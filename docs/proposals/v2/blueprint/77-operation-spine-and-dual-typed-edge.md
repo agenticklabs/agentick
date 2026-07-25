@@ -120,7 +120,7 @@ The confidence is *earned by method*, not assumed:
 
 ## References
 
-- `packages-next/runtime/src/substrate/base-harness.ts` — `runOperation` (returns Effect), `runHarnessProtocol` (`:1543`), `Effect.withSpan` (`:687`).
-- `packages-next/loop-executor/src/harness.ts:149` — the `tryPromise` → plain-async drop-out (the crux to undo).
+- `packages/runtime/src/substrate/base-harness.ts` — `runOperation` (returns Effect), `runHarnessProtocol` (`:1543`), `Effect.withSpan` (`:687`).
+- `packages/loop-executor/src/harness.ts:149` — the `tryPromise` → plain-async drop-out (the crux to undo).
 - `docs/proposals/v2/blueprint/76-operation-middleware-scoping.md` — tier-4 FiberRef middleware, unblocked by this.
 - Spike (2026-07-10, not committed): thenable-Effect → `runPromise` stack overflow; lazy-wrapper → single-execution dual. Findings inlined in §3.

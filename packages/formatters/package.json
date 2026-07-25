@@ -1,0 +1,58 @@
+{
+  "name": "@agentick/formatters",
+  "version": "0.0.0",
+  "description": "Reference formatters for Agentick v2. Pure functions that turn SemanticContentBlock[] into wire-ready ContentBlock[]. Ships markdown / xml / text formatters + the defineFormatter builder. Compiler plugs these into its formatter registry; markdown is the default.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "formatter",
+    "markdown",
+    "xml"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/formatters"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

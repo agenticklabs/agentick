@@ -1,0 +1,101 @@
+{
+  "name": "@agentick/app",
+  "version": "0.0.0",
+  "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (compiler, loop, executor), the session registry, and the createApp ergonomic surface. Compiler-agnostic — adopters writing React agents import from `@agentick/app/react` for the React default.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "app",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/app"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react.ts",
+      "import": "./src/react.ts",
+      "default": "./src/react.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react.d.ts",
+        "import": "./dist/react.js",
+        "default": "./dist/react.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@effect/opentelemetry": "^0.64.0",
+    "@effect/platform": "^0.97.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/resources": "^2.0.0",
+    "@opentelemetry/sdk-metrics": "^2.0.0",
+    "@opentelemetry/sdk-trace-base": "^2.0.0",
+    "@agentick/cluster": "workspace:*",
+    "@agentick/elicitation": "workspace:*",
+    "@agentick/loop-executor": "workspace:*",
+    "@agentick/model": "workspace:*",
+    "@agentick/resources": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/session": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/tasks": "workspace:*",
+    "@agentick/timeline": "workspace:*",
+    "@agentick/tool-executor": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0"
+  },
+  "devDependencies": {
+    "@agentick/compiler": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
+    "@agentick/knobs": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
+    "@agentick/skills": "workspace:*",
+    "@types/react": "^19.2.5",
+    "react": "^19.2.4"
+  },
+  "peerDependencies": {
+    "@agentick/compiler-react": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "@agentick/compiler-react": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

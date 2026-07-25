@@ -2,17 +2,17 @@
 
 **Status:** Proposed — 2026-06-30.
 
-**Touches:** `@agentick/spec-next/wire/extension.ts` (new — the
-`WireExtension` interface + registry contract), `@agentick/spec-next/wire/params.ts`
+**Touches:** `@agentick/spec/wire/extension.ts` (new — the
+`WireExtension` interface + registry contract), `@agentick/spec/wire/params.ts`
 (typed-method augmentation pattern already exists — this ADR
-documents the runtime story), `@agentick/gateway-next` (registers
+documents the runtime story), `@agentick/gateway` (registers
 extensions at construction, dispatches RPCs to handlers, threads auth
 
-- enumeration), `@agentick/client-next` (capability discovery at
+- enumeration), `@agentick/client` (capability discovery at
   connect, typed `request` / `subscribe` already exist — this ADR
   defines how packages ship the typed helpers on top), every package
-  that contributes methods to the wire (`@agentick/mcp-next`,
-  `@agentick/credentials-next`, future adopter packages). Cross-references
+  that contributes methods to the wire (`@agentick/mcp`,
+  `@agentick/credentials`, future adopter packages). Cross-references
   ADR 33 (Client + transports), ADR 32 (extension shape spectrum), ADR
   27 (modular built-ins), ADR 45 (runtime context model). Depends on
   the broader Gateway-extensions framework (#254) — the wire-extension
@@ -43,7 +43,7 @@ Before the design, a precision call-out that this ADR depends on:
   servers (Linear, GitHub, stdio binaries). End user never sees this
   layer directly. NOT what this ADR is about.
 
-- **Agentick client ↔ Agentick gateway.** `@agentick/client-next` in
+- **Agentick client ↔ Agentick gateway.** `@agentick/client` in
   the browser / TUI / native app talks Agentick's own JSON-RPC over
   the configured transport (WebSocket, HTTP, Unix socket). This is
   the end-user-facing layer. **This ADR extends THIS protocol.**
@@ -68,7 +68,7 @@ not to the MCP protocol.
 
 2. **Two install paths to one registry.**
    - **Package self-install (the common case).** A package like
-     `@agentick/mcp-next` ships its own `WireExtension` and installs
+     `@agentick/mcp` ships its own `WireExtension` and installs
      it from inside `withMCP(...)`'s gateway-extension chain. Adopter
      never sees the wire extension — it Just Works when they install
      the package.
@@ -185,7 +185,7 @@ adopter writes a `WireExtension` directly and passes it to
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  */
 export interface WireExtension {
-  /** Package identifier — `"@agentick/mcp-next"`, adopter-supplied for ad-hoc. */
+  /** Package identifier — `"@agentick/mcp"`, adopter-supplied for ad-hoc. */
   readonly name: string;
 
   /**
@@ -305,7 +305,7 @@ error pointing at both contributors:
 
 ```
 GatewayWireConflictError: method "mcpClients/reauthenticate"
-declared by both "@agentick/mcp-next" and "adopter-crm-extension".
+declared by both "@agentick/mcp" and "adopter-crm-extension".
 Methods must be uniquely owned by exactly one extension. Rename one,
 or have one extension extend the other's namespace.
 ```
@@ -406,7 +406,7 @@ The package's wire handler internally invokes the configured hooks at
 specific points:
 
 ```ts
-// Inside @agentick/mcp-next/wire/server.ts:
+// Inside @agentick/mcp/wire/server.ts:
 const mcpControlWireExtension: WireExtension = {
   // ...
   methods: {
@@ -503,9 +503,9 @@ The framework, on gateway construction:
 Adopters writing one-off RPC methods don't need to ship a package:
 
 ```ts
-import { defineWireExtension } from "@agentick/spec-next/wire";
+import { defineWireExtension } from "@agentick/spec/wire";
 
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface WireMethods {
     "crm/listLeads": { params: { account: string }; result: { leads: Lead[] } };
   }
@@ -536,9 +536,9 @@ adopter owns the handler.
 ## Client-side architecture — three locations per package
 
 ```
-@agentick/mcp-next/
+@agentick/mcp/
   src/
-    augment.ts              ← type-level: declare module "@agentick/spec-next"
+    augment.ts              ← type-level: declare module "@agentick/spec"
                               augments WireMethods + WireNotifications.
                               Imported by BOTH client + server builds.
 
@@ -552,7 +552,7 @@ adopter owns the handler.
 
       client.ts             ← React hooks, typed proxies, callback wrappers.
                               Imported by browser bundles.
-                              Uses @agentick/client-next's typed
+                              Uses @agentick/client's typed
                               `client.request` / `client.subscribe`
                               under the hood.
 
@@ -568,17 +568,17 @@ adopter owns the handler.
 
 Three subpath exports keep the bundler split honest:
 
-- `import { withMCP } from "@agentick/mcp-next"` — Node, server-side.
-- `import { useMcpClients } from "@agentick/mcp-next/client"` —
+- `import { withMCP } from "@agentick/mcp"` — Node, server-side.
+- `import { useMcpClients } from "@agentick/mcp/client"` —
   browser-safe React hooks.
-- `import { McpServerHarness } from "@agentick/mcp-next/server"` —
+- `import { McpServerHarness } from "@agentick/mcp/server"` —
   existing MCP server inbound infrastructure.
 
 ### Type augmentation reaches both halves
 
 ```ts
-// In @agentick/mcp-next/src/augment.ts:
-declare module "@agentick/spec-next" {
+// In @agentick/mcp/src/augment.ts:
+declare module "@agentick/spec" {
   interface WireMethods {
     "mcpClients/list": {
       params: McpClientsListParams;
@@ -599,14 +599,14 @@ declare module "@agentick/spec-next" {
 ```
 
 This file is imported by `mcp-next`'s main barrel. Browser code
-importing from `@agentick/mcp-next/client` transitively triggers the
-augmentation. Server code importing `@agentick/mcp-next` triggers the
+importing from `@agentick/mcp/client` transitively triggers the
+augmentation. Server code importing `@agentick/mcp` triggers the
 same augmentation. Both sides of the wire see the same typed shapes.
 
 ### Client-side helper shape
 
 ```ts
-// In @agentick/mcp-next/src/wire/client.ts:
+// In @agentick/mcp/src/wire/client.ts:
 
 export function useMcpClients(): {
   readonly clients: ReadonlyArray<{ serverId: string; status: McpConnectionStatus }>;
@@ -645,7 +645,7 @@ export function useMcpClients(): {
 
 The hook is the BROWSER-FACING API. It's typed via the module
 augmentation, calls into `client.request` / `client.subscribe` (the
-generic typed primitives from `@agentick/client-next`).
+generic typed primitives from `@agentick/client`).
 
 ---
 
@@ -773,7 +773,7 @@ await client.connect();
 // At this point client.capabilities is populated:
 
 client.capabilities.has("mcpClients/reauthenticate");
-// → true if @agentick/mcp-next is installed gateway-side
+// → true if @agentick/mcp is installed gateway-side
 
 const mcpCaps = client.capabilities.namespace("mcpClients");
 // → { name, version, methods, notifications } | undefined
@@ -850,12 +850,12 @@ that flows through.
 ## Conformance + test discipline
 
 A new `runWireExtensionConformance` helper in
-`@agentick/spec-conformance-next` (sibling to `runHarnessSlotConformance`
+`@agentick/spec-conformance` (sibling to `runHarnessSlotConformance`
 from #267) drives the executable checklist for any extension:
 
 ```ts
 runWireExtensionConformance({
-  name: "@agentick/mcp-next mcpControlWireExtension",
+  name: "@agentick/mcp mcpControlWireExtension",
   extension: mcpControlWireExtension,
   // declared methods all appear in WireMethods?
   // declared notifications all appear in WireNotifications?
@@ -878,7 +878,7 @@ The ADR specifies the design; implementation lands as sub-tickets.
 **Phase A — spec-next types + WireExtension interface. ✅ LANDED.**
 
 - `WireExtension` / `WireExtensionContext` / `WireMethodAuth` types
-  in `@agentick/spec-next/wire/extension.ts`.
+  in `@agentick/spec/wire/extension.ts`.
 - `defineWireExtension(opts)` helper that validates the extension at
   construction (namespace prefix, method-name alignment, etc.).
 - No runtime behavior change in this phase.
@@ -896,14 +896,14 @@ with real evidence from Phase B/C code to inform the design.
 Delivered:
 
 - `WireExtensionRegistry` interface in spec + concrete
-  `createWireExtensionRegistry()` in `@agentick/gateway-next`.
+  `createWireExtensionRegistry()` in `@agentick/gateway`.
 - `GatewayHarnessOptions.wireExtensions?: WireExtension[]` — adopter
   ad-hoc registration path.
 - `GatewayHarness.wireExtensions()` publicly exposes the sealed
   registry.
 - Optional `wireExtensions?()` on `GatewayHarnessProtocol` — bare
   test stubs still typecheck.
-- `@agentick/transport-next` dispatcher checks the registry BEFORE
+- `@agentick/transport` dispatcher checks the registry BEFORE
   its hardcoded switch.
 - `_extensions/list` built-in wire method returns the enumerate
   view.
@@ -969,7 +969,7 @@ framework method is a `WireExtension`.**
 **Phase D — capability discovery + client.capabilities.**
 
 - Built-in `_extensions/list` method on the gateway.
-- `@agentick/client-next` populates `client.capabilities` at
+- `@agentick/client` populates `client.capabilities` at
   connect time.
 
 **Phase E — composite extension shape for existing factories.**
@@ -980,7 +980,7 @@ framework method is a `WireExtension`.**
 
 **Phase F — first canonical wire extension: mcpControlWireExtension.**
 
-- `@agentick/mcp-next` ships `wire/server.ts` + `wire/client.ts` +
+- `@agentick/mcp` ships `wire/server.ts` + `wire/client.ts` +
   augmentation. `withMCP` self-installs.
 - Closes #279 (client MCP projection) + #277d (React useMcpClient).
 

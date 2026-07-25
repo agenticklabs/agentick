@@ -1,0 +1,78 @@
+{
+  "name": "@agentick/transport-in-process",
+  "version": "0.0.0",
+  "description": "In-process `ClientTransport` for agentick — direct function calls between client and gateway in the same process. Used for tests, embedded library deploys, and same-process TUI / daemon shapes (tentickle-class agents). Zero serialization cost; optional `wireParity: true` test mode roundtrips frames through JSON to catch wire-shape regressions.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "in-process",
+    "transport"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/transport-in-process"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/transport": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/app": "workspace:*",
+    "@agentick/client-core": "workspace:*",
+    "@agentick/compiler": "workspace:*",
+    "@agentick/elicitation": "workspace:*",
+    "@agentick/gates": "workspace:*",
+    "@agentick/gateway": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
+    "@agentick/prompts": "workspace:*",
+    "@agentick/resources": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/skills": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
+    "@agentick/state": "workspace:*",
+    "@agentick/tasks": "workspace:*",
+    "@agentick/tool-executor": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

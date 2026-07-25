@@ -77,7 +77,7 @@ my-app/
     extensions/
       my-thing/
         harness.ts        ← BaseHarness<"my-thing"> subclass
-        augment.ts        ← declare module "@agentick/spec-next"
+        augment.ts        ← declare module "@agentick/spec"
         extension.ts      ← withMyThing() SessionExtension
         index.ts          ← re-exports; imports ./augment for side effect
         react.ts          ← (optional) useMyThing() hook
@@ -101,7 +101,7 @@ If joining the workspace, the user is contributing to agentick. Tell them about 
 
 If standalone, the only meaningful differences from a workspace package are:
 
-- `package.json` deps point at real semver ranges (`"@agentick/spec-next": "^x.y.z"`), not `workspace:*`
+- `package.json` deps point at real semver ranges (`"@agentick/spec": "^x.y.z"`), not `workspace:*`
 - No changeset/typedoc/vitepress steps
 - Adopter installs via `pnpm add @my-org/agentick-thing`
 
@@ -115,9 +115,9 @@ You're adding a render-time capability: a new formatter scope, a new content-blo
 
 ### Required reading
 
-- **`packages-next/compiler/src/collect/contributors/`** — the existing contributors (semantic HTML, content blocks, formatters)
-- **`packages-next/compiler-react/README.md`** — the compiler-react surface
-- **`packages-next/spec/src/protocol/contributor.ts`** — Contributor protocol if it exists at spec level
+- **`packages/compiler/src/collect/contributors/`** — the existing contributors (semantic HTML, content blocks, formatters)
+- **`packages/compiler-react/README.md`** — the compiler-react surface
+- **`packages/spec/src/protocol/contributor.ts`** — Contributor protocol if it exists at spec level
 
 ### Local mode
 
@@ -125,7 +125,7 @@ A contributor is usually just a function or object passed to the compiler config
 
 ```ts
 // my-app/src/extensions/my-formatter.tsx
-import type { Contributor } from "@agentick/compiler-next";
+import type { Contributor } from "@agentick/compiler";
 
 export const myFormatter: Contributor = {
   name: "my-formatter",
@@ -138,7 +138,7 @@ createApp(<Agent />, {
 });
 ```
 
-The exact shape depends on the contributor type. Read the existing contributors in `packages-next/compiler/src/collect/contributors/` for the canonical shapes.
+The exact shape depends on the contributor type. Read the existing contributors in `packages/compiler/src/collect/contributors/` for the canonical shapes.
 
 ### Published mode
 
@@ -172,7 +172,7 @@ Gates-style. You declare typed descriptors (e.g., feature flags, capability hint
 
 ### Required reading
 
-- **`packages-next/gates/`** — the canonical reference. Read every file. It's small.
+- **`packages/gates/`** — the canonical reference. Read every file. It's small.
   - `src/descriptor.ts` — descriptor type
   - `src/index.ts` — exports
   - `src/react/` — the React hook
@@ -244,7 +244,7 @@ These bite adopters specifically (in addition to the `create-harness` pitfalls):
 
 4. **Forgetting to wait for `harness.ready`.** Local mode's `install` function is the adopter's responsibility. They forget to await; first call drops; nothing happens. Stress this when teaching local mode.
 
-5. **Trying to depend on `@agentick/compiler-react-next` from a non-React surface.** Per ADR 27, your harness package depends on `@agentick/compiler-react-next` only via the `/react` subpath. The base package must work without React.
+5. **Trying to depend on `@agentick/compiler-react` from a non-React surface.** Per ADR 27, your harness package depends on `@agentick/compiler-react` only via the `/react` subpath. The base package must work without React.
 
 6. **Skipping conformance because "it's just my app."** Local mode survives this. Published mode does not — the moment another adopter installs your package, conformance is the contract. Run it from day one.
 

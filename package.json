@@ -29,7 +29,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "turbo typecheck",
     "check:no-tla": "node scripts/no-tla-gate.mjs",
-    "verify:publish": "pnpm --filter \"./packages-next/*\" run clean && pnpm turbo build --filter \"./packages-next/*\" && pnpm check:no-tla",
+    "verify:publish": "pnpm --filter \"./packages/*\" run clean && pnpm turbo build --filter \"./packages/*\" && pnpm check:no-tla",
     "clean": "turbo clean",
     "dev": "turbo dev",
     "lint": "turbo lint",

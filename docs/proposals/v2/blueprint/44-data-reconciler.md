@@ -1,13 +1,13 @@
 # ADR 44 — Data reconciler (functional, non-React agent root)
 
-> **Rename note (2026-07-21, #243):** the reconciler → **compiler** sweep referenced below has now landed — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `defineReconciler` → `defineCompiler`, etc. The future package this ADR proposes would be `@agentick/compiler-data-next`. Original terminology is preserved below as historical record.
+> **Rename note (2026-07-21, #243):** the reconciler → **compiler** sweep referenced below has now landed — `@agentick/reconciler` → `@agentick/compiler`, `@agentick/reconciler-react` → `@agentick/compiler-react`, `ReconcilerProtocol` → `CompilerProtocol`, `defineReconciler` → `defineCompiler`, etc. The future package this ADR proposes would be `@agentick/compiler-data`. Original terminology is preserved below as historical record.
 
 **Status:** Draft — 2026-06-29.
-**Touches:** new package `@agentick/reconciler-data-next` (or
+**Touches:** new package `@agentick/reconciler-data` (or
 `-pure-next` — name TBD); composes onto existing
-`@agentick/reconciler-next` (collect machinery, `defineReconciler`)
-and `@agentick/formatters-next` (semantic-block rendering). Sibling
-to `@agentick/reconciler-react-next` — adopter picks one at
+`@agentick/reconciler` (collect machinery, `defineReconciler`)
+and `@agentick/formatters` (semantic-block rendering). Sibling
+to `@agentick/reconciler-react` — adopter picks one at
 `createApp({ reconciler })`. Names land under #243's
 reconciler → compiler sweep when it happens.
 **Driver:** Every v2 integration test that wants to exercise the App
@@ -47,7 +47,7 @@ import {
   list,
   listItem,
   code,
-} from "@agentick/reconciler-data-next";
+} from "@agentick/reconciler-data";
 
 export default agent(({ tick, knobs, props, timeline: tl }) => [
   system([
@@ -309,8 +309,8 @@ set, just as plain functions instead of JSX components:
 ## Implementation sketch
 
 ```ts
-// In @agentick/reconciler-data-next:
-import { defineReconciler, type ReconcilerProtocol } from "@agentick/reconciler-next";
+// In @agentick/reconciler-data:
+import { defineReconciler, type ReconcilerProtocol } from "@agentick/reconciler";
 
 export function dataReconciler(): ReconcilerProtocol {
   return defineReconciler({
@@ -369,15 +369,15 @@ suspense). The data-side wins are properties they DO want
 
 ## Naming
 
-Working title: `@agentick/reconciler-data-next` paralleling
-`@agentick/reconciler-react-next`. Other candidates:
+Working title: `@agentick/reconciler-data` paralleling
+`@agentick/reconciler-react`. Other candidates:
 
-- `@agentick/reconciler-pure-next` — emphasizes purity
-- `@agentick/reconciler-fn-next` — emphasizes functional shape
-- `@agentick/agent-fn-next` — drops "reconciler" entirely (post-#243)
+- `@agentick/reconciler-pure` — emphasizes purity
+- `@agentick/reconciler-fn` — emphasizes functional shape
+- `@agentick/agent-fn` — drops "reconciler" entirely (post-#243)
 
 After #243 ships the reconciler → compiler rename, the package
-becomes `@agentick/compiler-data-next` (or whichever suffix wins).
+becomes `@agentick/compiler-data` (or whichever suffix wins).
 The package-level rename is mechanical; no API churn.
 
 ## Where this fits in the v2.0 plan

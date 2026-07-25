@@ -26,7 +26,7 @@ The stated goal is a fully-functional multi-tenant, distributed, durable gateway
 
 Two facts, both verified in-tree this session, collapse most of that work:
 
-1. **`LocalEventBus` fan-in / isolated-reads composes, and it composes across replicas.** A per-session child bus wrapping its node's (cluster-wrapped) bus: session events fan up and reach a gateway-scope observer on *another* replica, while a sibling session on the same node never observes them. Isolation is physical (separate ring buffers), not filter-based, so clustering cannot leak it. (`packages-next/cluster/src/__tests__/composition-across-replicas.spec.ts`, `packages-next/runtime/src/__tests__/local-event-bus.spec.ts`.)
+1. **`LocalEventBus` fan-in / isolated-reads composes, and it composes across replicas.** A per-session child bus wrapping its node's (cluster-wrapped) bus: session events fan up and reach a gateway-scope observer on *another* replica, while a sibling session on the same node never observes them. Isolation is physical (separate ring buffers), not filter-based, so clustering cannot leak it. (`packages/cluster/src/__tests__/composition-across-replicas.spec.ts`, `packages/runtime/src/__tests__/local-event-bus.spec.ts`.)
 
 2. **Stores are namespace-keyed pluggable adapters.** `CredentialsStore` is `(namespace, key) → value` with a `backend` id, conformance suite, in-memory reference adapter, optional reactivity. `OperationJournal`, `SandboxRuntime`, `ClusterTransport` follow the same pattern. Namespacing *is* the isolation mechanism.
 

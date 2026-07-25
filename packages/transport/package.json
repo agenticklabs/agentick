@@ -1,0 +1,105 @@
+{
+  "name": "@agentick/transport",
+  "version": "0.0.0",
+  "description": "Shared transport plumbing for every @agentick/transport-* package. Ships BaseClientTransport (abstract; concrete transports subclass), MultiplexedStream (subscription / progress fan-out), the transport-agnostic JSON-RPC dispatcher that routes wire frames to GatewayHarnessProtocol methods, and shared DispatchHost / DispatchSink contract types.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "json-rpc",
+    "transport"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/transport"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@agentick/app": "workspace:*",
+    "@agentick/gateway": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/timeline": "workspace:*",
+    "effect": "^3.22.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

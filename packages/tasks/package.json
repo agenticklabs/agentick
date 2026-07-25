@@ -1,0 +1,93 @@
+{
+  "name": "@agentick/tasks",
+  "version": "0.0.0",
+  "description": "TasksHarness — substrate-level long-running tool primitive. Backs MCP Tasks (2025-11-25 core / draft extension), local long-running tool handlers, and any future managed-execution path. Same FSM as MCP's task model (`working/input_required/completed/failed/cancelled`); cluster-friendly via inbox-routed cancel + status notifications. Bundled into the agentick metapackage; not published independently.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "long-running",
+    "tasks"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/tasks"
+  },
+  "type": "module",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts",
+    "./dist/index.js",
+    "./dist/augment.js"
+  ],
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/client-core": "workspace:*",
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/store": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0"
+  },
+  "devDependencies": {
+    "@agentick/elicitation": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

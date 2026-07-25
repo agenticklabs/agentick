@@ -185,14 +185,14 @@ Minimum-viable adopter call by tier:
 | TCP   | `defineTcpCluster({ port: 9876 })` _(host defaults to `"127.0.0.1"`)_                        |
 | WS    | `defineWsCluster({ url: "ws://127.0.0.1:9876/cluster" })`                                    |
 | Redis | `defineRedisCluster({ pubClient: ..., subClient: ... })`                                     |
-| Local | `defineLocalCluster({ nodeId: "test-node" })` _(testing — `@agentick/cluster-next/testing`)_ |
+| Local | `defineLocalCluster({ nodeId: "test-node" })` _(testing — `@agentick/cluster/testing`)_ |
 
 `partitioning`, `codec`, `fanoutMode`, `journal`, `nodeId` all
 default. Adopters override only when they have a reason.
 
 ## The fifth wire: defineLocalCluster
 
-`@agentick/cluster-next/testing` ships `defineLocalCluster(opts)`
+`@agentick/cluster/testing` ships `defineLocalCluster(opts)`
 — the in-memory ClusterFactory. Use it in tests that need cluster
 substrate without standing up sockets.
 
@@ -249,23 +249,23 @@ limitations adopters need to know about:
 ## Where the code lives
 
 ```
-@agentick/cluster-next                 — protocol seams + makeClusterNode + defaultNodeId/resolveNodeId
+@agentick/cluster                 — protocol seams + makeClusterNode + defaultNodeId/resolveNodeId
   ├── /testing                          — local-cluster doubles + defineLocalCluster
   └── /effect                           — Effect-Tag interfaces (escape hatch)
 
-@agentick/cluster-broker-next          — broker pattern base (BaseBroker, BaseClusterClient, wire-helpers)
+@agentick/cluster-broker          — broker pattern base (BaseBroker, BaseClusterClient, wire-helpers)
 
-@agentick/cluster-net-next             — TCP + Unix wires
+@agentick/cluster-net             — TCP + Unix wires
   └── defineUnixCluster, defineTcpCluster, joinUnixCluster, joinTcpCluster, ...
 
-@agentick/cluster-ws-next              — WebSocket wire
+@agentick/cluster-ws              — WebSocket wire
   └── defineWsCluster, joinWsCluster, ...
 
-@agentick/cluster-redis-next           — Redis pub/sub wire (brokerless)
+@agentick/cluster-redis           — Redis pub/sub wire (brokerless)
   └── defineRedisCluster, joinRedisCluster, ...
 
-@agentick/app-next                     — createApp({cluster}) wires substrate fusion
-@agentick/gateway-next                 — createGateway({cluster}) wires substrate fusion
+@agentick/app                     — createApp({cluster}) wires substrate fusion
+@agentick/gateway                 — createGateway({cluster}) wires substrate fusion
 ```
 
 ## Related ADRs

@@ -17,17 +17,17 @@ and a concrete one, or arguing about where a feature should live.
 The artifacts with long-term value:
 
 ```
-1. @agentick/spec-next               wire shapes + protocol interfaces
+1. @agentick/spec               wire shapes + protocol interfaces
 2. The harness model            5 surfaces × N harnesses
-3. @agentick/spec-conformance-next   executable definition of "conforming"
+3. @agentick/spec-conformance   executable definition of "conforming"
 ```
 
 The artifacts with tactical value (replaceable any time without breaking
 adopters):
 
 ```
-- @agentick/runtime-next             MemoryJournal, LocalEventBus, LocalInbox, BaseHarness
-- @agentick/reconciler-react-next    the React-based reconciler harness
+- @agentick/runtime             MemoryJournal, LocalEventBus, LocalInbox, BaseHarness
+- @agentick/reconciler-react    the React-based reconciler harness
 - Every executor adapter        OpenAI, Anthropic, Google, AI SDK, …
 - Every formatter               Markdown, XML, Text, JSON, …
 - Every persistence impl        Postgres, SQLite, Redis, …
@@ -59,12 +59,12 @@ ditch:
 
 1. **Ship a reference impl with every spec surface, concurrent with the
    spec.** No protocol enters the blueprint without at least one
-   conforming impl planned in the same phase. `@agentick/spec-next` and
-   `@agentick/runtime-next` landed in the same workspace; future protocols
+   conforming impl planned in the same phase. `@agentick/spec` and
+   `@agentick/runtime` landed in the same workspace; future protocols
    follow the same rule.
 2. **Treat the conformance suite as the load-bearing artifact.** Prose
    in `docs/proposals/v2/blueprint/` is documentation. The vitest
-   suite in `@agentick/spec-conformance-next` is the _contract_. What passes
+   suite in `@agentick/spec-conformance` is the _contract_. What passes
    is conformant; what fails is not.
 
 ## The ten engineering rules
@@ -80,7 +80,7 @@ protocol with one or more reference impls.
 | Durable record      | `OperationJournal`      | `MemoryJournal`                   | `PostgresJournal`, `RedisStreamsJournal`, `SqliteJournal` |
 | Live observation    | `EventBus`              | `LocalEventBus`                   | `ClusterEventBus`, NATS-backed                            |
 | Addressable inbound | `MessageInbox`          | `LocalInbox`                      | `ClusterInbox` (Effect.cluster, etc.)                     |
-| JSX evaluation      | `ReconcilerProtocol`    | `@agentick/reconciler-react-next` | Vue/Solid hosts (theoretical)                             |
+| JSX evaluation      | `ReconcilerProtocol`    | `@agentick/reconciler-react` | Vue/Solid hosts (theoretical)                             |
 | Content formatting  | `FormatterProtocol`     | Markdown / XML / Text             | Custom application formatters                             |
 | Provider execution  | `LanguageModelExecutor` | `@agentick/openai`, etc.          | Any HTTP-shaped LLM API                                   |
 | Tool dispatch       | `ToolExecutorProtocol`  | (Phase 4a)                        | MCP-backed, RPC-backed                                    |
@@ -116,7 +116,7 @@ This trade is non-negotiable. Defaults conform; they don't dictate.
 
 ### 4. Conformance suites are the executable form of the spec
 
-The blueprint is documentation. `@agentick/spec-conformance-next` is the
+The blueprint is documentation. `@agentick/spec-conformance` is the
 contract. Every protocol gets a suite _before_ a second impl is allowed
 to claim conformance.
 
@@ -213,8 +213,8 @@ Package and protocol names describe what they _are_, not what they're
 _made of_:
 
 ```
-@agentick/runtime-next         (not @agentick/memory-substrate)
-@agentick/reconciler-react-next (React is the impl detail; reconciler is the role)
+@agentick/runtime         (not @agentick/memory-substrate)
+@agentick/reconciler-react (React is the impl detail; reconciler is the role)
 @agentick/persistence-postgres  (when it lands)
 @agentick/transport-grpc        (when it lands)
 ```
@@ -266,7 +266,7 @@ default doesn't need, the protocol takes it.
 
 When designing a new feature or interface, in order:
 
-1. **Find the protocol.** Which `@agentick/spec-next` interface does this
+1. **Find the protocol.** Which `@agentick/spec` interface does this
    belong to? If none exists, decide whether you're adding a protocol
    or a capability on an existing protocol.
 2. **Find the tier.** T1/T2/T3. State it explicitly.
@@ -290,4 +290,4 @@ When designing a new feature or interface, in order:
 - `19-foundation.md` — the substrate that this principle applies to
   first
 - `17-open-questions.md` — open questions about specific protocols
-- `@agentick/spec-conformance-next` — the executable form of the principle
+- `@agentick/spec-conformance` — the executable form of the principle

@@ -22,7 +22,7 @@ audio bolted on at the edges.
 ## 1. The seams are sessions (so "session-required" is the default)
 
 ```ts
-// @agentick/live-next — STT seam. Session-oriented on purpose: open → write* → close
+// @agentick/live — STT seam. Session-oriented on purpose: open → write* → close
 // IS Google streamingRecognize's lifecycle, so it maps 1:1. A stateless/batch
 // provider is the one that adapts (buffer in write, transcribe in close) — the
 // LiveKit StreamAdapter pattern.
@@ -52,7 +52,7 @@ rotation must land at a **turn boundary** (post-final silence), never mid-uttera
 or it clips speech. So: **arm** on elapsed time, **execute** on the next `isFinal`.
 
 ```ts
-// app-side (or @agentick/stt-google-next). NOT framework code.
+// app-side (or @agentick/stt-google). NOT framework code.
 function googleStt(opts: GoogleSttOpts): SttEngine {
   return {
     open(config) {
@@ -98,7 +98,7 @@ was swapped — precisely ADR 88's "provider spans are engine-internal."
 ## 3. The `pipelineEngine` — the framework mediator
 
 ```ts
-// @agentick/live-next
+// @agentick/live
 function pipelineEngine(stages: { stt: SttEngine; tts: TtsEngine }): LiveEngine {
   return {
     capabilities: { audioOutput: true, turnDetection: false,   // app/STT own turns
@@ -248,7 +248,7 @@ Neither touches the framework — a `getUserMedia` constraint and an engine poli
 
 | Piece | Owner |
 |---|---|
-| `MediaSession`, `MediaTransport`, `LiveHarness`, `pipelineEngine` skeleton, `SttEngine`/`TtsEngine` seams, `media.session.send` bridge, barge-in mechanics, `(sessionId, streamId)` routing | **framework** (`@agentick/live-next`) |
+| `MediaSession`, `MediaTransport`, `LiveHarness`, `pipelineEngine` skeleton, `SttEngine`/`TtsEngine` seams, `media.session.send` bridge, barge-in mechanics, `(sessionId, streamId)` routing | **framework** (`@agentick/live`) |
 | `googleStt()` incl. rotation/keepalive, `cartesiaTts()`, `assemble()` (multimodal policy), `resampleTo16kPcm16`/`createPcmPlayer`, AEC, barge-in gate, `language`/`voice` | **app** (or optional adapter pkgs) |
 
 The framework never mentions Google, PCM16, `chirp_2`, a 5-minute cap, `MediaStream`,

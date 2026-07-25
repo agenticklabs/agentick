@@ -1,8 +1,8 @@
 # 21 — Reconciler Harness: Implementation Shape
 
-> **Rename note (2026-07-21, #243):** the "reconciler" subsystem described below was renamed to **compiler** — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
+> **Rename note (2026-07-21, #243):** the "reconciler" subsystem described below was renamed to **compiler** — `@agentick/reconciler` → `@agentick/compiler`, `@agentick/reconciler-react` → `@agentick/compiler-react`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
 
-**Status:** Draft 2026-05-15 · low-level shape for `@agentick/reconciler-react-next`
+**Status:** Draft 2026-05-15 · low-level shape for `@agentick/reconciler-react`
 
 This doc complements `03-reconciler-harness.md` (which is the spec-level
 surface — commands, events, lifecycle, inbox) with the
@@ -540,7 +540,7 @@ React component a live `Session` object.
 **Pattern:**
 
 ```ts
-// @agentick/spec-next (or a sibling spec-react package)
+// @agentick/spec (or a sibling spec-react package)
 export interface HookBridges {
   readonly timeline: TimelineReader;
   readonly knobs: KnobReader;
@@ -550,7 +550,7 @@ export interface HookBridges {
   // …
 }
 
-// @agentick/reconciler-react-next
+// @agentick/reconciler-react
 const BridgeContext = createContext<HookBridges | null>(null);
 
 export function useTimeline(): TimelineSnapshot {
@@ -617,7 +617,7 @@ first `renderTree`.
 ```
 packages/reconciler-react/
   package.json                  deps: react@19, react-reconciler@0.33,
-                                      @agentick/spec-next, @agentick/runtime-next
+                                      @agentick/spec, @agentick/runtime
   src/
     index.ts                    public exports
     harness/
@@ -700,11 +700,11 @@ Outputs from the reconciler harness:
 - Formatter function references
 - Tool handler closures
 
-All of these stay inside `@agentick/reconciler-react-next`.
+All of these stay inside `@agentick/reconciler-react`.
 
 ## Conformance suite (`runReconcilerConformance`)
 
-Land in `@agentick/spec-conformance-next` once the harness is implemented.
+Land in `@agentick/spec-conformance` once the harness is implemented.
 Required invariants:
 
 1. **Idempotence:** same React element + same bridges → identical
@@ -749,8 +749,8 @@ the same suite if it produces an equivalent `RenderedTree`.
 3.17 reconciler-react/__tests__/*    conformance + harness-local tests
 ```
 
-3.1–3.3 are spec work (lands in `@agentick/spec-next`).
-3.4–3.15 are runtime work (lands in `@agentick/reconciler-react-next`).
+3.1–3.3 are spec work (lands in `@agentick/spec`).
+3.4–3.15 are runtime work (lands in `@agentick/reconciler-react`).
 3.16 is the conformance suite.
 3.17 wires conformance + adds harness-local invariants.
 

@@ -1,14 +1,14 @@
 # ADR 41 — Unified `AgentickError` class hierarchy
 
 **Status:** Proposed — 2026-06-29.
-**Touches:** every v2 package that raises typed errors. Concretely: `@agentick/spec-next` (18 union types, ~94 of the ~104 tags live here), `@agentick/runtime-next` (`OperationOutcomeError` — already class-shaped, becomes the template), `@agentick/mcp-next` (`McpServerError`, `McpClientError`, `McpRemoteTaskNonCompletedError`), `@agentick/sandbox-next` (`SandboxError`), `@agentick/tool-executor-next`, `@agentick/cluster-next`, `@agentick/tasks-next`, `@agentick/cluster-broker-next`. **The other 22 v2-next packages have zero typed errors and are not touched.**
+**Touches:** every v2 package that raises typed errors. Concretely: `@agentick/spec` (18 union types, ~94 of the ~104 tags live here), `@agentick/runtime` (`OperationOutcomeError` — already class-shaped, becomes the template), `@agentick/mcp` (`McpServerError`, `McpClientError`, `McpRemoteTaskNonCompletedError`), `@agentick/sandbox` (`SandboxError`), `@agentick/tool-executor`, `@agentick/cluster`, `@agentick/tasks`, `@agentick/cluster-broker`. **The other 22 v2-next packages have zero typed errors and are not touched.**
 **Driver:** Convert v2's typed-error convention from POJO `_tag` discriminated unions to class instances that subclass a common `AgentickError` base. Reason: cross-cutting code (logging, telemetry, error-boundary fallback, gateway extension error reporting, cluster wire codec) needs an `err instanceof AgentickError` check today and cannot get it because every error is a structurally-shaped object. Symptom that surfaced the gap: `SecurityError extends Error` was written by hand in the MCP server pipeline (#171c part 1), reviewed in `2b42039c`, and reverted because it was out of pattern with the surrounding `_tag` POJOs. Both shapes were wrong for cross-cutting; this ADR picks the right one.
 
 ---
 
 ## TL;DR
 
-1. **Every typed error v2 raises subclasses `AgentickError`.** `AgentickError extends Error`. Single canonical home: `@agentick/spec-next/errors`. `err instanceof AgentickError` is the cross-cutting predicate — gateway extensions, telemetry, cluster wire codec, error-boundary fallback all use it.
+1. **Every typed error v2 raises subclasses `AgentickError`.** `AgentickError extends Error`. Single canonical home: `@agentick/spec/errors`. `err instanceof AgentickError` is the cross-cutting predicate — gateway extensions, telemetry, cluster wire codec, error-boundary fallback all use it.
 
 2. **Two-level hierarchy.** `AgentickError` (root, abstract) → per-domain **abstract** intermediates (`AppError`, `SessionError`, `ToolExecutorError`, `McpServerError`, …) → concrete error classes (`SessionAlreadyExistsError`, `ToolNotFoundError`, `McpServerAuthRejected`, …). `err instanceof AppError` catches anything an `AppHarness` can raise; `err instanceof SessionAlreadyExistsError` narrows further. Concrete classes carry domain fields as constructor args.
 
@@ -22,7 +22,7 @@
 
 7. **`name` is set in the constructor.** `this.name = "SessionAlreadyExistsError"`. Required for `Error.prototype.toString()` to print the right class — V8 inherits `name` from `Error` otherwise. Three lines of boilerplate per class; not worth deduplicating via a mixin.
 
-8. **JSON codec lives in `@agentick/spec-next/errors/codec`.** `serializeAgentickError(err)` → `{ _tag, message, fields, cause? }`. `deserializeAgentickError(o)` → `AgentickError` via a registry keyed by `_tag`. Every concrete class auto-registers on module import via a side-effect at the bottom of its file. The cluster wire and MCP error projection both go through the codec — no ad-hoc per-package serialization.
+8. **JSON codec lives in `@agentick/spec/errors/codec`.** `serializeAgentickError(err)` → `{ _tag, message, fields, cause? }`. `deserializeAgentickError(o)` → `AgentickError` via a registry keyed by `_tag`. Every concrete class auto-registers on module import via a side-effect at the bottom of its file. The cluster wire and MCP error projection both go through the codec — no ad-hoc per-package serialization.
 
 9. **`OperationOutcomeError` already follows the pattern.** Class, `readonly _tag = "OperationOutcomeError" as const`, domain fields (`outcome`, `terminal`), `name` set in constructor. The migration ports OperationOutcomeError under `AgentickError` and uses it as the worked example in the package README — no behavior change, just inheritance.
 
@@ -30,7 +30,7 @@
 
 11. **Effect signatures stay union-typed; `Effect.catchTag` works unchanged.** Effect's runtime only looks at the `_tag` property; class instances pass that check. `Effect.fail(new SessionAlreadyExistsError({ sessionId }))` flows through `Effect.catchTag("SessionAlreadyExistsError", h)` without integration code. Exhaustiveness in `Effect.catchAll` still relies on the union type.
 
-12. **Conformance test pins the invariant.** A package-agnostic spec-conformance test (in `@agentick/spec-conformance-next`) iterates the global registry and asserts: every registered class extends `AgentickError`; the abstract intermediate (if any) extends `AgentickError`; `_tag` is a non-empty string; round-trips through `serializeAgentickError`/`deserializeAgentickError`; `instanceof` chain returns the registered class on the deserialized output.
+12. **Conformance test pins the invariant.** A package-agnostic spec-conformance test (in `@agentick/spec-conformance`) iterates the global registry and asserts: every registered class extends `AgentickError`; the abstract intermediate (if any) extends `AgentickError`; `_tag` is a non-empty string; round-trips through `serializeAgentickError`/`deserializeAgentickError`; `instanceof` chain returns the registered class on the deserialized output.
 
 13. **One non-Error survivor: `CursorEvictedError`.** It's an `Error` subclass thrown from the journal cursor's `next()` (not flowed through `Effect.fail`). Convert under the hierarchy too — promote to `class CursorEvictedError extends JournalError` with `_tag = "CursorEvictedError"`. Cursor consumers were already catching it via `instanceof`; that path continues working.
 
@@ -46,7 +46,7 @@
 
 Two error-construction patterns coexist in v2 without an articulated reason for the split:
 
-**Pattern P (POJO `_tag`).** Vast majority — ~104 distinct `_tag` literals across `packages-next/`. Raised via `Effect.fail({ _tag: "X", …fields })`. Caught via `Effect.catchTag("X", h)` or `switch (err._tag)`. Union types document the channel (`type AppError = SessionAlreadyExistsError | …`).
+**Pattern P (POJO `_tag`).** Vast majority — ~104 distinct `_tag` literals across `packages/`. Raised via `Effect.fail({ _tag: "X", …fields })`. Caught via `Effect.catchTag("X", h)` or `switch (err._tag)`. Union types document the channel (`type AppError = SessionAlreadyExistsError | …`).
 
 **Pattern C (class `extends Error`).** Two cases — `OperationOutcomeError` (runtime-next, dual-mode: `extends Error` AND `_tag = "OperationOutcomeError"`) and `CursorEvictedError` (spec-next, `extends Error`, no `_tag`). One-off, not declared as the convention anywhere.
 
@@ -87,7 +87,7 @@ A class hierarchy alone could replace `_tag` with `class.name` or `instanceof` c
 ### Base class
 
 ```ts
-// @agentick/spec-next/errors/base.ts
+// @agentick/spec/errors/base.ts
 
 export abstract class AgentickError extends Error {
   /** Discriminator. Each concrete subclass declares its own literal. */
@@ -132,16 +132,16 @@ Subclasses with `this.name = …` (the OperationOutcomeError pattern) are wrong 
 One abstract intermediate per current union type. Empty body — the class exists only so `instanceof` answers the group question.
 
 ```ts
-// @agentick/spec-next/errors/app.ts
+// @agentick/spec/errors/app.ts
 export abstract class AppError extends AgentickError {}
 
-// @agentick/spec-next/errors/session.ts
+// @agentick/spec/errors/session.ts
 export abstract class SessionError extends AgentickError {}
 
-// @agentick/spec-next/errors/journal.ts
+// @agentick/spec/errors/journal.ts
 export abstract class JournalError extends AgentickError {}
 
-// @agentick/spec-next/errors/inbox.ts
+// @agentick/spec/errors/inbox.ts
 export abstract class InboxError extends AgentickError {}
 
 // … one per current union (18 of them).
@@ -154,7 +154,7 @@ The intermediates map to the inventory's 18 union types, plus a few that don't c
 The pattern, worked example:
 
 ```ts
-// @agentick/spec-next/errors/session-concrete.ts
+// @agentick/spec/errors/session-concrete.ts
 
 export class SessionAlreadyExistsError extends SessionError {
   readonly _tag = "SessionAlreadyExistsError" as const;
@@ -223,7 +223,7 @@ The name collision (`AppError` is BOTH the abstract class value AND the union ty
 ### Registry + codec
 
 ```ts
-// @agentick/spec-next/errors/registry.ts
+// @agentick/spec/errors/registry.ts
 
 type AgentickErrorClass = new (...args: any[]) => AgentickError;
 
@@ -255,7 +255,7 @@ export function isAgentickError(value: unknown): value is AgentickError {
 Codec:
 
 ```ts
-// @agentick/spec-next/errors/codec.ts
+// @agentick/spec/errors/codec.ts
 
 export function serializeAgentickError(err: AgentickError): unknown {
   return err.toJSON();
@@ -316,13 +316,13 @@ Effect.catchIf(x, (err): err is ToolNotFoundError => err instanceof ToolNotFound
 
 ### Cluster wire compatibility
 
-`@agentick/cluster-next` wire payloads serialize errors via `serializeAgentickError`; deserialization on the receiving side rehydrates classes. ADR 35 §"InboxError round-trip fidelity" already requires preserving typed routing failures across the wire (Phase 3.2 (4), #189) — this ADR is the natural mechanism. The current InboxError round-trip uses an ad-hoc JSON schema; that gets replaced by the codec in this ADR.
+`@agentick/cluster` wire payloads serialize errors via `serializeAgentickError`; deserialization on the receiving side rehydrates classes. ADR 35 §"InboxError round-trip fidelity" already requires preserving typed routing failures across the wire (Phase 3.2 (4), #189) — this ADR is the natural mechanism. The current InboxError round-trip uses an ad-hoc JSON schema; that gets replaced by the codec in this ADR.
 
 Migration note: the cluster wire's existing InboxError serializer is two layers deep — `cluster-broker-next/framing.ts` carries the bytes, `cluster-next/wrappers/` handles the InboxError shape. Both reroute through `(de)serializeAgentickError` in the migration; no protocol-version bump because the on-the-wire JSON shape is unchanged (still `{_tag, message, ...fields}`).
 
 ### MCP wire compatibility
 
-The MCP server's tools/call response uses `{ isError: true, content: [...] }` for handler exceptions today. This ADR doesn't change that protocol-level shape — the JSON-RPC error code mapping for protocol errors (auth rejected, etc.) maps from `AgentickError._tag` to MCP error codes in `@agentick/mcp-next/server/projection/`. The mapping table is internal; the wire stays MCP-spec-compliant.
+The MCP server's tools/call response uses `{ isError: true, content: [...] }` for handler exceptions today. This ADR doesn't change that protocol-level shape — the JSON-RPC error code mapping for protocol errors (auth rejected, etc.) maps from `AgentickError._tag` to MCP error codes in `@agentick/mcp/server/projection/`. The mapping table is internal; the wire stays MCP-spec-compliant.
 
 ---
 
@@ -362,12 +362,12 @@ Each becomes an abstract intermediate class extending `AgentickError`; the exist
 1. **Stay on `feat/v2`** for this ADR commit. No code churn yet.
 2. **Cut `feat/v2-error-infra` off `feat/v2`** for the implementation. (Branch, not worktree.)
 3. Commit sequence:
-   - **a)** Base class + registry + codec in `@agentick/spec-next/errors/` (new module). Tests for the codec round-trip. No other packages touched yet.
+   - **a)** Base class + registry + codec in `@agentick/spec/errors/` (new module). Tests for the codec round-trip. No other packages touched yet.
    - **b)** Promote `OperationOutcomeError` and `CursorEvictedError` under the base. Verify they still work as before (zero behavior change, just an `extends` chain swap).
    - **c)** Convert `spec-next`'s 18 union types: per union, one commit that defines the abstract intermediate + concrete classes + auto-registration, then updates the union type alias to the new shape. Each commit's test suite must stay green before moving to the next.
    - **d)** Per-package conversion of consumers: `runtime-next`, `tool-executor-next`, `mcp-next`, `sandbox-next`, `cluster-next`, `cluster-broker-next`, `tasks-next` — one commit each, ordered by dependency-graph depth (`runtime-next` first, others can interleave).
-   - **e)** Conformance test in `@agentick/spec-conformance-next` that asserts the invariant: every registered tag instantiates to an `AgentickError`; round-trips through the codec; abstract intermediates extend the base; no orphan tags (tags raised in source but not registered).
-   - **f)** Sweep: grep all of `packages-next/` for `Effect.fail\(\{ _tag:` — must return zero hits.
+   - **e)** Conformance test in `@agentick/spec-conformance` that asserts the invariant: every registered tag instantiates to an `AgentickError`; round-trips through the codec; abstract intermediates extend the base; no orphan tags (tags raised in source but not registered).
+   - **f)** Sweep: grep all of `packages/` for `Effect.fail\(\{ _tag:` — must return zero hits.
 4. **Merge `feat/v2-error-infra` → `feat/v2`** when all packages typecheck + test + conformance gate passes.
 
 ### Codemod approach
@@ -411,11 +411,11 @@ Codemod script gets thrown away after the merge; not part of the framework.
 
 1. **`code` field on every error?** §"Base class" defines `code` as optional. Pre-1.0 we don't need stable error codes; if telemetry / customer-facing error messages later want them, populate per concrete class. Deferred decision; not blocking.
 
-2. **Per-package error-namespace barrel exports?** Today errors live in `@agentick/spec-next` (94 of them) — should each consuming package re-export the errors it raises so adopters can `import { McpServerAuthRejected } from "@agentick/mcp-next"`? Lean yes for discoverability; defer to the per-package conversion commit to decide case-by-case.
+2. **Per-package error-namespace barrel exports?** Today errors live in `@agentick/spec` (94 of them) — should each consuming package re-export the errors it raises so adopters can `import { McpServerAuthRejected } from "@agentick/mcp"`? Lean yes for discoverability; defer to the per-package conversion commit to decide case-by-case.
 
 3. **Localized messages?** Out of scope. Messages are English strings; if i18n is ever needed, it slots in via a `messageBuilder(args)` static or external resolver. Not blocking.
 
-4. **Should `cause` chain through `toJSON`?** Currently yes (it's an own property after `super(message, { cause })`). For wire transmission this means `cause` traverses the wire. If `cause` is a raw `Error` (not an `AgentickError`), it serializes to `{}`. Mitigation: every Effect fail-path that wraps a foreign throw goes through `new XError({ cause: errorReason(unknown) })` (`errorReason` already in `@agentick/utils-next`). Conformance test pins this for the codec round-trip.
+4. **Should `cause` chain through `toJSON`?** Currently yes (it's an own property after `super(message, { cause })`). For wire transmission this means `cause` traverses the wire. If `cause` is a raw `Error` (not an `AgentickError`), it serializes to `{}`. Mitigation: every Effect fail-path that wraps a foreign throw goes through `new XError({ cause: errorReason(unknown) })` (`errorReason` already in `@agentick/utils`). Conformance test pins this for the codec round-trip.
 
 5. **Mode for `Effect.fail` literals in tests.** Tests currently `Effect.fail({ _tag: "...", ... })` directly to simulate errors. After conversion they use `new XError({...})`. Codemod handles both paths the same way; no special test-helper needed.
 
@@ -426,5 +426,5 @@ Codemod script gets thrown away after the merge; not part of the framework.
 - ADR 23 — MCP as harness (errors flow through harness operations; same shape applies)
 - ADR 34 — Scoped capability cascade (cascading config doesn't touch errors; mentioned for context only)
 - ADR 35 — Cluster protocol (cluster wire codec consumes this ADR's serializer)
-- Inventory pass — 2026-06-29, `feat/v2` @ `04f6a307`. Sources: every `_tag:` literal under `packages-next/`, every `extends Error` class under `packages-next/`, all `isXError` type-guard predicates.
-- Precedent — `OperationOutcomeError` (`packages-next/runtime/src/substrate/base-harness.ts:1136`) — the existing dual-mode class is the worked template.
+- Inventory pass — 2026-06-29, `feat/v2` @ `04f6a307`. Sources: every `_tag:` literal under `packages/`, every `extends Error` class under `packages/`, all `isXError` type-guard predicates.
+- Precedent — `OperationOutcomeError` (`packages/runtime/src/substrate/base-harness.ts:1136`) — the existing dual-mode class is the worked template.

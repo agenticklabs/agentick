@@ -1,0 +1,96 @@
+{
+  "name": "@agentick/utils",
+  "version": "0.0.0",
+  "description": "Framework-agnostic bedrock utilities for Agentick v2 — type predicates, deep equality, the `mergeLayered` cascade primitive, Effect Cause helpers (`reasonOf` / `reasonOfCause` / `unwrapExit`), and the `drainRejection` test helper. No compiler, harness, or protocol coupling. The in-process observer primitives (`Notifier` / `KeyedNotifier` / `LocalPubSub`) live in `@agentick/pubsub`.",
+  "keywords": [
+    "agentick",
+    "cause",
+    "merge",
+    "predicates",
+    "utilities"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/utils"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    },
+    "./loaders": {
+      "types": "./src/loaders/index.ts",
+      "import": "./src/loaders/index.ts",
+      "default": "./src/loaders/index.ts"
+    },
+    "./loaders/node": {
+      "types": "./src/loaders/node/index.ts",
+      "import": "./src/loaders/node/index.ts",
+      "default": "./src/loaders/node/index.ts"
+    },
+    "./path/node": {
+      "types": "./src/path/node.ts",
+      "import": "./src/path/node.ts",
+      "default": "./src/path/node.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      },
+      "./loaders": {
+        "types": "./dist/loaders/index.d.ts",
+        "import": "./dist/loaders/index.js",
+        "default": "./dist/loaders/index.js"
+      },
+      "./loaders/node": {
+        "types": "./dist/loaders/node/index.d.ts",
+        "import": "./dist/loaders/node/index.js",
+        "default": "./dist/loaders/node/index.js"
+      },
+      "./path/node": {
+        "types": "./dist/path/node.d.ts",
+        "import": "./dist/path/node.js",
+        "default": "./dist/path/node.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "effect": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "name": "@agentick/compiler",
+  "version": "0.0.0",
+  "description": "Compiler-agnostic base for Agentick v2. Owns the callback-style `defineCompiler` factory and compiler-flavored utilities that don't depend on a specific JSX runtime. Concrete compilers (React, Angular, …) depend on this and ship as separate packages.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "compiler",
+    "harness"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/compiler"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

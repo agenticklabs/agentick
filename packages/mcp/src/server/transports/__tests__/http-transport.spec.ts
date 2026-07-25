@@ -1,0 +1,265 @@
+/**
+ * `httpTransport` — real-loopback Streamable HTTP conformance (Wave 1).
+ *
+ * NO fakes, NO in-memory pair: this stands up an `McpServerHarness` on
+ * `httpTransport({ port: 0 })` (ephemeral loopback port) and connects a
+ * REAL `McpClientHarness` over the SDK's `StreamableHTTPClientTransport`
+ * to `http://127.0.0.1:<port>/mcp`. Every assertion crosses the actual
+ * HTTP/SSE wire.
+ *
+ * Pins:
+ *  - Full round-trip: initialize → tools/list (sees the tool) →
+ *    tools/call (gets the result) over real HTTP.
+ *  - The security pipeline runs for HTTP connections: bearer auth reads
+ *    the `Authorization` header built from the HTTP request
+ *    (`McpConnectionInfo` → `ctx.metadata.headers`); a bad token is
+ *    rejected at the per-request pipeline.
+ *  - Multi-connection: two concurrent clients each get their own MCP
+ *    session (distinct `Mcp-Session-Id`), tracked independently by the
+ *    server harness, with isolated call results.
+ *  - Client factory + OAuth threading: `streamableHttpTransport({ oauth })`
+ *    constructs the SDK transport with an `authProvider`; the provider's
+ *    `redirectToAuthorization` fires the session-bound URL elicit.
+ */
+
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { describe, expect, it } from "vitest";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import type { ContentBlock, ToolDeclaration, UrlElicitationRequest } from "@agentick/spec";
+import { jsonSchema } from "@agentick/spec";
+
+import {
+  bearerTokenAuth,
+  httpTransport,
+  McpServerHarness,
+  type HttpServerTransportHandle,
+  type ToolHandlerResolver,
+} from "../../index.js";
+import {
+  McpClientHarness,
+  NoneAuth,
+  streamableHttpTransport,
+  type TransportFactoryDeps,
+} from "../../../index.js";
+
+const TOKEN = "secret-token";
+
+const echoSchema = jsonSchema({
+  type: "object",
+  properties: { q: { type: "string" } },
+  required: ["q"],
+});
+
+function echoTool(): ToolDeclaration {
+  return {
+    id: "echo",
+    name: "echo",
+    description: "echoes q",
+    inputSchema: echoSchema,
+    exposure: ["model"],
+    handlerRef: "handler:echo",
+  };
+}
+
+const echoHandlers: ToolHandlerResolver = (ref) => {
+  if (ref !== "handler:echo") return null;
+  return async (input) => ({
+    kind: "inline",
+    content: [{ type: "text", text: `echo: ${(input as { q: string }).q}` }] as ContentBlock[],
+  });
+};
+
+/**
+ * Stand up a server harness on an ephemeral loopback port with a bearer
+ * authenticator. Returns the harness, the transport handle (to read the
+ * bound port), and the resolved base URL.
+ */
+async function makeHttpServer(): Promise<{
+  readonly harness: McpServerHarness;
+  readonly transport: HttpServerTransportHandle;
+  readonly url: string;
+}> {
+  const transport = httpTransport({ port: 0 });
+  const harness = new McpServerHarness(
+    `srv:${ulid()}`,
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      name: "http-test-server",
+      transports: [transport],
+      tools: { registry: [echoTool()], resolveHandler: echoHandlers },
+      auth: { authenticator: bearerTokenAuth({ tokens: { [TOKEN]: { id: "alice" } } }) },
+      serverInfo: { name: "http-test", version: "0.0.0" },
+    },
+  );
+  await harness.ready;
+  await harness.start();
+  const addr = transport.address();
+  if (addr === null) throw new Error("httpTransport did not bind a port");
+  return { harness, transport, url: `http://127.0.0.1:${addr.port}/mcp` };
+}
+
+/** Build a client harness over a real StreamableHTTP transport. */
+async function makeHttpClient(transport: Transport, serverId: string): Promise<McpClientHarness> {
+  const client = new McpClientHarness(
+    `${serverId}:${ulid()}`,
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+    { serverId, transport, auth: new NoneAuth() },
+  );
+  await client.ready;
+  await client.connect();
+  return client;
+}
+
+/** Deps for the client transport factory (no OAuth path). */
+function bearerDeps(serverId: string): TransportFactoryDeps {
+  return {
+    elicit: async () => ({ outcome: "cancelled" }),
+    serverId,
+    credentialKey: (field) => `mcp:${serverId}:${field}`,
+    interactive: false,
+  };
+}
+
+describe("httpTransport — round-trip over real loopback HTTP", () => {
+  it("initialize → tools/list → tools/call across the wire", async () => {
+    const { harness, transport, url } = await makeHttpServer();
+    const clientTransport = await streamableHttpTransport({
+      url,
+      requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+    })(bearerDeps("echo-srv"));
+    expect(clientTransport).toBeInstanceOf(StreamableHTTPClientTransport);
+
+    const client = await makeHttpClient(clientTransport, "echo-srv");
+
+    const tools = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain("echo");
+
+    const result = await client.callTool("echo", { q: "hello" });
+    expect(result.isError).toBeFalsy();
+    expect((result.content as { type: string; text: string }[])[0]!.text).toBe("echo: hello");
+
+    // The connection was accepted over loopback (localOnly guard) and
+    // is tracked by the harness.
+    expect(harness.connections()).toHaveLength(1);
+    expect(harness.connections()[0]!.transportKind).toBe("http");
+
+    await client.close();
+    await harness.close();
+    await transport.close();
+  });
+
+  it("rejects a bad bearer token at the per-request security pipeline", async () => {
+    const { harness, transport, url } = await makeHttpServer();
+    const clientTransport = await streamableHttpTransport({
+      url,
+      requestInit: { headers: { Authorization: "Bearer wrong-token" } },
+    })(bearerDeps("bad-srv"));
+    const client = await makeHttpClient(clientTransport, "bad-srv");
+
+    // Initialize is not authenticated (SDK-internal); the pipeline runs
+    // on tools/list and rejects the invalid token. Capture rather than
+    // matching the wire-surfaced message (JSON-RPC error text is not
+    // load-bearing here — that the pipeline rejected is).
+    let threw = false;
+    try {
+      await client.listTools();
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+
+    await client.close();
+    await harness.close();
+    await transport.close();
+  });
+});
+
+describe("httpTransport — multi-connection session isolation", () => {
+  it("two concurrent clients each get their own Mcp-Session-Id", async () => {
+    const { harness, transport, url } = await makeHttpServer();
+
+    const t1 = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+    });
+    const t2 = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+    });
+
+    const c1 = await makeHttpClient(t1, "srv-1");
+    const c2 = await makeHttpClient(t2, "srv-2");
+
+    // Two independent sessions on the server.
+    expect(harness.connections()).toHaveLength(2);
+
+    // Distinct session ids minted per connection by the SDK server transport.
+    expect(t1.sessionId).toBeDefined();
+    expect(t2.sessionId).toBeDefined();
+    expect(t1.sessionId).not.toBe(t2.sessionId);
+
+    // Isolated round-trips.
+    const [r1, r2] = await Promise.all([
+      c1.callTool("echo", { q: "A" }),
+      c2.callTool("echo", { q: "B" }),
+    ]);
+    expect((r1.content as { text: string }[])[0]!.text).toBe("echo: A");
+    expect((r2.content as { text: string }[])[0]!.text).toBe("echo: B");
+
+    await c1.close();
+    await c2.close();
+    await harness.close();
+    await transport.close();
+  });
+});
+
+describe("streamableHttpTransport — client factory + OAuth threading", () => {
+  it("wires an authProvider whose redirect fires the session URL elicit", async () => {
+    const elicitCalls: UrlElicitationRequest[] = [];
+    const deps: TransportFactoryDeps = {
+      elicit: async (request) => {
+        elicitCalls.push(request);
+        return { outcome: "accepted", value: undefined };
+      },
+      serverId: "oauth-srv",
+      credentialKey: (field) => `mcp:oauth-srv:${field}`,
+      interactive: true,
+    };
+
+    const transport = await streamableHttpTransport({
+      url: "https://remote.example/mcp",
+      oauth: true,
+    })(deps);
+    expect(transport).toBeInstanceOf(StreamableHTTPClientTransport);
+
+    // The SDK transport carries the bridged provider.
+    const provider = (
+      transport as unknown as { _authProvider?: { redirectToAuthorization?: unknown } }
+    )._authProvider;
+    expect(provider).toBeDefined();
+    expect(typeof provider!.redirectToAuthorization).toBe("function");
+
+    // Behavioral proof: driving the SDK provider's redirect path fires
+    // the session-bound URL elicit (DefaultOAuthProvider → createSDKProvider
+    // → StreamableHTTPClientTransport). Fire-and-forget inside the provider;
+    // give the microtask queue a tick.
+    await (
+      provider as { redirectToAuthorization: (u: URL) => Promise<void> }
+    ).redirectToAuthorization(new URL("https://auth.example/authorize?state=1"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(elicitCalls).toHaveLength(1);
+    expect(elicitCalls[0]!.mode).toBe("url");
+    expect(elicitCalls[0]!.url).toContain("auth.example");
+  });
+
+  it("omits the authProvider when oauth is not enabled", async () => {
+    const transport = await streamableHttpTransport({ url: "https://remote.example/mcp" })(
+      bearerDeps("plain-srv"),
+    );
+    const provider = (transport as unknown as { _authProvider?: unknown })._authProvider;
+    expect(provider).toBeUndefined();
+  });
+});

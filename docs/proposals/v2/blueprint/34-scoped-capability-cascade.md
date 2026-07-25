@@ -2,7 +2,7 @@
 
 **Status:** Active · 2026-06-23 (revised 2026-06-23 with Pattern A clarification)
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 31 (Harness hierarchy), ADR 32 (Extension shape spectrum)
-**Touches:** `@agentick/spec-next/data/declarations.ts` (`ToolBinding`), `@agentick/spec-next/protocol/tool-executor.ts`, `@agentick/tool-executor-next/src/registry.ts`, `@agentick/tool-executor-next/src/with-scope.ts`, `@agentick/shared/utils/merge-layered.ts`, every extension that contributes capability at a layer (`withMCP`, future `withSkills`/`withMemory`/`withAuth`/...)
+**Touches:** `@agentick/spec/data/declarations.ts` (`ToolBinding`), `@agentick/spec/protocol/tool-executor.ts`, `@agentick/tool-executor/src/registry.ts`, `@agentick/tool-executor/src/with-scope.ts`, `@agentick/shared/utils/merge-layered.ts`, every extension that contributes capability at a layer (`withMCP`, future `withSkills`/`withMemory`/`withAuth`/...)
 **Realized by:** Layered tools epic (#135 – #143), commit range `d161e902` → `7fb75ef2`; mergeLayered primitive (#144)
 
 ## TL;DR
@@ -21,7 +21,7 @@ What we built for tools is one of three sibling cascade patterns in the framewor
 | -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | **A. Declarative cascade** | Adopter-written config values (`maxTicks`, `executor`, `metadata`, project config) | **`mergeLayered<T>(...layers)`** in `@agentick/shared/utils/merge-layered.ts` | Landed                                                                                |
 | **A′. Substrate cascade**  | One slot per kind, factory-aware (bus/inbox/journal)                               | `HarnessShell` slot resolver in `BaseHarness`                                 | Landed (ADR 31)                                                                       |
-| **B. Emitted cascade**     | Dynamic multi-entry sources (tools, skills, prompts, resources, ...)               | **`ScopedRegistry<Entry, Strategy>`** + `withScope` + `replaceSlice`          | Reference impl exists (`@agentick/tool-executor-next`); lifts when third domain lands |
+| **B. Emitted cascade**     | Dynamic multi-entry sources (tools, skills, prompts, resources, ...)               | **`ScopedRegistry<Entry, Strategy>`** + `withScope` + `replaceSlice`          | Reference impl exists (`@agentick/tool-executor`); lifts when third domain lands |
 
 ### Pattern A — Declarative cascade (`mergeLayered`)
 
@@ -131,7 +131,7 @@ Two layers of generic — a base **`ScopedRegistry<Entry>`** with **`ResolutionS
 
 ### `Binding` — shared discriminator (already in spec)
 
-The discriminator is shared across all domains because it names _which scope owns the entry_, not what kind of entry it is. This already lives in `@agentick/spec-next/data/declarations.ts` as `ToolBinding`; lifting it to a more generic name (`ScopeBinding`?) when the next domain lands is a 30-second rename.
+The discriminator is shared across all domains because it names _which scope owns the entry_, not what kind of entry it is. This already lives in `@agentick/spec/data/declarations.ts` as `ToolBinding`; lifting it to a more generic name (`ScopeBinding`?) when the next domain lands is a 30-second rename.
 
 ```ts
 export type ScopeBinding =
@@ -249,7 +249,7 @@ The format is the documentation of identity-defining fields per variant. Already
 
 ## How tools map to the primitive (already realized)
 
-`@agentick/tool-executor-next` is the reference implementation. Mapping:
+`@agentick/tool-executor` is the reference implementation. Mapping:
 
 | Generic                       | Tools instance                                                         |
 | ----------------------------- | ---------------------------------------------------------------------- |
@@ -333,7 +333,7 @@ The trigger: **the third domain that needs this shape**.
 Likely +1: **skills** (near-term, structurally identical to tools, growing market momentum).
 Likely +2: **credentials** (security stakes change the calculus; the framework wins big by owning scope-bound lifetimes here).
 
-When +2 lands, the lift is one PR: extract `ScopedRegistry`, `withScope`, `bindingKey` into `@agentick/spec-next/data/scoped-registry.ts` (data) and `@agentick/runtime-next/src/scoped-registry.ts` (impl). Existing tools code switches its registry import; adopter call sites (`installer.registerExtensionTool`) stay exactly the same.
+When +2 lands, the lift is one PR: extract `ScopedRegistry`, `withScope`, `bindingKey` into `@agentick/spec/data/scoped-registry.ts` (data) and `@agentick/runtime/src/scoped-registry.ts` (impl). Existing tools code switches its registry import; adopter call sites (`installer.registerExtensionTool`) stay exactly the same.
 
 ## Consequences
 
@@ -372,5 +372,5 @@ When +2 lands, the lift is one PR: extract `ScopedRegistry`, `withScope`, `bindi
 - ADR 27 (Modular built-ins) — the principle "built-in is just bundled" which the cascade respects.
 - ADR 31 (Harness hierarchy) — the gateway → app → session ladder the binding follows.
 - ADR 32 (Extension shape spectrum) — extension installer surface; `registerExtensionTool` is one of N installer-write methods.
-- `@agentick/tool-executor-next/src/registry.ts` — the reference implementation.
-- `@agentick/tool-executor-next/src/with-scope.ts` — the lifecycle combinator.
+- `@agentick/tool-executor/src/registry.ts` — the reference implementation.
+- `@agentick/tool-executor/src/with-scope.ts` — the lifecycle combinator.

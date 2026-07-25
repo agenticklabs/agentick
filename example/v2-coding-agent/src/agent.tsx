@@ -8,9 +8,9 @@
  */
 
 import React from "react";
-import { System } from "@agentick/compiler-react-next";
-import { Knobs, useKnob } from "@agentick/knobs-next/react";
-import { Timeline } from "@agentick/timeline-next/react";
+import { System } from "@agentick/compiler-react";
+import { Knobs, useKnob } from "@agentick/knobs/react";
+import { Timeline } from "@agentick/timeline/react";
 
 import { ReadFile, ListDir, Grep, WriteFile, RunShell } from "./tools.js";
 

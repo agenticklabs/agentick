@@ -167,7 +167,7 @@ command instead of an Operation:
 ### 2. Model selection + swap — a `session.model` facade, NOT a new harness
 
 > **Status: LANDED** (feat/v2) — `session.model` facade in
-> `@agentick/session-next` (`model-facade.ts`): `setModel` / `setTarget`
+> `@agentick/session` (`model-facade.ts`): `setModel` / `setTarget`
 > swap the session default via the journaled + hookable `session:set-model`
 > command (`onBeforeSessionSetModel` policy veto); `use` / `guard` register
 > session-scoped interceptors on `model:generate[_stream]` that ride the

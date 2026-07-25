@@ -33,12 +33,12 @@ untyped — `gateway.hook({ onBeforeWireCrmDeleteContact })` needed a cast.
 The fix is one mapped type in spec, folded into the runtime `CommandRegistry`:
 
 ```ts
-// @agentick/spec-next — wire/params.ts
+// @agentick/spec — wire/params.ts
 export type WireCommandMap = {
   [K in WireMethod as `wire:${K}`]: { input: WireParams<K>; output: WireResult<K> };
 };
 
-// @agentick/runtime-next — substrate/middleware.ts
+// @agentick/runtime — substrate/middleware.ts
 export interface CommandRegistry extends WireCommandMap {}
 ```
 

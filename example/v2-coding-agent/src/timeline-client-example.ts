@@ -14,9 +14,9 @@
  * optimistic message against its eventual server echo is shown below.
  */
 
-import type { Client } from "@agentick/client-next";
-import { timelineView, type TimelineView } from "@agentick/timeline-next/client";
-import type { Cursor, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/spec-next";
+import type { Client } from "@agentick/client";
+import { timelineView, type TimelineView } from "@agentick/timeline/client";
+import type { Cursor, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/spec";
 
 // ============================================================================
 // 1. SERVER SIDE — hydrate recent history from the durable log

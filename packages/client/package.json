@@ -1,0 +1,72 @@
+{
+  "name": "@agentick/client",
+  "version": "0.0.0",
+  "description": "Batteries-included agentick client: re-exports `@agentick/client-core` and side-effect-imports every built-in `/client` subpath (tasks, knobs, elicitation, tool-executor/tools, timeline, gates, skills, prompts, resources, state) so their session sub-handles self-assemble with no per-harness imports. Interim stand-in for the public `agentick/client` metapackage entry until the v2 cut.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "client",
+    "bundle"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/client"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/client-core": "workspace:*",
+    "@agentick/elicitation": "workspace:*",
+    "@agentick/gates": "workspace:*",
+    "@agentick/knobs": "workspace:*",
+    "@agentick/prompts": "workspace:*",
+    "@agentick/resources": "workspace:*",
+    "@agentick/skills": "workspace:*",
+    "@agentick/state": "workspace:*",
+    "@agentick/tasks": "workspace:*",
+    "@agentick/timeline": "workspace:*",
+    "@agentick/tool-executor": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18",
+    "@agentick/transport-in-process": "workspace:*",
+    "@agentick/spec": "workspace:*"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

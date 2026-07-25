@@ -17,8 +17,8 @@
 
 import "dotenv/config";
 import React from "react";
-import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { createApp } from "@agentick/app/react";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 import { Agent } from "./agent.js";
@@ -43,7 +43,9 @@ async function main(): Promise<void> {
   try {
     console.log("→ User: What's 47 * 23, and tell me a fun fact about that number?\n");
     const handle = await session.send({
-      messages: [{ role: "user", content: "What's 47 * 23, and tell me a fun fact about that number?" }],
+      messages: [
+        { role: "user", content: "What's 47 * 23, and tell me a fun fact about that number?" },
+      ],
     });
     const result = await handle.result;
     console.log("← Assistant:", result.response);

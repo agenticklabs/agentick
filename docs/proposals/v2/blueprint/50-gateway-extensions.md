@@ -5,10 +5,10 @@
 ADR 31 (Harness hierarchy), ADR 32 (Extension shape spectrum), ADR 33
 (Client + transports), ADR 40 (MCP server harness), ADR 45 (Runtime
 context), ADR 46 (Wire extensions), ADR 48 (Layered isolation)
-**Touches:** `@agentick/spec-next` (`GatewayExtension`,
+**Touches:** `@agentick/spec` (`GatewayExtension`,
 `GatewayInstaller`, `GatewayBridges` seed, `ExtensionBundle`),
-`@agentick/gateway-next` (installer impl, bundle distribution) +
-`@agentick/transport-next` (ingress interceptor chain at the dispatch
+`@agentick/gateway` (installer impl, bundle distribution) +
+`@agentick/transport` (ingress interceptor chain at the dispatch
 edge), every `withX` composite factory (#297)
 **Unblocks:** #283 (gateway-level `withCredentials`), #297 (composite
 factories), #298 (`mcpControlWireExtension`), ADR 34/#302 (auth at the
@@ -232,7 +232,7 @@ pattern (ADR 27):
 export interface GatewayBridges {} // empty seed
 
 // credentials package, augment.ts
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface GatewayBridges {
     readonly credentials: CredentialsHarnessProtocol;
   }
@@ -346,12 +346,12 @@ per-consumer in their own ADRs (connectors especially).
 
 ## References
 
-- `packages-next/spec/src/protocol/app-extension.ts` — the contract this
+- `packages/spec/src/protocol/app-extension.ts` — the contract this
   mirrors (`AppExtension`, `SessionExtension`, installers, `AppSubstrate`)
-- `packages-next/gateway/src/harness.ts` — construction order, wire
+- `packages/gateway/src/harness.ts` — construction order, wire
   registry (note: ADR 47 removed the gateway connection/`acceptConnection`
   surface — ingress is transport-layer)
-- `packages-next/transport-next/src/server/dispatch.ts` — where the
+- `packages/transport-next/src/server/dispatch.ts` — where the
   per-request `WireExtensionContext` is built (the ingress edge the
   interceptor runs at)
 - ADR 46 §install paths — the two existing routes this adds a third to

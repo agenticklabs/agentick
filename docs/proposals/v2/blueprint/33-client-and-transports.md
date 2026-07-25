@@ -3,7 +3,7 @@
 **Status:** Draft · 2026-06-11 (rev 4)
 **Builds on:** ADR 26 (Harness as the single shape), ADR 29 (Bus overhaul — cursor protocol), ADR 31 (Self-similar slottable harness hierarchy), ADR 32 (Extension shape spectrum)
 **Companion:** ADR 34 (Auth subsystem — fills the auth slot defined here)
-**Touches:** New `@agentick/spec-next/wire/` types, new `@agentick/client-next` package, new `@agentick/transport-*-next` packages, `GatewayHarness` (server-side transport extensions consume frames).
+**Touches:** New `@agentick/spec/wire/` types, new `@agentick/client` package, new `@agentick/transport-*-next` packages, `GatewayHarness` (server-side transport extensions consume frames).
 
 ## TL;DR
 
@@ -36,8 +36,8 @@ Vercel-flavored composition: small factories, defaults that work, positional-fir
 ### Simplest path
 
 ```ts
-import { createClient } from "@agentick/client-next";
-import { websocket } from "@agentick/transport-websocket-next/client";
+import { createClient } from "@agentick/client";
+import { websocket } from "@agentick/transport-websocket/client";
 
 const client = createClient({
   transport: websocket({ url: "wss://api.example.com" }),
@@ -59,7 +59,7 @@ The accessor form `client.session(id).send(...)` stays for the cases where you w
 ### With auth
 
 ```ts
-import { bearer } from "@agentick/client-next"; // auth source helpers
+import { bearer } from "@agentick/client"; // auth source helpers
 
 const client = createClient({
   transport: websocket({
@@ -72,9 +72,9 @@ const client = createClient({
 ### With extensions
 
 ```ts
-import { retry } from "@agentick/client-extensions-next/retry";
-import { telemetry } from "@agentick/client-extensions-next/telemetry";
-import { offline } from "@agentick/client-extensions-next/offline";
+import { retry } from "@agentick/client-extensions/retry";
+import { telemetry } from "@agentick/client-extensions/telemetry";
+import { offline } from "@agentick/client-extensions/offline";
 
 const client = createClient({
   transport: websocket({ url, auth }),
@@ -91,9 +91,9 @@ Extension ordering: **listed-first = outermost.** Convention documented; see "Ex
 ### Multi-transport (fallback)
 
 ```ts
-import { selector } from "@agentick/client-next";
-import { websocket } from "@agentick/transport-websocket-next/client";
-import { http } from "@agentick/transport-http-next/client";
+import { selector } from "@agentick/client";
+import { websocket } from "@agentick/transport-websocket/client";
+import { http } from "@agentick/transport-http/client";
 
 const client = createClient({
   transport: selector([websocket({ url: "wss://..." }), http({ url: "https://..." })], {
@@ -107,9 +107,9 @@ Array order = priority. Candidates are constructed eagerly but start in `state: 
 ### Multi-tab (multiplexer)
 
 ```ts
-import { multiplexer } from "@agentick/transport-multiplexer-next";
-import { webLocksLeader } from "@agentick/transport-multiplexer-next/web-locks";
-import { broadcastChannelBridge } from "@agentick/transport-multiplexer-next/broadcast-channel";
+import { multiplexer } from "@agentick/transport-multiplexer";
+import { webLocksLeader } from "@agentick/transport-multiplexer/web-locks";
+import { broadcastChannelBridge } from "@agentick/transport-multiplexer/broadcast-channel";
 
 const client = createClient({
   transport: multiplexer(websocket({ url, auth }), {
@@ -141,7 +141,7 @@ In-process and remote: identical types. Generic in the client's auth context sha
 When an extension registers a namespace (`installer.registerNamespace("offline", api)`), that namespace appears typed on the client through TypeScript declaration merging. Same pattern as `HookBridges` augmentation (ADR 27):
 
 ```ts
-declare module "@agentick/client-next" {
+declare module "@agentick/client" {
   interface ClientNamespaces {
     offline: { pending(): Promise<Request[]>; flush(): Promise<void> };
     telemetry: { metrics(): SnapshotMetrics };
@@ -154,7 +154,7 @@ await client.offline.flush();         // typed
 const m = client.telemetry.metrics(); // typed
 ```
 
-`@agentick/client-next` ships `ClientNamespaces` as an empty seed (mirrors `HookBridges`). Extension packages augment via `declare module` in their `augment.ts`. The metapackage bundles common extensions' augmentations.
+`@agentick/client` ships `ClientNamespaces` as an empty seed (mirrors `HookBridges`). Extension packages augment via `declare module` in their `augment.ts`. The metapackage bundles common extensions' augmentations.
 
 ## Wire protocol — JSON-RPC 2.0 (MCP-aligned)
 
@@ -162,7 +162,7 @@ Plain JSON-RPC 2.0 envelopes with conventions deliberately aligned with **MCP 20
 
 The relationship: **wire-compatible peer protocol** with overlapping but disjoint method namespaces. MCP owns `tools/*`, `resources/*`, `prompts/*`, `sampling/*`, `completion/*`, `logging/*`, `initialize`. Agentick owns `gateway/*`, `app/*`, `session/*`, `subscribe`, `unsubscribe`, `auth/*`. A single JSON-RPC endpoint can host both simultaneously without collision.
 
-JSON-RPC inspectors (Postman, Bruno, Insomnia) work out of the box. OpenRPC schema generation is a separate effort (`@agentick/wire-openrpc-next`) — deferred; see Open Questions §6.
+JSON-RPC inspectors (Postman, Bruno, Insomnia) work out of the box. OpenRPC schema generation is a separate effort (`@agentick/wire-openrpc`) — deferred; see Open Questions §6.
 
 ### Rejected alternative — `@effect/rpc` as the wire
 
@@ -202,7 +202,7 @@ WebSocket transports advertise `agentick-rpc-v1` as a subprotocol per RFC 6455. 
 | `subscribe`, `unsubscribe`  | agentick             | general-purpose persistent subscriptions                                  |
 | `auth/*`                    | agentick             | `refresh`, `completeChallenge`, `signOut` (filled by ADR 34)              |
 | `ping`                      | shared with MCP      | keepalive                                                                 |
-| `tools/*`                   | **reserved for MCP** | agentick servers MAY implement when bundling `@agentick/mcp-surface-next` |
+| `tools/*`                   | **reserved for MCP** | agentick servers MAY implement when bundling `@agentick/mcp-surface` |
 | `resources/*`               | **reserved for MCP** | ditto                                                                     |
 | `prompts/*`                 | **reserved for MCP** | ditto                                                                     |
 | `sampling/*`                | **reserved for MCP** | ditto                                                                     |
@@ -210,7 +210,7 @@ WebSocket transports advertise `agentick-rpc-v1` as a subprotocol per RFC 6455. 
 | `logging/*`                 | **reserved for MCP** | ditto                                                                     |
 | `initialize`, `initialized` | **reserved for MCP** | ditto                                                                     |
 
-Reserved namespaces guarantee non-collision: agentick will not define methods in MCP's namespaces. Bilingual servers (`@agentick/mcp-surface-next`) implement the MCP methods natively and route them through the harness substrate.
+Reserved namespaces guarantee non-collision: agentick will not define methods in MCP's namespaces. Bilingual servers (`@agentick/mcp-surface`) implement the MCP methods natively and route them through the harness substrate.
 
 ### Two streaming patterns, both MCP-aligned
 
@@ -434,7 +434,7 @@ Standard JSON-RPC 2.0 reserved codes (-32700 to -32099) for transport / parse / 
 ### TypeScript surface
 
 ```ts
-// @agentick/spec-next/wire/index.ts
+// @agentick/spec/wire/index.ts
 
 export interface JsonRpcRequest<P = unknown> {
   jsonrpc: "2.0";
@@ -555,7 +555,7 @@ export const ErrorCode = {
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 ```
 
-Spec owns the wire types; transports import; gateway-side extensions import; `@agentick/client-next` imports. Zero cycles.
+Spec owns the wire types; transports import; gateway-side extensions import; `@agentick/client` imports. Zero cycles.
 
 ### MCP interop — bilingual servers and clients
 
@@ -563,8 +563,8 @@ Three planned extensions exploit the wire-compatible-peer relationship:
 
 | Package                               | Direction                      | Role                                                                                                                                                                                                                                                                       |
 | ------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@agentick/mcp-surface-next`          | server-side `GatewayExtension` | mounts MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/*`) onto an agentick gateway and answers them by routing through the active session's harnesses. MCP clients (Claude Desktop, Cline, Continue.dev) see a standard MCP server. |
-| `@agentick/transport-mcp-client-next` | client-side `ClientTransport`  | connects to a pure MCP server; exposes `client.mcp.tools`, `client.mcp.resources`, etc. namespaces. Agentick clients gain access to the MCP server ecosystem with no extra library.                                                                                        |
+| `@agentick/mcp-surface`          | server-side `GatewayExtension` | mounts MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/*`) onto an agentick gateway and answers them by routing through the active session's harnesses. MCP clients (Claude Desktop, Cline, Continue.dev) see a standard MCP server. |
+| `@agentick/transport-mcp-client` | client-side `ClientTransport`  | connects to a pure MCP server; exposes `client.mcp.tools`, `client.mcp.resources`, etc. namespaces. Agentick clients gain access to the MCP server ecosystem with no extra library.                                                                                        |
 | Tool projection                       | shared                         | tools defined via `createTool({ name, description, input: zodSchema })` project automatically to MCP tool descriptors. Same code, two protocols.                                                                                                                           |
 
 Sequenced after Phase 33.F (common middleware) to keep the critical path lean.
@@ -572,7 +572,7 @@ Sequenced after Phase 33.F (common middleware) to keep the critical path lean.
 ## The `ClientTransport` interface
 
 ```ts
-// @agentick/client-next/src/transport.ts
+// @agentick/client/src/transport.ts
 export interface ClientTransport {
   readonly id: string;
   readonly capabilities: TransportCapabilities;
@@ -617,11 +617,11 @@ Capabilities expose differences without forcing all transports to behave identic
 
 | Package                                    | Wire                                                                                                                                                                  | When                                                                                                | Capabilities                                                                                                               |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `@agentick/transport-in-process-next`      | direct function call                                                                                                                                                  | tests, embedded library (one-process gateway), tentickle TUI ↔ same-process daemon                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: false`, `binaryFrames: true`                              |
-| `@agentick/transport-websocket-next`       | WebSocket, JSON frames                                                                                                                                                | primary browser + server-to-server                                                                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` (v1)                         |
-| `@agentick/transport-http-next`            | **Streamable HTTP** (MCP 2025-03-26 spec) — single endpoint, POST returns JSON or SSE based on response shape; persistent SSE via `GET` for stand-alone subscriptions | modern HTTP deploys; cooperates with edge/serverless; load-balancer-friendly                        | `bidirectional: false` (asymmetric), `streamingRequest: true` (SSE response), `reconnectable: true`, `binaryFrames: false` |
-| `@agentick/transport-http-sse-legacy-next` | HTTP+SSE dual-endpoint (`GET /events` for stream + `POST /rpc/<session-token>` for requests, with sticky session affinity)                                            | environments where Streamable HTTP isn't viable (older load balancers, content-type-strict proxies) | `bidirectional: false`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false`                             |
-| `@agentick/transport-unix-socket-next`     | newline-delimited JSON over Unix socket                                                                                                                               | local IPC (TUI ↔ local daemon)                                                                      | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false`                              |
+| `@agentick/transport-in-process`      | direct function call                                                                                                                                                  | tests, embedded library (one-process gateway), tentickle TUI ↔ same-process daemon                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: false`, `binaryFrames: true`                              |
+| `@agentick/transport-websocket`       | WebSocket, JSON frames                                                                                                                                                | primary browser + server-to-server                                                                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` (v1)                         |
+| `@agentick/transport-http`            | **Streamable HTTP** (MCP 2025-03-26 spec) — single endpoint, POST returns JSON or SSE based on response shape; persistent SSE via `GET` for stand-alone subscriptions | modern HTTP deploys; cooperates with edge/serverless; load-balancer-friendly                        | `bidirectional: false` (asymmetric), `streamingRequest: true` (SSE response), `reconnectable: true`, `binaryFrames: false` |
+| `@agentick/transport-http-sse-legacy` | HTTP+SSE dual-endpoint (`GET /events` for stream + `POST /rpc/<session-token>` for requests, with sticky session affinity)                                            | environments where Streamable HTTP isn't viable (older load balancers, content-type-strict proxies) | `bidirectional: false`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false`                             |
+| `@agentick/transport-unix-socket`     | newline-delimited JSON over Unix socket                                                                                                                               | local IPC (TUI ↔ local daemon)                                                                      | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false`                              |
 
 Each package ships both ends:
 
@@ -684,7 +684,7 @@ Test mode: `inProcess({ wireParity: true })` routes frame bodies through `JSON.p
 
 ## Extensions — middleware + lifecycle handlers (parallels `BaseHarness`)
 
-The canonical pattern on both sides of the wire is **chain of responsibility for command bodies** (middleware) and **registered handlers for lifecycle decisions** (handler registry). v2 server-side ships this Effect-native in `@agentick/runtime-next/substrate/base-harness.ts` (`Middleware<I, R, E>`, `MiddlewareChain`, `LifecycleHandler<I, R, E>`, `HandlerVerdict`, `HandlerRegistry`). The client uses the **same canonical patterns** at the wire boundary, adapted to client-side idioms — Promise-native by default, with an opt-in Effect adapter for adopters who want the harness-style signature.
+The canonical pattern on both sides of the wire is **chain of responsibility for command bodies** (middleware) and **registered handlers for lifecycle decisions** (handler registry). v2 server-side ships this Effect-native in `@agentick/runtime/substrate/base-harness.ts` (`Middleware<I, R, E>`, `MiddlewareChain`, `LifecycleHandler<I, R, E>`, `HandlerVerdict`, `HandlerRegistry`). The client uses the **same canonical patterns** at the wire boundary, adapted to client-side idioms — Promise-native by default, with an opt-in Effect adapter for adopters who want the harness-style signature.
 
 ### Why the client is Promise-native (and the harness isn't)
 
@@ -700,7 +700,7 @@ Forcing client extension authors into Effect for what is typically a 10-line `re
 Adopters who DO want Effect on the client get it via `effectMiddleware(eff)`:
 
 ```ts
-import { effectMiddleware } from "@agentick/client-next";
+import { effectMiddleware } from "@agentick/client";
 import { Effect, Duration } from "effect";
 
 const extension = {
@@ -718,7 +718,7 @@ const extension = {
 ### Middleware — Promise-native canonical signature
 
 ```ts
-// @agentick/client-next/src/extension.ts
+// @agentick/client/src/extension.ts
 export interface ClientExtension {
   readonly name: string;
   install?(installer: ClientInstaller): void | Promise<void>;
@@ -755,7 +755,7 @@ Same chain-of-responsibility shape as `BaseHarness.Middleware`. Different primit
 ### Composition
 
 ```ts
-// @agentick/client-next/src/pipeline.ts
+// @agentick/client/src/pipeline.ts
 export function composeRequest(
   extensions: readonly ClientExtension[],
   terminal: (req: RequestInput) => Promise<unknown>,
@@ -777,7 +777,7 @@ Server-side `BaseHarness` uses one merge rule (`veto > replace > defer > proceed
 Client uses **per-event verdict types** with **per-event merge rules**, declared alongside the event:
 
 ```ts
-// @agentick/client-next/src/lifecycle.ts
+// @agentick/client/src/lifecycle.ts
 export interface ClientLifecycleEvents {
   "connection:opening": LifecycleEventSpec<{ transport: ClientTransport }, void, "observer">;
   "connection:opened": LifecycleEventSpec<{ transport: ClientTransport }, void, "observer">;
@@ -968,7 +968,7 @@ By default, wire events (`ProtocolEvent` from server-side harnesses) flow only t
 For devtools / debug / recording use cases, the `wireMirror()` extension republishes every received `EventFrame` to client-bus under `surface: "wire"`:
 
 ```ts
-import { wireMirror } from "@agentick/client-devtools-next";
+import { wireMirror } from "@agentick/client-devtools";
 
 const client = createClient({
   transport: websocket({ url, auth }),
@@ -991,7 +991,7 @@ Auth is its own subsystem; ADR 34 defines it in full. This ADR establishes only 
 Each transport accepts only the auth variants it can carry natively. A single `AuthSource` union forced together with `wsInitFrame` would accept impossible combinations on HTTP transports; the type system should prevent that.
 
 ```ts
-// @agentick/spec-next/wire/auth.ts
+// @agentick/spec/wire/auth.ts
 export interface AuthVariants {
   // Universally available
   bearer: { token: string | (() => Promise<string>) };
@@ -1050,42 +1050,42 @@ Shapes correspond to the three surfaces from the middleware section: **middlewar
 
 | Extension                                    | Shape                            | Provider  | Notes                                                                                                                                |
 | -------------------------------------------- | -------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `@agentick/transport-multiplexer-next`       | composite transport              | framework | cross-tab / cross-process leader-election                                                                                            |
-| `@agentick/transport-in-process-next`        | transport                        | framework | direct calls; test mode `{ wireParity: true }`                                                                                       |
-| `@agentick/transport-websocket-next`         | transport                        | framework | primary                                                                                                                              |
-| `@agentick/transport-http-next`              | transport                        | framework | Streamable HTTP (MCP 2025-03-26 spec); default for HTTP                                                                              |
-| `@agentick/transport-http-sse-legacy-next`   | transport                        | framework | dual-endpoint HTTP+SSE for legacy infra                                                                                              |
-| `@agentick/transport-unix-socket-next`       | transport                        | framework | local IPC                                                                                                                            |
-| `@agentick/client-extensions-next/retry`     | middleware + handler             | framework | exponential backoff, idempotency-key tracking, retryable-error predicate; handler for `connection:lost` votes "reconnect"            |
-| `@agentick/client-extensions-next/telemetry` | middleware + installer           | framework | W3C Trace Context propagation, OTel spans per logical RPC, counters; exposes `client.telemetry` namespace                            |
-| `@agentick/client-extensions-next/offline`   | middleware + installer + handler | framework | persistent outbound queue (IndexedDB / SQLite); replay on reconnect; handler for `connection:lost` defers in-flight                  |
-| `@agentick/client-extensions-next/cache`     | middleware                       | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus                                                            |
-| `@agentick/client-devtools-next`             | installer (+ `wireMirror`)       | framework | devtools panel namespace + wire-firehose                                                                                             |
-| `@agentick/client-mock-next`                 | transport / middleware           | framework | record-replay for tests                                                                                                              |
+| `@agentick/transport-multiplexer`       | composite transport              | framework | cross-tab / cross-process leader-election                                                                                            |
+| `@agentick/transport-in-process`        | transport                        | framework | direct calls; test mode `{ wireParity: true }`                                                                                       |
+| `@agentick/transport-websocket`         | transport                        | framework | primary                                                                                                                              |
+| `@agentick/transport-http`              | transport                        | framework | Streamable HTTP (MCP 2025-03-26 spec); default for HTTP                                                                              |
+| `@agentick/transport-http-sse-legacy`   | transport                        | framework | dual-endpoint HTTP+SSE for legacy infra                                                                                              |
+| `@agentick/transport-unix-socket`       | transport                        | framework | local IPC                                                                                                                            |
+| `@agentick/client-extensions/retry`     | middleware + handler             | framework | exponential backoff, idempotency-key tracking, retryable-error predicate; handler for `connection:lost` votes "reconnect"            |
+| `@agentick/client-extensions/telemetry` | middleware + installer           | framework | W3C Trace Context propagation, OTel spans per logical RPC, counters; exposes `client.telemetry` namespace                            |
+| `@agentick/client-extensions/offline`   | middleware + installer + handler | framework | persistent outbound queue (IndexedDB / SQLite); replay on reconnect; handler for `connection:lost` defers in-flight                  |
+| `@agentick/client-extensions/cache`     | middleware                       | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus                                                            |
+| `@agentick/client-devtools`             | installer (+ `wireMirror`)       | framework | devtools panel namespace + wire-firehose                                                                                             |
+| `@agentick/client-mock`                 | transport / middleware           | framework | record-replay for tests                                                                                                              |
 | Rate limiter                                 | middleware                       | adopter   | trivial — `(input, next) => throttle(input, next, opts)`                                                                             |
 | Compression                                  | middleware                       | adopter   | per-deploy choice of algorithm                                                                                                       |
 | E2E encryption envelope                      | middleware                       | adopter   | adopter key-management                                                                                                               |
 | Optimistic updates                           | installer                        | adopter   | domain-specific reconciliation                                                                                                       |
 | Service worker proxy                         | transport                        | adopter   | browser-specific; survives page refresh                                                                                              |
-| `@agentick/mcp-surface-next`                 | server-side `GatewayExtension`   | framework | mounts MCP methods (`tools/list`, `tools/call`, `resources/*`, `prompts/*`) on an agentick gateway. Makes the gateway an MCP server. |
-| `@agentick/transport-mcp-client-next`        | transport                        | framework | connects to pure MCP servers. Exposes `client.mcp.*` namespaces.                                                                     |
+| `@agentick/mcp-surface`                 | server-side `GatewayExtension`   | framework | mounts MCP methods (`tools/list`, `tools/call`, `resources/*`, `prompts/*`) on an agentick gateway. Makes the gateway an MCP server. |
+| `@agentick/transport-mcp-client`        | transport                        | framework | connects to pure MCP servers. Exposes `client.mcp.*` namespaces.                                                                     |
 
 The framework provides the extension shapes (middleware, handler, installer) — same shapes as `BaseHarness` — plus the small set of common needs. Everything else is adopter territory.
 
 ## Package layout
 
 ```
-@agentick/spec-next
+@agentick/spec
   wire/                                — JsonRpcRequest, JsonRpcResponse, JsonRpcNotification,
                                           SubscribeParams, EventNotificationParams,
                                           Scope, AuthSource, …
   protocol/auth.ts                     — AuthContext, AuthMethod, Decision (full impl in ADR 34)
 
-@agentick/runtime-next                 — (existing) Middleware<I,R,E>, MiddlewareChain,
+@agentick/runtime                 — (existing) Middleware<I,R,E>, MiddlewareChain,
                                           LifecycleHandler<I,R,E>, HandlerVerdict, HandlerRegistry,
                                           mergeVerdict — REUSED by client-next
 
-@agentick/client-next                  — AgentickClient, createClient,
+@agentick/client                  — AgentickClient, createClient,
                                           ClientTransport interface,
                                           ClientExtension (re-exports Middleware, LifecycleHandler),
                                           ClientLifecycleEvents,
@@ -1093,36 +1093,36 @@ The framework provides the extension shapes (middleware, handler, installer) —
                                           ClientInstaller, client-bus,
                                           selector(), bearer(), headers(), …
 
-@agentick/transport-in-process-next    — direct-call transport (client + server)
-@agentick/transport-websocket-next     — WS (client + server)
-@agentick/transport-http-next          — Streamable HTTP (client + server)
-@agentick/transport-http-sse-legacy-next — legacy dual-endpoint (client + server)
-@agentick/transport-unix-socket-next   — Unix socket (client + server)
-@agentick/transport-multiplexer-next   — leader-election + bridge (client only — composes any transport)
-@agentick/transport-mcp-client-next    — connects to pure MCP servers (client only)
+@agentick/transport-in-process    — direct-call transport (client + server)
+@agentick/transport-websocket     — WS (client + server)
+@agentick/transport-http          — Streamable HTTP (client + server)
+@agentick/transport-http-sse-legacy — legacy dual-endpoint (client + server)
+@agentick/transport-unix-socket   — Unix socket (client + server)
+@agentick/transport-multiplexer   — leader-election + bridge (client only — composes any transport)
+@agentick/transport-mcp-client    — connects to pure MCP servers (client only)
 
-@agentick/mcp-surface-next             — server-side GatewayExtension: mounts MCP methods
+@agentick/mcp-surface             — server-side GatewayExtension: mounts MCP methods
                                           on an agentick gateway. Bilingual server.
 
-@agentick/client-extensions-next       — first-party extensions bundle with subpath exports
+@agentick/client-extensions       — first-party extensions bundle with subpath exports
   /retry                                  — middleware + handler
   /telemetry                              — middleware + installer
   /offline                                — middleware + installer + handler
   /cache                                  — middleware
-@agentick/client-devtools-next         — installer + wireMirror
-@agentick/client-mock-next             — transport / middleware
-@agentick/client-react-next            — (future) React binding (hooks + context provider)
-@agentick/client-angular-next          — (future) Angular binding
-@agentick/client-vue-next              — (future) Vue binding
+@agentick/client-devtools         — installer + wireMirror
+@agentick/client-mock             — transport / middleware
+@agentick/client-react            — (future) React binding (hooks + context provider)
+@agentick/client-angular          — (future) Angular binding
+@agentick/client-vue              — (future) Vue binding
 
 (Auth packages — see ADR 34)
-@agentick/auth-next
-@agentick/auth-jwt-next
-@agentick/auth-oauth2-next
-@agentick/auth-dpop-next
-@agentick/auth-mtls-next
-@agentick/auth-rbac-next
-@agentick/auth-policy-next             — adapter to Cedar / OPA / OpenFGA / SpiceDB
+@agentick/auth
+@agentick/auth-jwt
+@agentick/auth-oauth2
+@agentick/auth-dpop
+@agentick/auth-mtls
+@agentick/auth-rbac
+@agentick/auth-policy             — adapter to Cedar / OPA / OpenFGA / SpiceDB
 ```
 
 Dependency graph (zero cycles):
@@ -1149,13 +1149,13 @@ client-extensions-next/{retry,telemetry,cache,offline}  (first-party client exte
 
 5. **Wire compression / binary frames.** JSON over WS is fine to multi-thousand events/sec; beyond that, MessagePack or CBOR. `TransportCapabilities.binaryFrames` is the slot; impls fill it later. **Deferred to post-MVP benchmarking.**
 
-6. **Should the framework expose JSON-RPC tooling integrations (OpenRPC schema generation, JSON-RPC validators) as separate packages?** Likely yes — `@agentick/wire-openrpc-next` for OpenRPC document generation off the harness protocols. **Deferred to post-MVP.**
+6. **Should the framework expose JSON-RPC tooling integrations (OpenRPC schema generation, JSON-RPC validators) as separate packages?** Likely yes — `@agentick/wire-openrpc` for OpenRPC document generation off the harness protocols. **Deferred to post-MVP.**
 
-7. **Multiplexer subscription-union algorithm for arbitrary `EventQuery` shapes.** The phase-33.G simple strategy ("union by surface/phase; per-follower otherwise") is correct but loses the multiplex win for complex queries. A general algorithm requires either (a) a query-normal-form that lets us compute predicate union, or (b) a query-introspection API on the bus that exposes the matcher's structure. **Deferred — track in `@agentick/transport-multiplexer-next`'s open issues.**
+7. **Multiplexer subscription-union algorithm for arbitrary `EventQuery` shapes.** The phase-33.G simple strategy ("union by surface/phase; per-follower otherwise") is correct but loses the multiplex win for complex queries. A general algorithm requires either (a) a query-normal-form that lets us compute predicate union, or (b) a query-introspection API on the bus that exposes the matcher's structure. **Deferred — track in `@agentick/transport-multiplexer`'s open issues.**
 
 8. **`agentick-rpc-v1` subprotocol version bumping.** First wire-breaking change forces `v2`. Coordination story with adopters TBD. **Deferred to first wire-breaking change.**
 
-9. **Higher-level web-framework adapters.** Today `@agentick/transport-http-next` and `@agentick/transport-websocket-next` accept a Node `http.Server` instance and attach via `on("upgrade")` / `on("request")`. That's the universal integration point — it works with Express's `app.listen()`-returned server, NestJS's `app.getHttpServer()`, Fastify's `server.server`, and any other framework wrapping `http.Server`. Bare-Node deploys obviously work too. **Bookmark:** ergonomic per-framework adapter packages (`@agentick/express-next`, `@agentick/nestjs-next`, `@agentick/koa-next`, `@agentick/elysia-next`, `@agentick/hono-next`, `@agentick/fastify-next`) would shave 10-20 lines of boilerplate per framework — useful adoption but not blocking. Each is a small wrapper that mounts `httpServer(...)` / `websocketServer(...)` and exposes a framework-idiomatic API (Express middleware shape, NestJS module, Fastify plugin, Hono `app.route(...)`, Elysia `.use(plugin)`, Koa middleware). **Weigh against:** the universal `http.Server` integration path means adopters can use any framework today by passing the underlying server — adapters are pure ergonomics. Defer until adopter requests surface a specific framework or pattern that the universal path doesn't serve cleanly. Track as a roadmap item, not a phased commitment.
+9. **Higher-level web-framework adapters.** Today `@agentick/transport-http` and `@agentick/transport-websocket` accept a Node `http.Server` instance and attach via `on("upgrade")` / `on("request")`. That's the universal integration point — it works with Express's `app.listen()`-returned server, NestJS's `app.getHttpServer()`, Fastify's `server.server`, and any other framework wrapping `http.Server`. Bare-Node deploys obviously work too. **Bookmark:** ergonomic per-framework adapter packages (`@agentick/express`, `@agentick/nestjs`, `@agentick/koa`, `@agentick/elysia`, `@agentick/hono`, `@agentick/fastify`) would shave 10-20 lines of boilerplate per framework — useful adoption but not blocking. Each is a small wrapper that mounts `httpServer(...)` / `websocketServer(...)` and exposes a framework-idiomatic API (Express middleware shape, NestJS module, Fastify plugin, Hono `app.route(...)`, Elysia `.use(plugin)`, Koa middleware). **Weigh against:** the universal `http.Server` integration path means adopters can use any framework today by passing the underlying server — adapters are pure ergonomics. Defer until adopter requests surface a specific framework or pattern that the universal path doesn't serve cleanly. Track as a roadmap item, not a phased commitment.
 
 ## Sequencing — what ships when
 
@@ -1163,10 +1163,10 @@ The work is broken into phases that exit cleanly:
 
 **Phase 33.A — Wire + spec types**
 
-- `@agentick/spec-next/wire/` — `WireFrame`, `JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcNotification`, param shapes, `Scope`, `AuthSource`, `TransportCapabilities`, `TransportState`.
+- `@agentick/spec/wire/` — `WireFrame`, `JsonRpcRequest`, `JsonRpcResponse`, `JsonRpcNotification`, param shapes, `Scope`, `AuthSource`, `TransportCapabilities`, `TransportState`.
 - Test: type-only round-trip tests; no impl.
 
-**Phase 33.B — `@agentick/client-next` skeleton**
+**Phase 33.B — `@agentick/client` skeleton**
 
 - `AgentickClient` + `createClient`.
 - `ClientTransport` interface, `ClientExtension`, `ClientInstaller`, client-bus.
@@ -1185,8 +1185,8 @@ The work is broken into phases that exit cleanly:
 
 **Phase 33.D — HTTP transports**
 
-- `@agentick/transport-http-next` (Streamable HTTP, primary).
-- `@agentick/transport-http-sse-legacy-next` (legacy dual-endpoint).
+- `@agentick/transport-http` (Streamable HTTP, primary).
+- `@agentick/transport-http-sse-legacy` (legacy dual-endpoint).
 - Both pass conformance + cursor-resume.
 
 **Phase 33.E — Unix socket transport**
@@ -1197,7 +1197,7 @@ The work is broken into phases that exit cleanly:
 
 **Phase 33.F — Common extensions**
 
-- `@agentick/client-extensions-next` — subpath bundle with `/retry`, `/telemetry`, `/cache`, `/offline`.
+- `@agentick/client-extensions` — subpath bundle with `/retry`, `/telemetry`, `/cache`, `/offline`.
 - Each subpath ships with its own README + test suite + prior-art table.
 - Establishes the `{layer}-extensions-next` naming convention (reserved `{layer}-{framework}-next` for future React/Angular/Vue bindings).
 
@@ -1214,8 +1214,8 @@ The work is broken into phases that exit cleanly:
 
 **Phase 33.I — MCP interop**
 
-- `@agentick/mcp-surface-next` (server-side `GatewayExtension`): mounts `tools/*`, `resources/*`, `prompts/*` on an agentick gateway. Routes via session's tool executor + reconciler. Agentick gateway becomes an MCP server for any MCP client (Claude Desktop, Cline, Continue.dev, etc.) with one extension install.
-- `@agentick/transport-mcp-client-next`: client-side transport that connects to a pure MCP server. Exposes `client.mcp.tools.call(name, input)`, `client.mcp.resources.read(uri)`, etc. Reuses the same `ClientTransport` interface.
+- `@agentick/mcp-surface` (server-side `GatewayExtension`): mounts `tools/*`, `resources/*`, `prompts/*` on an agentick gateway. Routes via session's tool executor + reconciler. Agentick gateway becomes an MCP server for any MCP client (Claude Desktop, Cline, Continue.dev, etc.) with one extension install.
+- `@agentick/transport-mcp-client`: client-side transport that connects to a pure MCP server. Exposes `client.mcp.tools.call(name, input)`, `client.mcp.resources.read(uri)`, etc. Reuses the same `ClientTransport` interface.
 - Tool projection: `createTool()` descriptors map automatically to MCP tool descriptors (both Zod-schema-based; trivial mapping).
 
 Auth ADR (34) lands in parallel with 33.B/33.C; auth-impl packages ship after 33.F. MCP interop (33.I) ships after the core transports are stable but can land in parallel with 33.F/33.G/33.H.

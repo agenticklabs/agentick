@@ -7,7 +7,7 @@ description: Build, typecheck, and test the agentick monorepo. Use when asked to
 
 > **v2 gate mechanics (use these on `feat/v2`).**
 >
-> - **Tests:** `npx vitest run packages-next` from the repo root. **Never** `pnpm --filter <pkg> test` — it is a turbo no-op that reports a false green.
+> - **Tests:** `npx vitest run packages` from the repo root. **Never** `pnpm --filter <pkg> test` — it is a turbo no-op that reports a false green.
 > - **Typecheck:** `pnpm typecheck --force` — `--force` bypasses stale turbo cache and runs `tsc` including test files.
 > - **Format / lint:** `pnpm format` (oxfmt) and `pnpm lint` (oxlint) — not prettier, not jest.
 > - **No top-level await:** `pnpm check:no-tla`.

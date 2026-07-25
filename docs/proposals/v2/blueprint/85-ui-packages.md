@@ -8,7 +8,7 @@
 Build agentick UIs in any framework by layering thin bindings over the existing
 `ClientProtocol`. The library is two tiers:
 
-1. **`@agentick/ui-core-next`** (framework-agnostic) — opens **one firehose
+1. **`@agentick/ui-core`** (framework-agnostic) — opens **one firehose
    subscription per session** (`session.events`) and **demuxes it client-side**
    into family `get/subscribe` stores (messages, elicitation, tasks, knobs, …),
    each seeded from a snapshot. A **per-session store registry** shares that one
@@ -27,7 +27,7 @@ library tiny (and multiplexing free) even as the surface grows.
 
 ## 1. Motivation
 
-The client (`@agentick/client-next`) is already transport-agnostic (ws / http /
+The client (`@agentick/client`) is already transport-agnostic (ws / http /
 in-process) and exposes typed streams (`handle.events()`), scoped subscriptions
 (`onLog` / `onProgress`), and channel views (`channelView`). What's missing is
 the last mile: turning those streams into **reactive UI state** in whatever
@@ -293,10 +293,10 @@ surfaced to the UI; a custom channel can expose the same ask/respond.
 ## 7. Package topology + dependencies
 
 ```
-@agentick/ui-core-next        // UIMessage model, fold reducer, store registry,
+@agentick/ui-core        // UIMessage model, fold reducer, store registry,
                               //   ClientProvider-agnostic core; re-exports channelView
-@agentick/ui-react-next       // useClient/useSession/useChannel = useSyncExternalStore
-@agentick/ui-angular-next     // the same over Angular signals + DI
+@agentick/ui-react       // useClient/useSession/useChannel = useSyncExternalStore
+@agentick/ui-angular     // the same over Angular signals + DI
 ```
 
 - **`ui-core` types against `ClientProtocol` (spec), not `client-next`** — so it
@@ -399,7 +399,7 @@ API reference.
 ## Appendix A — `ui-core` sketch (illustrative, not final)
 
 The whole library is: **the model, one router, one fold, a store, a registry, and
-`useStore`.** Everything below is framework-agnostic (`@agentick/ui-core-next`); a
+`useStore`.** Everything below is framework-agnostic (`@agentick/ui-core`); a
 binding is `useSyncExternalStore` over any `Store`.
 
 ```ts
@@ -474,7 +474,7 @@ function releaseSession(client: ClientProtocol, id: string) {
   if (e && --e.refs === 0) { e.store.close(); stores.delete(key); }
 }
 
-// ── 7. The React binding (@agentick/ui-react-next) — the whole thing ──────
+// ── 7. The React binding (@agentick/ui-react) — the whole thing ──────
 function useSession(id: string) {
   const client = useClient();
   const store = useMemo(() => acquireSession(client, id), [client, id]);

@@ -1,7 +1,7 @@
 /**
  * The client half — the star of this example.
  *
- * Everything a frontend needs comes from ONE import: `@agentick/client-next`,
+ * Everything a frontend needs comes from ONE import: `@agentick/client`,
  * the batteries-included bundle. Importing it lights up every built-in session
  * sub-handle (`session.knobs` / `session.tasks` / `session.elicitations`)
  * with no per-harness imports — that's the ADR 87 seam + the core/bundle split.
@@ -16,9 +16,9 @@
  *   - `handle.events()`     — the streamed token/tool output of the run
  */
 
-import { createClient, type Client } from "@agentick/client-next";
-import { inProcessTransport } from "@agentick/transport-in-process-next";
-import type { GatewayHarnessProtocol, SendResult } from "@agentick/spec-next";
+import { createClient, type Client } from "@agentick/client";
+import { inProcessTransport } from "@agentick/transport-in-process";
+import type { GatewayHarnessProtocol, SendResult } from "@agentick/spec";
 
 /**
  * Connect a client to an in-process gateway. `inProcessTransport({ gateway })`

@@ -40,8 +40,8 @@ Exact wording + token counts vary by run.
 ```tsx
 // src/agent.tsx
 import { z } from "zod";
-import { System, createTool } from "@agentick/compiler-react-next";
-import { Knobs, useKnob } from "@agentick/knobs-next/react";
+import { System, createTool } from "@agentick/compiler-react";
+import { Knobs, useKnob } from "@agentick/knobs/react";
 
 const Calculator = createTool({
   name: "calculator",
@@ -75,11 +75,11 @@ export function Agent() {
 
 ```ts
 // src/index.ts (abridged)
-import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { createApp } from "@agentick/app/react";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
-import { jsonSchema } from "@agentick/spec-next";
-import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp-next";
+import { jsonSchema } from "@agentick/spec";
+import { InMemoryMcpTransport, NoneAuth, withMCP } from "@agentick/mcp";
 
 const { clientTransport } = mkMcpEchoServer();
 

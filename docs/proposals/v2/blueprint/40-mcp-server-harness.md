@@ -1,7 +1,7 @@
 # ADR 40 — MCP server harness shape
 
-**Status:** Proposed — 2026-06-28. **Amended 2026-06-28** to align package layout with ADR 23 §6 (one package, subpath exports) — the original ADR 40 proposed a separate `@agentick/mcp-server-next` which would have duplicated ~70% of code shared with the client. Server now lives at `@agentick/mcp-next/server`.
-**Touches:** `@agentick/mcp-next` (server subpath — #171), `@agentick/tool-next` (transforms subpath, shipped #171a), `@agentick/prompts-next` (server projection), `@agentick/elicitation-next` (inbound dispatch), `@agentick/tasks-next` (server-side `taskSupport`), `@agentick/gateway-next` + `@agentick/app-next` (extension wiring), `@agentick/spec-next/protocol/mcp-server-harness.ts` (new). Cross-references ADR 23 §"Server-side: shape is OPEN" — this is the resolution.
+**Status:** Proposed — 2026-06-28. **Amended 2026-06-28** to align package layout with ADR 23 §6 (one package, subpath exports) — the original ADR 40 proposed a separate `@agentick/mcp-server` which would have duplicated ~70% of code shared with the client. Server now lives at `@agentick/mcp/server`.
+**Touches:** `@agentick/mcp` (server subpath — #171), `@agentick/tool` (transforms subpath, shipped #171a), `@agentick/prompts` (server projection), `@agentick/elicitation` (inbound dispatch), `@agentick/tasks` (server-side `taskSupport`), `@agentick/gateway` + `@agentick/app` (extension wiring), `@agentick/spec/protocol/mcp-server-harness.ts` (new). Cross-references ADR 23 §"Server-side: shape is OPEN" — this is the resolution.
 **Driver:** Lock the v2 MCP server shape so #171 can ship. ADR 23 left it open between two candidate models ("integrated session-extension" vs "descriptive standalone declaration tree"); the discussion on 2026-06-28 + the v1 audit closed the choice. This ADR is the resolution + the implementation contract.
 
 ---
@@ -10,8 +10,8 @@
 
 1. **MCP server is a Shape 1 harness at GATEWAY scope, NOT session scope.** A server is long-lived multi-tenant infrastructure; binding it to a session is wrong containment. Sessions interact with MCP servers as clients (existing `withMCP` + `McpClientHarness`), not by hosting them.
 
-2. **One package, two deployment modes, same harness.** Server ships at `@agentick/mcp-next/server` (subpath of the existing client package — ADR 23 §6 alignment; ~70% of code is shared between client + server, so a separate package would duplicate transport, era-codec, OAuth, JSON-RPC framing, and Standard-Schema bridge). Two modes:
-   - **Mode A — Standalone process** (`npx agentick-mcp-server --config server.config.ts` — bin shipped by `@agentick/mcp-next`). A thin shell boots substrate + harness + transports.
+2. **One package, two deployment modes, same harness.** Server ships at `@agentick/mcp/server` (subpath of the existing client package — ADR 23 §6 alignment; ~70% of code is shared between client + server, so a separate package would duplicate transport, era-codec, OAuth, JSON-RPC framing, and Standard-Schema bridge). Two modes:
+   - **Mode A — Standalone process** (`npx agentick-mcp-server --config server.config.ts` — bin shipped by `@agentick/mcp`). A thin shell boots substrate + harness + transports.
    - **Mode B — Gateway extension** (`createGateway({ mcpServers: [...] })`). Production deployment for most adopters.
    - Both modes wrap the same `McpServerHarness`. Mode A is "Mode B with a minimal synthesized gateway shell."
 
@@ -21,9 +21,9 @@
 
 5. **Per-connection projection + transforms, NOT per-server pre-baked sets.** Filters and transforms run at request time against the live `MCPRequestContext` of each connection. Same per-session-per-request granularity as v1. A single server can serve "anonymous read-only" and "authenticated admin" connections with different visibility, no separate server instance per persona.
 
-6. **Tool transforms are first-class primitives, shared with the rest of the framework.** `rename`, `alias`, `prefix`, `restrict-input`, `restrict-output`, `wrap-handler`, `filter` live in `@agentick/tool-next/transforms` — usable anywhere a tool list is consumed, not MCP-server-specific. The MCP server just composes them.
+6. **Tool transforms are first-class primitives, shared with the rest of the framework.** `rename`, `alias`, `prefix`, `restrict-input`, `restrict-output`, `wrap-handler`, `filter` live in `@agentick/tool/transforms` — usable anywhere a tool list is consumed, not MCP-server-specific. The MCP server just composes them.
 
-7. **Security pipeline ported from v1 verbatim.** `ConnectionGuard` / `Authenticator` / `Authorizer` / `RateLimiter` / `InputSanitizer` — five named async stages, swappable per-server. Defaults are transport-aware (HTTP forces explicit auth config; stdio + in-process default to allow-all). v1's stages library (`bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter`, `allowListGuard`) ports as-is to `@agentick/mcp-next/server/security`.
+7. **Security pipeline ported from v1 verbatim.** `ConnectionGuard` / `Authenticator` / `Authorizer` / `RateLimiter` / `InputSanitizer` — five named async stages, swappable per-server. Defaults are transport-aware (HTTP forces explicit auth config; stdio + in-process default to allow-all). v1's stages library (`bearerTokenAuth`, `roleBasedAuthz`, `slidingWindowLimiter`, `allowListGuard`) ports as-is to `@agentick/mcp/server/security`.
 
 8. **OAuth 2.1 fully spec-aligned, both AS and RS roles.** v1 shipped client-side OAuth only. v2 server ships token validation (Resource Server role) + optional embedded Authorization Server. PKCE-mandatory, OIDC discovery, JWT/introspection token formats. Reuses #134's URL-mode elicit infrastructure for symmetric callback handling.
 
@@ -35,7 +35,7 @@
 
 12. **Resources (#123) ship later. Server capability negotiation handles absence cleanly.** Server config has an optional `resources` slot; missing → don't advertise the capability → no `resources/list` or `resources/read` requests will arrive. Additive when #123 lands — including `resources/subscribe` per-URI, `notifications/resources/updated`, and resource templates. ADR 23's deferral stance applies.
 
-13. **Display metadata mutable per-connection; semantic annotations immutable.** `title`/`icons`/`description` flow through `@agentick/tool-next/transforms` (`setTitle`, `setIcons`, `describe`) and can be customized per audience. Tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are SEMANTIC — set at `createTool` time, immutable through projection. Lying about destructiveness per-connection would be a safety footgun.
+13. **Display metadata mutable per-connection; semantic annotations immutable.** `title`/`icons`/`description` flow through `@agentick/tool/transforms` (`setTitle`, `setIcons`, `describe`) and can be customized per audience. Tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are SEMANTIC — set at `createTool` time, immutable through projection. Lying about destructiveness per-connection would be a safety footgun.
 
 14. **Tool handlers receive `ctx.signal` + `ctx.sendProgress` via projection-layer wrapping.** Both ported from v1's `MCPHandlerContext` unchanged. Long-running tools observe `signal` for client cancellation; progress notifications stream to clients that advertised support. Wrapping happens in the projection layer; tool handlers see them as plain function/AbortSignal.
 
@@ -64,12 +64,12 @@ ADR 23 reaffirmed: MCP semantics ARE Agentick's native semantics. Concretely, th
 
 | MCP wire concept                         | v2 source of truth                                  | Translation needed?                      |
 | ---------------------------------------- | --------------------------------------------------- | ---------------------------------------- |
-| `tools/list`, `tools/call`               | `@agentick/tool-next` registry + `createTool`       | None — `createTool` IS the MCP shape     |
-| `prompts/list`, `prompts/get`            | `@agentick/prompts-next` (`PromptsHarness`)         | None — mirror is exact                   |
-| `elicitation/create` (server→client)     | `@agentick/elicitation-next` (`ElicitationHarness`) | None                                     |
-| `tasks/list`, `tasks/get`, taskSupport   | `@agentick/tasks-next` (`TasksHarness`)             | None — already cluster-aware             |
+| `tools/list`, `tools/call`               | `@agentick/tool` registry + `createTool`       | None — `createTool` IS the MCP shape     |
+| `prompts/list`, `prompts/get`            | `@agentick/prompts` (`PromptsHarness`)         | None — mirror is exact                   |
+| `elicitation/create` (server→client)     | `@agentick/elicitation` (`ElicitationHarness`) | None                                     |
+| `tasks/list`, `tasks/get`, taskSupport   | `@agentick/tasks` (`TasksHarness`)             | None — already cluster-aware             |
 | `sampling/createMessage` (server→client) | `SamplingHarness` (pending)                         | Bridge needed (not v1-shape direct call) |
-| `resources/list`, `resources/read`       | `@agentick/resources-next` (#123, pending)          | Bridge needed when #123 lands            |
+| `resources/list`, `resources/read`       | `@agentick/resources` (#123, pending)          | Bridge needed when #123 lands            |
 | `roots/list`                             | Workspace bridge (#124, pending)                    | Bridge needed                            |
 
 All but the bottom three are ready today. The MCP server harness composes the existing harnesses + bridges; it does NOT own state for things the harnesses already own.
@@ -110,7 +110,7 @@ The audit of `packages/mcp/src/server/` (20k LOC, ~3k LOC test) surfaced these l
 - **Single transport per server** (v1 hard-coded one transport per `MCPServer` instance via `.connect(transport)` or `.handleHTTPRequest()`). v2 — multiple transports per server (config is `transports: Transport[]`).
 - **Server owns the tool/prompt/resource registries.** v2 — registries live in their owning harnesses (tools in tool-executor, prompts in PromptsHarness, etc.). The server projects.
 - **Server starts a session-TTL cleanup interval.** v2 — gateway lifecycle handles cleanup. No per-server timer.
-- **No rename / alias / prefix / restrict-schema transforms.** v2 adds these as first-class primitives in `@agentick/tool-next/transforms`.
+- **No rename / alias / prefix / restrict-schema transforms.** v2 adds these as first-class primitives in `@agentick/tool/transforms`.
 - **OAuth client-side only.** v2 — server-side Resource Server token validation + optional embedded Authorization Server, both OAuth 2.1 spec-aligned.
 - **`MCPApp` (ui:// resources) as first-class capability.** v2 — defer. Spec stability uncertain; treat as adopter extension via a custom resource-type registration when #123 lands.
 
@@ -120,10 +120,10 @@ The audit of `packages/mcp/src/server/` (20k LOC, ~3k LOC test) surfaced these l
 
 ### 1. Package layout
 
-Server code lives inside the existing `@agentick/mcp-next` package as a `/server` subpath. This is ADR 23 §6 alignment: client + server share ~70% of code (wire codec, transport abstractions, OAuth utilities, era-codec, JSON-RPC framing, Standard-Schema bridge), so they live together and import from shared internal modules. The client public surface (`@agentick/mcp-next`) is unchanged; server consumers import from `@agentick/mcp-next/server`.
+Server code lives inside the existing `@agentick/mcp` package as a `/server` subpath. This is ADR 23 §6 alignment: client + server share ~70% of code (wire codec, transport abstractions, OAuth utilities, era-codec, JSON-RPC framing, Standard-Schema bridge), so they live together and import from shared internal modules. The client public surface (`@agentick/mcp`) is unchanged; server consumers import from `@agentick/mcp/server`.
 
 ```
-@agentick/mcp-next/                         ← existing package
+@agentick/mcp/                         ← existing package
 ├── src/
 │   ├── index.ts                            ← CLIENT public surface (unchanged)
 │   ├── client/                             ← existing
@@ -190,16 +190,16 @@ Server code lives inside the existing `@agentick/mcp-next` package as a `/server
 
 When client + server need diverging types (e.g., client `McpRequestContext` vs server `McpServerRequestContext`), they live in their respective subdirectories. Otherwise: shared internal modules first.
 
-`@agentick/tool-next/transforms` (shipped in #171a) is a separate package. The MCP server projection imports `composeTransforms` + the primitives from there; the transforms library is NOT MCP-specific.
+`@agentick/tool/transforms` (shipped in #171a) is a separate package. The MCP server projection imports `composeTransforms` + the primitives from there; the transforms library is NOT MCP-specific.
 
 ### 2. Config shape (declarative)
 
 ```ts
 // gateway.config.ts
-import { createGateway } from "@agentick/gateway-next";
-import { stdioTransport, httpTransport } from "@agentick/mcp-next/server";
-import { rename, prefix, filter } from "@agentick/tool-next/transforms";
-import { bearerTokenAuth, roleBasedAuthz } from "@agentick/mcp-next/server/security/built-ins";
+import { createGateway } from "@agentick/gateway";
+import { stdioTransport, httpTransport } from "@agentick/mcp/server";
+import { rename, prefix, filter } from "@agentick/tool/transforms";
+import { bearerTokenAuth, roleBasedAuthz } from "@agentick/mcp/server/security/built-ins";
 
 export const gateway = createGateway({
   cluster: defineCluster({ ... }),
@@ -291,7 +291,7 @@ Each transport connection produces:
 
 Both flow through unchanged from v1's `MCPHandlerContext` shape. The projection layer attaches them per-request; tools that don't need them ignore them.
 
-### 4. Tool transformation primitives (`@agentick/tool-next/transforms`)
+### 4. Tool transformation primitives (`@agentick/tool/transforms`)
 
 A `ToolTransform<C = MCPRequestContext>` is:
 
@@ -355,11 +355,11 @@ Defaults — applied per transport type unless overridden:
 
 ### 7. Internal agents — direct projection
 
-When an `@agentick/app-next` instance and a `withMcpServer` configuration live in the same process under the same gateway:
+When an `@agentick/app` instance and a `withMcpServer` configuration live in the same process under the same gateway:
 
 ```ts
 // in an app, talking to our own MCP server without going over the wire:
-import { withMCP } from "@agentick/mcp-next";
+import { withMCP } from "@agentick/mcp";
 
 const app = createApp(<MyAgent />, {
   extensions: [
@@ -430,7 +430,7 @@ The CLI entry (`bin/server.ts`) is a thin shell:
 
 ```ts
 #!/usr/bin/env node
-import { spawnStandaloneMcpServer } from "@agentick/mcp-next/server";
+import { spawnStandaloneMcpServer } from "@agentick/mcp/server";
 const config = await import(parseArgs(process.argv).config);
 await spawnStandaloneMcpServer(config.default);
 ```
@@ -456,7 +456,7 @@ Within a server:
 
 ## Conformance + testing
 
-`@agentick/mcp-next/server/conformance.ts` exports `runMcpServerHarnessConformance(makeHarness)`. Cases pin:
+`@agentick/mcp/server/conformance.ts` exports `runMcpServerHarnessConformance(makeHarness)`. Cases pin:
 
 - Capability negotiation matches wired harnesses
 - Per-connection filter + transforms apply correctly
@@ -473,8 +473,8 @@ Within a server:
 
 ## Migration / rollout plan
 
-1. **#171a — `@agentick/tool-next/transforms` subpath.** Lands first; usable independently. ~1 day.
-2. **#171b — `@agentick/mcp-next/server` subpath + spec types.** Subpath scaffold inside the existing mcp-next package, `McpServerHarness` shell, config validation, no transports yet. ~1 day.
+1. **#171a — `@agentick/tool/transforms` subpath.** Lands first; usable independently. ~1 day.
+2. **#171b — `@agentick/mcp/server` subpath + spec types.** Subpath scaffold inside the existing mcp-next package, `McpServerHarness` shell, config validation, no transports yet. ~1 day.
 3. **#171c — stdio transport + tools-only projection.** Minimum viable: stdio transport, capability negotiation, tools projection, security pipeline default-allow stages. Smoke test via Mode A CLI on a fixture config. ~2 days.
 4. **#171d — Prompts + elicitation + tasks projections.** Each is a small commit; harnesses already exist. ~2 days.
 5. **#171e — HTTP transport (Streamable HTTP) + OAuth 2.1 Resource Server.** ~3 days.
@@ -509,11 +509,11 @@ Total estimate: ~16 days of work. Not blocking on #123 or #124.
 
 ## What lives in the package README (not this ADR)
 
-The following are adopter-facing material that the `@agentick/mcp-next` README will document (server section, alongside the existing client section). They are NOT architectural shape questions — they're API surface + recipes. Listed here so the ADR isn't mistaken for the README:
+The following are adopter-facing material that the `@agentick/mcp` README will document (server section, alongside the existing client section). They are NOT architectural shape questions — they're API surface + recipes. Listed here so the ADR isn't mistaken for the README:
 
 - **Tool definition reference** — input/output schemas, handler context shape, error vs result patterns. Port from v1 README §"Server API — Tools".
 - **Production security recipes** — `bearerTokenAuth` + `roleBasedAuthz` + `slidingWindowLimiter` + `allowListGuard` (IP/origin CIDR + glob) usage examples. Port from v1 §"Production security stages".
-- **Argument completion** — `completeFromList`/`completeFromEnum`/`completePrefixMatch`/`completeDependent`/`completeFromAsync` builders. Already in `@agentick/mcp-next` (client side); the server-side completion handler reuses them.
+- **Argument completion** — `completeFromList`/`completeFromEnum`/`completePrefixMatch`/`completeDependent`/`completeFromAsync` builders. Already in `@agentick/mcp` (client side); the server-side completion handler reuses them.
 - **Elicitation sugar** — `ctx.elicit.{select, confirm, text, number, boolean, object, url, requireUrls, multiSelect}` + `tryX` variants + three-action distinction (`accept`/`decline`/`cancel`). Ported from v1 `ElicitationAPIImpl`.
 - **Sampling sugar** — `ctx.sample.{text, structured, message, image, audio, withTools}` + retry loop. Ported from v1 `SampleAPIImpl`.
 - **Roots helpers** — `ctx.roots.{list, assertWithin, rootContaining, resolveRelative}` + caching + invalidation on `notifications/roots/list_changed`. Ported from v1.

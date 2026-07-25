@@ -8,10 +8,10 @@ extensions), ADR 47 (signals ride the bus), ADR 48 (layered isolation /
 principal), ADR 49 (stores, not snapshots), ADR 50 (gateway extensions)
 **Feeds:** ADR 34/#302 (auth: ingress authn + grant derivation), the
 verb-coverage matrix, CUT-PLAN §B2/§C1
-**Touches:** `@agentick/spec-next` (CommandDescriptor, `origin`,
-`WireMethods` seam usage, AuthError family), `@agentick/runtime-next`
-(`BaseHarness.command()`, dispatch-chain step), `@agentick/gateway-next`
-(dynamic wire resolver, Authorizer gate), `@agentick/tool-executor-next`
+**Touches:** `@agentick/spec` (CommandDescriptor, `origin`,
+`WireMethods` seam usage, AuthError family), `@agentick/runtime`
+(`BaseHarness.command()`, dispatch-chain step), `@agentick/gateway`
+(dynamic wire resolver, Authorizer gate), `@agentick/tool-executor`
 (DispatchPolicy port), every harness package (verb declarations —
 net-negative LOC migration)
 
@@ -211,7 +211,7 @@ new declarations, never new plumbing.** `sub/*` can never be commands
 
 ```ts
 // timeline/src/augment.ts — same file that augments HookBridges:
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface WireMethods {
     "timeline/compact": {
       params: InferInput<typeof compactSignalSchema> & { sessionId: string };

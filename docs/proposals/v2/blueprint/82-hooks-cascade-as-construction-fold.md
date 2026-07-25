@@ -28,7 +28,7 @@ A **value** has neither problem. The resolved hooks for a scope is a plain immut
 ### 1. `Hooks` — an immutable per-command layer
 
 ```ts
-// @agentick/runtime-next — holds LISTS per command so layers COMPOSE (can't use a flat
+// @agentick/runtime — holds LISTS per command so layers COMPOSE (can't use a flat
 // object: two layers both setting onBeforeToolDispatch would collide on the key).
 export class Hooks {
   private constructor(

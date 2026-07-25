@@ -1,0 +1,92 @@
+{
+  "name": "@agentick/transport-websocket",
+  "version": "0.0.0",
+  "description": "WebSocket transport for agentick — JSON-RPC 2.0 over WS, with subprotocol negotiation (`agentick-rpc-v1`), cursor-aware reconnect, per-message-deflate compression, and bilingual MCP support. Client uses native `globalThis.WebSocket` (Node 22+, browser, Bun, Deno, edge); server uses the `ws` library (no native WS server in Node).",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "json-rpc",
+    "mcp",
+    "transport",
+    "websocket"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/transport-websocket"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/transport": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@agentick/app": "workspace:*",
+    "@agentick/client-core": "workspace:*",
+    "@agentick/gateway": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "@types/ws": "^8.5.13",
+    "effect": "^3.22.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

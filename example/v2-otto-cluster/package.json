@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentick/cluster-broker-next": "workspace:*",
-    "@agentick/cluster-net-next": "workspace:*",
-    "@agentick/cluster-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*"
+    "@agentick/cluster-broker": "workspace:*",
+    "@agentick/cluster-net": "workspace:*",
+    "@agentick/cluster": "workspace:*",
+    "@agentick/runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.5.4",

@@ -4,10 +4,10 @@
 **Builds on:** ADR 14 (State tiers), ADR 26 (Harness API shape), ADR 27
 (Modular built-ins), ADR 32 (Extension shape spectrum), ADR 42 (Slot
 dichotomy), ADR 48 (Layered isolation)
-**Touches:** `@agentick/spec-next` (store port types, observation-only),
-`@agentick/timeline-next` (TimelineStore port, flush barrier),
-`@agentick/state-next` (KV store port), `@agentick/session-next` /
-`@agentick/app-next` (open-or-rehydrate), `@agentick/runtime-next`
+**Touches:** `@agentick/spec` (store port types, observation-only),
+`@agentick/timeline` (TimelineStore port, flush barrier),
+`@agentick/state` (KV store port), `@agentick/session` /
+`@agentick/app` (open-or-rehydrate), `@agentick/runtime`
 (journal retention — resolves L7), every bundled harness README (state-class
 declaration)
 **Resolves:** A19 (`PersistenceBackend` shapes — by dissolution), L7
@@ -111,7 +111,7 @@ assignments:
 ## The store port pattern
 
 Generalized from `CredentialsStore`
-(`packages-next/credentials/src/store.ts`). A store port is:
+(`packages/credentials/src/store.ts`). A store port is:
 
 1. **Promise-shaped.** Implementer-facing surface; the Effect charter's
    "Effect internal, Promise external" rule applies. No Effect types in
@@ -243,10 +243,10 @@ Four rungs, in adoption order, with an explicit **bundling policy** (the
 two-pole test applied to dependencies):
 
 1. **in-memory** — bundled default, zero deps. `:memory:` semantics.
-2. **JSONL file** (`@agentick/timeline-fs-next`) — zero-dep file
+2. **JSONL file** (`@agentick/timeline-fs`) — zero-dep file
    persistence, one append-only transcript file per session.
    Human-greppable; the local-pole durable shape.
-3. **SQLite** (`@agentick/timeline-sqlite-next`) — the *recommended
+3. **SQLite** (`@agentick/timeline-sqlite`) — the *recommended
    first durable adapter* and a natural single-node event store
    (append-only rows, range reads for the fold). **A separate package,
    never bundled into the `agentick` metapackage** — a SQLite driver is
@@ -254,7 +254,7 @@ two-pole test applied to dependencies):
    Driver choice (`node:sqlite` once stable on our supported matrix vs.
    `better-sqlite3`) is decided when the adapter is written; verify
    `node:sqlite` stability first.
-4. **Postgres** (`@agentick/timeline-postgres-next`) — the **shared
+4. **Postgres** (`@agentick/timeline-postgres`) — the **shared
    source of truth across stateless replicas** (the cloud pole; the
    Knowify shape). SQLite-on-local-disk cannot fill this role (single
    writer, local file), so Postgres is not optional for multi-replica —
@@ -495,10 +495,10 @@ cluster workstream; interface sketch deferred to that note.)
 
 ## References
 
-- `packages-next/credentials/src/store.ts` — the template port
-- `packages-next/spec/src/protocol/timeline-harness.ts` — two-tier model
+- `packages/credentials/src/store.ts` — the template port
+- `packages/spec/src/protocol/timeline-harness.ts` — two-tier model
   this ADR binds to
-- `packages-next/spec/src/protocol/journal.ts` — journal surface
+- `packages/spec/src/protocol/journal.ts` — journal surface
   (unchanged, reclassified)
 - `docs/proposals/v2/CUT-PLAN.md` §3 — workstream context, acceptance
   tests (kill-and-resume on both poles)

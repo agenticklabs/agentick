@@ -2,7 +2,7 @@
 
 Thank you for your interest in contributing to Agentick! This document provides guidelines and instructions for contributing.
 
-Agentick is mid-rewrite. The stable v1 line lives under `packages/`; the v2 rewrite lives under `packages-next/` on the `feat/v2` branch and is where active development happens. Most contributions today target v2 — read the v2 pointers below before you start.
+Agentick is mid-rewrite. The stable v1 line lives under `packages/`; the v2 rewrite lives under `packages/` on the `feat/v2` branch and is where active development happens. Most contributions today target v2 — read the v2 pointers below before you start.
 
 ## AI-Assisted Development
 
@@ -63,8 +63,8 @@ agentick/
 │   ├── gateway/  server/  express/  nestjs/
 │   ├── devtools/  sandbox/  guardrails/  ...
 │   └── adapters/       # @agentick/openai, google, ai-sdk
-├── packages-next/       # v2 — active development (feat/v2 branch)
-│   ├── spec/           # @agentick/spec-next - protocol seam (augmented by harnesses)
+├── packages/       # v2 — active development (feat/v2 branch)
+│   ├── spec/           # @agentick/spec - protocol seam (augmented by harnesses)
 │   ├── runtime/  pubsub/  utils/          # foundation
 │   ├── compiler/  compiler-react/         # JSX → IR compiler harness
 │   ├── timeline/  knobs/  state/  gates/  tool/  resources/
@@ -83,7 +83,7 @@ agentick/
 └── website/            # Documentation website (VitePress)
 ```
 
-v2 packages follow the `-next` naming law: `<role>-next` for a base/shared/abstract package, `<role>-<discriminator>-next` for a concrete impl (e.g. `compiler-next` base, `compiler-react-next` concrete). See `CLAUDE.md` for the full modularity model.
+v2 packages follow the naming law: `<role>` for a base/shared/abstract package, `<role>-<discriminator>` for a concrete impl (e.g. `compiler` base, `compiler-react` concrete). See `CLAUDE.md` for the full modularity model.
 
 ## Development Workflow
 
@@ -105,8 +105,8 @@ These are the gates CI and the pre-commit hook enforce. Run them before opening 
 ### Tests (vitest)
 
 ```bash
-# v2 — run the whole packages-next tree from the repo root
-npx vitest run packages-next
+# v2 — run the whole packages tree from the repo root
+npx vitest run packages
 
 # Everything (v1 + v2 + tui)
 pnpm test
@@ -211,7 +211,7 @@ test: add conformance coverage for knobs
 
 ### Adding a New Package
 
-New v2 packages go under `packages-next/` and must follow the **New Package Checklist in `CLAUDE.md`** (package scaffold, changeset linked list, typedoc entry points, website package groups, README, `pnpm install`). Every new package ships a README (purpose, usage, API, status, roadmap, known gaps).
+New v2 packages go under `packages/` and must follow the **New Package Checklist in `CLAUDE.md`** (package scaffold, changeset linked list, typedoc entry points, website package groups, README, `pnpm install`). Every new package ships a README (purpose, usage, API, status, roadmap, known gaps).
 
 ### Package Dependencies
 
@@ -235,7 +235,7 @@ describe("FeatureName", () => {
 });
 ```
 
-Spec files are named `*.spec.ts` / `*.spec.tsx`. A harness package's tests live with the harness: `harness.spec.ts` (harness-only), `conformance.spec.ts`, and `integration-with-compiler.spec.tsx` (real `CompilerHarness`). Cross-harness integration tests live in `@agentick/session-next` or the metapackage.
+Spec files are named `*.spec.ts` / `*.spec.tsx`. A harness package's tests live with the harness: `harness.spec.ts` (harness-only), `conformance.spec.ts`, and `integration-with-compiler.spec.tsx` (real `CompilerHarness`). Cross-harness integration tests live in `@agentick/session` or the metapackage.
 
 ### Test doubles (Meszaros taxonomy)
 
@@ -246,7 +246,7 @@ Name test doubles by role, per Meszaros' _xUnit Test Patterns_:
 - `spy*` — call recorders
 - `mock*` — expectation checkers
 
-Never `test*` — it collapses the taxonomy. Every layer ships its doubles under a `/testing` subpath (e.g. `@agentick/knobs-next/testing`), typed against the spec interfaces so a spec change breaks stale doubles at compile time. Before writing a new helper, grep the package's `src/` (and `@agentick/utils-next` + its `/testing`) for an existing one.
+Never `test*` — it collapses the taxonomy. Every layer ships its doubles under a `/testing` subpath (e.g. `@agentick/knobs/testing`), typed against the spec interfaces so a spec change breaks stale doubles at compile time. Before writing a new helper, grep the package's `src/` (and `@agentick/utils` + its `/testing`) for an existing one.
 
 ## Documentation
 

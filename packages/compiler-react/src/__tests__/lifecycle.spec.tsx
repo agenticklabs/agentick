@@ -1,0 +1,504 @@
+import { describe, expect, it, vi } from "vitest";
+import React, { useState } from "react";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { CompilerHarness } from "../harness/compiler-harness.js";
+import { fakeBridges } from "@agentick/compiler";
+import { useOnTickStart } from "../react/hooks/use-on-tick-start.js";
+import { useOnTickEnd } from "../react/hooks/use-on-tick-end.js";
+import { useOnExecutionStart } from "../react/hooks/use-on-execution-start.js";
+import { useOnExecutionEnd } from "../react/hooks/use-on-execution-end.js";
+import { useOnError } from "../react/hooks/use-on-error.js";
+import { LifecycleDispatch } from "@agentick/compiler";
+import { flush } from "../testing/flush.js";
+
+async function makeHarness() {
+  const harness = new CompilerHarness(
+    "h_lifecycle",
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+  );
+  await harness.ready;
+  return harness;
+}
+
+describe("LifecycleDispatch — dispatch + catch-up unit tests", () => {
+  it("dispatch invokes registered handlers for the matching kind", async () => {
+    const store = new LifecycleDispatch();
+    const seen: string[] = [];
+    store.register("tick-start", () => {
+      seen.push("ts");
+    });
+    store.register("tick-end", () => {
+      seen.push("te");
+    });
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    expect(seen).toEqual(["ts"]);
+    await store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 });
+    expect(seen).toEqual(["ts", "te"]);
+  });
+
+  it("catch-up: handler registered AFTER tick-start fires immediately", async () => {
+    const store = new LifecycleDispatch();
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    const seen: string[] = [];
+    store.register("tick-start", (ev) => {
+      seen.push(`${ev.tickId}-late`);
+    });
+    // Catch-up is synchronous within the register call.
+    expect(seen).toEqual(["t1-late"]);
+  });
+
+  it("no catch-up after tick-end clears the active tick-start", async () => {
+    const store = new LifecycleDispatch();
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    await store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 });
+    const seen: string[] = [];
+    store.register("tick-start", (ev) => {
+      seen.push(ev.tickId);
+    });
+    // tick-start is no longer active → no catch-up.
+    expect(seen).toEqual([]);
+  });
+
+  it("handler registered BEFORE dispatch is NOT double-fired on catch-up", async () => {
+    const store = new LifecycleDispatch();
+    const seen: string[] = [];
+    store.register("tick-start", (ev) => {
+      seen.push(ev.tickId);
+    });
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    expect(seen).toEqual(["t1"]);
+    // Registering ANOTHER handler should catch up, but the existing
+    // handler shouldn't see t1 again.
+    store.register("tick-start", (ev) => {
+      seen.push(`late-${ev.tickId}`);
+    });
+    expect(seen).toEqual(["t1", "late-t1"]);
+  });
+
+  it("execution-start catch-up works the same way", async () => {
+    const store = new LifecycleDispatch();
+    await store.dispatch({ kind: "execution-start", executionId: "e1" });
+    const seen: string[] = [];
+    store.register("execution-start", (ev) => {
+      seen.push(ev.executionId);
+    });
+    expect(seen).toEqual(["e1"]);
+  });
+
+  it("tick-end / execution-end / error have NO catch-up", async () => {
+    const store = new LifecycleDispatch();
+    await store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 });
+    await store.dispatch({ kind: "execution-end", executionId: "e1", outcome: "ok" });
+    await store.dispatch({
+      kind: "error",
+      phase: "tick",
+      error: { name: "E", message: "x" },
+    });
+    const seen: string[] = [];
+    store.register("tick-end", () => void seen.push("te"));
+    store.register("execution-end", () => void seen.push("ee"));
+    store.register("error", () => void seen.push("err"));
+    expect(seen).toEqual([]);
+  });
+
+  it("clear() drops all state", async () => {
+    const store = new LifecycleDispatch();
+    let calls = 0;
+    store.register("tick-start", () => {
+      calls++;
+    });
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    expect(calls).toBe(1);
+    store.clear();
+    await store.dispatch({ kind: "tick-start", tickId: "t2" });
+    expect(calls).toBe(1);
+  });
+
+  it("a throwing handler is isolated: dispatch resolves, siblings still fire", async () => {
+    // The loop AWAITS tick-start / tick-end dispatch; a propagated throw
+    // would abort the tick. A user observer that throws must never do
+    // that — it's caught, logged, and siblings still run.
+    const store = new LifecycleDispatch();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const seen: string[] = [];
+    store.register("tick-end", () => {
+      throw new Error("observer blew up");
+    });
+    store.register("tick-end", () => void seen.push("sibling"));
+
+    // Does NOT reject even though a handler threw.
+    await expect(
+      store.dispatch({ kind: "tick-end", tickId: "t1", result: 0 }),
+    ).resolves.toBeUndefined();
+    expect(seen).toEqual(["sibling"]);
+    expect(errorSpy).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
+  });
+
+  it("a throwing catch-up handler is isolated (register does not throw/float)", async () => {
+    const store = new LifecycleDispatch();
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await store.dispatch({ kind: "tick-start", tickId: "t1" });
+    // Registering mid-tick triggers catch-up; the handler throws.
+    expect(() =>
+      store.register("tick-start", () => {
+        throw new Error("catch-up blew up");
+      }),
+    ).not.toThrow();
+    await flush();
+    expect(errorSpy).toHaveBeenCalledOnce();
+    errorSpy.mockRestore();
+  });
+
+  it("counts() reports registered handler totals", () => {
+    const store = new LifecycleDispatch();
+    store.register("tick-start", () => {});
+    store.register("tick-start", () => {});
+    store.register("error", () => {});
+    expect(store.counts()).toEqual({
+      "tick-start": 2,
+      "tick-end": 0,
+      "execution-start": 0,
+      "execution-end": 0,
+      "tool-start": 0,
+      "tool-end": 0,
+      "model-generate-start": 0,
+      "model-generate-end": 0,
+      error: 1,
+    });
+  });
+
+  it("custom kinds: registerCustom + dispatch invoke matching handlers", async () => {
+    const store = new LifecycleDispatch();
+    const seen: unknown[] = [];
+    store.registerCustom("app:demo:phase-x", (ev) => {
+      seen.push(ev);
+    });
+    await store.dispatch({ kind: "app:demo:phase-x", payload: 42 });
+    expect(seen).toEqual([{ kind: "app:demo:phase-x", payload: 42 }]);
+  });
+
+  it("custom kinds: unsubscribe stops further dispatches", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new LifecycleDispatch();
+      const seen: unknown[] = [];
+      const off = store.registerCustom("app:demo:phase-x", (ev) => {
+        seen.push(ev);
+      });
+      await store.dispatch({ kind: "app:demo:phase-x" });
+      off();
+      await store.dispatch({ kind: "app:demo:phase-x" });
+      expect(seen).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("custom kinds: unknown kind with no handler warns once per kind", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new LifecycleDispatch();
+      await store.dispatch({ kind: "app:unknown:event-1" });
+      await store.dispatch({ kind: "app:unknown:event-1" });
+      await store.dispatch({ kind: "app:unknown:event-2" });
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[0]?.[0]).toContain("app:unknown:event-1");
+      expect(warn.mock.calls[1]?.[0]).toContain("app:unknown:event-2");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("custom kinds: registered handler suppresses the unhandled warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = new LifecycleDispatch();
+      store.registerCustom("app:handled:kind", () => {});
+      await store.dispatch({ kind: "app:handled:kind" });
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
+describe("Lifecycle hooks — integration through CompilerHarness", () => {
+  it("useOnTickStart fires when dispatchLifecycle routes tick-start", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function App() {
+      useOnTickStart((ev) => {
+        events.push(`start:${ev.tickId}`);
+      });
+      useOnTickEnd((ev) => {
+        events.push(`end:${ev.tickId}`);
+      });
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_ts",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+    });
+    // useEffect (which registers the lifecycle handlers) runs after
+    // commit. Flush to ensure registration completes before dispatch.
+    await flush();
+
+    await harness.dispatchLifecycle({
+      mountId: "m_ts",
+      event: { kind: "tick-start", tickId: "t1" },
+    });
+    await harness.dispatchLifecycle({
+      mountId: "m_ts",
+      event: { kind: "tick-end", tickId: "t1", result: { ok: true } },
+    });
+    expect(events).toEqual(["start:t1", "end:t1"]);
+  });
+
+  it("CATCH-UP: useOnTickStart in a mid-tick mount fires on registration", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function Mountee() {
+      useOnTickStart((ev) => {
+        events.push(`catch-up:${ev.tickId}`);
+      });
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    // Mount with an EMPTY tree first. The lifecycle store has no
+    // handlers yet.
+    await harness.mount({
+      mountId: "m_late",
+      sessionId: "s",
+      element: React.createElement(React.Fragment),
+      bridges: fakeBridges(),
+    });
+    await flush();
+
+    // Tick starts. No handlers, nothing fires. The active tick-start
+    // is now remembered by the store.
+    await harness.dispatchLifecycle({
+      mountId: "m_late",
+      event: { kind: "tick-start", tickId: "t-mid" },
+    });
+
+    // NOW the user component mounts (rerender swaps element in). Its
+    // useOnTickStart handler should fire immediately (catch-up).
+    await harness.rerender({
+      mountId: "m_late",
+      element: React.createElement(Mountee),
+    });
+    await flush();
+
+    expect(events).toEqual(["catch-up:t-mid"]);
+  });
+
+  it("CATCH-UP fires only once per handler, even across renders", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function Mountee({ label }: { label: string }) {
+      useOnTickStart((ev) => {
+        events.push(`${label}:${ev.tickId}`);
+      });
+      return React.createElement("message", { role: "user" }, label);
+    }
+
+    await harness.mount({
+      mountId: "m_once",
+      sessionId: "s",
+      element: React.createElement(React.Fragment),
+      bridges: fakeBridges(),
+    });
+    await flush();
+
+    await harness.dispatchLifecycle({
+      mountId: "m_once",
+      event: { kind: "tick-start", tickId: "t1" },
+    });
+
+    await harness.rerender({
+      mountId: "m_once",
+      element: React.createElement(Mountee, { label: "a" }),
+    });
+    await flush();
+
+    // A second rerender with a prop change → React reconciles in
+    // place. The hook should NOT fire a second time for the same tick.
+    await harness.rerender({
+      mountId: "m_once",
+      element: React.createElement(Mountee, { label: "a" }),
+    });
+    await flush();
+
+    expect(events).toEqual(["a:t1"]);
+  });
+
+  it("useOnExecutionStart catch-up works through the harness", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function Mountee() {
+      useOnExecutionStart((ev) => {
+        events.push(`exec:${ev.executionId}`);
+      });
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_exec",
+      sessionId: "s",
+      element: React.createElement(React.Fragment),
+      bridges: fakeBridges(),
+    });
+    await flush();
+    await harness.dispatchLifecycle({
+      mountId: "m_exec",
+      event: { kind: "execution-start", executionId: "e1" },
+    });
+    await harness.rerender({
+      mountId: "m_exec",
+      element: React.createElement(Mountee),
+    });
+    await flush();
+    expect(events).toEqual(["exec:e1"]);
+  });
+
+  it("useOnError fires for error events", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function App() {
+      useOnError((ev) => {
+        events.push(`${ev.phase}:${ev.error.message}`);
+      });
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_err",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+    });
+    await flush();
+
+    await harness.dispatchLifecycle({
+      mountId: "m_err",
+      event: {
+        kind: "error",
+        phase: "tick",
+        error: { name: "RenderFailed", message: "boom" },
+      },
+    });
+    expect(events).toEqual(["tick:boom"]);
+  });
+
+  it("useOnExecutionEnd fires once for execution-end (no catch-up)", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function App() {
+      useOnExecutionEnd((ev) => {
+        events.push(`${ev.executionId}:${String(ev.outcome)}`);
+      });
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_eend",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+    });
+    await flush();
+
+    await harness.dispatchLifecycle({
+      mountId: "m_eend",
+      event: { kind: "execution-end", executionId: "e1", outcome: "succeeded" },
+    });
+    expect(events).toEqual(["e1:succeeded"]);
+  });
+
+  it("useOnLifecycleCustom fires for matching namespaced kinds", async () => {
+    const { useOnLifecycleCustom } = await import("../react/hooks/use-on-lifecycle-custom.js");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const harness = await makeHarness();
+      const seen: unknown[] = [];
+
+      function App() {
+        useOnLifecycleCustom("app:demo:phase-x", (ev) => {
+          seen.push(ev);
+        });
+        return React.createElement("message", { role: "user" }, "ok");
+      }
+
+      await harness.mount({
+        mountId: "m_custom",
+        sessionId: "s",
+        element: React.createElement(App),
+        bridges: fakeBridges(),
+      });
+      await flush();
+
+      await harness.dispatchLifecycle({
+        mountId: "m_custom",
+        event: { kind: "app:demo:phase-x", payload: { n: 1 } },
+      });
+      // Non-matching kind: handler must not fire; harness warns once.
+      await harness.dispatchLifecycle({
+        mountId: "m_custom",
+        event: { kind: "app:demo:other-kind" },
+      });
+
+      expect(seen).toEqual([{ kind: "app:demo:phase-x", payload: { n: 1 } }]);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("app:demo:other-kind");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("unmount clears the lifecycle store; later dispatch is a no-op", async () => {
+    const harness = await makeHarness();
+    const events: string[] = [];
+
+    function App() {
+      useOnTickStart((ev) => void events.push(ev.tickId));
+      return React.createElement("message", { role: "user" }, "ok");
+    }
+
+    await harness.mount({
+      mountId: "m_unmount",
+      sessionId: "s",
+      element: React.createElement(App),
+      bridges: fakeBridges(),
+    });
+    await flush();
+
+    await harness.dispatchLifecycle({
+      mountId: "m_unmount",
+      event: { kind: "tick-start", tickId: "t1" },
+    });
+    expect(events).toEqual(["t1"]);
+
+    await harness.unmount({ mountId: "m_unmount" });
+    await expect(
+      harness.dispatchLifecycle({
+        mountId: "m_unmount",
+        event: { kind: "tick-start", tickId: "t2" },
+      }),
+    ).rejects.toMatchObject({ _tag: "NotMounted" });
+  });
+});
+
+// Suppress unused-symbol warning when useState isn't otherwise touched.
+void useState;

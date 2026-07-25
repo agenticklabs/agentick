@@ -2,7 +2,7 @@
 
 **Status:** DRAFT 2026-07-15 (Fable, with Ryan) · rev 3 (**retargeted to the minimal core**: transport capability + handle + stream routing. Engine / arbiter / realtime / full-duplex demoted to Future directions.)
 **Depends on:** ADR 26 (everything is a harness), ADR 27 (modular built-ins / augmentation law), ADR 33 (client + channels), ADR 46 (wire extensions), ADR 53 (steering), ADR 87 (client sub-handles mirror server bridges).
-**Nature:** OPTIONAL extension (like `sandbox`/`mcp`), NOT a bundled built-in. Ships as `@agentick/live-next`, installed separately.
+**Nature:** OPTIONAL extension (like `sandbox`/`mcp`), NOT a bundled built-in. Ships as `@agentick/live`, installed separately.
 
 ## Problem
 
@@ -30,7 +30,7 @@ ships the pipes; the adopter composes the rest from primitives that already exis
   boundaries, if any, are the app's concern, not a framework lifecycle.
 - **Callback/imperative is the spec; streams are the projection.** The portable
   spec surface is `sendFrame`/`onFrame` (+ typed `onTranscript`/`onState`) — no
-  stream-type dependency in `@agentick/spec-next` (Node === browser). The
+  stream-type dependency in `@agentick/spec` (Node === browser). The
   `WritableStream`/`ReadableStream` faces are first-class runtime projections over
   it, for `pipeThrough` composition.
 - **Grounded** in the common denominator of OpenAI Realtime, Gemini Live, the AI
@@ -230,18 +230,18 @@ deferred (Future directions).
 
 **Landed (v0 core + in-process media plane):**
 
-- **`@agentick/live-next`** (optional, public install) — `MediaSession` +
+- **`@agentick/live`** (optional, public install) — `MediaSession` +
   `LiveHarnessProtocol` (incl. the `onDownlink` egress seam), the `session.live`
   server handle + `live/*` wire extension, the stream **routing** +
   `withLive({ onStream })` hook.
-- **`@agentick/live-next/client`** — the `LiveSessionHandle` (`sendFrame`/`onFrame`
+- **`@agentick/live/client`** — the `LiveSessionHandle` (`sendFrame`/`onFrame`
   spec + `uplink`/`downlink` projections).
-- **`@agentick/live-next/testing`** — `inProcessLiveMedia(gateway)`, the in-memory
+- **`@agentick/live/testing`** — `inProcessLiveMedia(gateway)`, the in-memory
   `MediaTransport`, composed via `inProcessTransport({ gateway, media })`.
-- **`@agentick/transport-in-process-next`** — gained a generic
+- **`@agentick/transport-in-process`** — gained a generic
   `media?: MediaTransport` option (stays live-agnostic; just exposes what it is
   handed).
-- **`@agentick/spec-next`** — `session-next` exposes optional-extension bridges as
+- **`@agentick/spec`** — `session-next` exposes optional-extension bridges as
   `session.<name>` getters (the server twin of the ADR-87 client sub-handles), so
   an optional extension's wire method can reach its harness (`session.live`).
 

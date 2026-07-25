@@ -2,7 +2,7 @@
 
 **Status:** Active · 2026-06-07
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 31 (Self-similar slottable harness hierarchy)
-**Touches:** `@agentick/spec-next` (no new types — documents the existing shape options), `skills/create-extension/` (will reference this ADR explicitly), Phase 5+ transport / plugin packages.
+**Touches:** `@agentick/spec` (no new types — documents the existing shape options), `skills/create-extension/` (will reference this ADR explicitly), Phase 5+ transport / plugin packages.
 
 ## TL;DR
 
@@ -168,7 +168,7 @@ clean up.
 ### 4. Reconciler contributor
 
 **Cost.** A plain object satisfying the `Contributor` protocol from
-`@agentick/reconciler-next`. Registered via `app.registerContributor(...)`
+`@agentick/reconciler`. Registered via `app.registerContributor(...)`
 or `appOptions.contributors: [...]`.
 
 **What it owns.** Render-time behavior. Contributors plug into the
@@ -189,8 +189,8 @@ JSX → IR pipeline:
 
 **Examples in v2.**
 
-- `@agentick/formatters-next` — Markdown, XML, PlainText formatter scopes.
-- Semantic HTML contributors in `@agentick/reconciler-react-next` —
+- `@agentick/formatters` — Markdown, XML, PlainText formatter scopes.
+- Semantic HTML contributors in `@agentick/reconciler-react` —
   headings, lists, tables, paragraphs.
 - Content-block contributors — `<Image>`, `<Code>`, `<Json>`,
   `<Document>`.
@@ -219,7 +219,7 @@ composes over.
 
 **Examples in v2.**
 
-- **Gates** (`@agentick/gates-next`) — `gate(name, options)` builds a
+- **Gates** (`@agentick/gates`) — `gate(name, options)` builds a
   typed descriptor; `useGate(name)` returns `[state, set]` that
   composes over `useKnob`. A gate's value IS a knob value (a
   three-state `inactive`/`active`/`deferred` knob). Zero state in

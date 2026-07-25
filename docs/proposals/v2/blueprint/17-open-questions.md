@@ -73,7 +73,7 @@ Three statuses:
 
 | #   | Question                                                    | Source                    | Status  | Lean                                    |
 | --- | ----------------------------------------------------------- | ------------------------- | ------- | --------------------------------------- |
-| D1  | Package home (`@agentick/runtime-next` vs `@agentick/loop`) | loop-executor.md §OQ1     | LEAN    | internal under `@agentick/runtime-next` |
+| D1  | Package home (`@agentick/runtime` vs `@agentick/loop`) | loop-executor.md §OQ1     | LEAN    | internal under `@agentick/runtime` |
 | D2  | Public API or internal only                                 | loop-executor.md §OQ2, DL | DECIDED | internal-only in v2                     |
 | D3  | State applicator narrow interface                           | loop-executor.md §OQ4     | LEAN    | placeholder in `05-loop-executor.md`    |
 | D4  | Continuation as policy object vs interceptor only           | loop-executor.md §OQ5     | LEAN    | both: named policy + interceptors       |
@@ -507,10 +507,10 @@ Not measured. v1's substrate is structurally different (EventEmitter
 
 Decision 2026-05-16: user-facing component wrappers (`<Section>`,
 `<Message>`, `<H1>`, `<Tool>`, etc.) live in the matching reconciler
-package — `@agentick/reconciler-react-next` for the React variant. Not a
+package — `@agentick/reconciler-react` for the React variant. Not a
 separate `@agentick/components` package. Rationale: components are
 inherently coupled to the reconciler's intrinsics; future Solid or
 Vue reconcilers would ship their own component sets. example/v2
 currently defines them locally as a stopgap; they graduate into
 reconciler-react before Phase 4e (session harness) lands so app
-authors can `import { Section, Tool } from "@agentick/reconciler-react-next"`.
+authors can `import { Section, Tool } from "@agentick/reconciler-react"`.

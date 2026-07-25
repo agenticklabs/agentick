@@ -1,0 +1,72 @@
+{
+  "name": "@agentick/tool",
+  "version": "0.0.0",
+  "description": "Generic, compiler-agnostic tool authoring for Agentick v2. createTool() returns a registration bundle (declaration + handler + validator) that drops into any tool-executor. Compiler-specific variants (e.g., React tools with use() hook) extend this in their respective packages.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "createTool",
+    "tool"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/tool"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./transforms": {
+      "types": "./src/transforms/index.ts",
+      "import": "./src/transforms/index.ts",
+      "default": "./src/transforms/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./transforms": {
+        "types": "./dist/transforms/index.d.ts",
+        "import": "./dist/transforms/index.js",
+        "default": "./dist/transforms/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

@@ -79,7 +79,7 @@ export default defineAgentickConfig({
 `agentick dev` reads `discovery`/`apps`/`framework` (static meta) without constructing model
 clients or a DB pool (which need secrets/network). Static meta eager; runtime resources lazy.
 
-**Resolution = a `mergeLayered` cascade** (ADR 34 primitive, already in `@agentick/utils-next`:
+**Resolution = a `mergeLayered` cascade** (ADR 34 primitive, already in `@agentick/utils`:
 later-overrides-earlier, `undefined` falls through, `append`/`replace` modifiers) — no bespoke
 merge code. Layers, least→most specific:
 

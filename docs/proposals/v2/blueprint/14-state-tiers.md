@@ -219,7 +219,7 @@ Browser analog: disk
 ```
 
 Persistent state lives in pluggable backends (Postgres, Redis, SQLite,
-S3 for blobs). The persistence interface lives in `@agentick/spec-next`:
+S3 for blobs). The persistence interface lives in `@agentick/spec`:
 
 ```ts
 interface PersistenceBackend {

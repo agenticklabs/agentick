@@ -9,7 +9,7 @@
  * to track convergence.
  */
 
-import { joinUnixCluster } from "@agentick/cluster-net-next";
+import { joinUnixCluster } from "@agentick/cluster-net";
 
 const nodeId = process.env.NODE_ID;
 const socketPath = process.env.SOCKET_PATH;

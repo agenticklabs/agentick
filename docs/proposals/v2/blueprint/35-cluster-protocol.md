@@ -2,7 +2,7 @@
 
 **Status:** Active · 2026-06-25
 **Builds on:** ADR 11 (Cluster — high-level vision), ADR 26 (Harness as the single shape), ADR 29 (Bus overhaul — `ClusterEventBus`/`ClusterJournal`/`ClusterInbox` as substrate-slot fillers), ADR 31 (Harness hierarchy — `Factory<R, P>`, "Cluster mode is a substrate swap"), ADR 36 (define vs create convention).
-**Touches:** new `@agentick/cluster-next` protocol package, adapter packages (`@agentick/cluster-ipc-next`, `@agentick/cluster-redis-next`, `@agentick/cluster-nats-next`, future `@agentick/cluster-effect-next`), `@agentick/app-next` (one new substrate-seam hook in `createApp`).
+**Touches:** new `@agentick/cluster` protocol package, adapter packages (`@agentick/cluster-ipc`, `@agentick/cluster-redis`, `@agentick/cluster-nats`, future `@agentick/cluster-effect`), `@agentick/app` (one new substrate-seam hook in `createApp`).
 
 ## TL;DR
 
@@ -97,7 +97,7 @@ Read-only. No methods that mutate cluster state — partitioning rebalances, tra
 
 ### 2. The protocol package surface
 
-`@agentick/cluster-next` exports five typed seam interfaces and five corresponding `defineCluster*` authoring helpers.
+`@agentick/cluster` exports five typed seam interfaces and five corresponding `defineCluster*` authoring helpers.
 
 ```typescript
 // Seam: cross-node wire transport.
@@ -192,9 +192,9 @@ export interface DefineClusterConfig {
 Adapter author writes Promise-flavored impls; helper produces the factory; adopter passes it to `defineCluster`. Zero Effect knowledge required.
 
 ```typescript
-// @agentick/cluster-redis-next
+// @agentick/cluster-redis
 import Redis from "ioredis";
-import { defineClusterTransport, defineClusterMembership } from "@agentick/cluster-next";
+import { defineClusterTransport, defineClusterMembership } from "@agentick/cluster";
 
 export interface RedisTransportOptions {
   readonly url: string | (() => string | Promise<string>); // lazy-resolvable
@@ -228,8 +228,8 @@ export function redisTransport(opts: RedisTransportOptions): ClusterTransportFac
 Adopter wiring:
 
 ```typescript
-import { defineCluster } from "@agentick/cluster-next";
-import { redisTransport, redisMembership } from "@agentick/cluster-redis-next";
+import { defineCluster } from "@agentick/cluster";
+import { redisTransport, redisMembership } from "@agentick/cluster-redis";
 
 const cluster = defineCluster({
   nodeId: () => process.env.NODE_ID ?? "node-1",
@@ -247,9 +247,9 @@ const app = await createApp(MyAgent, { cluster });
 A power-user adapter that wants Effect/Layer composition for its internal DI uses the Effect-flavored Tag service via `/effect` subpath. Adopter passes the resolved Layer to the same `defineCluster` config slot (the framework accepts both shapes for each seam, with `Factory<X, P>`'s Effect return covering Layer composition).
 
 ```typescript
-// @agentick/cluster-redis-next/effect (subpath)
+// @agentick/cluster-redis/effect (subpath)
 import { Effect, Layer } from "effect";
-import { ClusterTransport } from "@agentick/cluster-next/effect";
+import { ClusterTransport } from "@agentick/cluster/effect";
 
 export const RedisTransportLayer = Layer.effect(
   ClusterTransport,
@@ -316,7 +316,7 @@ const factory: ClusterFactory = (appShell) => {
 };
 ```
 
-`ClusterEventBus` and `ClusterInbox` are implementation classes inside `@agentick/cluster-next` that compose the inner local impl with the outer transport. Local subscribers go through the inner bus (cheap, in-process); remote subscribers go through the transport. Inbound remote events are republished into the inner bus so all local subscribers see them uniformly.
+`ClusterEventBus` and `ClusterInbox` are implementation classes inside `@agentick/cluster` that compose the inner local impl with the outer transport. Local subscribers go through the inner bus (cheap, in-process); remote subscribers go through the transport. Inbound remote events are republished into the inner bus so all local subscribers see them uniformly.
 
 ### 7. Partitioning + multi-tenant isolation (rung c)
 
@@ -346,25 +346,25 @@ Each rung is opt-in via the choice of transport / membership / journal adapters.
 
 | Rung | Use case                  | Adapter packages                                                                                |
 | ---- | ------------------------- | ----------------------------------------------------------------------------------------------- |
-| (a)  | Single-host multi-process | `@agentick/cluster-ipc-next` — Node.js IPC + worker_threads / cluster module                    |
-| (b)  | Multi-node ephemeral      | `@agentick/cluster-redis-next`, `@agentick/cluster-nats-next`                                   |
+| (a)  | Single-host multi-process | `@agentick/cluster-ipc` — Node.js IPC + worker_threads / cluster module                    |
+| (b)  | Multi-node ephemeral      | `@agentick/cluster-redis`, `@agentick/cluster-nats`                                   |
 | (c)  | Multi-tenant isolation    | Same transports as (b); adopter writes custom `defineClusterPartitioning`                       |
-| (d)  | Durable execution         | `@agentick/cluster-effect-next` (wraps `@effect/cluster`), or a custom `DurableJournal` adapter |
+| (d)  | Durable execution         | `@agentick/cluster-effect` (wraps `@effect/cluster`), or a custom `DurableJournal` adapter |
 
 **Wire codec adapter packages** (cross-cutting; any rung):
 
 | Codec       | Use case                                                                   | Package                                                                  |
 | ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| JSON        | Default — debuggable, universal                                            | bundled in `@agentick/cluster-next`                                      |
-| MessagePack | Performance-sensitive deployments                                          | `@agentick/cluster-codec-msgpack-next`                                   |
-| Protobuf    | Strict schema enforcement; multi-language clusters                         | `@agentick/cluster-codec-protobuf-next` (ships .proto schemas alongside) |
+| JSON        | Default — debuggable, universal                                            | bundled in `@agentick/cluster`                                      |
+| MessagePack | Performance-sensitive deployments                                          | `@agentick/cluster-codec-msgpack`                                   |
+| Protobuf    | Strict schema enforcement; multi-language clusters                         | `@agentick/cluster-codec-protobuf` (ships .proto schemas alongside) |
 | Custom      | Adopter-defined wire (e.g., FlatBuffers, CBOR, encrypted-at-rest variants) | `defineClusterCodec` in adopter code                                     |
 
 Rung (d) requires reconciler-level work (continuation primitives, idempotency keys on tool dispatches, replay-safe side-effect markers) that isn't shipped in v2.0. The seam (`DurableJournal` factory slot) ships now so adapters can be built and tested incrementally; the framework consumes the slot once continuation primitives land.
 
 ### 9. In-process testing
 
-`@agentick/cluster-next/testing` ships `defineLocalClusterTransport` + `defineLocalClusterMembership` — in-memory impls that route between simulated nodes via shared `LocalEventBus` instances. Adopters and the cluster conformance suite use these to spin up multi-node tests without infrastructure. Same protocol as the real adapters; same code paths; no Docker.
+`@agentick/cluster/testing` ships `defineLocalClusterTransport` + `defineLocalClusterMembership` — in-memory impls that route between simulated nodes via shared `LocalEventBus` instances. Adopters and the cluster conformance suite use these to spin up multi-node tests without infrastructure. Same protocol as the real adapters; same code paths; no Docker.
 
 ### 10. Deployment tiers — picking a wire (Phase 4f / 4g)
 
@@ -383,7 +383,7 @@ Adopters pick a cluster wire by deployment tier, NOT by intrinsic feature prefer
 
 **Phase 4 hardening additions for the broker tiers:**
 
-- **4f.4 backpressure** — bounded per-connection write queue; one slow client can't stall fan-out (`BoundedWriteQueue` in `@agentick/cluster-broker-next`).
+- **4f.4 backpressure** — bounded per-connection write queue; one slow client can't stall fan-out (`BoundedWriteQueue` in `@agentick/cluster-broker`).
 - **4f.5 BrokerCodec adapter** — broker-frame schema separated from envelope schema; one cast lives in the adapter, not scattered across call sites.
 - **4f.6 graceful shutdown** — `broker.close()` flushes pending Goodbye frames before tearing down the listener; adopters wire `process.on("SIGTERM")` for k8s rolling deploys.
 
@@ -404,7 +404,7 @@ Adopters pick a cluster wire by deployment tier, NOT by intrinsic feature prefer
 
 ## Conformance
 
-`@agentick/cluster-next/conformance` ships `runClusterTransportConformance(transportFactory)` — a vitest suite covering:
+`@agentick/cluster/conformance` ships `runClusterTransportConformance(transportFactory)` — a vitest suite covering:
 
 - Ordering guarantees (per-node FIFO for `send`; per-channel ordering for `broadcast`).
 - At-least-once vs at-most-once delivery (declared, then verified against the declaration).

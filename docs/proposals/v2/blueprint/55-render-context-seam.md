@@ -79,7 +79,7 @@ that is history (usedTokens, last outcome, a tool that ran) rides the bridge.
 
 ### The envelope
 
-`@agentick/spec-next` gains `RenderContext` — the render-input analogue of `HookBridges`.
+`@agentick/spec` gains `RenderContext` — the render-input analogue of `HookBridges`.
 It carries the framework's own foundational render fact (`contextInfo`) as a seeded slot
 and stays open for packages to augment:
 
@@ -101,7 +101,7 @@ Packages augment via module augmentation — identical mechanics to `HookBridges
 
 ```ts
 // (future) model-next/src/augment.ts — the active model as a render fact (#169)
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface RenderContext {
     readonly activeModel?: { readonly id: string; readonly provider: string;
                              readonly capabilities?: ModelCapabilities };

@@ -3,15 +3,15 @@
 **Status:** Revised — 2026-06-30.
 **Supersedes:** the first draft of this same ADR (committed 2026-06-30 earlier, then substantially revised after expert review). The prior draft overclaimed in two places — `Operation.scope` was incorrectly proposed as redundant with `RuntimeContext`, and ALS coupling was proposed as the propagation backbone when closure-capture-via-deps is actually sufficient. Both corrected here.
 
-**Touches:** `@agentick/spec-next/data/events.ts` (EventScope canonicalization +
-empty-seed augmentation), `@agentick/spec-next/data/runtime-context.ts`
-(new — extends EventScope), `@agentick/runtime-next/substrate/runtime-context.ts`
+**Touches:** `@agentick/spec/data/events.ts` (EventScope canonicalization +
+empty-seed augmentation), `@agentick/spec/data/runtime-context.ts`
+(new — extends EventScope), `@agentick/runtime/substrate/runtime-context.ts`
 (narrow + clarify `readContext()` contract; drop sync `runWithContext`),
-`@agentick/spec-next/data/tool-handler.ts` (dual-typed handler signatures),
-`@agentick/tool-executor-next` (handler invocation site —
-discriminates on return type), `@agentick/utils-next/effect-lift.ts`
-(new — `liftToEffect` generic helper), `@agentick/sandbox-next` +
-`@agentick/mcp-next` (migrate hardcoded `sandboxId` / `mcpConnectionId`
+`@agentick/spec/data/tool-handler.ts` (dual-typed handler signatures),
+`@agentick/tool-executor` (handler invocation site —
+discriminates on return type), `@agentick/utils/effect-lift.ts`
+(new — `liftToEffect` generic helper), `@agentick/sandbox` +
+`@agentick/mcp` (migrate hardcoded `sandboxId` / `mcpConnectionId`
 fields from spec to package-level augmentations). Cross-references ADR
 26 (harness API shape), ADR 27 (modular built-ins — augmentation
 pattern this ADR extends), ADR 34 (scoped capability cascade), ADR 41
@@ -165,13 +165,13 @@ explaining the limitation; this ADR commits to the *fix*.
 ### EventScope is canonical
 
 ```ts
-// @agentick/spec-next/data/events.ts
+// @agentick/spec/data/events.ts
 
 /**
  * Empty seed — package-level augmentation slot. Each harness package
  * with its own identifier dimensions augments this via:
  *
- *   declare module "@agentick/spec-next" {
+ *   declare module "@agentick/spec" {
  *     interface EventScopeExtensions {
  *       readonly sandboxId?: string;
  *     }
@@ -208,22 +208,22 @@ The current hardcoded `sandboxId` and `mcpConnectionId` migrate out of
 spec-next into their owning packages:
 
 ```ts
-// @agentick/sandbox-next/augment.ts
-declare module "@agentick/spec-next" {
+// @agentick/sandbox/augment.ts
+declare module "@agentick/spec" {
   interface EventScopeExtensions {
     readonly sandboxId?: string;
   }
 }
 
-// @agentick/mcp-next/augment.ts (client subpath)
-declare module "@agentick/spec-next" {
+// @agentick/mcp/augment.ts (client subpath)
+declare module "@agentick/spec" {
   interface EventScopeExtensions {
     readonly mcpConnectionId?: string;
   }
 }
 
-// @agentick/mcp-next/server/augment.ts
-declare module "@agentick/spec-next" {
+// @agentick/mcp/server/augment.ts
+declare module "@agentick/spec" {
   interface EventScopeExtensions {
     readonly mcpServerId?: string;
   }
@@ -235,13 +235,13 @@ New harnesses just follow suit. No coupling back to spec-next.
 ### RuntimeContext extends EventScope
 
 ```ts
-// @agentick/spec-next/data/runtime-context.ts (new home)
+// @agentick/spec/data/runtime-context.ts (new home)
 
 /**
  * Empty seed — adopter app code augments this with their own
  * per-call ambient state:
  *
- *   declare module "@agentick/spec-next" {
+ *   declare module "@agentick/spec" {
  *     interface RuntimeContextUser {
  *       readonly tenantId: string;
  *       readonly userId: string;
@@ -348,7 +348,7 @@ shouldn't, security bugs from propagation surprises.
 ### The lift helper preserves the pattern
 
 ```ts
-// @agentick/utils-next/effect-lift.ts
+// @agentick/utils/effect-lift.ts
 
 export function liftToEffect<
   Args extends readonly unknown[],
@@ -372,10 +372,10 @@ export function liftToEffect<
 Surface-specific lift for tool handlers (the canonical pattern):
 
 ```ts
-// @agentick/tool-next/lift.ts
+// @agentick/tool/lift.ts
 
-import { liftToEffect } from "@agentick/utils-next";
-import { getContext } from "@agentick/runtime-next";
+import { liftToEffect } from "@agentick/utils";
+import { getContext } from "@agentick/runtime";
 
 /**
  * Lift a tool handler into Effect form WITH automatic ctx-capture
@@ -586,7 +586,7 @@ type ToolHandler<I> =
 The executor discriminates at the call site:
 
 ```ts
-// In @agentick/tool-executor-next:
+// In @agentick/tool-executor:
 const result = handler(input, deps);
 if (Effect.isEffect(result)) {
   return yield* result;
@@ -675,7 +675,7 @@ readonly user?: RuntimeContextUser;
 pattern as v1's `UserContext`. Adopters augment:
 
 ```ts
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface RuntimeContextUser {
     readonly tenantId: string;
     readonly userId: string;
@@ -791,8 +791,8 @@ The implementation work shrinks substantially from the first draft.
 
 ### Phase B — lift helpers
 
-1. **Ship `liftToEffect` in `@agentick/utils-next`.** The generic lift.
-2. **Ship `liftHandler` in `@agentick/tool-next`.** Specific to
+1. **Ship `liftToEffect` in `@agentick/utils`.** The generic lift.
+2. **Ship `liftHandler` in `@agentick/tool`.** Specific to
    ToolHandler. Captures ctx from FiberRef + passes to handler via deps.
 3. **Ship `liftMiddleware`, `liftHook`, etc.** Mirroring pattern for
    each adopter-facing surface.
@@ -869,7 +869,7 @@ or per-field selectors.**
 ### 3. `RuntimeContext` discoverability for new contributors
 
 `RuntimeContextUser` augmentation is loudly documented in:
-- `@agentick/runtime-next/README.md` (full section + worked example)
+- `@agentick/runtime/README.md` (full section + worked example)
 - JSDoc on `RuntimeContextUser` itself (example block + warning that
   framework auth doesn't consult `ctx.user`)
 - `docs/proposals/v2/blueprint/00-overview.md` mentions adopter

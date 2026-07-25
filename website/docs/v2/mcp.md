@@ -36,13 +36,13 @@ Connect a session to one or more servers with the `withMCP` extension. Each serv
 is identified by a **`serverId`** (an alias _you_ assign) and a **transport**.
 
 ```tsx
-import { createApp } from "@agentick/app-next/react";
-import { openai } from "@agentick/model-openai-next";
+import { createApp } from "@agentick/app/react";
+import { openai } from "@agentick/model-openai";
 import {
   withMCP,
   streamableHttpTransport,
   StdioClientTransport,
-} from "@agentick/mcp-next";
+} from "@agentick/mcp";
 
 const app = await createApp(<Agent />, {
   model: openai("gpt-4o"),
@@ -173,7 +173,7 @@ MCP is one projection of both. The source is pluggable — a static list works w
 sandbox at all:
 
 ```ts
-import { McpClientHarness } from "@agentick/mcp-next";
+import { McpClientHarness } from "@agentick/mcp";
 
 // Static list — no sandbox required:
 const harness = new McpClientHarness(scopeId, journal, bus, inbox, {
@@ -188,7 +188,7 @@ the boundaries you declare to a peer equal the boundaries you enforce, and mount
 changes keep the peer in sync automatically.
 
 ```ts
-import { sandboxRootsSource, bindSandboxRootsToClient } from "@agentick/sandbox-next/mcp";
+import { sandboxRootsSource, bindSandboxRootsToClient } from "@agentick/sandbox/mcp";
 
 const harness = new McpClientHarness(scopeId, journal, bus, inbox, {
   serverId: "fs",
@@ -237,7 +237,7 @@ streamableHttpTransport({
 ```
 
 OAuth utilities (`DefaultOAuthProvider`, `OAuthCallbackServer`, custom providers)
-are also available on the `@agentick/mcp-next/oauth` subpath for CLI bootstrap or
+are also available on the `@agentick/mcp/oauth` subpath for CLI bootstrap or
 bespoke flows.
 
 ## Inbound elicitation
@@ -283,5 +283,5 @@ Namespace credentials per tenant either by encoding the principal in `serverId`
 - [Resources](/docs/v2/resources) — the pull primitive remote resources surface into.
 - [Tools](/docs/tools) — where discovered tools land.
 - [Sandbox](/docs/sandbox) — the filesystem primitive roots + file-resources project from.
-- [`@agentick/mcp-next` README](https://github.com/agenticklabs/agentick/blob/feat/v2/packages-next/mcp/README.md) — package overview, connection lifecycle, capability negotiation.
+- [`@agentick/mcp` README](https://github.com/agenticklabs/agentick/blob/feat/v2/packages/mcp/README.md) — package overview, connection lifecycle, capability negotiation.
 - ADRs: [62 — resources](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/62-resources-harness.md), [64 — runtime signals (log/progress)](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/64-runtime-signal-family.md), [65 — roots as projection](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/65-roots-as-projection.md).

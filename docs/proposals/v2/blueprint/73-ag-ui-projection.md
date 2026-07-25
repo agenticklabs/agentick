@@ -13,7 +13,7 @@ client-next (state-sync via snapshot + `onStateChange`; `client.events()` reserv
 exists.** It's an event-based Agent↔User protocol (message deltas, tool calls, event-sourced state
 diffs, lifecycle, thinking + a return channel for input/interrupts/steering/state). Every one of
 those maps to a primitive agentick already emits (the bus / `ClientEvent` surface) or accepts (the
-session inbox). So AG-UI is a **thin codec** — `@agentick/ag-ui-next` on the gateway — not a new
+session inbox). So AG-UI is a **thin codec** — `@agentick/ag-ui` on the gateway — not a new
 model. It is a *different axis* from ADR 72's `ui://` widget seam: AG-UI is the run *feed*, A2UI is
 the *widgets*; A2UI widgets can ride an AG-UI stream. **Closer to done** than the widget seam — the
 substrate is here; the gaps are the streaming surface (#308) + the codec.
@@ -115,7 +115,7 @@ transport can serve it). No new transport, a new codec + framing.
 1. **`client.events()` streaming surface (#308)** — the bus-`Stream` → `AsyncIterable` adapter is
    reserved but not built; AG-UI's server→client stream needs it (or the gateway emits AG-UI events
    directly off the bus).
-2. **`@agentick/ag-ui-next`** — the gateway-side codec: bus/`ClientEvent` → AG-UI event frames, and
+2. **`@agentick/ag-ui`** — the gateway-side codec: bus/`ClientEvent` → AG-UI event frames, and
    AG-UI return frames → the session inbox (`send` / abort / steer / knob-set).
 3. **Event-vocabulary coverage** — an audit of which AG-UI events map cleanly vs need a `custom`
    escape vs are lossy (esp. AG-UI's event-sourced shared-state diffs vs our snapshot +
@@ -126,7 +126,7 @@ transport can serve it). No new transport, a new codec + framing.
   and project (the ADR-40-inversion, same as ADR 72).
 - **A separate AG-UI event system.** The bus IS the event system; AG-UI is a codec over it.
 - **Bundling AG-UI into the `ui://` widget seam (ADR 72).** Different axis — event stream vs
-  widgets. Separate packages (`@agentick/ag-ui-next` vs `@agentick/a2ui-next`); they compose.
+  widgets. Separate packages (`@agentick/ag-ui` vs `@agentick/a2ui`); they compose.
 
 ## Open (workshop)
 1. **State sync shape** — AG-UI wants event-sourced *diffs* for shared typed stores; agentick today

@@ -67,14 +67,14 @@ unstarted gateway can still be closed. The canonical flow is therefore
 ## 2. `ServerTransport` — the missing symmetry
 
 **Status: LANDED — the abstraction + gateway ownership + conformance
-(`@agentick/spec-next` `server/transport.ts`, `@agentick/gateway-next`,
-`@agentick/spec-conformance-next` `runServerTransportConformance`) AND the
+(`@agentick/spec` `server/transport.ts`, `@agentick/gateway`,
+`@agentick/spec-conformance` `runServerTransportConformance`) AND the
 four concrete transport wrappers:**
 
-- **`webSocketServerTransport({ port, host?, … })`** — `@agentick/transport-websocket-next/server`. Owns the Node `http.Server`: `listen(host)` creates it, attaches `websocketServer`, binds the port; `close()` tears down both. `{ httpServer }` config attaches to an adopter-owned server (not closed).
-- **`httpServerTransport({ port, host?, … })`** — `@agentick/transport-http-next/server`. Same http-server ownership as WS (`httpServer` mounts on a caller-supplied Node server, so the wrapper creates + binds it). `{ httpServer }` config for adopter-owned servers.
-- **`unixSocketServerTransport({ path, … })`** — `@agentick/transport-unix-socket-next/server`. Simplest — `unixSocketServer` binds its own `net.Server`; the wrapper defers the host and awaits `listening`. `close()` closes the socket (Node unlinks the path).
-- **`inProcessServerTransport()`** — `@agentick/transport-in-process-next`. Direct-call transport: no wire to bind, so `listen`/`close` are honest no-ops. Present so an in-process deployment lists its transport alongside the network ones and fan-out stays uniform. Stable id `"in-process"`.
+- **`webSocketServerTransport({ port, host?, … })`** — `@agentick/transport-websocket/server`. Owns the Node `http.Server`: `listen(host)` creates it, attaches `websocketServer`, binds the port; `close()` tears down both. `{ httpServer }` config attaches to an adopter-owned server (not closed).
+- **`httpServerTransport({ port, host?, … })`** — `@agentick/transport-http/server`. Same http-server ownership as WS (`httpServer` mounts on a caller-supplied Node server, so the wrapper creates + binds it). `{ httpServer }` config for adopter-owned servers.
+- **`unixSocketServerTransport({ path, … })`** — `@agentick/transport-unix-socket/server`. Simplest — `unixSocketServer` binds its own `net.Server`; the wrapper defers the host and awaits `listening`. `close()` closes the socket (Node unlinks the path).
+- **`inProcessServerTransport()`** — `@agentick/transport-in-process`. Direct-call transport: no wire to bind, so `listen`/`close` are honest no-ops. Present so an in-process deployment lists its transport alongside the network ones and fan-out stays uniform. Stable id `"in-process"`.
 
 Each wraps the existing `websocketServer` / `httpServer` /
 `unixSocketServer` factory (or, for in-process, the direct-call handler)

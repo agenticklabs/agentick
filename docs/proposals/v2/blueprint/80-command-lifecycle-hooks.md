@@ -110,7 +110,7 @@ export type CommandHooks =
         AfterHook<CommandRegistry[K]  extends { output: infer O } ? O : never> };  // after  ← op OUTPUT
 
 // one line per command; both hooks generated + typed:
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface CommandRegistry {
     "model:generate":  { input: LanguageModelInput;  output: LanguageModelExecutionResult };
     "timeline:append": { input: TimelineAppendInput; output: TimelineEntry };

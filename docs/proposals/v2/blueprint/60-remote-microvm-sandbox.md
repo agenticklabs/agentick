@@ -157,7 +157,7 @@ into the AWS account with **no local/docker analog**. Non-negotiable:
    `autoResumeEnabled` tuned for agent sessions (suspend on idle, auto-resume on next tool call).
 
 ## Package shape
-`@agentick/sandbox-lambda-next`, deps `@agentick/sandbox-next` **only** + AWS SDK v3
+`@agentick/sandbox-lambda`, deps `@agentick/sandbox` **only** + AWS SDK v3
 (`@aws-sdk/client-lambda-microvms` or the shipped client) + a minimal HTTP/WS client. Passes
 `runSandboxProviderConformance` against a **real** microVM (no fakes — the stat/readdir lesson).
 **Do NOT extract shared "remote provider" primitives yet** — `applyEdits` + the matcher are already

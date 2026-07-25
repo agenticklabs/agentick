@@ -168,7 +168,7 @@ Or use `@agentick/react-hooks`'s pre-built stub bridges.
 ## Level 2: tests that mock everything below
 
 ```ts
-import { mountForTest, MockExecutor, MockToolExecutor } from "@agentick/runtime-next/testing";
+import { mountForTest, MockExecutor, MockToolExecutor } from "@agentick/runtime/testing";
 
 const test = mountForTest(<MyAgent />, {
   executors: { language-model: new MockExecutor([

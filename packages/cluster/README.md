@@ -1,0 +1,288 @@
+# @agentick/cluster
+
+Cluster **protocol** for Agentick v2. Ships the typed seams, factory
+shapes, and `defineCluster*` adapter-authoring helpers — but NO
+transport implementations. Adapter packages
+(`@agentick/cluster-net`, `@agentick/cluster-ws`,
+`@agentick/cluster-redis`) provide the actual wire.
+
+**Status:** Phase 6 — protocol + wrappers + cross-node ask +
+diagnostics + gateway/app substrate-seam integration, with real wire
+adapters shipped (`cluster-net`, `cluster-ws`, `cluster-redis`).
+`ClusterEventBus` / `ClusterInbox` wrap the parent's
+local substrate and route across the cluster transport. Remote
+`ask` works end-to-end via a cluster-internal `@cluster/ask` /
+`@cluster/ask-response` wire framing with correlationId-keyed
+pending-deferred registry. Both `MessageHandlerError` AND `InboxError`
+round-trip structurally — typed failure tags preserved across the
+wire. `Effect.async` cancel hook fires on caller-interrupt so
+interrupted asks don't leak pending entries / timeouts. Wire payloads
+are runtime-validated at the inbound boundary; malformed envelopes
+emit `cluster:ask:invalid-payload` and drop. The `@cluster/`
+namespace is enforced at `register` / `send` / `ask` — adopters
+attempting to use reserved addresses or types get `RoutingFailed`
+with a clear pointer (closes the response-spoofing footgun). Type
+guards for `MessageHandlerError` / `InboxError` use spec-evolution-safe
+exhaustive `Record` checks. `defineCluster` subscribes
+`membership.onChange` and emits `cluster:membership:*` diagnostics
+on every topology transition. Transport failures (`broadcast`, `send`)
+emit `cluster:transport:*:failed` diagnostics. Inbound routes to
+unregistered addresses emit `cluster:routing:address-not-found`.
+Bus inbound shape-validates before re-appending; malformed events
+emit `cluster:event:malformed`. The substrate seam is wired into both
+`createGateway` (canonical) and `createApp` (fallback) — pass a
+`ClusterFactory` as the `cluster` slot — and the first real wire
+adapters (`cluster-net`, `cluster-ws`, `cluster-redis`) are shipped.
+
+**Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
+[ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)
+
+## What this package is
+
+Cluster mode in Agentick is a **substrate wrapper** — when configured
+on `createGateway` (canonical) or `createApp` (fallback), the
+gateway's local `bus / inbox / journal` are wrapped with cluster-aware
+variants that add cross-node transport while preserving local fan-out
+for node-local subscribers. Children of the cluster-defining harness
+inherit the wrapped substrate via the factory-pattern parent-chain;
+they're blind to whether substrate is local or clustered.
+
+This package defines the protocol — five typed seams adapters
+implement — plus the `defineCluster` factory that composes them.
+Adapter implementations ship separately so adopters install only
+what they need (Redis pub/sub vs NATS JetStream vs IPC vs custom).
+
+## Quick start
+
+Pass a `defineXCluster` factory (from any wire adapter package) as the
+`cluster` slot on `createGateway` (canonical) or `createApp` (fallback).
+The factory wraps the local substrate before children inherit it:
+
+```typescript
+import { createGateway } from "@agentick/gateway";
+import { defineUnixCluster } from "@agentick/cluster-net";
+
+const gateway = await createGateway({
+  cluster: defineUnixCluster({
+    // Auto-elect: first to bind the socket becomes broker; rest connect.
+    socketPath: "/tmp/agentick.sock",
+    nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
+  }),
+  // ... rest of gateway options
+});
+```
+
+Wire adapters ship separately — `@agentick/cluster-net` (TCP +
+Unix socket), `@agentick/cluster-ws` (WebSocket), and
+`@agentick/cluster-redis` (cross-machine via Redis). Each exports a
+matching `defineXCluster` factory that plugs into the same `cluster`
+slot. Without `cluster` configured, the gateway behaves identically to
+today — pure local substrate, zero overhead.
+
+## Status
+
+| Phase | Scope                                                                                                                   | Status      |
+| ----- | ----------------------------------------------------------------------------------------------------------------------- | ----------- |
+| 1     | Protocol scaffold — types, factory shapes, helper signatures                                                            | **shipped** |
+| 2     | `defineCluster*` impls + JSON codec + `LocalClusterTransport` fixture + conformance suite                               | **shipped** |
+| 3     | `ClusterEventBus` / `ClusterInbox` wrapper impls + diagnostic event emission                                            | **shipped** |
+| 3.1   | Cross-node `ask` + membership reactivity + transport diagnostics + loud routing                                         | **shipped** |
+| 3.2   | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards      | **shipped** |
+| 4     | First real wire adapters — `cluster-broker-next` base + `cluster-net-next` (TCP / Unix) + `cluster-ws-next` (WebSocket) | **done**    |
+| 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                              | **done**    |
+| 6     | `@agentick/cluster-redis` — cross-machine via Redis                                                                | **done**    |
+| 7+    | NATS, MessagePack/protobuf codecs, durability (rung d)                                                                  | pending     |
+
+## API surface (Phase 1)
+
+### Protocol seams (interfaces)
+
+| Seam                  | Role                                                                             |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `ClusterTransport`    | Cross-node wire — sends messages point-to-point, broadcasts events               |
+| `ClusterMembership`   | Tracks live cluster members + emits join/lost transitions                        |
+| `ClusterPartitioning` | Maps address → owning node (default: consistent-hash; override for multi-tenant) |
+| `ClusterCodec`        | Wire serialization (default: JSON; swap for MessagePack / protobuf / custom)     |
+| `DurableJournal`      | Optional rung (d) — durable journal with replay                                  |
+
+### `Cluster` value
+
+The factory's return — what the framework reads from at the
+substrate seam.
+
+```typescript
+interface Cluster {
+  readonly bus: EventBus; // wrapped local bus + cross-node fan-out
+  readonly inbox: MessageInbox; // wrapped local inbox + cross-node routing
+  readonly journal: OperationJournal;
+  readonly currentNode: NodeId;
+  nodes(): Promise<readonly NodeId[]>;
+  ownerOf(address: string): Promise<NodeId>;
+  close(): Promise<void>;
+}
+```
+
+### Adapter authoring (Phase 2)
+
+Adapter packages implement seams and wrap them in
+`defineClusterX(impl)` helpers — Promise-flavored boring code, no
+Effect knowledge needed. Power users who want Effect/Layer
+composition for their adapter drop into a `/effect` subpath export
+(future slice).
+
+### Conformance
+
+`@agentick/cluster/conformance` exposes
+`runClusterTransportConformance(config)` — adapter test suites pass
+their transport factory to verify ordering, delivery, lifecycle,
+filter semantics, and resource cleanup against the protocol's
+contract.
+
+### Ergonomic facade — `makeClusterNode` (Phase 4f.7)
+
+Every wire package's `joinXCluster(...)` (side-channel ClusterNode
+for adopters who want raw `bus`/`membership` access outside the
+framework substrate) composes against the same wire-agnostic
+facade builder in cluster-next:
+
+```typescript
+import { makeClusterNode } from "@agentick/cluster";
+
+// Wire packages do their wire-specific setup, then hand the factory
+// pair to makeClusterNode:
+return makeClusterNode({
+  nodeId,
+  role: "broker" | "client",
+  transportFactory,
+  membershipFactory,
+  cleanup, // optional — for wire-specific tear-down
+  localBrokerRunning, // optional — wire introspection
+});
+```
+
+The facade adds: name-based `bus.subscribe(name, handler)` /
+`bus.broadcast(name, payload)` with auto-stamped envelopes,
+`membership.waitForPeers(n)` convenience, `Symbol.asyncDispose`
+lifecycle. See ADR 38 for the substrate-fusion vs side-channel
+patterns.
+
+### nodeId auto-default — `defaultNodeId`/`resolveNodeId` (Phase 5b)
+
+```typescript
+import { defaultNodeId, resolveNodeId, type NodeIdInput } from "@agentick/cluster";
+
+// defaultNodeId(): always returns `${hostname}:${pid}` (+ suspicious
+// flag if hostname is empty/"localhost")
+// resolveNodeId(explicit, onDiagnostic?): use the explicit value if
+// provided (literal OR sync thunk), else fall back to defaultNodeId().
+// Emits `cluster:nodeId:auto-defaulted` / `cluster:nodeId:suspicious`
+// diagnostics at resolution time.
+```
+
+`NodeIdInput = NodeId | (() => NodeId)` — every `defineXCluster` /
+`joinXCluster` accepts the thunk form for deferred env-var reads:
+
+```typescript
+defineUnixCluster({
+  socketPath: "/tmp/cluster.sock",
+  nodeId: () => process.env.NODE_ID ?? `auto-${process.pid}`,
+});
+```
+
+### Testing fifth wire — `defineLocalCluster`
+
+`@agentick/cluster/testing` ships `defineLocalCluster(opts)`,
+the in-memory ClusterFactory peer to `defineUnixCluster` etc. Tests
+that need cluster substrate without sockets use it directly:
+
+```typescript
+import { defineLocalCluster } from "@agentick/cluster/testing";
+
+// Single-node — implicit registry
+const cluster = defineLocalCluster({ nodeId: "test" });
+
+// Multi-node — explicit shared registry
+const registry = createLocalClusterRegistry();
+const a = defineLocalCluster({ nodeId: "a", registry });
+const b = defineLocalCluster({ nodeId: "b", registry });
+```
+
+## Observability
+
+Cluster is **not** a harness. It emits diagnostic events on the bus
+it wraps with `surface: "cluster"`:
+
+- `cluster:node:joined` / `cluster:node:lost`
+- `cluster:partition:detected` / `cluster:partition:healed`
+- `cluster:routing:dropped`
+- `cluster:transport:reconnecting` / `cluster:transport:reconnected`
+- `cluster:journal:backpressure` (rung d)
+
+Any bus subscriber (devtools, management dashboards, OTel exporters,
+adopter monitoring) sees them through the standard subscription path.
+
+## Verified by
+
+- `src/__tests__/json-codec.spec.ts` — JSON codec round-trips
+  `MessageEnvelope` / `EventEnvelope` through encode → decode.
+- `src/__tests__/consistent-hash-partitioning.spec.ts` — default
+  partitioning is deterministic, balanced, FNV-1a-hashed.
+- `src/__tests__/define.spec.ts` — `defineCluster` composes seams,
+  resolves lazy `nodeId`, wraps bus/inbox, registers all close
+  handlers with the parent.
+- `src/__tests__/conformance-against-local.spec.ts` — the conformance
+  suite passes against `LocalClusterTransport`.
+- `src/__tests__/cluster-wrappers.spec.ts` — `ClusterEventBus` honors
+  `cluster-wide-default` (remote events visible) and
+  `node-local-default` (remote events dropped); emits
+  `cluster:wrap:installed` diagnostic. `ClusterInbox` routes local
+  `send` to the local inbox and remote `send` over the transport;
+  `ask` is local-only (Phase 3) — remote ask fails with a clear
+  Phase 3b pointer.
+
+## Roadmap & known gaps
+
+- **`subscribe` always returns the LOCAL bus stream.** In
+  `node-local-default` mode this is correct — only local events are
+  visible. In `cluster-wide-default` it works because remote events
+  are re-appended into the local bus. A future "cluster-wide
+  subscriber opt-in" path (per-subscription cross-cluster flag)
+  would let a single bus serve both audiences without flipping the
+  global default. Phase 5+.
+- **`publishLazy` over-builds in `cluster-wide-default` mode.** The
+  wrapper can't probe remote nodes' subscriber indexes from here, so
+  it always builds when fan-out crosses the wire. Adopters with hot
+  publishers can keep `fanoutMode: "node-local-default"` to retain
+  the short-circuit.
+- **The local fixture transport stays in-process and doesn't
+  serialize** — so the codec is a no-op against it. The real wire
+  adapters (`cluster-net-next`, `cluster-ws-next`,
+  `cluster-redis-next`) route their frames through the configured
+  codec for on-wire serialization.
+- **Rung (d) durability is documented but not implementable** until
+  the framework's continuation primitives ship (v2.x). The
+  `DurableJournal` seam exists so adapters can build incrementally.
+
+### Broker leader re-election (wire-adapter concern)
+
+The broker-pattern wire adapters (`cluster-net-next`,
+`cluster-ws-next`) elect ONE process as the broker; other processes
+connect as clients. If the broker dies, clients lose their wire — the
+cluster's transport effectively partitions until a new broker exists.
+
+Two recovery paths the adapters support, ranked by what ships:
+
+1. **External supervisor restarts the broker** (PM2, Kubernetes,
+   systemd, Docker restart policy). Clients detect disconnect, retry
+   with exponential backoff, reconnect once the broker is back up.
+   The adapter does nothing special — the orchestrator handles
+   restart. **This is the default.**
+2. **Internal re-election** — file-lock on the socket path (Unix) or
+   bind-on-port race (TCP); first-to-acquire becomes the new broker;
+   others connect to the new winner. More complex; lands if real
+   demand surfaces for self-contained clustering without external
+   supervisor.
+
+Either way, the protocol layer doesn't care — `ClusterMembership`
+just emits `lost` for the old broker + `joined` for the new one;
+framework reacts naturally via the membership stream.

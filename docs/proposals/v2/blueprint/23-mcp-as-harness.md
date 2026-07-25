@@ -1,7 +1,7 @@
 # ADR 23 — MCP integration shape
 
 **Status:** Revised — 2026-06-14 (originally Proposed 2026-05-20).
-**Touches:** `@agentick/mcp-next` (new package; rework of v1 `@agentick/mcp`), `@agentick/spec-next/data/mcp.ts` (landed in cbb49b6b — needs extension), `HookBridges` extensibility (ADR 22), `@agentick/transport-next` (`BaseClientTransport` reuse, ADR 33), schema slots across spec (Standard-Schema adoption).
+**Touches:** `@agentick/mcp` (new package; rework of v1 `@agentick/mcp`), `@agentick/spec/data/mcp.ts` (landed in cbb49b6b — needs extension), `HookBridges` extensibility (ADR 22), `@agentick/transport` (`BaseClientTransport` reuse, ADR 33), schema slots across spec (Standard-Schema adoption).
 **Driver:** Lock in v2 MCP shape across BOTH directions (client-side consuming external MCP servers, server-side exposing Agentick as MCP) before sandbox implementation. Several decisions are still open and called out as such; this ADR captures the reasoning so we can return to them deliberately.
 
 ---
@@ -13,7 +13,7 @@
 3. **Client-side: each MCP connection is `BaseHarness<"mcp">`** (the original ADR 23 decision; reaffirmed).
 4. **Server-side: shape is OPEN** — two candidate models discussed below ("integrated" via session-extension; "descriptive" as a standalone declaration tree). Both are viable; need real-world adopter scenarios to choose.
 5. **Standard-Schema adopted framework-wide** for `inputSchema`, `outputSchema`, and elicitation schema slots. Zod remains valid (Zod is a Standard-Schema implementation).
-6. **One package, subpath exports:** `@agentick/mcp-next/{client, server, transport/*, auth/*, react, testing}`. Client + server share ~70% of code (wire codec, transport, vocab, auth); splitting them would duplicate that.
+6. **One package, subpath exports:** `@agentick/mcp/{client, server, transport/*, auth/*, react, testing}`. Client + server share ~70% of code (wire codec, transport, vocab, auth); splitting them would duplicate that.
 
 ---
 
@@ -89,7 +89,7 @@ A table that earns the design's keep. Every native Agentick primitive has a clea
 Single package; subpath exports per the v2 modularity model (ADR 27).
 
 ```
-@agentick/mcp-next/
+@agentick/mcp/
   package.json
     "exports": {
       "."                          : "./src/index.ts",       // common types
@@ -269,7 +269,7 @@ Per-connection inbox (OQ23.4 lean preserved). Each MCPHarness owns its inbox; mu
 Registry of MCP harnesses. Module-augments `HookBridges`:
 
 ```ts
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface HookBridges {
     mcp: MCPBridge;
   }
@@ -425,7 +425,7 @@ S3 dissolves the tensions that S1/S2 each had:
 
 ## Transport set
 
-Reuse `BaseClientTransport` from `@agentick/transport-next` (ADR 33) for the wire-level plumbing (connection state machine, RPC correlation, reconnect-with-backoff). MCP-specific transport bindings layer on top.
+Reuse `BaseClientTransport` from `@agentick/transport` (ADR 33) for the wire-level plumbing (connection state machine, RPC correlation, reconnect-with-backoff). MCP-specific transport bindings layer on top.
 
 | Transport       | When                                                                              | Status                                          |
 | --------------- | --------------------------------------------------------------------------------- | ----------------------------------------------- |
@@ -440,20 +440,20 @@ Stdio is unambiguously transport-level. Streamable HTTP includes the `Mcp-Sessio
 
 ## Auth
 
-`@agentick/mcp-next/auth/`. Two-tier surface mirroring the SDK ecosystem survey's finding:
+`@agentick/mcp/auth/`. Two-tier surface mirroring the SDK ecosystem survey's finding:
 
 - `auth/bearer` — simple `AuthProvider` interface: `token(): Promise<string | undefined>` + optional `onUnauthorized(ctx)`. Adopter-managed bearer tokens.
 - `auth/oauth` — full OAuth 2.1 + PKCE (S256 required) + RFC 8707 resource indicators + RFC 9728 protected resource metadata + OIDC discovery + Client ID Metadata Documents + step-up scope flow. Adapter to `AuthProvider` via `adaptOAuthProvider`.
 
 Adopters import what they need. CLI/dev tools use bearer; production-cloud uses OAuth.
 
-`MCPAuthStorage` interface for token persistence lives in `@agentick/mcp-next/auth/` (per OQ23.5 lean — MCP-specific, not in spec).
+`MCPAuthStorage` interface for token persistence lives in `@agentick/mcp/auth/` (per OQ23.5 lean — MCP-specific, not in spec).
 
 ---
 
 ## Migration path for v1 adopters
 
-v1 `@agentick/mcp` is replaced by v2 `@agentick/mcp-next`. No import compat. Migration guide ships with the package.
+v1 `@agentick/mcp` is replaced by v2 `@agentick/mcp`. No import compat. Migration guide ships with the package.
 
 ```diff
 - import { MCPClient } from "@agentick/mcp";
@@ -461,7 +461,7 @@ v1 `@agentick/mcp` is replaced by v2 `@agentick/mcp-next`. No import compat. Mig
 - await client.connect();
 - const result = await client.invokeTool("files", "read", { path });
 
-+ import { MCP } from "@agentick/mcp-next/react";
++ import { MCP } from "@agentick/mcp/react";
 + const app = await createApp(<Agent />, {
 +   model,
 +   extensions: [withMCP()],
@@ -534,9 +534,9 @@ This ADR's implementation lift is significantly larger than the original estimat
 - **OQ23.2** — When the server changes its tool list mid-session, does the agent's `RuntimeDeclarations` re-collect automatically? **Resolution: yes** — `tools.listChanged` reactive signal triggers re-collect via bridge subscription.
 - **OQ23.3** — Sampling callbacks invoke the executor. If middleware on the executor rate-limits them, what's the error path back to the server? **Resolution: middleware rejection → MCP protocol error** sent back via the MRTR response.
 - **OQ23.4** — Should the inbox be ONE inbox shared with the rest of the app, or per-connection? **Resolution: per-connection** (preserved from original lean).
-- **OQ23.5** — Auth storage interface in `@agentick/mcp-next` or `@agentick/spec-next`? **Resolution: `@agentick/mcp-next/auth`** (MCP-specific token shapes).
+- **OQ23.5** — Auth storage interface in `@agentick/mcp` or `@agentick/spec`? **Resolution: `@agentick/mcp/auth`** (MCP-specific token shapes).
 - **OQ23.6** — How does `connect()` surface auth-redirect-required in headless contexts? **Resolution: throws `AuthInteractionRequired` with URL**; adopters handle interactively or via pre-populated tokens. The `<MCP>` JSX component installs an `onAuthRequired` handler integrating with the `ElicitationBridge` for UI flows.
-- **OQ23.7** — Auto-reconnect middleware bundled in `@agentick/mcp-next/react` (default-on) or shipped separately? **Resolution: bundled, default-on for HTTP transports; off for stdio/in-process** (process death is end-of-session).
+- **OQ23.7** — Auto-reconnect middleware bundled in `@agentick/mcp/react` (default-on) or shipped separately? **Resolution: bundled, default-on for HTTP transports; off for stdio/in-process** (process death is end-of-session).
 
 ### New (from 2026-06-14 design session)
 
@@ -560,7 +560,7 @@ This ADR's implementation lift is significantly larger than the original estimat
 
 - **OQ23.16** — v1's `InMemoryTransport` was a custom impl due to an SDK concurrency bug. Does the SDK v2 fix it? **Resolution: verify during MCP.1 implementation**; default to porting from v1 if unclear.
 
-- **OQ23.17** — Migration path from v1: dual-package compat (`@agentick/mcp` continues to ship alongside `@agentick/mcp-next` for a transition window) or clean break? **Lean: clean break.** v2 doesn't promise import compat with v1; rename forces adopter migration to the new model.
+- **OQ23.17** — Migration path from v1: dual-package compat (`@agentick/mcp` continues to ship alongside `@agentick/mcp` for a transition window) or clean break? **Lean: clean break.** v2 doesn't promise import compat with v1; rename forces adopter migration to the new model.
 
 ---
 

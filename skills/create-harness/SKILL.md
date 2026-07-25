@@ -34,13 +34,13 @@ Read these end-to-end before writing code. They are the contract.
 
 4. **`docs/proposals/v2/blueprint/19-foundation.md`** — Substrate primitives (Journal, Bus, Inbox), the `Operation` shape, lifecycle handlers, idempotency, journaling policy. Your async surface composes Operations; you need to understand them.
 
-5. **`packages-next/spec/src/protocol/app-extension.ts`** — `Extension`, `AppExtension`, `SessionExtension`, `AppInstaller`, `SessionInstaller`, `AppSubstrate`. The integration contract your `withX()` factory implements.
+5. **`packages/spec/src/protocol/app-extension.ts`** — `Extension`, `AppExtension`, `SessionExtension`, `AppInstaller`, `SessionInstaller`, `AppSubstrate`. The integration contract your `withX()` factory implements.
 
-6. **`packages-next/spec/src/protocol/hook-bridges.ts`** — The empty seed interface every harness augments. Read the file even though it's nearly empty; the comments document the augmentation discipline.
+6. **`packages/spec/src/protocol/hook-bridges.ts`** — The empty seed interface every harness augments. Read the file even though it's nearly empty; the comments document the augmentation discipline.
 
-7. **`packages-next/runtime/src/substrate/base-harness.ts`** — `BaseHarness` constructor signature, `HarnessShell`, `runOperation`, `runHarnessProtocol`, `handleMessage`, lifecycle hooks. You will extend this class.
+7. **`packages/runtime/src/substrate/base-harness.ts`** — `BaseHarness` constructor signature, `HarnessShell`, `runOperation`, `runHarnessProtocol`, `handleMessage`, lifecycle hooks. You will extend this class.
 
-8. **`packages-next/knobs/`** — The canonical reference impl. Read every file. This is the shape to copy:
+8. **`packages/knobs/`** — The canonical reference impl. Read every file. This is the shape to copy:
    - `src/harness.ts` — `BaseHarness<"knobs">` subclass with sync + async surface
    - `src/augment.ts` — dual augmentation pattern (`HookBridges.knobs` + `SessionHarnessProtocol.knobs`)
    - `src/extension.ts` — `withKnobs()` `SessionExtension` factory
@@ -52,9 +52,9 @@ Read these end-to-end before writing code. They are the contract.
    - `src/__tests__/integration-with-compiler.spec.tsx` — real-`CompilerHarness` integration
    - `package.json` — `sideEffects`, dual subpaths, optional react peer dep
 
-9. **`packages-next/state/`** — Second reference. Differs from knobs in: persistence layer (state survives `serialize`/`restore`), simpler async surface. Read for the snapshot/restore contract.
+9. **`packages/state/`** — Second reference. Differs from knobs in: persistence layer (state survives `serialize`/`restore`), simpler async surface. Read for the snapshot/restore contract.
 
-10. **`packages-next/timeline/`** — Third reference. Differs in: large async surface (append, projection, two-tier log), strategies file (`strategies.ts`) for pluggable behavior. Read if your harness has compositional internals.
+10. **`packages/timeline/`** — Third reference. Differs in: large async surface (append, projection, two-tier log), strategies file (`strategies.ts`) for pluggable behavior. Read if your harness has compositional internals.
 
 11. **`packages/sandbox/`** — Per-session-factory variant. Read if your harness needs per-session instance lifecycle that the bundled installer pattern doesn't directly model.
 
@@ -186,14 +186,14 @@ The canonical shape — adapt names + scope.
     "typecheck": "tsc -p tsconfig.build.json --noEmit"
   },
   "dependencies": {
-    "@agentick/spec-next": "workspace:*",
-    "@agentick/runtime-next": "workspace:*",
-    "@agentick/compiler-next": "workspace:*",
-    "@agentick/compiler-react-next": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/compiler": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
     "effect": "^3.21.2"
   },
   "devDependencies": {
-    "@agentick/spec-conformance-next": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
     "@types/react": "^19.2.5"
   },
   "peerDependencies": {
@@ -247,7 +247,7 @@ packages/my-thing/
   src/
     index.ts                              ← package entry; imports ./augment for side effects
     harness.ts                            ← BaseHarness<"my-thing"> subclass
-    augment.ts                            ← declare module "@agentick/spec-next"
+    augment.ts                            ← declare module "@agentick/spec"
     extension.ts                          ← withMyThing() SessionExtension factory
     handle.ts                             ← curated user-facing API (optional but recommended)
     conformance.ts                        ← runMyThingHarnessConformance(deps)
@@ -265,9 +265,9 @@ packages/my-thing/
 
 ## Step-by-step build
 
-### Step 1. Protocol shape (`packages-next/spec/src/protocol/my-thing-harness.ts`)
+### Step 1. Protocol shape (`packages/spec/src/protocol/my-thing-harness.ts`)
 
-The protocol lives in `@agentick/spec-next`. Bundled built-ins do this; published external extensions can either contribute via PR or keep their protocol local (see "Local protocol variant" at the end).
+The protocol lives in `@agentick/spec`. Bundled built-ins do this; published external extensions can either contribute via PR or keep their protocol local (see "Local protocol variant" at the end).
 
 ```ts
 import type { ContentBlock } from "../data/content-block.js";
@@ -310,19 +310,19 @@ export interface MyThingHarnessProtocol {
 }
 ```
 
-Add an export to `packages-next/spec/src/protocol/index.ts` and re-export from `packages-next/spec/src/index.ts`.
+Add an export to `packages/spec/src/protocol/index.ts` and re-export from `packages/spec/src/index.ts`.
 
 **Design notes:**
 
 - **Sync reads, async writes.** Read methods (`get`, `list`, `has`, `subscribe`) are synchronous — they read from local Maps maintained by the harness. Write methods (`set`, `reset`) return Promises because they go through `runOperation` (lifecycle handlers → middleware → body → terminal envelope on bus + journal). This split is canonical. Do not make reads async; the React side depends on sync reads through `useSyncExternalStore`.
-- **`Unsubscribe`** is imported from `@agentick/spec-next` — a `() => void` newtype. Always return it from `subscribe*`.
+- **`Unsubscribe`** is imported from `@agentick/spec` — a `() => void` newtype. Always return it from `subscribe*`.
 - **Inbox catalog** as a discriminated union. The `type` field is the discriminator. Cluster routing depends on this shape.
 
 ### Step 2. Harness impl (`src/harness.ts`)
 
 ```ts
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime-next";
+import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime";
 import type {
   ContentBlock,
   EventBus,
@@ -334,7 +334,7 @@ import type {
   MyThingSetInput,
   Operation,
   OperationJournal,
-} from "@agentick/spec-next";
+} from "@agentick/spec";
 
 export class MyThingHarness extends BaseHarness<"my-thing"> implements MyThingHarnessProtocol {
   private readonly values = new Map<string, string>();
@@ -502,10 +502,10 @@ export class MyThingHarness extends BaseHarness<"my-thing"> implements MyThingHa
 ### Step 3. Augmentation (`src/augment.ts`)
 
 ```ts
-import type { MyThingHarnessProtocol } from "@agentick/spec-next";
+import type { MyThingHarnessProtocol } from "@agentick/spec";
 import type { MyThingHandle } from "./handle.js";
 
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface HookBridges {
     readonly myThing: MyThingHarnessProtocol;
   }
@@ -530,8 +530,8 @@ If you skipped the handle (Q3 = full protocol exposed), augment only `HookBridge
 ### Step 4. Handle (`src/handle.ts`)
 
 ```ts
-import type { ContentBlock, Unsubscribe } from "@agentick/spec-next";
-import type { MyThingSetInput } from "@agentick/spec-next";
+import type { ContentBlock, Unsubscribe } from "@agentick/spec";
+import type { MyThingSetInput } from "@agentick/spec";
 
 export interface MyThingHandle {
   list(): readonly { readonly id: string; readonly value: string }[];
@@ -549,7 +549,7 @@ Structural subset of the protocol. Hides `id`, `ready`, `close`, `exportSnapshot
 ### Step 5. Extension factory (`src/extension.ts`)
 
 ```ts
-import type { SessionExtension, SessionInstaller } from "@agentick/spec-next";
+import type { SessionExtension, SessionInstaller } from "@agentick/spec";
 import { MyThingHarness } from "./harness.js";
 
 export interface WithMyThingOptions {
@@ -592,7 +592,7 @@ export function withMyThing(options: WithMyThingOptions = {}): SessionExtension 
 **App-scoped variant** (when `target: "app"`):
 
 ```ts
-import type { AppExtension, AppInstaller } from "@agentick/spec-next";
+import type { AppExtension, AppInstaller } from "@agentick/spec";
 
 export function withMyThingApp(...): AppExtension {
   return {
@@ -624,7 +624,7 @@ export function withMyThing(opts): readonly [AppExtension, SessionExtension] {
 
 ```ts
 import { describe, expect, it } from "vitest";
-import type { MyThingHarnessProtocol } from "@agentick/spec-next";
+import type { MyThingHarnessProtocol } from "@agentick/spec";
 
 export interface MyThingHarnessFactoryDeps {
   readonly make: () => Promise<MyThingHarnessProtocol>;
@@ -724,7 +724,7 @@ export { useMyThing } from "./use-my-thing.js";
 
 ```ts
 import { useCallback, useSyncExternalStore } from "react";
-import { useBridges } from "@agentick/compiler-react-next";
+import { useBridges } from "@agentick/compiler-react";
 
 export function useMyThing(id: string): readonly [string | undefined, (value: string) => void] {
   const { myThing } = useBridges();
@@ -760,7 +760,7 @@ export function useMyThing(id: string): readonly [string | undefined, (value: st
 `src/testing/index.ts`:
 
 ```ts
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime-next";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import { MyThingHarness } from "../harness.js";
 
 export function stubMyThingHarness(initial: Readonly<Record<string, string>> = {}): MyThingHarness {
@@ -777,7 +777,7 @@ export function stubMyThingHarness(initial: Readonly<Record<string, string>> = {
 }
 ```
 
-Used by downstream tests of components that consume `useMyThing()`. Pair with `@agentick/compiler-react-next`'s test bridges to render-test a component in isolation.
+Used by downstream tests of components that consume `useMyThing()`. Pair with `@agentick/compiler-react`'s test bridges to render-test a component in isolation.
 
 ### Step 9. Package entry (`src/index.ts`)
 
@@ -837,7 +837,7 @@ Skip if this is a local module inside an adopter's app — see `create-extension
 
 5. **Hardcoding the slot name in snapshot/restore.** ADR 27 mandates generic iteration with `SnapshotCapable` feature detection. Implement `exportSnapshot`/`importSnapshot` on the harness; the framework finds them. Don't try to hook into snapshot/restore explicitly — the framework iterates `HookBridges` for you.
 
-6. **React subpath depending on the harness package depending on `compiler-react`.** Cycle. The harness package depends on `@agentick/compiler-react-next` (for `useBridges`); `@agentick/compiler-react-next` MUST NOT depend on the harness package. Per ADR 27, compiler-react has no harness deps.
+6. **React subpath depending on the harness package depending on `compiler-react`.** Cycle. The harness package depends on `@agentick/compiler-react` (for `useBridges`); `@agentick/compiler-react` MUST NOT depend on the harness package. Per ADR 27, compiler-react has no harness deps.
 
 7. **Skipping `await harness.ready`.** Operations queued before `ready` resolves silently drop. Always `await ready` in your extension's `install`.
 
@@ -861,12 +861,12 @@ If you can't claim all five, the harness isn't done.
 
 ## Local protocol variant (for adopter packages outside the workspace)
 
-If you're building `@my-org/agentick-my-thing` outside the agentick workspace, you can either (a) PR the protocol type into `@agentick/spec-next` (preferred — the protocol becomes canonical), or (b) keep the protocol local in your package and augment from there. Both work; (b) means your protocol type is `@my-org/agentick-my-thing`'s `MyThingHarnessProtocol`, and your `augment.ts` imports it locally:
+If you're building `@my-org/agentick-my-thing` outside the agentick workspace, you can either (a) PR the protocol type into `@agentick/spec` (preferred — the protocol becomes canonical), or (b) keep the protocol local in your package and augment from there. Both work; (b) means your protocol type is `@my-org/agentick-my-thing`'s `MyThingHarnessProtocol`, and your `augment.ts` imports it locally:
 
 ```ts
 import type { MyThingHarnessProtocol } from "./protocol.js";
 
-declare module "@agentick/spec-next" {
+declare module "@agentick/spec" {
   interface HookBridges {
     readonly myThing: MyThingHarnessProtocol;
   }
@@ -879,7 +879,7 @@ declare module "@agentick/spec-next" {
 
 If you're replacing an existing harness's implementation (e.g., Postgres-backed Timeline), the work is:
 
-1. Skip Step 1 (protocol exists already in `@agentick/spec-next`)
+1. Skip Step 1 (protocol exists already in `@agentick/spec`)
 2. Skip Step 3 (augmentation exists already in the bundled package)
 3. Skip Step 4 (handle exists)
 4. Steps 2, 5, 6, 7 (harness, extension factory, conformance, react/testing) apply normally but you implement the **existing** protocol

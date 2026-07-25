@@ -1,0 +1,35 @@
+{
+  "name": "@agentick/spec-conformance",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Conformance test fixtures for @agentick/spec implementations. Internal — not published.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/spec-conformance"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0"
+  },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  }
+}

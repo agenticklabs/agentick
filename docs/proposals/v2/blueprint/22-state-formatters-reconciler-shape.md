@@ -1,6 +1,6 @@
 # ADR 22 — StateBridge + Formatters
 
-> **Rename note (2026-07-21, #243):** the "reconciler" subsystem referenced below was renamed to **compiler** — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
+> **Rename note (2026-07-21, #243):** the "reconciler" subsystem referenced below was renamed to **compiler** — `@agentick/reconciler` → `@agentick/compiler`, `@agentick/reconciler-react` → `@agentick/compiler-react`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
 
 **Status:** Accepted — 2026-05-19
 **Modifies:** `04-formatter-harness.md` (rename → `04-formatters.md` with a
@@ -57,10 +57,10 @@ interfaces.
 Adopt v1's proven shape from `packages/core/src/renderers/base.ts`:
 
 ```ts
-// In @agentick/spec-next/data/formatter.ts (already mostly there)
+// In @agentick/spec/data/formatter.ts (already mostly there)
 type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 
-// In @agentick/spec-next/data/semantic.ts — KEEP the sidecar
+// In @agentick/spec/data/semantic.ts — KEEP the sidecar
 type SemanticContentBlock = ContentBlock & {
   readonly semanticNode?: SemanticNode;
 };
@@ -85,7 +85,7 @@ interface SemanticNode {
 - Nested formatter switching via `SemanticNode.rendererRef` — the
   reconciler resolves the ref against its formatter registry.
 
-**`createFormatter` exported from `@agentick/formatters-next`** (per [ADR 36](36-define-vs-create-convention.md) — formatters need no parent-substrate, so the verb is `create`):
+**`createFormatter` exported from `@agentick/formatters`** (per [ADR 36](36-define-vs-create-convention.md) — formatters need no parent-substrate, so the verb is `create`):
 
 ```ts
 interface CreateFormatterInput {
@@ -117,7 +117,7 @@ downstream sees SemanticNode.
 
 ### D3 — Defer reconciler-core extraction
 
-Do not split `@agentick/reconciler-react-next` into core + driver packages now.
+Do not split `@agentick/reconciler-react` into core + driver packages now.
 Refactor when a second concrete reconciler arrives (Angular, Solid) to force
 the boundary. Speculative extraction guesses wrong; refactoring against a
 real second consumer guesses right.
@@ -166,4 +166,4 @@ Total: ~3.5 days.
 
 **E — Drop the sidecar; require formatter to output flat strings only.** Loses the ability to mix native ContentBlocks (images, audio) with formatted text in one pass. v1's `Formatter` returns `ContentBlock[]` precisely so mixed-content stays composable.
 
-**F — Extract `@agentick/reconciler-next` core now.** Sandi Metz / Kent Beck: refactor against present pressure, not imagined futures. Defer to second concrete consumer.
+**F — Extract `@agentick/reconciler` core now.** Sandi Metz / Kent Beck: refactor against present pressure, not imagined futures. Defer to second concrete consumer.

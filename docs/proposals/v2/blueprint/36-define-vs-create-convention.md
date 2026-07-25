@@ -2,7 +2,7 @@
 
 **Status:** Active · 2026-06-25
 **Builds on:** ADR 31 (Harness hierarchy — `Factory<R, P>` primitive)
-**Touches:** `@agentick/formatters-next` (rename `defineFormatter → createFormatter`), `@agentick/app-next` (drop `defineApp` alias), all future `define*` and `create*` exports across the framework.
+**Touches:** `@agentick/formatters` (rename `defineFormatter → createFormatter`), `@agentick/app` (drop `defineApp` alias), all future `define*` and `create*` exports across the framework.
 
 ## TL;DR
 
@@ -18,7 +18,7 @@ That's the entire rule. One mechanical question per call site (does it need pare
 
 Two minor inconsistencies in the current codebase:
 
-1. `defineApp` is aliased to `createApp` in `packages-next/app/src/index.ts` "for naming preference." `createApp` doesn't need parent substrate (it IS the outermost layer); under the rule it's correctly named `create*`. The `define*` alias muddles the convention.
+1. `defineApp` is aliased to `createApp` in `packages/app/src/index.ts` "for naming preference." `createApp` doesn't need parent substrate (it IS the outermost layer); under the rule it's correctly named `create*`. The `define*` alias muddles the convention.
 
 2. `defineFormatter` returns a `DefinedFormatter` directly (no factory wrapper). Formatters don't need parent harness substrate — they're pure render functions. Under the rule it should be `createFormatter`.
 
@@ -59,7 +59,7 @@ The verb encodes the deferral, which encodes the dependency on parent substrate.
 The named factory exported by an adapter package (`openai(...)`, `redisTransport(...)`, `markdownFormatter(...)`) typically WRAPS the protocol-level `defineX` internally and closes over instance config. The adapter function's return type matches what `defineX` returns — a factory for protocol implementations needing parent substrate, a direct instance otherwise.
 
 ```typescript
-// @agentick/executor-openai-next
+// @agentick/executor-openai
 export function openai(config: OpenAIConfig): ExecutorFactory {
   return defineExecutor({
     prepareInput: ...,   // closures over config
@@ -68,7 +68,7 @@ export function openai(config: OpenAIConfig): ExecutorFactory {
   });
 }
 
-// @agentick/formatters-markdown-next
+// @agentick/formatters-markdown
 export function markdownFormatter(config: MarkdownConfig = {}): DefinedFormatter {
   return createFormatter({   // post-rename
     id: "markdown",
@@ -90,8 +90,8 @@ This is independent of the define/create convention. Both `defineX` factories an
 
 In order of cost:
 
-1. **Drop `defineApp` re-export** in `packages-next/app/src/index.ts`. Remove the comment that explains the alias. One-line change. Search adopter-facing docs / READMEs for stray references.
-2. **Rename `defineFormatter → createFormatter`** in `@agentick/formatters-next`. Update the function name, the return type's name (`DefinedFormatter` may stay — names of return types aren't covered by this convention), call sites across the workspace, and the spec entry.
+1. **Drop `defineApp` re-export** in `packages/app/src/index.ts`. Remove the comment that explains the alias. One-line change. Search adopter-facing docs / READMEs for stray references.
+2. **Rename `defineFormatter → createFormatter`** in `@agentick/formatters`. Update the function name, the return type's name (`DefinedFormatter` may stay — names of return types aren't covered by this convention), call sites across the workspace, and the spec entry.
 3. **No other renames.** Every other `define*` and `create*` in the codebase is already correct under the rule.
 
 ## Conformance

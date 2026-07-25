@@ -1,0 +1,97 @@
+{
+  "name": "@agentick/session",
+  "version": "0.0.0",
+  "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + compiler + loop executor into the user-facing `session.send({ messages })` surface.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "session"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/session"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/elicitation": "workspace:*",
+    "@agentick/gates": "workspace:*",
+    "@agentick/knobs": "workspace:*",
+    "@agentick/loop-executor": "workspace:*",
+    "@agentick/model": "workspace:*",
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/compiler": "workspace:*",
+    "@agentick/resources": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/state": "workspace:*",
+    "@agentick/store": "workspace:*",
+    "@agentick/tasks": "workspace:*",
+    "@agentick/timeline": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@agentick/compiler-react": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
+    "@agentick/skills": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
+    "@agentick/timeline-fs": "workspace:*",
+    "@agentick/timeline-postgres": "workspace:*",
+    "@agentick/tool-executor": "workspace:*",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.2.5",
+    "pg": "^8.13.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "name": "@agentick/cluster-broker",
+  "version": "0.0.0",
+  "description": "Broker-pattern base for cluster transport adapters that run their own broker process. Ships abstract `BaseBroker` + `BaseClusterClient`, a `Connection` interface, a length-prefix framing helper, and the wire frame schema. Concrete wire packages (cluster-net-next for TCP/Unix; cluster-ws-next for WebSocket) subclass these to plug in their listener / connector. External-broker adapters (cluster-redis-next, cluster-nats-next) are peers of this package, not children — they don't use this plumbing.",
+  "keywords": [
+    "agentick",
+    "broker",
+    "cluster",
+    "ipc",
+    "transport"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/cluster-broker"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/cluster": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

@@ -9,7 +9,7 @@ secure-exec provider, #226 (Lambda).
 
 ## The problem
 
-v2 shipped the sandbox *substrate* (`packages-next/sandbox` — bridge, harness, ACL,
+v2 shipped the sandbox *substrate* (`packages/sandbox` — bridge, harness, ACL,
 elicitation permission gate, React `<Sandbox>`/tools) but **zero concrete providers**, and
 it **narrowed the handle to 4 methods and left three lossy fakes**:
 - `editFile` (`harness.ts:549` `applyEditsLocal`) — naive `string.replace`; only
@@ -80,7 +80,7 @@ the already-specced `SandboxExecDelta` (`exec:delta`).
 
 1. **Types → `spec-next`**: `NetworkRule`, `ProxiedRequest`, `network: boolean | readonly
    NetworkRule[]` — wire vocabulary any egress-enforcing provider + observability shares.
-2. **Pure matcher → a shared `@agentick/sandbox-net-next` helper**: `matchRequest` /
+2. **Pure matcher → a shared `@agentick/sandbox-net` helper**: `matchRequest` /
    `matchDomain` (first-match-wins, default-deny, `*.domain` wildcards) — OS-free, reusable
    by docker/remote. (Putting it in `local` would force docker→local — wrong direction.)
 3. **The Node proxy server → `sandbox-local-next`**: 127.0.0.1 HTTP proxy + CONNECT tunnel
@@ -103,9 +103,9 @@ the already-specced `SandboxExecDelta` (`exec:delta`).
 
 ## Packages
 
-`@agentick/sandbox-local-next`, `@agentick/sandbox-docker-next` (implement spec
-`SandboxProvider`), `@agentick/sandbox-net-next` (the shared matcher). The harness
-`@agentick/sandbox-next` owns bridge/harness/tools and **must not depend on any provider**
+`@agentick/sandbox-local`, `@agentick/sandbox-docker` (implement spec
+`SandboxProvider`), `@agentick/sandbox-net` (the shared matcher). The harness
+`@agentick/sandbox` owns bridge/harness/tools and **must not depend on any provider**
 (providers → spec only). Full new-package checklist each; `/testing` doubles;
 `runSandboxProviderConformance` suite (#218) that every provider passes.
 
@@ -170,7 +170,7 @@ layer).** The rule: when packaging a subsystem, copy the closest precedent's sha
 then justify any divergence — don't re-derive.
 
 ### The grain (model layer, the mirror)
-`@agentick/model-openai-next` **deps** `@agentick/model-next`. The `LanguageModelAdapter`
+`@agentick/model-openai` **deps** `@agentick/model`. The `LanguageModelAdapter`
 contract + shared code live in `model-next` (the base), NOT spec. Sandbox mirrors this
 exactly.
 
@@ -190,11 +190,11 @@ sandbox-docker-next  provider — deps `sandbox-next`   (Wave 2b)
 2. `applyEdits` + `EditError`: `sandbox-edit` → `sandbox-next/src/edit.ts`. **Delete `sandbox-edit`.**
 3. `matchRequest`/`matchDomain`: `sandbox-net` → `sandbox-next/src/net.ts`. **Delete `sandbox-net`.** (`NetworkRule`/`ProxiedRequest` types stay in spec.)
 4. `runSandboxProviderConformance` + `fakeSandboxProvider`: → **`sandbox-next/testing`** (conformance + double live with the contract). Remove the sandbox suite from `spec-conformance-next`.
-5. `sandbox-local-next`: dep `spec-only` → **`@agentick/sandbox-next`**; repoint imports (`sandbox-next` re-exports the spec wire types so providers have one import source).
+5. `sandbox-local-next`: dep `spec-only` → **`@agentick/sandbox`**; repoint imports (`sandbox-next` re-exports the spec wire types so providers have one import source).
 6. `sandbox-next` main entry **React-free**: move the stray React ref + `react/tools.tsx` + `<Sandbox>` behind the **`sandbox-next/react`** subpath.
 
 ### Invariants (green checks)
-- `sandbox-local-next/package.json` deps `@agentick/sandbox-next` — not `-edit`/`-net`, not spec-only.
+- `sandbox-local-next/package.json` deps `@agentick/sandbox` — not `-edit`/`-net`, not spec-only.
 - `sandbox-edit` + `sandbox-net` gone everywhere (dirs, lockfile, `website/typedoc.json`, `config.mts`).
 - `sandbox-next` main entry imports zero React (React only via `/react`).
 - `reconciler-react` still deps only spec for the sandbox bridge — unchanged.

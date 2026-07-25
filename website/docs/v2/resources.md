@@ -84,7 +84,7 @@ no host output of its own.
 There are three ways to supply content; pick the cleanest for the case.
 
 ```tsx
-import { Resource } from "@agentick/resources-next/react";
+import { Resource } from "@agentick/resources/react";
 
 // 1. Static content — a string or a ResourceContents object:
 <Resource uri="config://app" name="App config" mimeType="application/json"
@@ -132,10 +132,10 @@ Template syntax is an RFC 6570-lite subset:
 ### A minimal end-to-end example
 
 ```tsx
-import { createApp } from "@agentick/app-next/react";
-import { openai } from "@agentick/model-openai-next";
-import { withResources } from "@agentick/resources-next";
-import { Resource } from "@agentick/resources-next/react";
+import { createApp } from "@agentick/app/react";
+import { openai } from "@agentick/model-openai";
+import { withResources } from "@agentick/resources";
+import { Resource } from "@agentick/resources/react";
 import { System, Timeline } from "agentick";
 
 function Agent() {
@@ -170,7 +170,7 @@ other), and it costs only the metadata, not the payload.
 
 - Absent any registered resources, the catalog contributes nothing.
 - Override or suppress it with `<Project projectionKey="resources">` from
-  `@agentick/compiler-react-next` if you want to render availability yourself.
+  `@agentick/compiler-react` if you want to render availability yourself.
 
 This is the crux of pull semantics: the model spends tokens on _knowing what's
 readable_, and spends the content budget only on what it actually reads.
@@ -250,7 +250,7 @@ import {
   sandboxFileResolver,
   fsFileResolver,
   registerFileResolver,
-} from "@agentick/sandbox-next/mcp";
+} from "@agentick/sandbox/mcp";
 
 // Read through a sandbox — ACL-gated, provider-backed (text, per the handle contract):
 registerFileResolver(session.resources, sandboxFileResolver(sandbox));
@@ -307,5 +307,5 @@ When projected over MCP these become `notifications/resources/updated` and
 - [Exposing an MCP server](/docs/v2/mcp-server) — projecting your resources over the wire.
 - [Tools](/docs/tools) — the verb primitive (contrast with resources, the noun).
 - [Sandbox](/docs/sandbox) — the filesystem primitive file-resources read through.
-- [`@agentick/resources-next` README](https://github.com/agenticklabs/agentick/blob/feat/v2/packages-next/resources/README.md) — the package spec and full protocol surface.
+- [`@agentick/resources` README](https://github.com/agenticklabs/agentick/blob/feat/v2/packages/resources/README.md) — the package spec and full protocol surface.
 - ADRs: [62 — resources as a read-projection seam](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/62-resources-harness.md), [63 — compiler surfacing](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/63-compiler-surfacing.md).

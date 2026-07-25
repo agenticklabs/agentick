@@ -21,9 +21,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** name → { dir, exports } for every workspace package under packages-next/. */
+/** name → { dir, exports } for every workspace package under packages/. */
 const workspace = new Map();
-for (const base of ["packages-next"]) {
+for (const base of ["packages"]) {
   const baseDir = join(ROOT, base);
   if (!existsSync(baseDir)) continue;
   for (const name of readdirSync(baseDir)) {
@@ -40,7 +40,7 @@ for (const base of ["packages-next"]) {
   }
 }
 
-/** `@agentick/foo-next` → ["@agentick/foo-next", "."]; `.../bar` → [pkg, "./bar"]. */
+/** `@agentick/foo` → ["@agentick/foo", "."]; `.../bar` → [pkg, "./bar"]. */
 function splitSpecifier(spec) {
   const parts = spec.split("/");
   if (spec.startsWith("@")) {

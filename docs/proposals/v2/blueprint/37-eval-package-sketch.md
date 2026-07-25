@@ -1,4 +1,4 @@
-# 37 — `@agentick/eval-next` sketch
+# 37 — `@agentick/eval` sketch
 
 **Status:** SKETCH — future direction, not Phase 4/5 scope. Land
 later, possibly Phase 6+. This file captures the idea while it's
@@ -21,9 +21,9 @@ matrix-runnable artifact instead of a one-shot.
 ## Sketch
 
 ```ts
-import { defineEval } from "@agentick/eval-next";
-import { openai } from "@agentick/openai-next";
-import { anthropic } from "@agentick/anthropic-next";
+import { defineEval } from "@agentick/eval";
+import { openai } from "@agentick/openai";
+import { anthropic } from "@agentick/anthropic";
 
 const refundSafety = defineEval({
   description: "Support agent does not issue a refund from an unverified refund request.",
@@ -140,10 +140,10 @@ fixtures instead of being frozen scripts.
 ## Where it sits in the package graph
 
 ```
-@agentick/eval-next
-  ├── @agentick/app-next          (drives the agent)
-  ├── @agentick/spec-next         (envelope types for assertions)
-  └── @agentick/utils-next        (judge primitives, fixtures)
+@agentick/eval
+  ├── @agentick/app          (drives the agent)
+  ├── @agentick/spec         (envelope types for assertions)
+  └── @agentick/utils        (judge primitives, fixtures)
 ```
 
 devDep-only for adopters. Optional bundled judge models (cheap +

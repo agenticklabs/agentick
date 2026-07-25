@@ -32,7 +32,7 @@ ways — a server-side `GatewayPlugin` (Telegram: `ctx.sendToSession` /
 `ctx.respondToConfirmation`, re-implementing the four behaviors ad hoc) and a client-side
 `ConnectorPlatform` + `ConnectorSession` (iMessage, over a `ConnectorBridge`). The
 client-side `ConnectorSession` **cannot be rebuilt in v2** (`client-next` is a low-level RPC
-client — `grep MessageLog|ToolConfirmations packages-next/client/src` = zero; the v1
+client — `grep MessageLog|ToolConfirmations packages/client/src` = zero; the v1
 `ConnectorSession` composed `@agentick/client`'s `MessageLog`+`ToolConfirmations` which do
 not exist here). So **both platforms become the one server-side gateway-extension shape**;
 the `GatewayPlugin` path dies.
@@ -40,7 +40,7 @@ the `GatewayPlugin` path dies.
 ## The contract
 
 ```ts
-// @agentick/connector-next (base) — the composition primitive
+// @agentick/connector (base) — the composition primitive
 export function defineConnector(spec: {
   name: string;
   platform: ConnectorPlatform;          // thin adapter: start/stop/emit-inbound/deliver-outbound
@@ -81,7 +81,7 @@ now-retired client-side `ConnectorSession`). Fork 4 resolved: thin platform, no 
 
 Inbound messages carry provenance (`imessage:{type,handle}`, `telegram:{chatId}`). v1 used
 an augmentable `MessageSource`/`MessageSourceTypes` registry; `grep MessageSource
-packages-next` = zero. `MessageMetadata` (`spec-next/data/entries.ts:38`) already has an
+packages` = zero. `MessageMetadata` (`spec-next/data/entries.ts:38`) already has an
 open index (`[key:string]: unknown`), so `metadata.source` is buildable today.
 
 **Resolution (overriding the survey's "typed field on MessageMetadata" lean):** per the

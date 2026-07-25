@@ -1,0 +1,71 @@
+{
+  "name": "@agentick/model-ai-sdk",
+  "version": "0.0.0",
+  "description": "Vercel AI SDK bridge for Agentick v2 (ADR 52). aisdk(model, options?) wraps any ai-package LanguageModel as a LanguageModelAdapter.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "ai-sdk",
+    "executor",
+    "harness",
+    "vercel"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/model-ai-sdk"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/model": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "ai": "^5.0.0"
+  },
+  "devDependencies": {
+    "@agentick/model-executor": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
+    "effect": "^3.22.0",
+    "msw": "^2.0.0"
+  },
+  "peerDependencies": {
+    "ai": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

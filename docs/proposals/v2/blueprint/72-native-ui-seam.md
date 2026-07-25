@@ -2,7 +2,7 @@
 
 **Status:** DRAFT 2026-07-09 (Fable, for Ryan — design workshop). **Revisits** ADR 40's "defer
 first-class MCP-Apps" stance. **Builds on:** ADR 62 (resources — `ui://` rides the general seam;
-`@agentick/mcp-apps-next` reserved for rendering), Flow E (`15-flows/e-resource-render-no-loop` —
+`@agentick/mcp-apps` reserved for rendering), Flow E (`15-flows/e-resource-render-no-loop` —
 the reconciler renders JSX → a resource body with NO loop, browser-safe), ADR 69 (request
 escalation + the addressable session inbox), ADR 71 (the `--framework` reconciler binding + the
 `clients/` axis), ADR 23/26/27 (everything is a projection of a native seam).
@@ -131,13 +131,13 @@ MCP-Apps-specific one) is now the right investment. Owning the native IR seam + 
    agent-authoring, or a UI-specific renderer over the shared IR?
 3. **Tool-call origin-addressing** — the exact inbox address scheme for native-dispatch vs
    mcp-app-relay origins, and how the `ui://` resource carries origin.
-4. **Package split** — `@agentick/a2ui-next` (the IR→A2UI widget projection + native render) and
-   `@agentick/mcp-apps-next` (the A2UI-over-MCP binding, server-side). Native render lives in
+4. **Package split** — `@agentick/a2ui` (the IR→A2UI widget projection + native render) and
+   `@agentick/mcp-apps` (the A2UI-over-MCP binding, server-side). Native render lives in
    client-next + the binding.
 5. **Security model** for untrusted inbound MCP-App HTML/widgets (sandbox policy, capability gating
    via the relay).
 6. **The sibling AG-UI ADR** — scope out the event-stream projection (bus/client-sync + inbox →
-   AG-UI events; `@agentick/ag-ui-next` on the gateway) and map its event vocabulary onto our
+   AG-UI events; `@agentick/ag-ui` on the gateway) and map its event vocabulary onto our
    existing bus/execution events + steering/abort — it's a different axis and likely closer to
    done.
 

@@ -116,11 +116,11 @@ Add a spec **resource content block** (`{ type: "resource"; resource: ResourceCo
 embedded resources in tool/prompt results (and `ui://` app resources) round-trip through
 agentick's content model instead of being flattened to text (today `content-mapper.ts` drops
 them). `read` results and embedded resources share it. `ui://` *rendering* is the separate
-`@agentick/mcp-apps-next` package's concern; the block is protocol-general.
+`@agentick/mcp-apps` package's concern; the block is protocol-general.
 
 ## Package shape
 
-`@agentick/resources-next` — bundled built-in (ADR 27), per-harness layout (harness/augment/
+`@agentick/resources` — bundled built-in (ADR 27), per-harness layout (harness/augment/
 extension/conformance/testing + an optional `react/` `<Resource>` that deps reconciler-react, no
 cycle). Spec carries only wire/firewall types (`ResourceDescriptor`, `ResourceContents`,
 `ResourceTemplateDescriptor`, the resource content block, `ResourcesHarnessProtocol`).

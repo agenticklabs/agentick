@@ -53,7 +53,7 @@ of `HookBridges` — one empty seed, augmented per harness, contributed by the
 New empty-seed interface in spec (client subpath), mirroring `HookBridges`:
 
 ```ts
-// @agentick/spec-next/client
+// @agentick/spec/client
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface SessionHandleExtensions {}          // seed — core declares nothing
 
@@ -66,13 +66,13 @@ export interface SessionHandle
 Each harness client package augments it (the exact `HookBridges` move):
 
 ```ts
-// @agentick/tasks-next/client
-declare module "@agentick/spec-next" {
+// @agentick/tasks/client
+declare module "@agentick/spec" {
   interface SessionHandleExtensions {
     readonly tasks: TasksClientHandle;
   }
 }
-// @agentick/knobs-next/client → interface SessionHandleExtensions { readonly knobs: KnobsClientHandle }
+// @agentick/knobs/client → interface SessionHandleExtensions { readonly knobs: KnobsClientHandle }
 ```
 
 ## 2. The registration seam (runtime assembly)
@@ -81,7 +81,7 @@ Augmentation adds the TYPE; a small registry attaches the IMPL — the one new
 mechanism, and the client twin of how the server wires bridges:
 
 ```ts
-// @agentick/client-next
+// @agentick/client
 type SubHandleFactory = (client: ClientProtocol, sessionId: string) => unknown;
 export function registerSessionHandleExtension(name: string, make: SubHandleFactory): void;
 
@@ -93,13 +93,13 @@ Harness client packages register on import (side-effect), delegating to the
 existing façade:
 
 ```ts
-// @agentick/tasks-next/client
+// @agentick/tasks/client
 registerSessionHandleExtension("tasks", (client, id) => makeTasksClientHandle(client, id));
 // makeTasksClientHandle wraps taskStatusView(client, id) as .view() + the wire verbs.
 ```
 
 **Install-to-appear** (ADR 27 modularity): `client.session(id).tasks` exists iff
-`@agentick/tasks-next/client` is imported. The `agentick` metapackage bundles the
+`@agentick/tasks/client` is imported. The `agentick` metapackage bundles the
 built-in client packages, so `.tasks`/`.knobs`/`.elicitation`/`.timeline` are
 present by default; optional harnesses add their own. Client-core stays agnostic —
 it hardcodes no slot, exactly like spec's `HookBridges` seed hardcodes none.
@@ -177,10 +177,10 @@ app/gateway bridge scoping.
 The agnostic core and the batteries-included bundle are **two packages**, the
 client twin of how the `agentick` metapackage bundles server built-ins:
 
-- **`@agentick/client-core-next`** — the lean core. Owns `createClient`,
+- **`@agentick/client-core`** — the lean core. Owns `createClient`,
   `makeSessionHandle`, the `registerSessionHandleExtension` registry, the handle
   surface. Depends on **no** harness (the whole point — augmentation, not import).
-- **`@agentick/client-next`** — the default. Re-exports the core AND
+- **`@agentick/client`** — the default. Re-exports the core AND
   side-effect-imports every built-in `/client` subpath (`tasks`, `knobs`,
   `elicitation`), so all slots self-assemble with zero per-harness imports. Carries
   no logic — three imports + `export *`.
@@ -202,7 +202,7 @@ The two are twins: the same noun, the same verb grammar minus what cannot cross
 the wire (functions, live schemas, resolver-backed reads), rows typed by the
 wire projection, `Enumerable` by default, delivered per this ADR (`/client`
 subpath: `declare module` types the slot + registers the runtime factory;
-`@agentick/client-next` bundles the built-ins — bundled, not privileged, the
+`@agentick/client` bundles the built-ins — bundled, not privileged, the
 same as ADR 27 server-side). A new harness the client can't see is half a
 harness — so the omission is an architectural defect, not a follow-up.
 

@@ -43,7 +43,7 @@ peer messaging. The harness wrapping was bureaucracy.
 ## Shape
 
 ```ts
-// In @agentick/spec-next/data/formatter.ts
+// In @agentick/spec/data/formatter.ts
 type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
 
 interface FormatterIdentity {
@@ -52,7 +52,7 @@ interface FormatterIdentity {
   readonly version?: string;
 }
 
-// In @agentick/spec-next/data/semantic.ts — the sidecar pattern
+// In @agentick/spec/data/semantic.ts — the sidecar pattern
 type SemanticContentBlock = ContentBlock & {
   readonly semanticNode?: SemanticNode;
 };
@@ -87,7 +87,7 @@ Behavior:
 
 ## `createFormatter`
 
-Author entry point in `@agentick/formatters-next`. Per [ADR 36](36-define-vs-create-convention.md),
+Author entry point in `@agentick/formatters`. Per [ADR 36](36-define-vs-create-convention.md),
 formatters use the `create` verb because they need no parent-substrate
 to construct.
 
@@ -128,7 +128,7 @@ flat `ContentBlock[]` only.
 ## Where formatters live
 
 ```
-@agentick/formatters-next
+@agentick/formatters
   createFormatter
   refOf
   markdownFormatter          (default for the reconciler)
@@ -146,7 +146,7 @@ without upside. Easy to split later if a real need emerges.
 ## Scope switching
 
 `<XML>` / `<Markdown>` / `<PlainText>` JSX scope providers (in
-`@agentick/reconciler-react-next/react/components/format-scope.tsx`) push a
+`@agentick/reconciler-react/react/components/format-scope.tsx`) push a
 new active formatter for their subtree. The reconciler walker tracks
 the active formatter via the `HostScope` chain and stamps it on each
 emitted entry as `MessageEntry.renderedWith` / `SectionEntry.renderedWith`.
@@ -259,7 +259,7 @@ const app = createApp(<Agent />, {
 - [ADR 22](./22-state-formatters-reconciler-shape.md) — the decision record.
 - [03 — Reconciler Harness](./03-reconciler-harness.md) — the host of the formatter pass.
 - [02 — Data Model](./02-data-model.md) — ContentBlock, SemanticNode, FormatterRef wire types.
-- [13 — Package Graph](./13-package-graph.md) — `@agentick/formatters-next` package home.
+- [13 — Package Graph](./13-package-graph.md) — `@agentick/formatters` package home.
 
 ## What's not here
 

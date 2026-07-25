@@ -39,12 +39,8 @@ website/api/
 
 coverage/
 
-# Example app data
-example/express/data/
-
 *.tsbuildinfo
 
-packages/tui/UI_IDEAS.md
 plans/
 
 # Top-level docs/ — ignored except v2 proposals and the archive.

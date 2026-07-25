@@ -4,7 +4,7 @@
 (stores-not-snapshots — three planes, outcomes-not-commands, the timeline as the
 recovery-bearing ES log), ADR 73 (StateDelta — the first routing of a reactive
 change), ADR 76 (operation middleware — the *intercept* seam this ADR's *notify*
-seam is the twin of), the `KeyedNotifier` (`@agentick/pubsub-next`), the per-entry
+seam is the twin of), the `KeyedNotifier` (`@agentick/pubsub`), the per-entry
 `renderedWith: FormatterRef` seam (`entries.ts`). **Governing principle:**
 [[feedback_capability_not_opinion]] — ship *capability* + an *overridable default*,
 never a hardcoded policy.
@@ -74,7 +74,7 @@ Steel-manning before adding anything ([[feedback_steelman_the_null_hypothesis]])
 
 ### 1. The change-event primitive — the `ChangeNotifier` notify seam
 
-A **sibling primitive** in `@agentick/pubsub-next`, `ChangeNotifier<V>`, carries
+A **sibling primitive** in `@agentick/pubsub`, `ChangeNotifier<V>`, carries
 typed *push* reactivity alongside the existing *pull* one. It is deliberately
 **separate from `KeyedNotifier`** (not a bolt-on): `KeyedNotifier`'s job is
 `void`-or-`T` ping fan-out for `useSyncExternalStore` render subscriptions; folding
@@ -317,13 +317,13 @@ answer / awaited result, ADR 68/69) is a separate, already-built mechanism and i
   seam; `onChange` here is its *notify* twin.
 - `docs/proposals/v2/blueprint/73-ag-ui-projection.md` — StateDelta + steps, the
   first change-event routings.
-- `packages-next/spec/src/data/entries.ts` — `MessageEntry` / `SectionEntry` +
+- `packages/spec/src/data/entries.ts` — `MessageEntry` / `SectionEntry` +
   `renderedWith: FormatterRef`.
-- `packages-next/spec/src/data/content-blocks.ts` — `MessageRole`, and
-  `packages-next/spec/src/protocol/session-harness.ts` — `SessionMessageRole` +
+- `packages/spec/src/data/content-blocks.ts` — `MessageRole`, and
+  `packages/spec/src/protocol/session-harness.ts` — `SessionMessageRole` +
   `TimelineEntry` / `MessageTimelineEntry` / `TurnBoundaryEntry` (both role unions
   drop `"event"`; the new `EventTimelineEntry` kind lands here, and `visibility`
   serves the out-of-context case). Migration touches reconciler-react's
   `content-blocks.spec.tsx` `role:"event"` usages + the timeline README note.
-- `packages-next/pubsub/src/change-notifier.ts` — the `ChangeNotifier` notify seam
+- `packages/pubsub/src/change-notifier.ts` — the `ChangeNotifier` notify seam
   (`onChange` / `emitChange` / `changeKind`), sibling to `keyed-notifier.ts`. **BUILT.**

@@ -1,0 +1,67 @@
+{
+  "name": "@agentick/prompts-react",
+  "version": "0.0.0",
+  "description": "React binding for @agentick/prompts. Exports `reactPromptRenderer` (ReactNode → MessageEntry[] via compileTemplate) and the `withReactPrompts` convenience extension.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "harness",
+    "prompts",
+    "react"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/prompts-react"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/prompts": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "react": "^19.2.4"
+  },
+  "devDependencies": {
+    "@agentick/runtime": "workspace:*",
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

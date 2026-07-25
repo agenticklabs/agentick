@@ -36,8 +36,8 @@ lands with the formal gateway-extension work; Mode A ships today.
 ## Quickstart (Mode A)
 
 ```ts
-import { spawnStandaloneMcpServer, stdioTransport } from "@agentick/mcp-next/server";
-import { createTool } from "@agentick/tool-next";
+import { spawnStandaloneMcpServer, stdioTransport } from "@agentick/mcp/server";
+import { createTool } from "@agentick/tool";
 import { z } from "zod";
 
 const Calculator = createTool({
@@ -63,7 +63,7 @@ client that connects. `spawnStandaloneMcpServer` synthesizes a minimal substrate
 constructs the harness, mounts transports, and returns a `{ harness, close }`
 handle — you own the signal handling.
 
-Note the tool factory: server tools use `createTool` from `@agentick/tool-next`,
+Note the tool factory: server tools use `createTool` from `@agentick/tool`,
 whose schema field is `inputSchema` and whose handler receives `(input, { ctx })`.
 
 ## The options shape
@@ -98,7 +98,7 @@ The `tools` slot accepts an array shorthand (the 90% case) or a config object wi
 per-connection projection rules:
 
 ```ts
-import { toolPrefix } from "@agentick/tool-next/transforms";
+import { toolPrefix } from "@agentick/tool/transforms";
 
 // Array shorthand:
 tools: [Calculator, Search, Translate];
@@ -206,7 +206,7 @@ import {
   bearerTokenAuth,
   roleBasedAuthz,
   slidingWindowLimiter,
-} from "@agentick/mcp-next/server";
+} from "@agentick/mcp/server";
 
 auth: {
   authenticator: bearerTokenAuth({
@@ -273,7 +273,7 @@ Each transport carries its own `kind` discriminator, which the security pipeline
 reads for its transport-aware defaults.
 
 ```ts
-import { McpServerHarness, httpTransport, bearerTokenAuth } from "@agentick/mcp-next/server";
+import { McpServerHarness, httpTransport, bearerTokenAuth } from "@agentick/mcp/server";
 
 const server = new McpServerHarness(scopeId, journal, bus, inbox, {
   name: "my-server",
@@ -287,7 +287,7 @@ await server.start();
 
 ## Conformance
 
-`@agentick/mcp-next/testing` ships `runMcpConformance`, which exercises a server
+`@agentick/mcp/testing` ships `runMcpConformance`, which exercises a server
 harness both over an in-process loopback (server harness ↔ a real `McpClient`) and,
 gated, against an official reference peer — catching wire drift the shared-SDK
 loopback can't. Run it against your server config to prove the projection round-trips
@@ -315,5 +315,5 @@ every operation.
 - [MCP: connecting to servers](/docs/v2/mcp) — the client direction.
 - [Resources](/docs/v2/resources) — the registry you project over `resources/*`.
 - [Tools](/docs/tools) — the tools you project over `tools/*`.
-- [`@agentick/mcp-next/server` README](https://github.com/agenticklabs/agentick/blob/feat/v2/packages-next/mcp/src/server/README.md) — full server surface + exports.
+- [`@agentick/mcp/server` README](https://github.com/agenticklabs/agentick/blob/feat/v2/packages/mcp/src/server/README.md) — full server surface + exports.
 - ADRs: [40 — MCP server harness](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/40-mcp-server-harness.md), [62 — resources](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/62-resources-harness.md), [63 — compiler surfacing](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/63-compiler-surfacing.md), [64 — runtime signals](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/64-runtime-signal-family.md), [65 — roots](https://github.com/agenticklabs/agentick/blob/feat/v2/docs/proposals/v2/blueprint/65-roots-as-projection.md).

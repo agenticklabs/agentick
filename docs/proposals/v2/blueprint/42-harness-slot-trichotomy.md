@@ -2,10 +2,10 @@
 
 **Status:** Proposed — 2026-06-29.
 **Touches:** every package whose adopter-facing options surface a slot
-backed by a harness — initial set: `@agentick/mcp-next/server`
+backed by a harness — initial set: `@agentick/mcp/server`
 (`prompts`, future `tools` / `tasks` / `elicit` / `sample`),
-`@agentick/app-next` (`tools`, `skills`, `prompts`),
-`@agentick/eval-next` (`app`), `@agentick/gateway-next`
+`@agentick/app` (`tools`, `skills`, `prompts`),
+`@agentick/eval` (`app`), `@agentick/gateway`
 (`mcpServers` and its inner slots). Cross-references ADR 26
 (harness API shape) and ADR 27 (modular built-ins).
 **Driver:** During #171d.1b, the prompts slot leaked the word
@@ -342,7 +342,7 @@ This is the first pass against existing slots. Items marked ⚠ are
 the gaps that should generate follow-up tasks; items marked ✅ already
 satisfy the convention.
 
-### `@agentick/mcp-next/server` → `prompts` slot
+### `@agentick/mcp/server` → `prompts` slot
 - 1. Array shorthand: ✅ (lands with #171d.1b)
 - 2. Instance shorthand: ✅
 - 3. `use:` escape hatch: ✅
@@ -351,7 +351,7 @@ satisfy the convention.
 - 6. `server.prompts` getter: ✅
 - 7. Test coverage: ✅
 
-### `@agentick/mcp-next/server` → `tools` slot — landed via Slice 2 (#265)
+### `@agentick/mcp/server` → `tools` slot — landed via Slice 2 (#265)
 - 1. Array shorthand: ✅ — `tools: CreatedTool[]` is the 90% case.
      The two-collection problem (declarations + handlers) is solved
      by `CreatedTool` carrying both: server splits `t.declaration`
@@ -377,7 +377,7 @@ satisfy the convention.
 - 7. Test coverage: ✅ — `tools-slot.spec.ts` covers both authoring
      patterns + the xor-discrimination boundary cases.
 
-### `@agentick/skills-next` → `withSkills` — landed via Slice 3 (#266)
+### `@agentick/skills` → `withSkills` — landed via Slice 3 (#266)
 - 1. Array shorthand: ✅ — `withSkills([{ name, description, content }, ...])`
      is sugar for `{ initial: [...] }`. The earlier note about
      "loader-driven harnesses exempt from the shorthand" was
@@ -399,7 +399,7 @@ satisfy the convention.
 - 7. Test coverage: ✅ — `slot-trichotomy.spec.ts` (10 tests) +
      `loaders.spec.ts` end-to-end still green.
 
-### `@agentick/prompts-next` → `withPrompts` — landed via Slice 3 (#266)
+### `@agentick/prompts` → `withPrompts` — landed via Slice 3 (#266)
 - 1. Array shorthand: ✅ — `withPrompts([{ declaration }, ...])` →
      `{ initial: [...] }`.
 - 2. Instance shorthand: ✅ — `withPrompts(myPromptsInstance)` →
@@ -415,7 +415,7 @@ satisfy the convention.
 - 6. `session.prompts` getter: same caveat as skills — leaks "Harness".
 - 7. Test coverage: ✅ — `slot-trichotomy.spec.ts` (11 tests).
 
-### `@agentick/tasks-next` → `withTasks` — alias-only, slot deferred (#266)
+### `@agentick/tasks` → `withTasks` — alias-only, slot deferred (#266)
 - 1-3. Trichotomy: ⚠ INTENTIONALLY EXEMPT — per ADR 42 §"What this
      ADR does NOT decide", the per-session `TasksHarness` is owned by
      the parent `AppHarness` via the single-construction-site pattern
@@ -434,12 +434,12 @@ satisfy the convention.
      instance contract; no slot-trichotomy tests since the slot
      doesn't apply.
 
-### `@agentick/eval-next` → `app` slot
+### `@agentick/eval` → `app` slot
 - Differs from harness slots — it accepts a factory thunk, not a
   harness instance. Out of scope for this ADR; the thunk form is
   documented in ADR 37.
 
-### `@agentick/gateway-next` → `mcpServers` slot
+### `@agentick/gateway` → `mcpServers` slot
 - Already accepts an array of `McpServerOptions` — the shorthand form
   matches the convention. Each entry's INTERIOR (tools, prompts, ...)
   is what gets audited via the rows above.

@@ -9,7 +9,7 @@
 
 ## TL;DR
 
-`gateway.notify()` is the only server→client change-fan-out in the framework that (a) reinvents a fan-out mechanism instead of using the bus or `@agentick/pubsub-next`, and (b) isolates by **runtime filter** (`to: (meta) => boolean`) instead of **by instance**. Every other reactive signal path in the codebase uses one of the two foundational primitives, and every other isolation boundary (app, session, MCP connection, credential namespace, outbound principal) is **per-instance / structural**, per ADR 45.
+`gateway.notify()` is the only server→client change-fan-out in the framework that (a) reinvents a fan-out mechanism instead of using the bus or `@agentick/pubsub`, and (b) isolates by **runtime filter** (`to: (meta) => boolean`) instead of **by instance**. Every other reactive signal path in the codebase uses one of the two foundational primitives, and every other isolation boundary (app, session, MCP connection, credential namespace, outbound principal) is **per-instance / structural**, per ADR 45.
 
 **Decision:** server→client reactive signals are modeled as `ProtocolEvent`s on the bus and delivered over the existing `sub/subscribe` wire extension. The gateway gets an `emitCapabilitiesChanged()` seam (bus append) now; the client's *unconditional, client-owned* self-maintenance of `client.capabilities` is deferred to #308 (the trigger event can't fire until dynamic extensions exist). `gateway.notify` / `acceptConnection` / `ClientConnection` / `ClientConnectionMetadata` / `onDeliveryError` / the per-transport sink registration / `serverNotifier` are **deleted**. Multi-tenant and principal isolation are per-instance child buses — the composition that already isolates app and session substrate — not a `notify({to})` predicate.
 
@@ -23,7 +23,7 @@ This is not a shrink. It is a total removal. The residual "per-connection contro
 
 1. **`LocalEventBus`** (`runtime-next/substrate/local-event-bus.ts`) — a cursor log (ring buffer + per-subscriber cursor pull), scoped by `EventScope`, replayable with `CursorEvictedError` on retention overrun, lazily fanned via a surface index, journal- and wire-projectable. The domain-event substrate. Its defining composition (doc comment, `local-event-bus.ts:50`): **"Fan-in writes, isolated reads. Tenant-scoped composition."**
 
-2. **`@agentick/pubsub-next`** — `createNotifier` (one topic), `createKeyedNotifier`, `createLocalPubSub`. Synchronous, local, no replay, no scope. The "my harness state changed, tell in-process subscribers" primitive.
+2. **`@agentick/pubsub`** — `createNotifier` (one topic), `createKeyedNotifier`, `createLocalPubSub`. Synchronous, local, no replay, no scope. The "my harness state changed, tell in-process subscribers" primitive.
 
 Harnesses use them **without divergence**:
 

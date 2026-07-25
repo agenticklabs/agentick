@@ -64,7 +64,7 @@ block just before ADR 57's `messagePartFromBlock`. Three actions, in order of pr
   a typed `UnsupportedMediaError`. Configurable per app / per target.
 
 ### 3. Where it lives
-The pass is a stage in `@agentick/model-next`'s projection pipeline (the ADR-57 Stage-1 home),
+The pass is a stage in `@agentick/model`'s projection pipeline (the ADR-57 Stage-1 home),
 consuming `target.capabilities.media`. Adapters keep projecting the (now-normalized) blocks; they
 stop having to defensively down-convert. A `runMediaNormalization(content, capabilities, opts)`
 export + conformance suite (each provider × each modality/source/policy).

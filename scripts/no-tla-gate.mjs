@@ -34,7 +34,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import process from "node:process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const PKG_DIR = join(ROOT, "packages-next");
+const PKG_DIR = join(ROOT, "packages");
 
 // ── Node version guard: require(ESM) needs 20.19+ or 22.12+ ──────────────────
 const [maj, min] = process.versions.node.split(".").map(Number);

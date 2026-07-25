@@ -7,10 +7,10 @@ gate (cloud persona #163) ingresses over HTTP and connectors, both currently una
 `AuthSource` *grant-derivation* side), ADR 47 (no gateway connection registry — the seam lives
 at transport ingress), ADR 48 (`principal` → structural identity), ADR 58 (connectors — the
 second ingress edge).
-**Touches:** `@agentick/spec-next` (`wire/authorizer.ts` — `AuthSource`/`IngressIdentity`
-already exist; adds `IngressContext` + `IngressCredential`), `@agentick/transport-next`
+**Touches:** `@agentick/spec` (`wire/authorizer.ts` — `AuthSource`/`IngressIdentity`
+already exist; adds `IngressContext` + `IngressCredential`), `@agentick/transport`
 (server dispatch + connection-context), `@agentick/transport-{websocket,http,unix-socket}-next`
-(the edges), `@agentick/connector-next` (the federated edge, slice 2).
+(the edges), `@agentick/connector` (the federated edge, slice 2).
 **Tracking:** #146 (title still says "ADR 34" — pre-renumber; retarget to ADR 61). The
 `TODO(#302)` code refs are stale — #302 does not exist; the issue is #146.
 

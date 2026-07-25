@@ -1,0 +1,101 @@
+{
+  "name": "@agentick/sandbox",
+  "version": "0.0.0",
+  "description": "Base sandbox package (ADR 59) — the SandboxHarness + bridge + ACL, the SandboxProvider construction contract + SandboxHandle interface, the applyEdits transform, and the pure network matcher. Providers dep this base (mirroring model-openai-next → model-next). React bindings ship from /react; the conformance suite + fake from /testing.",
+  "type": "module",
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/augment.ts"
+  ],
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./react": {
+      "types": "./src/react/index.ts",
+      "import": "./src/react/index.ts",
+      "default": "./src/react/index.ts"
+    },
+    "./mcp": {
+      "types": "./src/mcp/index.ts",
+      "import": "./src/mcp/index.ts",
+      "default": "./src/mcp/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/elicitation": "workspace:*",
+    "@agentick/mcp": "workspace:*",
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/compiler": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
+    "@agentick/resources": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/tool": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.5"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "vitest": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.ts",
+        "import": "./dist/react/index.js",
+        "default": "./dist/react/index.js"
+      },
+      "./mcp": {
+        "types": "./dist/mcp/index.d.ts",
+        "import": "./dist/mcp/index.js",
+        "default": "./dist/mcp/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

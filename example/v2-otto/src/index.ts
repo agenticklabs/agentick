@@ -29,17 +29,17 @@ import "dotenv/config";
 import React from "react";
 import { z } from "zod";
 
-import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { createApp } from "@agentick/app/react";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
-import type { AppExtension, ContentBlock } from "@agentick/spec-next";
-import { jsonSchema } from "@agentick/spec-next";
+import type { AppExtension, ContentBlock } from "@agentick/spec";
+import { jsonSchema } from "@agentick/spec";
 
-import { NoneAuth, withMCP } from "@agentick/mcp-next";
-import { inMemoryServerTransport, McpServerHarness } from "@agentick/mcp-next/server";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime-next";
-import { withTasks } from "@agentick/tasks-next";
-import { createTool } from "@agentick/tool-next";
+import { NoneAuth, withMCP } from "@agentick/mcp";
+import { inMemoryServerTransport, McpServerHarness } from "@agentick/mcp/server";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { withTasks } from "@agentick/tasks";
+import { createTool } from "@agentick/tool";
 
 import { Agent } from "./agent.js";
 

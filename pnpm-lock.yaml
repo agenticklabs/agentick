@@ -60,39 +60,39 @@ importers:
 
   example/v2-coding-agent:
     dependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
-        version: link:../../packages-next/app
-      '@agentick/client-next':
+        version: link:../../packages/app
+      '@agentick/client':
         specifier: workspace:*
-        version: link:../../packages-next/client
-      '@agentick/compiler-react-next':
+        version: link:../../packages/client
+      '@agentick/compiler-react':
         specifier: workspace:*
-        version: link:../../packages-next/compiler-react
-      '@agentick/eval-next':
+        version: link:../../packages/compiler-react
+      '@agentick/eval':
         specifier: workspace:*
-        version: link:../../packages-next/eval
-      '@agentick/gateway-next':
+        version: link:../../packages/eval
+      '@agentick/gateway':
         specifier: workspace:*
-        version: link:../../packages-next/gateway
-      '@agentick/knobs-next':
+        version: link:../../packages/gateway
+      '@agentick/knobs':
         specifier: workspace:*
-        version: link:../../packages-next/knobs
-      '@agentick/model-ai-sdk-next':
+        version: link:../../packages/knobs
+      '@agentick/model-ai-sdk':
         specifier: workspace:*
-        version: link:../../packages-next/model-ai-sdk
-      '@agentick/spec-next':
+        version: link:../../packages/model-ai-sdk
+      '@agentick/spec':
         specifier: workspace:*
-        version: link:../../packages-next/spec
-      '@agentick/timeline-next':
+        version: link:../../packages/spec
+      '@agentick/timeline':
         specifier: workspace:*
-        version: link:../../packages-next/timeline
-      '@agentick/transport-in-process-next':
+        version: link:../../packages/timeline
+      '@agentick/transport':
         specifier: workspace:*
-        version: link:../../packages-next/transport-in-process
-      '@agentick/transport-next':
+        version: link:../../packages/transport
+      '@agentick/transport-in-process':
         specifier: workspace:*
-        version: link:../../packages-next/transport
+        version: link:../../packages/transport-in-process
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.6)
@@ -121,39 +121,39 @@ importers:
 
   example/v2-otto:
     dependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
-        version: link:../../packages-next/app
-      '@agentick/compiler-react-next':
+        version: link:../../packages/app
+      '@agentick/compiler-react':
         specifier: workspace:*
-        version: link:../../packages-next/compiler-react
-      '@agentick/knobs-next':
+        version: link:../../packages/compiler-react
+      '@agentick/knobs':
         specifier: workspace:*
-        version: link:../../packages-next/knobs
-      '@agentick/mcp-next':
+        version: link:../../packages/knobs
+      '@agentick/mcp':
         specifier: workspace:*
-        version: link:../../packages-next/mcp
-      '@agentick/model-ai-sdk-next':
+        version: link:../../packages/mcp
+      '@agentick/model-ai-sdk':
         specifier: workspace:*
-        version: link:../../packages-next/model-ai-sdk
-      '@agentick/runtime-next':
+        version: link:../../packages/model-ai-sdk
+      '@agentick/runtime':
         specifier: workspace:*
-        version: link:../../packages-next/runtime
-      '@agentick/spec-next':
+        version: link:../../packages/runtime
+      '@agentick/spec':
         specifier: workspace:*
-        version: link:../../packages-next/spec
-      '@agentick/state-next':
+        version: link:../../packages/spec
+      '@agentick/state':
         specifier: workspace:*
-        version: link:../../packages-next/state
-      '@agentick/tasks-next':
+        version: link:../../packages/state
+      '@agentick/tasks':
         specifier: workspace:*
-        version: link:../../packages-next/tasks
-      '@agentick/timeline-next':
+        version: link:../../packages/tasks
+      '@agentick/timeline':
         specifier: workspace:*
-        version: link:../../packages-next/timeline
-      '@agentick/tool-next':
+        version: link:../../packages/timeline
+      '@agentick/tool':
         specifier: workspace:*
-        version: link:../../packages-next/tool
+        version: link:../../packages/tool
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.6)
@@ -182,18 +182,18 @@ importers:
 
   example/v2-otto-cluster:
     dependencies:
-      '@agentick/cluster-broker-next':
+      '@agentick/cluster':
         specifier: workspace:*
-        version: link:../../packages-next/cluster-broker
-      '@agentick/cluster-net-next':
+        version: link:../../packages/cluster
+      '@agentick/cluster-broker':
         specifier: workspace:*
-        version: link:../../packages-next/cluster-net
-      '@agentick/cluster-next':
+        version: link:../../packages/cluster-broker
+      '@agentick/cluster-net':
         specifier: workspace:*
-        version: link:../../packages-next/cluster
-      '@agentick/runtime-next':
+        version: link:../../packages/cluster-net
+      '@agentick/runtime':
         specifier: workspace:*
-        version: link:../../packages-next/runtime
+        version: link:../../packages/runtime
     devDependencies:
       '@types/node':
         specifier: ^22.5.4
@@ -210,27 +210,27 @@ importers:
 
   example/v2-real:
     dependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
-        version: link:../../packages-next/app
-      '@agentick/compiler-react-next':
+        version: link:../../packages/app
+      '@agentick/compiler-react':
         specifier: workspace:*
-        version: link:../../packages-next/compiler-react
-      '@agentick/knobs-next':
+        version: link:../../packages/compiler-react
+      '@agentick/knobs':
         specifier: workspace:*
-        version: link:../../packages-next/knobs
-      '@agentick/model-ai-sdk-next':
+        version: link:../../packages/knobs
+      '@agentick/model-ai-sdk':
         specifier: workspace:*
-        version: link:../../packages-next/model-ai-sdk
-      '@agentick/spec-next':
+        version: link:../../packages/model-ai-sdk
+      '@agentick/spec':
         specifier: workspace:*
-        version: link:../../packages-next/spec
-      '@agentick/state-next':
+        version: link:../../packages/spec
+      '@agentick/state':
         specifier: workspace:*
-        version: link:../../packages-next/state
-      '@agentick/timeline-next':
+        version: link:../../packages/state
+      '@agentick/timeline':
         specifier: workspace:*
-        version: link:../../packages-next/timeline
+        version: link:../../packages/timeline
       '@ai-sdk/openai':
         specifier: ^2.0.0
         version: 2.0.89(zod@4.3.6)
@@ -257,42 +257,42 @@ importers:
         specifier: ^5.7.3
         version: 5.9.3
 
-  packages-next/app:
+  packages/app:
     dependencies:
-      '@agentick/cluster-next':
+      '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/loop-executor-next':
+      '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../loop-executor
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/session-next':
+      '@agentick/session':
         specifier: workspace:*
         version: link:../session
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
-      '@agentick/tool-executor-next':
+      '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@effect/opentelemetry':
@@ -317,19 +317,19 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/knobs-next':
+      '@agentick/knobs':
         specifier: workspace:*
         version: link:../knobs
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/skills-next':
+      '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
       '@types/react':
@@ -339,46 +339,46 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
 
-  packages-next/client:
+  packages/client:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/gates-next':
+      '@agentick/gates':
         specifier: workspace:*
         version: link:../gates
-      '@agentick/knobs-next':
+      '@agentick/knobs':
         specifier: workspace:*
         version: link:../knobs
-      '@agentick/prompts-next':
+      '@agentick/prompts':
         specifier: workspace:*
         version: link:../prompts
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/skills-next':
+      '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
-      '@agentick/state-next':
+      '@agentick/state':
         specifier: workspace:*
         version: link:../state
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
-      '@agentick/tool-executor-next':
+      '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor
     devDependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-in-process-next':
+      '@agentick/transport-in-process':
         specifier: workspace:*
         version: link:../transport-in-process
       typescript:
@@ -388,25 +388,25 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/client-core:
+  packages/client-core:
     dependencies:
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       typescript:
@@ -416,16 +416,16 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/client-extensions:
+  packages/client-extensions:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
     devDependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/transport-in-process-next':
+      '@agentick/transport-in-process':
         specifier: workspace:*
         version: link:../transport-in-process
       typescript:
@@ -435,16 +435,16 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/client-react:
+  packages/client-react:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
     devDependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
       '@testing-library/dom':
@@ -469,58 +469,58 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4(react@19.2.4)
 
-  packages-next/cluster:
+  packages/cluster:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
 
-  packages-next/cluster-broker:
+  packages/cluster-broker:
     dependencies:
-      '@agentick/cluster-next':
+      '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
 
-  packages-next/cluster-net:
+  packages/cluster-net:
     dependencies:
-      '@agentick/cluster-broker-next':
+      '@agentick/cluster':
+        specifier: workspace:*
+        version: link:../cluster
+      '@agentick/cluster-broker':
         specifier: workspace:*
         version: link:../cluster-broker
-      '@agentick/cluster-next':
-        specifier: workspace:*
-        version: link:../cluster
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
 
-  packages-next/cluster-redis:
+  packages/cluster-redis:
     dependencies:
-      '@agentick/cluster-next':
+      '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
@@ -528,18 +528,18 @@ importers:
         specifier: ^5.4.0
         version: 5.11.1(supports-color@8.1.1)
 
-  packages-next/cluster-ws:
+  packages/cluster-ws:
     dependencies:
-      '@agentick/cluster-broker-next':
-        specifier: workspace:*
-        version: link:../cluster-broker
-      '@agentick/cluster-next':
+      '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
-      '@agentick/spec-next':
+      '@agentick/cluster-broker':
+        specifier: workspace:*
+        version: link:../cluster-broker
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       ws:
@@ -550,42 +550,42 @@ importers:
         specifier: ^8.5.10
         version: 8.18.1
 
-  packages-next/compiler:
+  packages/compiler:
     dependencies:
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
 
-  packages-next/compiler-react:
+  packages/compiler-react:
     dependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/formatters-next':
+      '@agentick/formatters':
         specifier: workspace:*
         version: link:../formatters
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/tool-next':
+      '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -598,7 +598,7 @@ importers:
         specifier: ^0.33.0
         version: 0.33.0(react@19.2.4)
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       '@types/react':
@@ -608,34 +608,34 @@ importers:
         specifier: 0.33.0
         version: 0.33.0(@types/react@19.2.13)
 
-  packages-next/connector:
+  packages/connector:
     dependencies:
-      '@agentick/formatters-next':
+      '@agentick/formatters':
         specifier: workspace:*
         version: link:../formatters
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/model-executor-next':
-        specifier: workspace:*
-        version: link:../model-executor
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/runtime-next':
+      '@agentick/model-executor':
+        specifier: workspace:*
+        version: link:../model-executor
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
       '@types/react':
@@ -645,72 +645,72 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
 
-  packages-next/credentials:
+  packages/credentials:
     dependencies:
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
 
-  packages-next/elicitation:
+  packages/elicitation:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
 
-  packages-next/eval:
+  packages/eval:
     dependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
         version: link:../app
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
       '@types/react':
@@ -720,36 +720,36 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
 
-  packages-next/formatters:
+  packages/formatters:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
 
-  packages-next/gates:
+  packages/gates:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/knobs-next':
+      '@agentick/knobs':
         specifier: workspace:*
         version: link:../knobs
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       effect:
@@ -759,74 +759,74 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/gateway:
+  packages/gateway:
     dependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
         version: link:../app
-      '@agentick/cluster-next':
+      '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
 
-  packages-next/knobs:
+  packages/knobs:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/tool-next':
+      '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -836,99 +836,99 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/live:
+  packages/live:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/transport-in-process-next':
+      '@agentick/transport-in-process':
         specifier: workspace:*
         version: link:../transport-in-process
 
-  packages-next/loop-executor:
+  packages/loop-executor:
     dependencies:
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/tool-executor-next':
+      '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor
 
-  packages-next/mcp:
+  packages/mcp:
     dependencies:
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/prompts-next':
+      '@agentick/prompts':
         specifier: workspace:*
         version: link:../prompts
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/tool-executor-next':
-        specifier: workspace:*
-        version: link:../tool-executor
-      '@agentick/tool-next':
+      '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
-      '@agentick/utils-next':
+      '@agentick/tool-executor':
+        specifier: workspace:*
+        version: link:../tool-executor
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@modelcontextprotocol/sdk':
@@ -938,22 +938,22 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
         version: link:../app
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/credentials-next':
+      '@agentick/credentials':
         specifier: workspace:*
         version: link:../credentials
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       '@types/react':
@@ -963,37 +963,37 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
 
-  packages-next/model:
+  packages/model:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
 
-  packages-next/model-ai-sdk:
+  packages/model-ai-sdk:
     dependencies:
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       ai:
         specifier: ^5.0.0
         version: 5.0.123(zod@4.3.6)
     devDependencies:
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
@@ -1003,188 +1003,188 @@ importers:
         specifier: ^2.0.0
         version: 2.14.6(@types/node@25.0.9)(typescript@7.0.2)
 
-  packages-next/model-anthropic:
+  packages/model-anthropic:
     dependencies:
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@anthropic-ai/sdk':
         specifier: ^0.39.0
         version: 0.39.0
     devDependencies:
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
         specifier: ^3.22.0
         version: 3.22.0
 
-  packages-next/model-executor:
+  packages/model-executor:
     dependencies:
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
 
-  packages-next/model-google:
+  packages/model-google:
     dependencies:
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@google/genai':
         specifier: ^1.31.0
         version: 1.38.0(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.3.6))(supports-color@8.1.1)
     devDependencies:
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
         specifier: ^3.22.0
         version: 3.22.0
 
-  packages-next/model-openai:
+  packages/model-openai:
     dependencies:
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       openai:
         specifier: ^6.0.0
         version: 6.16.0(ws@8.19.0)(zod@4.3.6)
     devDependencies:
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
         specifier: ^3.22.0
         version: 3.22.0
 
-  packages-next/prompts:
+  packages/prompts:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
 
-  packages-next/prompts-react:
+  packages/prompts-react:
     dependencies:
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/prompts-next':
+      '@agentick/prompts':
         specifier: workspace:*
         version: link:../prompts
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       react:
         specifier: ^19.2.4
         version: 19.2.4
     devDependencies:
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/pubsub:
+  packages/pubsub:
     dependencies:
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
 
-  packages-next/resources:
+  packages/resources:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1194,19 +1194,19 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/runtime:
+  packages/runtime:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@opentelemetry/sdk-metrics':
@@ -1219,43 +1219,43 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.0
 
-  packages-next/sandbox:
+  packages/sandbox:
     dependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/mcp-next':
+      '@agentick/mcp':
         specifier: workspace:*
         version: link:../mcp
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/tool-next':
+      '@agentick/tool':
         specifier: workspace:*
         version: link:../tool
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1272,15 +1272,15 @@ importers:
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/sandbox-docker:
+  packages/sandbox-docker:
     dependencies:
-      '@agentick/sandbox-next':
+      '@agentick/sandbox':
         specifier: workspace:*
         version: link:../sandbox
 
-  packages-next/sandbox-lambda:
+  packages/sandbox-lambda:
     dependencies:
-      '@agentick/sandbox-next':
+      '@agentick/sandbox':
         specifier: workspace:*
         version: link:../sandbox
       '@aws-sdk/client-lambda-microvms':
@@ -1294,60 +1294,60 @@ importers:
         specifier: ^8.18.1
         version: 8.18.1
 
-  packages-next/sandbox-local:
+  packages/sandbox-local:
     dependencies:
-      '@agentick/sandbox-next':
+      '@agentick/sandbox':
         specifier: workspace:*
         version: link:../sandbox
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
 
-  packages-next/session:
+  packages/session:
     dependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/gates-next':
+      '@agentick/gates':
         specifier: workspace:*
         version: link:../gates
-      '@agentick/knobs-next':
+      '@agentick/knobs':
         specifier: workspace:*
         version: link:../knobs
-      '@agentick/loop-executor-next':
+      '@agentick/loop-executor':
         specifier: workspace:*
         version: link:../loop-executor
-      '@agentick/model-next':
+      '@agentick/model':
         specifier: workspace:*
         version: link:../model
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/state-next':
+      '@agentick/state':
         specifier: workspace:*
         version: link:../state
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1357,25 +1357,25 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
     devDependencies:
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/skills-next':
+      '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/timeline-fs-next':
+      '@agentick/timeline-fs':
         specifier: workspace:*
         version: link:../timeline-fs
-      '@agentick/timeline-postgres-next':
+      '@agentick/timeline-postgres':
         specifier: workspace:*
         version: link:../timeline-postgres
-      '@agentick/tool-executor-next':
+      '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor
       '@types/pg':
@@ -1388,38 +1388,38 @@ importers:
         specifier: ^8.13.1
         version: 8.22.0
 
-  packages-next/skills:
+  packages/skills:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
 
-  packages-next/spec:
+  packages/spec:
     dependencies:
       '@opentelemetry/sdk-metrics':
         specifier: ^2.0.0
@@ -1435,12 +1435,12 @@ importers:
         specifier: ^6.0.2
         version: 6.0.2
 
-  packages-next/spec-conformance:
+  packages/spec-conformance:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1450,27 +1450,27 @@ importers:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/state:
+  packages/state:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
       effect:
@@ -1480,47 +1480,47 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/store:
+  packages/store:
     dependencies:
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
 
-  packages-next/subscriptions:
+  packages/subscriptions:
     dependencies:
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       react:
@@ -1531,56 +1531,56 @@ importers:
         specifier: ^19.2.13
         version: 19.2.13
 
-  packages-next/tasks:
+  packages/tasks:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
 
-  packages-next/tasks-store-postgres:
+  packages/tasks-store-postgres:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       pg:
         specifier: ^8.13.1
         version: 8.22.0
     devDependencies:
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
       '@types/pg':
         specifier: ^8.11.10
         version: 8.20.0
 
-  packages-next/telemetry-otlp:
+  packages/telemetry-otlp:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
       '@opentelemetry/api':
@@ -1611,30 +1611,30 @@ importers:
         specifier: ^2.0.0
         version: 2.10.0(@opentelemetry/api@1.9.0)
 
-  packages-next/timeline:
+  packages/timeline:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react-next':
+      '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1644,26 +1644,26 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
 
-  packages-next/timeline-fs:
+  packages/timeline-fs:
     dependencies:
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
     devDependencies:
-      '@agentick/store-next':
+      '@agentick/store':
         specifier: workspace:*
         version: link:../store
 
-  packages-next/timeline-postgres:
+  packages/timeline-postgres:
     dependencies:
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
       pg:
@@ -1674,75 +1674,75 @@ importers:
         specifier: ^8.11.10
         version: 8.20.0
 
-  packages-next/tool:
+  packages/tool:
     dependencies:
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       zod:
         specifier: ^4.3.6
         version: 4.3.6
 
-  packages-next/tool-executor:
+  packages/tool-executor:
     dependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
 
-  packages-next/transport:
+  packages/transport:
     dependencies:
-      '@agentick/pubsub-next':
+      '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
     devDependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
         version: link:../app
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/timeline-next':
+      '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline
       effect:
@@ -1755,25 +1755,25 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/transport-http:
+  packages/transport-http:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-next':
+      '@agentick/transport':
         specifier: workspace:*
         version: link:../transport
     devDependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1786,61 +1786,61 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/transport-in-process:
+  packages/transport-in-process:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-next':
+      '@agentick/transport':
         specifier: workspace:*
         version: link:../transport
     devDependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
         version: link:../app
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/compiler-next':
+      '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/elicitation-next':
+      '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/gates-next':
+      '@agentick/gates':
         specifier: workspace:*
         version: link:../gates
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/model-executor-next':
+      '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
-      '@agentick/prompts-next':
+      '@agentick/prompts':
         specifier: workspace:*
         version: link:../prompts
-      '@agentick/resources-next':
+      '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/skills-next':
+      '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/state-next':
+      '@agentick/state':
         specifier: workspace:*
         version: link:../state
-      '@agentick/tasks-next':
+      '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
-      '@agentick/tool-executor-next':
+      '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       effect:
@@ -1853,22 +1853,22 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/transport-unix-socket:
+  packages/transport-unix-socket:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-next':
+      '@agentick/transport':
         specifier: workspace:*
         version: link:../transport
     devDependencies:
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
       effect:
@@ -1881,34 +1881,34 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/transport-websocket:
+  packages/transport-websocket:
     dependencies:
-      '@agentick/spec-next':
+      '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
-      '@agentick/transport-next':
+      '@agentick/transport':
         specifier: workspace:*
         version: link:../transport
       ws:
         specifier: ^8.18.0
         version: 8.19.0
     devDependencies:
-      '@agentick/app-next':
+      '@agentick/app':
         specifier: workspace:*
         version: link:../app
-      '@agentick/client-core-next':
+      '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
-      '@agentick/gateway-next':
+      '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
-      '@agentick/runtime-next':
+      '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
-      '@agentick/spec-conformance-next':
+      '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils-next':
+      '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
       '@types/ws':
@@ -1924,7 +1924,7 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.8.4)
 
-  packages-next/utils:
+  packages/utils:
     dependencies:
       effect:
         specifier: ^3.22.0
@@ -3137,20 +3137,11 @@ packages:
   '@protobufjs/base64@1.1.2':
     resolution: {integrity: sha512-AZkcAA5vnN/v4PDqKyMR5lx7hZttPDgClv83E//FMNhR2TMcLUhfRUBHCmSl0oi9zMgDDqRUJkSxO3wm85+XLg==}
 
-  '@protobufjs/codegen@2.0.4':
-    resolution: {integrity: sha512-YyFaikqM5sH0ziFZCN3xDC7zeGaB/d0IUb9CATugHWbd1FRFwWwt4ld4OYMPWu5a3Xe01mGAULCdqhMlPl29Jg==}
-
   '@protobufjs/codegen@2.0.5':
     resolution: {integrity: sha512-zgXFLzW3Ap33e6d0Wlj4MGIm6Ce8O89n/apUaGNB/jx+hw+ruWEp7EwGUshdLKVRCxZW12fp9r40E1mQrf/34g==}
 
-  '@protobufjs/eventemitter@1.1.0':
-    resolution: {integrity: sha512-j9ednRT81vYJ9OfVuXG6ERSTdEL1xVsNgqpkxMsbIabzSo3goCjDIveeGv5d03om39ML71RdmrGNjG5SReBP/Q==}
-
   '@protobufjs/eventemitter@1.1.1':
     resolution: {integrity: sha512-vW1GmwMZNnL+gMRaovlh9yZX74kc+TTU3FObkkurpMaRtBfLP3ldjS9KQWlwZgraRE0+dheEEoAxdzcJQ8eXZg==}
-
-  '@protobufjs/fetch@1.1.0':
-    resolution: {integrity: sha512-lljVXpqXebpsijW71PZaCYeIcE5on1w5DlQy5WH6GLbFryLUrBD4932W/E2BSpfRJWseIL4v/KPgBFxDOIdKpQ==}
 
   '@protobufjs/fetch@1.1.1':
     resolution: {integrity: sha512-GpptLrs57adMSuHi3VNj0mAF8dwh36LMaYF6XyJ6JMWlVsc+t42tm1HSEDmOs3A8fC9yyeisgLhsTVQokOZ0zw==}
@@ -3158,17 +3149,11 @@ packages:
   '@protobufjs/float@1.0.2':
     resolution: {integrity: sha512-Ddb+kVXlXst9d+R9PfTIxh1EdNkgoRe5tOX6t01f1lYWOvJnSPDBlG241QLzcyPdoNTsblLUdujGSE4RzrTZGQ==}
 
-  '@protobufjs/inquire@1.1.0':
-    resolution: {integrity: sha512-kdSefcPdruJiFMVSbn801t4vFK7KB/5gd2fYvrxhuJYg8ILrmn9SKSX2tZdV6V+ksulWqS7aXjBcRXl3wHoD9Q==}
-
   '@protobufjs/path@1.1.2':
     resolution: {integrity: sha512-6JOcJ5Tm08dOHAbdR3GrvP+yUUfkjG5ePsHYczMFLq3ZmMkAD98cDgcT2iA1lJ9NVwFd4tH/iSSoe44YWkltEA==}
 
   '@protobufjs/pool@1.1.0':
     resolution: {integrity: sha512-0kELaGSIDBKvcgS4zkjz1PeddatrjYcmMWOlAuAPwAeccUrPHdUqo/J6LiymHHEiJT5NrF1UVwxY14f+fy4WQw==}
-
-  '@protobufjs/utf8@1.1.0':
-    resolution: {integrity: sha512-Vvn3zZrhQZkkBE8LSuW3em98c0FwgO4nxzv6OdSxPKJIEKY2bGbHn+mhGIPerzI4twdxaP8/0+06HBpwf345Lw==}
 
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
@@ -5101,10 +5086,6 @@ packages:
   property-information@7.1.0:
     resolution: {integrity: sha512-TwEZ+X+yCJmYfL7TPUOcvBZ4QfoT5YenQiJuX//0th53DE6w0xxLEtfK3iyryQFddXuvkIk51EEgrJQ0WJkOmQ==}
 
-  protobufjs@7.5.4:
-    resolution: {integrity: sha512-CvexbZtbov6jW2eXAvLukXjXUW1TzFaivC46BpWc/3BpcCysb5Vffu+B3XHMm8lVEuy2Mm4XGex8hBSg1yapPg==}
-    engines: {node: '>=12.0.0'}
-
   protobufjs@7.6.5:
     resolution: {integrity: sha512-/FPD0nUc9jH6rfFjji9IBqOz4pcSE3CsT1m7Ep6Mdb0LxSUMj8hgl6GomOvZzpNpAqqGaXA0P3VSrZLFzIhQrw==}
     engines: {node: '>=12.0.0'}
@@ -6536,7 +6517,7 @@ snapshots:
   '@google/genai@1.38.0(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.3.6))(supports-color@8.1.1)':
     dependencies:
       google-auth-library: 10.5.0(supports-color@8.1.1)
-      protobufjs: 7.5.4
+      protobufjs: 7.6.5
       ws: 8.19.0
     optionalDependencies:
       '@modelcontextprotocol/sdk': 1.29.0(supports-color@8.1.1)(zod@4.3.6)
@@ -6876,18 +6857,9 @@ snapshots:
 
   '@protobufjs/base64@1.1.2': {}
 
-  '@protobufjs/codegen@2.0.4': {}
-
   '@protobufjs/codegen@2.0.5': {}
 
-  '@protobufjs/eventemitter@1.1.0': {}
-
   '@protobufjs/eventemitter@1.1.1': {}
-
-  '@protobufjs/fetch@1.1.0':
-    dependencies:
-      '@protobufjs/aspromise': 1.1.2
-      '@protobufjs/inquire': 1.1.0
 
   '@protobufjs/fetch@1.1.1':
     dependencies:
@@ -6895,13 +6867,9 @@ snapshots:
 
   '@protobufjs/float@1.0.2': {}
 
-  '@protobufjs/inquire@1.1.0': {}
-
   '@protobufjs/path@1.1.2': {}
 
   '@protobufjs/pool@1.1.0': {}
-
-  '@protobufjs/utf8@1.1.0': {}
 
   '@protobufjs/utf8@1.1.2': {}
 
@@ -7177,7 +7145,7 @@ snapshots:
 
   '@types/node-fetch@2.6.13':
     dependencies:
-      '@types/node': 22.19.7
+      '@types/node': 25.0.9
       form-data: 4.0.5
 
   '@types/node@18.19.130':
@@ -7194,7 +7162,7 @@ snapshots:
 
   '@types/pg@8.20.0':
     dependencies:
-      '@types/node': 22.19.7
+      '@types/node': 25.0.9
       pg-protocol: 1.15.0
       pg-types: 2.2.0
 
@@ -7231,7 +7199,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 22.19.7
+      '@types/node': 25.0.9
 
   '@typescript-eslint/eslint-plugin@8.54.0(@typescript-eslint/parser@8.54.0(eslint@9.39.2(jiti@2.6.1)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@7.0.2))(eslint@9.39.2(jiti@2.6.1)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@7.0.2)':
     dependencies:
@@ -8889,21 +8857,6 @@ snapshots:
 
   property-information@7.1.0: {}
 
-  protobufjs@7.5.4:
-    dependencies:
-      '@protobufjs/aspromise': 1.1.2
-      '@protobufjs/base64': 1.1.2
-      '@protobufjs/codegen': 2.0.4
-      '@protobufjs/eventemitter': 1.1.0
-      '@protobufjs/fetch': 1.1.0
-      '@protobufjs/float': 1.0.2
-      '@protobufjs/inquire': 1.1.0
-      '@protobufjs/path': 1.1.2
-      '@protobufjs/pool': 1.1.0
-      '@protobufjs/utf8': 1.1.0
-      '@types/node': 22.19.7
-      long: 5.3.2
-
   protobufjs@7.6.5:
     dependencies:
       '@protobufjs/aspromise': 1.1.2
@@ -8915,7 +8868,7 @@ snapshots:
       '@protobufjs/path': 1.1.2
       '@protobufjs/pool': 1.1.0
       '@protobufjs/utf8': 1.1.2
-      '@types/node': 22.19.7
+      '@types/node': 25.0.9
       long: 5.3.2
 
   proxy-addr@2.0.7:

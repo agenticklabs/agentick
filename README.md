@@ -14,9 +14,9 @@ calls a tool, your component re-renders. When you want older messages compressed
 you write a component. The model's entire world is a tree you control.
 
 ```tsx
-import { System, createTool } from "@agentick/compiler-react-next";
-import { Knobs, useKnob } from "@agentick/knobs-next/react";
-import { Timeline } from "@agentick/timeline-next/react";
+import { System, createTool } from "@agentick/compiler-react";
+import { Knobs, useKnob } from "@agentick/knobs/react";
+import { Timeline } from "@agentick/timeline/react";
 import { z } from "zod";
 
 const Calculator = createTool({
@@ -50,8 +50,8 @@ export function Agent() {
 ```
 
 ```tsx
-import { createApp } from "@agentick/app-next/react";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { createApp } from "@agentick/app/react";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 const app = await createApp(<Agent />, { model: aisdk(openai("gpt-4o-mini")) });
@@ -84,9 +84,9 @@ pnpm --filter example-v2-real dev
 ```
 
 Building your own agent in the monorepo, you compose the `-next` packages
-directly (the calculator above uses five): `@agentick/app-next`,
-`@agentick/compiler-react-next`, `@agentick/knobs-next`, `@agentick/timeline-next`,
-and a model adapter (`@agentick/model-ai-sdk-next` + an `@ai-sdk/*` provider).
+directly (the calculator above uses five): `@agentick/app`,
+`@agentick/compiler-react`, `@agentick/knobs`, `@agentick/timeline`,
+and a model adapter (`@agentick/model-ai-sdk` + an `@ai-sdk/*` provider).
 Your `tsconfig.json` needs React JSX:
 
 ```json
@@ -116,10 +116,10 @@ framework compiles it, the model reads it.
 Everything in the tree compiles to what the model sees. A curated set — each
 package's README has the full surface.
 
-**Messages & context** — `@agentick/compiler-react-next`
+**Messages & context** — `@agentick/compiler-react`
 
 ```tsx
-import { System, User, Assistant, Section } from "@agentick/compiler-react-next";
+import { System, User, Assistant, Section } from "@agentick/compiler-react";
 
 <System>You are a support agent.</System>
 <Section id="account" audience="model">
@@ -130,10 +130,10 @@ import { System, User, Assistant, Section } from "@agentick/compiler-react-next"
 `<Section audience="model" | "user" | "all">` injects structured context. Semantic
 components (`<H1>`–`<H3>`, `<Paragraph>`, …) compile to renderer-appropriate output
 (markdown, XML) so you never hand-format strings — see the
-[`@agentick/compiler-react-next` README](packages-next/compiler-react/README.md)
+[`@agentick/compiler-react` README](packages/compiler-react/README.md)
 for the full set.
 
-**The timeline is yours to shape** — `@agentick/timeline-next/react`
+**The timeline is yours to shape** — `@agentick/timeline/react`
 
 `<Timeline />` with no children renders history with sensible defaults. Pass a
 render function — `(entries, budget) => ReactNode` — and you decide exactly how each
@@ -158,14 +158,14 @@ message appears — compress old turns, drop images, collapse tool results:
 The render function also receives `budget` (a `TokenBudgetInfo | null`) so you can
 compact against a live token ceiling.
 
-**Tools** — `@agentick/tool-next` + `@agentick/compiler-react-next`
+**Tools** — `@agentick/tool` + `@agentick/compiler-react`
 
 `createTool` bundles a Zod-validated schema with an inline handler that returns
 content blocks. Mount it as `<MyTool.Tool />`. Tools can also `render()` state
 back into context and be dispatched without the model — see
-[`@agentick/tool-next`](packages-next/tool/README.md).
+[`@agentick/tool`](packages/tool/README.md).
 
-**Knobs** — model-visible, model-settable state — `@agentick/knobs-next/react`
+**Knobs** — model-visible, model-settable state — `@agentick/knobs/react`
 
 ```tsx
 const [section] = useKnob("section", "none", {
@@ -179,10 +179,10 @@ The model sees collapsed headers, sets the knob, reads the expanded content,
 answers — so only what it needs consumes tokens. `<Knobs />` renders the current
 values plus the `set_knob` tool.
 
-**Gates** — named exit conditions — `@agentick/gates-next`
+**Gates** — named exit conditions — `@agentick/gates`
 
 ```tsx
-import { gate, useGate } from "@agentick/gates-next/react";
+import { gate, useGate } from "@agentick/gates/react";
 
 const verifyGate = gate({
   description: "Verify changes before finishing",
@@ -276,19 +276,19 @@ the built-ins into one install). The ones you touch building an agent:
 
 | Package                         | What it gives you                                                          |
 | ------------------------------- | -------------------------------------------------------------------------- |
-| `@agentick/app-next`            | `createApp` — the runtime root; `/react` gives the reconciler              |
-| `@agentick/compiler-react-next` | JSX components + `createTool` (the React surface)                          |
-| `@agentick/timeline-next`       | `<Timeline>` — the conversation, yours to shape                            |
-| `@agentick/knobs-next`          | `useKnob` / `<Knobs>` — model-settable state                               |
-| `@agentick/gates-next`          | `gate` / `useGate` — named exit conditions                                 |
-| `@agentick/tool-next`           | `createTool`, transforms, dispatch                                         |
-| `@agentick/model-ai-sdk-next`   | `aisdk(...)` — wrap any Vercel AI SDK provider                             |
-| `@agentick/session-next`        | the session harness (send / dispatch / spawn / channels)                   |
-| `@agentick/gateway-next`        | multi-app server + wire + auth ([README](packages-next/gateway/README.md)) |
-| `@agentick/client-next`         | the client that talks to a gateway over the wire                           |
-| `@agentick/mcp-next`            | connect to / expose Model Context Protocol servers                         |
+| `@agentick/app`            | `createApp` — the runtime root; `/react` gives the reconciler              |
+| `@agentick/compiler-react` | JSX components + `createTool` (the React surface)                          |
+| `@agentick/timeline`       | `<Timeline>` — the conversation, yours to shape                            |
+| `@agentick/knobs`          | `useKnob` / `<Knobs>` — model-settable state                               |
+| `@agentick/gates`          | `gate` / `useGate` — named exit conditions                                 |
+| `@agentick/tool`           | `createTool`, transforms, dispatch                                         |
+| `@agentick/model-ai-sdk`   | `aisdk(...)` — wrap any Vercel AI SDK provider                             |
+| `@agentick/session`        | the session harness (send / dispatch / spawn / channels)                   |
+| `@agentick/gateway`        | multi-app server + wire + auth ([README](packages/gateway/README.md)) |
+| `@agentick/client`         | the client that talks to a gateway over the wire                           |
+| `@agentick/mcp`            | connect to / expose Model Context Protocol servers                         |
 
-Foundations (`spec-next`, `runtime-next`, `pubsub-next`, `utils-next`) sit
+Foundations (`spec`, `runtime`, `pubsub`, `utils`) sit
 underneath; you rarely import them directly.
 
 ## Status & docs

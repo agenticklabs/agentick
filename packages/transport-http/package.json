@@ -1,0 +1,100 @@
+{
+  "name": "@agentick/transport-http",
+  "version": "0.0.0",
+  "description": "Streamable HTTP transport for agentick per MCP 2025-03-26 — JSON-RPC 2.0 over a single endpoint that serves request/response (application/json) and streaming responses (text/event-stream) on the same POST, plus a persistent GET for notification fan-in. Universal `fetch` on the client (Node 22+, browser, Bun, Deno, edge); Node `http.Server` on the server.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "http",
+    "json-rpc",
+    "mcp",
+    "sse",
+    "streamable-http",
+    "transport"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/transport-http"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "import": "./src/server/index.ts",
+      "default": "./src/server/index.ts"
+    },
+    "./fetch": {
+      "types": "./src/server/fetch-handler.ts",
+      "import": "./src/server/fetch-handler.ts",
+      "default": "./src/server/fetch-handler.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/transport": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/client-core": "workspace:*",
+    "@agentick/gateway": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
+    "@agentick/utils": "workspace:*",
+    "effect": "^3.22.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      },
+      "./fetch": {
+        "types": "./dist/server/fetch-handler.d.ts",
+        "import": "./dist/server/fetch-handler.js",
+        "default": "./dist/server/fetch-handler.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  }
+}

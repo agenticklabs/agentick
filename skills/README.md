@@ -2,7 +2,7 @@
 
 Task-scoped skills for working in this repo. Invoke the one that matches what you are building.
 
-The repo is mid-rewrite: v2 lives under `packages-next/` (`feat/v2`), v1 under `packages/` (stable). Skills are scoped accordingly.
+The repo is mid-rewrite: v2 lives under `packages/` (`feat/v2`), v1 under `packages/` (stable). Skills are scoped accordingly.
 
 ## v2 skills (author here)
 
@@ -22,7 +22,7 @@ These are symlinks into the v1 package trees; they describe v1 APIs (`@agentick/
 | `create-tool`      | `packages/core/.agents/skills/create-tool`        | v1    |
 | `create-adapter`   | `packages/adapters/.agents/skills/create-adapter` | v1    |
 
-For a **v2** tool, use `createTool` from `@agentick/tool-next` (the `create-harness` / `create-extension` skills cover where it fits); for a v2 model adapter, see the `@agentick/model-executor-next` base + `@agentick/model-*-next` packages.
+For a **v2** tool, use `createTool` from `@agentick/tool` (the `create-harness` / `create-extension` skills cover where it fits); for a v2 model adapter, see the `@agentick/model-executor` base + `@agentick/model-*-next` packages.
 
 ## Cross-cutting skills
 
@@ -30,6 +30,6 @@ Symlinks into `.agents/skills/`; each carries a v2-gate banner at the top for `f
 
 | Skill             | Use for                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------ |
-| `add-package`     | Scaffold a new workspace package (v2 → `packages-next/` per the New Package Checklist in `CLAUDE.md`). |
+| `add-package`     | Scaffold a new workspace package (v2 → `packages/` per the New Package Checklist in `CLAUDE.md`). |
 | `build-and-check` | Run the verification gates (v2: root vitest, `typecheck --force`, oxfmt/oxlint, `check:no-tla`).       |
 | `test-agent`      | Write agent tests (v2: the Meszaros `/testing` doubles law).                                           |

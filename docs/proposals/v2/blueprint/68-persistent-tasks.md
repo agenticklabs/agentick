@@ -49,7 +49,7 @@ interface TaskStore {
 }
 ```
 Swappable + conformance-parameterized (`runTaskStoreConformance(factory)`), exactly like the
-timeline stores. **Ship the in-memory default now; a `@agentick/tasks-store-postgres-next` conforms
+timeline stores. **Ship the in-memory default now; a `@agentick/tasks-store-postgres` conforms
 to the SAME protocol later — not built here.** No `subscribe` on the store — liveness is the
 bus; the store is CRUD + re-hydration.
 
@@ -121,5 +121,5 @@ in-memory store is node-local; a shared store (pg) is what lets another node rea
 5. Parity: every existing `TasksHarness` test green (in-process default is behavior-identical);
    new: store conformance, detached-survives-close, child-process round-trip, interrupted-on-
    restart, cross-node cancel (clustered, if feasible in-test).
-Deferred, seam-ready: `@agentick/tasks-store-postgres-next`; sandbox + distributed-worker executors;
+Deferred, seam-ready: `@agentick/tasks-store-postgres`; sandbox + distributed-worker executors;
 reattach-across-app-restart.

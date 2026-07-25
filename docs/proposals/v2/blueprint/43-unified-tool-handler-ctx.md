@@ -1,13 +1,13 @@
 # ADR 43 — Unified `ToolHandlerCtx` (one ctx across transports)
 
 **Status:** Proposed — 2026-06-29.
-**Touches:** `@agentick/spec-next/data/tool-handler.ts` (the canonical
-ctx interface), `@agentick/spec-next/protocol/mcp-server-harness.ts`
-(deprecates `McpRequestContext` as a separate type), `@agentick/mcp-next/server`
-(projection populates the unified shape), `@agentick/tool-executor-next`
-(in-process dispatch populates the unified shape), `@agentick/session-next`
-(session dispatch populates the unified shape), `@agentick/tool-next/transforms`
-(`wrap-handler` audit), `@agentick/spec-conformance-next` (fixture
+**Touches:** `@agentick/spec/data/tool-handler.ts` (the canonical
+ctx interface), `@agentick/spec/protocol/mcp-server-harness.ts`
+(deprecates `McpRequestContext` as a separate type), `@agentick/mcp/server`
+(projection populates the unified shape), `@agentick/tool-executor`
+(in-process dispatch populates the unified shape), `@agentick/session`
+(session dispatch populates the unified shape), `@agentick/tool/transforms`
+(`wrap-handler` audit), `@agentick/spec-conformance` (fixture
 factory). Cross-references ADR 26 (harness API shape), ADR 27 (modular
 built-ins), ADR 40 (MCP server harness), ADR 41 (`AgentickError`), ADR
 42 (slot trichotomy + sugar convention).
@@ -256,7 +256,7 @@ unified shape now.
 `session.dispatch(...)` populates `transport: "in-process"`. Should
 be a one-line addition.
 
-**Step 5: `wrap-handler` audit.** Check `@agentick/tool-next/transforms/wrap-handler.ts`
+**Step 5: `wrap-handler` audit.** Check `@agentick/tool/transforms/wrap-handler.ts`
 for any ctx-shape assertions or mutations. Update if needed.
 
 **Step 6: Conformance fixture.** `spec-conformance-next` ships a
@@ -335,7 +335,7 @@ workspace tests pass. Single commit. ~1 day.
 ### Slice 2 (tool-executor)
 In-process ctx-build emits the new sugar `ctx.elicit?` by wrapping the
 local `ElicitationHarness` via a minimal `buildSessionElicit(harness)`
-factory in `@agentick/elicitation-next`. Test that a tool handler
+factory in `@agentick/elicitation`. Test that a tool handler
 running in-process can call `ctx.elicit.text(...)` identically to the
 MCP-server case. ~1 day.
 

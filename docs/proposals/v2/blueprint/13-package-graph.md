@@ -17,19 +17,19 @@ Each pluggable component has a **contract** (in spec) and one or more
 ```
 Pluggable component       Contract (in spec)               Implementations
 ──────────────────────────────────────────────────────────────────────────
-Reconciler harness          spec/protocol/compiler.ts        @agentick/reconciler-react-next
+Reconciler harness          spec/protocol/compiler.ts        @agentick/reconciler-react
                                                             (future: @agentick/compiler-vue, ...)
 
-Formatters (pure functions)  spec/data/formatter.ts          @agentick/formatters-next
+Formatters (pure functions)  spec/data/formatter.ts          @agentick/formatters
                              (Formatter type)                 (ships markdownFormatter,
                                                               xmlFormatter, textFormatter,
                                                               createFormatter; one consolidated
                                                               package — see ADR 22)
 
-Executor harness          spec/protocol/executor.ts        @agentick/executor-anthropic-next
-                                                           @agentick/executor-openai-next
-                                                           @agentick/executor-google-next
-                                                           @agentick/executor-ai-sdk-next
+Executor harness          spec/protocol/executor.ts        @agentick/executor-anthropic
+                                                           @agentick/executor-openai
+                                                           @agentick/executor-google
+                                                           @agentick/executor-ai-sdk
                                                            @agentick/executor-mock
 
 Persistence backend       spec/protocol/persistence.ts     @agentick/persistence-memory
@@ -67,16 +67,16 @@ v1 name                  v2 name                           Reason
 @agentick/tui            @agentick/client-tui              client SDK for TUIs
 @agentick/devtools       @agentick/client-devtools         client UI for debugging
 @agentick/kernel         (folded into runtime + shared)    BaseHarness replaces Procedure system
-@agentick/openai         @agentick/executor-openai-next         executor harness implementation
-@agentick/google         @agentick/executor-google-next         same
-@agentick/ai-sdk         @agentick/executor-ai-sdk-next         same
-(no v1 equivalent)       @agentick/reconciler-react-next          NEW v2 — JSX reconciler harness implementation
-(no v1 equivalent)       @agentick/runtime-next                 NEW v2 — central runtime (replaces parts of @agentick/core)
+@agentick/openai         @agentick/executor-openai         executor harness implementation
+@agentick/google         @agentick/executor-google         same
+@agentick/ai-sdk         @agentick/executor-ai-sdk         same
+(no v1 equivalent)       @agentick/reconciler-react          NEW v2 — JSX reconciler harness implementation
+(no v1 equivalent)       @agentick/runtime                 NEW v2 — central runtime (replaces parts of @agentick/core)
 (no v1 equivalent)       @agentick/cluster                 NEW v2 — optional distributed wrapper
 (no v1 equivalent)       @agentick/persistence-{...}       NEW v2 — pluggable journal backends
 @agentick/core           (split + retired)                 see Migration section
-@agentick/shared         @agentick/shared                  slimmed (wire types moved to @agentick/spec-next)
-@agentick/spec-next           @agentick/spec-next                    NEW v2 (wire types + protocol contracts)
+@agentick/shared         @agentick/shared                  slimmed (wire types moved to @agentick/spec)
+@agentick/spec           @agentick/spec                    NEW v2 (wire types + protocol contracts)
 @agentick/gateway        @agentick/gateway                 unchanged (already correctly named)
 @agentick/sandbox        @agentick/sandbox                 unchanged
 @agentick/sandbox-*      @agentick/sandbox-*               unchanged
@@ -103,7 +103,7 @@ graph TD
   end
 
   subgraph framework["Framework layer (server-side)"]
-    RT["@agentick/runtime-next"]
+    RT["@agentick/runtime"]
     SBX["@agentick/sandbox"]
     MCP["@agentick/mcp"]
     PER_PG["@agentick/persistence-postgres"]
@@ -113,14 +113,14 @@ graph TD
   end
 
   subgraph compilers["Compiler implementations (server-side)"]
-    CR["@agentick/reconciler-react-next"]
+    CR["@agentick/reconciler-react"]
   end
 
   subgraph adapters["Executor adapters (server-side)"]
-    EX_AN["@agentick/executor-anthropic-next"]
-    EX_OAI["@agentick/executor-openai-next"]
-    EX_GG["@agentick/executor-google-next"]
-    EX_AISDK["@agentick/executor-ai-sdk-next"]
+    EX_AN["@agentick/executor-anthropic"]
+    EX_OAI["@agentick/executor-openai"]
+    EX_GG["@agentick/executor-google"]
+    EX_AISDK["@agentick/executor-ai-sdk"]
     EX_MOCK["@agentick/executor-mock"]
   end
 
@@ -132,7 +132,7 @@ graph TD
   end
 
   subgraph foundation["Foundation"]
-    SPEC["@agentick/spec-next"]
+    SPEC["@agentick/spec"]
     SHARED["@agentick/shared"]
   end
 
@@ -182,14 +182,14 @@ graph TD
 
 | Package                                                     | Role                                                                                                                              | Browser-safe? | Effect dep?               | Status                                                            |
 | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------- | ------------------------- | ----------------------------------------------------------------- |
-| `@agentick/spec-next`                                       | Wire types + protocol interfaces + JSON Schema artifacts                                                                          | yes           | no                        | new in v2                                                         |
+| `@agentick/spec`                                       | Wire types + protocol interfaces + JSON Schema artifacts                                                                          | yes           | no                        | new in v2                                                         |
 | `@agentick/shared`                                          | Cross-package utilities (extractText, identity, model catalog, errors)                                                            | yes           | no                        | `[V1-REFINED]` (slimmed)                                          |
-| `@agentick/reconciler-react-next`                           | Reconciler harness implementation (JSX → RenderedTree). React reconciler + JSX runtime + components + hooks + built-in renderers. | no            | no (Effect-free)          | new in v2                                                         |
+| `@agentick/reconciler-react`                           | Reconciler harness implementation (JSX → RenderedTree). React reconciler + JSX runtime + components + hooks + built-in renderers. | no            | no (Effect-free)          | new in v2                                                         |
 | `@agentick/client`                                          | Transport-side client core; consumes spec types                                                                                   | yes           | no                        | `[V1-INHERITED, REFINED]`                                         |
 | `@agentick/client-react`                                    | Pure React hooks for browser apps consuming a session                                                                             | yes           | no                        | `[V1-RENAMED]` from `@agentick/react`                             |
 | `@agentick/client-tui`                                      | Ink-based TUI client (uses client-react hooks under the hood)                                                                     | no (Node)     | yes                       | `[V1-RENAMED]` from `@agentick/tui`                               |
 | `@agentick/client-devtools`                                 | Browser UI for DevTools (consumes DevTools event stream via transport)                                                            | yes           | no                        | `[V1-RENAMED]` from `@agentick/devtools`                          |
-| `@agentick/runtime-next`                                    | App harness, session harness, loop executor, tool executor (default impls), BaseHarness, MemoryJournal, LocalInbox, LocalEventBus | no            | yes                       | `[V1-REPLACED]` for `@agentick/core` runtime parts                |
+| `@agentick/runtime`                                    | App harness, session harness, loop executor, tool executor (default impls), BaseHarness, MemoryJournal, LocalInbox, LocalEventBus | no            | yes                       | `[V1-REPLACED]` for `@agentick/core` runtime parts                |
 | `@agentick/sandbox`                                         | Sandbox component, types, edit utilities (helper package; not a provider impl)                                                    | partial       | mixed                     | `[V1-INHERITED]`                                                  |
 | `@agentick/sandbox-local`, `-docker`, `-bwrap`, `-remote`   | Sandbox provider implementations                                                                                                  | no            | yes                       | `[V1-INHERITED]`                                                  |
 | `@agentick/mcp`                                             | MCP server + client + JSX components                                                                                              | no            | yes                       | `[V1-INHERITED]`                                                  |
@@ -205,13 +205,13 @@ graph TD
 
 ```
                 ╔══════════════════════════════════╗
-                ║       @agentick/spec-next             ║   ← zero-dep, types-only
+                ║       @agentick/spec             ║   ← zero-dep, types-only
                 ║  (data + protocol interfaces)    ║      browser-safe
                 ╚══════════════════════════════════╝
                        ▲                  ▲
             depends on │                  │ depends on
          ───────────────┐              ┌───────────────
-    @agentick/client    │              │  @agentick/runtime-next
+    @agentick/client    │              │  @agentick/runtime
     (browser-safe)      │              │  (server-side)
                         │              │
          everything      │              │ everything
@@ -222,11 +222,11 @@ graph TD
 ```
 
 **The spec firewall rule**: anything that crosses a harness boundary
-must be a value defined in `@agentick/spec-next`. No Effect refs, no React
+must be a value defined in `@agentick/spec`. No Effect refs, no React
 fibers, no provider SDK clients, no live renderer instances, no
 closures.
 
-This rule is what lets `@agentick/reconciler-react-next` stay Effect-free (it
+This rule is what lets `@agentick/reconciler-react` stay Effect-free (it
 only sees spec types) and what lets the runtime swap implementations
 behind the boundary without browser code knowing.
 
@@ -234,15 +234,15 @@ behind the boundary without browser code knowing.
 
 ```
 Effect-free packages (browser-safe, no Effect dep):
-  @agentick/spec-next
+  @agentick/spec
   @agentick/shared
-  @agentick/reconciler-react-next        ← EFFECT-FREE; pure React + spec types
+  @agentick/reconciler-react        ← EFFECT-FREE; pure React + spec types
   @agentick/client
   @agentick/client-react
   @agentick/client-devtools
 
 Effect-bearing packages (server-side):
-  @agentick/runtime-next
+  @agentick/runtime
   @agentick/devtools-recorder     (server-side recording infra; not the UI)
   @agentick/sandbox-*
   @agentick/mcp
@@ -254,7 +254,7 @@ Effect-bearing packages (server-side):
   @agentick/client-tui            (Node-only; uses Ink)
 ```
 
-Note: `@agentick/reconciler-react-next` is Effect-free even though it's
+Note: `@agentick/reconciler-react` is Effect-free even though it's
 server-side. The runtime imports compiler-react and bridges to Effect at
 the BaseHarness boundary; compiler-react itself is pure React + spec.
 
@@ -282,7 +282,7 @@ Forbidden:
 
 ## What lives where
 
-### `@agentick/spec-next`
+### `@agentick/spec`
 
 ```
 src/
@@ -328,7 +328,7 @@ src/
     ...
 ```
 
-### `@agentick/reconciler-react-next`
+### `@agentick/reconciler-react`
 
 ```
 src/
@@ -371,9 +371,9 @@ src/
     json.ts                     // json passthrough renderer
 ```
 
-This package implements `ReconcilerProtocol` from `@agentick/spec-next`.
+This package implements `ReconcilerProtocol` from `@agentick/spec`.
 
-### `@agentick/runtime-next`
+### `@agentick/runtime`
 
 ```
 src/
@@ -486,32 +486,32 @@ The v1 → v2 mapping for reference:
 
 ```
 v1                                          v2
-@agentick/shared                           @agentick/spec-next (wire types) +
+@agentick/shared                           @agentick/spec (wire types) +
                                            @agentick/shared (utilities, slimmed)
-@agentick/kernel                           folded into @agentick/runtime-next + @agentick/shared
+@agentick/kernel                           folded into @agentick/runtime + @agentick/shared
 @agentick/core                             split:
-  src/jsx/                                   → @agentick/reconciler-react-next
-  src/reconciler/                            → @agentick/reconciler-react-next
-  src/compiler/                              → @agentick/reconciler-react-next
+  src/jsx/                                   → @agentick/reconciler-react
+  src/reconciler/                            → @agentick/reconciler-react
+  src/compiler/                              → @agentick/reconciler-react
   src/com/                                   → DELETED
-  src/component/                             → @agentick/reconciler-react-next
-  src/renderers/                             → @agentick/reconciler-react-next/renderers
-  src/app/                                   → @agentick/runtime-next
+  src/component/                             → @agentick/reconciler-react
+  src/renderers/                             → @agentick/reconciler-react/renderers
+  src/app/                                   → @agentick/runtime
   src/engine/                                → folded into runtime + executor adapters
   src/middleware/                            → folded into runtime (BaseHarness middleware)
   src/model/                                 → split into spec types + executor pkgs
-  src/tool/                                  → @agentick/runtime-next (tool executor)
+  src/tool/                                  → @agentick/runtime (tool executor)
   src/mcp/                                   → @agentick/mcp (already extracted)
   src/sandbox*                               → @agentick/sandbox (already extracted)
   src/local-transport.ts                     → @agentick/server-local (or similar)
   src/channels/                              → DELETED (was dead code)
-@agentick/openai                           @agentick/executor-openai-next
-@agentick/google                           @agentick/executor-google-next
-@agentick/ai-sdk                           @agentick/executor-ai-sdk-next
+@agentick/openai                           @agentick/executor-openai
+@agentick/google                           @agentick/executor-google
+@agentick/ai-sdk                           @agentick/executor-ai-sdk
 @agentick/express                          @agentick/server-express
 @agentick/gateway                          @agentick/gateway (refined)
 @agentick/devtools                         @agentick/client-devtools (UI) +
-                                           parts folded into @agentick/runtime-next (server-side recording)
+                                           parts folded into @agentick/runtime (server-side recording)
 @agentick/react                            @agentick/client-react
 @agentick/tui                              @agentick/client-tui
 ```
@@ -521,7 +521,7 @@ v1                                          v2
 Two axes:
 
 1. **Spec version** (date string, e.g. `"2026-05-01"`) — the protocol
-   contract version. Lives in `@agentick/spec-next` as `SPEC_VERSION`. Changes
+   contract version. Lives in `@agentick/spec` as `SPEC_VERSION`. Changes
    when the wire format itself evolves. Backward-compatible additions
    don't bump; field removals do.
 
@@ -544,7 +544,7 @@ engineering assets, primarily test infrastructure for our own contracts.
 
 ```
 packages/
-  spec-conformance/                @agentick/spec-conformance-next
+  spec-conformance/                @agentick/spec-conformance
     runJournalConformance(j)       (validates OperationJournal impls)
     runInboxConformance(i)         (validates MessageInbox impls)
     runHarnessConformance(h)       (validates BaseHarness behaviors)
@@ -562,21 +562,21 @@ Why private:
   the published types.
 
 These packages are dev-dependencies of internal packages
-(`@agentick/runtime-next`, `@agentick/persistence-*`, executor adapters, etc.)
+(`@agentick/runtime`, `@agentick/persistence-*`, executor adapters, etc.)
 and are excluded from the publish pipeline.
 
 ## Browser bundle considerations
 
 ```
 Recommended browser deps:
-  @agentick/spec-next                     (types only, zero runtime cost)
+  @agentick/spec                     (types only, zero runtime cost)
   @agentick/shared                   (small utility surface)
   @agentick/client                   (transport client)
   @agentick/client-react             (React hooks for browser)
   @agentick/client-devtools          (browser DevTools UI)
 
 NOT for browser:
-  @agentick/runtime-next
+  @agentick/runtime
   @agentick/cluster
   @agentick/gateway
   @agentick/persistence-*
@@ -587,7 +587,7 @@ NOT for browser:
   @agentick/server-*                 (server-side transport adapters)
 
 Edge case:
-  @agentick/reconciler-react-next           SERVER-SIDE despite no Effect dep.
+  @agentick/reconciler-react           SERVER-SIDE despite no Effect dep.
                                      Theoretically browser-safe (pure
                                      React + spec) but the runtime that
                                      consumes it is server-side. No
@@ -597,13 +597,13 @@ Edge case:
 ## Decisions captured
 
 - Substrate-agnostic-contract + per-substrate-impl naming pattern.
-- `@agentick/reconciler-react-next` and `@agentick/client-react` are different
+- `@agentick/reconciler-react` and `@agentick/client-react` are different
   packages — distinct roles despite shared substrate.
 - `client-*`, `server-*` prefixes for SDKs and transports.
 - `executor-*`, `persistence-*`, `sandbox-*`, `compiler-*`, `renderer-*`
   for pluggable component implementations.
-- `@agentick/spec-next` is the firewall; zero deps; browser-safe.
-- `@agentick/reconciler-react-next` is Effect-free even though server-side.
+- `@agentick/spec` is the firewall; zero deps; browser-safe.
+- `@agentick/reconciler-react` is Effect-free even though server-side.
 - `@agentick/kernel` folded into runtime + shared for v2.
 - Cluster and gateway are optional packages.
 - Per-transport server packages, per-provider executor packages,

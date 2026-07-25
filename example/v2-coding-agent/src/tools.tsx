@@ -20,8 +20,8 @@ import { promises as fs } from "node:fs";
 import * as nodePath from "node:path";
 import { exec } from "node:child_process";
 import { z } from "zod";
-import { createTool } from "@agentick/compiler-react-next";
-import type { ContentBlock } from "@agentick/spec-next";
+import { createTool } from "@agentick/compiler-react";
+import type { ContentBlock } from "@agentick/spec";
 
 // ─────────────────────────────────────────────────────────────────────
 // Workspace — the sandbox root every tool resolves paths against. Set once

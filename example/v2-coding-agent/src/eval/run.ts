@@ -9,8 +9,8 @@
 
 import "dotenv/config";
 import { writeFile } from "node:fs/promises";
-import { formatResult, formatMatrix, renderHtmlReport } from "@agentick/eval-next";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { formatResult, formatMatrix, renderHtmlReport } from "@agentick/eval";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
 
 import { codingEval } from "./coding.eval.js";

@@ -137,7 +137,7 @@ call-scoped tier below exists for the cases structural scope can't express.
 > that tiers 2/3 cover the common cases. Building the ADR 77 spine surfaced that the
 > hypothesis is FALSE for the most common case — see "Construction-topology finding."
 > Tier 4 is now built: `withCallMiddleware([mw], effect)` (exported from
-> `@agentick/runtime-next`) scopes `mw` around every nested `runOperation` the effect
+> `@agentick/runtime`) scopes `mw` around every nested `runOperation` the effect
 > reaches, via a `CallMiddlewareRef` FiberRef read at the compose site (outermost of
 > all). Proven cross-sibling in `runtime/__tests__/call-middleware.spec.ts`.
 
@@ -260,11 +260,11 @@ walk the same construction-ancestor path. See open question Q2.
 
 ## Implementation (BUILT)
 
-In `packages-next/runtime/src/substrate/base-harness.ts` (DRAFT markers removed):
+In `packages/runtime/src/substrate/base-harness.ts` (DRAFT markers removed):
 
 - `MiddlewareChain.snapshot()` — expose the registered list in order.
 - `composeMiddleware(list, body)` — free function; `MiddlewareChain.compose`
-  delegates to it (DRY). Exported from `@agentick/runtime-next`.
+  delegates to it (DRY). Exported from `@agentick/runtime`.
 - `BaseHarness.ownAndInheritedMiddleware()` — protected, recursive: returns
   `[...parent?.ownAndInheritedMiddleware(), ...this.middleware.snapshot()]`,
   root-outermost (tier 3).

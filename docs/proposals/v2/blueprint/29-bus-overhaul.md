@@ -2,7 +2,7 @@
 
 **Status:** Proposed · 2026-06-02
 **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins)
-**Touches:** `@agentick/spec-next` (`EventBus`, `OperationJournal`, `JournalingPolicy`, new `EventLog`/`Cursor`/`CompiledMatcher` exports), `@agentick/runtime-next` (`LocalEventBus`, `MemoryJournal`, `BaseHarness.emit*` plumbing), future `@agentick/cluster` package.
+**Touches:** `@agentick/spec` (`EventBus`, `OperationJournal`, `JournalingPolicy`, new `EventLog`/`Cursor`/`CompiledMatcher` exports), `@agentick/runtime` (`LocalEventBus`, `MemoryJournal`, `BaseHarness.emit*` plumbing), future `@agentick/cluster` package.
 
 ## TL;DR
 
@@ -66,7 +66,7 @@ A bus instance has no concept of tenant. We rely on scope-keyed event metadata +
 **One primitive: the scoped append-only log.** Producers append (one event or a batch). Subscribers read by cursor. Retention is bounded (in-memory) or unbounded (durable). The shape is identical whether the backing store is an in-process ring buffer, a SQLite table, a Kafka topic, or an `@effect/cluster` sharded log. Local-only deployments use the ring buffer; cloud deployments swap in the cluster backend without changing adopter code.
 
 ```ts
-// @agentick/spec-next  (new — generic across event types)
+// @agentick/spec  (new — generic across event types)
 export interface EventLog<E> {
   append(event: E): Effect<void, never, never>;
   appendBatch(events: ReadonlyArray<E>): Effect<void, never, never>;
@@ -95,7 +95,7 @@ export interface LogMetrics {
 Today's `JournalingPolicy` decides drop / bus-only / always-journal per phase. We extend it:
 
 ```ts
-// @agentick/spec-next  (additive — no breaking change)
+// @agentick/spec  (additive — no breaking change)
 export interface SurfaceBatchPolicy {
   /** Flush after this many ms elapse since the first queued event. */
   readonly flushAfterMs?: number;
@@ -151,9 +151,9 @@ Default `fromCursor` is "now" (no replay). Opt-in cursor lets adopters resume af
 
 ## Pre-compiled query matchers
 
-**Shipped.** `compileQuery(query: EventQuery): CompiledMatcher` in `@agentick/runtime-next`, used at subscribe time in `LocalEventBus` and `MemoryJournal`. Specialises on the common shapes (single surface, single phase, name exact/prefix/segments/wildcard, scope entries pre-snapshotted) and falls back to a generic AND-loop for exotic queries. Per-event filter cost drops ~2× across realistic shapes. Bench numbers in `packages/runtime/src/__bench__/substrate.bench.ts`.
+**Shipped.** `compileQuery(query: EventQuery): CompiledMatcher` in `@agentick/runtime`, used at subscribe time in `LocalEventBus` and `MemoryJournal`. Specialises on the common shapes (single surface, single phase, name exact/prefix/segments/wildcard, scope entries pre-snapshotted) and falls back to a generic AND-loop for exotic queries. Per-event filter cost drops ~2× across realistic shapes. Bench numbers in `packages/runtime/src/__bench__/substrate.bench.ts`.
 
-The compiled-matcher type is exported from `@agentick/spec-next/protocol` so future backends (cluster, durable) consume it directly.
+The compiled-matcher type is exported from `@agentick/spec/protocol` so future backends (cluster, durable) consume it directly.
 
 ## Multi-tenancy is structural
 
@@ -227,7 +227,7 @@ Each phase is independently shippable. No phase breaks adopter code.
 ### Phase A — Easy wins (DONE 2026-06-02)
 
 - ✅ Pre-compiled queries (`compileQuery` in runtime, wired into `LocalEventBus` + `MemoryJournal`).
-- ✅ `SurfaceBatchPolicy` + `SurfaceRetentionPolicy` types in `@agentick/spec-next/data/journaling-policy.ts`. **Landed 2026-06-05 with Phase B (kept the type surface in scope of B's commit rather than retroactively patching Phase A).**
+- ✅ `SurfaceBatchPolicy` + `SurfaceRetentionPolicy` types in `@agentick/spec/data/journaling-policy.ts`. **Landed 2026-06-05 with Phase B (kept the type surface in scope of B's commit rather than retroactively patching Phase A).**
 - ✅ Optional batched-publish method on `EventBus`. **Named `publishBatch?` not `appendBatch?` — the bus is pub/sub, `append` is log-shape semantics that don't apply until Phase C unifies under `EventLog<E>`. The method renames to `appendBatch` inherited from the log primitive in Phase C.**
 
 ### Phase B — Batched LocalEventBus (DONE 2026-06-05)

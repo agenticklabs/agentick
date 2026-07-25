@@ -14,7 +14,7 @@ abstraction. See `01-harness-principle.md`.
 
 **Spec firewall**
 The rule that anything crossing a harness boundary is JSON-shaped data
-defined in `@agentick/spec-next`. No Effect refs, React fibers, SDK clients,
+defined in `@agentick/spec`. No Effect refs, React fibers, SDK clients,
 renderer instances, or closures cross.
 
 **Library-first**

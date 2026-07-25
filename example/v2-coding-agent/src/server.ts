@@ -8,11 +8,11 @@
  */
 
 import React from "react";
-import { createGateway } from "@agentick/gateway-next";
-import { reactCompiler } from "@agentick/compiler-react-next";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { createGateway } from "@agentick/gateway";
+import { reactCompiler } from "@agentick/compiler-react";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
-import type { GatewayHarnessProtocol } from "@agentick/spec-next";
+import type { GatewayHarnessProtocol } from "@agentick/spec";
 
 import { CodingAgent } from "./agent.js";
 import { setWorkspaceRoot } from "./tools.js";

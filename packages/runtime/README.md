@@ -1,0 +1,958 @@
+# @agentick/runtime
+
+In-process substrate for Agentick v2. Provides the default implementation
+of the `@agentick/spec` protocol interfaces:
+
+| Implementation  | Spec interface                      |
+| --------------- | ----------------------------------- |
+| `MemoryJournal` | `OperationJournal`                  |
+| `LocalEventBus` | `EventBus`                          |
+| `LocalInbox`    | `MessageInbox`                      |
+| `BaseHarness`   | (not a spec interface — base class) |
+
+`BaseHarness` is the inheritance point every concrete harness sits on
+top of. It composes journal + bus + inbox into the five-surface model
+(commands, inbox, lifecycle handlers, middleware, events) described in
+`docs/proposals/v2/blueprint/01-harness-principle.md`.
+
+This package is **in-process only**. Distribution (cluster) and
+persistence (postgres/sqlite/redis) are separate packages that
+implement the same `@agentick/spec` protocol interfaces.
+
+## Status
+
+Phase 2 of the v2 implementation plan — see
+`docs/proposals/v2/STATUS.md`.
+
+---
+
+## Observability / Telemetry
+
+Every operation already runs inside an OTel span (`runOperation` wraps each
+command body in `Effect.withSpan`). Telemetry here is **enrichment** of those
+spans — never a parallel subsystem. It is a **span ladder** with one switch on
+top and surgical seams underneath, all riding the ONE interceptor cascade
+(ADR 83). **Strictly opt-in** — nothing is auto-on.
+
+### The one switch (quickstart)
+
+```ts
+const app = await createApp(<Agent />, { name: "triage-bot", telemetry: true });
+```
+
+That is all. With the switch on you get, on every span the run touches:
+
+- `agentick.app.name` — your app `name` (agent-identity dimension).
+- `agentick.function.id` — **defaults to the app `name`**, so a single-purpose
+  app has function-level traces with zero extra config; override per send with
+  `session.send({ telemetry: { functionId } })` for a multi-function app.
+- model / tool / tick / session identity — `gen_ai.request.model`,
+  `gen_ai.system`, `agentick.tool.name`, `agentick.tick.index`,
+  `agentick.session_id` (and `execution_id` / `tick_id`, from the substrate).
+- **token usage + cost** on model-generate terminals —
+  `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens`,
+  `gen_ai.response.finish_reason`, and `agentick.usage.cost_usd` (estimated via
+  `@agentick/model`'s pricing; absent for un-priced models — never a
+  fabricated zero).
+
+`telemetry` also accepts a Layer (`telemetry: NodeSdk.layer(...)` — enrichment
+on **and** export wired) or `{ serviceName?, attributes?, layer? }`.
+
+_Verified by `packages/app/src/__tests__/telemetry.spec.ts`._
+
+### Attribute-key naming rule
+
+- Keys are **dot-separated, never colon** — colons live only in span/op NAMES
+  (the command vocabulary, e.g. `model:command:generate`).
+- Where the **OTel GenAI semantic conventions** define a key, we use it
+  **verbatim** (`gen_ai.request.model`, `gen_ai.system`,
+  `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`,
+  `gen_ai.response.finish_reason`; `service.name` is the standard resource
+  key). Vendor LLM dashboards auto-recognize these — that is the payoff, so
+  they are **never whitelabeled**.
+- Framework-specific keys live under **`${telemetryNamespace}.*`** (default
+  `agentick.*`) — one knob (`createApp({ telemetryNamespace: "acme" })`)
+  renames the whole spine's framework attributes; the `gen_ai.*` standards stay
+  put.
+- Adopter ad-hoc keys are yours — we don't police them; the dot + namespace
+  convention above is the **recommendation**, not a gate.
+
+### The full coverage map (all six seams)
+
+```ts
+import {
+  annotateOperationSpan, // per-moment: inside any command body / interceptor
+  spanAttributes,        // per-op-type: attrs from the op input
+  spanMiddleware,        // named child span (or annotate current)
+} from "@agentick/runtime";
+
+// 1. PER-CALL — known at send time. Rides the tier-4 send seam.
+session.send({ telemetry: { functionId: "summarize", metadata: { requestId } } });
+
+// 2. PER-MOMENT — computed mid-execution, inside a body/interceptor (in-fiber).
+const handler = (input, { ctx }) =>
+  Effect.gen(function* () {
+    const hit = yield* lookup(input);
+    yield* annotateOperationSpan({ "acme.cache_hit": hit }); // this span, now
+    return hit;
+  });
+
+// 3. PER-OP-TYPE — static per command kind, from the op input. A decorated hook.
+harness.fx.use(spanAttributes((input) => ({ "gen_ai.request.model": input.target.modelId })));
+
+// 4. NAMED CHILD SPAN — carve a sub-operation out of a body's work.
+harness.fx.use(spanMiddleware("acme.retrieval", (input) => ({ "acme.query": input.q })));
+
+// 5. CONSTRUCTION-TIME — harness-wide (runner deps) + app-wide static attrs.
+createApp(<Agent />, { telemetry: { attributes: { "deploy.region": "us-east" } } });
+//   …and per harness, via OperationRunnerDeps.spanAttributes (the ADR-78 seam).
+
+// 6. RUNTIME LEASE — turn dynamic tracing on, then off.
+const stop = harness.fx.use(spanMiddleware(undefined, () => ({ "acme.debug": true })));
+stop(); // lease released — annotation stops
+```
+
+### Three altitudes — pick by _when you know the value_
+
+| Altitude    | Seam                                      | Known…                      |
+| ----------- | ----------------------------------------- | --------------------------- |
+| per-call    | `send({ telemetry: { metadata } })`       | at send time                |
+| per-op-type | `spanAttributes(fn)` via a decorated hook | at registration, from input |
+| per-moment  | `annotateOperationSpan(attrs)` in a body  | mid-execution, computed     |
+
+### Two ease guarantees
+
+- **No registration ceremony.** Every seam is a plain function call where you
+  already are — a value on `send`, a `yield*` in a body, a `.use(...)` on a
+  harness. No provider tree, no decorators, no config file.
+- **No framework change, ever.** The attribute bag is an open
+  `Record<string, unknown>` at every seam. A new dimension is a new key — never
+  a spec edit, never a release.
+
+### Zero overhead when off
+
+With `telemetry` omitted/`false`: **no interceptors are registered**, the
+tier-4 send seam short-circuits to a pass-through, and no runtime is built. The
+switch is the only thing that composes the enrichment.
+_Verified by `packages/app/src/__tests__/telemetry.spec.ts` ("switch OFF")
+and `packages/session/src/__tests__/telemetry.spec.ts` ("telemetry OFF")._
+
+### Exporting spans (the recipe — your vendor, your choice)
+
+The framework bundles **no** OTel dependency. Enrichment annotates spans; where
+they GO is your Effect tracing layer. Wire an exporter with
+`@effect/opentelemetry` and hand the app its Layer:
+
+```ts
+import { NodeSdk } from "@effect/opentelemetry";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+
+const telemetry = NodeSdk.layer(() => ({
+  resource: { serviceName: "triage-bot" },
+  spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
+}));
+
+const app = await createApp(<Agent />, { name: "triage-bot", telemetry });
+```
+
+The rung-3 helpers (`annotateOperationSpan`, `spanAttributes`, `spanMiddleware`)
+are _verified by `packages/runtime/src/__tests__/span-helpers.spec.ts`._
+
+### The `ctx` facets — `log`/`trace`/`metrics` + the `run`/`runner` ladder (ADR 64/78/19)
+
+The span ladder above is how the FRAMEWORK enriches operation spans. The
+**observability facet** is how a HANDLER reaches the same diagnostic surface —
+one flat contract (`ctx.log`, `ctx.trace`, `ctx.metrics`) landed identically on
+every ctx-shaped surface (`ToolHandlerCtx` in-process, the MCP request ctx, and
+the runtime **interceptor ctx** — a `harness.use` middleware / `harness.guard` /
+command hook receives the SAME facets, as `InterceptorCtx = RuntimeContext &
+Observability & Ops`). `deriveObservability(deps)` is the ONE derivation; the few
+ctx assemblers call it, so there is one implementation behind N call sites.
+
+```ts
+handler: async (input, { ctx }) => {
+  ctx.metrics.count("dispatch", 1, { tool: "search" }); // counter.add
+  const rows = await ctx.trace("retrieval", async (span) => {
+    span.setAttribute("query.length", input.q.length);
+    return db.search(input.q); // nested under the operation span
+  });
+  ctx.log.info({ found: rows.length }); // level method; ctx.log("info", …) is identical
+  return rows;
+};
+```
+
+**`ctx.log` is a callable object** (a `Log`): the verbatim call form
+`ctx.log(level, data, logger?)` PLUS all eight RFC-5424 level methods
+(`debug`/`info`/`notice`/`warning`/`error`/`critical`/`alert`/`emergency`, with
+`warn` an alias for `warning`) PLUS `ctx.log.with(fields)` for pino-style child
+binding — every form emitting ONE bus event. It is always live (independent of the
+telemetry switch) and stamps the active `traceId`/`spanId` onto each event (the
+log↔span correlation join), captured synchronously before the fire-and-forget
+fork. See `guide-observability.md` §2 for the levels table + `.with` rules.
+
+**The ladder — climb by how much the system should know about the work.** The
+old bright-line ("`trace` is not an operation, full stop") is really a ladder of
+four rungs; pick the rung that matches how much structure the work deserves:
+
+| Rung         | Call                      | Gives you                                                                                                                                         | When to climb                                                                               |
+| ------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 1 · count it | `ctx.metrics.count(name)` | a tally                                                                                                                                           | you only need "how many / how much"                                                         |
+| 2 · see it   | `ctx.trace(name, fn)`     | a span (timing/attribution) — **no** journal/hooks/guards                                                                                         | you want a sub-span inside a handler's own work (a retrieval, a parse)                      |
+| 3 · run it   | `ctx.run(name, fn)`       | a real **operation**: journal envelope + the inherited interceptor fold (guards + hooks) + outcome taxonomy + a parented span — minted **inline** | the step deserves a durable record + guard/hook reach, but isn't worth a registered command |
+| 4 · name it  | a registered command      | typed input/output, typed `onBefore/After<Command>` hooks, inbox addressability, wire-grantability                                                | the verb is part of the system's contract                                                   |
+
+`ctx.run(name, fn)` is the deliberate rung between an untyped annotation and a
+registered command. It runs `fn` through the ambient harness's `runOperation` —
+so it is journaled (`<surface>:run:<name>`, requested → terminal), guard-vetoable,
+and hook-observable (ad-hoc names reach guards/hooks via the **string-keyed
+generic tier** — an `onBefore<Surface>Run<Name>` hook on the harness sees it,
+since the name isn't in the typed `CommandRegistry`). Its span parents under the
+enclosing op via the **same ADR-77 FiberRef mechanism** `ctx.trace` uses — one
+parenting path for `trace` spans, `run` spans, and command spans alike.
+
+```ts
+const rows = await ctx.run("retrieval", () => db.search(q)); // journaled op
+const out = await ctx.run("charge", { input: { amount } }, () => pay(amount)); // + input journaled
+```
+
+**Journaled ≠ memoized.** `ctx.run` writes a durable _observational_ record —
+name, timing, input, outcome — NOT a resumable checkpoint. Adopters from
+Restate / Inngest will assume `run` memoizes (skip + replay a completed step on
+retry): **it does not.** Re-invoking re-runs `fn`. Durable kill/resume rides the
+store protocols (ADR 49), not this. The journal shape doesn't preclude a future
+replay story; none is built.
+
+**The escape hatch (ADR-42 dichotomy).** `ctx.run`'s options are frozen-small by
+design — `{ input?, metadata?, spanAttributes?, signal? }`, envelope data only,
+never behavior. If `ctx.run` took the full command suite it would collapse rung 4
+into rung 3; the deliberate GAP (no registry, no typed hooks, no addressability)
+is what makes the ladder work. **`ctx.run`'s options will not grow — if you need
+more, you want `ctx.runner` or a command.** `ctx.runner` is the ambient runner as
+a **run-only view**: `ctx.runner.runOperation(op, body)` is the primitive
+undiluted (tier-4 call-scoped middleware included). It exposes only
+`runOperation` — never the runner's lifecycle or `makeEvent`/`publish`, so
+handler code can't tear down or reconfigure the harness.
+
+`ctx.trace` remains span-only, zero-journal — unchanged. The two facets are
+separate interfaces (`Observability` = `log`/`trace`/`metrics`; `Ops` =
+`run`/`runner`) so neither over-claims.
+
+- **`log`** is ADR 64, unchanged and **always live** (independent of the
+  telemetry switch): one bus event that projections forward (MCP →
+  `notifications/message`; agentick client → `subscribe`/`onLog`).
+- **`trace` / `metrics`** are the telemetry half. **Off is free** — passthrough
+  `trace` + no-op `metrics` from process-global frozen singletons (`OFF_TRACE` /
+  `NOOP_METRICS`), zero per-op allocation. **On** builds lazily on first property
+  touch and rides the app's telemetry runtime.
+- **Metrics labels are low-cardinality only** — the framework's defaults are
+  bounded (tool name, op suffix); high-cardinality identity (`sessionId` /
+  `executionId`) rides spans + logs, never a default metric label. Overridable
+  (capability, not opinion), but safe by construction.
+- **The provider seam** (`TelemetryProvider = { tracer?, meter? }`) bundles the
+  Effect tracer Layer (spans) + a `MetricSink` (metrics). The app wires it from
+  the adopter's `telemetry` switch — multiple exporters fan out at the
+  standard-OTel edge (span processors / metric readers collect together into one
+  runtime + meter; see `@agentick/app`'s `createTelemetry`). Test at the
+  substrate level with `spyTelemetryProvider()` (records via the `MetricSink` +
+  an Effect tracer Layer), or the full app export path with `spyTelemetrySink()`
+  (records at the OTel edge) — both from `@agentick/runtime/testing`.
+
+_Verified by `packages/runtime/src/__tests__/observability.spec.ts`
+(off-path identity, live span parenting, metric fan-out),
+`packages/tool-executor/src/__tests__/ctx-run.spec.ts` (ad-hoc op journaled +
+parented + hook-observed + guard-vetoed + run-only runner), and the cross-surface
+`runObservabilityCtxConformance` / `runOpsCtxConformance` suites in
+`@agentick/spec-conformance`._
+
+---
+
+## RuntimeContext — scope identity that propagates through Effect fibers
+
+`RuntimeContext` is the ambient state a handler, middleware, or
+observer sees. It extends `EventScope` (the canonical event-routing
+identity coordinates from `@agentick/spec`) with operation-level
+state, diagnostic ephemera, and an adopter-augmentable `user` slot.
+
+```ts
+import type { RuntimeContext } from "@agentick/runtime";
+
+interface RuntimeContext extends EventScope {
+  // Inherited from EventScope: appId / sessionId / executionId /
+  // tickId / parentSessionId / spawnPath / nodeId / gatewayId
+  // + augmented harness identifiers (sandboxId, mcpConnectionId, ...)
+
+  // Operation-level state:
+  readonly opId?: string;
+  readonly parentOpId?: string;
+
+  // Diagnostic ephemera:
+  readonly correlationId?: string;
+  readonly traceparent?: string;
+
+  // Adopter extension (typed via module augmentation):
+  readonly user?: RuntimeContextUser;
+}
+```
+
+### Adopter extension via module augmentation
+
+`RuntimeContextUser` is an empty seed in spec-next. Adopters augment
+via `declare module` to type their own per-call ambient state.
+Mirrors the v1 `UserContext` pattern + the v2 `HookBridges` /
+`EventScopeExtensions` empty-seed convention used elsewhere.
+
+```ts
+// In your app's setup:
+declare module "@agentick/runtime" {
+  interface RuntimeContextUser {
+    readonly tenantId: string;
+    readonly userId: string;
+    readonly requestId?: string;
+    readonly featureFlags?: Readonly<Record<string, boolean>>;
+  }
+}
+
+// Then anywhere ctx is in scope:
+async (input, { ctx }) => {
+  const tenant = ctx.user?.tenantId; // typed!
+  // ...
+};
+```
+
+⚠️ **The framework's auth-bearing primitives do NOT consult
+`ctx.user` for authorization.** Per ADR 45's structural-identity
+rule, principal-bearing resources (MCP client harness, sandbox
+runtime, etc.) encode the principal in their construction identity.
+Adopters MAY put `userId` / `tenantId` in `ctx.user` for their OWN
+telemetry / branching / logging, but it isn't a security boundary.
+
+### Reading + writing context
+
+| Surface                   | When                                    | How                                                                                                                                          |
+| ------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `yield* getContext`       | Inside an Effect chain (substrate code) | Effect-native read — works correctly within fiber lineage.                                                                                   |
+| `withContext(scope, eff)` | Inside an Effect chain                  | Scoped write — inner wins on collision; reverts on Effect exit.                                                                              |
+| `readContext()`           | Outside an Effect chain (rare)          | Sync snapshot. Honest contract: works outside Effect fibers, returns `EMPTY_CONTEXT` inside Effect fibers (the nested `Effect.runSync` gap). |
+| `ctx` via deps parameter  | Adopter handlers, middleware, hooks     | **Preferred pattern.** JS closure captures `ctx` through any async chain the function authors.                                               |
+
+The `readContext()` function exists as an escape hatch for places that
+genuinely can't receive `ctx` as a parameter (top-level subscribers,
+plugin hooks with fixed signatures). Most code should NOT use it —
+receive `ctx` via deps and let closure semantics propagate it.
+
+### Why no `runWithContext` (sync scoped-set)
+
+Per ADR 45: `Effect.runSync(withContext(scope, Effect.sync(fn)))`
+doesn't work — the nested `Effect.runSync(getContext)` inside `fn`
+starts a fresh root fiber that doesn't inherit the outer's FiberRef.
+Faithfully imitating v1's ALS-based `Context.run` would require
+AsyncLocalStorage as a parallel substrate; this was explicitly
+rejected (Node-tie, worker-thread caveat, cross-runtime portability
+cost). Callers needing a scoped sync set should either:
+
+- (a) Restructure to receive `ctx` via a deps parameter (closure
+  capture handles propagation through any async work).
+- (b) Enter Effect-land at the boundary:
+  `Effect.runPromise(withContext(scope, eff))`.
+
+See `docs/proposals/v2/blueprint/45-runtime-context-model.md` for the
+full rationale.
+
+---
+
+## Effect fibers, forks, and lifetimes
+
+Substrate code is Effect-typed end-to-end. Adopter code is typically
+Promise-typed (with dual-shape support for adopters who want full
+Effect power). Understanding how fibers compose is helpful for
+anyone going into substrate-internal work or implementing custom
+harnesses.
+
+### Run-functions vs fork
+
+| Function                 | Call site            | Creates                    | Inherits FiberRef?                         |
+| ------------------------ | -------------------- | -------------------------- | ------------------------------------------ |
+| `Effect.fork(eff)`       | Inside Effect        | CHILD fiber of caller      | **Yes** — child inherits parent's snapshot |
+| `Effect.runFork(eff)`    | Raw JS (entry point) | ROOT fiber, returns handle | **No** — no parent to inherit from         |
+| `Effect.runSync(eff)`    | Raw JS (entry point) | ROOT fiber, blocking       | **No** — fresh root fiber                  |
+| `Effect.runPromise(eff)` | Raw JS (entry point) | ROOT fiber, async          | **No** — fresh root fiber                  |
+
+**Discipline:**
+
+- **Inside Effect, never call `runX`.** If you want to spawn child
+  work, use `yield* eff` (same fiber) or `Effect.fork(eff)`
+  (child fiber). Nested `runX` is almost always a bug — it silently
+  loses FiberRef state.
+- **At substrate edges (request entry, sync escape), use `runX`
+  deliberately.** Match the run-function to your blocking needs:
+  `runSync` if you need the result synchronously, `runPromise` for
+  async, `runFork` for fire-and-forget with a handle.
+
+### Lifetime models
+
+Effect's structured concurrency gives us four fork shapes covering
+the lifetime models the framework needs:
+
+| Primitive                   | Lifetime                                                             | When to use                                                                                   |
+| --------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `Effect.fork(eff)`          | Tied to parent fiber. Parent dies → child interrupted.               | **Default.** Tool handler spawning concurrent sub-work that should die when the handler dies. |
+| `Effect.forkScoped(eff)`    | Tied to a `Scope`. Scope finalizes → fiber interrupted.              | Resources managed within `Effect.scoped(...)` blocks.                                         |
+| `Effect.forkIn(scope)(eff)` | Tied to an EXPLICIT scope you provide.                               | Adopter-managed lifetimes (`app.scope`, `gateway.scope`, etc.).                               |
+| `Effect.forkDaemon(eff)`    | Detached from parent. Outlives parent. Only the runtime can kill it. | Long-running work that must survive its initiating session (background sync, deploy step).    |
+
+**Cascading abort is the default** — `runOperation`'s body runs in a
+fiber, and any work spawned inside via `yield*` or `Effect.fork` is
+structured-concurrency-correct. When the parent op is interrupted
+(timeout, user cancel, parent error), all child work is interrupted
+too. `Effect.scoped(body)` around the body ensures resource cleanup
+runs.
+
+**Daemon fork breaks structured concurrency on purpose** — used when
+work should outlive its initiating session. `Effect.forkDaemon` is
+the v2 primitive for this; it has no clean analog in v1.
+
+### How `runOperation` uses this
+
+`BaseHarness.runOperation(op, body)` runs `body` in the calling
+fiber's lineage. It reads ambient context (`yield* getContext`),
+enriches it (sets `opId`, `parentOpId`), and scopes the body via
+`withContext(enriched, ...)`. Nested `runOperation` calls compose:
+
+```
+outerHarness.runOperation(opA, body)
+  yield* withContext(ctxA = {opId:"A", parentOpId:undef}, body):
+    body() runs — calls innerHarness.runOperation(opB, ...)
+      ambient = ctxA (inherited via FiberRef)
+      yield* withContext(ctxB = {opId:"B", parentOpId:"A"}, innerBody):
+        innerBody() — sees ctxB
+      reverts to ctxA
+    body resumes
+  reverts to no scope
+```
+
+Same fiber throughout. FiberRef stacks via `Effect.locally`. Each
+nested call enriches and scopes; reverts cleanly on exit.
+
+**Cross-harness via the inbox** is different: when harness A sends a
+message to harness B's inbox, B's handler runs in a DIFFERENT fiber
+(spawned by the inbox dispatcher). FiberRef does not propagate across
+the wire. Instead, the message envelope carries `scope` and
+`correlationId` explicitly; B's `runOperation` reconstructs context
+from the envelope. No FiberRef propagation expected; the envelope IS
+the carrier.
+
+---
+
+## Runtime signals — `emitLog` / `emitProgress` (ADR 64)
+
+`BaseHarness` exposes two protected helpers for the runtime signal
+family — the shared emit seam behind `ctx.log` / `ctx.progress` and any
+harness / loop that wants structured out-of-band diagnostics:
+
+```ts
+protected emitLog(scope, level, data, logger?): Effect<void, JournalError, never>
+protected emitProgress(scope, p: ProgressEventPayload): Effect<void, JournalError, never>
+```
+
+Each builds one discrete envelope (`<surface>:signal:log` /
+`:progress`, phase `terminal`, the `*EventPayload`, the caller's scope
+plus the harness principal) and appends it to the bus. They are
+**structurally bus-only** — they bypass `publish` / the journaling
+policy and append straight to the bus, so signals are NEVER journaled
+even though `terminal` is an `alwaysJournal` phase (routing diagnostic
+spam into the recovery spine would bloat it for zero durability
+benefit). A subscriber probe keeps the no-listener cost to one map
+lookup. Fire-and-forget: callers launch them via `Effect.runFork`.
+
+Consumers subscribe via the bus (the MCP-server projection, the
+gateway→client projection). There is intentionally NO ambient global
+`Context.log` — non-tool components that log ARE harnesses and emit via
+these helpers (see `TODO(#19-ambient)`).
+
+Verified by `src/__tests__/signals.spec.ts`.
+
+## Lifting between Promise-land and Effect-land
+
+Adopter code is typically `async (input, deps) => result`. Substrate
+code is Effect-typed. The `liftToEffect` helper (re-exported from
+`@agentick/utils`) is the type-shape bridge:
+
+```ts
+import { liftToEffect } from "@agentick/utils";
+
+const fetchUser = async (id: string) => fetch(`/api/users/${id}`);
+const fetchUserEff = liftToEffect(fetchUser);
+// fetchUserEff: (id: string) => Effect.Effect<Response, unknown>
+
+// Compose in Effect chains:
+yield * fetchUserEff("42");
+```
+
+**Properties:**
+
+- **Type-shape only.** Does NOT fork. The returned Effect is unrun
+  until the caller composes it via `yield*` / `Effect.fork` / etc.
+- **Lazy.** Uses `Effect.suspend` so `fn(args)` doesn't execute until
+  the Effect runs (matches Effect convention; no side effects leak
+  into construction).
+- **Idempotent on Effect inputs.** If `fn` already returns an Effect,
+  the lifted function passes it through unchanged (no double-wrap).
+- **Does NOT bridge context into the Promise body.** If the wrapped
+  Promise's body calls `readContext()`, it sees `EMPTY_CONTEXT` —
+  the body is outside the fiber. Pass `ctx` to the function via deps
+  and let closure capture handle propagation.
+
+For surface-specific lifts that DO bridge context (`liftHandler` for
+tool handlers — captures ctx from FiberRef + passes via deps), see
+the owning package. The pattern, when needed:
+
+```ts
+import { Effect } from "effect";
+import { getContext } from "@agentick/runtime";
+
+const liftHandler =
+  <I, D, E = unknown>(
+    fn: (
+      input: I,
+      deps: D & { ctx: RuntimeContext },
+    ) => Promise<readonly ContentBlock[]> | Effect.Effect<readonly ContentBlock[], E>,
+  ) =>
+  (input: I, depsBase: D) =>
+    Effect.gen(function* () {
+      const ctx = yield* getContext;
+      const result = fn(input, { ...depsBase, ctx });
+      if (Effect.isEffect(result)) return yield* result;
+      return yield* Effect.tryPromise(() => Promise.resolve(result));
+    });
+```
+
+The handler body has `ctx` in lexical scope via the deps parameter.
+Async work inside the body captures it via JS closure — no
+`readContext()` needed inside the handler.
+
+## The edge bridges — `runHarnessProtocol` / `runHarnessStream`
+
+The `.fx` dual-typed edge (ADR 77) is Effect-canonical; the Promise/AsyncStream
+facades are DERIVED at the entity edge by these two bridges.
+
+**`runHarnessProtocol(effect, runtime?)`** — Effect → Promise. Runs `effect`
+to a settled `Exit` and normalizes it (typed failures re-thrown, defects
+surfaced). The single `runPromise` boundary a harness facade crosses:
+
+```ts
+// A harness facade IS its `.fx` twin bridged once:
+run(input: RunInput): Promise<ExecutorTerminal> {
+  return runHarnessProtocol(this.runFx(input)); // fx.run minus the runPromise
+}
+```
+
+Pass the optional `runtime` (an app-scoped `ManagedRuntime` built from a
+telemetry `Layer`) to run the whole composed fiber on a real tracer — that is
+how a `session.send` produces a **nested** span tree (see `@agentick/session`).
+
+**`runHarnessStream(build, options?)`** — the streaming sibling, Effect →
+`AsyncStream`. All the Queue / `forkDaemon` / iterator / result-Promise
+machinery lives here ONCE; each streaming edge supplies only its sink-fold
+`build` + policy hooks (`queueCapacity`, `isCancellation`, `onStart`,
+`onAbort`, `runtime`). The executor's `executeStream` facade is
+`runHarnessStream((sink) => this.executeStreamFx(input, sink), { … })`.
+
+### `command` vs `commandStream` — the two declaration sites
+
+`command({ name, handler })` declares a NON-streaming verb: registry
+registration (mints the boundary hooks + inbox addressability) + `runOperation`
+
+- the `runHarnessProtocol` Promise facade. The public method returns
+  `Promise<R>`.
+
+`commandStream({ name, body })` is its **streaming twin** (ADR 77) — it fuses
+the same registry registration + the same `runOperation` cascade with
+`runHarnessStream`'s iterator. The `body(input, sink)` emits chunks as a
+side-effect and returns the final `R`; the ONE composed interceptor cascade
+(`guard → onBefore(input) → body → onAfter(R)`) fires at the stream's **start**
+(guard/onBefore bracket the first chunk) and **terminal** (onAfter over the
+finished `R`), exactly as for a non-streaming command — there is no second
+interceptor path. The public method returns `AsyncStream<Chunk, R>`.
+
+Two consumption modes over ONE cascade:
+
+- **The stream** — `for await` drains the chunks; `.result` resolves to `R`.
+- **The registry `run`** (inbox-addressable) — a remote/inbox caller of the
+  verb gets the final `R` (the registry drives the same operation with a no-op
+  sink and drains). Boundary hooks + terminal fire once, identically.
+
+`stream.abort(reason)` interrupts the operation fiber (the kill/resume path):
+an aborted run publishes NO `terminal:succeeded` and fires NO `onAfter` with a
+bogus value — `.result` rejects with the interrupted cause.
+Pinned by `src/__tests__/command-stream.spec.ts`.
+
+### Per-chunk interception — `on<Verb>Chunk` (ADR 80 Phase 2)
+
+Beyond the boundary hooks, a streaming command mints an `on<Verb>Chunk`
+registrar (`deriveChunkHookName` — e.g. `onModelGenerateStreamChunk`) and
+accepts a `def.chunk` list. Both take **chunk interceptors** that **sink-wrap**
+the body's sink — they run BETWEEN the body's `emit` and the downstream sink, so
+BOTH consumption faces (`stream`'s iterator AND `fx`'s in-fiber sink — the loop's
+per-tick model call) see the TRANSFORMED chunks, and the registry `run` still
+traverses them (drained through a no-op sink). Two kinds:
+
+- **`observe`** — `{ observe(chunk, ctx) }`. A tap; sees each chunk in order,
+  cannot alter or drop it. For metrics, logging, progress.
+- **`transform`** — `{ onChunk(chunk, emit, ctx), onFlush?(emit, ctx) }`. A
+  stateful map: `emit` zero times to BUFFER/coalesce, once for a 1:1 map, or many
+  for fan-out. A `transform` that throws covers stop-on-bad-content (there is NO
+  separate per-chunk guard).
+
+**Flush-on-terminal.** `onFlush` runs ONCE at the terminal boundary — after the
+body's last emit, BEFORE the `onAfter` boundary hook — releasing any buffered
+tail so an N→1 coalescer loses nothing. It is reached only on CLEAN completion:
+an aborted/interrupted body never returns, so `flush` never runs (no bogus tail
+on abort).
+
+Interceptors compose in registration order into a pipeline `body → i0 → i1 → …
+→ sink` (`def.chunk` entries first — closest to the body). **Zero overhead when
+none is registered**: the sink is not wrapped at all (no `getContext`, no flush)
+— unregistering the last interceptor restores the raw sink. Registered
+harness-locally (they do NOT inherit down the construction tree, and a
+declarative session-config `{ hooks: { onXChunk } }` is not folded through
+`hooksToMiddlewares` — session-scoped chunk interceptors are a follow-up).
+Pinned by `src/__tests__/command-stream.spec.ts`; exercised end-to-end on
+`model:generate_stream` by `@agentick/model-executor` and the executor
+conformance suite.
+
+## Operation middleware — three tiers (ADR 76 / 83)
+
+`runOperation` composes ONE interceptor list around every operation body. It
+assembles `[ ...callMiddleware (tier-4), ...inheritedInterceptors (tier-3,
+folded at construction), ...ownMiddleware (tier-2) ]` — hooks are op-scoped
+`transform` middleware living IN `ownMiddleware`/`inheritedInterceptors` (ADR 83
+amendment), not a separate term — then
+a **stable, guard-outermost sort** (`orderInterceptors` — `guard ≺ transform ≺
+observe`) floats every `guard`-kind interceptor to the front (preserving relative
+order within a kind), so admission control always runs before any transform:
+
+```
+guard-outermost, then by tier (broadest → innermost):
+tier 4 — call-scoped (FiberRef, broadest)
+  → tier 3 — inherited construction-ancestors (folded at construction)
+    → tier 2 — this harness's own chain (guards + transforms)
+      → hooks (onBefore*/onAfter* — transform-kind sugar)
+        → operation body
+```
+
+Within any one chain, first-registered is outermost. A `Middleware` wraps the
+body: call `next(input)` to proceed, or return a value to short-circuit. There is
+**one interceptor primitive** — see [Command lifecycle hooks](#command-lifecycle-hooks-adr-80--82--83)
+below for its three kinds (`guard` / `transform` / `observe`) and the `guard()`
+admission-control sugar.
+
+```ts
+import type { Middleware } from "@agentick/runtime";
+
+const timing: Middleware = (input, next) =>
+  Effect.gen(function* () {
+    const start = Date.now();
+    const result = yield* next(input);
+    // …record Date.now() - start…
+    return result;
+  });
+```
+
+### Two surfaces: `use` (pure-JS) and `fx.use` (Effect) — you do NOT need Effect
+
+Middleware comes in two forms, registered through the **two surfaces every
+harness already exposes** — the same facade/twin split as every operation
+(`harness.use : harness.fx.use  ::  harness.run : harness.fx.run`):
+
+- **`harness.use(mw)`** takes an **`AsyncMiddleware`** (pure JS) — `next(input)`
+  returns a `Promise`; `await` it. No Effect knowledge required. The operation's
+  `RuntimeContext` is handed to you as an explicit **third argument** (`ctx`),
+  since an async middleware runs outside the fiber and can't read `getContext`.
+- **`harness.fx.use(mw)`** takes an Effect-native **`Middleware`** — `next(input)`
+  returns an Effect; composes IN the fiber. Telemetry span-nesting and structured
+  interruption propagate through it.
+
+```ts
+// Pure-JS — the ergonomic form. `use` types the inline arrow cleanly.
+harness.use(async (input, next, ctx) => {
+  const start = Date.now();
+  const result = await next(input);
+  metrics.record(ctx.sessionId, ctx.opId, Date.now() - start);
+  return result;
+});
+
+// Effect-native — for middleware that must stay in-fiber.
+harness.fx.use((input, next) =>
+  Effect.gen(function* () {
+    const t0 = yield* Clock.currentTimeMillis;
+    const result = yield* next(input);
+    yield* recordSpan(Clock.currentTimeMillis - t0);
+    return result;
+  }),
+);
+```
+
+Splitting the forms across the two surfaces is what lets EACH be a single type,
+so an inline arrow infers its params cleanly — one overloaded `use` could not
+(the async and Effect `next` contracts are incompatible, and the union kills
+inline inference for both).
+
+> **Honest caveat — only the middleware's OWN body is off-fiber; the wrapped
+> ops are fully in-fiber.** `liftMiddleware` forks each `use` continuation on the
+> **ambient runtime** (`Effect.runtime()` — the fiber's Context, FiberRefs, and
+> tracer), not the default one. So everything the middleware _wraps_ keeps full
+> in-fiber semantics across the `await` boundary: **OTel span-nesting** (a span
+> opened in the wrapped ops nests under the op span), **`RuntimeContext` /
+> `parentOpId`**, **tier-4 `withCallMiddleware`** (a nested op reached through the
+> middleware still sees call-scoped middleware), and **interruption** (aborting a
+> `send` tears down the in-flight inner model/tool call — no detached-root leak).
+> The ONE thing that stays off-fiber is the middleware's _own_ JS body — the
+> statements around `await next` run on the microtask queue, not a fiber, so they
+> can't be fiber-interrupted mid-statement and can't read `getContext` (that's
+> _why_ `ctx` is passed explicitly). For a middleware whose _own logic_ must be
+> in-fiber, use `fx.use`. **`use` = ergonomic, wrapped work fully in-fiber;
+> `fx.use` = the middleware body itself is in-fiber too.** Each of these is
+> pinned by a test (`base-harness.spec` → "async middleware fiber propagation").
+
+### Which surface — a use-case catalog
+
+Reach for `use` (async) by default — the work it wraps is fully in-fiber
+(spans nest, interruption reaches inner ops, context + tier-4 survive). Drop to
+`fx.use` (Effect) only when the middleware's **own body** must be in-fiber. Rule
+of thumb: **wrapping ops → `use` is enough; the middleware itself does
+fiber-level work → `fx.use`.**
+
+| Use case                                          | Surface  | Why                                                             |
+| ------------------------------------------------- | -------- | --------------------------------------------------------------- |
+| Timing / metrics / structured logging             | `use`    | Reads `ctx` (sessionId, opId, traceparent)                      |
+| Auth / quota guard (short-circuit before `next`)  | `use`    | Return a value without calling `next` — op never runs           |
+| Retry with backoff around a flaky op              | `use`    | A `for` loop `await`ing `next` reads naturally in async JS      |
+| Result rewriting / redaction after `next`         | `use`    | Pure transform of the awaited result                            |
+| A per-op OTel span that **nests** under the op    | `use`    | The wrapped ops fork on the ambient runtime → nesting survives  |
+| A timeout / cancel that tears down **inner** work | `use`    | Interruption is re-threaded to the forked continuation          |
+| The middleware's OWN body must be interruptible   | `fx.use` | Only an Effect body runs in-fiber; a JS async body cannot       |
+| Providing a scoped resource via Layer/FiberRef    | `fx.use` | Establishing (not just inheriting) fiber scope needs the Effect |
+
+```ts
+// use — short-circuit guard (never calls next): the op never runs.
+harness.use(async (input, next, ctx) => {
+  if (!isAuthorized(ctx.user)) return denied(); // no next() → body skipped
+  return next(input);
+});
+
+// use — retry: async control flow is exactly what async middleware is good at.
+harness.use(async (input, next) => {
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await next(input);
+    } catch (err) {
+      lastErr = err;
+      await sleep(2 ** attempt * 50);
+    }
+  }
+  throw lastErr;
+});
+```
+
+**Tier 2 — per-instance** (`harness.use(mw)`): wraps that harness's own ops.
+Returns an `Unsubscribe`.
+
+**Tier 3 — structural inheritance (a construction-FOLD, ADR 83):** a harness's
+effective stack is its **construction-ancestors'** chains, root-outermost,
+wrapping its own. The app is each session's construction parent, so `app.use(mw)`
+structurally wraps every session op — deployment-global tracing / journaling /
+audit. **Guards inherit the SAME way** (they live on the same
+`this.middleware` chain and ride the fold with transforms) — there is no separate
+before-verdict subsystem anymore.
+
+The cascade no longer WALKS a `parent` pointer per op. Each scope **snapshots**
+its parent's `resolvedInterceptors()` at construction into a frozen
+`inheritedInterceptors` (mirroring the hooks fold, ADR 82; `parent` and
+`ownAndInheritedMiddleware` are deleted). The trade is a **static boundary**:
+registration BEFORE a child's construction inherits into it; `app.use` AFTER a
+session already exists does not reach that session (its fold already ran). Own
+tier-2 registration (`harness.use` / `harness.guard` on a harness's own ops) stays
+fully dynamic — a local `this.middleware.snapshot()` read per op; only the
+INHERITED layer is snapshotted. The SHARED spine harnesses (loop / executor /
+tool) are construction-_siblings_, not children — a session-scoped concern
+around the model call is tier 4, not tier 3.
+
+**Tier 4 — call-scoped** (`withCallMiddleware(mw, effect)`): the Effect-native,
+dynamic-scope power. Scopes `mw` around every nested `runOperation` the effect
+transitively reaches — **in ANY harness, across construction-siblings** — then
+evaporates. Enabled by the ADR 77 spine: the call is one fiber, so a FiberRef
+propagates the middleware list across boundaries. This is the _only_ correct
+scope for per-request / per-session middleware around a _shared_ harness:
+
+```ts
+import { withCallMiddleware } from "@agentick/runtime";
+
+// budgetCap wraps every op this send transitively reaches — the model call
+// (executor) and each tool dispatch, though they're shared singletons — then
+// is gone when the send settles. Nested calls accumulate (outer stays outermost).
+yield * withCallMiddleware([budgetCap], loop.fx.runExecution(sendInput));
+```
+
+> **Full write-up:** [ADR 76 — Operation middleware scoping](../../docs/proposals/v2/blueprint/76-operation-middleware-scoping.md).
+
+---
+
+## Command lifecycle hooks (ADR 80 / 82 / 83)
+
+Every harness verb — `tool:dispatch`, `knobs:set`, `session:send`, … — is a
+`command("<who>:<what>", body)` routed through `runOperation`. That one seam
+already emits phase envelopes and composes middleware; **lifecycle hooks ride it
+too.** No privileged "core" layer: every verb on every harness gets the same
+before/after participation, uniformly.
+
+### One interceptor primitive, three kinds (ADR 83)
+
+There is exactly **one** interception primitive — the wrapping `Middleware`
+`(input, next, ctx) => output`. Everything at the operation boundary is a **kind**
+of it (`InterceptorKind = "guard" | "transform" | "observe"`, tagged via
+`tagInterceptor`; untagged defaults to `"transform"`) or **sugar** over it. The
+verdict subsystem (`HandlerRegistry` / `mergeVerdict` / `runInheritedBefore`) is
+**deleted**.
+
+| Kind        | Intent                              | Surface                                             |
+| ----------- | ----------------------------------- | --------------------------------------------------- |
+| `guard`     | Admission control before the body   | `harness.guard(decide)` sugar / `guardEffect`       |
+| `transform` | Reshape input/output                | plain `harness.use` / `fx.use`; **hooks** are sugar |
+| `observe`   | Pure side-effect (metrics, logging) | `harness.use` that just reads + returns `next(...)` |
+
+**`guard` — admission control.** A guard decides `proceed | veto | replace |
+defer` before the body. The ergonomic surface is `harness.guard(decide)` where
+`decide` returns a `HandlerVerdict` (or `void` ≡ proceed), sync or Promise:
+
+```ts
+harness.guard((input, ctx) => (input.locked ? { kind: "veto", reason: "locked" } : undefined));
+```
+
+`HandlerVerdict` (from `@agentick/spec`) is discriminated by `kind`:
+`{ kind: "proceed" }` · `{ kind: "veto"; reason? }` ·
+`{ kind: "replace"; result; reason? }` · `{ kind: "defer"; retryAfter? }`. A
+non-`proceed` verdict is desugared (`signalFromVerdict`) into a typed
+`OperationSignal` (`OperationVeto` / `OperationReplace` / `OperationDefer`, in
+`op-signals.ts`) that the guard **raises** on the failure channel;
+`runOperation`'s settle step catches it (`isOperationSignal`) and maps it to the
+matching terminal. **Terminal semantics are byte-identical** to the old verdict
+switch — `terminateFromSignal` delegates to the same `terminate()` path (`vetoed`
+/ `deferred` fail with `OperationOutcomeError`; `replaced` succeeds with the
+result). Only the _trigger_ changed: a caught signal instead of a separate phase.
+
+Guards compose **outermost** (the guard-outermost sort above), so a retry /
+transform middleware cannot swallow a raised veto. `harness.listInterceptors(op)`
+enumerates the composed kinds for introspection. Multi-guard precedence is
+**compose-order** (first non-`proceed` guard in composed order wins; stable sort =
+guard-outermost, then scope, then registration) — ADR 83 replaced the old
+order-independent `veto > replace > defer` priority-merge (a hardcoded substrate
+policy) with a caller-controlled composition order.
+
+**`transform` — reshape input/output.** This is plain `Middleware`. **Hooks
+(`onBefore*` / `onAfter*`, below) are keyed sugar over transform** — `onBefore`
+reshapes the command input, `onAfter` reshapes the output.
+
+**`observe` — pure side-effect.** A middleware that reads and returns the value
+unchanged.
+
+> **`guard : operation :: gate : loop`.** The `guard` seam is op admission. It is
+> NOT the `gate` package (`@agentick/gates` / `SessionHarness.gate(name) =>
+GateHandle`), which is **loop continuation** — a different concept at a
+> different scope. The distinction is load-bearing: a `guard(decide)` method on
+> `BaseHarness` collided (TS2416) with `SessionHarness.gate(name)`, which forced
+> the naming. The tool-executor's `guardDispatch` (was `onBeforeDispatch`) follows
+> the same rule.
+
+> **Full write-up:** [ADR 83 — one interceptor primitive](../../docs/proposals/v2/blueprint/83-one-interceptor-primitive.md).
+
+### Two surfaces, one seam
+
+The command already carries an **observe** side; hooks add a **participate** side.
+
+- **Events (observe · out-of-band).** `runOperation` emits structured phase
+  envelopes `{ surface, name: "<who>:<what>", phase }` on the bus —
+  `EventPhase` is `"requested" | "before" | "delta" | "terminal"`. Subscribe on
+  the bus (the app exposes `app.events(...)`); fire-and-forget, cannot alter the
+  op. (ADR 80's flat
+  `<who>-<what>-<phase>` kebab is the _wire_ projection of these envelopes for
+  wire-extensions — a projection over this in-process shape, not a second bus.)
+- **Hooks (participate · in-band).** `onBefore<Who><What>` /
+  `onAfter<Who><What>` — awaited, ordered, transform-capable. The rest of this
+  section is about these.
+
+A **hook** is `(value, ctx) => value | void`: **return a value → transform**,
+**return `void` → observe**, **`throw` → veto**. `before` receives the command
+input and returns that same type; `after` receives the command output and returns
+that same type. `ctx` is the op's `RuntimeContext` (scope, resolved `target`,
+principal, hooks). Hooks **are middleware entries** — lifted through the SAME
+`liftMiddleware` path as `use` (above), so ambient `RuntimeContext`, OTel
+span-nesting, and interruption survive the `await`. There is no bespoke
+hook-runner; the fiber invariant is inherited from middleware verbatim.
+
+### Typed by a derived mapped type
+
+Hook names are a **total function of the command id**:
+`hook = on + Before|After + PascalCase("<who>:<what>")`. A verb opts into typed
+hooks with one line — an augmentation of the empty-seed `CommandRegistry`:
+
+```ts
+// in the harness that owns the verb (e.g. @agentick/tool-executor):
+declare module "@agentick/runtime" {
+  interface CommandRegistry {
+    "tool:dispatch": { input: DispatchInput; output: DispatchResult };
+  }
+}
+```
+
+`CommandHooks` (a mapped type over the registry) then mints
+`onBeforeToolDispatch?: (input: DispatchInput, ctx) => …` and
+`onAfterToolDispatch?: (output: DispatchResult, ctx) => …`. Only augmented verbs
+are type-safe keys — the surface is **exposure-gated**. The type-level `Pascal<K>`
+and the runtime `deriveHookNames(id)` are lockstep-tested so a name can never
+drift between them.
+
+### Hooks ARE op-scoped middleware (ADR 83 amendment)
+
+There is no separate `Hooks` subsystem. A hook registers as an op-scoped
+`transform` middleware on the ONE `.use` chain (`registerCommandHook` →
+`this.middleware.use`), self-scoping via `ctx.op` (the op's Pascal suffix). So
+hooks cascade through the SAME `inheritedInterceptors` construction-fold as guards
+and middleware (see [tier 3 above](#operation-middleware--three-tiers-adr-76--83)) —
+one chain, one fold. `on<Command>` is the primitive (the full typed middleware for
+a verb); `onBefore/onAfter<Command>` are `asBefore`/`asAfter` sugar over it.
+
+```ts
+// declarative (folds down the construction tree):
+createApp({ hooks: { onBeforeToolDispatch, onAfterToolDispatch, onToolDispatch } });
+
+// imperative (own future ops; returns Unsubscribe = removal):
+const off = harness.hook({ onBeforeToolDispatch: (input) => reshape(input) });
+harness.hooks.onAfterToolDispatch((output) => redact(output)); // per-verb proxy
+harness.hooks.onToolDispatch((input, next, ctx) => next(input)); // full typed middleware
+```
+
+Same static boundary as `use`/`guard` (own future ops, not already-constructed
+children — the fold snapshots at construction). A call-scoped transform that must
+reach a _shared_ harness (the model executor) is **tier-4** (`withCallMiddleware`,
+above), not the fold. Mechanism pinned by `src/__tests__/command-hooks.spec.ts`.
+
+> **The canonical hook taxonomy — every hookable verb, all four surfaces, the full
+> lifecycle table:** [`docs/proposals/v2/HOOK-LIFECYCLE.md`](../../docs/proposals/v2/HOOK-LIFECYCLE.md).
+> Design: [ADR 83](../../docs/proposals/v2/blueprint/83-one-interceptor-primitive.md)
+> (amends [ADR 80](../../docs/proposals/v2/blueprint/80-command-lifecycle-hooks.md) /
+> [82](../../docs/proposals/v2/blueprint/82-hooks-cascade-as-construction-fold.md)).
+
+---
+
+## See also
+
+- `docs/proposals/v2/blueprint/45-runtime-context-model.md` — full
+  design rationale (structural identity, closure-capture propagation,
+  rejected alternatives)
+- `docs/proposals/v2/blueprint/01-harness-principle.md` — the
+  five-surface model `BaseHarness` implements
+- `docs/proposals/v2/blueprint/19-foundation.md` — substrate
+  foundations (journal / bus / inbox)
+- ADR 43 — Unified `ToolHandlerCtx` (the deps shape `ctx` arrives
+  through)

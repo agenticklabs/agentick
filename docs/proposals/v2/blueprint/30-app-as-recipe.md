@@ -4,7 +4,7 @@
 
 > **Note:** This ADR's "sessions own all substrate" inversion was the wrong scope. ADR 31's hierarchical slot model achieves the same goals (per-session isolation, multi-tenant cloud, hibernate portability) without forcing the inversion of substrate ownership. Reading this ADR is still useful for the design exploration, but **the active design is ADR 31**.
 > **Builds on:** ADR 26 (Harness as the single shape), ADR 27 (Modular built-ins), ADR 29 (Bus overhaul)
-> **Touches:** `@agentick/app-next` (`AppHarness`, `createApp`), `@agentick/session-next` (`SessionHarness` construction), `@agentick/runtime-next` (`LocalEventBus`/`LocalInbox`/`MemoryJournal` static `createFactory` helpers), `@agentick/spec-next` (factory type signatures for the three substrate primitives).
+> **Touches:** `@agentick/app` (`AppHarness`, `createApp`), `@agentick/session` (`SessionHarness` construction), `@agentick/runtime` (`LocalEventBus`/`LocalInbox`/`MemoryJournal` static `createFactory` helpers), `@agentick/spec` (factory type signatures for the three substrate primitives).
 
 ## TL;DR
 
@@ -166,7 +166,7 @@ createApp(<Agent />, {
 Each in-memory built-in ships a static `createFactory`:
 
 ```ts
-// @agentick/runtime-next
+// @agentick/runtime
 class LocalEventBus implements EventBus {
   static createFactory(configFn?: (deps: FactoryDeps) => LocalEventBusOptions): EventBusFactory {
     return (deps) => new LocalEventBus(configFn?.(deps));
@@ -365,7 +365,7 @@ In practice this means: Sandbox / MCP / Subscription extensions get one install 
 **Resolved: factories receive a `Lifecycle` handle and register `onClose` cleanup if they want it.** No ownership flags, no `SharedRef` primitive, no GC reliance. The factory has full control over what session-close means for the resource it returned.
 
 ```ts
-// @agentick/spec-next
+// @agentick/spec
 export interface Lifecycle {
   /**
    * Register a teardown that runs at session-close. Handlers run in

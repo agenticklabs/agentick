@@ -63,7 +63,7 @@ Expected output (process names + roles):
 ## What it doesn't demonstrate (deferred)
 
 - **Real-Redis multi-host.** Use `defineRedisCluster` from
-  `@agentick/cluster-redis-next` against an actual Redis instance.
+  `@agentick/cluster-redis` against an actual Redis instance.
   Requires docker-compose; Phase 5+.
 - **Broker re-election under fault injection.** The
   `unix-re-election.spec.ts` test pins this in-process; the demo

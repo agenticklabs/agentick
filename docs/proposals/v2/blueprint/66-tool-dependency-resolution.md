@@ -47,7 +47,7 @@ Category 2 has, historically, been served two ways:
   `ToolHandlerCtx extends ToolHandlerCtxExtensions`. Spec stays harness-agnostic — it
   hardcodes no optional harness.
 - **each optional harness augments it** — e.g. sandbox:
-  `declare module "@agentick/spec-next" { interface ToolHandlerCtxExtensions { readonly sandbox?: SandboxBridge } }`.
+  `declare module "@agentick/spec" { interface ToolHandlerCtxExtensions { readonly sandbox?: SandboxBridge } }`.
   Optional (`?`) because not every deployment mounts it. (Augmentation is *required* here,
   not merely tidy: there is no spec-level sandbox protocol, so spec could not hardcode it
   even if it wanted to.)

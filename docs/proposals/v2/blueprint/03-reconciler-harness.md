@@ -1,6 +1,6 @@
 # 03 — Reconciler Harness
 
-> **Rename note (2026-07-21, #243):** the "reconciler" subsystem described below was renamed to **compiler** — `@agentick/reconciler-next` → `@agentick/compiler-next`, `@agentick/reconciler-react-next` → `@agentick/compiler-react-next`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
+> **Rename note (2026-07-21, #243):** the "reconciler" subsystem described below was renamed to **compiler** — `@agentick/reconciler` → `@agentick/compiler`, `@agentick/reconciler-react` → `@agentick/compiler-react`, `ReconcilerProtocol` → `CompilerProtocol`, `ReconcilerHarness` → `CompilerHarness`, etc. Original terminology is preserved below as historical record.
 
 **Status:** Synthesized with placeholders · refined 2026-05-08 (renamed)
 `[SOURCE: compiler-harness.md, harness-principle.md, compiled-spec.md]`
@@ -12,11 +12,11 @@ string, rendered resource, snapshots.
 
 The harness is named after its **function** (compiles to
 `RenderedTree`), not its substrate. **v2 ships
-`@agentick/reconciler-react-next` as the reference (and only initial)
+`@agentick/reconciler-react` as the reference (and only initial)
 implementation** — using a real React JSX tree under the hood. Future
 implementations could be `@agentick/compiler-vue`,
 `@agentick/compiler-imperative`, etc., conforming to the same
-`ReconcilerProtocol` from `@agentick/spec-next`.
+`ReconcilerProtocol` from `@agentick/spec`.
 
 The mounted application owns component identity, hook state, effects,
 subscriptions, providers, scoped declarations, and render-time
@@ -26,7 +26,7 @@ harness is a living application, not a one-shot transformer.
 ```
                 ┌──────────────────────────────────────┐
                 │       Reconciler harness               │
-                │   (v2: @agentick/reconciler-react-next)     │
+                │   (v2: @agentick/reconciler-react)     │
                 │                                      │
    commands ──► │  mount · rerender · renderTree   │ ──► events
                 │  renderToString · renderResource     │
@@ -60,10 +60,10 @@ roles — easy to confuse, important to keep separate:
 
 | Package                           | Role                                                                                                                                               | Where it runs    |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `@agentick/reconciler-react-next` | **Reconciler harness implementation.** Takes JSX agent definitions, produces `RenderedTree`. Server-side; runs in the runtime.                     | server / runtime |
+| `@agentick/reconciler-react` | **Reconciler harness implementation.** Takes JSX agent definitions, produces `RenderedTree`. Server-side; runs in the runtime.                     | server / runtime |
 | `@agentick/client-react`          | **Client SDK.** Pure React hooks for connecting a browser app to a session via transport. Inherits behavior unchanged from v1's `@agentick/react`. | browser          |
 
-This doc is exclusively about `@agentick/reconciler-react-next`.
+This doc is exclusively about `@agentick/reconciler-react`.
 
 ## What this harness manages
 
@@ -619,7 +619,7 @@ interface HookBridges {
 
 `[PLACEHOLDER]` shape. The exact bridge surface is part of the v2
 implementation, not the spec wire format. It belongs in the runtime
-package's protocol surface to the React harness, not in `@agentick/spec-next`.
+package's protocol surface to the React harness, not in `@agentick/spec`.
 
 ## Async components — first-class
 
@@ -832,11 +832,11 @@ COM and the model output stream.
 
 The `@agentick/react` package is **Effect-free** — pure React + the spec
 package. The runtime imports React harness types from
-`@agentick/spec-next/protocol/react-harness` and bridges to Effect at the
+`@agentick/spec/protocol/react-harness` and bridges to Effect at the
 boundary.
 
 ```
-@agentick/react      depends on  →  react, react-reconciler, @agentick/spec-next
+@agentick/react      depends on  →  react, react-reconciler, @agentick/spec
                      does NOT     →  effect, @effect/cluster, runtime
 ```
 
@@ -888,8 +888,8 @@ packages/react/
 
 `[PROPOSAL]` — keep built-in renderer implementations here for now (open
 question 1 in `renderer-harness.md` is whether they belong in
-`@agentick/react`, `@agentick/spec-next`, or a separate `@agentick/renderers`).
-The formatter harness contract is in `@agentick/spec-next`; the markdown/XML
+`@agentick/react`, `@agentick/spec`, or a separate `@agentick/renderers`).
+The formatter harness contract is in `@agentick/spec`; the markdown/XML
 implementations ship with `@agentick/react` to keep the dep graph simple.
 
 ## Levels of usage

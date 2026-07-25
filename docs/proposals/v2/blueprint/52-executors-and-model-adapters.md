@@ -5,9 +5,9 @@
 spectrum — harness vs part), ADR 48 (harness instance vs backing
 resource; BYOK corollary), ADR 51 (invocation model; internal commands),
 the Effect charter direction (Effect internal, Promise external)
-**Touches:** `@agentick/model-executor-next` (the ONE executor + standalone
+**Touches:** `@agentick/model-executor` (the ONE executor + standalone
 helpers), `executor-openai/-google/-anthropic/-ai-sdk-next` (reshaped
-into model-adapter packages), `@agentick/app-next` (`model:` sugar),
+into model-adapter packages), `@agentick/app` (`model:` sugar),
 spec (`LanguageModelAdapter` protocol, observation types unchanged)
 **Resolves:** #103 (duplicated `define*` factory scaffolding — dies at
 the root)
@@ -166,8 +166,8 @@ literals.
 ### Standalone use (the v1 story, restored)
 
 ```ts
-import { openai } from "@agentick/model-openai-next";
-import { generate, generateStream } from "@agentick/model-next";
+import { openai } from "@agentick/model-openai";
+import { generate, generateStream } from "@agentick/model";
 
 const model = openai("gpt-5", { apiKey });
 const result = await generate(model, { messages: [...] });   // OCR-service pattern
@@ -225,7 +225,7 @@ must be rejected in review.
 ## Packaging (amended 2026-07-03 — the model-layer carve-out, Ryan-ratified)
 
 Per `<role>-<discriminator>-next` with `model` as the role. The
-decisive improvement over the original table: **`@agentick/model-next`
+decisive improvement over the original table: **`@agentick/model`
 is carved out as the base model layer** — the adapter contract, the
 accumulator (+view), the single-shot `generate`/`generateStream`
 helpers (options-bag signature: `generate({ model: openai("gpt-5.5"),
@@ -292,7 +292,7 @@ optional capabilities on adapters, each with a standalone helper**,
 mirroring the ai-sdk function vocabulary adopters already know:
 
 ```ts
-// standalone helpers in @agentick/model-executor-next — feature-detected,
+// standalone helpers in @agentick/model-executor — feature-detected,
 // substrate-free, same shape as generate/generateStream:
 embed(adapter, input)            // ernesto's EmbeddingService need
 embedMany(adapter, inputs)
@@ -322,7 +322,7 @@ pinned now so every modality lands the same way.
 ## Open questions
 
 1. **Package role noun** — `model-*-next` (recommended; reads as
-   `import { openai } from "@agentick/model-openai-next"`) vs
+   `import { openai } from "@agentick/model-openai"`) vs
    `adapter-*-next` (too generic — store/wire adapters exist).
 2. **`StreamAccumulatorView` surface** — RESOLVED 2026-07-03 (by
    audit): read-only accumulation state (usage, toolCalls, stopReason,
@@ -334,9 +334,9 @@ pinned now so every modality lands the same way.
 
 ## References
 
-- `packages-next/executor/src/base-language-model-executor.ts` — the
+- `packages/executor/src/base-language-model-executor.ts` — the
   hook surface this ADR object-ifies
-- `packages-next/executor-google/src/google-factory.ts` /
+- `packages/executor-google/src/google-factory.ts` /
   `executor-ai-sdk/src/aisdk-factory.ts` — the substrate-dance
   boilerplate this deletes
 - `packages/adapters/` (v1) — prior art: standalone-usable adapters;

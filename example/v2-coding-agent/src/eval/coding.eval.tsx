@@ -19,14 +19,14 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 
 import React from "react";
-import { createApp, run } from "@agentick/app-next/react";
-import { System } from "@agentick/compiler-react-next";
-import { Timeline } from "@agentick/timeline-next/react";
-import { aisdk } from "@agentick/model-ai-sdk-next";
+import { createApp, run } from "@agentick/app/react";
+import { System } from "@agentick/compiler-react";
+import { Timeline } from "@agentick/timeline/react";
+import { aisdk } from "@agentick/model-ai-sdk";
 import { openai } from "@ai-sdk/openai";
-import { defineEval } from "@agentick/eval-next";
-import { workspace } from "@agentick/eval-next/plugins/workspace";
-import { judge } from "@agentick/eval-next/plugins/judge";
+import { defineEval } from "@agentick/eval";
+import { workspace } from "@agentick/eval/plugins/workspace";
+import { judge } from "@agentick/eval/plugins/judge";
 
 import { CodingAgent } from "../agent.js";
 import { setAutoApproveWrites, setWorkspaceRoot } from "../tools.js";
