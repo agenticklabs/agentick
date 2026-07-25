@@ -631,7 +631,7 @@ Tests: skills tools spec (list/read/degradation), conformance that
 
 ---
 
-## E. Skill distribution & discovery (Flue-inspired, seams mostly exist)
+## E. Skill distribution & discovery (E1+E2 LANDED 2026-07-26; E3 = TODO(E3) trailhead)
 
 Skills already have the loader seam: `withSkills({ loaders })`, evaluated
 at install (`skills/src/extension.ts:53`), with `fromArray` / `fromUrl` /

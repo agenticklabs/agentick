@@ -114,7 +114,7 @@ review.stopReason; // "output_delivered" (terminal-tool path) | "end" | …
 
 **`opts`:** `{ args?, output?, maxTicks?, signal?, isolate? }`. `args` serialize into the run's user message; `output` (a `StandardSchemaV1`) drives structured extraction; `maxTicks` / `signal` pass straight to the send; `isolate: true` routes through `session.fork()` (see below).
 
-**Tool restriction (`Skill.allowedTools`).** A skill record may carry an `allowedTools?: readonly string[]` allowlist (canonical tool names). When present, `defaultComposeRun` threads it into the run's `SendInput.allowedTools` — the per-execution tool-**restriction** seam (C2): only those tools reach the **model** for this run; the dispatch door is unaffected, and the structured-output terminal tool is exempt (loop-injected after restriction). Absent = no restriction. The skill record is the only source in C2 (no `opts`-level override); the Agent Skills frontmatter `allowed-tools` loader that populates it is E-loader work (`TODO(E1)`).
+**Tool restriction (`Skill.allowedTools`).** A skill record may carry an `allowedTools?: readonly string[]` allowlist (canonical tool names). When present, `defaultComposeRun` threads it into the run's `SendInput.allowedTools` — the per-execution tool-**restriction** seam (C2): only those tools reach the **model** for this run; the dispatch door is unaffected, and the structured-output terminal tool is exempt (loop-injected after restriction). Absent = no restriction. The skill record is the only source in C2 (no `opts`-level override); the Node loaders (`agentSkillsDirectory` / `fromFile` / `fromDirectory`) populate it from the Agent Skills `allowed-tools` frontmatter (E1).
 
 **Composition seam (seam over setting).** `withSkills({ composeRun })` — a `(skill, opts) => SendInput` callback. The framework ships the default; the seam is the truth. An override fully owns composition (different framing, few-shot priming, or overriding the `allowedTools` restriction).
 
@@ -215,12 +215,13 @@ Cross-harness integration testing — when verifying that skills interact correc
 ```ts
 import { withSkills } from "@agentick/skills-next";
 import { fromArray, fromUrl } from "@agentick/skills-next/loaders";
-import { fromDirectory, fromFile } from "@agentick/skills-next/loaders/node";
+import { agentSkillsDirectory, fromDirectory, fromFile } from "@agentick/skills-next/loaders/node";
 
 withSkills({
   initial: [/* literal records, registered first */],
   loaders: [
     fromArray(bundled),
+    agentSkillsDirectory({ root: "./.agents/skills/" }), // Agent Skills layout
     fromDirectory({ path: "./skills/" }),    // walks .md files w/ frontmatter
     fromFile({ path: "./extra.md" }),
     fromUrl({ url: "https://registry.internal/skills.json" }),
@@ -235,8 +236,35 @@ withSkills({
 | `fromManifest(...)`                                       | `/loaders`      | alias for `fromUrl`                                                    |
 | `fromFile({ path, parseFrontmatter? })`                   | `/loaders/node` | one `.md` file with frontmatter                                        |
 | `fromDirectory({ path, match?, parseFrontmatter?, ... })` | `/loaders/node` | recursive walk of `.md` files; bad records skipped silently            |
+| `agentSkillsDirectory({ root?, parseFrontmatter? })`      | `/loaders/node` | [Agent Skills](https://agentskills.io/specification) layout — one skill per `<dir>/SKILL.md` |
 
 Frontmatter parsing defaults to a minimal `key: value` parser (`parseSimpleFrontmatter` — supports quoted strings + inline arrays like `[a, b, c]`). For full YAML / TOML, pass a custom `parseFrontmatter: (text) => Record<string, unknown>` callback — wire `yaml` / `@iarna/toml` / your parser of choice without adding a dep at the framework level.
+
+### `agentSkillsDirectory` — the Agent Skills layout (E1)
+
+Discovers [Agent Skills](https://agentskills.io/specification)-compatible directories: each **immediate subdirectory** of `root` (default `<cwd>/.agents/skills/`) that contains a `SKILL.md` becomes **one** skill record. Non-`SKILL.md` files are not skills; a directory without one is skipped.
+
+```
+.agents/skills/
+  code-review/
+    SKILL.md              ← name/description/allowed-tools frontmatter + body
+    references/
+      checklist.md        ← surfaced as skill://code-review/references/checklist.md
+```
+
+Frontmatter → `SkillsRegisterInput`: `name` (**defaults to the directory name** when absent — the Agent Skills convention), `description` (**required** — a dir with none is skipped), `tags`, and `allowed-tools` → `allowedTools` (accepts **both** an inline array `[Bash, Read]` **and** a comma-separated string `"Bash, Read"`). Every other key lands on `metadata`. A **missing `root` loads empty** (a preset pointed at a default path must not explode on absence); **hidden and symlinked** skill directories are **rejected** at load (Flue packaging rule). The same `allowed-tools` mapping now applies to `fromFile` / `fromDirectory` too — every Node loader speaks the field.
+
+**Verified by** `src/__tests__/agent-skills-directory.spec.ts` (discovery, `name` default, missing-description skip, missing-root-empty, symlink rejection, `allowed-tools` array + comma-string) and `src/__tests__/loaders.spec.ts` (`fromFile` / `fromDirectory` `allowed-tools` mapping). The disk → register → `composeRun` `allowedTools` loop closure is pinned in the same E1 spec (C2 closure).
+
+### Supporting files ride the resources harness (E2)
+
+A skill directory's `references/*` files register as **transient resources** at `skill://<name>/references/<relpath>` on the session's resources harness (the **same** registry `withMCP` proxy-registers remote resources into — composition, not new machinery). The model pulls them progressively via the existing `resource_read` tool; nothing invents a "skill file API".
+
+The loader records each reference on the skill's `metadata.references` (`readonly { uri, path }[]`, pure data that persists) and carries a lazy `node:fs`-backed resolver closure on a transient metadata key. `withSkills`' install path reads that wiring and registers each into `installer.resources` — the universal install path never imports `node:*` (the resolver closures come from the Node loader side). If no resources harness is present the skills still load (no throw); the `skill://` namespace is keyed by skill name, so collisions only arise on duplicate names (already rejected by `SkillAlreadyExists`).
+
+> Reload/restore drift: references are wired **once** at install from loader output. A post-install `reload()` or snapshot/restore does not currently re-sync them (the transient resolver closures don't serialize) — `TODO(E2-reload)` in `extension.ts`. npm-packaged skills (`fromPackage`) are `TODO(E3)` in `loaders-node.ts`.
+
+**Verified by** `src/__tests__/agent-skills-directory.spec.ts` — references registered + read through the harness (incl. a nested `references/deep/notes.txt`), and the no-resources-harness degradation path.
 
 ### Dynamic — post-startup `reload()` + `resolve(name)`
 
@@ -276,7 +304,7 @@ const skill = await session.skills.require("must_exist");
 
 **Planned:**
 
-- **`skills.run` C2 follow-up (remaining).** A `skills:run` `exposure: "wire"` command (needs the declarative `responseFormat` output form — serializable by construction). The `Skill.allowedTools` field is populated from Agent Skills frontmatter `allowed-tools` by the E-loader (`TODO(E1)`).
+- **`skills.run` C2 follow-up (remaining).** A `skills:run` `exposure: "wire"` command (needs the declarative `responseFormat` output form — serializable by construction). The `Skill.allowedTools` field is now populated from Agent Skills frontmatter `allowed-tools` by the Node loaders (E1 — `agentSkillsDirectory` / `fromFile` / `fromDirectory`).
 
 - SQLite backend for single-process durability
 - Remote-registry backend (`agentskills.io` compatibility)

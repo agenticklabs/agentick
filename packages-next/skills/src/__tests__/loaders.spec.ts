@@ -160,6 +160,22 @@ describe("fromFile", () => {
     await writeFile(path, "---\nname: x\n---\nbody");
     await expect(fromFile({ path }).load()).rejects.toThrow(/missing required/);
   });
+
+  it("maps `allowed-tools` array frontmatter → allowedTools", async () => {
+    const path = join(dir, "x.md");
+    await writeFile(path, "---\nname: x\ndescription: x\nallowed-tools: [Bash, Read]\n---\nbody");
+    const [record] = await fromFile({ path }).load();
+    expect(record!.allowedTools).toEqual(["Bash", "Read"]);
+    // Stripped from metadata (the canonical field is `allowedTools`).
+    expect(record!.metadata).not.toHaveProperty("allowed-tools");
+  });
+
+  it("maps `allowed-tools` comma-string frontmatter → allowedTools", async () => {
+    const path = join(dir, "x.md");
+    await writeFile(path, '---\nname: x\ndescription: x\nallowed-tools: "Bash, Read"\n---\nbody');
+    const [record] = await fromFile({ path }).load();
+    expect(record!.allowedTools).toEqual(["Bash", "Read"]);
+  });
 });
 
 describe("fromDirectory", () => {
@@ -172,6 +188,15 @@ describe("fromDirectory", () => {
 
     const records = await fromDirectory({ path: dir }).load();
     expect(records.map((r) => r.name).sort()).toEqual(["good", "more"]);
+  });
+
+  it("maps `allowed-tools` frontmatter → allowedTools on each record", async () => {
+    await writeFile(
+      join(dir, "restricted.md"),
+      "---\nname: restricted\ndescription: r\nallowed-tools: [Bash]\n---\nbody",
+    );
+    const [record] = await fromDirectory({ path: dir }).load();
+    expect(record!.allowedTools).toEqual(["Bash"]);
   });
 });
 

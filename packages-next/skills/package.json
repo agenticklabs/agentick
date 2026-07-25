@@ -69,6 +69,7 @@
     "effect": "^3.22.0"
   },
   "devDependencies": {
+    "@agentick/resources-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*"
   }
 }

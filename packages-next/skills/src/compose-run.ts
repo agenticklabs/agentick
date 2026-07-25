@@ -39,9 +39,8 @@ export function defaultComposeRun(skill: Skill, opts: SkillRunOptions): SendInpu
   // RESTRICTION seam (`SendInput.allowedTools`). When present, only these
   // canonical tool names reach the MODEL for this run; dispatch-door tools are
   // unaffected. The skill record is the ONLY source in C2 (no `opts`-level
-  // override).
-  // TODO(E1): populate `Skill.allowedTools` from Agent Skills frontmatter
-  // "allowed-tools" in the skill loader.
+  // override). Populated from Agent Skills `allowed-tools` frontmatter by the
+  // Node loaders (E1 — `agentSkillsDirectory` / `fromFile` / `fromDirectory`).
   return {
     messages,
     ...(skill.allowedTools !== undefined ? { allowedTools: skill.allowedTools } : {}),

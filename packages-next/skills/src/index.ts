@@ -16,6 +16,15 @@ export { SkillsHarness, type SkillsHarnessOptions } from "./harness.js";
 export type { SkillsHandle, SkillRunCompose, SkillRunOptions } from "./handle.js";
 export { defaultComposeRun } from "./compose-run.js";
 export { withSkills, type WithSkillsOptions } from "./extension.js";
+// E2 — reference-file wiring. `SkillReference` (`{ uri, path }`) is the
+// pure-data descriptor persisted on `skill.metadata.references`; the transient
+// resolver wiring + reader stay internal to the install path.
+export {
+  readSkillReferenceWiring,
+  SKILL_REFERENCE_WIRING,
+  type SkillReference,
+  type SkillReferenceWiring,
+} from "./references.js";
 export { buildSkillsTools, SKILL_LIST, SKILL_READ, type SkillsToolsBundle } from "./tools.js";
 export { runSkillsHarnessConformance } from "./conformance.js";
 // ADR 68-style store archetype (data-layer plan §6-C — the definition-library

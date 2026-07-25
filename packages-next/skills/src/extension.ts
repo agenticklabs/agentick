@@ -30,6 +30,7 @@
 import {
   isSkillsInstance,
   type CollectionMutation,
+  type Resources,
   type Store,
   type SessionExtension,
   type SessionInstaller,
@@ -37,11 +38,13 @@ import {
   type SkillStoreQuery,
   type Skills,
   type SkillsRegisterInput,
+  type Unsubscribe,
 } from "@agentick/spec-next";
 import { omitUndefined } from "@agentick/utils-next";
 import { SkillsHarness } from "./harness.js";
 import type { SkillRunCompose } from "./handle.js";
 import type { SkillLoader } from "./loaders.js";
+import { readSkillReferenceWiring } from "./references.js";
 import { buildSkillsTools } from "./tools.js";
 
 export interface WithSkillsOptions {
@@ -158,12 +161,18 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
         harness.setLoaders(options.loaders);
       }
 
+      // Accumulate every registered input record — the in-memory records
+      // (NOT the harness round-trip, which may drop the transient reference
+      // resolver closures on serialize) carry the E2 reference wiring.
+      const registered: SkillsRegisterInput[] = [];
+
       // Seed initial skills via the async surface so envelopes flow
       // through the journal — adopters subscribing to `skills:register`
       // see them on session boot.
       if (options.initial && options.initial.length > 0) {
         for (const skill of options.initial) {
           await harness.register(skill);
+          registered.push(skill);
         }
       }
 
@@ -172,9 +181,16 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
         for (const batch of batches) {
           for (const skill of batch) {
             await harness.register(skill);
+            registered.push(skill);
           }
         }
       }
+
+      // E2 — supporting files ride the RESOURCES harness (composition, not new
+      // machinery). Skills discovered by `agentSkillsDirectory` carry transient
+      // wiring for each `references/*` file; register each as a TRANSIENT
+      // resource so the model pulls it via `resource_read`.
+      wireSkillReferences(installer, registered);
 
       installer.registerNamespace("skills", harness);
       installer.onClose(() => harness.close());
@@ -207,4 +223,51 @@ export function resolveSlot(slot: WithSkillsSlot): WithSkillsOptions {
     );
   }
   return cfg;
+}
+
+/**
+ * Register each skill's `references/*` files as TRANSIENT resources on the
+ * session's resources harness (`installer.resources` — the SAME registry
+ * `withMCP` proxy-registers remote resources into; composition, not new
+ * machinery). The resolver closures were built on the Node loader side
+ * (`loaders-node.ts` — `node:fs`), so this universal install path never touches
+ * `node:*`; it only reads the wiring off the record and registers it.
+ *
+ * Degradation: `installer.resources` is host-constructed and normally always
+ * present, but a stub installer may omit it — guard so skills still load and no
+ * throw escapes. Uniqueness: `skill://` uris are namespaced by skill name, so
+ * collisions only arise on duplicate skill names, which `SkillAlreadyExists`
+ * already rejects upstream; a stray `ResourceAlreadyRegistered` is swallowed
+ * per-item so it cannot abort the rest of the wiring.
+ */
+function wireSkillReferences(
+  installer: SessionInstaller,
+  records: readonly SkillsRegisterInput[],
+): void {
+  const resources = installer.resources as Resources | undefined;
+  if (!resources) return; // no resources harness → skills still load, no throw
+
+  const unsubs: Unsubscribe[] = [];
+  for (const record of records) {
+    for (const wiring of readSkillReferenceWiring(record)) {
+      try {
+        unsubs.push(resources.register(wiring.uri, wiring.resolver, wiring.meta));
+      } catch {
+        // Duplicate uri (its owning skill name already collided upstream) — the
+        // first registration wins; skip.
+      }
+    }
+  }
+
+  if (unsubs.length > 0) {
+    installer.onClose(() => {
+      for (const unsub of unsubs) unsub();
+    });
+  }
+  // TODO(E2-reload): references are wired ONCE at install from loader output. A
+  // post-install `skills.reload()` / per-skill removal does NOT re-sync
+  // (drop+rewire) these reference resources, and snapshot/restore drops the
+  // transient resolver closures (functions don't serialize) so references do
+  // not re-register on restore. When reload-sync lands, retain the unsubs keyed
+  // by skill name and drop/rewire per mutated skill.
 }

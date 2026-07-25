@@ -1547,6 +1547,9 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
       '@agentick/spec-conformance-next':
         specifier: workspace:*
         version: link:../spec-conformance
