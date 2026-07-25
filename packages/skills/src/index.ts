@@ -25,6 +25,10 @@ export {
   type SkillReference,
   type SkillReferenceWiring,
 } from "./references.js";
+// `skill://<name>` body projection (three-audiences-plan §0/§E2) — the
+// uniform-addressing door; the reference FILES already ride `skill://<name>/
+// references/*`, this makes the body itself addressable. Wired by `withSkills`.
+export { skillBodyUri, wireSkillProjection } from "./projection.js";
 export { buildSkillsTools, SKILL_LIST, SKILL_READ, type SkillsToolsBundle } from "./tools.js";
 // ADR 68-style store archetype (data-layer plan §6-C — the definition-library
 // PURE floor). The bundled in-memory default + its search predicate; the

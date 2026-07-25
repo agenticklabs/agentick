@@ -266,6 +266,16 @@ The loader records each reference on the skill's `metadata.references` (`readonl
 
 **Verified by** `src/__tests__/agent-skills-directory.spec.ts` — references registered + read through the harness (incl. a nested `references/deep/notes.txt`), and the no-resources-harness degradation path.
 
+### Addressable as resources — `skill://<name>` (the uniform-addressing door)
+
+Registering a skill also projects its **body** as a read-only resource at `skill://<name>` on the session's resources harness. This completes the E2 story: the reference _files_ were already addressable at `skill://<name>/references/*`, but the skill body itself was not — an incoherence. Now the whole catalog is browsable through the standard resources surface (including the MCP projection) with zero bespoke wire work. Default-on; opt out with `withSkills({ exposeAsResources: false })`.
+
+**Two doors, one capability** (three-audiences-plan §0). The `skill_read` model tool is the **model-directed** door — progressive disclosure in-band, for the LLM driving the session. `skill://<name>` is the **uniform-addressing** door — MCP clients and restricted agents pull it like any other resource. They coexist deliberately; different audiences, same underlying content.
+
+The resolver reads the **live** harness at read time, so an `update` is reflected on the next read with no re-wire. The projection is also **live-set**: a skill registered after install (via `harness.register` / the `skills:register` command) projects on the next mutation, and a removed skill unregisters (a subsequent read degrades to `ResourceNotFound`) — driven by the harness `subscribeAll` change-subscription, no polling. The `skill://<name>` body uri is distinct from the `skill://<name>/references/*` reference uris, so both coexist.
+
+**Verified by** `src/__tests__/projection.spec.ts` — register-then-read (content + descriptor meta), live-update reflection, register-after-install, remove-unregisters-and-degrades, `exposeAsResources: false` opt-out, no-resources-harness degradation, and coexistence of the body uri with E2 reference uris on a disk skill.
+
 ### Dynamic — post-startup `reload()` + `resolve(name)`
 
 Loaders are retained on the harness, so the library can grow after session boot:
@@ -299,6 +309,7 @@ const skill = await session.skills.require("must_exist");
 - `/testing` subpath with `stubSkillsHarness`
 - Module augmentation: `session.skills` typed via `SkillsHandle` (optional slot — uniform with `live` / `prompts`)
 - `skills.run(name, opts)` — inline skill execution on the structured-output path (C-core); `composeRun` seam; late-bound `bindRunner` injection
+- **`skill://<name>` body projection** — each registered skill's body is addressable as a read-only resource on the resources harness (default-on; `exposeAsResources: false` to opt out). Live resolver + live set via `subscribeAll`. Verified by `src/__tests__/projection.spec.ts`.
 - **`skills.run(name, { isolate: true })` (C2)** — routes through `session.fork()` (same-image, copied-state child disposed after the run) via the late-bound `bindIsolationRunner`; unbound ⇒ `SkillIsolationUnavailable`. Verified by `src/__tests__/run.spec.ts` (routing) + `@agentick/app` `src/__tests__/skills-run-e2e.spec.tsx` (isolation invariant + dispose).
 - **`Skill.allowedTools` (C2)** — per-execution tool-**restriction** allowlist threaded into `SendInput.allowedTools` by `defaultComposeRun`; applied in the loop on the merged model-visible list. Verified by `src/__tests__/run.spec.ts` (round-trip + threading) + `@agentick/session` `src/__tests__/tool-restriction.spec.ts` (loop filter).
 
@@ -358,6 +369,7 @@ const skill = await session.skills.require("must_exist");
 - `src/__tests__/store-backing.spec.ts` — write-through to the injected store, loaders (`reload` / `resolve`) feed the store, `search` through the projection, `exportSnapshot`↔`hydrate()` round-trip, plus `runSkillStoreConformance` against `InMemorySkillStore`
 - `src/__tests__/run.spec.ts` — `skills.run` harness mechanics (dependency-free, stub runner): default composition (system skill body + serialized args), `composeRun` seam override, handle pass-through (with / without `output`; failures ride `handle.result`), `isolate: true` with no isolation runner→`SkillIsolationUnavailable` / with one bound→routes through it (not the plain runner), `Skill.allowedTools` round-trip + threading into `SendInput.allowedTools`, unbound runner→`SkillRunnerUnbound`, missing skill→`SkillNotFound`
 - `@agentick/app` `src/__tests__/skills-run-e2e.spec.tsx` — `session.skills.run` end-to-end through `createApp` (proves the C-core `bindRunner` injection site): `output`→validated `data` + `stopReason "output_delivered"`, no-`output`→text, missing skill, the `SteerCannotCarryStructuredOutput` reentrancy guard, and the **isolation** path (`isolate: true` runs on a fork, leaves the parent timeline untouched, disposes the child after settle)
+- `src/__tests__/projection.spec.ts` — `skill://<name>` body projection: register-then-read (content + descriptor meta), live-update reflection, register-after-install, remove-unregisters-and-degrades, `exposeAsResources: false` opt-out, no-resources-harness degradation, coexistence of the body uri with E2 reference uris
 - `@agentick/transport-in-process` `src/__tests__/wire-reads-e2e.spec.ts` — `skills/list` + `skills/get` (`content` included) round-trip over the real gateway + dynamic lane, `commands/list` enumerates them, undeclared verb stays MethodNotFound
 - Cross-harness integration tests live in adopter packages (`@agentick/session`, `@agentick/app`)
 

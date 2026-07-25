@@ -62,6 +62,9 @@
     "@agentick/utils": "workspace:*",
     "effect": "^3.22.0"
   },
+  "devDependencies": {
+    "@agentick/resources": "workspace:*"
+  },
   "files": [
     "dist"
   ],

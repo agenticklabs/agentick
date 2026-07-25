@@ -45,6 +45,7 @@ import { SkillsHarness } from "./harness.js";
 import type { SkillRunCompose } from "./handle.js";
 import type { SkillLoader } from "./loaders.js";
 import { readSkillReferenceWiring } from "./references.js";
+import { wireSkillProjection } from "./projection.js";
 import { buildSkillsTools } from "./tools.js";
 
 export interface WithSkillsOptions {
@@ -105,6 +106,20 @@ export interface WithSkillsOptions {
    * projection, with no LLM discovering them in-band.
    */
   readonly registerModelTools?: boolean;
+  /**
+   * Project each registered skill as a read-only `skill://<name>` resource on
+   * the session's resources harness. Defaults to `true` — every skill's BODY
+   * becomes addressable through the standard resources surface (and the MCP
+   * projection) with zero bespoke wire work, completing the E2 story whose
+   * `skill://<name>/references/*` files are already resources. The projection is
+   * LIVE (skills registered / removed after install project / unregister via the
+   * harness change-subscription) and reads content from the live harness at read
+   * time. Set `false` for the harness substrate without the uniform-addressing
+   * door — e.g. skills reached exclusively by the `skill_read` model tool or by
+   * adopter code (`session.skills`). Coexists with `registerModelTools`: two
+   * doors, one capability (three-audiences-plan §0).
+   */
+  readonly exposeAsResources?: boolean;
 }
 
 /**
@@ -141,6 +156,12 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
       if (options.use !== undefined) {
         installer.registerNamespace("skills", options.use);
         mountModelTools();
+        // `skill://<name>` body projection (default-on). Reads the live
+        // instance; our resource registrations + subscription unwind on close
+        // WITHOUT closing the adopter-owned harness.
+        if (options.exposeAsResources !== false) {
+          wireSkillProjection(installer, options.use);
+        }
         // Intentionally NO `onClose(() => harness.close())` — adopter
         // brought the instance, adopter closes it.
         return;
@@ -191,6 +212,15 @@ export function withSkills(slot: WithSkillsSlot = {}): SessionExtension {
       // wiring for each `references/*` file; register each as a TRANSIENT
       // resource so the model pulls it via `resource_read`.
       wireSkillReferences(installer, registered);
+
+      // `skill://<name>` body projection (default-on) — the second half of E2:
+      // the reference FILES are already `skill://<name>/references/*` resources;
+      // this makes the skill BODY addressable too. LIVE via the harness
+      // change-subscription (dynamic register / remove re-sync). Distinct uris
+      // from the reference wiring above — both coexist.
+      if (options.exposeAsResources !== false) {
+        wireSkillProjection(installer, harness);
+      }
 
       installer.registerNamespace("skills", harness);
       installer.onClose(() => harness.close());

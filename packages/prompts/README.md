@@ -300,6 +300,21 @@ const decl = await session.prompts.require("must_exist");
 
 `reload({ pruneMissing: true })` removes entries that have disappeared from sources — off by default so a runtime `harness.register(...)` isn't clobbered. The lookup-on-miss path is transparent in `invoke()` / `render()`; call `resolve()` directly when you want the declaration without rendering. Loaders may implement an optional `lookup(name)` for fast-path resolution; the built-in `fromX` factories do.
 
+## Addressable as resources — `prompt://<name>` (the uniform-addressing door)
+
+Registering a prompt also projects it as a read-only resource at `prompt://<name>` on the session's resources harness. The prompt catalog becomes browsable through the standard resources surface (including the MCP projection) with zero bespoke wire work. Default-on; opt out with `withPrompts({ exposeAsResources: false })`.
+
+**Two doors, one capability** (three-audiences-plan §0). Prompts are **user-directed** — invoked by the human via `prompts.invoke` / a slash command. `prompt://<name>` is the **uniform-addressing** door: MCP clients and restricted agents browse the catalog like any other resource.
+
+**Content served honestly — never a faked render.** A prompt's payload is either a static `template` or a dynamic `render(args)` function, and neither is guaranteed serializable (`render` is a closure; `template` is framework-typed — a React node, say). So the projection serves:
+
+- the `template` as **`text/markdown`** — only when it is a plain string and no `render` fn shadows it; otherwise
+- a **declaration document** (`application/json`) of `{ name, description, arguments }` — the serializable metadata a browser needs to decide whether to invoke the prompt. Argument `schema` validators (they carry a `~standard` fn) are dropped; only `{ name, description?, required? }` project.
+
+A function is never serialized, and a render result is never passed off as "the prompt". The resolver reads the **live** harness, and the projection is **live-set** (prompts registered / removed after install project / unregister via the harness `subscribeAll` change-subscription — no polling).
+
+**Verified by** `src/__tests__/projection.spec.ts` — declaration-doc for a function-render prompt (fn absent, argument `schema` stripped), static string template served as `text/markdown`, register-after-install + remove-unregisters-and-degrades, `exposeAsResources: false` opt-out, and no-resources-harness degradation.
+
 ## Status & roadmap
 
 **Shipped:**
@@ -312,6 +327,7 @@ const decl = await session.prompts.require("must_exist");
 - Module augmentation: `session.prompts` typed via `PromptsHandle`
 - Store backing — `PromptStore` port (spec-next), bundled `InMemoryPromptStore` (record slice only), `store` slot on `withPrompts`; record/sidecar split via `View` + augmentation `Map`
 - Conformance suite — `runPromptStoreConformance` (store)
+- **`prompt://<name>` projection** — each registered prompt is addressable as a read-only resource on the resources harness (default-on; `exposeAsResources: false` to opt out). Honest content: string template as text, else a `{ name, description, arguments }` declaration document (never a serialized fn). Live resolver + live set via `subscribeAll`. Verified by `src/__tests__/projection.spec.ts`.
 
 **Planned:**
 
@@ -329,6 +345,7 @@ const decl = await session.prompts.require("must_exist");
 - `src/__tests__/harness.spec.ts` — full surface coverage (register/update/remove, invoke + render, `get(name)` declaration read, native + custom content dispatch, argument validation, snapshot round-trip, typed errors)
 - `@agentick/transport-in-process` `src/__tests__/wire-reads-e2e.spec.ts` — `prompts/list` round-trips as wire-safe records (no `template`/`render` fns) over the real gateway + dynamic lane; `commands/list` enumerates the wire verbs
 - `src/__tests__/store-backing.spec.ts` — the record/sidecar split: record written to the store WITHOUT the fns, `update`/`remove` propagation, loaders (`reload` / `resolve`) feed store + sidecar, `invoke`/`render` combine the two halves, `exportSnapshot` drops fns, `hydrate()` restores records-only, plus `runPromptStoreConformance` against `InMemoryPromptStore`
+- `src/__tests__/projection.spec.ts` — `prompt://<name>` projection: declaration-doc for a function-render prompt (fn absent + argument `schema` stripped), static string template as `text/markdown`, register-after-install + remove-unregisters-and-degrades, `exposeAsResources: false` opt-out, no-resources-harness degradation
 
 ## See also
 

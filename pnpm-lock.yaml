@@ -1131,6 +1131,10 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+    devDependencies:
+      '@agentick/resources':
+        specifier: workspace:*
+        version: link:../resources
 
   packages/prompts-react:
     dependencies:

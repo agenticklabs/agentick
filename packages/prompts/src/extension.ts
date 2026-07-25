@@ -36,6 +36,7 @@ import {
 
 import { PromptsHarness } from "./harness.js";
 import type { PromptLoader } from "./loaders.js";
+import { wirePromptProjection } from "./projection.js";
 import type { PromptRenderer } from "./renderer.js";
 
 export interface WithPromptsOptions {
@@ -72,6 +73,19 @@ export interface WithPromptsOptions {
    * getters, and bridges resolve to it.
    */
   readonly use?: Prompts;
+  /**
+   * Project each registered prompt as a read-only `prompt://<name>` resource on
+   * the session's resources harness. Defaults to `true` — the prompt catalog
+   * becomes browsable through the standard resources surface (and the MCP
+   * projection) with zero bespoke wire work. The projection is LIVE (prompts
+   * registered / removed after install project / unregister via the harness
+   * change-subscription). Content is served HONESTLY: a static string `template`
+   * is served as `text/markdown`; a function `render` (or a non-string
+   * `template`) yields a `{ name, description, arguments }` declaration document
+   * (`application/json`) — a function is never serialized, a render result never
+   * faked. Set `false` to keep prompts off the resources surface.
+   */
+  readonly exposeAsResources?: boolean;
 }
 
 /**
@@ -98,6 +112,12 @@ export function withPrompts(slot: WithPromptsSlot = {}): SessionExtension {
       // ──────── Form B (instance) — adopter owns lifecycle ────────
       if (options.use !== undefined) {
         installer.registerNamespace("prompts", options.use);
+        // `prompt://<name>` projection (default-on). Reads the live instance;
+        // our resource registrations + subscription unwind on close WITHOUT
+        // closing the adopter-owned harness.
+        if (options.exposeAsResources !== false) {
+          wirePromptProjection(installer, options.use);
+        }
         // Adopter brought the instance — adopter closes it.
         return;
       }
@@ -141,6 +161,14 @@ export function withPrompts(slot: WithPromptsSlot = {}): SessionExtension {
             await harness.register(decl);
           }
         }
+      }
+
+      // `prompt://<name>` projection (default-on) — the prompt catalog becomes
+      // addressable through the standard resources surface. LIVE via the harness
+      // change-subscription; content served honestly (string template as text,
+      // else a declaration document — never a serialized function).
+      if (options.exposeAsResources !== false) {
+        wirePromptProjection(installer, harness);
       }
 
       installer.registerNamespace("prompts", harness);

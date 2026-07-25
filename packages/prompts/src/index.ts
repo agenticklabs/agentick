@@ -21,6 +21,10 @@ import "./augment.js";
 export { PromptsHarness, type PromptsHarnessOptions } from "./harness.js";
 export type { PromptsHandle } from "./handle.js";
 export { withPrompts, type WithPromptsOptions } from "./extension.js";
+// `prompt://<name>` projection (three-audiences-plan §0) — the uniform-addressing
+// door onto the prompt catalog. Wired by `withPrompts`. Content served honestly:
+// string template as text, else a declaration document (never a serialized fn).
+export { promptUri, wirePromptProjection } from "./projection.js";
 export { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from "./renderer.js";
 // Store archetype (data-layer plan §6-C — the definition-library archetype's
 // first AUGMENTED instance: skills' pure record PLUS a non-serializable
