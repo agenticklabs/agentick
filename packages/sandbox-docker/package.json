@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-docker",
-  "version": "1.0.0-next.0",
+  "version": "1.0.0-next.1",
   "description": "Docker SandboxProvider — one container per sandbox, exec via docker exec (streamed), fs via docker exec, atomic editFile via applyEdits, coarse egress via NetworkMode. Capability-tier: no runtime mounts (ADR 59).",
   "type": "module",
   "main": "src/index.ts",
