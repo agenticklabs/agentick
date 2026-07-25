@@ -43,9 +43,11 @@ coverage/
 
 plans/
 
-# Top-level docs/ — ignored except v2 proposals and the archive.
+# Top-level docs/ — ignored except v2 proposals, the archive, and the
+# dev-loop docs below.
 # Pattern note: must use /* on parents (not bare /), so child re-includes work.
 /docs/*
+!/docs/verdaccio.md
 !/docs/proposals/
 /docs/proposals/*
 !/docs/proposals/v2/
@@ -64,4 +66,3 @@ packages/*/docs/
 .codex/
 
 .claude/worktrees/*
-.verdaccio/
