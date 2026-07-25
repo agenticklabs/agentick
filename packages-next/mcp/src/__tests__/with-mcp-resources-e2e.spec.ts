@@ -132,7 +132,7 @@ describe("withMCP — resource surfacing e2e", () => {
     const aliased = "mcp://docs/config://app";
     await waitFor(async () => session.resources.has(aliased), { timeoutMs: 1000, pollMs: 20 });
 
-    const blocks = await session.dispatch("resource_read", { uri: aliased });
+    const blocks = await session.tools.dispatch("resource_read", { uri: aliased });
     expect(blocks[0]).toMatchObject({
       type: "resource",
       resource: { uri: "config://app", text: "remote:config://app" },

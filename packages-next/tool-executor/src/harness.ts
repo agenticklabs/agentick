@@ -69,10 +69,12 @@ import type {
   ToolPresentation,
   ToolRegistration,
   ToolResultInput,
+  ToolsHandle,
   UnregisterToolInput,
 } from "@agentick/spec-next";
 import { normalizeToolResult, TOOL_NARRATION_FIELD } from "@agentick/spec-next";
 import { viaToOrigin } from "./provenance.js";
+import { createToolsHandle } from "./tools-handle.js";
 import {
   HandlerError,
   isTaskHandle,
@@ -120,7 +122,7 @@ declare module "@agentick/runtime-next" {
     // (`this.command<DispatchInput, DispatchResult>` below) — NOT the bare
     // `ContentBlock[]`. This makes `onAfterToolDispatch` transform-SOUND: an
     // after-hook sees and may return a `DispatchResult`, so it can't silently
-    // strip `isError`/metadata off `session.dispatch()`.
+    // strip `isError`/metadata off `session.tools.dispatch()`.
     "tool:dispatch": { input: DispatchInput; output: DispatchResult };
     // The remaining tool verbs (ADR 80/83). Each routes through `runOperation`
     // (`tool:abort` is a declared command; `register` / `unregister` /
@@ -176,6 +178,15 @@ export class ToolExecutorHarness
    * latency, so cancellation stays immediate.
    */
   readonly abort: (input: AbortInput) => Promise<void>;
+
+  /**
+   * The curated host handle — `session.tools` (three-audiences-plan §F). SYNC
+   * View reads over this harness's registry, the host-door
+   * `dispatch(name, input, opts?)` ({@link hostDispatch} — `via: "dispatch"`),
+   * and the family topology-subscription pair (over the registry's
+   * change-notification). Built once here; the session getter forwards it.
+   */
+  readonly tools: ToolsHandle;
 
   constructor(
     scopeId: string,
@@ -253,6 +264,38 @@ export class ToolExecutorHarness
     if (options.initialTools) {
       for (const reg of options.initialTools) this.registry.add(reg);
     }
+
+    // `session.tools` (three-audiences-plan §F). Reads live off the registry
+    // (sync View), dispatches through the host door, and subscribes to registry
+    // topology changes. Built last so it closes over a fully-initialized `this`.
+    this.tools = createToolsHandle({
+      compileSync: (filter) => this.registry.compileForTick(filter),
+      getSync: (name) => this.registry.get(name),
+      dispatch: (name, input, opts) => this.hostDispatch(name, input, opts),
+      subscribe: (listener) => this.registry.subscribe(listener),
+    });
+  }
+
+  /**
+   * The host-door dispatch behind `session.tools.dispatch` (the sole home of the
+   * former `session.dispatch` body). Stamps `via: "dispatch"` provenance and a
+   * generated `host:` toolCallId, so a host invocation journals identically to
+   * the pre-handle path. Pattern A by default (awaits a returned `TaskHandle`);
+   * opt into Pattern B with `{ task: "ref" }`.
+   */
+  private async hostDispatch(
+    name: string,
+    input: unknown,
+    opts?: import("@agentick/spec-next").DispatchOptions,
+  ): Promise<readonly ContentBlock[]> {
+    const result = await this.dispatch({
+      toolCallId: `host:${ulid()}`,
+      name,
+      input,
+      context: { via: "dispatch", sessionId: this.scopeId },
+      ...(opts?.task !== undefined ? { task: opts.task } : {}),
+    });
+    return result.content;
   }
 
   // ──────────────────────── ToolExecutorProtocol ────────────────────────

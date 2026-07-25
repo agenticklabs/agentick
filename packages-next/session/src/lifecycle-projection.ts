@@ -30,7 +30,7 @@
  *    sees the failure in-path (ADR 83's one interceptor primitive — the
  *    in-process half of the ADR-89 observe/bus split). Loop-driven
  *    dispatches only (`context.tickId` present): host-door
- *    `session.dispatch()` calls never produced lifecycle events, and
+ *    `session.tools.dispatch()` calls never produced lifecycle events, and
  *    `LifecycleToolStart.tickId` is required.
  *  - `model:generate[_stream]` `onBefore`/`onAfter` →
  *    `model-generate-start` / `model-generate-end` (fire-and-forget).

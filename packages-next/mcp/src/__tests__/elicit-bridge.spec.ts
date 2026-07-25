@@ -18,7 +18,7 @@
  *      harness is reachable via `session.elicitation` (module-augmented
  *      slot on `SessionHarnessProtocol`).
  *   4. Test subscribes to the bus before kicking off
- *      `session.dispatch("server__ask_name", {})`; the dispatch fires
+ *      `session.tools.dispatch("server__ask_name", {})`; the dispatch fires
  *      `tools/call` over the wire; the server's handler fires
  *      `elicitation/create`; the bridge routes through
  *      `session.elicitation.elicit(...)`; the harness publishes a
@@ -181,7 +181,7 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
     // critical: subscribe FIRST so the envelope from the dispatch's
     // elicit lands inside the subscription window.
     const correlationIdP = nextElicitationCorrelationId(bus);
-    const dispatchP = session.dispatch("names__ask_name", {});
+    const dispatchP = session.tools.dispatch("names__ask_name", {});
 
     const correlationId = await correlationIdP;
     await session.elicitation.respond({
@@ -218,7 +218,7 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
     const session = await app.createSession();
 
     const correlationIdP = nextElicitationCorrelationId(bus);
-    const dispatchP = session.dispatch("names__ask_name", {});
+    const dispatchP = session.tools.dispatch("names__ask_name", {});
 
     const correlationId = await correlationIdP;
     await session.elicitation.respond({
@@ -254,7 +254,7 @@ describe("ElicitationBridge — server-to-client elicit routing (#133)", () => {
     const session = await app.createSession();
 
     const correlationIdP = nextElicitationCorrelationId(bus);
-    const dispatchP = session.dispatch("names__ask_name", {});
+    const dispatchP = session.tools.dispatch("names__ask_name", {});
 
     const correlationId = await correlationIdP;
     await session.elicitation.respond({
@@ -408,8 +408,8 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
     });
 
     // Fire two parallel dispatches.
-    const dispatchA = session.dispatch("two__ask", { q: "color" });
-    const dispatchB = session.dispatch("two__ask", { q: "fruit" });
+    const dispatchA = session.tools.dispatch("two__ask", { q: "color" });
+    const dispatchB = session.tools.dispatch("two__ask", { q: "fruit" });
 
     await collected;
     // Order is racy; correlate by the envelope's payload message.
@@ -507,7 +507,7 @@ describe("ElicitationBridge — related-task routing (#173)", () => {
         ),
       ),
     );
-    const dispatchP = session.dispatch("rt__ask_with_task", {});
+    const dispatchP = session.tools.dispatch("rt__ask_with_task", {});
     const env = Array.from(Chunk.toReadonlyArray(await envP))[0]!;
     // The published payload mirrors the FormWirePayload shape — the
     // relatedTaskId travels alongside `mode`, `message`, `schema`.
@@ -559,7 +559,7 @@ describe("ElicitationBridge — related-task routing (#173)", () => {
         ),
       ),
     );
-    const dispatchP = session.dispatch("plain__ask_name", {});
+    const dispatchP = session.tools.dispatch("plain__ask_name", {});
     const env = Array.from(Chunk.toReadonlyArray(await envP))[0]!;
     expect((env.payload as { relatedTaskId?: string }).relatedTaskId).toBeUndefined();
 
@@ -596,7 +596,7 @@ describe("ElicitationBridge — URL mode (#134a)", () => {
     const session = await app.createSession();
 
     const correlationIdP = nextElicitationCorrelationId(bus);
-    const dispatchP = session.dispatch("oauth__start_oauth", {});
+    const dispatchP = session.tools.dispatch("oauth__start_oauth", {});
 
     const correlationId = await correlationIdP;
     // URL-mode accepted = user consented to navigate to the URL. No
@@ -633,7 +633,7 @@ describe("ElicitationBridge — URL mode (#134a)", () => {
     const session = await app.createSession();
 
     const correlationIdP = nextElicitationCorrelationId(bus);
-    const dispatchP = session.dispatch("oauth__start_oauth", {});
+    const dispatchP = session.tools.dispatch("oauth__start_oauth", {});
 
     const correlationId = await correlationIdP;
     await session.elicitation.respond({
@@ -682,7 +682,7 @@ describe("ElicitationBridge — URL mode (#134a)", () => {
       ),
     ).then((c) => Array.from(Chunk.toReadonlyArray(c))[0]!);
 
-    const dispatchP = session.dispatch("oauth__start_oauth", {});
+    const dispatchP = session.tools.dispatch("oauth__start_oauth", {});
 
     const env = await envP;
     const payload = env.payload as {

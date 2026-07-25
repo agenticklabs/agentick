@@ -497,6 +497,18 @@ importers:
       '@agentick/knobs-next':
         specifier: workspace:*
         version: link:../knobs
+      '@agentick/prompts-next':
+        specifier: workspace:*
+        version: link:../prompts
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
+      '@agentick/skills-next':
+        specifier: workspace:*
+        version: link:../skills
+      '@agentick/state-next':
+        specifier: workspace:*
+        version: link:../state
       '@agentick/tasks-next':
         specifier: workspace:*
         version: link:../tasks
@@ -1234,6 +1246,9 @@ importers:
 
   packages-next/prompts:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -1286,6 +1301,9 @@ importers:
 
   packages-next/resources:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/compiler-react-next':
         specifier: workspace:*
         version: link:../compiler-react
@@ -1507,6 +1525,9 @@ importers:
 
   packages-next/skills:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/pubsub-next':
         specifier: workspace:*
         version: link:../pubsub
@@ -1563,6 +1584,9 @@ importers:
 
   packages-next/state:
     dependencies:
+      '@agentick/client-core-next':
+        specifier: workspace:*
+        version: link:../client-core
       '@agentick/compiler-next':
         specifier: workspace:*
         version: link:../compiler
@@ -1921,6 +1945,9 @@ importers:
       '@agentick/prompts-next':
         specifier: workspace:*
         version: link:../prompts
+      '@agentick/resources-next':
+        specifier: workspace:*
+        version: link:../resources
       '@agentick/runtime-next':
         specifier: workspace:*
         version: link:../runtime

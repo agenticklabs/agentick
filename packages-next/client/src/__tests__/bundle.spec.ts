@@ -27,7 +27,19 @@ describe("@agentick/client-bundle-next", () => {
   it("registers every built-in session sub-handle slot on import", () => {
     const names = registeredSessionHandleExtensions();
     expect(names).toEqual(
-      expect.arrayContaining(["tasks", "knobs", "elicitations", "clientToolCalls", "timeline"]),
+      expect.arrayContaining([
+        "tasks",
+        "knobs",
+        "elicitations",
+        "clientToolCalls",
+        "timeline",
+        "gates",
+        "tools",
+        "skills",
+        "prompts",
+        "resources",
+        "state",
+      ]),
     );
   });
 
@@ -36,8 +48,12 @@ describe("@agentick/client-bundle-next", () => {
     // is touched when a view is first read (not here — we assert presence).
     const fakeClient = {
       id: "c1",
+      // The RPC-backed handles (gates/tools/skills/prompts/resources/state) eager
+      // fetch on construction; a benign resolver keeps the fire-and-forget poll
+      // from throwing.
       request: (async () => null) as never,
       transport: {
+        request: (async () => null) as ClientTransport["request"],
         subscribe: (() => neverStream()) as ClientTransport["subscribe"],
       } as never,
     };
@@ -51,5 +67,16 @@ describe("@agentick/client-bundle-next", () => {
     expect(typeof session.clientToolCalls.set).toBe("function"); // folded declare verb
     expect(typeof session.clientToolCalls.route).toBe("function"); // folded router verb
     expect(typeof session.timeline.list).toBe("function"); // TimelineView (Enumerable)
+    expect(typeof session.gates.list).toBe("function"); // GatesClientHandle (Enumerable)
+    expect(typeof session.tools.list).toBe("function"); // ToolsClientHandle (Enumerable)
+    expect(typeof session.tools.dispatch).toBe("function"); // host-door dispatch verb
+    expect(typeof session.skills.list).toBe("function"); // SkillsClientHandle (Enumerable)
+    expect(typeof session.skills.search).toBe("function"); // read verb
+    expect(typeof session.prompts.list).toBe("function"); // PromptsClientHandle (Enumerable)
+    expect(typeof session.prompts.render).toBe("function"); // read verb
+    expect(typeof session.resources.list).toBe("function"); // ResourcesClientHandle (Enumerable)
+    expect(typeof session.resources.read).toBe("function"); // read verb
+    expect(typeof session.state.list).toBe("function"); // StateClientHandle (Enumerable)
+    expect(typeof session.state.set).toBe("function"); // write verb
   });
 });

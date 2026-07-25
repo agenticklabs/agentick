@@ -64,7 +64,7 @@ export interface ReactToolSpec<
   readonly outputSchema?: StandardSchemaV1;
   readonly exposure?: readonly ToolExposure[];
   /**
-   * Alternate dispatch names. `session.dispatch(alias, input)` resolves to
+   * Alternate dispatch names. `session.tools.dispatch(alias, input)` resolves to
    * this tool. Threaded onto `ToolDeclaration.aliases`.
    */
   readonly aliases?: readonly string[];

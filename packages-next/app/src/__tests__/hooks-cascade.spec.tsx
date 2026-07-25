@@ -92,7 +92,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     });
 
     const session = await app.createSession();
-    const result = await session.dispatch("echo", { value: "original" });
+    const result = await session.tools.dispatch("echo", { value: "original" });
 
     // The app-level before-hook fired around the real dispatch body: both the
     // handler AND the returned content reflect the reshaped input.
@@ -133,7 +133,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
       },
     });
 
-    const result = await session.dispatch("echo", { value: "x" });
+    const result = await session.tools.dispatch("echo", { value: "x" });
 
     // Compose, not override: BOTH ran. Outer-first ordering → app before session.
     expect(seen.value).toBe("x|app|session");
@@ -142,7 +142,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     await app.closeApp();
   });
 
-  it("onAfterToolDispatch TRANSFORMS the DispatchResult and the change reaches session.dispatch()", async () => {
+  it("onAfterToolDispatch TRANSFORMS the DispatchResult and the change reaches session.tools.dispatch()", async () => {
     const seen: { value?: unknown } = {};
     let afterRan = 0;
     const app = await createApp(React.createElement(Agent), {
@@ -153,7 +153,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
         // Transform, soundly: the registry now declares `tool:dispatch` output
         // as the richer `DispatchResult`, so the hook receives one and returns
         // one — rewriting `content` without stripping `isError`/metadata. Proves
-        // after-transforms flow through to `session.dispatch()`, not just observe.
+        // after-transforms flow through to `session.tools.dispatch()`, not just observe.
         onAfterToolDispatch: (output) => {
           afterRan++;
           return {
@@ -165,7 +165,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     });
 
     const session = await app.createSession();
-    const result = await session.dispatch("echo", { value: "untouched" });
+    const result = await session.tools.dispatch("echo", { value: "untouched" });
 
     // The handler ran unchanged; the after-transform rewrote the surfaced content.
     expect(seen.value).toBe("untouched");
@@ -184,7 +184,7 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
     });
 
     const session = await app.createSession();
-    const result = await session.dispatch("echo", { value: "verbatim" });
+    const result = await session.tools.dispatch("echo", { value: "verbatim" });
 
     expect(seen.value).toBe("verbatim");
     expect((result[0] as { text: string }).text).toBe("verbatim");
@@ -235,7 +235,7 @@ describe("ADR 83 §4 — late app registration reaches already-constructed per-s
 
     // (1) per-session TOOL-EXECUTOR dispatch — the late app.hook reshaped the
     // input, so it reached `tool:dispatch` on a harness built before it.
-    const result = await session.dispatch("echo", { value: "original" });
+    const result = await session.tools.dispatch("echo", { value: "original" });
     expect(seen.value).toBe("reshaped-late");
     expect((result[0] as { text: string }).text).toBe("reshaped-late");
 

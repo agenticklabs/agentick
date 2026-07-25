@@ -98,7 +98,7 @@ export interface ToolSpec<TInput = unknown> {
   /**
    * Where the tool is reachable from. Defaults to `["model"]`.
    *   - `"model"` — model-callable via function-calling
-   *   - `"dispatch"` — host-callable via `session.dispatch(name, input)`
+   *   - `"dispatch"` — host-callable via `session.tools.dispatch(name, input)`
    *   - `"runtime"` — internal-only
    */
   readonly exposure?: readonly ToolExposure[];
@@ -173,7 +173,7 @@ export interface ToolSpec<TInput = unknown> {
         ctx: ToolHandlerCtx,
       ) => readonly ContentBlock[] | Promise<readonly ContentBlock[]>);
   /**
-   * Alternate dispatch names. `session.dispatch(alias, input)` resolves to
+   * Alternate dispatch names. `session.tools.dispatch(alias, input)` resolves to
    * this tool (registry resolves by exact `name` first, then alias).
    * Threaded onto {@link ToolDeclaration.aliases}.
    */

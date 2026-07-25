@@ -46,6 +46,7 @@
     "@agentick/gateway-next": "workspace:*",
     "@agentick/model-executor-next": "workspace:*",
     "@agentick/prompts-next": "workspace:*",
+    "@agentick/resources-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/skills-next": "workspace:*",
     "@agentick/spec-conformance-next": "workspace:*",

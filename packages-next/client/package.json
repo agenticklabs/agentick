@@ -2,7 +2,7 @@
   "name": "@agentick/client-next",
   "version": "0.0.0",
   "private": true,
-  "description": "Batteries-included agentick client: re-exports `@agentick/client-core-next` and side-effect-imports every built-in `/client` subpath (tasks, knobs, elicitation, tool-executor) so their session sub-handles (`session.tasks` / `.knobs` / `.elicitations()` / `.registerTool()`) self-assemble with no per-harness imports. Interim stand-in for the public `agentick/client` metapackage entry until the v2 cut.",
+  "description": "Batteries-included agentick client: re-exports `@agentick/client-core-next` and side-effect-imports every built-in `/client` subpath (tasks, knobs, elicitation, tool-executor/tools, timeline, gates, skills, prompts, resources, state) so their session sub-handles self-assemble with no per-harness imports. Interim stand-in for the public `agentick/client` metapackage entry until the v2 cut.",
   "keywords": [
     "agent",
     "agentick",
@@ -38,6 +38,10 @@
     "@agentick/elicitation-next": "workspace:*",
     "@agentick/gates-next": "workspace:*",
     "@agentick/knobs-next": "workspace:*",
+    "@agentick/prompts-next": "workspace:*",
+    "@agentick/resources-next": "workspace:*",
+    "@agentick/skills-next": "workspace:*",
+    "@agentick/state-next": "workspace:*",
     "@agentick/tasks-next": "workspace:*",
     "@agentick/timeline-next": "workspace:*",
     "@agentick/tool-executor-next": "workspace:*"

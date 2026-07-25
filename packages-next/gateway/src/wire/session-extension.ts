@@ -186,8 +186,19 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
     },
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {
       const sess = ctx.session ?? findSession(ctx, sessionId);
-      const content = await sess.dispatch(tool, input as Record<string, unknown>);
+      const content = await sess.tools.dispatch(tool, input as Record<string, unknown>);
       return { content };
+    },
+    "session/list_tools": async ({ sessionId, exposure }, ctx) => {
+      // Dedicated wire read behind the client `ToolsClientHandle` enumeration
+      // (three-audiences-plan §F). `session.tools.list` is a sync View read; the
+      // handler just projects the query and returns the wire-safe ToolInfo rows.
+      // Gateway-resident + harness-agnostic (`tools` is on SessionHarnessProtocol),
+      // mirroring session/timeline_history — the tool executor's `tool:<sessionId>`
+      // address does not fit the dynamic-command lane pattern.
+      const sess = ctx.session ?? findSession(ctx, sessionId);
+      const tools = sess.tools.list(exposure !== undefined ? { exposure } : undefined);
+      return { tools };
     },
     "session/abort": async ({ sessionId }, ctx) => {
       // Stub-only today: SessionHarnessProtocol exposes abort() on the

@@ -13,7 +13,7 @@
  *     with `via: "model"`, so every model-driven dispatch is journaled with
  *     `origin: "model"`.
  *   - `via: "dispatch"` → origin `"host"` — a direct in-process call by the
- *     host/session (e.g. `session.dispatch(name, input)`), matching the
+ *     host/session (e.g. `session.tools.dispatch(name, input)`), matching the
  *     `OperationOrigin` contract's "direct calls default `host`".
  *
  * The inbox/wire path does NOT go through this map: a `tool:dispatch` message

@@ -9,7 +9,8 @@
  */
 
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { ClientToolDeclaration } from "../data/declarations.js";
+import type { ClientToolDeclaration, ToolExposure } from "../data/declarations.js";
+import type { ToolInfo } from "../protocol/tool-executor.js";
 import type { ToolResultInput } from "../data/tool-result.js";
 import type { EventQuery } from "../data/events.js";
 import type { ExecutionResult } from "../data/execution-result.js";
@@ -193,6 +194,28 @@ export interface SessionDispatchParams extends WireRequestParams {
 
 export interface SessionDispatchResult {
   readonly content: readonly ContentBlock[];
+}
+
+/**
+ * Params for `session/list_tools` — the wire read behind the client
+ * `ToolsClientHandle`'s enumeration (three-audiences-plan §F). A DEDICATED
+ * session-namespace method rather than a dynamic-lane surface: the tool executor
+ * harness's inbox address is `tool:<sessionId>` (its scopeId is the bare
+ * sessionId), which does NOT match the dynamic lane's
+ * `<surface>:<sessionId>:<surface>` pattern — so `tools:list` cannot route there
+ * without contorting either the lane or the executor's addressing. A
+ * gateway-resident handler over `sess.tools.list(query)` is the honest fit,
+ * mirroring `session/timeline_history` / `session/set_client_tools` (both
+ * session-namespace, gateway-resident, harness-agnostic).
+ */
+export interface SessionListToolsParams extends WireRequestParams {
+  readonly sessionId: string;
+  /** Optional exposure filter — mirrors `ToolsHandle.list({ exposure })`. */
+  readonly exposure?: ToolExposure;
+}
+
+export interface SessionListToolsResult {
+  readonly tools: readonly ToolInfo[];
 }
 
 export interface SessionAbortParams extends WireRequestParams {
@@ -582,6 +605,7 @@ export interface WireMethods {
 
   "session/send": { params: SessionSendParams; result: SessionSendResult };
   "session/dispatch": { params: SessionDispatchParams; result: SessionDispatchResult };
+  "session/list_tools": { params: SessionListToolsParams; result: SessionListToolsResult };
   "session/abort": { params: SessionAbortParams; result: SessionAbortResult };
   "session/queue": { params: SessionQueueParams; result: SessionQueueResult };
   "session/snapshot": { params: SessionSnapshotParams; result: SessionSnapshotResult };

@@ -174,6 +174,31 @@ the harness is the store.
 can `session.state.set(...)` to stash a result the JSX tree then reads via
 `useSessionState` — server logic and render tree meeting on one key.
 
+## `/client` — the client-side handle (ADR 87)
+
+`@agentick/state-next/client` projects `session.state` to the wire client, per
+the symmetry law (a harness that ships a session handle ships the matching
+client handle). Importing the subpath self-assembles `client.session(id).state`:
+
+```ts
+import { createClient } from "@agentick/client-next"; // bundles this subpath
+const session = client.session(id);
+session.state.list();               // readonly StateListEntry[] (Enumerable)
+session.state.get("cursor");        // { key, value } | undefined
+await session.state.set("cursor", 4);
+await session.state.delete("draft");
+session.subscribe(() => render());  // zero-arg store contract
+```
+
+**RPC-backed, not channel-backed.** There is no `state-state` delta channel
+(state is the adopter stash, not model-visible; a reactive mirror rides the
+client channel-consumer primitive later). The read side is a poll:
+`list()`/`get()` read a local snapshot seeded by an eager `state/list` fetch and
+re-fetched after each mutation (fire-and-refetch); `refresh()` forces a re-poll.
+The verbs ride the `state/*` dynamic-lane commands. Depends only on
+`@agentick/client-core-next` + spec types — never the server harness — so it
+stays out of a browser bundle.
+
 ## Status & roadmap
 
 Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
@@ -214,6 +239,14 @@ Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
 - `@agentick/transport-in-process-next` `src/__tests__/wire-reads-e2e.spec.ts` —
   `state/get` + `state/list` + `state/set` round-trip over the real gateway +
   dynamic lane, `commands/list` enumerates them, deny-by-default preserved.
+- `src/client/__tests__/state-handle.spec.ts` (5 tests) — the client handle: the
+  eager `state/list` poll seeds `list()`/`get()`, each verb's wire request shape
+  (`set`/`delete`/`refresh`), fire-and-refetch (a mutation triggers a follow-up
+  `state/list`), and the zero-arg `subscribe(cb)` store contract.
+- `src/client/__tests__/session-state.spec.ts` (2 tests) — ADR 87 self-assembly:
+  importing `@agentick/state-next/client` makes `client.session(id).state`
+  resolve via `registerSessionHandleExtension`, polling a snapshot and issuing
+  `state/set` over the transport.
 
 @see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
 @see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)

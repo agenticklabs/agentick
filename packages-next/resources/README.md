@@ -353,8 +353,43 @@ unchanged. Green.
 - **Pagination** is offset-based with an opaque decimal cursor over a
   stable-sorted (by uri) snapshot.
 
+## Client (`@agentick/resources-next/client`)
+
+The wire twin of `session.resources`, per ADR 87 (a harness that projects a
+session handle ships the matching client handle). Importing
+`@agentick/resources-next/client` self-assembles `client.session(id).resources`:
+
+```ts
+import "@agentick/resources-next/client"; // (bundled by @agentick/client-next)
+
+const resources = client.session(id).resources;
+resources.list(); // sync snapshot of ResourceDescriptor[] (eager resources/list poll)
+resources.get("file:///a.txt"); // by uri, sync
+await resources.listTemplates(); // ResourceTemplateDescriptor[] (RPC)
+await resources.read("file:///a.txt"); // ResourceContents[] (RPC)
+await resources.refresh(); // force a resources/list re-poll
+resources.subscribe(() => {
+  /* re-read on change */
+});
+```
+
+RPC-backed (no `resources-state` delta channel yet — the reactive mirror rides
+the client channel-consumer primitive later): `list()`/`get()` read a local
+snapshot seeded by an eager `resources/list` poll; `read`/`listTemplates` are
+pure RPC. The `resources/*` wire rows are declared type-only in
+`src/wire-augment.ts` (imported by both the server `augment.ts` and the client
+subpath, so the `/client` bundle loads no server code).
+
 ## Verified by
 
+- `src/client/__tests__/resources-handle.spec.ts` — client handle unit:
+  eager `resources/list` seed populates `list()` (unwrapped from
+  `.resources`); `read`/`listTemplates` are pure RPC (no `resources/list`
+  follow-up); `get(uri)` from snapshot; `refresh()` re-polls; `subscribe(cb)`
+  fires with no args. (5 tests)
+- `src/client/__tests__/session-resources.spec.ts` — ADR 87 self-assembly:
+  importing `/client` registers `client.session(id).resources`; `read(uri)`
+  issues `resources/read` over the transport. (2 tests)
 - `src/__tests__/conformance.spec.ts` — runs the exported
   `runResourcesHarnessConformance` suite against this package's impl:
   register/list/has, name-defaults-to-uri, pagination with no

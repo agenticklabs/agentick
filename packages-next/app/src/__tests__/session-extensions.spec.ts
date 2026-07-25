@@ -131,7 +131,7 @@ describe("SessionExtension — install lifecycle", () => {
     });
 
     const session = await app.createSession({ sessionId: "s-dispatch" });
-    const result = await session.dispatch("hello", {});
+    const result = await session.tools.dispatch("hello", {});
     expect(handlerCalls).toBe(1);
     expect((result[0] as { text: string }).text).toBe("from session s-dispatch");
 
@@ -244,7 +244,7 @@ describe("SessionExtension — install lifecycle", () => {
     });
     const s1 = await app.createSession({ sessionId: "s-eph-1" });
     // First dispatch succeeds — handler is live.
-    const result = await s1.dispatch(`ephemeral-${s1.id}`, {});
+    const result = await s1.tools.dispatch(`ephemeral-${s1.id}`, {});
     expect((result[0] as { text: string }).text).toBe("still-alive");
     await s1.close();
 
@@ -255,7 +255,7 @@ describe("SessionExtension — install lifecycle", () => {
     // reachable (i.e., it didn't no-op due to the shared resolver
     // already holding a stale entry).
     const s2 = await app.createSession({ sessionId: "s-eph-2" });
-    const result2 = await s2.dispatch(`ephemeral-${s2.id}`, {});
+    const result2 = await s2.tools.dispatch(`ephemeral-${s2.id}`, {});
     expect((result2[0] as { text: string }).text).toBe("still-alive");
 
     await s2.close();

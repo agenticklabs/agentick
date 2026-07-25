@@ -8,7 +8,7 @@
  * `useBridges().mcp?.client("linear")` and call any of the verbs
  * (`connect` / `disconnect` / `reconnect` / `reauthenticate`) or
  * read `status` / subscribe via `onStatusChange`. Tool dispatch
- * goes through the canonical `session.dispatch("<serverId>__<tool>", ...)`
+ * goes through the canonical `session.tools.dispatch("<serverId>__<tool>", ...)`
  * path — no need to reach into the harness's wire ops directly.
  *
  * The `clients` array gives bulk access for surfaces that want to

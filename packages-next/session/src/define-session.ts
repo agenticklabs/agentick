@@ -56,7 +56,7 @@ import type {
   ApplyResult,
   ApplyToolResultsInput,
   ChannelHandle,
-  ContentBlock,
+  ToolsHandle,
   EscalationInterceptor,
   EventBus,
   EventEnvelope,
@@ -122,11 +122,12 @@ export interface DefineSessionInput<P = unknown> {
   readonly spawn?: (
     input: SpawnInput<P>,
   ) => Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
-  readonly dispatch?: (
-    name: string,
-    input: Record<string, unknown>,
-    options?: import("@agentick/spec-next").DispatchOptions,
-  ) => Promise<readonly ContentBlock[]>;
+  /**
+   * The session's tools handle (three-audiences-plan §F). Replaces the former
+   * `dispatch` callback — a whole `ToolsHandle` (View reads + host-door
+   * `dispatch` + subscription). Omit to get a throwing default.
+   */
+  readonly tools?: ToolsHandle;
   readonly channel?: <T = unknown>(name: string) => ChannelHandle<T>;
   /**
    * Render a channel's current snapshot as its opening frame (slice 2 —
@@ -312,17 +313,9 @@ class CallbackSessionHarness<P = unknown>
     );
   }
 
-  dispatch(
-    name: string,
-    input: Record<string, unknown>,
-    options?: import("@agentick/spec-next").DispatchOptions,
-  ): Promise<readonly ContentBlock[]> {
-    if (this.spec.dispatch) return this.spec.dispatch(name, input, options);
-    return Promise.reject(
-      new ExecutionFailed({
-        cause: new Error("defineSession: dispatch() not configured"),
-      }) satisfies SessionError,
-    );
+  get tools(): ToolsHandle {
+    if (this.spec.tools) return this.spec.tools;
+    throw new Error("defineSession: tools not configured");
   }
 
   channel<T = unknown>(name: string): ChannelHandle<T> {

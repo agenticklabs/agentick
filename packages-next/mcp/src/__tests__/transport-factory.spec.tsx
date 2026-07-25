@@ -137,7 +137,7 @@ describe("withMCP — transport factory (#154)", () => {
         expect(receivedDeps!.serverId).toBe("echo-server");
         expect(typeof receivedDeps!.elicit).toBe("function");
 
-        const content = await session.dispatch("echo-server__echo", { message: "hi" });
+        const content = await session.tools.dispatch("echo-server__echo", { message: "hi" });
         expect(content).toHaveLength(1);
         expect(content[0]).toEqual({ type: "text", text: "echo: hi" });
       } finally {
@@ -168,7 +168,7 @@ describe("withMCP — transport factory (#154)", () => {
     try {
       const session = await app.createSession();
       try {
-        const content = await session.dispatch("delayed__echo", { message: "after-await" });
+        const content = await session.tools.dispatch("delayed__echo", { message: "after-await" });
         expect((content[0] as { text: string }).text).toBe("echo: after-await");
       } finally {
         await session.close();
@@ -221,7 +221,7 @@ describe("withMCP — transport factory (#154)", () => {
           /* close-time cancellation */
         });
 
-        const content = await session.dispatch("elicit-test__echo", { message: "ok" });
+        const content = await session.tools.dispatch("elicit-test__echo", { message: "ok" });
         expect((content[0] as { text: string }).text).toBe("echo: ok");
       } finally {
         await session.close();

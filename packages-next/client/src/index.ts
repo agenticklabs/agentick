@@ -37,6 +37,12 @@ import "@agentick/elicitation-next/client";
 import "@agentick/tool-executor-next/client";
 import "@agentick/timeline-next/client";
 import "@agentick/gates-next/client";
+// Three-audiences-plan §G — the client parity handles (skills, prompts,
+// resources, state). Each types its slot + registers its runtime factory.
+import "@agentick/skills-next/client";
+import "@agentick/prompts-next/client";
+import "@agentick/resources-next/client";
+import "@agentick/state-next/client";
 
 // Re-export the full client-core surface (createClient, handles, channelView,
 // the sub-handle registry, protocol type re-exports, …).

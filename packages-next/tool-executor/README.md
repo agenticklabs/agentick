@@ -103,10 +103,44 @@ only the tail is new.
 `ToolDeclaration.aliases` (a `readonly string[]`) gives a tool alternate dispatch
 names. The registry resolves a dispatch by **exact `name` first**, then falls
 back to an alias→name index built at register time, so
-`session.dispatch("ls", …)` reaches a tool named `list_directory` that declares
-`aliases: ["ls", "dir"]`. Exact-name lookup always wins, so an alias can never
-shadow a real tool. Aliases are dispatch names — they live on the declaration,
-not the annotations — and are surfaced on `createTool({ aliases })`.
+`session.tools.dispatch("ls", …)` reaches a tool named `list_directory` that
+declares `aliases: ["ls", "dir"]`. Exact-name lookup always wins, so an alias can
+never shadow a real tool. Aliases are dispatch names — they live on the
+declaration, not the annotations — and are surfaced on `createTool({ aliases })`.
+
+## `session.tools` — the host handle (three-audiences §F)
+
+Tools were the one session collection without a curated handle: the raw
+`session.toolExecutor` (the full protocol) plus a `session.dispatch(name, input)`
+sugar. Both are replaced by **`session.tools`**, which reads exactly like the
+sibling handles (`session.knobs` / `session.state`):
+
+```ts
+session.tools.list({ exposure: "model" });     // sync View — ToolInfo[] (precedence-resolved)
+session.tools.get("resource_read")?.info;       // per-tool handle + wire-safe projection
+await session.tools.get("resource_read")?.dispatch({ uri });
+await session.tools.dispatch("resource_read", { uri }); // host door, via: "dispatch"
+session.tools.has("resource_read");
+const off = session.tools.subscribeAll(() => rerender()); // registry topology
+```
+
+- **Sync reads** — `list`/`get`/`has`. An in-memory registry with a sync read
+  surface holds a View (the data-layer rule), so these never return a Promise.
+  `list` rides `compileForTick` (one `ToolInfo` per name, precedence-resolved,
+  optional `exposure` filter).
+- **`ToolInfo` is the wire-safe projection** — `name`, `description`, `exposure`,
+  `aliases?`, `annotations?`, `hasInputSchema`. NOT the live `StandardSchemaV1`
+  validator; power users who need it keep `session.toolExecutor`.
+- **`dispatch`** carries the same `via: "dispatch"` journaling/provenance the
+  removed `session.dispatch` had — it IS the host door now.
+- **`subscribe(name, fn)` / `subscribeAll(fn)`** ride the registry's
+  change-notification, fired only from the registration-mutation paths
+  (`add`/`remove`/`removeWhere`/`replaceCompilerSlice`/`clear`) — never the hot
+  dispatch read path.
+
+> **Verified by** `src/__tests__/tools-handle.spec.ts` (the View + dispatch +
+> subscribe unit) and `../session/src/__tests__/extended-surface.spec.ts`
+> (`session.tools` end-to-end through the real harness).
 
 ## Quick start
 
@@ -692,6 +726,36 @@ calls.confirm((req) => !req.toolName?.startsWith("rm")); // predicate
   `.routeClientTools` / `.confirmClientTools` / `.respondToToolCall` are folded
   onto the handle as `.set` / `.route` / `.confirm` / `.respond` (pre-1.0, no
   deprecation).
+
+### `session.tools` — the tool-registry client handle (three-audiences §F)
+
+`@agentick/tool-executor-next/client` contributes a SECOND, distinct handle:
+`session.tools`, the client twin of the server `session.tools` — the tool
+**registry** projection (`clientToolCalls` is the inbound client-tool-call
+_feed_; different slot, different concern, they never collide):
+
+```ts
+import "@agentick/tool-executor-next/client";
+
+const tools = client.session(id).tools;
+await tools.refresh({ exposure: "model" }); // → session/list_tools
+tools.list();                                // Enumerable<ToolInfo> snapshot
+tools.get("resource_read");                  // by name
+await tools.dispatch("resource_read", { uri }); // → session/dispatch → content blocks
+```
+
+RPC-backed (no `tools-state` channel yet, like `gates`): `list()`/`get()` read a
+local snapshot seeded by an eager `session/list_tools` poll; `refresh()`
+re-polls; `dispatch(name, input)` rides the existing `session/dispatch` method
+and does NOT re-poll (dispatch doesn't mutate topology). `session/list_tools` is
+a DEDICATED session-namespace wire read (not the dynamic lane — the executor's
+`tool:<sessionId>` inbox address doesn't fit the lane pattern).
+
+> **Verified by** `src/client/__tests__/tools-handle.spec.ts` (per-verb wire
+> shapes), `src/client/__tests__/session-tools.spec.ts` (ADR-87 self-assembly +
+> no `clientToolCalls` collision), and
+> `../transport-in-process/src/__tests__/tools-e2e.spec.ts` (full-stack
+> `session/list_tools` round-trip).
 
 **Verified by** `src/__tests__/client-tool-router.spec.ts` (router: correlated
 relay → respond, unknown → error, throw → error, custom `onUnknown`,

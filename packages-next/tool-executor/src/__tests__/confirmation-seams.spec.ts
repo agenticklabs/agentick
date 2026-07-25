@@ -9,7 +9,7 @@
  *     leaving the existing `toolUseId` / `toolName` / `arguments` intact.
  *   - `defaultResult` widened to a callable — evaluated for BOTH the
  *     fire-and-forget resolve and the `requiresResponse` timeout fallback.
- *   - `aliases` → `session.dispatch(alias, …)` resolves the tool.
+ *   - `aliases` → `session.tools.dispatch(alias, …)` resolves the tool.
  */
 
 import { describe, expect, it } from "vitest";

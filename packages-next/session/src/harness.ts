@@ -84,6 +84,7 @@ import type {
   TickResult,
   TimelineEntry,
   ToolExecutorProtocol,
+  ToolsHandle,
   TreeInterceptionSource,
   Unsubscribe,
 } from "@agentick/spec-next";
@@ -1139,6 +1140,22 @@ export class SessionHarness<P = unknown>
   }
 
   /**
+   * The session's tools handle — the curated projection of the tool registry
+   * (three-audiences-plan §F). SYNC View reads (`list`/`get`/`has`), the
+   * host-door `dispatch(name, input, opts?)` (`via: "dispatch"` — this replaces
+   * the removed `session.dispatch`), and the family topology-subscription pair.
+   * Reads exactly like `session.knobs` / `session.state`.
+   *
+   * Built and owned by the tool executor harness (`toolExecutor.tools`), over
+   * its own registry — no wrapper. Power users who need the live
+   * `ToolDeclaration` (with its Standard-Schema validator) keep the raw
+   * `session.toolExecutor`.
+   */
+  get tools(): ToolsHandle {
+    return this.toolExecutor.tools;
+  }
+
+  /**
    * The session's model selection / swap facade (ADR 89 §2) — NOT a
    * harness, a thin projection of the session-default model the session
    * already owns.
@@ -1466,29 +1483,6 @@ export class SessionHarness<P = unknown>
         }),
       ),
     );
-  }
-
-  async dispatch(
-    name: string,
-    input: Record<string, unknown>,
-    options?: import("@agentick/spec-next").DispatchOptions,
-  ): Promise<readonly ContentBlock[]> {
-    if (this._closed) {
-      throw new SessionClosedError({ attemptedCommand: "dispatch" }) satisfies SessionError;
-    }
-    await this._mountReady;
-    // Defaults to Pattern A — when the tool returns a TaskHandle, the
-    // executor awaits the handle's result and the caller observes
-    // final blocks. Opt into Pattern B with `{ task: "ref" }`; see
-    // `DispatchOptions`.
-    const result = await this.toolExecutor.dispatch({
-      toolCallId: `host:${ulid()}`,
-      name,
-      input,
-      context: { via: "dispatch", sessionId: this.runtime.id },
-      ...(options?.task !== undefined ? { task: options.task } : {}),
-    });
-    return result.content;
   }
 
   channel<T = unknown>(name: string): ChannelHandle<T> {

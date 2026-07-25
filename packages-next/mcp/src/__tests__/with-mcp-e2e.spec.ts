@@ -10,7 +10,7 @@
  *      auto-registers the discovered MCP tools (via
  *      `installer.registerExtensionTool` accumulating into
  *      `this.extensionTools` and the createSession path).
- *   4. `session.dispatch("<serverId>__<toolName>", input)` resolves
+ *   4. `session.tools.dispatch("<serverId>__<toolName>", input)` resolves
  *      the handler via the shared HandlerResolver, which proxies to
  *      `harness.callTool()` and maps the result to ContentBlock[].
  *   5. The model never directly sees MCP — every MCP tool looks like
@@ -142,7 +142,7 @@ describe("withMCP — end-to-end", () => {
     });
 
     const session = await app.createSession();
-    const content = await session.dispatch("echo-server__echo", { message: "hi" });
+    const content = await session.tools.dispatch("echo-server__echo", { message: "hi" });
 
     expect(content).toHaveLength(1);
     expect(content[0]).toEqual({ type: "text", text: "echo: hi" });
@@ -170,10 +170,10 @@ describe("withMCP — end-to-end", () => {
     // landed in the session's ToolExecutor. (SessionHarnessProtocol
     // doesn't surface the toolExecutor directly; dispatch is the
     // documented host-door for invoking by name.)
-    const echoResult = await session.dispatch("math__echo", { message: "hi" });
+    const echoResult = await session.tools.dispatch("math__echo", { message: "hi" });
     expect((echoResult[0] as { text: string }).text).toBe("echo: hi");
 
-    const addResult = await session.dispatch("math__add", { a: 2, b: 3 });
+    const addResult = await session.tools.dispatch("math__add", { a: 2, b: 3 });
     expect((addResult[0] as { text: string }).text).toBe("5");
 
     await session.close();
@@ -203,7 +203,7 @@ describe("withMCP — end-to-end", () => {
     const session = await app.createSession();
     // toolPrefix:"" means the tool is registered under its raw MCP
     // name. Dispatch by that name and confirm it resolves.
-    const content = await session.dispatch("echo", { message: "raw" });
+    const content = await session.tools.dispatch("echo", { message: "raw" });
     expect((content[0] as { text: string }).text).toBe("echo: raw");
 
     await session.close();
@@ -222,7 +222,7 @@ describe("withMCP — end-to-end", () => {
       ],
     });
     const session = await app.createSession();
-    const content = await session.dispatch("shape__echo", { message: "x" });
+    const content = await session.tools.dispatch("shape__echo", { message: "x" });
     // Every block carries an agentick-canonical `type` discriminator
     // (text in this case). Proves the content-mapper is in the path.
     expect(content[0]).toMatchObject({ type: "text" });

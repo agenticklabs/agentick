@@ -53,7 +53,9 @@ import {
 } from "@agentick/runtime-next";
 import type {
   AbortInput,
+  ContentBlock,
   DispatchInput,
+  DispatchOptions,
   DispatchResult,
   EventBus,
   MessageEnvelope,
@@ -73,9 +75,11 @@ import type {
   ToolExecutorFx,
   ToolExecutorProtocol,
   ToolListFilter,
+  ToolsHandle,
   UnregisterToolInput,
 } from "@agentick/spec-next";
 import { HandlerError, ToolAbortedError, ToolValidationError } from "@agentick/spec-next";
+import { createToolsHandle } from "./tools-handle.js";
 
 import { InMemoryToolRegistry, sameBindingKey } from "./registry.js";
 import { viaToOrigin } from "./provenance.js";
@@ -195,6 +199,9 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
    */
   readonly abort: (input: AbortInput) => Promise<void>;
 
+  /** `session.tools` (three-audiences-plan §F) — over this executor's registry. */
+  readonly tools: ToolsHandle;
+
   constructor(
     scopeId: string,
     journal: OperationJournal,
@@ -205,6 +212,12 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     super("tool", scopeId, journal, bus, inbox);
     this.spec = spec;
     this.registry = new InMemoryToolRegistry();
+    this.tools = createToolsHandle({
+      compileSync: (filter) => this.registry.compileForTick(filter),
+      getSync: (name) => this.registry.get(name),
+      dispatch: (name, input, opts) => this.hostDispatch(name, input, opts),
+      subscribe: (listener) => this.registry.subscribe(listener),
+    });
     this.abort = this.command<AbortInput, void, unknown>({
       name: "tool:abort",
       scope: () => ({ sessionId: this.scopeId }),
@@ -448,6 +461,22 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
 
   dispatch(input: DispatchInput): Promise<DispatchResult> {
     return runHarnessProtocol(this.dispatchFx(input));
+  }
+
+  /** Host-door dispatch behind `session.tools.dispatch` (via: "dispatch"). */
+  private async hostDispatch(
+    name: string,
+    input: unknown,
+    opts?: DispatchOptions,
+  ): Promise<readonly ContentBlock[]> {
+    const result = await this.dispatch({
+      toolCallId: `host:${ulid()}`,
+      name,
+      input,
+      context: { via: "dispatch", sessionId: this.scopeId },
+      ...(opts?.task !== undefined ? { task: opts.task } : {}),
+    });
+    return result.content;
   }
 
   /**

@@ -19,7 +19,7 @@
  *   5. Honors `tasks/cancel` by transitioning the task to cancelled
  *      and pushing one final status notification.
  *
- * The test exercises the integration via `session.dispatch(...)` —
+ * The test exercises the integration via `session.tools.dispatch(...)` —
  * the Pattern B branch returns a session_task_ref content block, then
  * we drive the lifecycle to completion via `session.dispatch` of
  * `session_tasks_await`. Cancellation path uses
@@ -322,7 +322,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     const session = await app.createSession();
     teardown.push(() => session.close());
 
-    const blocks = (await session.dispatch("tasksvr__slow_task", { label: "x" })) as Array<{
+    const blocks = (await session.tools.dispatch("tasksvr__slow_task", { label: "x" })) as Array<{
       type: string;
       text: string;
     }>;
@@ -356,7 +356,11 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     const session = await app.createSession();
     teardown.push(() => session.close());
 
-    const refBlocks = await session.dispatch("tasksvr__slow_task", { label: "x" }, { task: "ref" });
+    const refBlocks = await session.tools.dispatch(
+      "tasksvr__slow_task",
+      { label: "x" },
+      { task: "ref" },
+    );
     expect(refBlocks).toHaveLength(1);
     const refBlock = refBlocks[0];
     if (!isTaskRefBlock(refBlock!)) {
@@ -398,7 +402,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
 
     // Kick off the dispatch — it'll block since autoComplete=false.
     // Pre-drain the rejection so vitest doesn't flag it.
-    const dispatchP = session.dispatch("tasksvr__slow_task", { label: "y" });
+    const dispatchP = session.tools.dispatch("tasksvr__slow_task", { label: "y" });
     const drained = drainRejection(dispatchP);
 
     // Wait for the server to observe a task creation (the
@@ -455,7 +459,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
 
     // Track local progress events on the TasksHarness's bus.
     const localProgress: Array<{ current: number; total?: number; message?: string }> = [];
-    const dispatchP = session.dispatch("tasksvr__slow_task", { label: "z" });
+    const dispatchP = session.tools.dispatch("tasksvr__slow_task", { label: "z" });
     void drainRejection(dispatchP);
 
     await new Promise((r) => setTimeout(r, 25));
@@ -528,7 +532,7 @@ describe("withMCP — taskSupport:'optional' / 'supported' per-call opt-in (#174
     // The fake server's CallToolRequest handler returns
     // `inline:${label}` when no `task` arg is present, so receiving
     // exactly that text proves the wire never asked for a task.
-    const blocks = await session.dispatch("opt__slow_task", { label: "x" });
+    const blocks = await session.tools.dispatch("opt__slow_task", { label: "x" });
     expect(blocks).toHaveLength(1);
     expect((blocks[0] as { type: string; text: string }).text).toBe("inline:x");
   });
@@ -564,7 +568,11 @@ describe("withMCP — taskSupport:'optional' / 'supported' per-call opt-in (#174
     const session = await app.createSession();
     teardown.push(() => session.close());
 
-    const refBlocks = await session.dispatch("opt2__slow_task", { label: "y" }, { task: "ref" });
+    const refBlocks = await session.tools.dispatch(
+      "opt2__slow_task",
+      { label: "y" },
+      { task: "ref" },
+    );
     expect(refBlocks).toHaveLength(1);
     const refBlock = refBlocks[0];
     if (!isTaskRefBlock(refBlock!)) {

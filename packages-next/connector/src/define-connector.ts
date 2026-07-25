@@ -135,7 +135,7 @@ export function defineConnector(spec: DefineConnectorSpec): GatewayExtension {
         //
         // The ingress ACTION is `session.send` by default. The seam is
         // intentionally open — a future config could route an event to
-        // `session.dispatch(tool, input)` or `app.run(...)` instead.
+        // `session.tools.dispatch(tool, input)` or `app.run(...)` instead.
         await session.send({
           messages: [{ role: "user", content: msg.text, ...(metadata ? { metadata } : {}) }],
         });

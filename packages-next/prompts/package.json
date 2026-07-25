@@ -31,6 +31,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
+    },
     "./loaders": {
       "types": "./src/loaders.ts",
       "import": "./src/loaders.ts",
@@ -45,6 +50,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/client-core-next": "workspace:*",
     "@agentick/pubsub-next": "workspace:*",
     "@agentick/runtime-next": "workspace:*",
     "@agentick/spec-next": "workspace:*",

@@ -198,7 +198,7 @@ describe("AppExtension — installer surfaces", () => {
         binding: { scope: "runtime" },
       },
     });
-    const content = await session.dispatch("ping", {});
+    const content = await session.tools.dispatch("ping", {});
     expect(dispatched).toBe(true);
     expect(content).toEqual([{ type: "text", text: "pong" }]);
     await app.closeApp();
@@ -266,7 +266,7 @@ describe("AppExtension — ctx extension threading (ADR 66)", () => {
         binding: { scope: "runtime" },
       },
     });
-    await session.dispatch("probe", {});
+    await session.tools.dispatch("probe", {});
     await app.closeApp();
     return captured;
   }

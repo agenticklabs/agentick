@@ -14,7 +14,7 @@
  * sends `dispatch({ via: "model" })` when the model emits a `tool_use`
  * block. The session harness (host door) sends
  * `dispatch({ via: "dispatch" })` when the host calls
- * `session.dispatch(name, input)`. Same validation, same confirmation,
+ * `session.tools.dispatch(name, input)`. Same validation, same confirmation,
  * same interceptors — by construction. `via` is observable to
  * middleware so policies can differ if needed.
  *
@@ -24,7 +24,7 @@
  * decides which door the tool is reachable from:
  *
  * - `"model"`     reachable when the model emits `tool_use`.
- * - `"dispatch"`  reachable from `session.dispatch(name, input)`.
+ * - `"dispatch"`  reachable from `session.tools.dispatch(name, input)`.
  * - `"runtime"`   internal use only; not reachable by either door.
  *
  * The harness enforces exposure at dispatch time (the wrong door for a
@@ -45,11 +45,13 @@ import type { ContentBlock } from "../data/content-blocks.js";
 import type {
   ClientToolAnnotations,
   ClientToolDeclaration,
+  ToolAnnotations,
   ToolBinding,
   ToolDeclaration,
   ToolExposure,
   ToolPresentation,
 } from "../data/declarations.js";
+import type { Unsubscribe } from "./inbox.js";
 import type { ToolResultInput } from "../data/tool-result.js";
 import type { StandardSchemaIssue } from "../data/standard-schema.js";
 import { jsonSchema } from "../data/standard-schema.js";
@@ -223,6 +225,85 @@ export interface DispatchResult {
    */
   readonly presentation?: ToolPresentation;
   readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// ============================================================================
+// Host handle projection — `session.tools` (three-audiences-plan §F)
+// ============================================================================
+
+/**
+ * Options for a host-door dispatch (`session.tools.dispatch` /
+ * `ToolHandle.dispatch`). Selects the task pattern for tools that may produce a
+ * `TaskHandle` — see the `task` field on {@link DispatchInput} for the full
+ * matrix. Formerly on `SessionHarnessProtocol.dispatch`; moved here with the
+ * removal of `session.dispatch` (the handle is the one dispatch door now).
+ */
+export interface DispatchOptions {
+  readonly task?: "auto" | "ref" | "inline";
+}
+
+/**
+ * **Wire-safe projection** of a registered tool's declaration — the row
+ * `session.tools.list()` returns and the client `ToolsClientHandle`
+ * enumerates. A serializable subset of {@link ToolDeclaration}: it deliberately
+ * OMITS the live `inputSchema` (a `StandardSchemaV1` validator — a function,
+ * uncrossable) and surfaces only `hasInputSchema`. Power users who need the
+ * validator itself keep the raw `session.toolExecutor`.
+ */
+export interface ToolInfo {
+  readonly name: string;
+  readonly description: string;
+  /** Which doors the tool is reachable from (`"model"` / `"dispatch"` / `"runtime"`). */
+  readonly exposure: readonly ToolExposure[];
+  /** Alternate dispatch names (declaration-level, not annotations). */
+  readonly aliases?: readonly string[];
+  readonly annotations?: ToolAnnotations;
+  /** True when the tool declares an `inputSchema`. The schema itself never crosses. */
+  readonly hasInputSchema: boolean;
+}
+
+/**
+ * Per-tool handle — the {@link ToolInfo} projection plus a name-bound
+ * {@link DispatchOptions}-aware dispatch. Handed back by
+ * {@link ToolsHandle.get}. Dispatch flows the host door (`via: "dispatch"`).
+ */
+export interface ToolHandle {
+  readonly name: string;
+  readonly info: ToolInfo;
+  dispatch(input: unknown, opts?: DispatchOptions): Promise<readonly ContentBlock[]>;
+}
+
+/**
+ * `session.tools` — the missing sibling handle (three-audiences-plan §F). Tools
+ * were the one session collection without a curated handle: the raw
+ * `session.toolExecutor` plus the removed `session.dispatch` sugar. This reads
+ * exactly like `session.knobs` / `session.state`: SYNC View reads
+ * (`list`/`get`/`has` — an in-memory registry with a sync read surface holds a
+ * View, per the data-layer rule), an ASYNC `dispatch` (host door, `via:
+ * "dispatch"` provenance — the same journaling the removed `session.dispatch`
+ * had), and the family topology-subscription pair.
+ *
+ * `ToolInfo` is the wire-safe projection; `session.toolExecutor` remains for
+ * power users who need the live declaration.
+ */
+export interface ToolsHandle {
+  /** Current registered tools as {@link ToolInfo} rows, optionally filtered by exposure. */
+  list(query?: { readonly exposure?: ToolExposure }): readonly ToolInfo[];
+  /** Look one tool up by name, then alias; a {@link ToolHandle} or `undefined`. */
+  get(name: string): ToolHandle | undefined;
+  /** True when a tool by that name (or alias) is registered. */
+  has(name: string): boolean;
+  /**
+   * Invoke a tool by name without the model (host door). Auto-validates input
+   * against the tool's schema, resolves by name then alias, and returns the
+   * tool's content blocks. Replaces `session.dispatch`. Throws
+   * `ToolExecutorError` on validation/permission/handler failure.
+   */
+  dispatch(name: string, input: unknown, opts?: DispatchOptions): Promise<readonly ContentBlock[]>;
+  /** Fire when the named tool's registrations change (declaration / presence). */
+  subscribe(name: string, listener: () => void): Unsubscribe;
+  /** Fire on any registry topology change (add / remove of any tool). */
+  subscribeAll(listener: () => void): Unsubscribe;
 }
 
 // ============================================================================
@@ -686,6 +767,15 @@ export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "
    * severing the fiber at the Promise facade.
    */
   readonly fx: ToolExecutorFx;
+
+  /**
+   * The curated host handle — `session.tools` (three-audiences-plan §F). SYNC
+   * View reads (`list`/`get`/`has`) over the registry, the host-door
+   * `dispatch(name, input, opts?)` (`via: "dispatch"`), and the family
+   * topology-subscription pair. The concrete harness builds this once over its
+   * own registry; the session getter forwards it.
+   */
+  readonly tools: ToolsHandle;
 
   /**
    * Add a tool to the registry. Idempotent on `registration.declaration.name`

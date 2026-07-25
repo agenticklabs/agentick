@@ -27,6 +27,10 @@
 
 import type { Resources } from "@agentick/spec-next";
 
+// Side-effect: the `resources/*` WireMethods rows (split into a type-only
+// module so the `/client` subpath can load them without this server augment).
+import "./wire-augment.js";
+
 declare module "@agentick/spec-next" {
   interface HookBridges {
     /**

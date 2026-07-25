@@ -37,6 +37,31 @@ export class InMemoryToolRegistry {
   // Maintained incrementally on `add`; fully rebuilt on removal (rare).
   private readonly aliasToName = new Map<string, string>();
 
+  // Topology-change listeners (three-audiences-plan §F — `session.tools`
+  // subscribe/subscribeAll). Fired ONLY from the registration-mutation paths
+  // (add/remove/removeWhere/replaceCompilerSlice/clear) — NEVER from the hot
+  // `get`/`compileForTick`/dispatch read path, so subscription costs nothing at
+  // dispatch time. A listener receives the AFFECTED name, or `undefined` for a
+  // bulk change (removeWhere/replaceCompilerSlice/clear touch many names).
+  private readonly changeListeners = new Set<(name: string | undefined) => void>();
+
+  /**
+   * Register a topology-change listener. Fires with the affected tool name on a
+   * single-name mutation, or `undefined` on a bulk mutation. Returns a detach
+   * function. The `session.tools` handle folds this into `subscribe(name)` /
+   * `subscribeAll`.
+   */
+  subscribe(listener: (name: string | undefined) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private notifyChange(name: string | undefined): void {
+    for (const l of this.changeListeners) l(name);
+  }
+
   /**
    * Add a registration. Idempotent on equal shape under the same
    * binding; throws `ToolAlreadyRegistered` when re-adding a different
@@ -49,17 +74,19 @@ export class InMemoryToolRegistry {
     if (!list) {
       this.byName.set(name, [registration]);
       this.indexAliases(registration);
+      this.notifyChange(name);
       return;
     }
     const idx = list.findIndex((r) => sameBindingKey(r.binding, registration.binding));
     if (idx >= 0) {
       if (areRegistrationsEqual(list[idx]!, registration)) {
-        return; // idempotent on identical shape
+        return; // idempotent on identical shape — no topology change, no notify
       }
       throw new ToolAlreadyRegistered({ name });
     }
     list.push(registration);
     this.indexAliases(registration);
+    this.notifyChange(name);
   }
 
   /** Register this registration's declared aliases → its canonical name. */
@@ -87,8 +114,9 @@ export class InMemoryToolRegistry {
    * For scope-bounded removal use {@link removeWhere}.
    */
   remove(name: string): void {
-    this.byName.delete(name);
+    const existed = this.byName.delete(name);
     this.reindexAliases();
+    if (existed) this.notifyChange(name);
   }
 
   /**
@@ -109,7 +137,10 @@ export class InMemoryToolRegistry {
         this.byName.set(name, kept);
       }
     }
-    if (removed > 0) this.reindexAliases();
+    if (removed > 0) {
+      this.reindexAliases();
+      this.notifyChange(undefined); // bulk — many names may have changed
+    }
     return removed;
   }
 
@@ -243,10 +274,12 @@ export class InMemoryToolRegistry {
     }
     // 2. Remove the existing slice.
     this.removeWhere((b) => b.scope === "compiler" && b.mountId === mountId);
-    // 3. Add the new slice.
+    // 3. Add the new slice. (`add` fires per-name notifications; the bulk
+    //    notify below covers the removal half + coalesces the whole swap.)
     for (const reg of registrations) {
       this.add(reg);
     }
+    this.notifyChange(undefined); // bulk compiler-slice swap
   }
 
   /** Count of registered names (NOT registrations). */
@@ -268,8 +301,10 @@ export class InMemoryToolRegistry {
 
   /** Drop every registration. Used on harness close. */
   clear(): void {
+    const had = this.byName.size > 0;
     this.byName.clear();
     this.aliasToName.clear();
+    if (had) this.notifyChange(undefined);
   }
 }
 

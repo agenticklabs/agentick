@@ -120,8 +120,23 @@ async function mkSession(
 describe("SessionHarness — dispatch (host-side tool invocation)", () => {
   it("invokes a registered tool with via:'dispatch' and returns its content", async () => {
     const { session, tools } = await mkSession({ tools: [calcTool] });
-    const content = await session.dispatch("calc", { a: 1, b: 2 });
+    const content = await session.tools.dispatch("calc", { a: 1, b: 2 });
     expect(content[0]).toMatchObject({ type: "text", text: "42" });
+    await session.close();
+    await tools.close();
+  });
+
+  it("exposes the tool registry as a sync View (list/get/has) — three-audiences §F", async () => {
+    const { session, tools } = await mkSession({ tools: [calcTool] });
+    const infos = session.tools.list();
+    expect(infos.map((i) => i.name)).toContain("calc");
+    expect(infos.every((i) => !("inputSchema" in i))).toBe(true); // wire-safe projection
+    expect(session.tools.has("calc")).toBe(true);
+    expect(session.tools.has("nope")).toBe(false);
+    const handle = session.tools.get("calc");
+    expect(handle?.name).toBe("calc");
+    const viaHandle = await handle!.dispatch({ a: 1, b: 2 });
+    expect(viaHandle[0]).toMatchObject({ type: "text", text: "42" });
     await session.close();
     await tools.close();
   });
@@ -138,7 +153,7 @@ describe("SessionHarness — dispatch (host-side tool invocation)", () => {
       binding: { scope: "runtime" },
     };
     const { session, tools } = await mkSession({ tools: [modelOnly] });
-    await expect(session.dispatch("model-only", {})).rejects.toMatchObject({
+    await expect(session.tools.dispatch("model-only", {})).rejects.toMatchObject({
       _tag: "ToolPermissionError",
     });
     await session.close();

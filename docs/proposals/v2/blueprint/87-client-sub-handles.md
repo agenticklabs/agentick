@@ -13,9 +13,9 @@ contributed by harness packages via module augmentation of the empty-seed
 `bridges.knobs`, etc., and the set grows with whatever harnesses are installed;
 core hardcodes none of them.
 
-The **client** session handle is inconsistent with this. It has the *generic*
+The **client** session handle is inconsistent with this. It has the _generic_
 per-session surface on the handle (`onLog`/`onProgress`/`channelView`, and
-`elicitations()`), but the *typed harness projections* are **loose free
+`elicitations()`), but the _typed harness projections_ are **loose free
 functions** — `taskStatusView(client, sessionId)`, `knobsStateView(client,
 sessionId)` — that never made it onto the handle. So `client.session(id)` isn't
 the mirror of the server session it's supposed to be:
@@ -34,19 +34,19 @@ wire."
 ## Thesis
 
 **The client `SessionHandle` is the wire-side twin of the server session's bridge
-bag, and it self-assembles from installed harness *client* packages the same way
+bag, and it self-assembles from installed harness _client_ packages the same way
 the server session self-assembles bridges from harnesses.** It's the client twin
 of `HookBridges` — one empty seed, augmented per harness, contributed by the
 `/client` subpath, never hardcoded in client-core.
 
-| | Server (in-process) | Client (over-wire) |
-| --- | --- | --- |
-| empty seed | `HookBridges` (spec) | `SessionHandleExtensions` (spec/client) |
-| contributor | harness package `augment.ts` | harness package `/client` subpath |
-| slot type | `interface HookBridges { tasks: Tasks }` | `interface SessionHandleExtensions { tasks: TasksClientHandle }` |
-| access | `useBridges().tasks` / `bridges.tasks` | `client.session(id).tasks` |
-| assembly | session harness wires bridges | `makeSessionHandle` spreads registered factories |
-| what it is | the live harness | the wire projection: **a read view + action verbs** |
+|             | Server (in-process)                      | Client (over-wire)                                               |
+| ----------- | ---------------------------------------- | ---------------------------------------------------------------- |
+| empty seed  | `HookBridges` (spec)                     | `SessionHandleExtensions` (spec/client)                          |
+| contributor | harness package `augment.ts`             | harness package `/client` subpath                                |
+| slot type   | `interface HookBridges { tasks: Tasks }` | `interface SessionHandleExtensions { tasks: TasksClientHandle }` |
+| access      | `useBridges().tasks` / `bridges.tasks`   | `client.session(id).tasks`                                       |
+| assembly    | session harness wires bridges            | `makeSessionHandle` spreads registered factories                 |
+| what it is  | the live harness                         | the wire projection: **a read view + action verbs**              |
 
 ## 1. The seed + the augmentation
 
@@ -68,7 +68,9 @@ Each harness client package augments it (the exact `HookBridges` move):
 ```ts
 // @agentick/tasks-next/client
 declare module "@agentick/spec-next" {
-  interface SessionHandleExtensions { readonly tasks: TasksClientHandle; }
+  interface SessionHandleExtensions {
+    readonly tasks: TasksClientHandle;
+  }
 }
 // @agentick/knobs-next/client → interface SessionHandleExtensions { readonly knobs: KnobsClientHandle }
 ```
@@ -109,21 +111,21 @@ Each sub-handle IS an ADR 85 family, structured as a handle: the **read view** (
 
 ```ts
 interface TasksClientHandle {
-  view(): ChannelView<Record<string, TaskInfo>>;   // == taskStatusView (the read store)
-  list(): Promise<readonly TaskInfo[]>;             // wire tasks/list
+  view(): ChannelView<Record<string, TaskInfo>>; // == taskStatusView (the read store)
+  list(): Promise<readonly TaskInfo[]>; // wire tasks/list
   get(taskId: string): Promise<TaskInfo | undefined>;
-  cancel(taskId: string): Promise<void>;            // wire tasks/cancel
+  cancel(taskId: string): Promise<void>; // wire tasks/cancel
 }
 interface KnobsClientHandle {
-  view(): ChannelView<KnobsState>;                  // == knobsStateView
-  set(id: string, value: unknown): Promise<void>;   // wire set — bidirectional
+  view(): ChannelView<KnobsState>; // == knobsStateView
+  set(id: string, value: unknown): Promise<void>; // wire set — bidirectional
 }
 // elicitation: the existing stream + respond, pulled under `session.elicitation`.
 ```
 
 Read side = the `useSyncExternalStore` store a UI's `useTasks`/`useKnobs` wraps
 (ADR 85); action side = the bidirectional verbs. This is where the ADR 85 family
-model *lives* on the client.
+model _lives_ on the client.
 
 ## 4. Migration (no rework — the bricks slot in)
 
@@ -132,7 +134,7 @@ model *lives* on the client.
 - `session.elicitations()` → keep, but surface as `session.elicitation.stream()` (or
   `session.elicitation` iterable) for naming consistency with the other sub-handles.
 - The tier-1 generic methods (`onLog`/`onProgress`/`channelView`) are unchanged —
-  they're the *generic* floor; the sub-handles are the *typed* projections above it.
+  they're the _generic_ floor; the sub-handles are the _typed_ projections above it.
 
 ## 5. App / Gateway (same pattern, if needed)
 
@@ -192,3 +194,30 @@ A wire-method a client sub-handle calls (e.g. knobs' `knobs/set`) needs its
 `WireMethods` augmentation loadable from the `/client` subpath alone — so that
 augmentation lives in a dedicated type-only file (`wire-augment.ts`) the client
 index side-effect-imports, NOT bundled with the server-bridge augmentation.
+
+## 10. The symmetry law (three-audiences-plan §G, ratified 2026-07-24)
+
+**A harness that projects a session handle SHIPS the matching client handle.**
+The two are twins: the same noun, the same verb grammar minus what cannot cross
+the wire (functions, live schemas, resolver-backed reads), rows typed by the
+wire projection, `Enumerable` by default, delivered per this ADR (`/client`
+subpath: `declare module` types the slot + registers the runtime factory;
+`@agentick/client-next` bundles the built-ins — bundled, not privileged, the
+same as ADR 27 server-side). A new harness the client can't see is half a
+harness — so the omission is an architectural defect, not a follow-up.
+
+Concretely, the **per-harness package checklist becomes six**: `harness` +
+`augment` + `extension` + `conformance` + **`/client`** (+ `react`/`testing`
+where they apply). The `/client` surface is the parity obligation; a harness
+PR that adds a session handle without it is incomplete.
+
+Read verbs are RPC-backed (`list()`/`get()` poll + fire-and-refetch after
+mutations — the `gates`/`skills`/`prompts`/`resources`/`state`/`tools` pattern),
+NOT channel-backed: a live reactive mirror (channel-projected views like knobs'
+`knobsStateView`) remains gated on the client channel-consumer primitive.
+Parity here means **verbs + enumeration**, not live state — a floor every
+handle clears, with the reactive mirror an opt-in ceiling.
+
+Deliberate holds are recorded, not silently skipped: `session.model` projects
+in-process only (a model swap over the wire is an authz question decided
+separately), so it ships no client handle by design.

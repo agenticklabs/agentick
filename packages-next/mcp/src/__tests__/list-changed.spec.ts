@@ -135,7 +135,7 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
     const session = await app.createSession();
 
     // Baseline — initial tool is dispatchable.
-    const before = await session.dispatch("srv__before", {});
+    const before = await session.tools.dispatch("srv__before", {});
     expect(before).toEqual([{ type: "text", text: "before ok" }]);
 
     // Swap the server's tool catalog + push the notification. The
@@ -150,7 +150,7 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
     await waitFor(
       async () => {
         try {
-          const result = await session.dispatch("srv__after", {});
+          const result = await session.tools.dispatch("srv__after", {});
           return result[0]?.type === "text" && result[0].text === "after ok";
         } catch {
           return false;
@@ -161,7 +161,7 @@ describe("withMCP — notifications/tools/list_changed reactivity", () => {
 
     // Sanity: the old tool is gone (dispatching it now fails to
     // resolve a handler on the ToolExecutor).
-    await expect(session.dispatch("srv__before", {})).rejects.toBeDefined();
+    await expect(session.tools.dispatch("srv__before", {})).rejects.toBeDefined();
 
     await session.close();
     await app.closeApp();

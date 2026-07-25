@@ -90,9 +90,9 @@ describe("defineSession — defaults", () => {
     await expect(session.spawn({ agent: null } as never)).rejects.toMatchObject({
       _tag: "ExecutionFailed",
     });
-    await expect(session.dispatch("anything", {})).rejects.toMatchObject({
-      _tag: "ExecutionFailed",
-    });
+    // `tools` is a whole handle now (three-audiences-plan §F): the unconfigured
+    // default throws synchronously on access, like `channel`/`knob` below.
+    expect(() => session.tools).toThrow(/tools/);
     expect(() => session.channel("x")).toThrow(/channel/);
     expect(() => session.knob("x")).toThrow(/knob/);
   });

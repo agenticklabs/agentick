@@ -153,7 +153,7 @@ describe("#159 substrate primitives — single construction site", () => {
     // Dispatch `session_tasks_list` — the handler reads ctx.tasks
     // (which the ToolExecutor was wired with). If ctx.tasks !==
     // session.tasks, the submitted task would be invisible.
-    const result = await session.dispatch("session_tasks_list", {});
+    const result = await session.tools.dispatch("session_tasks_list", {});
     const text = result.map((b: ContentBlock) => (b.type === "text" ? b.text : "")).join("");
     // The handler returns a JSON payload listing tasks. The exact
     // shape lives in `@agentick/tasks-next/tools`; we only assert
@@ -208,7 +208,7 @@ describe("#159 resources — single construction site + ctx.resource", () => {
       { uri: "mem://greeting", text: "hello from ctx.resource" },
     ]);
 
-    const blocks = await session.dispatch("resource_read", { uri: "mem://greeting" });
+    const blocks = await session.tools.dispatch("resource_read", { uri: "mem://greeting" });
     expect(blocks[0]).toMatchObject({
       type: "resource",
       resource: { uri: "mem://greeting", text: "hello from ctx.resource" },

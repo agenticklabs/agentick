@@ -36,5 +36,10 @@ export {
 } from "./client-tool-calls.js";
 export { type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
 
+// `session.tools` — the tool registry projection (three-audiences-plan §F).
+export { toolsHandle, type ToolsClientHandle, type ToolsCommandClient } from "./tools-handle.js";
+
 // Side-effect: type the slot (declare module) + register the runtime factory.
+// TWO registrations — `clientToolCalls` (inbound feed) and `tools` (registry).
 import "./register.js";
+import "./tools-register.js";

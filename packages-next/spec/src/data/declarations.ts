@@ -44,7 +44,7 @@ export type ToolExposure = "model" | "dispatch" | "runtime";
  * resolve name collisions deterministically.
  *
  * Internal accounting only — never exposed on the wire, never visible
- * to model providers, never surfaced through `session.dispatch()`.
+ * to model providers, never surfaced through `session.tools.dispatch()`.
  *
  * The layered config seams (in increasing specificity) are:
  *
@@ -339,7 +339,7 @@ export interface ToolDeclaration {
    * Alternate dispatch names for this tool. Restores v1's tool `aliases`.
    * The registry resolves a dispatch by exact `name` first, then falls
    * back to scanning aliases (an alias→name index), so
-   * `session.dispatch(alias, input)` reaches the same tool. Aliases are
+   * `session.tools.dispatch(alias, input)` reaches the same tool. Aliases are
    * DISPATCH names — they live on the declaration, not the annotations —
    * and an alias that collides with a real tool `name` never shadows it
    * (exact-name lookup wins).

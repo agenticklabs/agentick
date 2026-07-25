@@ -105,7 +105,7 @@ describe("ADR 84 §3 — gateway → app live interceptor link (CAPSTONE)", () =
     // down gateway → app → session → tool-executor and fired around the REAL
     // `tool:dispatch` body — both the handler AND the surfaced content reflect
     // the reshaped input.
-    const result = await session.dispatch("echo", { value: "original" });
+    const result = await session.tools.dispatch("echo", { value: "original" });
     expect(seen.value).toBe("reshaped-by-gateway");
     expect((result[0] as { text: string }).text).toBe("reshaped-by-gateway");
 
@@ -127,7 +127,7 @@ describe("ADR 84 §3 — gateway → app live interceptor link (CAPSTONE)", () =
     });
     off();
 
-    const result = await session.dispatch("echo", { value: "verbatim" });
+    const result = await session.tools.dispatch("echo", { value: "verbatim" });
     expect(seen.value).toBe("verbatim");
     expect((result[0] as { text: string }).text).toBe("verbatim");
 

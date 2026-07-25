@@ -23,6 +23,10 @@ export { defineToolExecutor, type DefineToolExecutorInput } from "./define-tool-
 // Registry
 export { InMemoryToolRegistry } from "./registry.js";
 
+// `session.tools` host handle (three-audiences-plan §F) — the curated View +
+// host-door dispatch + topology subscription over the registry.
+export { createToolsHandle, toToolInfo, type ToolsHandleDeps } from "./tools-handle.js";
+
 // Scoped binding lifecycle helper — composes register + cleanup
 // around a caller-supplied async body. The canonical adapter at every
 // scope boundary (execution, future "step" / "subagent" / "draft" scopes).

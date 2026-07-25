@@ -119,7 +119,7 @@ describe("model-less app (no model / modelExecutor at construction)", () => {
     const session = await app.createSession();
 
     // A user-audience tool reachable via dispatch — no model involved.
-    const dispatched = await session.dispatch("noop-echo", { value: "hi" }).catch((e) => e);
+    const dispatched = await session.tools.dispatch("noop-echo", { value: "hi" }).catch((e) => e);
     // The tool isn't registered here; the point is dispatch does not require a
     // model (it fails with a tool-resolution error, NOT NoModelForExecutionError).
     expect((dispatched as { _tag?: string })._tag).not.toBe("NoModelForExecutionError");
