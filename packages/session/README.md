@@ -8,8 +8,9 @@ prompts — wire together for a single conversation. One session per
 human dialog; sessions are created by an app harness and persist
 across ticks.
 
-Private workspace package. Bundled into the `agentick` metapackage;
-not published independently.
+Published on the v2 `next` lane (`@agentick/session@1.0.0-next.N`);
+most adopters reach it through `createApp` rather than importing it
+directly.
 
 ## Quick start
 
@@ -38,13 +39,14 @@ session.resources     // Resources — resource read-projection (ADR 62)
 session.gates         // GatesHandle — unified gate registry
 session.gate("write") // GateHandle | undefined — per-gate handle
 session.model         // ModelSelectionHandle — model selection / swap facade (ADR 89 §2)
+session.tools         // ToolsHandle — tool registry projection + host-door dispatch (§F)
 
 // Elicitation — ask the user for typed input.
 session.elicitation   // ElicitationHarnessProtocol — raw substrate
 session.elicit        // Elicit — sugar surface (preferred)
 
 // Dispatch + send.
-await session.dispatch("rename-file", { from: "a", to: "b" });
+await session.tools.dispatch("rename-file", { from: "a", to: "b" });
 await session.send({ messages: [{ role: "user", content: [...] }] });
 ```
 
@@ -860,7 +862,7 @@ adopter or the app harness actually constructs against:
 | ------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | `SessionHarness` / `SessionHarnessOptions`             | Reference `SessionHarnessProtocol` impl + its construction options bag.        |
 | `defineSession` / `DefineSessionInput`                 | Callback-style factory for custom / test session topologies.                   |
-| `SessionStateStore`                                    | Per-session status / tick / usage store (advanced; the harness owns one).      |
+| `SessionRuntime`                                       | Per-session status / tick / usage projection (advanced; the harness owns one). |
 | `InMemorySessionStore`                                 | Bundled in-memory `SessionStore` default (E11) — the durable session registry. |
 | `runSessionStoreConformance`                           | Conformance suite every `SessionStore` adapter must pass.                      |
 | `SessionRecord` / `SessionStore` / `SessionStoreQuery` | Re-exported from spec — the E11 record + port + query.                         |
@@ -919,9 +921,9 @@ STORES them, never populates their semantics). Seed them at
 record — a tick is execution-local, so it is execution-scoped runtime, not
 session metadata.
 
-`session.send` / `dispatch` / `snapshot` / `spawn` / `channel` / `knob` /
-`gate` and the harness surfaces (`timeline`, `knobs`, `state`, `gates`,
-`tasks`, `resources`, `elicitation`, `elicit`) are all defined on
+`session.send` / `snapshot` / `spawn` / `fork` / `channel` / `knob` /
+`gate` / `tools` and the harness surfaces (`timeline`, `knobs`, `state`,
+`gates`, `tasks`, `resources`, `elicitation`, `elicit`) are all defined on
 `SessionHarnessProtocol` in `@agentick/spec` (built up by each
 harness package's module augmentation) — see the individual harness
 package READMEs for each surface's contract.
@@ -931,7 +933,7 @@ package READMEs for each surface's contract.
 acceptance suite that store adapters (memory / fs / postgres) run against
 their backing.
 
-[typedoc]: https://example.com/typedoc/session-next
+[typedoc]: https://example.com/typedoc/session
 
 ## Status
 
@@ -961,12 +963,13 @@ their backing.
 - **`activeModel` is construction-bound.** The model is `session.target`,
   so `RenderContext.activeModel` is stable across ticks. Under #169 it
   becomes IR-derived per tick (`TODO(trail-per-tick-model)`).
-- **Session commands are not declarable yet.** `send`/`dispatch`/`queue`/
-  `append` don't run through `runOperation`, and `SendInput` carries
-  non-serializable per-call overrides (`executor`, `target`, `signal`,
-  live tool handlers). An addressable `session:send` needs a designed
-  serializable signal form — `TODO(adr-51-session-verbs)`. `session/send`
-  and `session/respond_to_elicitation` are already routed via the gateway.
+- **Session verbs are hookable, not wire-addressable.** The verbs DO run
+  through `runOperation` (the command-hooks table above), but `SendInput`
+  carries non-serializable per-call overrides (`executor`, `target`,
+  `signal`, live tool handlers), so no wire `CommandDescriptor` is
+  declared for them — `TODO(adr-51-session-verbs)`. The gateway's
+  `session/send` (the serializable porcelain subset) and
+  `session/respond_to_elicitation` are already routed.
 - **Inbox dispatch mostly not wired.** `handleMessage` handles the
   `session:escalation` message type — the terminal / forward hop of ADR 69
   request escalation (a task or sub-agent asking the client for input;
