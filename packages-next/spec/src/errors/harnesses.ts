@@ -468,15 +468,15 @@ export abstract class ToolExecutorError extends AgentickError {}
 
 export class ToolNotFoundError extends ToolExecutorError {
   readonly _tag = "ToolNotFoundError" as const;
-  readonly name: string;
+  readonly toolName: string;
   readonly registered: readonly string[];
   constructor(args: {
-    readonly name: string;
+    readonly toolName: string;
     readonly registered: readonly string[];
     readonly cause?: unknown;
   }) {
-    super(`tool ${args.name} not found`, { cause: args.cause });
-    this.name = args.name;
+    super(`tool ${args.toolName} not found`, { cause: args.cause });
+    this.toolName = args.toolName;
     this.registered = args.registered;
   }
 }
@@ -617,10 +617,10 @@ registerAgentickError("ToolAbortedError", ToolAbortedError);
 
 export class ToolAlreadyRegistered extends ToolExecutorError {
   readonly _tag = "ToolAlreadyRegistered" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`tool ${args.name} already registered`, { cause: args.cause });
-    this.name = args.name;
+  readonly toolName: string;
+  constructor(args: { readonly toolName: string; readonly cause?: unknown }) {
+    super(`tool ${args.toolName} already registered`, { cause: args.cause });
+    this.toolName = args.toolName;
   }
 }
 registerAgentickError("ToolAlreadyRegistered", ToolAlreadyRegistered);
@@ -685,35 +685,35 @@ export abstract class PromptsError extends AgentickError {}
 
 export class PromptNotFound extends PromptsError {
   readonly _tag = "PromptNotFound" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`prompt ${args.name} not found`, { cause: args.cause });
-    this.name = args.name;
+  readonly promptName: string;
+  constructor(args: { readonly promptName: string; readonly cause?: unknown }) {
+    super(`prompt ${args.promptName} not found`, { cause: args.cause });
+    this.promptName = args.promptName;
   }
 }
 registerAgentickError("PromptNotFound", PromptNotFound);
 
 export class PromptAlreadyExists extends PromptsError {
   readonly _tag = "PromptAlreadyExists" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`prompt ${args.name} already exists`, { cause: args.cause });
-    this.name = args.name;
+  readonly promptName: string;
+  constructor(args: { readonly promptName: string; readonly cause?: unknown }) {
+    super(`prompt ${args.promptName} already exists`, { cause: args.cause });
+    this.promptName = args.promptName;
   }
 }
 registerAgentickError("PromptAlreadyExists", PromptAlreadyExists);
 
 export class PromptArgumentMissing extends PromptsError {
   readonly _tag = "PromptArgumentMissing" as const;
-  readonly name: string;
+  readonly promptName: string;
   readonly argument: string;
   constructor(args: {
-    readonly name: string;
+    readonly promptName: string;
     readonly argument: string;
     readonly cause?: unknown;
   }) {
-    super(`prompt ${args.name} missing argument: ${args.argument}`, { cause: args.cause });
-    this.name = args.name;
+    super(`prompt ${args.promptName} missing argument: ${args.argument}`, { cause: args.cause });
+    this.promptName = args.promptName;
     this.argument = args.argument;
   }
 }
@@ -726,17 +726,17 @@ interface PromptIssueLike {
 
 export class PromptArgumentInvalid extends PromptsError {
   readonly _tag = "PromptArgumentInvalid" as const;
-  readonly name: string;
+  readonly promptName: string;
   readonly argument: string;
   readonly issues: readonly PromptIssueLike[];
   constructor(args: {
-    readonly name: string;
+    readonly promptName: string;
     readonly argument: string;
     readonly issues: readonly PromptIssueLike[];
     readonly cause?: unknown;
   }) {
-    super(`prompt ${args.name} invalid argument ${args.argument}`, { cause: args.cause });
-    this.name = args.name;
+    super(`prompt ${args.promptName} invalid argument ${args.argument}`, { cause: args.cause });
+    this.promptName = args.promptName;
     this.argument = args.argument;
     this.issues = args.issues;
   }
@@ -745,21 +745,21 @@ registerAgentickError("PromptArgumentInvalid", PromptArgumentInvalid);
 
 export class PromptMissingContent extends PromptsError {
   readonly _tag = "PromptMissingContent" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`prompt ${args.name} produced no content`, { cause: args.cause });
-    this.name = args.name;
+  readonly promptName: string;
+  constructor(args: { readonly promptName: string; readonly cause?: unknown }) {
+    super(`prompt ${args.promptName} produced no content`, { cause: args.cause });
+    this.promptName = args.promptName;
   }
 }
 registerAgentickError("PromptMissingContent", PromptMissingContent);
 
 export class PromptRenderFailed extends PromptsError {
   readonly _tag = "PromptRenderFailed" as const;
-  readonly name: string;
+  readonly promptName: string;
   override readonly cause: unknown;
-  constructor(args: { readonly name: string; readonly cause: unknown }) {
-    super(`prompt ${args.name} render failed: ${String(args.cause)}`, { cause: args.cause });
-    this.name = args.name;
+  constructor(args: { readonly promptName: string; readonly cause: unknown }) {
+    super(`prompt ${args.promptName} render failed: ${String(args.cause)}`, { cause: args.cause });
+    this.promptName = args.promptName;
     this.cause = args.cause;
   }
 }
@@ -851,10 +851,10 @@ export abstract class GatesError extends AgentickError {}
  */
 export class GateNotFound extends GatesError {
   readonly _tag = "GateNotFound" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`gate ${args.name} not found`, { cause: args.cause });
-    this.name = args.name;
+  readonly gateName: string;
+  constructor(args: { readonly gateName: string; readonly cause?: unknown }) {
+    super(`gate ${args.gateName} not found`, { cause: args.cause });
+    this.gateName = args.gateName;
   }
 }
 registerAgentickError("GateNotFound", GateNotFound);
@@ -869,20 +869,20 @@ export abstract class SkillsError extends AgentickError {}
 
 export class SkillNotFound extends SkillsError {
   readonly _tag = "SkillNotFound" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`skill ${args.name} not found`, { cause: args.cause });
-    this.name = args.name;
+  readonly skillName: string;
+  constructor(args: { readonly skillName: string; readonly cause?: unknown }) {
+    super(`skill ${args.skillName} not found`, { cause: args.cause });
+    this.skillName = args.skillName;
   }
 }
 registerAgentickError("SkillNotFound", SkillNotFound);
 
 export class SkillAlreadyExists extends SkillsError {
   readonly _tag = "SkillAlreadyExists" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`skill ${args.name} already exists`, { cause: args.cause });
-    this.name = args.name;
+  readonly skillName: string;
+  constructor(args: { readonly skillName: string; readonly cause?: unknown }) {
+    super(`skill ${args.skillName} already exists`, { cause: args.cause });
+    this.skillName = args.skillName;
   }
 }
 registerAgentickError("SkillAlreadyExists", SkillAlreadyExists);
@@ -907,15 +907,15 @@ registerAgentickError("SkillsBackendError", SkillsBackendError);
  */
 export class SkillIsolationUnavailable extends SkillsError {
   readonly _tag = "SkillIsolationUnavailable" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+  readonly skillName: string;
+  constructor(args: { readonly skillName: string; readonly cause?: unknown }) {
     super(
-      `skill ${args.name}: isolated run (isolate: true) is not yet available — ` +
+      `skill ${args.skillName}: isolated run (isolate: true) is not yet available — ` +
         `the session.fork() enabler ships in C2 (three-audiences-plan §C split, item 3). ` +
         `Run inline (omit isolate) for now.`,
       { cause: args.cause },
     );
-    this.name = args.name;
+    this.skillName = args.skillName;
   }
 }
 registerAgentickError("SkillIsolationUnavailable", SkillIsolationUnavailable);
@@ -929,15 +929,15 @@ registerAgentickError("SkillIsolationUnavailable", SkillIsolationUnavailable);
  */
 export class SkillRunnerUnbound extends SkillsError {
   readonly _tag = "SkillRunnerUnbound" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
+  readonly skillName: string;
+  constructor(args: { readonly skillName: string; readonly cause?: unknown }) {
     super(
-      `skill ${args.name}: this skills harness has no bound send runner — ` +
+      `skill ${args.skillName}: this skills harness has no bound send runner — ` +
         `skills.run needs a session (the runner is late-bound at session install ` +
         `via bindRunner). A standalone harness cannot run skills.`,
       { cause: args.cause },
     );
-    this.name = args.name;
+    this.skillName = args.skillName;
   }
 }
 registerAgentickError("SkillRunnerUnbound", SkillRunnerUnbound);
@@ -1024,10 +1024,10 @@ export abstract class McpServerError extends AgentickError {}
 
 export class McpServerNotFound extends McpServerError {
   readonly _tag = "McpServerNotFound" as const;
-  readonly name: string;
-  constructor(args: { readonly name: string; readonly cause?: unknown }) {
-    super(`mcp server ${args.name} not found`, { cause: args.cause });
-    this.name = args.name;
+  readonly serverName: string;
+  constructor(args: { readonly serverName: string; readonly cause?: unknown }) {
+    super(`mcp server ${args.serverName} not found`, { cause: args.cause });
+    this.serverName = args.serverName;
   }
 }
 registerAgentickError("McpServerNotFound", McpServerNotFound);

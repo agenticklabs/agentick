@@ -14,6 +14,8 @@
 import "@agentick/spec-next";
 import * as Errors from "@agentick/spec-next";
 import type { AgentickError } from "@agentick/spec-next";
+import { deserializeAgentickError, serializeAgentickError } from "@agentick/spec-next";
+import { describe, expect, it } from "vitest";
 
 import { runAgentickErrorConformance } from "../errors.js";
 
@@ -78,7 +80,7 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
   ["RehydrateStrategyMissing", () => new Errors.RehydrateStrategyMissing({ reason: "test" })],
 
   // Domain harness cluster
-  ["ToolNotFoundError", () => new Errors.ToolNotFoundError({ name: "t1", registered: ["t2"] })],
+  ["ToolNotFoundError", () => new Errors.ToolNotFoundError({ toolName: "t1", registered: ["t2"] })],
   ["ToolValidationError", () => new Errors.ToolValidationError({ toolName: "t1", issues: [] })],
   [
     "ToolHandlerError",
@@ -92,7 +94,7 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
     () => new Errors.ToolConfirmationTimeoutError({ toolName: "t1", ms: 5000 }),
   ],
   ["ToolAbortedError", () => new Errors.ToolAbortedError({ toolCallId: "c1" })],
-  ["ToolAlreadyRegistered", () => new Errors.ToolAlreadyRegistered({ name: "t1" })],
+  ["ToolAlreadyRegistered", () => new Errors.ToolAlreadyRegistered({ toolName: "t1" })],
   [
     "ToolHandlerMissing",
     () => new Errors.ToolHandlerMissing({ toolName: "t1", handlerRef: "h.t1" }),
@@ -106,28 +108,31 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
         supportMode: "unsupported",
       }),
   ],
-  ["PromptNotFound", () => new Errors.PromptNotFound({ name: "p1" })],
-  ["PromptAlreadyExists", () => new Errors.PromptAlreadyExists({ name: "p1" })],
-  ["PromptArgumentMissing", () => new Errors.PromptArgumentMissing({ name: "p1", argument: "a1" })],
+  ["PromptNotFound", () => new Errors.PromptNotFound({ promptName: "p1" })],
+  ["PromptAlreadyExists", () => new Errors.PromptAlreadyExists({ promptName: "p1" })],
+  [
+    "PromptArgumentMissing",
+    () => new Errors.PromptArgumentMissing({ promptName: "p1", argument: "a1" }),
+  ],
   [
     "PromptArgumentInvalid",
-    () => new Errors.PromptArgumentInvalid({ name: "p1", argument: "a1", issues: [] }),
+    () => new Errors.PromptArgumentInvalid({ promptName: "p1", argument: "a1", issues: [] }),
   ],
-  ["PromptMissingContent", () => new Errors.PromptMissingContent({ name: "p1" })],
+  ["PromptMissingContent", () => new Errors.PromptMissingContent({ promptName: "p1" })],
   [
     "PromptRenderFailed",
-    () => new Errors.PromptRenderFailed({ name: "p1", cause: new Error("test") }),
+    () => new Errors.PromptRenderFailed({ promptName: "p1", cause: new Error("test") }),
   ],
   ["PromptsBackendError", () => new Errors.PromptsBackendError({ cause: new Error("test") })],
-  ["SkillNotFound", () => new Errors.SkillNotFound({ name: "s1" })],
-  ["SkillAlreadyExists", () => new Errors.SkillAlreadyExists({ name: "s1" })],
+  ["SkillNotFound", () => new Errors.SkillNotFound({ skillName: "s1" })],
+  ["SkillAlreadyExists", () => new Errors.SkillAlreadyExists({ skillName: "s1" })],
   ["SkillsBackendError", () => new Errors.SkillsBackendError({ cause: new Error("test") })],
   ["UnknownKnob", () => new Errors.UnknownKnob({ id: "k1" })],
   ["ValidationFailed", () => new Errors.ValidationFailed({ id: "k1", reason: "test" })],
   ["GroupEmpty", () => new Errors.GroupEmpty({ group: "g1" })],
   ["GroupTypeMismatch", () => new Errors.GroupTypeMismatch({ group: "g1", reason: "test" })],
   ["InvalidDispatchInput", () => new Errors.InvalidDispatchInput({ reason: "test" })],
-  ["McpServerNotFound", () => new Errors.McpServerNotFound({ name: "server-1" })],
+  ["McpServerNotFound", () => new Errors.McpServerNotFound({ serverName: "server-1" })],
   ["McpServerConfigInvalid", () => new Errors.McpServerConfigInvalid({ reason: "test" })],
   [
     "McpServerTransportFailed",
@@ -203,4 +208,77 @@ runAgentickErrorConformance({
     const stub = tagStubs.get(tag);
     return stub ? stub() : null;
   },
+});
+
+/**
+ * Regression pins for the harness-error domain-field rename. Before the
+ * rename these fourteen classes declared their domain value (tool /
+ * prompt / gate / skill / server name) on `readonly name` — squatting the
+ * platform `Error.name` slot. Two invariants broke as a result and are
+ * pinned here for one class per family:
+ *
+ *   1. **Wire fidelity.** `Error.name` is skipped by `toJSON()` (it's an
+ *      Error-inherited slot), so a domain value parked on `name` was
+ *      DROPPED over every wire. The renamed field must survive a
+ *      serialize → deserialize round-trip alongside `_tag` + `message`.
+ *   2. **Platform slot.** `e.name` must be the CLASS name (stamped by the
+ *      `AgentickError` base ctor), never the domain value — on both the
+ *      original and the round-tripped instance.
+ */
+describe("harness-error domain field (rename regression)", () => {
+  const CASES = [
+    {
+      className: "GateNotFound",
+      make: () => new Errors.GateNotFound({ gateName: "deploy" }),
+      field: "gateName",
+      value: "deploy",
+    },
+    {
+      className: "SkillNotFound",
+      make: () => new Errors.SkillNotFound({ skillName: "reviewer" }),
+      field: "skillName",
+      value: "reviewer",
+    },
+    {
+      className: "ToolNotFoundError",
+      make: () => new Errors.ToolNotFoundError({ toolName: "calc.add", registered: ["calc.sub"] }),
+      field: "toolName",
+      value: "calc.add",
+    },
+    {
+      className: "PromptNotFound",
+      make: () => new Errors.PromptNotFound({ promptName: "greeting" }),
+      field: "promptName",
+      value: "greeting",
+    },
+    {
+      className: "McpServerNotFound",
+      make: () => new Errors.McpServerNotFound({ serverName: "filesystem" }),
+      field: "serverName",
+      value: "filesystem",
+    },
+  ] as const;
+
+  for (const { className, make, field, value } of CASES) {
+    it(`${className}: preserves the domain field, _tag, and message across a wire round-trip`, () => {
+      const original = make();
+      const restored = deserializeAgentickError(serializeAgentickError(original));
+
+      // Wire fidelity — the domain value survives (it was silently dropped
+      // when parked on the `name` slot, which `toJSON` skips).
+      expect((restored as unknown as Record<string, unknown>)[field]).toBe(value);
+      expect((original as unknown as Record<string, unknown>)[field]).toBe(value);
+      expect(restored._tag).toBe(className);
+      expect(restored.message).toBe(original.message);
+    });
+
+    it(`${className}: keeps the platform \`name\` slot pinned to the class name, not the domain value`, () => {
+      const original = make();
+      const restored = deserializeAgentickError(serializeAgentickError(original));
+
+      expect(original.name).toBe(className);
+      expect(restored.name).toBe(className);
+      expect(original.name).not.toBe(value);
+    });
+  }
 });

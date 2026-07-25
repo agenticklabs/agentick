@@ -39,7 +39,7 @@ describe("InMemoryToolRegistry", () => {
     const r = new InMemoryToolRegistry();
     r.add(reg("a"));
     expect(() => r.add(reg("a", { handlerRef: "h.different" }))).toThrowError(
-      expect.objectContaining(new ToolAlreadyRegistered({ name: "a" })),
+      expect.objectContaining(new ToolAlreadyRegistered({ toolName: "a" })),
     );
   });
 

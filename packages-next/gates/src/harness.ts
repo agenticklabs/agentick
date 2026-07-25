@@ -147,7 +147,7 @@ export class GatesHarness extends BaseHarness<"gates"> {
       handler: (i: GatesClearInput) =>
         Effect.gen(this, function* () {
           if (this.controller.get(i.name) === undefined) {
-            return yield* Effect.fail(new GateNotFound({ name: i.name }));
+            return yield* Effect.fail(new GateNotFound({ gateName: i.name }));
           }
           this.controller.rawClear(i.name);
         }),
@@ -162,7 +162,7 @@ export class GatesHarness extends BaseHarness<"gates"> {
       handler: (i: GatesDeferInput) =>
         Effect.gen(this, function* () {
           if (this.controller.get(i.name) === undefined) {
-            return yield* Effect.fail(new GateNotFound({ name: i.name }));
+            return yield* Effect.fail(new GateNotFound({ gateName: i.name }));
           }
           this.controller.rawDefer(i.name);
         }),
@@ -182,7 +182,7 @@ export class GatesHarness extends BaseHarness<"gates"> {
           const rc = yield* getContext;
           const origin: GateOverrideOrigin = rc.origin === "wire" ? "wire" : "host";
           if (this.controller.get(i.name) === undefined) {
-            return yield* Effect.fail(new GateNotFound({ name: i.name }));
+            return yield* Effect.fail(new GateNotFound({ gateName: i.name }));
           }
           this.controller.rawOverride(i.name, i.value, i.reason, origin);
         }),

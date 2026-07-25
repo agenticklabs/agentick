@@ -172,7 +172,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect(h2.get("p")?.template).toBeUndefined();
     await expect(h2.render({ name: "p", args: { x: 1 } })).rejects.toMatchObject({
       _tag: "PromptMissingContent",
-      name: "p",
+      promptName: "p",
     });
     await h2.close();
   });

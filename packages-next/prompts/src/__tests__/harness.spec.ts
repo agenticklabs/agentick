@@ -51,7 +51,7 @@ describe("PromptsHarness — registration", () => {
     await h.register({ declaration: { name: "x", description: "x", template: "t" } });
     await expect(
       h.register({ declaration: { name: "x", description: "x2", template: "t2" } }),
-    ).rejects.toMatchObject({ _tag: "PromptAlreadyExists", name: "x" });
+    ).rejects.toMatchObject({ _tag: "PromptAlreadyExists", promptName: "x" });
   });
 
   it("update merges fields", async () => {
@@ -125,7 +125,7 @@ describe("PromptsHarness — invoke + native content", () => {
     const h = await makeHarness();
     await expect(h.render({ name: "nope" })).rejects.toMatchObject({
       _tag: "PromptNotFound",
-      name: "nope",
+      promptName: "nope",
     });
   });
 
@@ -134,7 +134,7 @@ describe("PromptsHarness — invoke + native content", () => {
     await h.register({ declaration: { name: "empty", description: "empty" } });
     await expect(h.render({ name: "empty" })).rejects.toMatchObject({
       _tag: "PromptMissingContent",
-      name: "empty",
+      promptName: "empty",
     });
   });
 
@@ -151,7 +151,7 @@ describe("PromptsHarness — invoke + native content", () => {
     });
     await expect(h.render({ name: "boom" })).rejects.toMatchObject({
       _tag: "PromptRenderFailed",
-      name: "boom",
+      promptName: "boom",
     });
   });
 });
@@ -169,7 +169,7 @@ describe("PromptsHarness — argument validation", () => {
     });
     await expect(h.render({ name: "p" })).rejects.toMatchObject({
       _tag: "PromptArgumentMissing",
-      name: "p",
+      promptName: "p",
       argument: "x",
     });
   });
@@ -238,7 +238,7 @@ describe("PromptsHarness — argument validation", () => {
     });
     await expect(h.render({ name: "p", args: { n: "oops" } })).rejects.toMatchObject({
       _tag: "PromptArgumentInvalid",
-      name: "p",
+      promptName: "p",
       argument: "n",
     });
   });
@@ -284,7 +284,7 @@ describe("PromptsHarness — custom renderer dispatch", () => {
     });
     await expect(h.render({ name: "p" })).rejects.toMatchObject({
       _tag: "PromptRenderFailed",
-      name: "p",
+      promptName: "p",
     });
   });
 });

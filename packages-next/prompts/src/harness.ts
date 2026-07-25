@@ -391,7 +391,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   async require(name: string): Promise<PromptDeclaration> {
     const resolved = await this.resolve(name);
     if (resolved !== null) return resolved;
-    throw new PromptNotFound({ name });
+    throw new PromptNotFound({ promptName: name });
   }
 
   // ─────────── Sync surface ───────────
@@ -512,7 +512,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return Effect.suspend((): Effect.Effect<PromptDeclaration, PromptsError, never> => {
       const decl = input.declaration;
       if (this.view.hasSync(decl.name)) {
-        return Effect.fail(new PromptAlreadyExists({ name: decl.name }));
+        return Effect.fail(new PromptAlreadyExists({ promptName: decl.name }));
       }
       // Split: the serializable record writes through the view (sync cache first,
       // durable store off the critical path, a render ping); the non-serializable
@@ -538,7 +538,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return Effect.suspend((): Effect.Effect<PromptDeclaration, PromptsError, never> => {
       const existingRecord = this.view.getSync(input.name);
       if (!existingRecord) {
-        return Effect.fail(new PromptNotFound({ name: input.name }));
+        return Effect.fail(new PromptNotFound({ promptName: input.name }));
       }
       const existingAug = this.augmentations.get(input.name);
       const patch = input.declaration;
@@ -652,7 +652,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     rawArgs: Readonly<Record<string, unknown>> | undefined,
   ): Promise<PromptsGetResult> {
     const decl = this.declarationOf(name);
-    if (!decl) throw new PromptNotFound({ name });
+    if (!decl) throw new PromptNotFound({ promptName: name });
 
     // 1. Validate args against the declared schemas.
     const args = await validateArgs(name, decl.arguments, rawArgs ?? {});
@@ -663,12 +663,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       try {
         content = await Promise.resolve(decl.render(args));
       } catch (cause) {
-        throw new PromptRenderFailed({ name, cause });
+        throw new PromptRenderFailed({ promptName: name, cause });
       }
     } else if (decl.template !== undefined) {
       content = decl.template;
     } else {
-      throw new PromptMissingContent({ name });
+      throw new PromptMissingContent({ promptName: name });
     }
 
     // 3. Dispatch to native handler or matching renderer.
@@ -693,12 +693,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         try {
           return await renderer.render(content, args);
         } catch (cause) {
-          throw new PromptRenderFailed({ name, cause });
+          throw new PromptRenderFailed({ promptName: name, cause });
         }
       }
     }
     throw new PromptRenderFailed({
-      name,
+      promptName: name,
       cause: `no registered renderer handles content (typeof=${typeof content}); registered: [${this.renderers.map((r) => r.name).join(", ")}]`,
     });
   }
@@ -718,7 +718,7 @@ async function validateArgs(
     if (value === undefined) {
       if (arg.required === true) {
         throw new PromptArgumentMissing({
-          name: promptName,
+          promptName,
           argument: arg.name,
         }) satisfies PromptsError;
       }
@@ -728,7 +728,7 @@ async function validateArgs(
       const result = await runStandardSchema(arg.schema, value);
       if (result.issues) {
         throw new PromptArgumentInvalid({
-          name: promptName,
+          promptName,
           argument: arg.name,
           issues: result.issues.map((iss) => ({
             ...omitUndefined({ path: iss.path?.map(coercePathSegment) }),

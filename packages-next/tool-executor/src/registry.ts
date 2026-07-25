@@ -82,7 +82,7 @@ export class InMemoryToolRegistry {
       if (areRegistrationsEqual(list[idx]!, registration)) {
         return; // idempotent on identical shape — no topology change, no notify
       }
-      throw new ToolAlreadyRegistered({ name });
+      throw new ToolAlreadyRegistered({ toolName: name });
     }
     list.push(registration);
     this.indexAliases(registration);

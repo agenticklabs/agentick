@@ -278,7 +278,7 @@ describe("skills.run — guards", () => {
 
     await expect(h.run("s", { isolate: true })).rejects.toMatchObject({
       _tag: "SkillIsolationUnavailable",
-      name: "s",
+      skillName: "s",
     });
     // Never silently degrade to the same-session runner — it was not invoked.
     expect(captured).toHaveLength(0);
@@ -308,7 +308,7 @@ describe("skills.run — guards", () => {
     const h = await mkHarness();
     await h.register({ name: "s", description: "x", content: "body" });
 
-    await expect(h.run("s")).rejects.toMatchObject({ _tag: "SkillRunnerUnbound", name: "s" });
+    await expect(h.run("s")).rejects.toMatchObject({ _tag: "SkillRunnerUnbound", skillName: "s" });
     await h.close();
   });
 
@@ -317,7 +317,7 @@ describe("skills.run — guards", () => {
     const { send } = stubRunner({ result: mkSendResult() });
     h.bindRunner(send);
 
-    await expect(h.run("nope")).rejects.toMatchObject({ _tag: "SkillNotFound", name: "nope" });
+    await expect(h.run("nope")).rejects.toMatchObject({ _tag: "SkillNotFound", skillName: "nope" });
     await h.close();
   });
 });

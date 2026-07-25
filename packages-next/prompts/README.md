@@ -177,12 +177,12 @@ The split **composes** rather than being hand-rolled: an eager `View<PromptDecla
 
 ```ts
 type PromptsError =
-  | { _tag: "PromptNotFound"; name }
-  | { _tag: "PromptAlreadyExists"; name }
-  | { _tag: "PromptArgumentMissing"; name; argument }
-  | { _tag: "PromptArgumentInvalid"; name; argument; issues }
-  | { _tag: "PromptMissingContent"; name }
-  | { _tag: "PromptRenderFailed"; name; cause }
+  | { _tag: "PromptNotFound"; promptName }
+  | { _tag: "PromptAlreadyExists"; promptName }
+  | { _tag: "PromptArgumentMissing"; promptName; argument }
+  | { _tag: "PromptArgumentInvalid"; promptName; argument; issues }
+  | { _tag: "PromptMissingContent"; promptName }
+  | { _tag: "PromptRenderFailed"; promptName; cause }
   | { _tag: "PromptsBackendError"; cause };
 ```
 
@@ -295,7 +295,7 @@ const decl = await session.prompts.resolve("late_prompt");
 
 // Throw-on-miss variant for must-exist contracts:
 const decl = await session.prompts.require("must_exist");
-// → throws { _tag: "PromptNotFound", name: "must_exist" } if no source has it.
+// → throws { _tag: "PromptNotFound", promptName: "must_exist" } if no source has it.
 ```
 
 `reload({ pruneMissing: true })` removes entries that have disappeared from sources — off by default so a runtime `harness.register(...)` isn't clobbered. The lookup-on-miss path is transparent in `invoke()` / `render()`; call `resolve()` directly when you want the declaration without rendering. Loaders may implement an optional `lookup(name)` for fast-path resolution; the built-in `fromX` factories do.

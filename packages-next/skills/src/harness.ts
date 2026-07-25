@@ -309,11 +309,11 @@ export class SkillsHarness
     // throws (never silently degrade to a same-session run).
     const isolate = opts.isolate === true;
     if (isolate && this.isolationRunner === undefined) {
-      throw new SkillIsolationUnavailable({ name });
+      throw new SkillIsolationUnavailable({ skillName: name });
     }
     const runner = isolate ? this.isolationRunner : this.runner;
     if (runner === undefined) {
-      throw new SkillRunnerUnbound({ name });
+      throw new SkillRunnerUnbound({ skillName: name });
     }
     // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
     const skill = await this.require(name);
@@ -410,7 +410,7 @@ export class SkillsHarness
   async require(name: string): Promise<Skill> {
     const resolved = await this.resolve(name);
     if (resolved !== null) return resolved;
-    throw new SkillNotFound({ name });
+    throw new SkillNotFound({ skillName: name });
   }
 
   // ─────────── Sync surface ───────────
@@ -523,7 +523,7 @@ export class SkillsHarness
   private applyRegister(input: SkillsRegisterInput): Effect.Effect<Skill, SkillsError, never> {
     return Effect.suspend((): Effect.Effect<Skill, SkillsError, never> => {
       if (this.view.hasSync(input.name)) {
-        return Effect.fail(new SkillAlreadyExists({ name: input.name }));
+        return Effect.fail(new SkillAlreadyExists({ skillName: input.name }));
       }
       const now = Date.now();
       const skill: Skill = {
@@ -552,7 +552,7 @@ export class SkillsHarness
     return Effect.suspend((): Effect.Effect<Skill, SkillsError, never> => {
       const existing = this.view.getSync(input.name);
       if (!existing) {
-        return Effect.fail(new SkillNotFound({ name: input.name }));
+        return Effect.fail(new SkillNotFound({ skillName: input.name }));
       }
       const updated: Skill = {
         ...existing,

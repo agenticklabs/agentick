@@ -652,7 +652,7 @@ export class ToolExecutorHarness
       const reg = this.registry.get(input.name);
       if (!reg) {
         return yield* Effect.fail(
-          new ToolNotFoundError({ name: input.name, registered: this.registry.names() }),
+          new ToolNotFoundError({ toolName: input.name, registered: this.registry.names() }),
         );
       }
       if (!reg.declaration.exposure.includes(input.context.via)) {

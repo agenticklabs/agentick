@@ -198,7 +198,7 @@ describe("@agentick/spec-next — tool executor protocol", () => {
   describe("Errors", () => {
     it("ToolExecutorError tags discriminate", () => {
       const e1: ToolExecutorError = new ToolNotFoundError({
-        name: "missing",
+        toolName: "missing",
         registered: ["a", "b"],
       });
       const e2: ToolExecutorError = new ToolTimeoutError({

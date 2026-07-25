@@ -84,11 +84,11 @@ Failures are typed:
 
 ```ts
 type SkillsError =
-  | { _tag: "SkillNotFound"; name: string }
-  | { _tag: "SkillAlreadyExists"; name: string }
+  | { _tag: "SkillNotFound"; skillName: string }
+  | { _tag: "SkillAlreadyExists"; skillName: string }
   | { _tag: "SkillsBackendError"; cause: unknown }
-  | { _tag: "SkillIsolationUnavailable"; name: string } // isolate: true, no isolation runner bound
-  | { _tag: "SkillRunnerUnbound"; name: string }; // run on a harness with no session
+  | { _tag: "SkillIsolationUnavailable"; skillName: string } // isolate: true, no isolation runner bound
+  | { _tag: "SkillRunnerUnbound"; skillName: string }; // run on a harness with no session
 ```
 
 ## `skills.run` — the model executes, the skill guides
@@ -254,7 +254,7 @@ const skill = await session.skills.resolve("late_arriving");
 
 // Throw-on-miss variant for must-exist contracts:
 const skill = await session.skills.require("must_exist");
-// → throws { _tag: "SkillNotFound", name: "must_exist" } if no source has it.
+// → throws { _tag: "SkillNotFound", skillName: "must_exist" } if no source has it.
 ```
 
 `reload({ pruneMissing: true })` removes entries that have disappeared from the loader snapshot — off by default so a runtime `harness.register(...)` isn't clobbered by the next reload. Loaders may implement an optional `lookup(name)` for fast-path resolution (no full enumeration); the built-in `fromX` factories do.
