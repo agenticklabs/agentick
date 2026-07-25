@@ -157,6 +157,11 @@ versioning:
     - "example-v2-coding-agent"
     - "example-v2-otto"
     - "example-v2-otto-cluster"
-  # Changelog composed at publish time into the tarball; no committed CHANGELOG.md.
+  # Committed CHANGELOG.md per package. NOT registry storage: registry-composed
+  # changelogs fetch the PREVIOUS version's tarball at publish time — for the 8
+  # names v1 also published (client, gateway, mcp, sandbox×3, connector, eval)
+  # that "previous version" is v1 0.15.x through the registry proxy, a different
+  # lineage the v2 changelog must not build on (and whose proxied tarball fetch
+  # 500s through the CodeArtifact uplink).
   changelog:
-    storage: registry
+    storage: repository

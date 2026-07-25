@@ -780,8 +780,10 @@ across every subsequent swap.
 
 ```typescript
 // A cost/redaction transform on the model call — survives setModel swaps.
-const offUse = session.model.use(async (input, next) => {
-  meter.record(input);
+// The handler is a standard AsyncMiddleware: (input, next, ctx) — the same
+// InterceptorCtx every middleware receives (log / trace / metrics / opId).
+const offUse = session.model.use(async (input, next, ctx) => {
+  meter.record(input, { opId: ctx.opId });
   return next(input);
 });
 
