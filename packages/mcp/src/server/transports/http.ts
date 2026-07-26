@@ -28,6 +28,13 @@
  * stray sessionless request) and pass it back through `handleRequest`
  * as `parsedBody` so it isn't read twice.
  *
+ * OAuth resource-server discovery (RFC 9728): when `oauth.metadata` is
+ * configured the transport also answers `GET
+ * /.well-known/oauth-protected-resource` with the protected-resource
+ * metadata document, so clients can locate the authorization server.
+ * This is discovery only — token verification stays in the adopter's
+ * `Authenticator` security stage. See {@link OAuthTransportOptions}.
+ *
  * @see ./types.ts for the `ServerTransport` + `AcceptHandler` contract
  */
 
@@ -41,6 +48,7 @@ import {
 import type { AddressInfo } from "node:net";
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import type { McpConnectionInfo } from "../security/stages.js";
@@ -49,6 +57,45 @@ import type { AcceptHandler, ServerTransport } from "./types.js";
 const DEFAULT_PATH = "/mcp";
 /** Reject POST bodies larger than this before buffering the whole thing. */
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** RFC 9728 well-known prefix for OAuth Protected Resource Metadata. */
+const PROTECTED_RESOURCE_WELL_KNOWN = "/.well-known/oauth-protected-resource";
+
+/**
+ * Server-side OAuth resource-server discovery options (MCP authorization
+ * spec / RFC 9728). This is the *discovery + challenge* half of a
+ * spec-compliant OAuth resource server — the transport serves the
+ * protected-resource metadata document so clients can locate the
+ * authorization server. Token **verification** is NOT the transport's
+ * job: that stays in the adopter's `Authenticator` security stage
+ * (`bearerTokenAuth` + a custom verify callback). Capability, not
+ * opinion — the framework serves discovery; the adopter verifies.
+ *
+ * @see https://datatracker.ietf.org/doc/html/rfc9728
+ */
+export interface OAuthTransportOptions {
+  /**
+   * The RFC 9728 Protected Resource Metadata document to serve. When
+   * provided, the transport answers `GET
+   * /.well-known/oauth-protected-resource` (and the RFC-9728
+   * path-suffixed variant derived from `metadata.resource`) with this
+   * JSON document. Reuse the SDK's `OAuthProtectedResourceMetadata`
+   * shape (`@modelcontextprotocol/sdk/shared/auth.js`) to build it.
+   */
+  readonly metadata?: OAuthProtectedResourceMetadata;
+
+  // NOTE: a `resourceMetadataUrl` field (metadata hosted elsewhere) is
+  // deliberately NOT shipped yet. Its only consumer is the
+  // `WWW-Authenticate: Bearer resource_metadata="…"` challenge on a 401,
+  // which is currently blocked — the per-request `Authenticator`
+  // rejection is raised inside an SDK request handler, after the SDK's
+  // `StreamableHTTPServerTransport` has already committed a `200`
+  // response (SSE / JSON), so the transport can neither set the status
+  // to 401 nor inject the header. Shipping it now would be an inert
+  // option. See the transport README's "OAuth resource-server
+  // discovery" § (Known gap). TODO(oauth-401): add it alongside the
+  // challenge mechanism (HTTP pre-gate or transport challenge seam).
+}
 
 export interface HttpTransportOptions {
   /**
@@ -86,6 +133,14 @@ export interface HttpTransportOptions {
    * Defaults to `false` (SSE preferred).
    */
   readonly enableJsonResponse?: boolean;
+
+  /**
+   * OAuth resource-server discovery (MCP authorization spec / RFC 9728).
+   * When `oauth.metadata` is provided, the transport serves the
+   * protected-resource metadata document at the well-known path(s).
+   * @see {@link OAuthTransportOptions}
+   */
+  readonly oauth?: OAuthTransportOptions;
 }
 
 /**
@@ -145,6 +200,38 @@ function buildConnectionInfo(req: IncomingMessage): McpConnectionInfo {
   return info;
 }
 
+/**
+ * Derive the RFC 9728 well-known path(s) at which a protected-resource
+ * metadata document is served, from its `resource` identifier.
+ *
+ * Mirrors the SDK's `getOAuthProtectedResourceMetadataUrl`
+ * (`@modelcontextprotocol/sdk/server/auth/router.js`) — reimplemented
+ * inline because that module's type surface imports `express`, which is
+ * not a dependency of this package (importing it would break `tsc`).
+ *
+ * Serves both the bare well-known path and the path-suffixed variant
+ * (RFC 9728 §3.1) so that clients using either discovery convention
+ * resolve the document. The two collapse to one when `resource` has no
+ * path component.
+ *
+ * @example
+ *   resource "https://api.example.com/mcp"
+ *   → { "/.well-known/oauth-protected-resource",
+ *       "/.well-known/oauth-protected-resource/mcp" }
+ */
+function protectedResourcePaths(resource: string): Set<string> {
+  const paths = new Set<string>([PROTECTED_RESOURCE_WELL_KNOWN]);
+  try {
+    const rsPath = new URL(resource).pathname;
+    if (rsPath && rsPath !== "/") {
+      paths.add(`${PROTECTED_RESOURCE_WELL_KNOWN}${rsPath}`);
+    }
+  } catch {
+    // A malformed `resource` yields only the bare well-known path.
+  }
+  return paths;
+}
+
 /** Emit a minimal JSON-RPC error response (no live session to route through). */
 function writeJsonRpcError(res: ServerResponse, status: number, message: string): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -161,6 +248,15 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
   const path = options.path ?? DEFAULT_PATH;
   const ownsServer = options.server === undefined;
 
+  // OAuth resource-server discovery (RFC 9728). When a metadata
+  // document is configured, resolve the well-known path(s) it is served
+  // at, keyed off its `resource` identifier.
+  const oauthMetadata = options.oauth?.metadata;
+  const oauthPaths =
+    oauthMetadata !== undefined
+      ? protectedResourcePaths(oauthMetadata.resource)
+      : new Set<string>();
+
   /** Live SDK transports keyed by `Mcp-Session-Id`. */
   const sessions = new Map<string, StreamableHTTPServerTransport>();
 
@@ -174,8 +270,29 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
     res: ServerResponse,
   ): Promise<void> => {
     const url = new URL(req.url ?? "/", "http://localhost");
+
+    // OAuth Protected Resource Metadata (RFC 9728). Served at the
+    // well-known path(s) when `oauth.metadata` is configured — a plain
+    // GET of the JSON document, no MCP session involved.
+    if (oauthMetadata !== undefined && oauthPaths.has(url.pathname)) {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        res.writeHead(405, { "Content-Type": "application/json", Allow: "GET, HEAD" });
+        res.end(JSON.stringify({ error: "method_not_allowed" }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(req.method === "HEAD" ? undefined : JSON.stringify(oauthMetadata));
+      return;
+    }
+
     if (url.pathname !== path) {
-      writeJsonRpcError(res, 404, `Not found: ${url.pathname}`);
+      // Shared-server citizenship: only an owned server answers foreign
+      // paths (with 404). When attached to a caller-supplied server we
+      // claim ONLY our own paths and leave everything else untouched so
+      // the caller's other request listeners can handle it.
+      if (ownsServer) {
+        writeJsonRpcError(res, 404, `Not found: ${url.pathname}`);
+      }
       return;
     }
 

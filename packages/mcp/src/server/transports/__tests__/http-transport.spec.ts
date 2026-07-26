@@ -22,7 +22,11 @@
  *    `redirectToAuthorization` fires the session-bound URL elicit.
  */
 
+import { createServer, type Server as HttpServer } from "node:http";
+import type { AddressInfo } from "node:net";
+
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
@@ -211,6 +215,114 @@ describe("httpTransport — multi-connection session isolation", () => {
 
     await c1.close();
     await c2.close();
+    await harness.close();
+    await transport.close();
+  });
+});
+
+/** RFC 9728 protected-resource metadata document served in the OAuth tests. */
+const OAUTH_METADATA: OAuthProtectedResourceMetadata = {
+  resource: "https://api.example.com/mcp",
+  authorization_servers: ["https://auth.example.com"],
+  bearer_methods_supported: ["header"],
+  scopes_supported: ["mcp:read", "mcp:write"],
+};
+
+const WELL_KNOWN = "/.well-known/oauth-protected-resource";
+
+/**
+ * Start a server harness on the given transport handle (already
+ * constructed with the desired options). Mirrors `makeHttpServer` but
+ * lets a test pick the transport (owned vs. attached, oauth on/off).
+ */
+async function startHarnessOn(transport: HttpServerTransportHandle): Promise<McpServerHarness> {
+  const harness = new McpServerHarness(
+    `srv:${ulid()}`,
+    new MemoryJournal({ capacity: 1024 }),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      name: "http-oauth-test-server",
+      transports: [transport],
+      tools: { registry: [echoTool()], resolveHandler: echoHandlers },
+      auth: { authenticator: bearerTokenAuth({ tokens: { [TOKEN]: { id: "alice" } } }) },
+      serverInfo: { name: "http-oauth-test", version: "0.0.0" },
+    },
+  );
+  await harness.ready;
+  await harness.start();
+  return harness;
+}
+
+describe("httpTransport — OAuth resource-server discovery (RFC 9728)", () => {
+  it("serves protected-resource metadata at the well-known path(s) (owned server)", async () => {
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const base = `http://127.0.0.1:${addr.port}`;
+
+    // Bare well-known path (RFC 9728 §3.1).
+    const bare = await fetch(`${base}${WELL_KNOWN}`);
+    expect(bare.status).toBe(200);
+    expect(bare.headers.get("content-type")).toContain("application/json");
+    expect(await bare.json()).toEqual(OAUTH_METADATA);
+
+    // Path-suffixed variant derived from `resource` ("/mcp").
+    const suffixed = await fetch(`${base}${WELL_KNOWN}/mcp`);
+    expect(suffixed.status).toBe(200);
+    expect(await suffixed.json()).toEqual(OAUTH_METADATA);
+
+    // Non-GET is rejected with 405 + Allow.
+    const posted = await fetch(`${base}${WELL_KNOWN}`, { method: "POST" });
+    expect(posted.status).toBe(405);
+    expect(posted.headers.get("allow")).toContain("GET");
+
+    await harness.close();
+    await transport.close();
+  });
+
+  it("serves metadata on a caller-supplied server without claiming foreign paths (attached)", async () => {
+    // Caller owns the server + its own routes; the transport attaches.
+    const caller: HttpServer = createServer((req, res) => {
+      if (req.url === "/caller-route") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("caller-handled");
+      }
+      // Any other path: leave it for the transport's attached listener.
+    });
+    await new Promise<void>((resolve) => caller.listen(0, "127.0.0.1", resolve));
+    const port = (caller.address() as AddressInfo).port;
+    const base = `http://127.0.0.1:${port}`;
+
+    const transport = httpTransport({ server: caller, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+
+    // The transport claims + serves its OAuth well-known path.
+    const md = await fetch(`${base}${WELL_KNOWN}`);
+    expect(md.status).toBe(200);
+    expect(await md.json()).toEqual(OAUTH_METADATA);
+
+    // Shared-server citizenship: the transport does NOT 404 a foreign
+    // path — the caller's own listener answers it.
+    const foreign = await fetch(`${base}/caller-route`);
+    expect(foreign.status).toBe(200);
+    expect(await foreign.text()).toBe("caller-handled");
+
+    await harness.close();
+    await transport.close();
+    await new Promise<void>((resolve) => caller.close(() => resolve()));
+  });
+
+  it("serves no metadata endpoint and 404s the well-known path when oauth is absent (owned)", async () => {
+    const transport = httpTransport({ port: 0 });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+
+    const res = await fetch(`http://127.0.0.1:${addr.port}${WELL_KNOWN}`);
+    expect(res.status).toBe(404);
+
     await harness.close();
     await transport.close();
   });

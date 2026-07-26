@@ -374,6 +374,100 @@ request — tools, transforms, and `filter` predicates all see it.
 
 ---
 
+## OAuth resource-server discovery (RFC 9728)
+
+A real deployment serving Claude / ChatGPT is an **OAuth 2.0 protected
+resource**: clients must be able to discover which authorization server
+issues tokens for it. The MCP authorization spec layers RFC 9728
+(Protected Resource Metadata) on top of that.
+
+**Division of labour — the framework serves discovery; the adopter's
+`Authenticator` verifies.** The framework issues and verifies _no_
+tokens. It only serves the discovery document; your `authenticator`
+stage does the actual RS256 / JWKS verification (userland). This keeps
+token material and provider-specific verification policy where it
+belongs — with the adopter.
+
+### Serving the metadata document
+
+`httpTransport` takes an `oauth` option. When `oauth.metadata` is
+provided, the transport answers `GET
+/.well-known/oauth-protected-resource` (and the RFC 9728 path-suffixed
+variant derived from `metadata.resource`, e.g.
+`/.well-known/oauth-protected-resource/mcp`) with the JSON document.
+This works in both `{ port }` owned mode and caller-supplied `server`
+(attached) mode — in attached mode the transport claims only its own
+paths and leaves everything else for the caller's other routes
+(shared-server citizenship).
+
+```ts
+import { httpTransport } from "@agentick/mcp/server";
+import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
+
+const metadata: OAuthProtectedResourceMetadata = {
+  resource: "https://api.example.com/mcp",
+  authorization_servers: ["https://auth.example.com"],
+  bearer_methods_supported: ["header"],
+  scopes_supported: ["mcp:read", "mcp:write"],
+};
+
+const transport = httpTransport({ port: 8080, oauth: { metadata } });
+```
+
+### Verifying tokens — the adopter's `Authenticator`
+
+Token verification stays in the security pipeline. A minimal RS256 /
+JWKS verify callback wired as the `authenticator`:
+
+```ts
+import { bearerTokenAuth } from "@agentick/mcp/server";
+import { createRemoteJWKSet, jwtVerify } from "jose";
+
+const jwks = createRemoteJWKSet(new URL("https://auth.example.com/.well-known/jwks.json"));
+
+auth: {
+  authenticator: bearerTokenAuth({
+    // `verify(token)` returns the authenticated principal, or `null` to
+    // reject. Runs only when the token isn't in the static `tokens` map.
+    verify: async (token) => {
+      try {
+        const { payload } = await jwtVerify(token, jwks, {
+          issuer: "https://auth.example.com",
+          audience: "https://api.example.com/mcp",
+        });
+        return { id: String(payload.sub), roles: (payload.roles as string[]) ?? [] };
+      } catch {
+        return null; // invalid signature / expired / wrong audience
+      }
+    },
+  }),
+}
+```
+
+### Known gap — the `WWW-Authenticate` challenge on 401
+
+The RFC 9728 flow expects an unauthorized HTTP request to return `401`
+with `WWW-Authenticate: Bearer resource_metadata="…"` so the client can
+_discover_ the metadata endpoint. That challenge is **not emitted
+today**. The reason is an SDK coupling: the `authenticator` runs inside
+an SDK request handler, by which point the SDK's
+`StreamableHTTPServerTransport` has already committed a `200` response
+(SSE / JSON) and dispatched to it (`webStandardStreamableHttp.js` —
+`handlePostRequest` opens the SSE stream / resolves the JSON promise
+_before_ invoking `onmessage`) — the transport can neither set the
+status to `401` nor inject a header.
+
+A companion `oauth.resourceMetadataUrl` field (metadata hosted
+elsewhere, populating the challenge's `resource_metadata` parameter) is
+therefore **deliberately not shipped yet** — its only consumer is the
+blocked challenge, so it would be an inert option. Emitting the
+challenge requires lifting auth to an HTTP pre-gate (or a
+transport-level challenge seam); `resourceMetadataUrl` lands alongside
+it. Until then, clients that already know the metadata URL (or are
+configured with it) can still fetch the served document.
+
+---
+
 ## Per-connection request context (`McpRequestContext`)
 
 Built once per `tools/call` / `prompts/get` / etc., passed to handlers,
@@ -504,6 +598,11 @@ Spec types are re-exported for adopters' convenience: `McpRequestContext`,
   pipeline; two concurrent clients each getting a distinct
   `Mcp-Session-Id`; and the client `streamableHttpTransport` factory
   wiring an OAuth `authProvider` whose redirect fires the URL elicit.
+  Also OAuth resource-server discovery (RFC 9728): serving the
+  protected-resource metadata document at the well-known path(s) in both
+  owned (`{ port }`) and attached (caller-supplied `server`) modes, the
+  405 on non-GET, shared-server citizenship (attached mode leaves foreign
+  paths for the caller's own routes), and the `oauth`-absent 404.
 - `__tests__/tools-slot.spec.ts` — trichotomy contract for the tools slot
   (every form + the xor-discrimination boundary cases).
 - `__tests__/projection-elicit.spec.ts` — `ctx.elicit` sugar surface +

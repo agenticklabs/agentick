@@ -16,4 +16,5 @@ export {
   httpTransport,
   type HttpTransportOptions,
   type HttpServerTransportHandle,
+  type OAuthTransportOptions,
 } from "./http.js";
