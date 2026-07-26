@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cluster-ws",
-  "version": "1.0.0-next.8",
+  "version": "1.0.0-next.9",
   "description": "WebSocket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker` + the `ws` library. Mounts on adopter's existing `http.Server` (gateway-level scenario) or owns its own port (app-level fallback). Native WebSocket message framing — no length-prefix wrapping needed. Subprotocol-negotiated for forward-compatible protocol versioning.",
   "keywords": [
     "agentick",

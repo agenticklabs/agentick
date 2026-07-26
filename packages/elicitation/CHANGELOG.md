@@ -1,5 +1,15 @@
 # @agentick/elicitation
 
+## 1.0.0-next.9
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.9
+  - @agentick/runtime@1.0.0-next.9
+  - @agentick/spec@1.0.0-next.9
+  - @agentick/utils@1.0.0-next.9
+
 ## 1.0.0-next.8
 
 ### Patch Changes

@@ -1,5 +1,35 @@
 # @agentick/mcp
 
+## 1.0.0-next.9
+
+### Minor Changes
+
+- ADR 92 Slice A — the ingress family joins the operation grammar. Every
+  MCP server request crossing runs as a named, journaled, guardable op
+  (`mcp:command:<verb>`) with the connection dimension + authenticated
+  identity on its scope; work inside a crossing journals as a child
+  (parentOpId + connection dim, two levels deep); the security pipeline
+  rides the op guard seam (stages unchanged on the wire — byte-identical
+  frames); per-op-class journal policy (call-tool/initialize persisted,
+  reads bus-only). Subscription dispatch runs as
+  `subscriptions:command:dispatch` (guard-vetoable scheduled fires).
+  Admission failures emit a discrete event (connection shape + failure
+  class, never credentials). Runtime spine rule: child op scopes inherit
+  the ambient crossing's work-path + identity dimensions.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/elicitation@1.0.0-next.9
+  - @agentick/prompts@1.0.0-next.9
+  - @agentick/pubsub@1.0.0-next.9
+  - @agentick/runtime@1.0.0-next.9
+  - @agentick/spec@1.0.0-next.9
+  - @agentick/tasks@1.0.0-next.9
+  - @agentick/tool@1.0.0-next.9
+  - @agentick/tool-executor@1.0.0-next.9
+  - @agentick/utils@1.0.0-next.9
+
 ## 1.0.0-next.8
 
 ### Patch Changes
