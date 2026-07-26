@@ -10,11 +10,16 @@
  * `McpServerConfig.capabilities.<name> = false`. Setting `= true`
  * does NOT enable capabilities the framework can't actually serve —
  * the wire reflects what's plumbed, not what's wished for.
+ *
+ * That rule governs the CLOSED capability set only. `capabilities.
+ * extensions` (`McpServerOptions.extensions`) is an open namespace of
+ * spec extensions whose surfaces the harness cannot see, so it is merged
+ * verbatim and the adopter owns the truth of the claim.
  */
 
 import type { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
 
-import type { McpServerCapabilitiesOptions } from "../config.js";
+import type { McpServerCapabilitiesOptions, McpServerExtensionsOptions } from "../config.js";
 
 /**
  * What the projection layer has wired. Each flag answers "can the
@@ -42,10 +47,17 @@ export interface WiredCapabilities {
  *   2. Adopter `override.X = false` removes the capability even if wired.
  *   3. Adopter `override.X = true` is a NO-OP when not wired (no lying
  *      on the wire).
+ *   4. `extensions` is merged VERBATIM under `capabilities.extensions`.
+ *      Rules 1–3 do not apply: an extension's surface is invisible to the
+ *      harness, so there is no wiring fact to check a claim against and
+ *      the adopter owns its truth. Omitted entirely when absent or empty
+ *      — an empty `extensions: {}` advertises nothing, so it stays off
+ *      the wire.
  */
 export function buildCapabilities(
   wired: WiredCapabilities,
   override: McpServerCapabilitiesOptions | undefined,
+  extensions?: McpServerExtensionsOptions,
 ): ServerCapabilities {
   const out: ServerCapabilities = {};
 
@@ -101,6 +113,14 @@ export function buildCapabilities(
   // shape per spec.
   if (wired.logging && override?.logging !== false) {
     out.logging = {};
+  }
+
+  // Spec extensions (`capabilities.extensions`) — adopter-declared, not
+  // harness-derived. Copied rather than aliased so a later mutation of
+  // the adopter's config object cannot retroactively change what an
+  // already-negotiated connection advertised.
+  if (extensions !== undefined && Object.keys(extensions).length > 0) {
+    out.extensions = { ...extensions };
   }
 
   return out;

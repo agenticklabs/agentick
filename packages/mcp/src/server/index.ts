@@ -52,6 +52,7 @@ export {
   type McpServerCompletionsConfig,
   type McpServerCompletionsOptions,
   type McpServerElicitOptions,
+  type McpServerExtensionsOptions,
   type McpServerInstructions,
   type McpServerOptions,
   type McpServerPromptsConfig,

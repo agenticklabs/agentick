@@ -822,6 +822,59 @@ Adopter `options.capabilities` can opt **OUT** of an otherwise-wired
 capability (`{ tools: false }` hides a populated tools registry) but
 cannot opt IN to something that isn't wired.
 
+### The `extensions` slot — advertising MCP spec extensions
+
+The table above is the **closed** capability set: the harness knows
+whether each projection module is attached, so it can refuse to advertise
+what it cannot serve. `capabilities.extensions` is the **open** namespace
+— spec extensions negotiated at `initialize`, each keyed by an extension
+identifier (convention: vendor-prefixed, e.g. `io.modelcontextprotocol/ui`)
+with a value shaped by that extension's own spec.
+
+`options.extensions` is merged **verbatim** into the advertised
+capabilities on every connection:
+
+```ts
+new McpServerHarness(scopeId, journal, bus, inbox, {
+  name: "my-server",
+  transports: [httpTransport({ port: 3000 })],
+  resources: myResourcesHarness, // serves the ui:// templates
+  extensions: {
+    "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] },
+  },
+});
+```
+
+**Worked example — MCP Apps.** The MCP Apps extension is not optional
+decoration: a conformant host **refuses to render a `ui://` resource
+unless the server negotiated the extension** in its `initialize` result.
+Registering the `ui://` resources and attaching `mcpToolExtensions` to
+the tool declarations is only half the contract; without the
+advertisement above the host treats the tool as UI-less. Read client-side
+as `client.getServerCapabilities().extensions`.
+
+**The adopter owns the truth of an extension claim.** This is a separate
+slot from `capabilities` for exactly one reason: the asymmetry in who can
+verify. A wired capability is a fact the harness checks — which is what
+makes "no lying on the wire" enforceable and `{ tools: true }` a
+deliberate no-op. An extension's surface (a `ui://` template, a `_meta`
+convention, an out-of-band rendering contract) is invisible to the
+harness, so there is no wiring fact to check against and the claim is
+passed through as written. Advertising `io.modelcontextprotocol/ui` while
+serving no `ui://` resources is a bug this slot cannot catch. Folding
+extensions into `capabilities` would have quietly dissolved the
+verification invariant that makes the closed set trustworthy.
+
+What the slot _does_ enforce, at construction time (not first
+connection): the bag is an object, keys are non-empty, values are
+objects. It deliberately does **not** enforce a key format — vendor-
+prefixed reverse-DNS is the spec's convention, not a grammar it
+validates, and rejecting a legal identifier would be broken, not strict.
+
+Absent or empty → no `extensions` key on the wire (an empty map
+advertises nothing). Every other advertised capability is byte-identical
+whether or not the slot is set.
+
 ## Conformance
 
 `@agentick/mcp/testing` ships `runMcpConformance` — the executable
@@ -957,6 +1010,15 @@ reference-server round-trip (until the package is a dev dep).
   static string verbatim, function form evaluated per connection (not
   cached), async form, ctx-visible, and identity-visible over an
   authenticated HTTP crossing (`ctx.mcp.user` resolved before the fn).
+- `src/server/__tests__/capability-extensions.spec.ts` — the `extensions`
+  slot: options validation (object bag, non-empty keys, object values, and
+  the deliberate NON-enforcement of a key format), `buildCapabilities`
+  merging verbatim / omitting an empty bag / copying rather than aliasing /
+  not resurrecting an unwired capability, the MCP Apps `ui` extension
+  reaching a real client's `getServerCapabilities().extensions` on every
+  connection, the client harness surfacing it on `serverInfo.capabilities`,
+  and the regression guard that an absent slot leaves the advertised
+  capabilities byte-identical.
 - `src/server/transports/__tests__/http-middleware.spec.ts` —
   `httpMiddlewareTransport` mount door driven by a REAL host `http.Server`:
   full round-trip through `handler` with and without a prior body parser
@@ -1107,6 +1169,13 @@ Defer until production load demands it; design space documented in
   `InitializeResult.instructions`; the function form is evaluated per
   `initialize` against the identity-resolved request context (never cached
   across connections).
+- **Capability extensions (`capabilities.extensions`)** — **landed.**
+  `extensions: Record<string, object>` merged verbatim into every
+  connection's `initialize` result, validated at construction. Unlocks
+  MCP Apps, whose hosts refuse to render `ui://` resources without the
+  `io.modelcontextprotocol/ui` negotiation. Open namespace, adopter-owned
+  truth — the closed capability set keeps its harness-verified
+  "no lying on the wire" rule.
 - **Resource-template argument completion** — **landed.** `completions.resources`
   keyed by template uri → variable → `CompletionHandler` (same `complete*`
   sugar as prompts); `ref/resource` routes to it, unknown template/arg →

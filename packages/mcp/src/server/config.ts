@@ -41,6 +41,8 @@ import {
   type ToolCatalog,
 } from "@agentick/tool";
 import type { ToolTransform } from "@agentick/tool/transforms";
+import { isObject } from "@agentick/utils";
+import type { ServerCapabilities } from "@modelcontextprotocol/sdk/types.js";
 
 import type {
   Authenticator,
@@ -223,6 +225,35 @@ export interface McpServerCapabilitiesOptions {
 }
 
 /**
+ * Spec-extension advertisements — the MCP `capabilities.extensions`
+ * field. Keys are extension identifiers (the spec's convention is a
+ * vendor-prefixed name such as `io.modelcontextprotocol/ui`); values are
+ * the extension's own negotiation object, shaped by that extension's
+ * spec, not by MCP core.
+ *
+ * **Why this is a separate slot from {@link McpServerCapabilitiesOptions}.**
+ * The closed capability set (tools / prompts / resources / tasks /
+ * completions / logging) is HARNESS-DRIVEN: the harness knows whether a
+ * projection module is attached, so it can refuse to advertise something
+ * it cannot serve — `capabilities.X = true` is a deliberate no-op ("no
+ * lying on the wire"). Extensions invert that. An extension's surface
+ * lives outside the harness's knowledge — a `ui://` resource template, a
+ * `_meta` convention, an out-of-band rendering contract — so the harness
+ * has nothing to verify a claim against. **The adopter owns the truth of
+ * an extension claim.** Advertising `io.modelcontextprotocol/ui` and then
+ * serving no `ui://` resources is a bug this slot cannot catch. Widening
+ * `capabilities` to carry extensions would have quietly dissolved the
+ * verification invariant that makes the closed set trustworthy; keeping
+ * them apart makes the asymmetry legible at the call site.
+ *
+ * The type is the SDK's own `ServerCapabilities["extensions"]` — values
+ * must be objects, per the spec's `AssertObjectSchema`.
+ *
+ * @see https://modelcontextprotocol.io — `ServerCapabilities.extensions`
+ */
+export type McpServerExtensionsOptions = Readonly<NonNullable<ServerCapabilities["extensions"]>>;
+
+/**
  * Argument-completion slot. Maps a prompt name to a per-argument map
  * of {@link CompletionHandler}s — the sugar builders in
  * `@agentick/mcp` (`completeFromList`, `completeFromEnum`,
@@ -356,6 +387,26 @@ export interface McpServerOptions {
   readonly completions?: McpServerCompletionsOptions;
   /** Capability opt-OUTS. Defaults derive from what's actually wired. */
   readonly capabilities?: McpServerCapabilitiesOptions;
+  /**
+   * Spec extensions advertised under `capabilities.extensions` in every
+   * connection's `initialize` result. Merged verbatim — the harness has
+   * no surface to verify an extension claim against, so the adopter owns
+   * its truth (see {@link McpServerExtensionsOptions} for why this is not
+   * folded into `capabilities`).
+   *
+   * Conformant hosts gate extension behavior on this advertisement. MCP
+   * Apps, for instance, will not render a `ui://` resource unless the
+   * server negotiated it:
+   *
+   * ```ts
+   * extensions: {
+   *   "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] },
+   * }
+   * ```
+   *
+   * Absent (or empty) → no `extensions` key on the wire.
+   */
+  readonly extensions?: McpServerExtensionsOptions;
   /** Security pipeline. Defaults are transport-aware; adopters override stages individually. */
   readonly auth?: McpServerAuthOptions;
   /** Adopter-defined metadata (logging context, deployment tier, etc.). */
@@ -436,6 +487,9 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
   ) {
     throw invalid("capabilities must be an object", ["capabilities"]);
   }
+  if (options.extensions !== undefined) {
+    validateExtensionsOption(options.extensions);
+  }
   if (options.auth !== undefined && options.auth !== null && typeof options.auth !== "object") {
     throw invalid("auth must be an object", ["auth"]);
   }
@@ -451,6 +505,35 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
 
 function invalid(reason: string, path?: readonly string[]): McpServerConfigInvalid {
   return new McpServerConfigInvalid(path ? { reason, path } : { reason });
+}
+
+/**
+ * Validate the `extensions` slot: a key/value bag whose keys are
+ * non-empty identifiers and whose values are objects.
+ *
+ * Deliberately does NOT enforce a key FORMAT. Vendor-prefixed
+ * reverse-DNS-ish names (`io.modelcontextprotocol/ui`) are the spec's
+ * CONVENTION, not a grammar it validates — a server that refuses a
+ * legal-but-unfashionable identifier is broken against the spec, not
+ * strict.
+ *
+ * Value shape IS enforced, one notch tighter than the wire schema (which
+ * accepts functions). A function or array can never round-trip as an
+ * extension negotiation object, so rejecting them at construction beats
+ * shipping unserializable garbage on every `initialize`.
+ */
+function validateExtensionsOption(option: McpServerExtensionsOptions): void {
+  if (!isObject(option)) {
+    throw invalid("extensions must be an object keyed by extension identifier", ["extensions"]);
+  }
+  for (const [key, value] of Object.entries(option)) {
+    if (key.length === 0) {
+      throw invalid("extensions keys must be non-empty strings", ["extensions"]);
+    }
+    if (!isObject(value)) {
+      throw invalid(`extensions["${key}"] must be an object`, ["extensions", key]);
+    }
+  }
 }
 
 /**

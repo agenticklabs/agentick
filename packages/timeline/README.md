@@ -1,31 +1,28 @@
 # @agentick/timeline
 
-**The timeline IS the conversation.** One append-only log per session —
-every user message, every model generation, every tool result, every
-turn — durable, replayable, and rendered back to the model on every
-tick. Agentick's core bet is that context is _re-rendered from facts_
-each tick rather than accumulated in a prompt string, and the timeline
-is where those facts live.
+**The timeline is the conversation.** One append-only log per session — every user message, every model generation, every tool result, every turn boundary — durable, replayable, and re-rendered to the model on every tick.
 
-## The one thing you must know: `<Timeline/>` OVERRIDES the default fold (ADR 63)
+That last part is the bet. Agentick doesn't accumulate a prompt string across turns; it re-derives context from facts each tick, and the timeline is where the facts live. Everything else in this package follows from that: compaction rewrites a _view_, never the log; the client is a _fold_ over an event stream, never a second copy of the truth.
 
-The conversation reaches the model by **default** — the compiler ships a
-`timeline` surfacing projection that folds the timeline's current
-projection (`read()` — post-compaction, minus `visibility: "log"`
-entries) into context whenever your tree doesn't override it. Write
-nothing and the conversation still surfaces:
+## Install
+
+```bash
+npm install @agentick/timeline
+```
+
+Subpaths: `/react` (components + hooks), `/client` (browser-side view), `/strategies` (compaction), `/testing` (stub + conformance suites).
+
+## Quick start
+
+The conversation reaches the model by default. Write nothing and it still surfaces:
 
 ```tsx
 function MinimalAgent() {
   return <System>You are a helpful assistant.</System>;
-  // The timeline surfaces via the default projection (default:timeline).
 }
 ```
 
-`<Timeline/>` is how you **override** that default to filter, compact, or
-reshape the fold — it is the one projection of the timeline harness, and
-rendering it suppresses the default (lazy — the log is never folded
-twice):
+`<Timeline/>` is how you **override** that default — to filter, compact, or reshape what folds into context:
 
 ```tsx
 import { Timeline } from "@agentick/timeline/react";
@@ -34,63 +31,57 @@ function Agent() {
   return (
     <>
       <System>You are a helpful assistant.</System>
-      <Calculator.Tool />
-      {/* OVERRIDE the default projection — filter / compact / reshape. */}
       <Timeline maxTokens={100_000} roles={["user", "assistant"]} />
     </>
   );
 }
 ```
 
-Under the hood `<Timeline>` renders its fold inside
-`<Project projectionKey="timeline">`, so the compiler tags its entries
-`authored:timeline` and skips the default fold. The component boundary is
-where filtering, compaction, and formatting become _your_ declarative
-choices — but omitting it no longer drops the conversation. (ADR 63
-retired the old `timeline-not-rendered` diagnostic for exactly this
-reason: there is no longer a way to silently forget the timeline.)
+> [!IMPORTANT]
+> Rendering `<Timeline/>` suppresses the default fold — the log is never folded twice. Omitting it doesn't drop the conversation; there is no way to silently forget the timeline.
 
-## Consumption semantics (ADR 53 — offsets, not tiers)
+`<Transcript>` is the same component under a name that reads better in chat-shaped apps.
 
-There is no pending queue. Input **appends the moment it arrives** —
-at `send()` and mid-execution — and consumption is **non-destructive**:
-every tick re-renders the whole log, so nothing is ever "consumed away."
-The distinctions other frameworks model as tiers are _derived facts_:
+## Two tiers, one truth
 
-- **`trailingInput()`** — input entries after the last assistant entry
-  (the structural "not yet replied to" set; style it, prompt resume
-  with it — nothing load-bearing reads it).
-- **Steering** — a `send()` while an execution runs JOINS it: messages
-  append, the in-flight handle returns, and the loop's continuation
-  predicate runs another tick so the model addresses the new input.
-  "Wait — use the staging account" is native behavior:
+| Tier              | What it is                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Persisted log** | Append-only ground truth. Never rewritten.                                                                         |
+| **Projection**    | The model-visible view. `compact()` rewrites it — the log is untouched, so compaction is reversible re-derivation. |
+
+`<Timeline/>` renders the projection. `readPersisted()` is the uncompacted record. `history({ fromSeq, limit })` pages the durable log by the store's frozen `seq` cursor.
+
+```ts
+const { entries, version } = session.timeline.read(); // projection snapshot
+session.timeline.readPersisted(); // the uncompacted log
+session.timeline.trailingInput(); // input after the last assistant entry
+session.timeline.subscribe(() => rerender()); // any projection or log mutation
+await session.timeline.history({ limit: 50 }); // seq-cursored durable read
+await session.timeline.compact(strategy); // rewrite the projection
+```
+
+## No pending queue
+
+Input **appends the moment it arrives** — at `send()` and mid-execution — and consumption is non-destructive. Every tick re-renders the whole log, so nothing is ever "consumed away." The distinctions other frameworks model as tiers are derived facts here:
+
+**Steering is native.** A `send()` while an execution is running _joins_ it: the messages append, the in-flight handle comes back, and the loop runs another tick so the model addresses the new input.
 
 ```ts
 const handle = await session.send({ messages: [{ role: "user", content: "do the thing" }] });
 // ... the agent is mid-run ...
-const same = await session.send({ messages: [{ role: "user", content: "wait — dry-run only!" }] });
-// same === handle; the next tick sees the correction.
+const same = await session.send({ messages: [{ role: "user", content: "wait — dry-run only" }] });
+console.log(same === handle); // true — the running execution absorbed the correction
 ```
 
-- **Turn boundaries** — at each execution end the session appends a
-  `kind: "boundary"` record (outcome + the turn's aggregate usage,
-  `visibility: "log"` so the model never sees it). Load-bearing
-  NOWHERE — it is emitted data: turn segmentation for UIs and eval,
-  cost-per-turn in the record (a failed tick's spend appears here even
-  though it produced no entry). Opt out with `turnBoundaries: false`.
-- **Provenance** — execution-produced entries carry
-  `metadata.executionId` / `tickId`, and every assistant entry carries
-  its generation's `metadata.usage` (one tick = one generation = one
-  assistant entry). "Show me turn 3" and "cost per message" are log
-  queries, not new systems.
+**`trailingInput()`** is the structural "not yet replied to" set: input entries after the last assistant entry. Style it, resume a prompt from it — nothing load-bearing reads it.
 
-## Fine-grained rendering — the render prop
+**Turn boundaries** are appended at each execution end: outcome plus the turn's aggregate usage, marked `visibility: "log"` so the model never sees them. They're emitted data, not control flow — turn segmentation for UIs and eval, and cost-per-turn including a failed tick's spend that produced no entry. Pass `turnBoundaries: false` to opt out.
 
-`<Timeline>` accepts a render function over the kept entries — **total
-control of what the model sees, per entry, per block**. The canonical
-adopter pattern (ported from ernesto's `KnowifyTimeline`): current-turn
-and assistant content verbatim, old heavy tool results collapsed to
-_references the model can chase_:
+**Provenance** rides every entry the framework produces: `metadata.executionId` and `metadata.tickId`, plus `metadata.usage` on each assistant entry (one tick, one generation, one assistant entry). "Show me turn 3" and "cost per message" are log queries, not new subsystems.
+
+## Fine-grained rendering
+
+`<Timeline>` takes a render function over the kept entries — total control of what the model sees, per entry, per block. The pattern worth stealing: keep the current turn and all assistant output verbatim, collapse old heavy tool results into references the model can chase.
 
 ```tsx
 import { useState } from "react";
@@ -99,14 +90,9 @@ import { Message, useOnExecutionStart } from "@agentick/compiler-react";
 
 const edges = (t: string) => (t.length <= 280 ? t : `${t.slice(0, 140)}\n…\n${t.slice(-140)}`);
 
-// v2 has no <Text> component — content blocks are the currency. Build a
-// ContentBlock[] and pass it via the `content` prop (verified by
-// integration-with-compiler.spec.tsx "README reference pattern").
 export function ReferenceTimeline() {
-  // Provenance beats clock math: the framework stamps
-  // metadata.executionId on every entry it produces (ADR 53) — "is this
-  // from the current turn?" is an exact comparison, not a timestamp
-  // heuristic.
+  // Provenance beats clock math: "is this from the current turn?" is an
+  // exact comparison against the stamped executionId, not a heuristic.
   const [currentExecution, setCurrentExecution] = useState<string>();
   useOnExecutionStart((e) => setCurrentExecution(e.executionId));
 
@@ -114,21 +100,20 @@ export function ReferenceTimeline() {
     <Timeline maxTokens={100_000} strategy="sliding-window" preserveRoles={["system", "user"]}>
       {(entries) =>
         entries.map(({ message }) => {
-          // ICL safety: assistant output ALWAYS verbatim — summarized
-          // assistant turns teach the model to produce summaries.
+          // Assistant output stays verbatim — summarizing it teaches the
+          // model to produce summaries.
           if (message.role === "assistant") return <Message key={message.id} {...message} />;
-          // Current turn: verbatim.
-          if (message.metadata?.executionId === currentExecution)
+          // The current turn stays verbatim.
+          if (message.metadata?.executionId === currentExecution) {
             return <Message key={message.id} {...message} />;
-          // OLD entries: map blocks to compact forms. Heavy tool
-          // results render as a file reference — the tool layer wrote
-          // the full payload to disk and stamped { path, bytes } on the
-          // block's metadata; pair with a read_file tool and the model
-          // can look the result up ON DEMAND instead of carrying it in
-          // every context.
+          }
+          // Older entries: heavy tool results become a chaseable reference.
+          // The tool layer wrote the payload to disk and stamped { path,
+          // bytes } on the block; pair with a read_file tool and the model
+          // looks it up on demand instead of carrying it every tick.
           const content = message.content.map((block) => {
             if (block.type === "tool_result") {
-              const ref = block.metadata?.file; // { path, bytes } stamped by the tool layer
+              const ref = block.metadata?.file as { path: string; bytes: number } | undefined;
               return {
                 type: "text" as const,
                 text: ref
@@ -147,24 +132,14 @@ export function ReferenceTimeline() {
 }
 ```
 
-The pieces composing here: the render prop (`(entries, budget) =>
-ReactNode`) with `filter`/`roles`/`limit` pre-filters and
-`maxTokens`/`strategy`/`preserveRoles`/`headroom`/`onEvict` budget
-compaction; provenance stamps for exact turn detection; and
-block-level `metadata` as the adopter's decoration channel (the
-"extract heavy payloads to disk, render a reference" pattern is a TOOL
-concern — the timeline just renders what the blocks carry). KV-cache
-discipline is yours to keep: never rewrite old rendered entries between
-ticks — evict whole entries (sliding-window does) so the prefix stays
-cache-stable.
+Three things compose there: the render prop with its `filter`/`roles`/`limit` pre-filters and `maxTokens`/`strategy`/`preserveRoles`/`headroom`/`onEvict` budget compaction; provenance stamps for exact turn detection; and block-level `metadata` as your decoration channel. Extracting heavy payloads to disk is a _tool_ concern — the timeline just renders what the blocks carry.
 
-## Adaptive auto-compaction (`useContextInfo`)
+> [!WARNING]
+> KV-cache discipline is yours to keep. Never rewrite old rendered entries between ticks — evict whole entries, which `sliding-window` does, so the prefix stays cache-stable.
 
-`compact()` and the `<Timeline>` budget props are the levers; **`useContextInfo`
-is the gauge** — real-time context-window utilization, so an adopter can
-compress harder as the window fills (the ernesto `KnowifyTimeline`
-pattern, now portable because the model registry supplies the window,
-#204):
+## Adaptive compaction
+
+`compact()` and the `<Timeline>` budget props are the levers; `useContextInfo` is the gauge. It reads accumulated usage against the model's declared context window, so a component can compress harder as the window fills:
 
 ```tsx
 import { useContextInfo } from "@agentick/compiler-react";
@@ -183,256 +158,181 @@ function AdaptiveTimeline() {
 }
 ```
 
-`useContextInfo` reads `usedTokens` (ADR 53's per-generation usage
-stamps) against the model's `contextWindow` (the #204 registry). Set an
-auto-compaction policy once and it rides every tick — verbatim when
-roomy, aggressive summarization when tight — with KV-cache discipline
-intact (evict whole entries; never rewrite old ones).
+Set the policy once and it rides every tick — verbatim when roomy, aggressive when tight.
 
-## Two tiers, one truth
+### Compaction strategies
 
-| Tier              | What it is                                                                                                                                         |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Persisted log** | Append-only ground truth. Never rewritten.                                                                                                         |
-| **Projection**    | The model-visible view. `compact()` rewrites it (fold, summarize, evict) — the log is untouched, so compaction is always reversible re-derivation. |
-
-`<Timeline/>` renders the projection. `readPersisted()` is the
-uncompacted record. `history({ fromSeq, limit })` pages the durable log
-by the store's frozen `seq` cursor (#168).
-
-## Durability — stores, not snapshots (ADR 49)
-
-Inject a `TimelineStore` and the session becomes **open-or-rehydrate**:
-`createSession({ sessionId })` with entries in the store hydrates the
-log before first render — create and resume are the same call. Writes
-trail through a write-behind pump (default) or await per-append
-(`writePolicy: "through"`); the `flush()` barrier at execution end
-guarantees any process that subsequently loads the store sees every
-completed execution.
+A `CompactStrategy` is a plain value: a source tier plus an async function over its entries, whose return becomes the new projection. `fromHandler` is the escape hatch that turns any function into one.
 
 ```ts
-const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
-  session: { timeline: { store: mySqliteStore } },   // implement TimelineStore,
-});                                                   // certify with the conformance suite
+import { fromHandler } from "@agentick/timeline/strategies";
+
+const keepRecent = fromHandler({
+  source: "persisted", // or "projection" — default "persisted"
+  handler: async ({ entries }) => entries.slice(-20),
+});
+
+await session.timeline.compact(keepRecent);
 ```
 
-Seeding IS resuming — `run({ history })` replays a previous session's
-`snapshot().timeline` verbatim through the same hydration path (the
-eval/replay loop).
+Bind one at construction and `compact()` with no argument runs it — including a bare `timeline:compact` verb arriving over the wire. An explicit call-site strategy wins over the bound default; calling with neither rejects with a typed error.
 
-## Client timeline — `fold(session event stream)` (`/client`)
+## Durability — stores, not snapshots
 
-The client-side timeline is a **fold over the session event stream** — no read
-RPC, no bespoke channel. Every `timeline.append(...)` runs through the harness
-command path (ADR 51); the declared verb `timeline:append` emits a
-`timeline:command:append` lifecycle whose **`requested`-phase envelope carries
-the appended entries** (`envelope.payload = { entries }`, the argument-bound
-phase). `timelineView` subscribes to exactly those envelopes (via
-`timelineEventQuery()` in `@agentick/spec`) and folds their entries onto a
-growing `readonly TimelineEntry[]`.
-
-> **Tool results can be truncated on the wire (ROADMAP A3).** A tool can return
-> a multi-megabyte result; the durable log and the model-facing projection ALWAYS
-> keep the full bytes. When enabled, the gateway truncates oversized `tool_result`
-> content on every client-facing frame — including these append envelopes —
-> before it reaches the browser. A folded entry whose tool output was truncated
-> carries `block.metadata.bounded` (`{ truncated: true, originalBytes, … }`); the
-> full content survives in the store (a future `timeline_history` read). This is
-> an OPT-IN gateway-configured policy (`createGateway({ truncateToolResults })`),
-> **OFF by default** — see the gateway README. It is orthogonal to `compact()`:
-> compaction rewrites the model-visible projection; this truncates only the
-> client copy.
-
-`session.timeline` is a `ClientHandle` — `list()`/`get(id)`/`subscribe(cb)` plus
-the window verbs (`seed`/`prepend`/`append`/`clear`) and a lazy `loadOlder()`.
-Importing the subpath registers it (ADR 87); the free `timelineView` factory
-stays exported as its implementation.
-
-**The scroll-back loop — 6 lines.** `loadOlder()` reads a cursored page of
-durable history over `session/timeline_history` and splices it at the head:
+Inject a `TimelineStore` and sessions become open-or-rehydrate: `createSession({ sessionId })` with entries in the store hydrates the log before first render. Create and resume are the same call.
 
 ```ts
-import "@agentick/timeline/client"; // side-effect: types + registers the slot
+import { withTimeline, MemoryTimelineStore } from "@agentick/timeline";
 
-const t = client.session(id).timeline;
+const timeline = withTimeline({
+  store: new MemoryTimelineStore(), // swap for a durable adapter
+  writePolicy: "behind", // "behind" (default) | "through"
+  compact: keepRecent, // construction-bound default strategy
+});
+```
+
+Writes trail through a write-behind pump by default, or await per-append with `writePolicy: "through"`. The `flush()` barrier at execution end guarantees that any process loading the store afterwards sees every completed execution. Store failures surface as typed errors — `TimelineWriteFailed` from the append or the flush, `CompactHandlerFailed` when a strategy (an LLM call, say) blows up — never as an unhandled defect.
+
+Compaction never touches the store. Seeding is resuming: replaying a previous session's entries goes through the same hydration path, which is what makes eval and replay loops work.
+
+`TimelineStore` is a log-shaped port — `append → seq[]`, `read`, `keys`, `delete`, plus optional `prune` and `history`. Entries are opaque to it and `seq` is the frozen ordering identity. The bundled `MemoryTimelineStore` is a plain in-memory log. Certify your own adapter with `runTimelineStoreConformance` from `/testing`; shipped adapters are [@agentick/timeline-fs](../timeline-fs) (JSONL) and [@agentick/timeline-postgres](../timeline-postgres).
+
+## The client timeline
+
+The browser-side timeline is a **fold over the session event stream** — no read RPC, no bespoke channel. Every append runs through the command path, and the resulting lifecycle envelope carries the appended entries; the client subscribes to exactly those envelopes and folds them onto a growing array.
+
+Importing the subpath registers `session.timeline` on the client:
+
+```ts
+import "@agentick/timeline/client";
+
+const t = client.session(sessionId).timeline;
+
 t.subscribe(() => render(t.list())); // re-render on any change
+
 onScrollTop(async () => {
-  const { done } = await t.loadOlder(50); // page older history in at the HEAD
+  const { done } = await t.loadOlder(50); // page older history in at the head
   if (done) detachScrollHandler(); // reached the log's tail
 });
 ```
 
-**Posture B — feed YOUR store — 3 lines.** The handle is a typed subscription
-into your own message model; our window is optional, your shape is the truth:
+That's the whole scroll-back loop. `loadOlder()` wraps a cursored, bounded read over the durable log, tracks its own cursor across calls, and splices each page at the head.
+
+**Or feed your own store instead.** The handle is a typed subscription; your shape can be the truth:
 
 ```ts
 t.subscribe(() => myStore.ingest(t.list().map(toMyMessage)));
 ```
 
-Both postures are first-class (§5b): **A** — the handle IS your state (bind a UI
-straight to `list()`/`subscribe()`); **B** — the handle FEEDS your state (above).
-Nothing fights an adopter whose cache isn't ours (the no-client-cache bright
-line). `metadata` passthrough carries your join keys (`clientId` generalized).
+Both postures are first-class: the handle _is_ your state (bind a UI straight to `list()` and `subscribe()`), or the handle _feeds_ your state. The framework owns no client cache, so nothing fights an adopter whose message model isn't ours — `metadata` passes through and carries your join keys.
 
-The handle passes `runClientHandleConformance` (core + Enumerable + the
-`loadOlder` read verb). The seed/window verbs stay LOCAL view mutations —
-`seed(entries)` replaces the window (server-hydrated history), `clear()` empties
-it, `prepend`/`append` splice at head/tail — no wire round-trip, no visual
-distinction from the wire-backed `loadOlder` (Q2 RESOLVED).
+The window verbs are local view mutations with no wire round-trip: `seed(entries)` replaces the window with server-hydrated history, `prepend`/`append` splice at head and tail, `clear()` empties it. `view({ filter })` mints an additional filtered projection over the _same_ wire subscription — no second subscribe — and closes independently.
 
-### The headless factory — `timelineView`
+> [!NOTE]
+> There is no framework-level dedup. Live appends carry a bus cursor while durable history carries the timeline `seq` — two numbering systems, so a single-key merge would need a server change that isn't worth it. When an optimistic `append` is later echoed by the server, reconcile by matching `message.metadata.clientId`, the correlation id that rides `send()` straight onto the folded entry.
 
-For the composition case, call the factory directly; the handle is built on it:
+### The headless factory
+
+`timelineView` is what the handle is built on. Reach for it directly when you're composing rather than binding:
 
 ```ts
 import { timelineView } from "@agentick/timeline/client";
 
-// `initial` seeds the fold with server-hydrated history (the AI-SDK
-// `initialMessages` pattern); `fromCursor` resumes the live tail from AFTER that
-// seed so appends are not double-counted. Omit both → empty, tailing live now.
+// `initial` seeds the fold with server-hydrated history; `fromCursor`
+// resumes the live tail from AFTER that seed so appends aren't
+// double-counted. Omit both → empty, tailing live from now.
 const view = timelineView(client, sessionId, {
   initial: serverHydratedEntries,
   fromCursor: lastSeenCursor,
-  visibility: (e) => e.visibility !== "log", // optional filter (default: all)
+  visibility: (e) => e.visibility !== "log",
 });
 
-view.get(); // readonly TimelineEntry[] — synchronous (React getSnapshot)
+view.get(); // readonly TimelineEntry[] — synchronous (getSnapshot)
 view.subscribe(() => rerender()); // useSyncExternalStore(view.subscribe, view.get)
-view.onChange((append) => { … }); // the raw { entries } each LIVE fold sees
+view.onChange((append) => console.log(append.entries.length)); // raw live folds
+
+view.prepend(olderEntries); // scroll-back: splice at the HEAD
+view.append([optimisticEntry]); // optimistic: splice at the TAIL
 ```
 
-### The mutable window — `prepend` / `append` / `clear`
+Both splices are copy-on-write — a new array reference each time, satisfying the `useSyncExternalStore` contract — and a no-op on an empty or fully-filtered batch. The live fold keeps tailing and interleaves correctly after any prior splice. `/client` depends only on the generic client and the shapes package, never the server-side implementation, so it can't drag the session runtime into a browser bundle.
 
-`timelineView` is not just a fold; it is a **live window** with two imperative
-splices on top of the fold:
+## API
 
-```ts
-view.prepend(olderEntries); // scroll-back: splice OLDER history at the HEAD
-view.append([optimisticEntry]); // optimistic/manual: splice at the TAIL
-```
+### `@agentick/timeline`
 
-- **`prepend`** is pure window expansion over server-authoritative history — the
-  adopter loads an older page (`LogStore.history` backward) and splices it at the
-  head as the user scrolls up.
-- **`append`** shows a pending message instantly (before the server echoes it) or
-  inserts a manual entry at the tail.
-- The **live fold keeps tailing** the real append stream onto the tail, and
-  interleaves correctly after any prior `prepend`/`append`.
+| Export                                          | Purpose                                                    |
+| ----------------------------------------------- | ---------------------------------------------------------- |
+| `withTimeline(options?)`                        | Session extension: store, write policy, default compaction |
+| `TimelineHarness`                               | The implementation, for direct construction                |
+| `MemoryTimelineStore`                           | Bundled in-memory log store                                |
+| `TimelineHandle` (type)                         | What `session.timeline` exposes                            |
+| `TimelineStore` / `TimelineEntry` / `SeqTagged` | Port and data types, re-exported from the shapes package   |
 
-Both are **copy-on-write** (new array ref → the `useSyncExternalStore` contract
-fires) and **no-op on an empty/all-filtered batch** (same ref, no notify).
-`prepend`/`append` notify the STATE feed only; `onChange` stays the LIVE-fold
-change feed.
+### `session.timeline`
 
-**Minimal splice — NO seq-merge (locked design).** Live append events carry a
-bus `Cursor`; durable history reads carry the timeline `seq` — two numbering
-systems, so a single-key merge would need a server change. Not worth it: the
-ecosystem (AI-SDK, assistant-ui) reconciles at the app level, and so does an
-agentick adopter. There is **no framework-level dedup**. When an optimistic
-`append` is later echoed by the server (folded in via the live tail), the app
-reconciles by matching `message.metadata.clientId` — the correlation id that
-rides `send({ messages: [{ metadata: { clientId } }] })` straight onto the folded
-entry's `message.metadata`. The framework gives you the live view + the two
-splices; **the app owns the cache and the reconciliation** (the no-client-cache
-bright line, ADR 33). A worked end-to-end recipe lives in
-[`example/v2-coding-agent/src/timeline-client-example.ts`](../../example/v2-coding-agent/src/timeline-client-example.ts).
+| Method                          | Returns                                            |
+| ------------------------------- | -------------------------------------------------- |
+| `read()`                        | Projection snapshot `{ entries, version }`         |
+| `readPersisted()`               | The uncompacted durable log                        |
+| `trailingInput()`               | Input entries after the last assistant entry       |
+| `inputEntryCount()`             | Count of input entries in the persisted log        |
+| `append(...entries)`            | Append to log + projection atomically              |
+| `compact(strategy?)`            | Rewrite the projection; resolves a `CompactResult` |
+| `history({ fromSeq?, limit? })` | Seq-tagged durable page; flushes writes first      |
+| `endTurn(input)`                | Emit the turn-boundary record                      |
+| `subscribe(fn)`                 | Fires on any projection or log mutation            |
 
-`timelineView` is an integrated window over the `eventStream` primitive in
-`@agentick/client-core`, sharing its fan-out core (`liveStore`) with the
-generic `eventView` fold. The `/client` subpath depends only on `client-core` +
-`spec` — never the timeline harness runtime — so it never pulls the server
-harness into a browser bundle.
+Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timeline:compact`, `timeline:replaceProjection`, `timeline:resetProjection`.
 
-### The data source for scroll-back: `session/timeline_history` (§6.3)
+### `@agentick/timeline/react`
 
-`session.timeline.loadOlder()` wraps the **`session/timeline_history`** wire read
-— a cursored, bounded page over `TimelineStore.history` — tracking its own
-`nextFromSeq` cursor across calls and prepending each page. On the raw factory,
-drive it yourself:
+| Export                              | Purpose                                                      |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `<Timeline>`                        | Override the default fold; filter, budget, or render-prop it |
+| `<Transcript>`                      | The same component, chat-shaped name                         |
+| `useTimeline()`                     | Projection snapshot; re-renders when the version advances    |
+| `compactEntries` / `getEntryTokens` | The budget primitives `<Timeline>` uses internally           |
 
-```ts
-// Page the durable log over the wire; feed each page to the scroll-back window.
-let fromSeq: number | undefined; // undefined ⇒ start from the log's head
-do {
-  const page = await client.request("session/timeline_history", {
-    sessionId,
-    limit: 50,
-    ...(fromSeq !== undefined ? { fromSeq } : {}),
-  });
-  view.prepend(page.entries.map((e) => e.entry)); // splice this page
-  fromSeq = page.nextFromSeq; // undefined ⇒ reached the tail, stop
-} while (fromSeq !== undefined);
-```
+`<Timeline>` props: `roles`, `filter`, `limit` (pre-filters) · `maxTokens`, `strategy`, `preserveRoles`, `headroom`, `guidance`, `onEvict` (budget) · `children` as a render function or static JSX.
 
-Because history is `seq`-cursored while the live tail is bus-`Cursor`-ordered
-(§6.4 — the honest Cursor-vs-seq gap, NOT unified), `loadOlder` pages forward
-from the log start and prepends; an app doing true infinite-scroll-up reconciles
-final ordering itself (it holds the `message.metadata.clientId`).
+### `@agentick/timeline/client`
 
-Each row is `{ seq, entry, cursor? }`: `seq` is the frozen `LogStore` ordering
-identity; `cursor` is the event-bus position returned **alongside** `seq` only
-where the server co-locates the two (§6.4 — the honest Cursor-vs-seq gap, not a
-unification; the bundled `MemoryTimelineStore` co-locates none, so it is
-absent). `nextFromSeq` is the next page's `fromSeq` — present on a full page,
-absent at the tail. The read flushes the write-behind buffer first, so a page
-reflects every completed append.
+| Export              | Purpose                                                   |
+| ------------------- | --------------------------------------------------------- |
+| `session.timeline`  | Registered on import: window + `loadOlder` + minted views |
+| `timelineView(...)` | The headless fold the handle is built on                  |
 
-## API sketch
+### `@agentick/timeline/testing`
 
-```ts
-session.timeline.read(); // projection snapshot { entries, version }
-session.timeline.readPersisted(); // the uncompacted log
-session.timeline.trailingInput(); // input after the last assistant entry
-session.timeline.append(...e); // admin/import path (bypasses the loop)
-session.timeline.compact(strategy); // rewrite the projection; log untouched
-session.timeline.history(opts); // seq-cursored durable reads (store-optional)
-session.timeline.subscribe(fn); // any projection/log mutation
-```
+| Export                          | Purpose                                    |
+| ------------------------------- | ------------------------------------------ |
+| `stubTimelineHarness(initial?)` | Standalone instance with its own substrate |
+| `runTimelineHarnessConformance` | Certify an alternate implementation        |
+| `runTimelineStoreConformance`   | Certify a store adapter                    |
 
-Declared commands (ADR 51): `timeline:append`, `timeline:compact`
-(wire-exposed, signal form — the resident strategy runs), `timeline:replaceProjection`,
-`timeline:resetProjection`. Enumerable via `timeline:commands`.
+## Patterns
 
-`TimelineStore` is the concrete **log** archetype — `TimelineStore extends
-LogStore<TimelineEntry>` (the port lives in `@agentick/spec`, port-home
-§6-D; its `logKey` IS the `sessionId`). Port surface: `append → seq[]` / `read`
-/ `keys` / `delete` / optional `prune` + `history` (seq-tagged `SeqTagged<T>`).
-Entries are opaque to the store; `seq` is the frozen ordering identity
-(#133/#168). Reference impl: `MemoryTimelineStore`, an empty
-`extends MemoryLog<TimelineEntry>` subclass (`@agentick/store`) — the store
-needs nothing the generic log doesn't provide (a full in-memory array is the
-intended default, no memory strategy legislated, §2.7). Certify adapters with
-`runTimelineStoreConformance`, which delegates its store-agnostic trio
-(backend-id, empty-read → `[]`, idempotent-delete) to the shared
-`runStoreConformance` skeleton.
+**Durable adapters.** [@agentick/timeline-fs](../timeline-fs) and [@agentick/timeline-postgres](../timeline-postgres) implement `TimelineStore`; both pass the conformance suite.
 
-## Verified by
+**Rendering.** [@agentick/compiler-react](../compiler-react) owns `<Message>`, `<System>`, the content block components, and `useContextInfo`.
 
-- `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection
-  invariants, turn boundaries + trailing-input fold, compaction.
-- `src/__tests__/harness-store.spec.ts` — write policies, flush barrier,
-  failure typing, `turnBoundaries: false`, cursored history.
-- `src/__tests__/integration-with-compiler.spec.tsx` — `<Timeline/>` →
-  `context.entries` (the mechanism itself).
-- Session-level: steering/join, send serialization, provenance stamps
-  (`@agentick/session` extended-surface suite).
-- `src/client/__tests__/timeline-view.spec.ts` — the client fold: `initial`
-  seeding, `fromCursor` threading (no double-count), visibility filtering,
-  copy-on-write refs, and the `timeline:command:append` requested-phase query.
-- `../gateway/src/wire/__tests__/session-timeline-history.spec.ts` — the
-  `session/timeline_history` wire read (§6.3): full read seq-tagged; `limit`
-  bounds a page + hands back `nextFromSeq`; forward paging reconstructs the whole
-  ordered log; the tail page carries no cursor; the cursor-alongside-seq shape
-  (§6.4 — `seq` present, `cursor` absent for the memory store). (4 tests)
+**Shapes.** [@agentick/spec](../spec) owns `TimelineEntry`, `TimelineStore`, `CompactStrategy`, and `Cursor`.
+
+**Wire.** [@agentick/gateway](../gateway) serves `session/timeline_history` for scroll-back. Its optional `truncateToolResults` policy trims oversized tool output on client-facing frames only — the durable log and the model-facing projection always keep the full bytes, and a truncated block carries `metadata.bounded`. Off by default, and orthogonal to compaction.
 
 ## Roadmap & known gaps
 
-- `TODO(trail-pending-render)` is CLOSED by ADR 53; `TODO(trail-entry-kinds)`
-  remains (richer non-message kinds; `role: "event"` conflation deferred).
-- Store adapters (#132): `@agentick/timeline-fs` (JSONL) and
-  `@agentick/timeline-postgres` have SHIPPED; a SQLite adapter
-  (`@agentick/timeline-sqlite`, the recommended first durable) is the
-  remaining gap.
-- `<Timeline/>` trailing-input styling + boundary turn-separators
-  (ADR 53 wave 2).
+- **SQLite adapter** — the recommended first durable store isn't shipped. Filesystem and Postgres are.
+- **Richer entry kinds** — non-message records beyond turn boundaries are still coarse; `role: "event"` conflation is deferred.
+- **`<Timeline>` turn affordances** — trailing-input styling and boundary turn-separators aren't built.
+- **Cursor vs. seq** — the live tail is bus-cursor-ordered while durable history is seq-ordered, and the two are deliberately not unified. An app doing true infinite-scroll-up reconciles final ordering itself.
+
+## Verified by
+
+- `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection invariants, inbox addressability, snapshot round-trip across instances.
+- `src/__tests__/harness-store.spec.ts` — write-behind and write-through, flush barrier and idempotence, hydration on resume, typed store failures, cursored `history()`, `turnBoundaries: false`, and that compaction never touches the store.
+- `src/__tests__/compact-default.spec.ts` — construction-bound default strategy, call-site override, typed rejection with neither, the bare `timeline:compact` verb, verb enumeration.
+- `src/__tests__/integration-with-compiler.spec.tsx` — `<Timeline/>` overriding the default fold, role/limit/predicate filtering, the render prop, budget eviction with `onEvict`, `preserveRoles`, the reference collapse pattern above, and `<Transcript>` identity.
+- `src/client/__tests__/timeline-view.spec.ts` + `timeline-handle.spec.ts` + `timeline-fanout.spec.ts` — `initial` seeding, `fromCursor` threading with no double-count, visibility filtering, copy-on-write refs, the window splices, `loadOlder` cursor advance and tail latch, and one shared subscription across minted views.
+- Steering and provenance stamps are covered in [@agentick/session](../session) (`extended-surface.spec.ts`); the `session/timeline_history` wire read in [@agentick/gateway](../gateway).

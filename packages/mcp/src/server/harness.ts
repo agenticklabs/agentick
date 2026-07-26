@@ -648,6 +648,10 @@ export class McpServerHarness
         logging: this.loggingEnabled,
       },
       this.options.capabilities,
+      // Spec extensions — advertised verbatim on every connection. Not
+      // gated on any wiring fact: the harness has no view of an
+      // extension's surface (see McpServerExtensionsOptions).
+      this.options.extensions,
     );
     // Per-connection instructions (projected into InitializeResult.instructions).
     // Resolved BEFORE SDK Server construction: the SDK reads `instructions`
