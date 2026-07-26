@@ -343,11 +343,104 @@ observable by any other bus subscriber.
 
 ---
 
+## Every request crossing is an operation (ADR 92 §Slice A)
+
+An inbound MCP request is external ingress, so it qualifies under the
+operation-grammar law: an adopter could want to hook it, guard it, or find
+it in the audit trail. Each SDK `setRequestHandler` crossing therefore runs
+inside a named, journaled, guardable, span-parented operation.
+
+| Wire method                | Operation                             | Journal   |
+| -------------------------- | ------------------------------------- | --------- |
+| connection accept          | `mcp:command:initialize`              | persisted |
+| `tools/call`               | `mcp:command:call-tool`               | persisted |
+| `tools/list`               | `mcp:command:list-tools`              | bus-only  |
+| `resources/list`           | `mcp:command:list-resources`          | bus-only  |
+| `resources/templates/list` | `mcp:command:list-resource-templates` | bus-only  |
+| `resources/read`           | `mcp:command:read-resource`           | bus-only  |
+| `resources/subscribe`      | `mcp:command:subscribe-resource`      | bus-only  |
+| `resources/unsubscribe`    | `mcp:command:unsubscribe-resource`    | bus-only  |
+| `prompts/list`             | `mcp:command:list-prompts`            | bus-only  |
+| `prompts/get`              | `mcp:command:get-prompt`              | bus-only  |
+| `completion/complete`      | `mcp:command:complete`                | bus-only  |
+
+Every crossing gets the **envelope** — name, guards, hooks, span —
+unconditionally. The journal column is only about RETENTION: the chatty
+read/list classes stay bus-only so a polling client cannot grow the durable
+journal without bound, while `call-tool` and `initialize` persist. Every
+phase of every crossing is still observable on the bus.
+
+**Scope.** A crossing op carries the connection dimension
+(`mcpConnectionId`, `mcpServerId`), `origin: "wire"`, and the authenticated
+`identity` (`{ principal, user, scopes }` — identifiers and grants, never
+the credential).
+
+**Parenting.** Work inside a crossing journals as a CHILD: a tool handler's
+`ctx.run` mints an op whose `parentOpId` is the crossing's `opId` and whose
+scope inherits the connection dimension and identity. The chain reads
+connection → crossing → inner command.
+
+### Hooking or guarding a crossing
+
+The op name Pascalizes to the hook/command tag (`mcp:command:call-tool` →
+`McpCallTool`), so a guard self-scopes by comparing `ctx.op`:
+
+```ts
+server.guard((input, ctx) =>
+  ctx.op === "McpCallTool" && !allowed(ctx.identity)
+    ? { kind: "veto", reason: "policy" }
+    : { kind: "proceed" },
+);
+```
+
+A veto blocks the handler before it runs and terminates the op `vetoed`.
+
+### Known gap — resource resolvers and prompt render
+
+A `ResourceResolver` / `PromptDeclaration.render` invoked through
+`resources/read` or `prompts/get` still receives its OWN harness op's ctx,
+not the crossing's identity. `Resources.read(uri)` and `Prompts.render(...)`
+re-enter Effect through `runHarnessProtocol`'s `Effect.runPromiseExit`,
+which starts a fresh root fiber that inherits no `FiberRef` — so neither the
+crossing's `opId` nor its identity can reach the inner op, and it still
+journals as an orphaned root. Closing it needs an Effect-native face on
+those reads (`Resources.fx.read`) that the projection can run on the
+crossing's captured runtime. Seams that ARE reached today: tool handlers and
+completion handlers (both receive the crossing's branded ctx directly).
+
+---
+
 ## Security pipeline
 
 Five named stages, each independently overridable. Defaults are
-transport-aware. Stages execute in order; any throw short-circuits the
-request with a typed `McpServerError` subclass.
+transport-aware. Any throw short-circuits the request with a typed
+`McpServerError` subclass.
+
+**The stages are seams on the crossing op, not a parallel pipeline.** The
+staged `auth: {...}` config is sugar over that one enforcement path:
+
+| Stage             | Where it runs                                                              |
+| ----------------- | -------------------------------------------------------------------------- |
+| `connectionGuard` | Pre-op, once per connection — before `mcp:command:initialize`              |
+| `authenticator`   | **Pre-op**, per request — admission is not work, so it is not an operation |
+| `authorizer`      | `guard`-kind interceptor on the crossing op                                |
+| `rateLimiter`     | `guard`-kind interceptor on the crossing op                                |
+| `inputSanitizer`  | `transform`-kind interceptor — rewrites the crossing op's tool input       |
+
+Guard-kind interceptors sort ahead of transforms, which reproduces the
+fixed order authenticate → authorize → rate-limit → sanitize. Each stage
+self-scopes to its crossing's command tag, so none of them fire on the
+nested ops a handler triggers. Each rejects by throwing its existing typed
+error rather than raising a veto signal, so the JSON-RPC frame a client
+sees is byte-identical to the pre-envelope path.
+
+A **rejected admission** (connection guard, pre-gate 401, or a failed
+per-request authenticator) publishes the discrete
+`mcpServer:admission:failed` event instead of an operation — admission
+denied means no work unit exists. Its payload carries the connection shape
+(`transportKind`, `origin`, `remoteAddress`) and a `failureClass` of
+`"connection-guard" | "pre-gate" | "authenticate"`, plus the stage's reason
+string. It never carries headers or credential material.
 
 | Stage             | Default                          | Adopter override                                 |
 | ----------------- | -------------------------------- | ------------------------------------------------ |
@@ -668,6 +761,10 @@ resource_metadata="…"` (derived url AND explicit `resourceMetadataUrl`)
   is resolvable; the enforcement split (no `oauth` → pre-gate dormant,
   unauthenticated crossing reaches the SDK as before); and attached-mode
   citizenship (the pre-gate guards only the MCP path, not foreign routes).
+  Plus ADR 92 §Slice A at the HTTP edge: a pre-gate `401` publishes
+  `mcpServer:admission:failed` (failure class `"pre-gate"`, no crossing op, no
+  credential in the payload), and a pre-gate-authenticated crossing forwards
+  its identity onto the `mcp:command:initialize` op scope.
 - `__tests__/tools-slot.spec.ts` — trichotomy contract for the tools slot
   (every form + the xor-discrimination boundary cases).
 - `__tests__/projection-elicit.spec.ts` — `ctx.elicit` sugar surface +
@@ -693,8 +790,20 @@ resource_metadata="…"` (derived url AND explicit `resourceMetadataUrl`)
   log the MCP projection drops is STILL observed by an independent bus
   subscriber; each projection applies its own threshold.
 - `__tests__/spawn.spec.ts` — Mode-A shell ergonomics.
-- `security/__tests__/pipeline.spec.ts` — 35 tests covering every stage in
-  isolation + the composed pipeline.
+- `security/__tests__/pipeline.spec.ts` — 28 tests covering the connection
+  guard, the transport-aware defaults, and every built-in stage in isolation.
+- `__tests__/crossing-operations.spec.ts` — ADR 92 §Slice A over the real
+  wire (in-memory transport + a real SDK `Client`): every promoted crossing
+  emits `mcp:command:<verb>` with the connection dimension + authenticated
+  identity on its scope; a handler's `ctx.run` op parents under the crossing
+  and inherits its dims two levels deep; a tool handler's AND a completion
+  handler's ctx trunk carries the request's identity; a guard veto blocks
+  `McpCallTool` while sibling crossings still run; journal policy is honored
+  per op class (`call-tool` + `initialize` in the journal, `list-tools` +
+  `read-resource` bus-only); the authenticator runs exactly once per
+  crossing; a rejected admission emits `mcpServer:admission:failed` with no
+  crossing op and no credential material; and the four security stages run
+  in order on the guard seam with the sanitizer scoped to tool calls only.
 
 ## See also
 

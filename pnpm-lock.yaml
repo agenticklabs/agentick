@@ -1529,6 +1529,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
       react:
         specifier: ^19.0.0
         version: 19.2.4

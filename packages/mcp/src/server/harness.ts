@@ -18,11 +18,20 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, deriveContext, ulid, type Unsubscribe } from "@agentick/runtime";
+import {
+  BaseHarness,
+  deriveContext,
+  runHarnessProtocol,
+  ulid,
+  withCallMiddleware,
+  type Unsubscribe,
+} from "@agentick/runtime";
 import type {
   Derived,
   EventBus,
   EventScope,
+  IngressIdentity,
+  JournalingPolicy,
   McpAuthenticatedUser,
   McpServerConnectionInfo,
   McpServerHarnessProtocol,
@@ -30,12 +39,20 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  Operation,
   OperationJournal,
   ProgressToken,
   Prompts,
   Resources,
 } from "@agentick/spec";
-import { HandlerError, McpServerClosed } from "@agentick/spec";
+import {
+  DEFAULT_JOURNALING_POLICY,
+  deriveHookNames,
+  HandlerError,
+  McpServerAuthRejected,
+  McpServerClosed,
+  parseHookKey,
+} from "@agentick/spec";
 import { createNotifier, type Notifier } from "@agentick/pubsub";
 import { PromptsHarness } from "@agentick/prompts";
 import { TasksHarness } from "@agentick/tasks";
@@ -68,6 +85,14 @@ import { installClientRootsIngest } from "./projection/roots.js";
 import { installResourcesHandlers, type ResourcesFilter } from "./projection/resources.js";
 import { createServerTaskRegistry, installTasksHandlers } from "./projection/tasks.js";
 import { installToolsHandlers } from "./projection/tools.js";
+import {
+  crossingBody,
+  crossingOpName,
+  securityStageInterceptors,
+  type McpCrossing,
+  type McpCrossingInput,
+  type RunCrossing,
+} from "./projection/crossing.js";
 import { allowAllAuth, resolveSecurity, type ResolvedSecurity } from "./security/index.js";
 import { evaluateConnectionGuard, isMcpSecurityError } from "./security/pipeline.js";
 import type { McpConnectionInfo } from "./security/stages.js";
@@ -76,6 +101,82 @@ import { isFalsey, isNull, omitUndefined } from "@agentick/utils";
 
 const SURFACE = "mcpServer" as const;
 type McpServerSurface = typeof SURFACE;
+
+/**
+ * Discrete bus event published when an inbound crossing is REJECTED at
+ * admission (ADR 92 §Family 1.3). Not an operation — admission denied means no
+ * work unit exists — but the audit trail must still see the attempt.
+ *
+ * Payload carries the connection shape (transport kind, origin, remote address)
+ * and a failure CLASS; it never carries credential material. The
+ * credentials-never-cross-the-wire law extends to the journal.
+ */
+export const MCP_SERVER_ADMISSION_FAILED = "mcpServer:admission:failed";
+
+/** How an inbound crossing failed admission. */
+export type McpAdmissionFailureClass =
+  /** The HTTP auth pre-gate rejected the request (RFC 9728 401 challenge). */
+  | "pre-gate"
+  /** The per-request `Authenticator` stage rejected the crossing. */
+  | "authenticate"
+  /** The `ConnectionGuard` refused the connection outright. */
+  | "connection-guard";
+
+/**
+ * Per-op-class journaling policy for the MCP server (ADR 92 §"Journaling policy
+ * is orthogonal to the envelope"). Every crossing gets the ENVELOPE — name,
+ * guards, hooks, span — regardless; this decides only what the JOURNAL retains.
+ *
+ * `call-tool` and `initialize` are state-affecting / session-establishing and
+ * persist. Reads, lists, completions and subscription bookkeeping are chatty
+ * under a polling client, so they stay bus-only: subscribers, OTel exporters
+ * and live debuggers still observe every phase; the durable journal does not
+ * grow without bound.
+ */
+const MCP_SERVER_JOURNALING_POLICY: JournalingPolicy = {
+  ...DEFAULT_JOURNALING_POLICY,
+  override: {
+    [crossingOpName("list-tools")]: "bus-only",
+    [crossingOpName("list-resources")]: "bus-only",
+    [crossingOpName("list-resource-templates")]: "bus-only",
+    [crossingOpName("read-resource")]: "bus-only",
+    [crossingOpName("subscribe-resource")]: "bus-only",
+    [crossingOpName("unsubscribe-resource")]: "bus-only",
+    [crossingOpName("list-prompts")]: "bus-only",
+    [crossingOpName("get-prompt")]: "bus-only",
+    [crossingOpName("complete")]: "bus-only",
+  },
+};
+
+/**
+ * Project an authenticated MCP user onto the trunk's structured ingress
+ * identity (ADR 34/51). `principal` is the scalar identity-scope key; `user` is
+ * the adopter-shaped record; `scopes` are the credential's grants. Identifiers
+ * and scopes only — never the credential itself.
+ */
+function toIngressIdentity(
+  user: McpAuthenticatedUser | null | undefined,
+): IngressIdentity | undefined {
+  if (user === null || user === undefined) return undefined;
+  return omitUndefined({
+    principal: user.id,
+    user: { ...user } as Readonly<Record<string, unknown>>,
+    scopes: user.scopes,
+  });
+}
+
+/**
+ * Reduce an admission rejection to a short, non-sensitive reason string. A
+ * stage's own `reason` is adopter-authored prose; a thrown error contributes
+ * only its message. Never the credential — see
+ * {@link McpServerHarness.emitAdmissionFailure}.
+ */
+function normalizeAdmissionReason(reason: unknown): string | undefined {
+  if (reason === undefined || reason === null) return undefined;
+  if (typeof reason === "string") return reason;
+  if (reason instanceof Error) return reason.message;
+  return String(reason);
+}
 
 export class McpServerHarness
   extends BaseHarness<McpServerSurface>
@@ -251,7 +352,9 @@ export class McpServerHarness
     inbox: MessageInbox,
     options: McpServerOptions,
   ) {
-    super(SURFACE, scopeId, journal, bus, inbox);
+    // ADR 92 §Slice A — per-op-class journal policy for the crossing ops. The
+    // envelope is unconditional; only retention is policy.
+    super(SURFACE, scopeId, journal, bus, inbox, { policy: MCP_SERVER_JOURNALING_POLICY });
     // Validate eagerly — surface bad options at construction, not at
     // first connection. Throws `McpServerConfigInvalid`.
     this.options = validateOptions(options);
@@ -442,6 +545,12 @@ export class McpServerHarness
    * `AcceptHandler` callback. Runs the connection guard, builds the
    * SDK Server, installs projection handlers, connects the wire, and
    * registers the connection for observability.
+   *
+   * ADR 92 §Slice A — the ConnectionGuard stays PRE-OP (a refused connection
+   * is admission, not work; its refusal surfaces as an admission-failure
+   * event), and everything after it runs as the `mcp:command:initialize`
+   * crossing operation: journaled (persisted per policy), guardable, and the
+   * span parent of every per-connection projection install.
    */
   private async acceptConnection(transport: Transport, info: McpConnectionInfo): Promise<void> {
     if (this.closed) {
@@ -459,6 +568,7 @@ export class McpServerHarness
     try {
       await evaluateConnectionGuard(this.security, info);
     } catch (err) {
+      this.emitAdmissionFailure("connection-guard", info, err);
       try {
         await transport.close();
       } catch {
@@ -468,6 +578,52 @@ export class McpServerHarness
       return;
     }
 
+    const connectionId = `conn:${ulid()}`;
+    const identity = toIngressIdentity(info.authenticatedUser);
+    const scope: EventScope = omitUndefined({
+      mcpServerId: this.scopeId,
+      mcpConnectionId: connectionId,
+      identity,
+      // An external client through the projection boundary (ADR 51).
+      origin: "wire" as const,
+    });
+    const op: Operation<McpCrossingInput, void, unknown> = {
+      opId: `${crossingOpName("initialize")}:${ulid()}`,
+      surface: SURFACE,
+      name: crossingOpName("initialize"),
+      scope,
+      input: {
+        params: omitUndefined({
+          transportKind: info.transportKind,
+          origin: info.origin,
+          remoteAddress: info.remoteAddress,
+        }),
+        toolInput: undefined,
+      },
+    };
+    // `runHarnessProtocol` (not a bare `Effect.runPromise`) so a rejection
+    // surfaces as the ORIGINAL error value rather than a wrapping FiberFailure
+    // — accept-path error semantics are unchanged by the envelope.
+    await runHarnessProtocol(
+      this.runOperation(op, () =>
+        Effect.tryPromise({
+          try: () => this.acceptConnectionBody(transport, info, connectionId),
+          catch: (cause) => cause,
+        }),
+      ),
+    );
+  }
+
+  /**
+   * The `mcp:command:initialize` op body — everything downstream of connection
+   * admission. Split out so {@link acceptConnection} reads as
+   * "admit, then run the crossing".
+   */
+  private async acceptConnectionBody(
+    transport: Transport,
+    info: McpConnectionInfo,
+    connectionId: string,
+  ): Promise<void> {
     // 2. Construct SDK Server with negotiated capabilities.
     const capabilities = buildCapabilities(
       {
@@ -501,7 +657,6 @@ export class McpServerHarness
     const sdkServer = new SdkServer(this.serverInfo, omitUndefined({ capabilities, instructions }));
 
     // 3. Track + register the connection.
-    const connectionId = `conn:${ulid()}`;
     const connectedAt = Date.now();
     const connectionRecord: McpServerConnectionInfo = {
       connectionId,
@@ -552,7 +707,27 @@ export class McpServerHarness
     // equivalent) — install unconditionally per connection.
     cleanup.push(installProgressProjection({ sdkServer, bus: this.bus, connectionScope }));
 
-    const buildRequestContext = (): Derived<McpRequestContext> => {
+    /**
+     * Mint the per-request branded ctx. `overrides` carry what only the
+     * crossing knows: the identity the PRE-OP authenticator resolved (ADR 92 —
+     * admission stays pre-op) and `tools/call`'s per-call progress token. Both
+     * compose INTO the single branded mint rather than being spread on
+     * afterwards (a post-mint spread erases the brand and forces the lazy
+     * facets).
+     */
+    const buildRequestContext = (overrides?: {
+      readonly user?: McpAuthenticatedUser | null;
+      readonly identity?: IngressIdentity;
+      readonly progressToken?: ProgressToken;
+    }): Derived<McpRequestContext> => {
+      // The crossing's trunk: the connection dimensions plus the authenticated
+      // ingress identity. This is what a handler reads as `ctx.identity` and
+      // what every ad-hoc `ctx.run` op inherits as its scope.
+      const requestScope: EventScope = omitUndefined({
+        ...connectionScope,
+        identity: overrides?.identity,
+        origin: "wire" as const,
+      });
       // Pull the client's negotiated capabilities + identity from the
       // SDK Server post-initialize. Undefined before initialize
       // completes (which it always has by the time any request handler
@@ -578,21 +753,26 @@ export class McpServerHarness
       // `deriveContext` call (ADR 91 §Phase-2): the facets attach as lazy
       // getters, every boundary field composes IN as a branded descriptor. No
       // post-derivation spread (which erases the brand AND forces the lazy
-      // facets). The trunk derives from the CONNECTION crossing
-      // (`connectionScope` — off-fiber parent), so `ctx.run` ad-hoc ops run as
-      // ROOT ops on this server harness's runner. `log` emits ONE bus event
-      // scoped to this connection (`installLogProjection` forwards it to
+      // facets). The trunk derives from the CROSSING (`requestScope` — the
+      // connection dims plus the authenticated identity). The facets are
+      // RE-ATTACHED in-fiber once the crossing op is running (see
+      // `runCrossing`), which is what makes `ctx.run` a CHILD of the crossing
+      // rather than an orphaned root. `log` emits ONE bus event scoped to this
+      // connection (`installLogProjection` forwards it to
       // `notifications/message`); `trace`/`metrics` go to the telemetry
-      // provider, off-path here.
+      // provider, off-path until the in-fiber re-attach.
       const built = deriveContext(
-        connectionScope,
+        requestScope,
         {
           log: (level, data, logger, trace) => {
             void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
           },
           namespace: this.telemetryNamespace,
-          surface: "mcp",
-          scope: connectionScope,
+          // The harness's own surface, so a `ctx.run` op is named the same
+          // (`mcpServer:run:<name>`) whether it fires before the crossing op
+          // starts or from inside it after the in-fiber facet re-attach.
+          surface: SURFACE,
+          scope: requestScope,
           runOperation: this.runOperation.bind(this),
         },
         {
@@ -633,11 +813,18 @@ export class McpServerHarness
             connectionId,
             transportKind: info.transportKind,
             connectedAt,
-            user: null,
+            user: overrides?.user ?? null,
             clientInfo: sdkClientInfo
               ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
               : null,
             clientCapabilities: sdkClientCaps,
+            // ADR 64 / A1 — the client's per-call `_meta.progressToken`, so a
+            // handler calling `ctx.progress(ctx.mcp!.progressToken!, …)` emits a
+            // signal the progress projection echoes back under the token the
+            // client generated. Only `tools/call` carries one.
+            ...(overrides?.progressToken !== undefined
+              ? { progressToken: overrides.progressToken }
+              : {}),
             // ADR 65 — inbound roots, read fresh per request so a
             // `roots/list_changed` re-pull is reflected on the next call.
             // Omitted when the client never advertised `roots`.
@@ -653,6 +840,92 @@ export class McpServerHarness
       );
       const ctx: Derived<McpRequestContext> = built;
       return ctx;
+    };
+
+    /**
+     * The crossing runner for THIS connection (ADR 92 §Slice A). Every SDK
+     * request handler on this connection routes through it:
+     *
+     *   1. **Authenticate — PRE-OP.** Admission is not an operation (ADR 92
+     *      non-goals); a rejected crossing has no work unit, so it produces an
+     *      admission-failure EVENT and the same `McpServerAuthRejected` the
+     *      pipeline threw before.
+     *   2. **Manufacture the op.** `mcp:command:<verb>`, scope = connection
+     *      dims + the resolved identity + `origin: "wire"`.
+     *   3. **Guard seam.** Authorizer / RateLimiter / InputSanitizer ride the
+     *      op's tier-4 call-scoped interceptor list, self-scoped to this
+     *      crossing's command so they never touch nested ops.
+     *   4. **Re-attach the ctx facets IN-FIBER** with the op runtime + the op's
+     *      trunk coordinates, so `ctx.log`/`ctx.trace` nest under the crossing
+     *      span and `ctx.run` mints CHILD ops carrying `parentOpId` + the
+     *      connection dim.
+     *   5. **Body.** The SDK handler, over the post-cascade input.
+     */
+    const runCrossing: RunCrossing = async <R>(crossing: McpCrossing<R>): Promise<R> => {
+      // The ADMISSION ctx — deliberately identity-less. The authenticator is
+      // what ESTABLISHES the identity, so it must not be handed one; it reads
+      // the credential material off `ctx.metadata.headers`.
+      const admissionCtx = buildRequestContext();
+      const authn = await this.security.authenticator(admissionCtx);
+      if (!authn.authenticated) {
+        this.emitAdmissionFailure("authenticate", info, authn.reason, connectionId);
+        throw new McpServerAuthRejected({ reason: authn.reason || "Authentication failed" });
+      }
+      // The CROSSING ctx — the same connection, now carrying the identity
+      // admission resolved. Minted (not spread over the admission ctx) so the
+      // whole composition stays branded and the lazy facets stay lazy.
+      const identity = toIngressIdentity(authn.user);
+      const ctx = buildRequestContext(
+        omitUndefined({ user: authn.user, identity, progressToken: crossing.progressToken }),
+      );
+
+      const opName = crossingOpName(crossing.verb);
+      const scope: EventScope = omitUndefined({
+        ...connectionScope,
+        identity,
+        origin: "wire" as const,
+      });
+      const op: Operation<McpCrossingInput, R, unknown> = {
+        opId: `${opName}:${ulid()}`,
+        surface: SURFACE,
+        name: opName,
+        scope,
+        input: {
+          params: crossing.params ?? {},
+          toolInput: crossing.toolInput ? { ...crossing.toolInput } : undefined,
+        },
+      };
+      // The command tag `runOperation` stamps on `ctx.op` — the value each
+      // security stage compares against so it fires on the crossing only.
+      const command = parseHookKey(deriveHookNames(opName)[0])?.command as string;
+      const interceptors = securityStageInterceptors({
+        security: this.security,
+        ctx,
+        operation: crossing.operation,
+        command,
+      });
+
+      const body = crossingBody(crossing.run, ctx);
+      const opEffect = this.runOperation(op, (input) =>
+        Effect.gen(this, function* () {
+          // ADR 64/78/91 — bind the ctx to the RUNNING op: the captured runtime
+          // parents `ctx.trace` spans and makes `ctx.run` a child op, and the
+          // op's trunk coordinates (opId as the child's parentOpId) land on the
+          // ctx the handler reads.
+          const runtime = yield* Effect.runtime<never>();
+          this.defineOperationFacets(ctx, scope, runtime, command);
+          // The crossing is a ROOT op (it is driven from the SDK's own
+          // callback, outside any fiber), so there is no parentOpId to stamp —
+          // only its own opId, which the handler reads and its `ctx.run`
+          // children inherit as THEIR parent.
+          Object.assign(ctx, { opId: op.opId });
+          return yield* body(input);
+        }),
+      );
+      // `runHarnessProtocol` unwraps the Exit so a rejected stage throws its
+      // ORIGINAL `McpServerError` — the SDK serializer sees the same value it
+      // saw pre-envelope, which is what keeps the wire byte-identical.
+      return runHarnessProtocol(withCallMiddleware(interceptors, opEffect));
     };
 
     // Per-connection task registry — bookkeeping for Pattern B tool
@@ -676,8 +949,7 @@ export class McpServerHarness
               },
             }
           : {}),
-        security: this.security,
-        buildContext: buildRequestContext,
+        runCrossing,
       });
       cleanup.push(toolsUnsubscribe);
     }
@@ -691,8 +963,7 @@ export class McpServerHarness
       const unsubscribe = installPromptsHandlers(sdkServer, {
         source: this.promptsSource,
         ...(this.promptsFilter ? { filter: this.promptsFilter } : {}),
-        security: this.security,
-        buildContext: buildRequestContext,
+        runCrossing,
       });
       cleanup.push(unsubscribe);
     }
@@ -701,8 +972,7 @@ export class McpServerHarness
       const unsubscribe = installResourcesHandlers(sdkServer, {
         source: this.resourcesSource,
         ...(this.resourcesFilter ? { filter: this.resourcesFilter } : {}),
-        security: this.security,
-        buildContext: buildRequestContext,
+        runCrossing,
       });
       cleanup.push(unsubscribe);
     }
@@ -714,8 +984,7 @@ export class McpServerHarness
       const unsubscribe = installCompletionsHandlers(sdkServer, {
         prompts: this.resolvedCompletions.prompts,
         resources: this.resolvedCompletions.resources,
-        security: this.security,
-        buildContext: buildRequestContext,
+        runCrossing,
       });
       cleanup.push(unsubscribe);
     }
@@ -762,7 +1031,12 @@ export class McpServerHarness
       // `McpConnectionInfo` and instructions resolution needn't re-authenticate.
       verify: async (info) => {
         const result = await this.security.authenticator(this.buildPreGateContext(info));
-        return result.authenticated ? { ok: true, user: result.user } : { ok: false };
+        if (result.authenticated) return { ok: true, user: result.user };
+        // ADR 92 §Family 1.3 — a 401'd crossing leaves a trace. The pre-gate is
+        // the LAST place holding the connection shape before the transport
+        // writes the challenge and drops the request.
+        this.emitAdmissionFailure("pre-gate", info, result.reason);
+        return { ok: false };
       },
     };
   }
@@ -806,7 +1080,7 @@ export class McpServerHarness
           void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
         },
         namespace: this.telemetryNamespace,
-        surface: "mcp",
+        surface: SURFACE,
         scope: connectionScope,
         runOperation: this.runOperation.bind(this),
       },
@@ -902,6 +1176,45 @@ export class McpServerHarness
   }
 
   // ─────────── Internal — used by transport + projection layers (#171c+) ───────────
+
+  /**
+   * Publish the admission-failure event for a REJECTED inbound crossing
+   * (ADR 92 §Family 1.3). A discrete event, not an operation: admission denied
+   * means no work unit exists, so there is no phase contract to run — but the
+   * audit trail must still see the attempt so probing shows up.
+   *
+   * Carries the connection SHAPE (transport kind, origin, remote address) plus
+   * the failure class and the stage's own reason string. It never carries the
+   * credential, the `Authorization` header, or any other request headers — the
+   * credentials-never-cross-the-wire law extends to the journal.
+   */
+  private emitAdmissionFailure(
+    failureClass: McpAdmissionFailureClass,
+    info: McpConnectionInfo,
+    reason?: unknown,
+    connectionId?: string,
+  ): void {
+    const scope: EventScope = omitUndefined({
+      mcpServerId: this.scopeId,
+      mcpConnectionId: connectionId,
+      origin: "wire" as const,
+    });
+    void Effect.runFork(
+      this.emit({
+        name: MCP_SERVER_ADMISSION_FAILED,
+        phase: "terminal",
+        outcome: "failed",
+        scope,
+        payload: omitUndefined({
+          failureClass,
+          transportKind: info.transportKind,
+          origin: info.origin,
+          remoteAddress: info.remoteAddress,
+          reason: normalizeAdmissionReason(reason),
+        }),
+      }),
+    );
+  }
 
   /**
    * Register an open connection. Called by the transport accept path.

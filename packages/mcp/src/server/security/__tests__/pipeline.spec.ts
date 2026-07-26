@@ -3,12 +3,13 @@
  *
  * Pins:
  *  - Connection guard: trusted transports skip; untrusted run guard
- *  - Pipeline order: authn → authz → rate-limit → sanitize
- *  - Each stage's rejection produces the correct POJO `_tag`:
- *      McpServerConnectionRejected (guard)
- *      McpServerAuthRejected       (authn)
- *      McpServerAuthzDenied        (authz)
- *      McpServerRateLimited        (rate)
+ *  - The connection guard's rejection produces `McpServerConnectionRejected`
+ *
+ * The PER-REQUEST stage semantics (order, each rejection, sanitizer scoping,
+ * identity propagation) moved to
+ * `../../__tests__/crossing-operations.spec.ts` §"security stages ride the
+ * crossing's guard seam" when ADR 92 §Slice A mapped them onto the crossing
+ * op — they are asserted over the real wire against what actually enforces.
  *  - Transport-aware defaults: stdio/in-memory = allowAll; HTTP/WS = localOnly + rejectAll
  *  - bearerTokenAuth: static map + verify fallback + case-insensitive header lookup
  *  - roleBasedAuthz: pattern specificity, missing rule = deny, empty roles = any-authn
@@ -27,7 +28,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { McpAuthenticatedUser, McpRequestContext } from "@agentick/spec";
+import type { McpRequestContext } from "@agentick/spec";
 import {
   createLog,
   McpServerAuthRejected,
@@ -45,7 +46,6 @@ import {
   allowListGuard,
   bearerTokenAuth,
   evaluateConnectionGuard,
-  evaluateRequestPipeline,
   isMcpSecurityError,
   localOnlyGuard,
   passthroughSanitizer,
@@ -54,7 +54,7 @@ import {
   roleBasedAuthz,
   slidingWindowLimiter,
 } from "../index.js";
-import type { AuthnResult, AuthzResult, RateLimitResult, ResolvedSecurity } from "../index.js";
+import type { ResolvedSecurity } from "../index.js";
 
 /**
  * Build a fake `McpRequestContext` (ADR 43-shaped) for security
@@ -148,129 +148,6 @@ describe("evaluateConnectionGuard", () => {
         remoteAddress: "1.2.3.4",
       }),
     ).rejects.toBeInstanceOf(McpServerConnectionRejected);
-  });
-});
-
-describe("evaluateRequestPipeline", () => {
-  it("runs stages in order: authn → authz → rate → sanitize", async () => {
-    const order: string[] = [];
-    const result = await evaluateRequestPipeline(
-      security({
-        authenticator: async () => {
-          order.push("authn");
-          return { authenticated: true, user: { id: "u1" } };
-        },
-        authorizer: async () => {
-          order.push("authz");
-          return { allowed: true };
-        },
-        rateLimiter: async () => {
-          order.push("rate");
-          return { allowed: true };
-        },
-        inputSanitizer: async (_c, _t, input) => {
-          order.push("sanitize");
-          return { ...input };
-        },
-      }),
-      ctx(),
-      { type: "tool_call", name: "search" },
-      { q: "hello" },
-    );
-    expect(order).toEqual(["authn", "authz", "rate", "sanitize"]);
-    expect(result.ctx.mcp.user).toEqual({ id: "u1" });
-    expect(result.toolInput).toEqual({ q: "hello" });
-  });
-
-  it("rejects with McpServerAuthRejected; later stages don't run", async () => {
-    let authzCalled = false;
-    const err = await evaluateRequestPipeline(
-      security({
-        authenticator: async (): Promise<AuthnResult> => ({
-          authenticated: false,
-          reason: "nope",
-        }),
-        authorizer: async () => {
-          authzCalled = true;
-          return { allowed: true };
-        },
-      }),
-      ctx(),
-      { type: "tool_call", name: "x" },
-    ).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(McpServerAuthRejected);
-    expect(authzCalled).toBe(false);
-  });
-
-  it("rejects with McpServerAuthzDenied on authz failure", async () => {
-    const err = await evaluateRequestPipeline(
-      security({
-        authorizer: async (): Promise<AuthzResult> => ({ allowed: false, reason: "no role" }),
-      }),
-      ctx(),
-      { type: "tool_call", name: "x" },
-    ).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(McpServerAuthzDenied);
-  });
-
-  it("rejects with McpServerRateLimited + retryAfterMs on rate-limit", async () => {
-    const err = await evaluateRequestPipeline(
-      security({
-        rateLimiter: async (): Promise<RateLimitResult> => ({
-          allowed: false,
-          retryAfterMs: 5000,
-        }),
-      }),
-      ctx(),
-      { type: "tool_call", name: "x" },
-    ).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(McpServerRateLimited);
-  });
-
-  it("does NOT call sanitizer for non-tool operations", async () => {
-    let sanCalled = false;
-    await evaluateRequestPipeline(
-      security({
-        inputSanitizer: async (_c, _t, input) => {
-          sanCalled = true;
-          return { ...input };
-        },
-      }),
-      ctx(),
-      { type: "tool_list" },
-    );
-    expect(sanCalled).toBe(false);
-  });
-
-  it("sanitizes input on tool_call only", async () => {
-    const result = await evaluateRequestPipeline(
-      security({
-        inputSanitizer: async (_c, _t, input) => ({ ...input, _sanitized: true }),
-      }),
-      ctx(),
-      { type: "tool_call", name: "x" },
-      { q: "hi" },
-    );
-    expect(result.toolInput).toEqual({ q: "hi", _sanitized: true });
-  });
-
-  it("propagates authn-provided user into authz/rate stages", async () => {
-    const seenAuthz: (McpAuthenticatedUser | null)[] = [];
-    await evaluateRequestPipeline(
-      security({
-        authenticator: async () => ({
-          authenticated: true,
-          user: { id: "u9", roles: ["admin"] },
-        }),
-        authorizer: async (c) => {
-          seenAuthz.push(c.mcp.user);
-          return { allowed: true };
-        },
-      }),
-      ctx(),
-      { type: "tool_call", name: "x" },
-    );
-    expect(seenAuthz[0]).toEqual({ id: "u9", roles: ["admin"] });
   });
 });
 

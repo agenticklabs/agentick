@@ -18,9 +18,14 @@ export {
   createSubscriptionBridge,
   type SubscriptionBridge,
   type SubscriptionCtx,
+  type SubscriptionDispatchInput,
+  type SubscriptionDispatchRunner,
   type SubscriptionHandler,
+  type SubscriptionInvoker,
   type CreateSubscriptionBridgeOptions,
 } from "./bridge.js";
+
+export { SubscriptionsHarness, type SubscriptionsHarnessOptions } from "./harness.js";
 
 export { attachInProcessScheduler } from "./scheduler.js";
 

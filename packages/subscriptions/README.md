@@ -20,27 +20,31 @@ published independently.
 
 ## What it is
 
-Unlike knobs and state, this is **not a `BaseHarness`** — it is a plain
-in-memory bridge (`createSubscriptionBridge`) installed as an **app-level**
-extension (`withSubscriptions()`), living for the app's lifetime and shared
-across every session. The `HookBridges.subscriptions` slot is optional; the
-React components throw a clear error if the extension isn't installed.
+An **app-level** extension (`withSubscriptions()`) living for the app's
+lifetime and shared across every session. The `HookBridges.subscriptions` slot
+is optional; the React components throw a clear error if the extension isn't
+installed.
 
-Three moving parts:
+Four moving parts:
 
-1. **The bridge** (`bridge.ts`) — holds intents. `declare(intent, handler)`
-   registers one (re-declaration aborts the prior controller);
-   `dispatch(id, event)` invokes the bound handler with a `SubscriptionCtx`;
-   `list()` is what drivers read; `subscribe(fn)` notifies drivers of intent
-   changes. Intents are JSON-serializable and snapshot via `exportSnapshot()`;
-   handlers are not — on restore, intents come back as **pending** (no handler)
-   and get promoted to **live** when the JSX re-declares them with a
-   freshly-bound handler.
-2. **The default scheduler driver** (`scheduler.ts`) —
+1. **The bridge** (`bridge.ts`) — the intent registry. `declare` registers one
+   (re-declaration aborts the prior controller);
+   `dispatch(id, event)` fires it; `invoker(id)` resolves the bound invocation
+   without the operation envelope; `list()` is what drivers read;
+   `subscribe(fn)` notifies drivers of intent changes. Intents are
+   JSON-serializable and snapshot via `exportSnapshot()`; handlers are not — on
+   restore, intents come back as **pending** (no handler) and get promoted to
+   **live** when the JSX re-declares them with a freshly-bound handler.
+2. **The harness** (`harness.ts`) — `SubscriptionsHarness`, a `BaseHarness`
+   declaring one verb, `subscriptions:dispatch`. `withSubscriptions` injects
+   its `runDispatch` into the bridge so **every fire is an operation** —
+   guardable, hookable, journaled. See
+   [The dispatch operation](#the-dispatch-operation).
+3. **The default scheduler driver** (`scheduler.ts`) —
    `attachInProcessScheduler(bridge)` watches `list()` and fires every
    `kind: "cron"` intent via `setTimeout` chains, re-evaluating live as
    `<Cron>` JSX mounts/unmounts.
-3. **The React components** (`/react`) — `<Cron>`, `<Webhook>`,
+4. **The React components** (`/react`) — `<Cron>`, `<Webhook>`,
    `<EventListener>`: thin declarative wrappers that `declare` an intent on
    mount and unsubscribe on unmount, reading the latest handler via a ref so
    re-renders don't thrash the declaration.
@@ -114,23 +118,103 @@ app.post("/hooks/github", async (req) => {
 });
 ```
 
+## The dispatch operation
+
+A cron tick, a webhook POST, a bus event: each is _ingress_. Before ADR 92 a
+driver reached into `bridge.dispatch(...)` and the declared handler simply ran
+— no seam could deny it, and the journal kept no record that the system had
+been woken from outside. Time-triggered ingress was the one entry point with no
+operation grammar around it.
+
+`withSubscriptions()` now installs a `SubscriptionsHarness` and injects its
+`runDispatch` into the bridge, so every fire runs the full phase contract.
+
+|                    |                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| **Verb**           | `subscriptions:dispatch`                                                                   |
+| **Op name**        | `subscriptions:command:dispatch`                                                           |
+| **Surface**        | `subscriptions`                                                                            |
+| **Input**          | `{ id, sessionId, event, metadata }` — serializable only                                   |
+| **Scope**          | `{ sessionId, subscriptionId }`                                                            |
+| **Journal policy** | **PERSISTED** — `requested` + `terminal` hit the journal (the default policy; no override) |
+| **Hooks**          | `onBeforeSubscriptionsDispatch` / `onAfterSubscriptionsDispatch`                           |
+| **`ctx.op`**       | `"SubscriptionsDispatch"`                                                                  |
+
+`subscriptionId` is a module augmentation of `EventScopeExtensions` (in
+`augment.ts`), so it filters like any other scope dimension:
+
+```ts
+app.events({ scope: { subscriptionId: "nightly-report" } });
+```
+
+### Guarding a fire
+
+The harness is reachable as `bridge.harness` — so anywhere you hold the bridge
+(`useBridges().subscriptions`, `withSubscriptions({ initialize })`) you hold
+the registration point:
+
+```ts
+withSubscriptions({
+  initialize: (bridge) => {
+    bridge.harness?.guard<{ id: string }>((input) =>
+      quietHours() && input.id === "nightly-report"
+        ? { kind: "veto", reason: "quiet-hours" }
+        : undefined,
+    );
+  },
+});
+```
+
+A veto means the handler never runs, the terminal outcome is `vetoed`, and the
+driver's `bridge.dispatch(...)` promise rejects (the in-process scheduler
+swallows that rejection by design — a bad fire must not tear down the
+scheduler). The same handle registers middleware (`.use(...)`) and the boundary
+hooks (`.hooks.onBeforeSubscriptionsDispatch(...)`) on that one seam.
+
+### Signal form
+
+The command input is data only — the handler **function** is not an input
+(ADR 51 §1.2). The harness holds a construction-bound lookup into the bridge's
+registry (`bridge.invoker(id)`) and reconstructs the invocation from the
+signal. That is what makes the verb genuinely inbox-addressable: a message of
+type `subscriptions:dispatch` fires the subscription with no closure in play,
+through the identical body an in-process driver drives.
+
+A fire for an `id` with nothing live declared under it throws **pre-op** — that
+is admission, not work, so no operation is opened and no terminal is journaled
+(ADR 92's rule). If the intent is withdrawn _between_ admission and execution,
+the body fails and the terminal records it.
+
 ## API
 
 ### `@agentick/subscriptions`
 
 - **`createSubscriptionBridge(options?)`** → `SubscriptionBridge`.
-  `CreateSubscriptionBridgeOptions.sessionId` stamps the ctx (default `"app"`).
-  Surface: `declare(intent, handler): Unsubscribe` · `list()` ·
-  `dispatch(id, event, { metadata? })` · `subscribe(fn): Unsubscribe` ·
-  `exportSnapshot()` · `importSnapshot(intents)`.
+  `CreateSubscriptionBridgeOptions`: `sessionId` stamps the ctx (default
+  `"app"`); `runDispatch` injects the operation wrapper; `harness` surfaces the
+  harness as `bridge.harness`. Both are supplied by `withSubscriptions`;
+  omitted (the bare bridge) `dispatch` invokes the handler directly, exactly as
+  before. Surface: `declare(intent, handler): Unsubscribe` · `list()` ·
+  `dispatch(id, event, { metadata? })` · `invoker(id)` ·
+  `subscribe(fn): Unsubscribe` · `exportSnapshot()` · `importSnapshot(intents)`
+  · `harness?`.
+- **`SubscriptionsHarness`** — the `BaseHarness` declaring
+  `subscriptions:dispatch`. Constructed by `withSubscriptions` against the
+  installer substrate with `{ resolveInvoker }` (the construction-bound
+  registry lookup). Public surface: `dispatch(input)` (the declared verb),
+  `runDispatch` (the bridge-injected runner), plus the inherited `guard` /
+  `use` / `hook` / `hooks` / `events` seams.
 - **`attachInProcessScheduler(bridge)`** → `Unsubscribe` — the default cron
   driver. Supports 5-field cron (`min hour dom month dow` with `*`, `*/N`,
   single numbers, comma lists) and the `@hourly` / `@daily` / `@weekly` /
   `@monthly` / `@yearly` macros.
-- **`withSubscriptions(options?)`** → `AppExtension`. Constructs + registers
-  the bridge and (unless `scheduler: false`) attaches the in-process scheduler,
-  detaching it on app close.
+- **`withSubscriptions(options?)`** → `AppExtension`. Constructs the harness
+  against the installer substrate, constructs + registers the bridge wired to
+  it, and (unless `scheduler: false`) attaches the in-process scheduler.
+  Closing the app detaches the scheduler and closes the harness.
 - Types: `SubscriptionBridge`, `SubscriptionCtx`, `SubscriptionHandler`,
+  `SubscriptionDispatchInput`, `SubscriptionDispatchRunner`,
+  `SubscriptionInvoker`, `SubscriptionsHarnessOptions`,
   `CreateSubscriptionBridgeOptions`, `WithSubscriptionsOptions`.
 
 ### `@agentick/subscriptions/react`
@@ -167,7 +251,8 @@ and promote to live when the JSX re-declares them.
 ## Status & roadmap
 
 Scaffolded per ADR 22 (state/formatters/compiler shape). The bridge, the
-default in-process cron scheduler, and the three React components are green.
+dispatch operation (ADR 92 Family 1 §2), the default in-process cron scheduler,
+and the three React components are green.
 
 - **Default scheduler is single-process, best-effort.** Two app instances each
   get their own scheduler and will fire the same intent twice — use an external
@@ -182,11 +267,36 @@ default in-process cron scheduler, and the three React components are green.
   adopter to `bridge.dispatch`.
 - **Connectors (Slack / Telegram / …)** are the motivating future consumer of
   this primitive; not yet built.
-- No conformance suite or `/testing` double ships today (the bridge is a plain
-  in-memory impl, not a `BaseHarness` behind a protocol).
+- No conformance suite or `/testing` double ships today. The bridge is a plain
+  in-memory registry, and `SubscriptionsHarness` has no protocol interface in
+  `@agentick/spec` yet (its one verb is reached through the bridge), so there
+  is nothing for a stub to be typed against.
+- **The dispatch op does not project to the wire.** The verb is
+  inbox-addressable (default `exposure`), but no `WireMethods` row is declared
+  — firing a subscription from a client is a capability decision that has not
+  been made.
+- **`origin` on a fire is the default `"host"`.** A driver cannot yet stamp the
+  gate it came through (`"wire"` for a webhook, `"system"` for the scheduler);
+  `bridge.dispatch` takes no `origin`. Add it when a driver needs the audit
+  distinction.
+- **App-scope interceptors do not reach the dispatch op yet.** The harness
+  accepts `inheritedInterceptors` / `interceptorParent`, but `AppInstaller`
+  exposes no handle to the host `AppHarness`, so `withSubscriptions` cannot
+  thread them (no `AppExtension` in the tree does). Until it can, an
+  `app.guard(...)` does **not** wrap subscription fires — register on
+  `bridge.harness` instead. Tracked at the `TODO(adr-92)` in `extension.ts`.
 
 ## Verified by
 
+- `src/__tests__/dispatch-operation.spec.ts` (10 tests) — a driver fire emits
+  `subscriptions:command:dispatch` with the `{ sessionId, subscriptionId }`
+  scope; `requested` + `terminal` are JOURNALED, not bus-only; the in-process
+  scheduler's tick takes the same op path; the op input is the data-only signal
+  form; a guard veto blocks a scheduled fire (handler never runs, terminal
+  `vetoed`, driver promise rejects) and can veto one subscription while a
+  sibling proceeds; `bridge.harness` is a working guard-registration handle;
+  the bare bridge (no `runDispatch`) still dispatches directly and exposes
+  `invoker()`.
 - `src/__tests__/bridge.spec.ts` (10 tests) — declare / list / dispatch,
   re-declaration aborting the prior controller, unknown-id dispatch error,
   metadata propagation onto the ctx, subscriber notification, and

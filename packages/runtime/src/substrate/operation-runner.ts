@@ -276,25 +276,24 @@ class OperationRunnerImpl implements OperationRunner {
           ? { ...op, parentOpId: ambient.opId }
           : op;
 
-      const scope: EventScope = resolvedOp.scope ?? {};
+      // ADR 92 §Slice A — the effective scope. A child op inherits the ambient
+      // crossing's WORK-PATH + IDENTITY dimensions (`sessionId`, `identity`,
+      // and every augmented dim such as `mcpConnectionId`); its own declared
+      // scope wins on collision. This is the spine rule that makes a nested op
+      // a genuine CHILD rather than an orphaned root carrying only its own
+      // dims: the MCP crossing's connection + principal reach the inner command
+      // it drives, exactly as `parentOpId` already reaches it above.
+      const scope: EventScope = inheritScope(ambient, resolvedOp.scope);
       const ctxScope: RuntimeContext = {
-        sessionId: scope.sessionId,
-        executionId: scope.executionId,
-        tickId: scope.tickId,
+        ...scope,
         // The op's authorization identity (ADR 51) — `"host"` / `"wire"` /
         // `"model"` / `"inbox"`. `RuntimeContext extends EventScope`, which
         // declares `origin`; threading it here lets a command handler read
         // "how was I invoked" via `getContext` (e.g. the gates:override audit's
-        // origin stamp) without unpacking an envelope. Undefined when the op
-        // carries no origin.
-        origin: scope.origin,
-        // The structured ingress identity (ADR 34/51), twin of `origin` on the
-        // identity axis. The gateway threads the authenticated per-request
-        // identity onto its `wire:<method>` op scope; carrying it here lets a
-        // before-hook / middleware read `ctx.identity` (WHO is calling) and
-        // reshape params. `undefined` for every non-wire op (their scope carries
-        // no identity) — no leakage into ordinary command ctx.
-        identity: scope.identity,
+        // origin stamp) without unpacking an envelope. Pinned from the op's OWN
+        // scope (never inherited): origin is a fact about how THIS op entered,
+        // not a coordinate of the work it belongs to.
+        origin: resolvedOp.scope?.origin,
         opId: resolvedOp.opId,
         parentOpId: resolvedOp.parentOpId,
         correlationId: resolvedOp.correlationId,
@@ -583,6 +582,40 @@ class OperationRunnerImpl implements OperationRunner {
     }
     return { name: "Error", message: String(err), data: err };
   }
+}
+
+/**
+ * Trunk fields that identify the AMBIENT OPERATION rather than the work it
+ * belongs to. They must never flow onto a child op's scope: `opId` /
+ * `parentOpId` / `correlationId` are re-derived per op (see the `parentOpId`
+ * auto-threading above), `op` is the command tag, and `origin` is a fact about
+ * how THAT op entered the system, not a coordinate of the work.
+ */
+const NON_INHERITED_TRUNK_KEYS: ReadonlySet<string> = new Set([
+  "opId",
+  "parentOpId",
+  "correlationId",
+  "op",
+  "origin",
+]);
+
+/**
+ * Compose a child op's effective {@link EventScope} (ADR 92 §Slice A): the
+ * ambient fiber trunk's work-path + identity dimensions, overlaid by the op's
+ * own declared scope. Undefined values on either side are dropped so a
+ * declared-but-absent dim never erases the inherited one.
+ *
+ * Returns the op's own scope unchanged when there is nothing to inherit (the
+ * root-op hot path allocates nothing extra).
+ */
+function inheritScope(ambient: RuntimeContext, own: EventScope | undefined): EventScope {
+  const inherited: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(ambient)) {
+    if (value === undefined || NON_INHERITED_TRUNK_KEYS.has(key)) continue;
+    inherited[key] = value;
+  }
+  if (Object.keys(inherited).length === 0) return own ?? {};
+  return { ...inherited, ...omitUndefined(own ?? {}) } as EventScope;
 }
 
 function matchOverride(

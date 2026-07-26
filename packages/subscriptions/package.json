@@ -69,7 +69,8 @@
     "@agentick/compiler-react": "workspace:*",
     "@agentick/pubsub": "workspace:*",
     "@agentick/runtime": "workspace:*",
-    "@agentick/spec": "workspace:*"
+    "@agentick/spec": "workspace:*",
+    "effect": "^3.22.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.13"

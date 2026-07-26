@@ -29,14 +29,21 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { describe, expect, it } from "vitest";
+import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
-import type { ContentBlock, ToolDeclaration, UrlElicitationRequest } from "@agentick/spec";
+import type {
+  ContentBlock,
+  ProtocolEvent,
+  ToolDeclaration,
+  UrlElicitationRequest,
+} from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
 import {
   bearerTokenAuth,
   httpTransport,
   McpServerHarness,
+  MCP_SERVER_ADMISSION_FAILED,
   type HttpServerTransportHandle,
   type ToolHandlerResolver,
 } from "../../index.js";
@@ -235,11 +242,14 @@ const WELL_KNOWN = "/.well-known/oauth-protected-resource";
  * constructed with the desired options). Mirrors `makeHttpServer` but
  * lets a test pick the transport (owned vs. attached, oauth on/off).
  */
-async function startHarnessOn(transport: HttpServerTransportHandle): Promise<McpServerHarness> {
+async function startHarnessOn(
+  transport: HttpServerTransportHandle,
+  bus: LocalEventBus = new LocalEventBus(),
+): Promise<McpServerHarness> {
   const harness = new McpServerHarness(
     `srv:${ulid()}`,
     new MemoryJournal({ capacity: 1024 }),
-    new LocalEventBus(),
+    bus,
     new LocalInbox(),
     {
       name: "http-oauth-test-server",
@@ -360,6 +370,50 @@ describe("httpTransport — HTTP auth pre-gate (RFC 9728 challenge)", () => {
     await transport.close();
   });
 
+  it("emits the admission-failure event when the pre-gate writes a 401 (ADR 92 §Family 1.3)", async () => {
+    // The pre-gate is the last place holding the connection shape before the
+    // transport writes the challenge and drops the request, so the rejection
+    // must leave a trace there — otherwise a probing client is invisible.
+    const bus = new LocalEventBus();
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport, bus);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+
+    const seen: ProtocolEvent[] = [];
+    const fiber = Effect.runFork(
+      Stream.runForEach(bus.subscribe({ surface: "mcpServer" }), (e) =>
+        Effect.sync(() => {
+          seen.push(e);
+        }),
+      ),
+    );
+
+    const res = await fetch(`http://127.0.0.1:${addr.port}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer wrong-token" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(res.status).toBe(401);
+    await res.body?.cancel();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const failures = seen.filter((e) => e.name === MCP_SERVER_ADMISSION_FAILED);
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.payload).toMatchObject({
+      failureClass: "pre-gate",
+      transportKind: "http",
+    });
+    // Admission denied ⇒ no work unit: no crossing op ran.
+    expect(seen.some((e) => e.name.startsWith("mcp:command:"))).toBe(false);
+    // And the credential never enters the record.
+    expect(JSON.stringify(failures[0]!.payload)).not.toContain("wrong-token");
+
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    await harness.close();
+    await transport.close();
+  });
+
   it("challenges a bad token with 401 + the right resource_metadata url", async () => {
     const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
     const harness = await startHarnessOn(transport);
@@ -418,6 +472,43 @@ describe("httpTransport — HTTP auth pre-gate (RFC 9728 challenge)", () => {
     expect((result.content as { text: string }[])[0]!.text).toBe("echo: gated");
     expect(harness.connections()).toHaveLength(1);
 
+    await client.close();
+    await harness.close();
+    await transport.close();
+  });
+
+  it("forwards the pre-gate identity onto the initialize crossing op (ADR 92 §Slice A)", async () => {
+    // The pre-gate authenticated the crossing and forward-derived its identity
+    // onto `McpConnectionInfo.authenticatedUser`; the accept path then stamps it
+    // on the `mcp:command:initialize` op scope, so the connection's whole audit
+    // subtree is attributable to the principal that opened it.
+    const bus = new LocalEventBus();
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport, bus);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+
+    const seen: ProtocolEvent[] = [];
+    const fiber = Effect.runFork(
+      Stream.runForEach(bus.subscribe({ surface: "mcpServer" }), (e) =>
+        Effect.sync(() => {
+          seen.push(e);
+        }),
+      ),
+    );
+
+    const clientTransport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${addr.port}/mcp`),
+      { requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } } },
+    );
+    const client = await makeHttpClient(clientTransport, "pregate-identity-srv");
+    await new Promise((r) => setTimeout(r, 20));
+
+    const init = seen.find((e) => e.name === "mcp:command:initialize" && e.phase === "requested");
+    expect(init).toBeDefined();
+    expect(init!.scope.identity).toEqual({ principal: "alice", user: { id: "alice" } });
+
+    await Effect.runPromise(Fiber.interrupt(fiber));
     await client.close();
     await harness.close();
     await transport.close();

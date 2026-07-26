@@ -37,6 +37,19 @@ export async function authenticateIngress(
   context: IngressContext,
   authSource?: AuthSource,
 ): Promise<IngressContext> {
+  // TODO(ADR-92 slice-A): a rejected ingress should publish an
+  // admission-failure bus EVENT (connection info + failure class, never the
+  // credential) so the audit trail sees probing — the MCP server already does
+  // this at `McpServerHarness.emitAdmissionFailure`. It cannot be done here:
+  // this helper is a pure function with no bus and no host reference, and its
+  // three callers (transport-http/src/server/server.ts:526,
+  // transport-websocket/src/server/server.ts:150,
+  // transport-unix-socket/src/server/server.ts:66) each hold a `DispatchHost`
+  // (the gateway harness, which HAS a bus) but never pass it in. `AuthSource`
+  // is configured per-transport, not owned by the gateway, so there is no
+  // gateway-side wrap point either. Unblocking it means threading an emitter —
+  // one seam, three edges — which is a deliberate follow-up, not a drive-by.
+
   // No AuthSource → local/trusted pole. No principal stamped.
   if (!authSource) return context;
 

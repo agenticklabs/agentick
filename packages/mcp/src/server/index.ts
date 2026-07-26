@@ -25,7 +25,21 @@
 // Side-effect import — augments `GatewayExtensions.mcpServers` slot.
 import "./augment.js";
 
-export { McpServerHarness } from "./harness.js";
+export {
+  McpServerHarness,
+  MCP_SERVER_ADMISSION_FAILED,
+  type McpAdmissionFailureClass,
+} from "./harness.js";
+
+// ADR 92 §Slice A — the crossing-operation vocabulary. Adopters registering
+// guards / hooks on a crossing name them through these.
+export {
+  crossingOpName,
+  type McpCrossing,
+  type McpCrossingInput,
+  type McpCrossingVerb,
+  type RunCrossing,
+} from "./projection/crossing.js";
 export { type McpServerHandle, toHandle } from "./handle.js";
 export {
   resolveCompletionsOption,

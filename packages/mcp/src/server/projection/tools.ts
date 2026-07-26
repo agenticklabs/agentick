@@ -2,19 +2,19 @@
  * Tools projection — per-connection `tools/list` + `tools/call`.
  *
  * The harness wires this onto each connection's SDK `Server` instance.
- * On every request:
+ * Each handler declares a CROSSING (ADR 92 §Slice A) and hands its body to
+ * `runCrossing`, which owns admission, the `mcp:command:<verb>` operation
+ * envelope, the security stages on the op's guard seam, and the per-request
+ * ctx mint. This module keeps only the projection work:
  *
- *  1. Build the per-request `McpRequestContext` from the connection
- *     state + SDK `RequestHandlerExtra`.
- *  2. Run the security pipeline (`evaluateRequestPipeline`).
- *  3. Apply the per-connection filter + transforms over the canonical
+ *  1. Apply the per-connection filter + transforms over the canonical
  *     tool registry.
- *  4. For `tools/list`, return projected declarations.
- *  5. For `tools/call`, resolve the handler, run it, return the result.
+ *  2. For `tools/list`, return projected declarations.
+ *  3. For `tools/call`, resolve the handler, run it, return the result.
  *
  * Tool transforms run against the **already authenticated** context
- * (post-authenticator stage), so they can branch on `ctx.user`,
- * `ctx.user.roles`, etc.
+ * (the crossing ctx, post-admission), so they can branch on `ctx.identity`,
+ * `ctx.mcp.user.roles`, etc.
  */
 
 import type {
@@ -51,8 +51,7 @@ export interface ToolsProjectionRules {
   readonly transforms?: readonly ToolTransform<McpRequestContext>[];
 }
 
-import { evaluateRequestPipeline } from "../security/pipeline.js";
-import type { ResolvedSecurity } from "../security/stages.js";
+import type { RunCrossing } from "./crossing.js";
 
 /**
  * Discriminated return shape from a resolved tool handler:
@@ -139,10 +138,12 @@ export interface ToolsProjectionOptions {
   readonly tasks?: ServerTaskRegistry;
   /** Per-connection filter + transforms — narrow slice of `McpServerOptions.tools`. */
   readonly projection?: ToolsProjectionRules;
-  /** Security pipeline resolved for this server. */
-  readonly security: ResolvedSecurity;
-  /** Connection-scoped context base (the projection clones + augments per-request). */
-  readonly buildContext: () => McpRequestContext;
+  /**
+   * The crossing-operation runner for this connection (ADR 92 §Slice A). Owns
+   * admission, the `mcp:command:<verb>` envelope, the security stages on the
+   * guard seam, and the per-request ctx mint.
+   */
+  readonly runCrossing: RunCrossing;
 }
 
 /**
@@ -165,140 +166,137 @@ export function installToolsHandlers(
   // ─────────── tools/list ───────────
   sdkServer.setRequestHandler(
     ListToolsRequestSchema,
-    async (_request: ListToolsRequest): Promise<ListToolsResult> => {
-      const baseCtx = options.buildContext();
-      const { ctx } = await evaluateRequestPipeline(options.security, baseCtx, {
-        type: "tool_list",
-      });
-      const projected = projectTools(options.registry.list(), filter, composed, ctx);
-      return { tools: projected.map(toWireTool) };
-    },
+    async (_request: ListToolsRequest): Promise<ListToolsResult> =>
+      options.runCrossing({
+        verb: "list-tools",
+        operation: { type: "tool_list" },
+        run: async (_input, ctx): Promise<ListToolsResult> => {
+          const projected = projectTools(options.registry.list(), filter, composed, ctx);
+          return { tools: projected.map(toWireTool) };
+        },
+      }),
   );
 
   // ─────────── tools/call ───────────
   sdkServer.setRequestHandler(
     CallToolRequestSchema,
     async (request: CallToolRequest): Promise<CallToolResult> => {
-      const baseCtx = options.buildContext();
-      const op = { type: "tool_call" as const, name: request.params.name };
-      const { ctx: authedCtx, toolInput } = await evaluateRequestPipeline(
-        options.security,
-        baseCtx,
-        op,
-        (request.params.arguments ?? {}) as Record<string, unknown>,
-      );
-
-      // ADR 64 / A1 — surface the client's per-call `_meta.progressToken`
-      // on `ctx.mcp.progressToken`. A handler that calls
-      // `ctx.progress(ctx.mcp!.progressToken!, ...)` emits a progress
-      // signal whose token the progress projection echoes verbatim onto
-      // the wire — so the client SDK's `onprogress` (keyed by the token
-      // it generated) correlates to THIS request. Only `tools/call`
-      // carries a progress token in the MCP spec (no `_meta.progressToken`
-      // on `prompts/get` or `completion/complete`), so this is the sole
-      // augmentation site. `undefined` when the client didn't opt in —
-      // the spread then leaves `ctx.mcp` untouched.
+      // ADR 64 / A1 — the client's per-call `_meta.progressToken` rides into the
+      // ctx mint so a handler calling `ctx.progress(ctx.mcp!.progressToken!, …)`
+      // emits a signal the progress projection echoes back under the token the
+      // client generated. Only `tools/call` carries one in the MCP spec.
       const progressToken = request.params._meta?.progressToken;
-      const ctx: McpRequestContext =
-        progressToken !== undefined
-          ? { ...authedCtx, mcp: { ...authedCtx.mcp, progressToken } }
-          : authedCtx;
+      return options.runCrossing({
+        verb: "call-tool",
+        operation: { type: "tool_call", name: request.params.name },
+        params: { name: request.params.name },
+        // The sanitizer stage (and any `onBeforeCallTool` hook) rewrites this;
+        // the body below reads the POST-CASCADE value off `input`.
+        toolInput: (request.params.arguments ?? {}) as Record<string, unknown>,
+        ...(progressToken !== undefined ? { progressToken } : {}),
+        run: async (input, ctx): Promise<CallToolResult> => {
+          const toolInput = input.toolInput;
 
-      // Re-project so per-connection filter/transforms decide
-      // visibility for this specific call. A tool hidden from `list`
-      // must not be callable via `call` either.
-      const projected = projectTools(options.registry.list(), filter, composed, ctx);
-      const tool = projected.find((t) => t.name === request.params.name);
-      if (!tool) {
-        // Tool either doesn't exist or is filtered for this connection.
-        // Return an `isError: true` result rather than a JSON-RPC
-        // protocol error — v1's distinction (tool-execution errors vs
-        // protocol violations). Adopters can branch on `isError` in
-        // their client tool wrappers.
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Tool not found or not available: ${request.params.name}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-      if (!tool.handlerRef) {
-        return {
-          content: [{ type: "text", text: `Tool has no handlerRef: ${tool.name}` }],
-          isError: true,
-        };
-      }
-      const handler = options.resolveHandler(tool.handlerRef);
-      if (!handler) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Tool handler unresolved: ${tool.handlerRef}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      try {
-        const result = await handler(toolInput ?? {}, ctx);
-        if (result.kind === "task") {
-          // Pattern B — handler returned a TaskHandle. Register with
-          // the per-connection task registry so subsequent
-          // `tasks/get` / `tasks/result` / `tasks/cancel` requests
-          // can drive its lifecycle, then return a wire
-          // `CreateTaskResult`. Per the MCP wire codec
-          // (discriminateCallToolResponse on the client side), the
-          // `task` field discriminates this response from a regular
-          // inline `CallToolResult`.
-          if (!options.tasks) {
+          // Re-project so per-connection filter/transforms decide
+          // visibility for this specific call. A tool hidden from `list`
+          // must not be callable via `call` either.
+          const projected = projectTools(options.registry.list(), filter, composed, ctx);
+          const tool = projected.find((t) => t.name === request.params.name);
+          if (!tool) {
+            // Tool either doesn't exist or is filtered for this connection.
+            // Return an `isError: true` result rather than a JSON-RPC
+            // protocol error — v1's distinction (tool-execution errors vs
+            // protocol violations). Adopters can branch on `isError` in
+            // their client tool wrappers.
             return {
               content: [
                 {
                   type: "text",
-                  text: `Tool '${tool.name}' returned a TaskHandle but the server is not configured with tasks projection.`,
+                  text: `Tool not found or not available: ${request.params.name}`,
                 },
               ],
               isError: true,
             };
           }
-          options.tasks.register(result.handle);
-          // The CreateTaskResult shape is structurally compatible
-          // with the SDK's CallToolResult union via the discriminator
-          // field `task`; cast through `unknown` because the SDK's
-          // CallToolResult type doesn't include the task variant
-          // (the wire spec evolved in 2025-11-25 and the SDK's
-          // typings cover both via separate aliases).
-          return toCreateTaskResult(result.handle.info()) as unknown as CallToolResult;
-        }
-        // ADR 70 — thread the handler's structuredContent + soft isError
-        // onto the wire result. `structuredContent` only when present;
-        // `isError` defaults to false for a resolved (non-throwing) call.
-        // 3b-0b-B — result-side `_meta` (step-up auth etc.) rides onto
-        // `CallToolResult._meta` only when the handler produced one, so a
-        // handler that carried none is byte-identical to before.
-        return {
-          content: result.content as CallToolResult["content"],
-          isError: result.isError ?? false,
-          ...(result.structuredContent !== undefined
-            ? { structuredContent: result.structuredContent as CallToolResult["structuredContent"] }
-            : {}),
-          ...(result._meta !== undefined ? { _meta: result._meta } : {}),
-        };
-      } catch (cause) {
-        // Tool-execution error — surface as `isError: true` per the v1
-        // convention. JSON-RPC protocol errors are for transport /
-        // schema / auth failures only.
-        const message = cause instanceof Error ? cause.message : String(cause);
-        return {
-          content: [{ type: "text", text: `Tool error: ${message}` }],
-          isError: true,
-        };
-      }
+          if (!tool.handlerRef) {
+            return {
+              content: [{ type: "text", text: `Tool has no handlerRef: ${tool.name}` }],
+              isError: true,
+            };
+          }
+          const handler = options.resolveHandler(tool.handlerRef);
+          if (!handler) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Tool handler unresolved: ${tool.handlerRef}`,
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          try {
+            const result = await handler(toolInput ?? {}, ctx);
+            if (result.kind === "task") {
+              // Pattern B — handler returned a TaskHandle. Register with
+              // the per-connection task registry so subsequent
+              // `tasks/get` / `tasks/result` / `tasks/cancel` requests
+              // can drive its lifecycle, then return a wire
+              // `CreateTaskResult`. Per the MCP wire codec
+              // (discriminateCallToolResponse on the client side), the
+              // `task` field discriminates this response from a regular
+              // inline `CallToolResult`.
+              if (!options.tasks) {
+                return {
+                  content: [
+                    {
+                      type: "text",
+                      text: `Tool '${tool.name}' returned a TaskHandle but the server is not configured with tasks projection.`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              options.tasks.register(result.handle);
+              // The CreateTaskResult shape is structurally compatible
+              // with the SDK's CallToolResult union via the discriminator
+              // field `task`; cast through `unknown` because the SDK's
+              // CallToolResult type doesn't include the task variant
+              // (the wire spec evolved in 2025-11-25 and the SDK's
+              // typings cover both via separate aliases).
+              return toCreateTaskResult(result.handle.info()) as unknown as CallToolResult;
+            }
+            // ADR 70 — thread the handler's structuredContent + soft isError
+            // onto the wire result. `structuredContent` only when present;
+            // `isError` defaults to false for a resolved (non-throwing) call.
+            // 3b-0b-B — result-side `_meta` (step-up auth etc.) rides onto
+            // `CallToolResult._meta` only when the handler produced one, so a
+            // handler that carried none is byte-identical to before.
+            return {
+              content: result.content as CallToolResult["content"],
+              isError: result.isError ?? false,
+              ...(result.structuredContent !== undefined
+                ? {
+                    structuredContent:
+                      result.structuredContent as CallToolResult["structuredContent"],
+                  }
+                : {}),
+              ...(result._meta !== undefined ? { _meta: result._meta } : {}),
+            };
+          } catch (cause) {
+            // Tool-execution error — surface as `isError: true` per the v1
+            // convention. JSON-RPC protocol errors are for transport /
+            // schema / auth failures only.
+            const message = cause instanceof Error ? cause.message : String(cause);
+            return {
+              content: [{ type: "text", text: `Tool error: ${message}` }],
+              isError: true,
+            };
+          }
+        },
+      });
     },
   );
 

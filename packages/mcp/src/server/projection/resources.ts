@@ -44,8 +44,7 @@ import type {
 } from "@agentick/spec";
 import type { Unsubscribe } from "@agentick/runtime";
 
-import { evaluateRequestPipeline } from "../security/pipeline.js";
-import type { ResolvedSecurity } from "../security/stages.js";
+import type { RunCrossing } from "./crossing.js";
 
 /** JSON-RPC error code MCP reserves for "resource not found". */
 const RESOURCE_NOT_FOUND = -32002;
@@ -63,10 +62,8 @@ export interface ResourcesProjectionOptions {
   readonly source: Resources;
   /** Per-connection visibility predicate for fixed resources. */
   readonly filter?: ResourcesFilter;
-  /** Security pipeline resolved for this server. */
-  readonly security: ResolvedSecurity;
-  /** Connection-scoped context base (cloned + augmented per-request). */
-  readonly buildContext: () => McpRequestContext;
+  /** The crossing-operation runner for this connection (ADR 92 §Slice A). */
+  readonly runCrossing: RunCrossing;
 }
 
 /**
@@ -79,63 +76,76 @@ export function installResourcesHandlers(
   sdkServer: SdkServer,
   options: ResourcesProjectionOptions,
 ): Unsubscribe {
-  const { source, filter, security } = options;
+  const { source, filter, runCrossing } = options;
 
   // ─────────── resources/list ───────────
   sdkServer.setRequestHandler(
     ListResourcesRequestSchema,
-    async (request: ListResourcesRequest): Promise<ListResourcesResult> => {
-      const baseCtx = options.buildContext();
-      const { ctx } = await evaluateRequestPipeline(security, baseCtx, { type: "resource_list" });
-      const page = await source.list(request.params?.cursor);
-      const projected = filter ? page.resources.filter((r) => filter(r, ctx)) : page.resources;
-      const result: ListResourcesResult = { resources: projected.map(toWireResource) };
-      if (page.nextCursor !== undefined) result.nextCursor = page.nextCursor;
-      return result;
-    },
+    async (request: ListResourcesRequest): Promise<ListResourcesResult> =>
+      runCrossing({
+        verb: "list-resources",
+        operation: { type: "resource_list" },
+        run: async (_input, ctx): Promise<ListResourcesResult> => {
+          const page = await source.list(request.params?.cursor);
+          const projected = filter ? page.resources.filter((r) => filter(r, ctx)) : page.resources;
+          const result: ListResourcesResult = { resources: projected.map(toWireResource) };
+          if (page.nextCursor !== undefined) result.nextCursor = page.nextCursor;
+          return result;
+        },
+      }),
   );
 
   // ─────────── resources/templates/list ───────────
   sdkServer.setRequestHandler(
     ListResourceTemplatesRequestSchema,
-    async (request: ListResourceTemplatesRequest): Promise<ListResourceTemplatesResult> => {
-      const baseCtx = options.buildContext();
-      await evaluateRequestPipeline(security, baseCtx, { type: "resource_list" });
-      const page = await source.listTemplates(request.params?.cursor);
-      const result: ListResourceTemplatesResult = {
-        resourceTemplates: page.templates.map(toWireResourceTemplate),
-      };
-      if (page.nextCursor !== undefined) result.nextCursor = page.nextCursor;
-      return result;
-    },
+    async (request: ListResourceTemplatesRequest): Promise<ListResourceTemplatesResult> =>
+      runCrossing({
+        verb: "list-resource-templates",
+        operation: { type: "resource_list" },
+        run: async (): Promise<ListResourceTemplatesResult> => {
+          const page = await source.listTemplates(request.params?.cursor);
+          const result: ListResourceTemplatesResult = {
+            resourceTemplates: page.templates.map(toWireResourceTemplate),
+          };
+          if (page.nextCursor !== undefined) result.nextCursor = page.nextCursor;
+          return result;
+        },
+      }),
   );
 
   // ─────────── resources/read ───────────
   sdkServer.setRequestHandler(
     ReadResourceRequestSchema,
-    async (request: ReadResourceRequest): Promise<ReadResourceResult> => {
-      const baseCtx = options.buildContext();
-      const { ctx } = await evaluateRequestPipeline(security, baseCtx, {
-        type: "resource_read",
-        name: request.params.uri,
-      });
+    async (request: ReadResourceRequest): Promise<ReadResourceResult> =>
+      runCrossing({
+        verb: "read-resource",
+        operation: { type: "resource_read", name: request.params.uri },
+        params: { uri: request.params.uri },
+        run: async (_input, ctx): Promise<ReadResourceResult> => {
+          // A fixed resource hidden by the per-connection filter must not be
+          // readable either. Templated / unknown uris carry no fixed
+          // descriptor, so the filter doesn't apply — the harness decides
+          // found / not-found. Only pay the catalog walk when a filter is set.
+          if (filter && !(await isReadable(source, filter, ctx, request.params.uri))) {
+            throw notFound(request.params.uri);
+          }
 
-      // A fixed resource hidden by the per-connection filter must not be
-      // readable either. Templated / unknown uris carry no fixed
-      // descriptor, so the filter doesn't apply — the harness decides
-      // found / not-found. Only pay the catalog walk when a filter is set.
-      if (filter && !(await isReadable(source, filter, ctx, request.params.uri))) {
-        throw notFound(request.params.uri);
-      }
-
-      try {
-        const contents = await source.read(request.params.uri);
-        return { contents: contents.map(toWireContents) };
-      } catch (err) {
-        if (isResourceNotFound(err)) throw notFound(request.params.uri);
-        throw err;
-      }
-    },
+          // TODO(ADR-92 slice-A): the inner `resources:command:read` op this
+          // drives is still an ORPHANED ROOT — `Resources.read(uri)` re-enters
+          // Effect through `runHarnessProtocol`'s `Effect.runPromiseExit`, which
+          // starts a fresh root fiber that inherits no FiberRef, so the crossing's
+          // opId + identity cannot reach it. Unblocking it needs an Effect-native
+          // face on the read (`Resources.fx.read`) that this projection can run on
+          // the crossing's captured runtime. See the resources/prompts stop-rule.
+          try {
+            const contents = await source.read(request.params.uri);
+            return { contents: contents.map(toWireContents) };
+          } catch (err) {
+            if (isResourceNotFound(err)) throw notFound(request.params.uri);
+            throw err;
+          }
+        },
+      }),
   );
 
   // ─────────── resources/subscribe + unsubscribe ───────────
@@ -146,41 +156,43 @@ export function installResourcesHandlers(
 
   sdkServer.setRequestHandler(
     SubscribeRequestSchema,
-    async (request: SubscribeRequest): Promise<Record<string, never>> => {
-      const baseCtx = options.buildContext();
-      await evaluateRequestPipeline(security, baseCtx, {
-        type: "resource_read",
-        name: request.params.uri,
-      });
-      const uri = request.params.uri;
-      if (!perUriUnsub.has(uri)) {
-        const unsub = source.subscribe(uri, () => {
-          void sdkServer.sendResourceUpdated({ uri }).catch(() => {
-            // Connection closing mid-notification — drop. The harness
-            // change still happened; a fresh read reflects it.
-          });
-        });
-        perUriUnsub.set(uri, unsub);
-      }
-      return {};
-    },
+    async (request: SubscribeRequest): Promise<Record<string, never>> =>
+      runCrossing({
+        verb: "subscribe-resource",
+        operation: { type: "resource_read", name: request.params.uri },
+        params: { uri: request.params.uri },
+        run: async (): Promise<Record<string, never>> => {
+          const uri = request.params.uri;
+          if (!perUriUnsub.has(uri)) {
+            const unsub = source.subscribe(uri, () => {
+              void sdkServer.sendResourceUpdated({ uri }).catch(() => {
+                // Connection closing mid-notification — drop. The harness
+                // change still happened; a fresh read reflects it.
+              });
+            });
+            perUriUnsub.set(uri, unsub);
+          }
+          return {};
+        },
+      }),
   );
 
   sdkServer.setRequestHandler(
     UnsubscribeRequestSchema,
-    async (request: UnsubscribeRequest): Promise<Record<string, never>> => {
-      const baseCtx = options.buildContext();
-      await evaluateRequestPipeline(security, baseCtx, {
-        type: "resource_read",
-        name: request.params.uri,
-      });
-      const unsub = perUriUnsub.get(request.params.uri);
-      if (unsub) {
-        unsub();
-        perUriUnsub.delete(request.params.uri);
-      }
-      return {};
-    },
+    async (request: UnsubscribeRequest): Promise<Record<string, never>> =>
+      runCrossing({
+        verb: "unsubscribe-resource",
+        operation: { type: "resource_read", name: request.params.uri },
+        params: { uri: request.params.uri },
+        run: async (): Promise<Record<string, never>> => {
+          const unsub = perUriUnsub.get(request.params.uri);
+          if (unsub) {
+            unsub();
+            perUriUnsub.delete(request.params.uri);
+          }
+          return {};
+        },
+      }),
   );
 
   // ─────────── notifications/resources/list_changed ───────────
