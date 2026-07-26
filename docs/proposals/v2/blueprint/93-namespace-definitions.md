@@ -76,7 +76,53 @@ mechanism):
   outranks local policy — an app guard must veto before layer-local
   logic runs.
 
-## Resources ruling (amendment, Ryan 2026-07-26)
+## Guards on configs + the completeness matrix (amendment, Ryan 2026-07-26)
+
+**`guards:` is a sibling bag of `hooks:`** at both sites — guards are a
+distinct KIND (verdict seam: proceed/veto/replace/defer), never folded
+into hooks. Drop-layer keys in definitions (`guards: { append }`),
+discriminated at app level (`guards: { timelineAppend }`); desugars to
+guard-kind interceptors, which the runner already orders
+GUARD-OUTERMOST. Total order: app guards → definition guards → app
+before-hooks → definition before-hooks → body → afters unwinding
+narrow-to-broad.
+
+**Definition surface — complete and closed** (candidates judged, not
+accumulated): `store` · `hydrate` · namespace shaping seams (`compact`,
+`writePolicy`, `evict`, `executor`) · `hooks:` · `guards:`. Judged OUT:
+`use:` raw-middleware bag (hooks+guards cover config cases; third form
+= duplicate seam; imperative `.use` remains — three-consumers holds the
+door); wire-exposure grants (`expose:`) — REAL requirement, WRONG home:
+a grant is deployment posture, not namespace nature; grants stay at the
+gateway (wire constraints at the wire), D2 ships the recipe; telemetry
+namespace (trunk field, ADR 91 P3); channels (the bus); error/validation
+seams (typed errors + hook replace/veto).
+
+## D1 spec (tight) — deliverables + gates
+
+Deliverables: `defineTimeline` + `defineTimelineStore`;
+`hydrate(ctx)`/`compact(entries, ctx)` with typed `ctx.store` facet
+(generic inference from the store slot); `hydrateFromStore()` +
+`hydrateTail(n)`; `hooks:`/`guards:` bags with drop-layer naming +
+cascade wiring; `AppOptions.timeline` slot (flat, replaces
+`session.timeline`); DELETIONS: `WithTimelineOptions.initial`,
+`rehydrateStrategy` + importSnapshot-as-resume path; §2.7 bounded
+projection (in-memory persisted tier dropped; `readPersisted()`
+becomes a store read); interceptor-cascade totalization (landmine 11 —
+installer threads the handle so app bags wrap every namespace);
+fork-no-genesis law.
+
+Gates (all must pass, judged first-hand): full workspace suite;
+kill/resume acceptance; **bounded-memory proof** (N-entry store +
+`hydrateTail(k)` ⇒ only `history` with limit k is called — assert
+`read` is NOT); **fork-no-hydrate** test (fork inherits image, hydrator
+not invoked); **seed-not-append** conformance (genesis entries never
+hit `append`); **cascade-order** test (app guard vetoes before
+definition guard runs; app before wraps definition before; afters
+unwind reverse); ctx.store type-test file (inference + `Derived`
+interplay, `@ts-expect-error` style); example/v2-* packages compile
+against the new `AppOptions`; consumer canary = the Knowify bump slice
+verifies `buildErnestoAppConfig` downstream.
 
 The filesystem's role in resources is the SOURCE, not the store:
 `resourcesFromDirectory(dir)` is a named hydrator+resolver pair
