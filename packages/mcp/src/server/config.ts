@@ -51,6 +51,7 @@ import type {
 } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
 import type { ToolHandlerResolver } from "./projection/tools.js";
+import { readMcpResultExtensions } from "./tool-extensions.js";
 import type { ResourcesFilter } from "./projection/resources.js";
 import type { CompletionHandler } from "../protocol/completions.js";
 
@@ -790,6 +791,13 @@ function resolveFromCreatedTools(
         (typeof result === "object" && result !== null && "content" in result)
       ) {
         const normalized = normalizeToolResult(result as ToolResultInput);
+        // 3b-0b-B — result-side MCP `_meta` rides through the envelope's
+        // open `metadata` bag under `metadata.mcp.meta` (the
+        // `mcpResultExtensions` convention). Project it onto the wire
+        // `CallToolResult._meta`; absent ⇒ the wire result omits `_meta`
+        // (byte-identical to before). Canonical producer:
+        // `wwwAuthenticateMeta` for mid-session step-up auth.
+        const resultMeta = readMcpResultExtensions(normalized.metadata)?.meta;
         return {
           kind: "inline",
           content: normalized.content,
@@ -797,6 +805,7 @@ function resolveFromCreatedTools(
             ? { structuredContent: normalized.structuredContent }
             : {}),
           ...(normalized.isError !== undefined ? { isError: normalized.isError } : {}),
+          ...(resultMeta !== undefined ? { _meta: resultMeta } : {}),
         };
       }
       // ToolHandlerResult can also be Effect<...>. The MCP server

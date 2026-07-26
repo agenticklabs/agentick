@@ -38,6 +38,7 @@ import { applyTransform, composeTransforms } from "@agentick/tool/transforms";
 import type { ToolTransform } from "@agentick/tool/transforms";
 
 import { toCreateTaskResult, type ServerTaskRegistry } from "./tasks.js";
+import { readMcpToolExtensions } from "../tool-extensions.js";
 
 /**
  * Per-connection projection rules — narrow slice of
@@ -86,6 +87,17 @@ export type ToolHandlerInvokeResult =
        * `catch` below to `isError: true`.
        */
       readonly isError?: boolean;
+      /**
+       * MCP result-side `_meta` (3b-0b-B). Free-form metadata projected
+       * verbatim onto the wire `CallToolResult._meta`. The CreatedTool
+       * wrapper reads it from the result envelope's `metadata.mcp.meta`
+       * carriage ({@link McpToolResultExtensions}); low-level
+       * `resolveHandler` adopters may set it directly. The canonical
+       * producer is {@link wwwAuthenticateMeta} (mid-session step-up
+       * auth). Absent → the wire result omits `_meta` (byte-identical to
+       * before).
+       */
+      readonly _meta?: Readonly<Record<string, unknown>>;
     }
   | { readonly kind: "task"; readonly handle: TaskHandle<readonly ContentBlock[]> };
 
@@ -266,12 +278,16 @@ export function installToolsHandlers(
         // ADR 70 — thread the handler's structuredContent + soft isError
         // onto the wire result. `structuredContent` only when present;
         // `isError` defaults to false for a resolved (non-throwing) call.
+        // 3b-0b-B — result-side `_meta` (step-up auth etc.) rides onto
+        // `CallToolResult._meta` only when the handler produced one, so a
+        // handler that carried none is byte-identical to before.
         return {
           content: result.content as CallToolResult["content"],
           isError: result.isError ?? false,
           ...(result.structuredContent !== undefined
             ? { structuredContent: result.structuredContent as CallToolResult["structuredContent"] }
             : {}),
+          ...(result._meta !== undefined ? { _meta: result._meta } : {}),
         };
       } catch (cause) {
         // Tool-execution error — surface as `isError: true` per the v1
@@ -320,11 +336,19 @@ export function projectTools(
 /**
  * Convert a v2 `ToolDeclaration` to the MCP wire `Tool` shape. Reads
  * `metadata.title` + `metadata.icons` per the convention (see
- * `@agentick/tool/transforms/describe.ts`).
+ * `@agentick/tool/transforms/describe.ts`), plus the MCP-specific
+ * `metadata.mcp` block (3b-0b-B — {@link McpToolDeclarationExtensions}):
+ *   - `mcp.meta`        → wire `Tool._meta` (MCP Apps `ui://` linkage, …)
+ *   - `mcp.annotations` → wire `Tool.annotations` advisory hints
+ * Absent block ⇒ neither field is emitted (byte-identical to before).
+ * Explicit fields win over metadata-carried ones where they overlap:
+ * the wire `Tool.title` stays sourced from `metadata.title`, never the
+ * annotations block.
  *
- * Annotations flow through unchanged — they're semantic flags that
- * influence agent behavior; mutating per-connection would be a safety
- * footgun. See ADR 40 §4.
+ * The framework `annotations.taskSupport` still flows through to the
+ * wire `execution` block below — it's a semantic flag that influences
+ * agent behavior; mutating per-connection would be a safety footgun.
+ * See ADR 40 §4.
  */
 export function toWireTool(decl: ToolDeclaration): McpWireTool {
   const meta = decl.metadata ?? {};
@@ -341,6 +365,24 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
   }
   if (Array.isArray(meta.icons)) {
     wire.icons = meta.icons as McpWireTool["icons"];
+  }
+  // 3b-0b-B — MCP declaration extensions carried under `metadata.mcp`.
+  const mcpExt = readMcpToolExtensions(meta);
+  if (mcpExt?.meta !== undefined) {
+    wire._meta = mcpExt.meta as McpWireTool["_meta"];
+  }
+  if (mcpExt?.annotations !== undefined) {
+    const hints = mcpExt.annotations;
+    const annotations: NonNullable<McpWireTool["annotations"]> = {};
+    if (hints.readOnlyHint !== undefined) annotations.readOnlyHint = hints.readOnlyHint;
+    if (hints.destructiveHint !== undefined) annotations.destructiveHint = hints.destructiveHint;
+    if (hints.idempotentHint !== undefined) annotations.idempotentHint = hints.idempotentHint;
+    if (hints.openWorldHint !== undefined) annotations.openWorldHint = hints.openWorldHint;
+    // Only attach when at least one hint was set, so an empty
+    // `annotations: {}` never appears on the wire.
+    if (Object.keys(annotations).length > 0) {
+      wire.annotations = annotations;
+    }
   }
   // #171d.3 — translate framework `annotations.taskSupport` to the
   // MCP wire `execution.taskSupport` enum so clients know to wrap

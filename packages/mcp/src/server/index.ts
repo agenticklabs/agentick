@@ -72,6 +72,17 @@ export {
   WWW_AUTHENTICATE_META_KEY,
   type WwwAuthenticateParams,
 } from "./security/www-authenticate.js";
+export {
+  MCP_METADATA_KEY,
+  mcpToolExtensions,
+  mcpResultExtensions,
+  readMcpToolExtensions,
+  readMcpResultExtensions,
+  type McpMetadataFragment,
+  type McpToolAnnotationHints,
+  type McpToolDeclarationExtensions,
+  type McpToolResultExtensions,
+} from "./tool-extensions.js";
 export * from "./transports/index.js";
 export { buildCapabilities, type WiredCapabilities } from "./protocol/lifecycle.js";
 export {

@@ -383,15 +383,61 @@ handler. An unknown prompt / template / argument resolves to an empty
 value list (clients probe freely — no protocol error). Output is capped
 at 100 values (spec-mandated); the sugar enforces it.
 
-### Signalling step-up auth from a tool — `wwwAuthenticateMeta`
+### MCP tool wire extensions — `metadata.mcp`
 
-When a tool needs the caller to (re)authenticate mid-session, it can
-attach an RFC 6750 `Bearer` challenge to its `CallToolResult._meta`
-under the `mcp/www_authenticate` key. A host that understands the signal
-triggers step-up auth without tearing the connection down.
+MCP `Tool` and `CallToolResult` carry wire fields v2's provider-agnostic
+`ToolDeclaration` / `ToolResultEnvelope` don't natively model —
+declaration `_meta` (MCP Apps `ui://` template linkage), advisory
+annotation hints (`readOnlyHint`, …), and result `_meta` (step-up auth).
+Rather than leak MCP vocabulary into the shared substrate, these ride
+through each type's open `metadata` bag under a **single namespaced key**
+(`metadata.mcp`) and are projected onto the wire at the MCP layer. Two
+typed helpers build the fragment so you never hand-write the key:
+
+- **`mcpToolExtensions({ meta?, annotations? })`** → declaration
+  `metadata`; `meta` projects to the wire `Tool._meta`, `annotations`
+  (the four boolean hints) to `Tool.annotations`.
+- **`mcpResultExtensions({ meta? })`** → a tool result envelope's
+  `metadata`; `meta` projects to `CallToolResult._meta`.
+
+Absent extensions ⇒ the wire output is **byte-identical** to a tool that
+carried none. Explicit fields win over metadata-carried ones where they
+overlap — the wire `Tool.title` stays sourced from `metadata.title`.
+
+**Declaration side — advisory hints + MCP Apps template linkage:**
 
 ```ts
-import { wwwAuthenticateMeta } from "@agentick/mcp/server";
+import { createTool } from "@agentick/tool";
+import { mcpToolExtensions } from "@agentick/mcp/server";
+
+createTool({
+  name: "search_invoices",
+  description: "Search invoices (read-only).",
+  handler: async () => [{ type: "text", text: "…" }],
+  metadata: mcpToolExtensions({
+    annotations: { readOnlyHint: true, openWorldHint: false },
+    // MCP Apps extension — link the tool's output to a ui:// template.
+    meta: { "openai/outputTemplate": "ui://widget/invoice-list" },
+  }),
+});
+```
+
+The client's `tools/list` now shows
+`annotations: { readOnlyHint: true, openWorldHint: false }` and
+`_meta: { "openai/outputTemplate": "ui://widget/invoice-list" }` on the
+tool.
+
+**Result side — signalling step-up auth (`wwwAuthenticateMeta`):**
+
+When a tool needs the caller to (re)authenticate mid-session, it attaches
+an RFC 6750 `Bearer` challenge to its `CallToolResult._meta` under the
+`mcp/www_authenticate` key. A host that understands the signal triggers
+step-up auth without tearing the connection down. The challenge rides
+through `mcpResultExtensions`:
+
+```ts
+import { createTool } from "@agentick/tool";
+import { mcpResultExtensions, wwwAuthenticateMeta } from "@agentick/mcp/server";
 
 createTool({
   name: "post_invoice",
@@ -400,10 +446,12 @@ createTool({
       return {
         content: [{ type: "text", text: "Re-authentication required for billing." }],
         isError: true,
-        _meta: wwwAuthenticateMeta({
-          resourceMetadataUrl: "https://api.example.com/.well-known/oauth-protected-resource",
-          scope: "invoices:write",
-          error: "insufficient_scope",
+        metadata: mcpResultExtensions({
+          meta: wwwAuthenticateMeta({
+            resourceMetadataUrl: "https://api.example.com/.well-known/oauth-protected-resource",
+            scope: "invoices:write",
+            error: "insufficient_scope",
+          }),
         }),
       };
     }
@@ -417,7 +465,12 @@ createTool({
 yields `{ "mcp/www_authenticate": "Bearer" }`. It is **opt-in** — nothing
 auto-invokes it. The underlying `buildWwwAuthenticate(...)` is the SAME
 challenge builder the HTTP transport's `401` pre-gate uses, so the two
-never drift.
+never drift. The connected client observes
+`result._meta["mcp/www_authenticate"]` on the `CallToolResult`.
+
+> Low-level `{ registry, resolveHandler }` adopters (the escape hatch)
+> skip the envelope and set `_meta` directly on the returned
+> `ToolHandlerInvokeResult` (`{ kind: "inline", content, _meta }`).
 
 ### HTTP transports — listener vs. middleware door
 
@@ -912,6 +965,18 @@ reference-server round-trip (until the package is a dev dep).
   `buildWwwAuthenticate` / `wwwAuthenticateMeta` challenge-string format:
   bare `Bearer`, `resource_metadata` parity with the pre-gate, `error` +
   `scope` params, ordering, and the `mcp/www_authenticate` `_meta` key.
+- `src/server/__tests__/tool-extensions.spec.ts` — the `metadata.mcp`
+  carriage convention: `mcpToolExtensions` / `mcpResultExtensions` build a
+  single-key `{ mcp }` fragment, readers round-trip + reject malformed
+  blocks, and `toWireTool` projects `mcp.meta` → `Tool._meta` /
+  `mcp.annotations` → `Tool.annotations` (partial hints, empty-hint
+  suppression, no-block byte-identical regression, title precedence).
+- `src/server/__tests__/tool-extensions-e2e.spec.ts` — end-to-end through
+  a real SDK client: a `wwwAuthenticateMeta` result lands as
+  `_meta["mcp/www_authenticate"]` on the client's `CallToolResult` (the
+  previously-inert step-up helper now reaches the wire); declaration
+  `_meta` + annotation hints visible in `tools/list`; a no-extensions tool
+  yields a result and a list entry with no `_meta`/`annotations`.
 - `src/server/__tests__/progress.spec.ts` — `ctx.progress` → bus →
   `installProgressProjection` → `notifications/progress` correlated to
   the client's `_meta.progressToken` (via `ctx.mcp.progressToken`):
@@ -1043,10 +1108,23 @@ Defer until production load demands it; design space documented in
   keyed by template uri → variable → `CompletionHandler` (same `complete*`
   sugar as prompts); `ref/resource` routes to it, unknown template/arg →
   empty. (Closes the former `TODO(phase-#123)` `ref/resource` no-op.)
-- **`wwwAuthenticateMeta` step-up helper** — **landed.** Opt-in builder for
-  the RFC 6750 `Bearer` challenge inside a `CallToolResult._meta`
-  (`mcp/www_authenticate`), sharing the pre-gate's challenge-string
-  construction (`buildWwwAuthenticate`). Never auto-invoked.
+- **MCP tool wire extensions (`metadata.mcp`)** — **landed (3b-0b-B).**
+  The one typed convention for carrying MCP-specific tool payloads the
+  provider-agnostic spec doesn't model — declaration `_meta` (MCP Apps
+  `ui://` linkage), advisory annotation hints (`readOnlyHint` /
+  `destructiveHint` / `idempotentHint` / `openWorldHint`), and result
+  `_meta`. `mcpToolExtensions` / `mcpResultExtensions` build the
+  `metadata.mcp` fragment; `toWireTool` + the CreatedTool wrapper project
+  it onto `Tool._meta` / `Tool.annotations` / `CallToolResult._meta`.
+  Absent ⇒ byte-identical wire output.
+- **`wwwAuthenticateMeta` step-up helper** — **landed; now reaches the
+  wire (3b-0b-B).** Opt-in builder for the RFC 6750 `Bearer` challenge
+  inside a `CallToolResult._meta` (`mcp/www_authenticate`), sharing the
+  pre-gate's challenge-string construction (`buildWwwAuthenticate`). Never
+  auto-invoked. The challenge is carried to the wire via
+  `mcpResultExtensions({ meta: wwwAuthenticateMeta(...) })` on the result
+  envelope's `metadata` — before 3b-0b-B the result-side `_meta` was
+  dropped at the projection, leaving the helper inert.
 - **Streamable HTTP transport (server)** — **landed** (Wave 1).
   `httpTransport({ port })` (from `@agentick/mcp/server`) is a
   multi-connection Streamable-HTTP listener wrapping the SDK
