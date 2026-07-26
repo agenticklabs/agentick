@@ -28,8 +28,8 @@ For a **v2** tool, use `createTool` from `@agentick/tool` (the `create-harness` 
 
 Symlinks into `.agents/skills/`; each carries a v2-gate banner at the top for `feat/v2` work.
 
-| Skill             | Use for                                                                                                |
-| ----------------- | ------------------------------------------------------------------------------------------------------ |
+| Skill             | Use for                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
 | `add-package`     | Scaffold a new workspace package (v2 → `packages/` per the New Package Checklist in `CLAUDE.md`). |
-| `build-and-check` | Run the verification gates (v2: root vitest, `typecheck --force`, oxfmt/oxlint, `check:no-tla`).       |
-| `test-agent`      | Write agent tests (v2: the Meszaros `/testing` doubles law).                                           |
+| `build-and-check` | Run the verification gates (v2: root vitest, `typecheck --force`, oxfmt/oxlint, `check:no-tla`).  |
+| `test-agent`      | Write agent tests (v2: the Meszaros `/testing` doubles law).                                      |

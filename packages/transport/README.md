@@ -246,17 +246,17 @@ is given — loopback is the security boundary, widened only by explicit opt-in.
 
 ## Verified by
 
-| Concern                                                                                         | Test file                                                                                       |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| End-to-end via in-process transport                                                             | `../transport-in-process/src/__tests__/transport-conformance.spec.ts`                           |
-| End-to-end via WebSocket transport                                                              | `../transport-websocket/src/__tests__/transport-conformance.spec.ts`                            |
-| State machine, RPC correlation, multiplex, cancellation, subscription routing, progress streams | `../spec-conformance/src/transport.ts` (`runTransportConformance` — invoked by every transport) |
-| Ingress authn seam — fail-closed, local-pole default, prototype-key guard, once-per-crossing     | `src/testing/index.ts` (`runIngressAuthnConformance` — run by every transport against a real server) |
-| `staticTokenAuthSource` credential-kind switch + platform rejection + prototype-key bypass       | `src/__tests__/wire-lane-e2e.spec.ts`                                                           |
-| `MultiplexedStream` backpressure — drop-oldest / drop-newest / close-on-overflow / capacity guard | `src/__tests__/multiplexed-stream-backpressure.spec.ts`                                        |
-| Full-jitter reconnect backoff bounds                                                             | `src/__tests__/backoff-jitter.spec.ts`                                                          |
-| Web-security policy (STATUS A2 §4c) — host allow-list, cross-site rejection, CSRF token, forwarded-header trust (incl. non-loopback-peer spoof deny), never-`*` CORS — allow + deny for each default and each override | `src/__tests__/web-security.spec.ts`                                                            |
-| WireExtension registry dispatch, bootstrap short-circuit, `_extensions/list`, `ctx.publish` declared-notification guard | `src/__tests__/wire-extension-dispatch.spec.ts`                              |
+| Concern                                                                                                                                                                                                                | Test file                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| End-to-end via in-process transport                                                                                                                                                                                    | `../transport-in-process/src/__tests__/transport-conformance.spec.ts`                                |
+| End-to-end via WebSocket transport                                                                                                                                                                                     | `../transport-websocket/src/__tests__/transport-conformance.spec.ts`                                 |
+| State machine, RPC correlation, multiplex, cancellation, subscription routing, progress streams                                                                                                                        | `../spec-conformance/src/transport.ts` (`runTransportConformance` — invoked by every transport)      |
+| Ingress authn seam — fail-closed, local-pole default, prototype-key guard, once-per-crossing                                                                                                                           | `src/testing/index.ts` (`runIngressAuthnConformance` — run by every transport against a real server) |
+| `staticTokenAuthSource` credential-kind switch + platform rejection + prototype-key bypass                                                                                                                             | `src/__tests__/wire-lane-e2e.spec.ts`                                                                |
+| `MultiplexedStream` backpressure — drop-oldest / drop-newest / close-on-overflow / capacity guard                                                                                                                      | `src/__tests__/multiplexed-stream-backpressure.spec.ts`                                              |
+| Full-jitter reconnect backoff bounds                                                                                                                                                                                   | `src/__tests__/backoff-jitter.spec.ts`                                                               |
+| Web-security policy (STATUS A2 §4c) — host allow-list, cross-site rejection, CSRF token, forwarded-header trust (incl. non-loopback-peer spoof deny), never-`*` CORS — allow + deny for each default and each override | `src/__tests__/web-security.spec.ts`                                                                 |
+| WireExtension registry dispatch, bootstrap short-circuit, `_extensions/list`, `ctx.publish` declared-notification guard                                                                                                | `src/__tests__/wire-extension-dispatch.spec.ts`                                                      |
 
 `runTransportConformance(name, factory)` in
 `@agentick/spec-conformance` ships the shared behavioral suite.
@@ -288,10 +288,10 @@ Phase 33.C.1 of the v2 implementation plan — see
 
 ## Development plan
 
-| Step                               | Status                                                     |
-| ---------------------------------- | ---------------------------------------------------------- |
-| Phase 33.C.1 — extraction          | Landed                                                     |
-| Backpressure on MultiplexedStream  | Landed (per-stream policy on `MultiplexedStream`)          |
-| Phase 33.D — HTTP transport        | Landed (`@agentick/transport-http`)                   |
-| Phase 33.E — Unix-socket transport | Landed (`@agentick/transport-unix-socket`)            |
+| Step                               | Status                                                                                                           |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Phase 33.C.1 — extraction          | Landed                                                                                                           |
+| Backpressure on MultiplexedStream  | Landed (per-stream policy on `MultiplexedStream`)                                                                |
+| Phase 33.D — HTTP transport        | Landed (`@agentick/transport-http`)                                                                              |
+| Phase 33.E — Unix-socket transport | Landed (`@agentick/transport-unix-socket`)                                                                       |
 | Batch request dispatch             | Works via adapter fan-out (`initialize` advertises `batch: true`); dedicated batch-semantics test still deferred |

@@ -274,19 +274,19 @@ instead — the same machinery behind `generateObject`. Full guide:
 v2 is composed of focused `@agentick/*-next` packages (the metapackage will bundle
 the built-ins into one install). The ones you touch building an agent:
 
-| Package                         | What it gives you                                                          |
-| ------------------------------- | -------------------------------------------------------------------------- |
-| `@agentick/app`            | `createApp` — the runtime root; `/react` gives the reconciler              |
-| `@agentick/compiler-react` | JSX components + `createTool` (the React surface)                          |
-| `@agentick/timeline`       | `<Timeline>` — the conversation, yours to shape                            |
-| `@agentick/knobs`          | `useKnob` / `<Knobs>` — model-settable state                               |
-| `@agentick/gates`          | `gate` / `useGate` — named exit conditions                                 |
-| `@agentick/tool`           | `createTool`, transforms, dispatch                                         |
-| `@agentick/model-ai-sdk`   | `aisdk(...)` — wrap any Vercel AI SDK provider                             |
-| `@agentick/session`        | the session harness (send / dispatch / spawn / channels)                   |
+| Package                    | What it gives you                                                     |
+| -------------------------- | --------------------------------------------------------------------- |
+| `@agentick/app`            | `createApp` — the runtime root; `/react` gives the reconciler         |
+| `@agentick/compiler-react` | JSX components + `createTool` (the React surface)                     |
+| `@agentick/timeline`       | `<Timeline>` — the conversation, yours to shape                       |
+| `@agentick/knobs`          | `useKnob` / `<Knobs>` — model-settable state                          |
+| `@agentick/gates`          | `gate` / `useGate` — named exit conditions                            |
+| `@agentick/tool`           | `createTool`, transforms, dispatch                                    |
+| `@agentick/model-ai-sdk`   | `aisdk(...)` — wrap any Vercel AI SDK provider                        |
+| `@agentick/session`        | the session harness (send / dispatch / spawn / channels)              |
 | `@agentick/gateway`        | multi-app server + wire + auth ([README](packages/gateway/README.md)) |
-| `@agentick/client`         | the client that talks to a gateway over the wire                           |
-| `@agentick/mcp`            | connect to / expose Model Context Protocol servers                         |
+| `@agentick/client`         | the client that talks to a gateway over the wire                      |
+| `@agentick/mcp`            | connect to / expose Model Context Protocol servers                    |
 
 Foundations (`spec`, `runtime`, `pubsub`, `utils`) sit
 underneath; you rarely import them directly.

@@ -55,14 +55,14 @@ postgresTimelineStore({ executor: pool, migrate: "create-if-absent" });
 
 ### `postgresTimelineStore(options): TimelineStore`
 
-| Option     | Type                              | Default              | Description                                                                 |
-| ---------- | --------------------------------- | -------------------- | --------------------------------------------------------------------------- |
-| `executor` | `pg.Pool \| QueryExecutor`        | **required**         | BYO connection. A `pg.Pool` or a minimal `{ query(text, values?) }`. Never owned. |
-| `table`    | `string`                          | `"agentick_timeline"`| Table name.                                                                 |
-| `columns`  | `Partial<TimelineColumns>`        | snake_case           | Map logical `sessionId`/`seq`/`payload`/`schemaVer` onto real columns.      |
-| `sql`      | `TimelineSqlOverrides`            | generated            | Per-operation FULL SQL override (see below).                                |
-| `codec`    | `TimelineCodec`                   | identity             | `jsonb` payload encode/decode + schema-on-read (`encrypt`, `compress`, migrate). |
-| `migrate`  | `"off" \| "create-if-absent"`     | `"off"`              | `"off"` never runs DDL; `"create-if-absent"` runs `CREATE TABLE IF NOT EXISTS` once. |
+| Option     | Type                          | Default               | Description                                                                          |
+| ---------- | ----------------------------- | --------------------- | ------------------------------------------------------------------------------------ |
+| `executor` | `pg.Pool \| QueryExecutor`    | **required**          | BYO connection. A `pg.Pool` or a minimal `{ query(text, values?) }`. Never owned.    |
+| `table`    | `string`                      | `"agentick_timeline"` | Table name.                                                                          |
+| `columns`  | `Partial<TimelineColumns>`    | snake_case            | Map logical `sessionId`/`seq`/`payload`/`schemaVer` onto real columns.               |
+| `sql`      | `TimelineSqlOverrides`        | generated             | Per-operation FULL SQL override (see below).                                         |
+| `codec`    | `TimelineCodec`               | identity              | `jsonb` payload encode/decode + schema-on-read (`encrypt`, `compress`, migrate).     |
+| `migrate`  | `"off" \| "create-if-absent"` | `"off"`               | `"off"` never runs DDL; `"create-if-absent"` runs `CREATE TABLE IF NOT EXISTS` once. |
 
 `backend` is `"postgres"`. Implements the full [`TimelineStore`](../timeline/src/store.ts)
 port. Per ADR 49's "NO `define*` helper" amendment, the adapter

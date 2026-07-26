@@ -47,18 +47,18 @@ Optional:    sandbox* · mcp · connector · eval · formatters · store · tele
 
 ## File locations (v2)
 
-| What                     | Where                                                         |
-| ------------------------ | ------------------------------------------------------------- |
-| Protocol seam (spec)     | `packages/spec/src/`                                     |
-| Foundation (bus/journal) | `packages/runtime/src/`                                  |
-| JSX compiler harness     | `packages/compiler-react/src/`                           |
-| Compiler base + collect  | `packages/compiler/src/`                                 |
-| Built-in harnesses       | `packages/<harness>/src/`                                |
+| What                     | Where                                               |
+| ------------------------ | --------------------------------------------------- |
+| Protocol seam (spec)     | `packages/spec/src/`                                |
+| Foundation (bus/journal) | `packages/runtime/src/`                             |
+| JSX compiler harness     | `packages/compiler-react/src/`                      |
+| Compiler base + collect  | `packages/compiler/src/`                            |
+| Built-in harnesses       | `packages/<harness>/src/`                           |
 | Session / App            | `packages/session/src/`, `packages/app/src/`        |
 | Gateway / transports     | `packages/gateway/src/`, `packages/transport*/src/` |
-| Client                   | `packages/client*/src/`                                  |
-| Tests                    | `packages/*/src/**/*.spec.ts`                            |
-| Examples                 | `example/v2-real/` (canonical), `example/v2*/`                |
+| Client                   | `packages/client*/src/`                             |
+| Tests                    | `packages/*/src/**/*.spec.ts`                       |
+| Examples                 | `example/v2-real/` (canonical), `example/v2*/`      |
 
 v1 lives under `packages/*/src/` and is stable; don't migrate v1 code into v2 — v2 is a rewrite, not a port.
 

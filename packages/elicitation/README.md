@@ -179,9 +179,9 @@ contract (`requested` → `before` → terminal). **ONE op models the WHOLE
 round-trip:** the `before` face is the outbound request; the `after` face is
 the resolved `ElicitationResult`.
 
-| Verb     | CommandRegistry key   | Hooks                                                   |
-| -------- | --------------------- | ------------------------------------------------------ |
-| `elicit` | `elicitation:elicit`  | `onBeforeElicitationElicit` / `onAfterElicitationElicit` |
+| Verb     | CommandRegistry key  | Hooks                                                    |
+| -------- | -------------------- | -------------------------------------------------------- |
+| `elicit` | `elicitation:elicit` | `onBeforeElicitationElicit` / `onAfterElicitationElicit` |
 
 ```typescript
 // Declarative (returns an Unsubscribe):
@@ -264,7 +264,9 @@ try {
 
 // Or non-throwing:
 const issues = checkFlatSchema(wire);
-if (issues.length > 0) { /* fall back to a flatter schema */ }
+if (issues.length > 0) {
+  /* fall back to a flatter schema */
+}
 ```
 
 The framework's `buildMcpElicit` sugar (`text` / `confirm` / `select` /
@@ -463,11 +465,11 @@ that return an `ElicitOutcome<T>` discriminated union.
 **Cross-transport portability.** The same `Elicit` interface is
 exposed in three places:
 
-| Where                                         | How it's built                                                                     | What it does underneath                              |
-| --------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| `ctx.elicit` (in-process tool handler)        | `buildSessionElicit(harness)` in `tool-executor-next/harness.ts`                   | calls `harness.elicit({mode, message, schema})`      |
+| Where                                         | How it's built                                                                | What it does underneath                              |
+| --------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `ctx.elicit` (in-process tool handler)        | `buildSessionElicit(harness)` in `tool-executor-next/harness.ts`              | calls `harness.elicit({mode, message, schema})`      |
 | `ctx.elicit` (MCP-server tool handler)        | `buildMcpElicit({ sdkServer, clientCapabilities })` in `@agentick/mcp/server` | calls `sdkServer.request("elicitation/create", ...)` |
-| `session.elicit` (session-level command code) | `buildSessionElicit(harness)` in `session-next/harness.ts`                         | identical to in-process tool-handler case            |
+| `session.elicit` (session-level command code) | `buildSessionElicit(harness)` in `session-next/harness.ts`                    | identical to in-process tool-handler case            |
 
 Tool handlers writing `await ctx.elicit?.text(...)` are wholly
 portable across in-process and MCP-server transports. The same is

@@ -286,30 +286,30 @@ through each session's tick automatically.
 
 Every claim above is exercised by a test:
 
-| Claim                                                                                                  | Test                                               |
-| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| Latch arms on trigger, blocks the loop, `clear()` releases                                             | `controller.spec.ts`, `gate.spec.tsx`              |
-| Latch does not re-arm once engaged; `deferred` un-defers when blocking                                 | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified engages when unsatisfied, auto-clears on pass, re-engages on regression                       | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified arming scope stays dormant until triggered                                                    | `controller.spec.ts`, `gate.spec.tsx`              |
-| Fail-closed: a throwing predicate engages the gate                                                     | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified knob is read-only — the model's `knob_set` dispatch is refused (adversarial)                  | `controller.spec.ts`, `gate.spec.tsx`              |
-| `.override()` releases a verified gate AND emits an audit envelope; rejects on latch; not a model path | `controller.spec.ts`                               |
+| Claim                                                                                                                  | Test                                               |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| Latch arms on trigger, blocks the loop, `clear()` releases                                                             | `controller.spec.ts`, `gate.spec.tsx`              |
+| Latch does not re-arm once engaged; `deferred` un-defers when blocking                                                 | `controller.spec.ts`, `gate.spec.tsx`              |
+| Verified engages when unsatisfied, auto-clears on pass, re-engages on regression                                       | `controller.spec.ts`, `gate.spec.tsx`              |
+| Verified arming scope stays dormant until triggered                                                                    | `controller.spec.ts`, `gate.spec.tsx`              |
+| Fail-closed: a throwing predicate engages the gate                                                                     | `controller.spec.ts`, `gate.spec.tsx`              |
+| Verified knob is read-only — the model's `knob_set` dispatch is refused (adversarial)                                  | `controller.spec.ts`, `gate.spec.tsx`              |
+| `.override()` releases a verified gate AND emits an audit envelope; rejects on latch; not a model path                 | `controller.spec.ts`                               |
 | Host `clear`/`defer`/`override` are async + journaled (route through `gates:*`); the raw transition is the shared body | `controller.spec.ts`, `__tests__/harness.spec.ts`  |
-| Async verified predicates are awaited                                                                  | `gate.spec.tsx`                                    |
-| Layer chain: `list`/`get` unify over a parent, self shadows parent by name                             | `controller.spec.ts`                               |
-| An inherited (parent) gate still evaluates against the child's tick (parent's own knob + loop)         | `controller.spec.ts`                               |
-| A self gate shadows a same-named parent gate during evaluation (parent skipped)                        | `controller.spec.ts`                               |
-| Unified registry: tree-declared + programmatic gates both in `session.gates.list()`                    | `session/__tests__/gates-integration.spec.tsx`     |
-| Single construction site: `useGate`'s controller IS `session.gates` (reference equality)               | `session/__tests__/gates-integration.spec.tsx`     |
-| `useGate` (registration-only) → controller evaluates: arm/verify/block/defer/clear/read-only           | `gate.spec.tsx`                                    |
-| Real execution: `session.notifyLifecycle` evaluates both gates AND they HOLD the loop to `maxTicks`    | `session/__tests__/gates-integration.spec.tsx`     |
-| `GatesHarness` commands delegate to the ONE owned controller; inbox address is `gates:<sid>:gates`     | `__tests__/harness.spec.ts`                        |
-| `gates:override` audit stamps `origin` (`host` via method, `wire` over the inbox); missing gate throws | `__tests__/harness.spec.ts`                        |
-| The four verbs enumerate via `gates:commands`, all `exposure: "wire"`                                  | `__tests__/harness.spec.ts`                        |
-| Full-stack: `gates/list`/`clear`/`defer`/`override` round-trip the dynamic lane; deny-by-default holds | `transport-in-process/__tests__/gates-e2e.spec.ts` |
-| Client handle: each verb issues the right `gates/*` request; `list()` reflects the poll                | `client/__tests__/gates-handle.spec.ts`            |
-| ADR 87: `session.gates` self-assembles on the client `SessionHandle`                                   | `client/__tests__/session-gates.spec.ts`           |
+| Async verified predicates are awaited                                                                                  | `gate.spec.tsx`                                    |
+| Layer chain: `list`/`get` unify over a parent, self shadows parent by name                                             | `controller.spec.ts`                               |
+| An inherited (parent) gate still evaluates against the child's tick (parent's own knob + loop)                         | `controller.spec.ts`                               |
+| A self gate shadows a same-named parent gate during evaluation (parent skipped)                                        | `controller.spec.ts`                               |
+| Unified registry: tree-declared + programmatic gates both in `session.gates.list()`                                    | `session/__tests__/gates-integration.spec.tsx`     |
+| Single construction site: `useGate`'s controller IS `session.gates` (reference equality)                               | `session/__tests__/gates-integration.spec.tsx`     |
+| `useGate` (registration-only) → controller evaluates: arm/verify/block/defer/clear/read-only                           | `gate.spec.tsx`                                    |
+| Real execution: `session.notifyLifecycle` evaluates both gates AND they HOLD the loop to `maxTicks`                    | `session/__tests__/gates-integration.spec.tsx`     |
+| `GatesHarness` commands delegate to the ONE owned controller; inbox address is `gates:<sid>:gates`                     | `__tests__/harness.spec.ts`                        |
+| `gates:override` audit stamps `origin` (`host` via method, `wire` over the inbox); missing gate throws                 | `__tests__/harness.spec.ts`                        |
+| The four verbs enumerate via `gates:commands`, all `exposure: "wire"`                                                  | `__tests__/harness.spec.ts`                        |
+| Full-stack: `gates/list`/`clear`/`defer`/`override` round-trip the dynamic lane; deny-by-default holds                 | `transport-in-process/__tests__/gates-e2e.spec.ts` |
+| Client handle: each verb issues the right `gates/*` request; `list()` reflects the poll                                | `client/__tests__/gates-handle.spec.ts`            |
+| ADR 87: `session.gates` self-assembles on the client `SessionHandle`                                                   | `client/__tests__/session-gates.spec.ts`           |
 
 ## Status & roadmap
 

@@ -229,13 +229,13 @@ withSkills({
 }),
 ```
 
-| Factory                                                   | Subpath         | Source                                                                 |
-| --------------------------------------------------------- | --------------- | ---------------------------------------------------------------------- |
-| `fromArray(skills)`                                       | `/loaders`      | in-memory                                                              |
-| `fromUrl({ url, ... })`                                   | `/loaders`      | JSON manifest at `{ "skills": [...] }` (configurable via `arrayField`) |
-| `fromManifest(...)`                                       | `/loaders`      | alias for `fromUrl`                                                    |
-| `fromFile({ path, parseFrontmatter? })`                   | `/loaders/node` | one `.md` file with frontmatter                                        |
-| `fromDirectory({ path, match?, parseFrontmatter?, ... })` | `/loaders/node` | recursive walk of `.md` files; bad records skipped silently            |
+| Factory                                                   | Subpath         | Source                                                                                       |
+| --------------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------- |
+| `fromArray(skills)`                                       | `/loaders`      | in-memory                                                                                    |
+| `fromUrl({ url, ... })`                                   | `/loaders`      | JSON manifest at `{ "skills": [...] }` (configurable via `arrayField`)                       |
+| `fromManifest(...)`                                       | `/loaders`      | alias for `fromUrl`                                                                          |
+| `fromFile({ path, parseFrontmatter? })`                   | `/loaders/node` | one `.md` file with frontmatter                                                              |
+| `fromDirectory({ path, match?, parseFrontmatter?, ... })` | `/loaders/node` | recursive walk of `.md` files; bad records skipped silently                                  |
 | `agentSkillsDirectory({ root?, parseFrontmatter? })`      | `/loaders/node` | [Agent Skills](https://agentskills.io/specification) layout — one skill per `<dir>/SKILL.md` |
 
 Frontmatter parsing defaults to a minimal `key: value` parser (`parseSimpleFrontmatter` — supports quoted strings + inline arrays like `[a, b, c]`). For full YAML / TOML, pass a custom `parseFrontmatter: (text) => Record<string, unknown>` callback — wire `yaml` / `@iarna/toml` / your parser of choice without adding a dep at the framework level.

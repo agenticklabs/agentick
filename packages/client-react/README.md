@@ -18,8 +18,7 @@ React surface is **two one-liners**, not a hook per handle.
 npm install @agentick/client-react @agentick/client react
 ```
 
-`react` (>=18) is a **peer** dependency — `useSyncExternalStore` ships in React
-18. No `react-dom` dependency: these are hooks, not components.
+`react` (>=18) is a **peer** dependency — `useSyncExternalStore` ships in React 18. No `react-dom` dependency: these are hooks, not components.
 
 ## API
 
@@ -35,7 +34,15 @@ import { useHandle } from "@agentick/client-react";
 
 function Knobs({ session }) {
   const knobs = useHandle(session.knobs); // readonly WireKnobDescriptor[]
-  return <ul>{knobs.map((k) => <li key={k.id}>{k.id}: {String(k.value)}</li>)}</ul>;
+  return (
+    <ul>
+      {knobs.map((k) => (
+        <li key={k.id}>
+          {k.id}: {String(k.value)}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function Timeline({ session }) {
@@ -108,19 +115,19 @@ does not paper over a broken store.
 
 ## Verified by
 
-| Claim | Test |
-| --- | --- |
-| `useHandle` renders the snapshot and re-renders on change | `src/__tests__/use-handle.spec.tsx` |
-| No render loop when `list()` is ref-stable (render-count bound) | `src/__tests__/use-handle.spec.tsx` |
-| A ref-unstable handle surfaces (throws) rather than being silently masked | `src/__tests__/use-handle.spec.tsx` |
-| SSR `getServerSnapshot` path renders without throwing | `src/__tests__/use-handle.spec.tsx` |
-| `useHandle` binds a minted `FilteredView` | `src/__tests__/use-handle.spec.tsx` |
-| `useView` renders the filtered projection + re-renders on source change | `src/__tests__/use-view.spec.tsx` |
-| `useView` closes the view on unmount | `src/__tests__/use-view.spec.tsx` |
-| `useView` re-mints (closing the old view) on dep change | `src/__tests__/use-view.spec.tsx` |
-| `useView` keeps the same view across re-renders with unchanged deps | `src/__tests__/use-view.spec.tsx` |
-| `useHandle` drives the REAL `tasksHandle` end-to-end (fold → render, no loop) | `src/__tests__/integration-with-handle.spec.tsx` |
-| `filteredView.list()` is referentially stable between changes | `@agentick/client-core` `src/__tests__/view-source.spec.ts` |
+| Claim                                                                         | Test                                                        |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `useHandle` renders the snapshot and re-renders on change                     | `src/__tests__/use-handle.spec.tsx`                         |
+| No render loop when `list()` is ref-stable (render-count bound)               | `src/__tests__/use-handle.spec.tsx`                         |
+| A ref-unstable handle surfaces (throws) rather than being silently masked     | `src/__tests__/use-handle.spec.tsx`                         |
+| SSR `getServerSnapshot` path renders without throwing                         | `src/__tests__/use-handle.spec.tsx`                         |
+| `useHandle` binds a minted `FilteredView`                                     | `src/__tests__/use-handle.spec.tsx`                         |
+| `useView` renders the filtered projection + re-renders on source change       | `src/__tests__/use-view.spec.tsx`                           |
+| `useView` closes the view on unmount                                          | `src/__tests__/use-view.spec.tsx`                           |
+| `useView` re-mints (closing the old view) on dep change                       | `src/__tests__/use-view.spec.tsx`                           |
+| `useView` keeps the same view across re-renders with unchanged deps           | `src/__tests__/use-view.spec.tsx`                           |
+| `useHandle` drives the REAL `tasksHandle` end-to-end (fold → render, no loop) | `src/__tests__/integration-with-handle.spec.tsx`            |
+| `filteredView.list()` is referentially stable between changes                 | `@agentick/client-core` `src/__tests__/view-source.spec.ts` |
 
 ## Roadmap & known gaps
 
@@ -136,4 +143,7 @@ does not paper over a broken store.
   can transiently retain a listener on the parent handle until the handle closes
   (bounded, dev-only, swept at handle close). Not addressed here to keep the
   binding thin; revisit if it bites a real app.
+
+```
+
 ```

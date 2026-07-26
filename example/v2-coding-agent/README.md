@@ -15,7 +15,7 @@ through `ctx`; a decoupled client drives it and consumes the results:
 
 | Ergonomic                  | Client code                                                       | Backed by                                                             |
 | -------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Batteries-included client  | `import { createClient } from "@agentick/client"`            | the core/bundle split                                                 |
+| Batteries-included client  | `import { createClient } from "@agentick/client"`                 | the core/bundle split                                                 |
 | Live knobs + client write  | `session.knobs.get()` / `session.knobs.set("explainSteps", true)` | `session:channel:knobs-state` (CQRS)                                  |
 | Live task status           | `session.tasks.subscribe(...)`                                    | `run_shell` → `ctx.tasks.submit(...)` → `session:channel:task-status` |
 | Human-in-the-loop approval | `for await (const e of session.elicitations) e.accept(true)`      | `write_file` → `ctx.elicit.confirm(...)`                              |

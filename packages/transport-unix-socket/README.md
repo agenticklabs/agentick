@@ -158,12 +158,12 @@ Phase 33.E of the v2 implementation plan — see
 
 ## Verified by
 
-| Concern                                                                                                                                                | Test file                                                                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                        |
-| State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (via `runTransportConformance` from `@agentick/spec-conformance`) |
-| Ingress authn (ADR 61) — host-local `none` credential → local pole; configured `authSource` rejecting `none` fails closed; `allowAnonymous` admits with no principal | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |
-| `unixSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the socket, ping round-trips; `gateway.close()` unlinks the path) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) |
+| Concern                                                                                                                                                                           | Test file                                                                                                       |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                                                         | `src/__tests__/smoke.spec.ts`                                                                                   |
+| State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams                            | `src/__tests__/transport-conformance.spec.ts` (via `runTransportConformance` from `@agentick/spec-conformance`) |
+| Ingress authn (ADR 61) — host-local `none` credential → local pole; configured `authSource` rejecting `none` fails closed; `allowAnonymous` admits with no principal              | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                            |
+| `unixSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the socket, ping round-trips; `gateway.close()` unlinks the path) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                      |
 
 ## Roadmap & known gaps
 
@@ -187,9 +187,9 @@ Phase 33.E of the v2 implementation plan — see
 
 ## Development plan
 
-| Step                               | Lands when                                                                  |
-| ---------------------------------- | --------------------------------------------------------------------------- |
-| Phase 33.E MVP                     | Landed                                                                      |
+| Step                               | Lands when                                                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Phase 33.E MVP                     | Landed                                                                                                                    |
 | Backpressure wiring                | Primitive landed in `@agentick/transport` (`MultiplexedStream`); this transport still uses the default `unbounded` policy |
-| `SO_PEERCRED` peer-cred enrichment | ADR 61 later interceptor (`TODO(#146)`)                                     |
-| Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises            |
+| `SO_PEERCRED` peer-cred enrichment | ADR 61 later interceptor (`TODO(#146)`)                                                                                   |
+| Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises                                                          |

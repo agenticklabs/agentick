@@ -143,10 +143,7 @@ interface WebSocketServerOptions {
 
 ```ts
 // Common path — the wrapper owns the Node http.Server:
-type WebSocketServerTransportPortConfig = Omit<
-  WebSocketServerOptions,
-  "gateway" | "httpServer"
-> & {
+type WebSocketServerTransportPortConfig = Omit<WebSocketServerOptions, "gateway" | "httpServer"> & {
   port: number;
   host?: string; // bind address; DEFAULT 127.0.0.1 (loopback only — the security boundary)
 };
@@ -308,9 +305,9 @@ Phase 33.C of the v2 implementation plan — see
 | Phase 33.C MVP                   | This commit — `a14670c8`                                                                                                                  |
 | 33.C hardening pass              | After Phase 33.D + 33.E so backpressure design covers all transports; adds bounded streams, real `session/send` test with a model adapter |
 | Compression / max-payload tuning | When a real workload surfaces the need                                                                                                    |
-| `GatewayExtension` wrapper       | When the shared `@agentick/gateway-rpc-adapter` lands (33.D extraction)                                                              |
+| `GatewayExtension` wrapper       | When the shared `@agentick/gateway-rpc-adapter` lands (33.D extraction)                                                                   |
 | Session affinity                 | When ADR 29 Phase D cluster substrate lands                                                                                               |
-| Bilingual MCP test               | Phase 33.I (`@agentick/mcp-surface`)                                                                                                 |
+| Bilingual MCP test               | Phase 33.I (`@agentick/mcp-surface`)                                                                                                      |
 
 ## Verified by
 
@@ -320,16 +317,16 @@ test** sit in the same checklist with an `✗` marker — they document
 behavior the design intends but tests don't yet exercise. The
 discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
 
-| Concern                                                                | Test file                                |
-| ---------------------------------------------------------------------- | ---------------------------------------- |
-| End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs)        | `src/__tests__/smoke.spec.ts`            |
-| Shared transport conformance (`runTransportConformance`)               | `src/__tests__/transport-conformance.spec.ts` |
-| Reconnect state machine                                                | `src/__tests__/reconnect.spec.ts`        |
-| Wire conformance (envelope roundtrips, validator integration, batches) | `src/__tests__/wire-conformance.spec.ts` |
-| Subprotocol enforcement (`agentick-rpc-v1`-only)                       | `src/__tests__/security.spec.ts`         |
-| Origin validation (`allowedOrigins`)                                   | `src/__tests__/security.spec.ts`         |
-| Security defaults — safe cross-origin deny / same-origin allow / Host allow-list (STATUS A2 §4c) | `src/__tests__/security.spec.ts`         |
-| `notifications/cancelled` client emit + server handle                  | `src/__tests__/cancellation.spec.ts`     |
-| Custom WebSocket constructor (`ws` library)                            | `src/__tests__/custom-ws-ctor.spec.ts`   |
-| Ingress authn (ADR 61) — per-connection bearer auth, fail-closed 401, prototype-key guard, once-per-socket, local pole when no `authSource` | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) |
+| Concern                                                                                                                                                                      | Test file                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs)                                                                                                              | `src/__tests__/smoke.spec.ts`                                              |
+| Shared transport conformance (`runTransportConformance`)                                                                                                                     | `src/__tests__/transport-conformance.spec.ts`                              |
+| Reconnect state machine                                                                                                                                                      | `src/__tests__/reconnect.spec.ts`                                          |
+| Wire conformance (envelope roundtrips, validator integration, batches)                                                                                                       | `src/__tests__/wire-conformance.spec.ts`                                   |
+| Subprotocol enforcement (`agentick-rpc-v1`-only)                                                                                                                             | `src/__tests__/security.spec.ts`                                           |
+| Origin validation (`allowedOrigins`)                                                                                                                                         | `src/__tests__/security.spec.ts`                                           |
+| Security defaults — safe cross-origin deny / same-origin allow / Host allow-list (STATUS A2 §4c)                                                                             | `src/__tests__/security.spec.ts`                                           |
+| `notifications/cancelled` client emit + server handle                                                                                                                        | `src/__tests__/cancellation.spec.ts`                                       |
+| Custom WebSocket constructor (`ws` library)                                                                                                                                  | `src/__tests__/custom-ws-ctor.spec.ts`                                     |
+| Ingress authn (ADR 61) — per-connection bearer auth, fail-closed 401, prototype-key guard, once-per-socket, local pole when no `authSource`                                  | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)       |
 | `webSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the port + WS round-trips a ping; `gateway.close()` frees it) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) |

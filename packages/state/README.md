@@ -60,7 +60,7 @@ to the store cell — `undefined`-valued cells round-trip through write-through,
 
 ## Contrast with knobs
 
-|                          | `@agentick/state`  | `@agentick/knobs`            |
+|                          | `@agentick/state`       | `@agentick/knobs`                 |
 | ------------------------ | ----------------------- | --------------------------------- |
 | Model can read           | no                      | yes (rendered in `<Knobs />`)     |
 | Model can write          | no                      | yes (`knob_set` tool)             |
@@ -183,11 +183,11 @@ client handle). Importing the subpath self-assembles `client.session(id).state`:
 ```ts
 import { createClient } from "@agentick/client"; // bundles this subpath
 const session = client.session(id);
-session.state.list();               // readonly StateListEntry[] (Enumerable)
-session.state.get("cursor");        // { key, value } | undefined
+session.state.list(); // readonly StateListEntry[] (Enumerable)
+session.state.get("cursor"); // { key, value } | undefined
 await session.state.set("cursor", 4);
 await session.state.delete("draft");
-session.subscribe(() => render());  // zero-arg store contract
+session.subscribe(() => render()); // zero-arg store contract
 ```
 
 **RPC-backed, not channel-backed.** There is no `state-state` delta channel

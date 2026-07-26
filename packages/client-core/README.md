@@ -95,16 +95,16 @@ exposes its event stream via `.events()`:
 // Run + stream, all on the handle:
 const handle = client.send(sessionId, { messages });
 for await (const event of handle.events()) render(event); // ← the event stream
-await handle.result;                              //   ← …and the final result
+await handle.result; //   ← …and the final result
 
 // Observe, uniformly — all return an Unsubscribe:
-client.onStateChange((s) => setBadge(s));         // connection state
-client.onCapabilitiesChange((c) => gate(c));      // feature flags, live across reconnect
+client.onStateChange((s) => setBadge(s)); // connection state
+client.onCapabilitiesChange((c) => gate(c)); // feature flags, live across reconnect
 
 // Signals + channels are PRE-SCOPED on the handle — no repeating { kind, id }:
 client.session(id).onLog((e) => log(e.level, e.data));
 client.session(id).onProgress((e) => bar(e.progress, e.total));
-client.session(id).channelView("task-status");    // zero-config: latest frame wins
+client.session(id).channelView("task-status"); // zero-config: latest frame wins
 // …the generic client.onLog(scope, cb) stays as the escape hatch for a
 // scope you don't hold a handle for.
 
@@ -325,7 +325,7 @@ session.elicitations.onChange((e) => e.accept({ ok: true })); // same read surfa
 > Don't want the manual imports? **`@agentick/client`** is the
 > batteries-included bundle — it re-exports this package AND side-effect-imports
 > every built-in `/client` subpath, so `import { createClient } from
-> "@agentick/client"` lights up all built-in slots automatically (the client
+"@agentick/client"` lights up all built-in slots automatically (the client
 > twin of how the `agentick` metapackage bundles server built-ins; becomes
 > `@agentick/client` at the v2 cut). This package (`client-core-next`) stays lean
 > for adopters who want to opt in per-harness.
@@ -370,25 +370,27 @@ the standard the refactors aim at.
 // MANDATORY CORE — every handle. Thin on purpose (the store.md lesson).
 interface ClientHandle {
   subscribe(cb: () => void): Unsubscribe; // THE store contract: fires on change,
-                                          // cb takes NO args, read via list().
-                                          // Zero-adapter useSyncExternalStore.
-  close?(): void;                         // where the handle owns a subscription
+  // cb takes NO args, read via list().
+  // Zero-adapter useSyncExternalStore.
+  close?(): void; // where the handle owns a subscription
 }
 
 // CAPABILITY PROFILES — declared (typed) + feature-detected (isEnumerable/…):
-interface Enumerable<T, Id = string> {    // current STATE, incl. pre-connection
+interface Enumerable<T, Id = string> {
+  // current STATE, incl. pre-connection
   list(): readonly T[];
   get(id: Id): T | undefined;
 }
-interface Respondable<In> {               // correlated reply-by-id
+interface Respondable<In> {
+  // correlated reply-by-id
   respond(id: string, input: In): Promise<void>;
 }
 ```
 
 Plus `isClientHandle` / `isEnumerable` / `isRespondable` — the runtime
 feature-detectors (the `isSnapshotCapable` precedent). `Streamable` was
-**removed**: no session-lifetime handle is `AsyncIterable` — *iterate BOUNDED
-things, observe UNBOUNDED things*. These are **plain structural** interfaces:
+**removed**: no session-lifetime handle is `AsyncIterable` — _iterate BOUNDED
+things, observe UNBOUNDED things_. These are **plain structural** interfaces:
 no branding, no registration — **satisfying the shape IS conforming, and a
 handle may carry anything else** (contracts are floors, not ceilings). User data
 rides our bags untouched; the only fields the framework ever strips are its own
@@ -398,12 +400,12 @@ reserved security fields, by name.
 `@agentick/client-core/testing` (the client twin of `runStoreConformance`).
 A thin mandatory core + profile cases that run iff declared:
 
-| Group | Cases |
-| --- | --- |
-| **Core (always)** | `subscribe` fires on change; the callback receives **no args**; the returned `Unsubscribe` stops it; `close()` (when present) tears down. |
-| **Enumerable (iff declared)** | `list()` reflects **pre-connection** state (the mid-ask shape — the caller supplies a "seed then connect" closure); `get(id)` + unknown-id → `undefined`. |
-| **Respondable (iff declared)** | `respond` routes by id; an unknown id rejects; double-respond is defined (settles, never hangs). |
-| **Write verbs** | every declared verb hits its wire method with correctly bound addressing (spy transport, `spyClientTransport`). |
+| Group                          | Cases                                                                                                                                                     |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Core (always)**              | `subscribe` fires on change; the callback receives **no args**; the returned `Unsubscribe` stops it; `close()` (when present) tears down.                 |
+| **Enumerable (iff declared)**  | `list()` reflects **pre-connection** state (the mid-ask shape — the caller supplies a "seed then connect" closure); `get(id)` + unknown-id → `undefined`. |
+| **Respondable (iff declared)** | `respond` routes by id; an unknown id rejects; double-respond is defined (settles, never hangs).                                                          |
+| **Write verbs**                | every declared verb hits its wire method with correctly bound addressing (spy transport, `spyClientTransport`).                                           |
 
 It asserts required members **behave** — never exact shape / no-extra-keys. The
 suite is proven against a minimal fake handle in
@@ -412,13 +414,13 @@ suite is proven against a minimal fake handle in
 **AS-IS migration table** (honest assessment against the target contract; slices
 3+ close the gaps — this slice changes none of it):
 
-| Handle | Core `subscribe(cb)` | `close?()` | Enumerable | Respondable | Write verb → wire | Gap to close (slices 3+) |
-| --- | --- | --- | --- | --- | --- | --- |
-| `session.knobs` | ~ has `subscribe((state)=>…)` — passes state, not zero-arg; also carries `onChange` (the dual-feed artifact) | ✓ | ✗ — `get()` returns the whole map, no `list()`/`get(id)`; values only (no descriptors) | n/a | `set` → `knobs/set` ✓ | subscribe → zero-arg; add `list`/`get(id)`; descriptors on wire (#1); `key`→`id` (#13); drop `onChange` |
-| `session.tasks` | ~ same as knobs (state-passing + `onChange`) | ✓ | ✗ — `get()` = whole `TaskStatusMap`, no `list`/`get(id)` (closest to correct) | n/a | `cancel` → `tasks/cancel` ✓ | subscribe → zero-arg; add `list`/`get(id)` |
-| `session.elicitations` | ✗ — `ChannelStream`: `AsyncIterable` + `onChange(frame)`, no `subscribe(cb)` | ✓ | ✗ — live-only (mid-ask client sees nothing) | ~ has `respond(input)` — id is **inside** `input`, not `respond(id, input)` | `respond` → `session/respond_to_elicitation` ✓ | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list` (§6.1); `respond(id, input)` shape |
-| `session.clientToolCalls` | ✗ — `ChannelStream` (`AsyncIterable` + `onChange`) | ✓ | ✗ — live-only | ✓ — `respond(correlationId, result)` already matches `respond(id, input)` | `respond` → `session/respond_to_tool_call` ✓ | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list`; verb-naming for route/confirm |
-| `session.timeline` | ✗ — not a sub-handle; a free `timelineView(client, id, …)` factory | (view has `close`) | ✗ — no wire history path | n/a | none (local view mutations) | become a registered sub-handle; `session/timeline_history` wire read (#2); Cursor-vs-seq (§6.4) |
+| Handle                    | Core `subscribe(cb)`                                                                                         | `close?()`         | Enumerable                                                                             | Respondable                                                                 | Write verb → wire                              | Gap to close (slices 3+)                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `session.knobs`           | ~ has `subscribe((state)=>…)` — passes state, not zero-arg; also carries `onChange` (the dual-feed artifact) | ✓                  | ✗ — `get()` returns the whole map, no `list()`/`get(id)`; values only (no descriptors) | n/a                                                                         | `set` → `knobs/set` ✓                          | subscribe → zero-arg; add `list`/`get(id)`; descriptors on wire (#1); `key`→`id` (#13); drop `onChange`           |
+| `session.tasks`           | ~ same as knobs (state-passing + `onChange`)                                                                 | ✓                  | ✗ — `get()` = whole `TaskStatusMap`, no `list`/`get(id)` (closest to correct)          | n/a                                                                         | `cancel` → `tasks/cancel` ✓                    | subscribe → zero-arg; add `list`/`get(id)`                                                                        |
+| `session.elicitations`    | ✗ — `ChannelStream`: `AsyncIterable` + `onChange(frame)`, no `subscribe(cb)`                                 | ✓                  | ✗ — live-only (mid-ask client sees nothing)                                            | ~ has `respond(input)` — id is **inside** `input`, not `respond(id, input)` | `respond` → `session/respond_to_elicitation` ✓ | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list` (§6.1); `respond(id, input)` shape |
+| `session.clientToolCalls` | ✗ — `ChannelStream` (`AsyncIterable` + `onChange`)                                                           | ✓                  | ✗ — live-only                                                                          | ✓ — `respond(correlationId, result)` already matches `respond(id, input)`   | `respond` → `session/respond_to_tool_call` ✓   | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list`; verb-naming for route/confirm     |
+| `session.timeline`        | ✗ — not a sub-handle; a free `timelineView(client, id, …)` factory                                           | (view has `close`) | ✗ — no wire history path                                                               | n/a                                                                         | none (local view mutations)                    | become a registered sub-handle; `session/timeline_history` wire read (#2); Cursor-vs-seq (§6.4)                   |
 
 Legend: ✓ conforms · ~ partial/shape-mismatch · ✗ absent. None of the handles is
 `Enumerable` today (the live-only defect); every one carries a working write verb
@@ -621,9 +623,9 @@ The pre-scoped handle methods are the 90%; the tiers below them exist for when
 you need a wider net or don't hold the handle:
 
 ```ts
-client.session(id).onLog(cb);                 // this session
-client.app(appId).onLog(cb);                  // every session under an app — one subscription
-client.gateway().onLog(cb);                   // deployment-wide
+client.session(id).onLog(cb); // this session
+client.app(appId).onLog(cb); // every session under an app — one subscription
+client.gateway().onLog(cb); // deployment-wide
 
 // don't hold a handle? pass the scope. Same call, same types:
 client.onLog({ kind: "session", id }, cb);
@@ -637,7 +639,7 @@ client.session(id).onProgress(render, { fromCursor: savedCursor });
 ```ts
 // (1) zero-config: full-object-per-frame channel, latest wins
 const status = client.session(id).channelView<TaskStatus>("task-status");
-status.get();                                 // TaskStatus | undefined
+status.get(); // TaskStatus | undefined
 
 // (2) custom fold: derive whatever state you want from snapshot + deltas
 const online = client.session(id).channelView<Set<string>, PresenceFrame>("presence", {
@@ -652,7 +654,7 @@ const online = client.session(id).channelView<Set<string>, PresenceFrame>("prese
 
 // (3) typed façade — zero config AND the correct fold, from the harness package
 import { knobsStateView } from "@agentick/knobs/client";
-const knobs = knobsStateView(client, id);           // snapshot+delta handled for you
+const knobs = knobsStateView(client, id); // snapshot+delta handled for you
 ```
 
 All three return the same `useSyncExternalStore` contract (`get()` / `subscribe()`
@@ -669,15 +671,15 @@ any time; an empty registry is zero-overhead:
 const off = client.hook({
   onBeforeSessionSend: (params) => {
     if (overBudget()) throw new Error("client budget exceeded"); // never leaves
-    return params;                                                // or a reshaped copy
+    return params; // or a reshaped copy
   },
   onAfterSessionSend: (result, ctx) => {
-    metrics.timing(ctx.method, result);          // observe, or reshape the result
+    metrics.timing(ctx.method, result); // observe, or reshape the result
     return result;
   },
 });
 client.hooks.onBeforeAppRunOnce((p) => ({ ...p, idempotencyKey: p.idempotencyKey ?? ulid() }));
-off();                                           // remove the batch
+off(); // remove the batch
 ```
 
 ### Consuming the execution stream
@@ -691,7 +693,7 @@ const handle = client.send(id, { messages });
 for await (const ev of handle.events()) {
   if (ev.type === "content-delta") ui.append(ev.delta);
   if (ev.type === "tool-call") ui.showToolCall(ev);
-  if (cancelled) await handle.abort();           // structured cancel
+  if (cancelled) await handle.abort(); // structured cancel
 }
 
 const { response, usage, stopReason } = await handle.result;
@@ -706,7 +708,7 @@ session handle — reach for it once:
 ```ts
 const s = client.session(id);
 s.onLog(logPanel.add);
-const status = s.channelView("task-status");   // zero-config view — stays on the handle
+const status = s.channelView("task-status"); // zero-config view — stays on the handle
 const handle = s.send({ messages });
 ```
 
@@ -719,21 +721,21 @@ Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` a
 Every claim in this README has a corresponding test, or appears below
 under "Roadmap & known gaps" with an explicit marker.
 
-| Concern                                                                                                                           | Test file                                                     |
-| --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `createClient`, `connect`, `close`, request dispatch                                                                              | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `request` middleware composition (outer→inner)                                                                          | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `install()` namespace registration                                                                                      | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `onClose` handler LIFO order                                                                                                      | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)                         | `src/__tests__/handler-registry.spec.ts`                      |
-| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware                                  | `src/__tests__/effect-middleware.spec.ts`                     |
-| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                  | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
-| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64) | `src/__tests__/signals.spec.ts`                               |
-| `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation, AND `client.channelView` instance-method delegation (ADR 33) | `src/__tests__/channel-view.spec.ts`                          |
-| Client hooks — `onBefore<Method>` param transform + abort, `onAfter<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83) | `src/__tests__/hooks.spec.ts`                                 |
-| Pre-scoped handle `onLog` / `onProgress` bake the session / app / gateway scope (asserted on `transport.subscribe`); pre-scoped zero-config `channelView` yields a last-frame-wins view | `src/__tests__/handle-subscriptions.spec.ts`                  |
-| `channelView` zero-config default fold (no config → view = latest frame payload, `undefined` before first frame) | `src/__tests__/handle-subscriptions.spec.ts`                  |
-| `createClient({ onStateChange, onCapabilitiesChange })` client-LOCAL observers fire on state / capability changes | `src/__tests__/handle-subscriptions.spec.ts`                  |
+| Concern                                                                                                                                                                                                        | Test file                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `createClient`, `connect`, `close`, request dispatch                                                                                                                                                           | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `request` middleware composition (outer→inner)                                                                                                                                                       | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| Extension `install()` namespace registration                                                                                                                                                                   | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `onClose` handler LIFO order                                                                                                                                                                                   | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
+| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)                                                                                                      | `src/__tests__/handler-registry.spec.ts`                      |
+| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware                                                                                                               | `src/__tests__/effect-middleware.spec.ts`                     |
+| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                                                                                               | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
+| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64)                                  | `src/__tests__/signals.spec.ts`                               |
+| `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation, AND `client.channelView` instance-method delegation (ADR 33)                         | `src/__tests__/channel-view.spec.ts`                          |
+| Client hooks — `onBefore<Method>` param transform + abort, `onAfter<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83)          | `src/__tests__/hooks.spec.ts`                                 |
+| Pre-scoped handle `onLog` / `onProgress` bake the session / app / gateway scope (asserted on `transport.subscribe`); pre-scoped zero-config `channelView` yields a last-frame-wins view                        | `src/__tests__/handle-subscriptions.spec.ts`                  |
+| `channelView` zero-config default fold (no config → view = latest frame payload, `undefined` before first frame)                                                                                               | `src/__tests__/handle-subscriptions.spec.ts`                  |
+| `createClient({ onStateChange, onCapabilitiesChange })` client-LOCAL observers fire on state / capability changes                                                                                              | `src/__tests__/handle-subscriptions.spec.ts`                  |
 | `ClientHandle` contract + `Enumerable`/`Respondable` profiles + `isClientHandle`/`isEnumerable`/`isRespondable` feature-detection; `runClientHandleConformance` core + profile + write-verb cases (B2 slice 1) | `src/__tests__/handle-conformance.spec.ts`                    |
 
 ## Roadmap & known gaps
@@ -748,14 +750,14 @@ under "Roadmap & known gaps" with an explicit marker.
 
 ## Development plan
 
-| Phase       | What lands                                                                                           |
-| ----------- | ---------------------------------------------------------------------------------------------------- |
-| 33.B (done) | This package + in-process transport + `ClientProtocol` in spec                                       |
-| 33.C (done) | WebSocket transport                                                                                  |
-| 33.D        | Streamable HTTP transport                                                                            |
-| 33.E        | Unix socket transport                                                                                |
+| Phase       | What lands                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------- |
+| 33.B (done) | This package + in-process transport + `ClientProtocol` in spec                                  |
+| 33.C (done) | WebSocket transport                                                                             |
+| 33.D        | Streamable HTTP transport                                                                       |
+| 33.E        | Unix socket transport                                                                           |
 | 33.F        | `@agentick/client-extensions` bundle with `/retry`, `/telemetry`, `/cache`, `/offline` subpaths |
 | 33.G        | Multiplexer (`@agentick/transport-multiplexer`)                                                 |
-| 33.H        | Devtools + mock                                                                                      |
-| 33.I        | MCP-bilingual (`@agentick/mcp-surface`, `@agentick/transport-mcp-client`)                  |
-| ADR 34      | Auth subsystem fills `client.auth`                                                                   |
+| 33.H        | Devtools + mock                                                                                 |
+| 33.I        | MCP-bilingual (`@agentick/mcp-surface`, `@agentick/transport-mcp-client`)                       |
+| ADR 34      | Auth subsystem fills `client.auth`                                                              |

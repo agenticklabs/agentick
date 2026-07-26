@@ -83,32 +83,32 @@ const provider = lambdaProvider({ imageIdentifier: "loopback", controlPlane });
 
 ## API
 
-| Export | Kind | Purpose |
-| --- | --- | --- |
-| `lambdaProvider(config)` | fn | The `SandboxProvider`. |
-| `LambdaProviderConfig` | type | Image ARN, control plane, connectors, idle policy, agent port. |
-| `LambdaSandbox` | class | The `SandboxHandle` client stub (one microVM). |
-| `EndpointClient` | class | Near-side HTTP+WS client to the in-VM agent. |
-| `awsLambdaMicrovmsControlPlane(config)` | fn | The AWS SDK v3 control plane. |
-| `LambdaMicrovmsControlPlane` | type | The injectable control-plane seam. |
-| `startSandboxAgent(opts)` (`/agent`) | fn | The in-VM server (baked into the image). |
-| `AgentEgressProxy` (`/agent`) | class | The in-VM domain-egress proxy. |
-| `fakeLambdaMicrovmsControlPlane()` (`/testing`) | fn | Loopback control plane (Meszaros fake). |
+| Export                                          | Kind  | Purpose                                                        |
+| ----------------------------------------------- | ----- | -------------------------------------------------------------- |
+| `lambdaProvider(config)`                        | fn    | The `SandboxProvider`.                                         |
+| `LambdaProviderConfig`                          | type  | Image ARN, control plane, connectors, idle policy, agent port. |
+| `LambdaSandbox`                                 | class | The `SandboxHandle` client stub (one microVM).                 |
+| `EndpointClient`                                | class | Near-side HTTP+WS client to the in-VM agent.                   |
+| `awsLambdaMicrovmsControlPlane(config)`         | fn    | The AWS SDK v3 control plane.                                  |
+| `LambdaMicrovmsControlPlane`                    | type  | The injectable control-plane seam.                             |
+| `startSandboxAgent(opts)` (`/agent`)            | fn    | The in-VM server (baked into the image).                       |
+| `AgentEgressProxy` (`/agent`)                   | class | The in-VM domain-egress proxy.                                 |
+| `fakeLambdaMicrovmsControlPlane()` (`/testing`) | fn    | Loopback control plane (Meszaros fake).                        |
 
 Subpaths: `.` (provider), `./agent` (in-VM bundle), `./testing` (doubles).
 Bin: `agentick-sandbox-agent` (the image `CMD`).
 
 ## Capability tiers (honest — never fake)
 
-| Capability | Lambda tier |
-| --- | --- |
-| `exec` (streaming, no ceiling) | ✅ WebSocket frames → `onOutput` + terminal exit frame |
-| `readFile` / `writeFile` / `editFile` | ✅ HTTP; `editFile` runs `applyEdits` IN-VM, atomic write-back |
-| `network: true` | ✅ attaches the `internetEgressConnector` ARN (public) when configured |
-| `network: false` / undefined | ⚠️ attaches **no** egress connector — _intended_ deny-all, **not yet verified** on a real microVM (see known gaps) |
-| `network: NetworkRule[]` | ✅ **in-VM egress proxy** (domain rules) + optional `vpcEgressConnector` — **richer than docker** |
-| runtime host mounts (`addMount` …) | ❌ `SandboxUnsupportedError` — a host path has no referent in a remote microVM |
-| hibernate / `restore` | ⏳ fast-follow (#223) — native `suspend`/`resume` |
+| Capability                            | Lambda tier                                                                                                        |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `exec` (streaming, no ceiling)        | ✅ WebSocket frames → `onOutput` + terminal exit frame                                                             |
+| `readFile` / `writeFile` / `editFile` | ✅ HTTP; `editFile` runs `applyEdits` IN-VM, atomic write-back                                                     |
+| `network: true`                       | ✅ attaches the `internetEgressConnector` ARN (public) when configured                                             |
+| `network: false` / undefined          | ⚠️ attaches **no** egress connector — _intended_ deny-all, **not yet verified** on a real microVM (see known gaps) |
+| `network: NetworkRule[]`              | ✅ **in-VM egress proxy** (domain rules) + optional `vpcEgressConnector` — **richer than docker**                  |
+| runtime host mounts (`addMount` …)    | ❌ `SandboxUnsupportedError` — a host path has no referent in a remote microVM                                     |
+| hibernate / `restore`                 | ⏳ fast-follow (#223) — native `suspend`/`resume`                                                                  |
 
 **Divergence from docker (intentional):** `sandbox-docker-next` throws
 `SandboxUnsupportedError` for a `NetworkRule[]` because `NetworkMode` cannot
@@ -194,7 +194,7 @@ for domain rules + mounts capability-tier. AWS SDK client
   order (`runMicrovm → waitRunning → createAuthToken → handle → terminate`) via
   a spy over the loopback fake; create-time env delivery; **plus** the
   AWS-integration conformance run, gated on real AWS (`SANDBOX_LAMBDA_TEST_IMAGE`
-  + region), registered skipped where AWS is absent.
+  - region), registered skipped where AWS is absent.
 - `src/__tests__/egress-proxy.spec.ts` — the in-VM proxy forwards an allowed
   host (200) and denies an unlisted host (403, default-deny) against a real
   origin.

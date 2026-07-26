@@ -27,8 +27,8 @@ copy-pasted conformance suite. This package factors all three out:
   `matchQuery` predicate. Exposes an optional **`onChange`** shared-store
   observation seam (below).
 - **`MemoryLog<T>`** — the **log**-archetype sibling: a `Map`-of-`{ entries,
-  baseSeq }` generic that fully backs `MemoryTimelineStore` (`T =
-  TimelineEntry`). Append→`seq`, cursored `history`, `keys` enumerate,
+baseSeq }` generic that fully backs `MemoryTimelineStore` (`T =
+TimelineEntry`). Append→`seq`, cursored `history`, `keys` enumerate,
   prune-by-absolute-seq, defensive-copy read — payload-agnostic over `T`. A
   **full in-memory array per log is the intended default** (no bounding /
   eviction — that is a durable adapter's concern, data-layer plan §2.7); the
@@ -63,6 +63,7 @@ copy-pasted conformance suite. This package factors all three out:
   view.write({ id: "verbose", value: true }, ctx); // sync cache → store → ping + change
   const keys = await view.hydrate(undefined, ctx); // merge store projection, ping loaded keys
   ```
+
 - **`LogView<T>`** — the **log**-archetype sibling of `View`: the harness-side
   SYNCHRONOUS projection of a [`LogStore<T>`](../spec/src/protocol/log-store.ts).
   Where `View` projects a keyed `CollectionStore`, `LogView` projects an
@@ -70,7 +71,7 @@ copy-pasted conformance suite. This package factors all three out:
   harness (timeline today) re-hand-rolled: **two tiers** (a durable, append-only
   `persisted` + a materialized `projection` that a compaction target diverges),
   monotonic version counters, an identity-stable render snapshot (`{ entries,
-  version }`), a keyless render `Notifier`, and the **write-behind pump**. Append
+version }`), a keyless render `Notifier`, and the **write-behind pump**. Append
   updates both tiers synchronously (memory-authoritative) and persists per
   `writePolicy`: `"through"` awaits the store inline; `"behind"` buffers and
   drains via a single-flight pump whose failures are absorbed into a latched
@@ -100,6 +101,7 @@ copy-pasted conformance suite. This package factors all three out:
 
   `View` and `LogView` are the **two projection archetypes over the two store
   archetypes**: `View : CollectionStore :: LogView : LogStore`.
+
 - **`runStoreConformance`** — the shared conformance skeleton the per-store
   suites (`runTaskStoreConformance`, `runTimelineStoreConformance`,
   `runCredentialsStoreConformance`) delegate their store-agnostic cases to
@@ -153,16 +155,16 @@ runStoreConformance<TaskStore>({
 
 ### `MemoryCollection<T, Q, PruneArg = never>` implements `CollectionStore<T, Q, PruneArg>`
 
-| Member                          | Behavior                                                             |
-| ------------------------------- | ------------------------------------------------------------------- |
-| `new MemoryCollection(config)`  | `config`: `{ backend, keyOf, matchQuery, prunePredicate? }`          |
-| `put(item)`                     | Upsert keyed by `keyOf(item)` — a later `put` replaces              |
-| `get(key)`                      | Read one; `undefined` when absent                                   |
-| `list(query?)`                  | Filter by `matchQuery`; returns a **fresh array** each call         |
-| `delete(key)`                   | Idempotent; returns whether the key existed                         |
-| `prune?(arg)`                   | Present only when `prunePredicate` given; drops predicate-selected  |
-| `onChange(listener)`            | Subscribe to `put`/`delete` deltas; returns unsubscribe (below)     |
-| `backend`                       | The configured backend label                                        |
+| Member                         | Behavior                                                           |
+| ------------------------------ | ------------------------------------------------------------------ |
+| `new MemoryCollection(config)` | `config`: `{ backend, keyOf, matchQuery, prunePredicate? }`        |
+| `put(item)`                    | Upsert keyed by `keyOf(item)` — a later `put` replaces             |
+| `get(key)`                     | Read one; `undefined` when absent                                  |
+| `list(query?)`                 | Filter by `matchQuery`; returns a **fresh array** each call        |
+| `delete(key)`                  | Idempotent; returns whether the key existed                        |
+| `prune?(arg)`                  | Present only when `prunePredicate` given; drops predicate-selected |
+| `onChange(listener)`           | Subscribe to `put`/`delete` deltas; returns unsubscribe (below)    |
+| `backend`                      | The configured backend label                                       |
 
 #### `onChange` — the shared-store observation seam
 
@@ -196,16 +198,16 @@ The **log**-archetype default backing — an in-process append-only log per
 (`MemoryTimelineStore extends MemoryLog<TimelineEntry>` is an empty subclass —
 timeline needs nothing the generic doesn't provide).
 
-| Member                          | Behavior                                                             |
-| ------------------------------- | ------------------------------------------------------------------- |
-| `new MemoryLog(config?)`        | `config`: `{ backend? }` — backend label, defaults to `"memory"`   |
-| `append(logKey, entries)`       | Append in order; returns the assigned `seq[]` (strictly increasing) |
-| `read(logKey)`                  | Full ordered read; `[]` when absent; **defensive copy** each call   |
-| `history?(logKey, opts?)`       | Cursored seq-tagged read: `{ fromSeq?, limit? }` → `SeqTagged<T>[]`  |
-| `keys()`                        | Enumerate log keys that hold entries (foundational enumerate verb)   |
-| `delete(logKey)`                | Idempotent; returns whether entries were removed; ends the `seq` run |
-| `prune?(logKey, { seq })`       | Erase entries below an ABSOLUTE `seq`; survivors keep their `seq`    |
-| `backend`                       | The configured backend label                                        |
+| Member                    | Behavior                                                             |
+| ------------------------- | -------------------------------------------------------------------- |
+| `new MemoryLog(config?)`  | `config`: `{ backend? }` — backend label, defaults to `"memory"`     |
+| `append(logKey, entries)` | Append in order; returns the assigned `seq[]` (strictly increasing)  |
+| `read(logKey)`            | Full ordered read; `[]` when absent; **defensive copy** each call    |
+| `history?(logKey, opts?)` | Cursored seq-tagged read: `{ fromSeq?, limit? }` → `SeqTagged<T>[]`  |
+| `keys()`                  | Enumerate log keys that hold entries (foundational enumerate verb)   |
+| `delete(logKey)`          | Idempotent; returns whether entries were removed; ends the `seq` run |
+| `prune?(logKey, { seq })` | Erase entries below an ABSOLUTE `seq`; survivors keep their `seq`    |
+| `backend`                 | The configured backend label                                         |
 
 The frozen `seq` contract (strictly increasing, never reused, stable across
 `prune`) is tracked as `baseSeq + index`; `baseSeq` advances on `prune` so a
@@ -229,17 +231,17 @@ harnesses read the store LIVE and hold no view — credentials is the deliberate
 counter-example (`get`/`has`/`keys` each `await` the store directly).
 "Store-backed harness ⟹ view" is conditional on render-read, not universal.
 
-| Member                                        | Behavior                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------------------ |
-| `View.collection(store, keyOf)`       | Factory over a `CollectionMutation` store (`toPut`/`toDelete` prefilled) |
-| `new View({ store, keyOf, toPut, toDelete })` | Full config for a bespoke mutation vocabulary `M`                 |
-| `getSync(key)` / `hasSync(key)` / `listSync()`| Sync reads; NEVER touch the store                                        |
-| `write(item, ctx)`                            | Cache → `store.mutate({ put })` → ping + typed change (add/update by presence) |
-| `deleteSync(key, ctx): boolean`               | Idempotent; on real delete: cache → `mutate({ delete })` → ping + removal change |
-| `replace(items, ctx)`                         | Bulk wholesale replace; cache-first, batched pings, **change-silent**    |
-| `hydrate(q, ctx): Promise<keys>`              | Merge `store.query(q)` overlay; batched pings; **change-silent**; returns loaded keys |
-| `subscribe` / `subscribeAll` / `notify`       | Render-ping seam (delegates to `KeyedNotifier`)                          |
-| `onChange(fn)`                                | Typed `ChangeEvent<T>` push seam (delegates to `ChangeNotifier`)         |
+| Member                                         | Behavior                                                                              |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `View.collection(store, keyOf)`                | Factory over a `CollectionMutation` store (`toPut`/`toDelete` prefilled)              |
+| `new View({ store, keyOf, toPut, toDelete })`  | Full config for a bespoke mutation vocabulary `M`                                     |
+| `getSync(key)` / `hasSync(key)` / `listSync()` | Sync reads; NEVER touch the store                                                     |
+| `write(item, ctx)`                             | Cache → `store.mutate({ put })` → ping + typed change (add/update by presence)        |
+| `deleteSync(key, ctx): boolean`                | Idempotent; on real delete: cache → `mutate({ delete })` → ping + removal change      |
+| `replace(items, ctx)`                          | Bulk wholesale replace; cache-first, batched pings, **change-silent**                 |
+| `hydrate(q, ctx): Promise<keys>`               | Merge `store.query(q)` overlay; batched pings; **change-silent**; returns loaded keys |
+| `subscribe` / `subscribeAll` / `notify`        | Render-ping seam (delegates to `KeyedNotifier`)                                       |
+| `onChange(fn)`                                 | Typed `ChangeEvent<T>` push seam (delegates to `ChangeNotifier`)                      |
 
 **Single vs bulk.** `write`/`deleteSync` emit a typed change (one JSON-Patch
 delta on a harness channel); `replace`/`hydrate` are change-silent — a wholesale
@@ -254,18 +256,18 @@ The **log**-archetype sibling of `View` — the harness-side sync projection of 
 machine every store-backed log harness (timeline) re-hand-rolled. Construct with
 `{ store, logKey, writePolicy, wrapWriteError? }`.
 
-| Member                                   | Behavior                                                                          |
-| ---------------------------------------- | --------------------------------------------------------------------------------- |
+| Member                                                         | Behavior                                                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `new LogView({ store, logKey, writePolicy, wrapWriteError? })` | The whole machine; `wrapWriteError` maps a raw store rejection to the adopter's typed error |
-| `append(entries, ctx): Promise`          | Both tiers sync; then `through` awaits the store / `behind` buffers + kicks the pump |
-| `read()` / `readPersisted()`             | Sync reads — the projection tier / the durable log tier                           |
-| `snapshot()`                             | Identity-stable `{ entries, version }` (re-allocated only on projection mutation) |
-| `subscribe(fn)`                          | Render-ping seam (keyless `Notifier`)                                             |
-| `replaceProjection(entries, meta?)`      | Compaction target — projection tier ONLY; records `meta` provenance               |
-| `resetProjection()`                      | Re-mirror the projection to the durable log; clears provenance                    |
-| `flush(): Promise`                       | Write-behind barrier — throws the wrapped error if a buffered write failed (latched) |
-| `hydrate(ctx): Promise`                  | Load the durable log into BOTH tiers (resume path)                                |
-| `exportSnapshot()` / `importSnapshot(snap, opts?)` | Both tiers + versions + provenance; import `mode: "as-is" \| "reset-projection"` |
+| `append(entries, ctx): Promise`                                | Both tiers sync; then `through` awaits the store / `behind` buffers + kicks the pump        |
+| `read()` / `readPersisted()`                                   | Sync reads — the projection tier / the durable log tier                                     |
+| `snapshot()`                                                   | Identity-stable `{ entries, version }` (re-allocated only on projection mutation)           |
+| `subscribe(fn)`                                                | Render-ping seam (keyless `Notifier`)                                                       |
+| `replaceProjection(entries, meta?)`                            | Compaction target — projection tier ONLY; records `meta` provenance                         |
+| `resetProjection()`                                            | Re-mirror the projection to the durable log; clears provenance                              |
+| `flush(): Promise`                                             | Write-behind barrier — throws the wrapped error if a buffered write failed (latched)        |
+| `hydrate(ctx): Promise`                                        | Load the durable log into BOTH tiers (resume path)                                          |
+| `exportSnapshot()` / `importSnapshot(snap, opts?)`             | Both tiers + versions + provenance; import `mode: "as-is" \| "reset-projection"`            |
 
 **The pump never rejects.** A failed write-behind batch is absorbed into a
 latched error; `flush()` is the single place it surfaces (as `wrapWriteError`'s
@@ -275,15 +277,15 @@ its store write is confirmed.
 
 ### `runStoreConformance<S>(options)`
 
-| Option             | Purpose                                                              |
-| ------------------ | ------------------------------------------------------------------- |
-| `label`            | `describe` heading                                                   |
-| `factory`          | Fresh, isolated store per test                                       |
-| `skip?`            | Register the suite as skipped (backend absent in env)               |
-| `capabilities?`    | `{ prune? }` — forwarded to `cases`                                  |
-| `emptyRead?`       | `{ read, expected, key? }` — unknown-key → empty-value probe        |
-| `idempotentDelete?`| `(store, key) => Promise` — delete-absent-twice probe               |
-| `cases?`           | `(ctx) => void` — register shape-specific `it`s under the describe  |
+| Option              | Purpose                                                            |
+| ------------------- | ------------------------------------------------------------------ |
+| `label`             | `describe` heading                                                 |
+| `factory`           | Fresh, isolated store per test                                     |
+| `skip?`             | Register the suite as skipped (backend absent in env)              |
+| `capabilities?`     | `{ prune? }` — forwarded to `cases`                                |
+| `emptyRead?`        | `{ read, expected, key? }` — unknown-key → empty-value probe       |
+| `idempotentDelete?` | `(store, key) => Promise` — delete-absent-twice probe              |
+| `cases?`            | `(ctx) => void` — register shape-specific `it`s under the describe |
 
 ## Patterns
 
@@ -295,7 +297,7 @@ its store write is confirmed.
   `MemoryLog`; collection = `CollectionStore` / `MemoryCollection`) sharing
   characteristics — `backend`, an enumerate verb, optional `prune`, a
   conformance suite — not a nominal base class. (`EventLog<E>` in spec is the
-  Effect-flavored *substrate* log — bus / journal — a different beast from the
+  Effect-flavored _substrate_ log — bus / journal — a different beast from the
   Promise-shaped `LogStore` adopter store.)
 - **`prune` presence is a capability signal.** Omit `prunePredicate` and the
   method is genuinely absent, so `typeof store.prune === "function"` — the
@@ -320,7 +322,7 @@ Landed across the data-layer store-substrate runs:
 - **Run #3 (credentials)** — `MemoryCollection.onChange` (the shared-store
   observation seam) landed with `inMemoryCredentialsStore` as its first
   consumer; that store now composes `MemoryCollection` (composite `(namespace,
-  key)` addressing) instead of a hand-rolled `Map` + listener set, and
+key)` addressing) instead of a hand-rolled `Map` + listener set, and
   `runCredentialsStoreConformance` delegates its store-agnostic trio to
   `runStoreConformance` via KV closures.
 - **Run #6 (timeline)** — `MemoryLog<T>` extracted (the **log**-archetype

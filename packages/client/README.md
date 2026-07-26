@@ -18,7 +18,8 @@ session.tasks.list(); // TaskInfo[]                      — @agentick/tasks/cli
 session.knobs.list(); // WireKnobDescriptor[] (+values)  — @agentick/knobs/client
 await session.knobs.set("temperature", 0.7);
 session.timeline.list(); // TimelineEntry[]              — @agentick/timeline/client
-session.elicitations.subscribe(() => {  // pending asks  — @agentick/elicitation/client
+session.elicitations.subscribe(() => {
+  // pending asks  — @agentick/elicitation/client
   for (const e of session.elicitations.list()) void e.accept({});
 });
 
@@ -53,8 +54,8 @@ the durable timeline store server-side (reachable via a future
 
 ## Core vs bundle
 
-| Package                      | What                                                                    |
-| ---------------------------- | ----------------------------------------------------------------------- |
+| Package                 | What                                                                    |
+| ----------------------- | ----------------------------------------------------------------------- |
 | `@agentick/client`      | **This package.** Batteries-included — core + every built-in `/client`. |
 | `@agentick/client-core` | The lean, harness-agnostic core. Opt in to built-ins per-harness.       |
 

@@ -150,17 +150,12 @@ interface HttpServerOptions {
 
 ```ts
 // Common path — the wrapper owns the Node http.Server:
-type HttpServerTransportPortConfig = Omit<
-  HttpServerOptions,
-  "gateway" | "httpServer"
-> & {
+type HttpServerTransportPortConfig = Omit<HttpServerOptions, "gateway" | "httpServer"> & {
   port: number;
   host?: string; // bind address; DEFAULT 127.0.0.1 (loopback only — the security boundary)
 };
 // Or mount on an adopter-owned server:
-type HttpServerTransportConfig =
-  | HttpServerTransportPortConfig
-  | Omit<HttpServerOptions, "gateway">; // { httpServer, ... }
+type HttpServerTransportConfig = HttpServerTransportPortConfig | Omit<HttpServerOptions, "gateway">; // { httpServer, ... }
 ```
 
 > **Server-side auth (prod edge).** `authSource` authenticates the
@@ -271,16 +266,16 @@ Phase 33.D of the v2 implementation plan — see
 Every claim in this README has a corresponding test, or appears below
 under "Roadmap & known gaps" with an explicit marker.
 
-| Concern                                                                                                                                                | Test file                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                              | `src/__tests__/smoke.spec.ts`                                                                                    |
-| State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams | `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance` from `@agentick/spec-conformance`) |
-| SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                        | covered via the conformance suite's streaming-response path                                                      |
-| Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                             |
-| `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                       |
-| Security defaults (STATUS A2 §4c) — CSRF bootstrap handshake + missing/invalid-token deny, cross-site `Origin`/`Sec-Fetch-Site` deny, `Host` allow-list deny, non-permissive CORS (allowlisted origin echoed, never `*`), loopback bind default; overrides (`csrf:false`, `allowedOrigins`, `allowedHosts`) | `src/__tests__/security.spec.ts` + policy matrix in `@agentick/transport` `src/__tests__/web-security.spec.ts` |
-| Embedded gateway (`fetchServerTransport`) — identity round-trip (dispatch sees the callback's principal), identity `Response` short-circuit, fail-closed default + `security: "host-managed"` local-pole opt-out, scopes denied through the existing `authorizeDispatch` choke point, subscription stream (GET SSE + `sub/subscribe` → frame → teardown), cross-site reject when embedded, Hono-style mount typechecks, `gateway.close()` sweeps live SSE sessions, pre-listen / post-close `503` refusal | `src/__tests__/embedded-fetch-handler.spec.ts` |
-| Embedded door `ServerTransport` conformance — stable id (`http:fetch`), `listen`/`close` bind + teardown, idempotent listen + close, re-listen after close | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance("fetchServerTransport", …)`) |
+| Concern                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Test file                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                                                                                                                                                                                                                                                                                                                                                                                 | `src/__tests__/smoke.spec.ts`                                                                                  |
+| State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams                                                                                                                                                                                                                                                                                                                                                    | `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance` from `@agentick/spec-conformance`)    |
+| SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                                                                                                                                                                                                                                                                                                                                                                           | covered via the conformance suite's streaming-response path                                                    |
+| Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                                                                                                                                                                                                                                                                                                                                                                   | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                           |
+| `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port)                                                                                                                                                                                                                                                                                                                  | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                     |
+| Security defaults (STATUS A2 §4c) — CSRF bootstrap handshake + missing/invalid-token deny, cross-site `Origin`/`Sec-Fetch-Site` deny, `Host` allow-list deny, non-permissive CORS (allowlisted origin echoed, never `*`), loopback bind default; overrides (`csrf:false`, `allowedOrigins`, `allowedHosts`)                                                                                                                                                                                               | `src/__tests__/security.spec.ts` + policy matrix in `@agentick/transport` `src/__tests__/web-security.spec.ts` |
+| Embedded gateway (`fetchServerTransport`) — identity round-trip (dispatch sees the callback's principal), identity `Response` short-circuit, fail-closed default + `security: "host-managed"` local-pole opt-out, scopes denied through the existing `authorizeDispatch` choke point, subscription stream (GET SSE + `sub/subscribe` → frame → teardown), cross-site reject when embedded, Hono-style mount typechecks, `gateway.close()` sweeps live SSE sessions, pre-listen / post-close `503` refusal | `src/__tests__/embedded-fetch-handler.spec.ts`                                                                 |
+| Embedded door `ServerTransport` conformance — stable id (`http:fetch`), `listen`/`close` bind + teardown, idempotent listen + close, re-listen after close                                                                                                                                                                                                                                                                                                                                                | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance("fetchServerTransport", …)`)          |
 
 ## Roadmap & known gaps
 
@@ -305,9 +300,9 @@ under "Roadmap & known gaps" with an explicit marker.
 
 ## Development plan
 
-| Step                                | Lands when                                                                               |
-| ----------------------------------- | ---------------------------------------------------------------------------------------- |
-| Phase 33.D MVP                      | Landed                                                                                   |
-| Backpressure wiring                 | Primitive landed in `@agentick/transport` (`MultiplexedStream`); this transport still uses the default `unbounded` policy |
+| Step                                | Lands when                                                                                                                                |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Phase 33.D MVP                      | Landed                                                                                                                                    |
+| Backpressure wiring                 | Primitive landed in `@agentick/transport` (`MultiplexedStream`); this transport still uses the default `unbounded` policy                 |
 | Notification-channel reconnect test | Base reconnect machinery lives in `@agentick/transport`; an HTTP server-bounce test (parallel to WS `reconnect.spec.ts`) is still missing |
-| Bilingual MCP support               | Phase 33.I                                                                               |
+| Bilingual MCP support               | Phase 33.I                                                                                                                                |

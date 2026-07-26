@@ -27,12 +27,12 @@ The `emit-inbound` half of a platform is **required**; `deliver` and
 consumer, cron) implements only inbound and never delivers back — that is
 first-class, not a degenerate case.
 
-| Direction                    | When wired            | Composition                                         |
-| ---------------------------- | --------------------- | --------------------------------------------------- |
-| **inbound** (required)       | always                | event → `apps().getSession()` → `session.send({ … })` |
-| **outbound** (optional)      | platform has `deliver`| `subscribeBus` execution end → hand raw output over |
-| **confirmations** (optional) | platform has `presentConfirmation` | elicitation channel → prompt → `respond(…)` |
-| **teardown**                 | always                | `onClose` → `platform.stop()`                       |
+| Direction                    | When wired                         | Composition                                           |
+| ---------------------------- | ---------------------------------- | ----------------------------------------------------- |
+| **inbound** (required)       | always                             | event → `apps().getSession()` → `session.send({ … })` |
+| **outbound** (optional)      | platform has `deliver`             | `subscribeBus` execution end → hand raw output over   |
+| **confirmations** (optional) | platform has `presentConfirmation` | elicitation channel → prompt → `respond(…)`           |
+| **teardown**                 | always                             | `onClose` → `platform.stop()`                         |
 
 ## Quick start
 
@@ -61,7 +61,9 @@ const webhook: ConnectorPlatform = {
   start(handle) {
     server.on("POST /hook", (req) => handle.emitInbound({ text: req.body.text }));
   },
-  stop() { server.close(); },
+  stop() {
+    server.close();
+  },
   // no `deliver`, no `presentConfirmation` → inbound-only
 };
 ```
@@ -133,7 +135,7 @@ config: {
   stamp `InboundMessage.sessionId` in your port for the latter.
 - **Provenance vs identity** — `InboundMessage.source` is stamped at
   `metadata.source` (typed via the `MessageSource` augmentation seam),
-  *unauthenticated provenance*, distinct from the authenticated actor
+  _unauthenticated provenance_, distinct from the authenticated actor
   (`RuntimeContextUser`). See Status.
 - **Platform-side delivery sophistication** — cadence, content policy,
   chunking, retry live in the platform port (compose `formatters-next` +

@@ -253,7 +253,7 @@ await knobs.set("verbosity", 3); // { sessionId, id: "verbosity", value: 3 } on 
 - Types: **`KnobsHandle`** (the contract above), **`KnobsState`**
   (`Readonly<Record<string, KnobPrimitive>>`), **`KnobsClient`** (read surface —
   `transport.subscribe`), **`KnobsCommandClient`** (command surface — `subscribe`
-  + `request`).
+  - `request`).
 
 **Two `session.knobs`, one noun — mind the vantage.** The CLIENT slot above
 (`client.session(id).knobs`, a `KnobsHandle` = the descriptor fold + a flat
@@ -332,7 +332,14 @@ round-trips:
 const { descriptors } = harness.stateSnapshotFrame();
 for (const d of descriptors) {
   if (d.valueType === "number")
-    ui.slider({ id: d.id, value: d.value, min: d.min, max: d.max, step: d.step, label: d.description });
+    ui.slider({
+      id: d.id,
+      value: d.value,
+      min: d.min,
+      max: d.max,
+      step: d.step,
+      label: d.description,
+    });
 }
 ```
 

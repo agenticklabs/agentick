@@ -67,7 +67,9 @@ default: no export spam). Set `autoDiscover: false` to suppress it.
 
 ```ts
 // endpoint env present ⇒ the app builds an otlpSink() automatically
-telemetry: { serviceName: "orders-agent" }; // createApp({ telemetry })
+telemetry: {
+  serviceName: "orders-agent";
+} // createApp({ telemetry })
 ```
 
 ## API
@@ -81,30 +83,30 @@ I/O at construction — building the sink opens no connection.
 
 ### `OtlpSinkOptions`
 
-| Field      | Type                                          | Default         |
-| ---------- | --------------------------------------------- | --------------- |
-| `endpoint` | `string`                                      | env / exporter default |
-| `headers`  | `Readonly<Record<string, string>>`            | env / none      |
-| `protocol` | `"http/protobuf" \| "http/json" \| "grpc"`    | `"http/protobuf"` |
+| Field      | Type                                       | Default                |
+| ---------- | ------------------------------------------ | ---------------------- |
+| `endpoint` | `string`                                   | env / exporter default |
+| `headers`  | `Readonly<Record<string, string>>`         | env / none             |
+| `protocol` | `"http/protobuf" \| "http/json" \| "grpc"` | `"http/protobuf"`      |
 
 ### Protocol → exporter package
 
-| `protocol`      | Trace exporter                                | Metric exporter                                 |
-| --------------- | --------------------------------------------- | ----------------------------------------------- |
-| `http/protobuf` | `@opentelemetry/exporter-trace-otlp-proto`    | `@opentelemetry/exporter-metrics-otlp-proto`    |
-| `http/json`     | `@opentelemetry/exporter-trace-otlp-http`     | `@opentelemetry/exporter-metrics-otlp-http`     |
-| `grpc`          | `@opentelemetry/exporter-trace-otlp-grpc`     | `@opentelemetry/exporter-metrics-otlp-grpc`     |
+| `protocol`      | Trace exporter                             | Metric exporter                              |
+| --------------- | ------------------------------------------ | -------------------------------------------- |
+| `http/protobuf` | `@opentelemetry/exporter-trace-otlp-proto` | `@opentelemetry/exporter-metrics-otlp-proto` |
+| `http/json`     | `@opentelemetry/exporter-trace-otlp-http`  | `@opentelemetry/exporter-metrics-otlp-http`  |
+| `grpc`          | `@opentelemetry/exporter-trace-otlp-grpc`  | `@opentelemetry/exporter-metrics-otlp-grpc`  |
 
 ### Env precedence — EXPLICIT-BEATS-AMBIENT, per field
 
 Env is read at **call time** (not module load), so a var set after import still
 takes effect. Each field resolves independently:
 
-| Field      | Env var                        | Resolution                                                                                     |
-| ---------- | ------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT`  | `options.endpoint ?? env`                                                                       |
-| `headers`  | `OTEL_EXPORTER_OTLP_HEADERS`   | **per-key merge**: parse the env's `k1=v1,k2=v2` list, then explicit keys win; env-only kept    |
-| `protocol` | `OTEL_EXPORTER_OTLP_PROTOCOL`  | `options.protocol ?? valid-env ?? "http/protobuf"`; an **unrecognized** env value falls back (no throw) |
+| Field      | Env var                       | Resolution                                                                                              |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | `options.endpoint ?? env`                                                                               |
+| `headers`  | `OTEL_EXPORTER_OTLP_HEADERS`  | **per-key merge**: parse the env's `k1=v1,k2=v2` list, then explicit keys win; env-only kept            |
+| `protocol` | `OTEL_EXPORTER_OTLP_PROTOCOL` | `options.protocol ?? valid-env ?? "http/protobuf"`; an **unrecognized** env value falls back (no throw) |
 
 The header merge is genuinely per-key, not all-or-nothing: with
 `OTEL_EXPORTER_OTLP_HEADERS=authorization=env,x-env-only=keep` and

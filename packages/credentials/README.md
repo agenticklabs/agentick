@@ -44,15 +44,15 @@ today.
 
 v1's `@agentick/secrets` had the right shape but the wrong types:
 
-| Concern         | v1 `secrets`              | v2 `credentials-next`               |
-|-----------------|---------------------------|-------------------------------------|
-| Value type      | `string` only             | Generic `T` per call site           |
-| Namespacing     | Flat key-space            | `(namespace, key)` tuples           |
-| Reactivity      | None — poll if you care   | `onChange` + harness PubSub fan-out |
-| Enumeration     | `list()` over flat keys   | `keys(namespace)` per-domain        |
-| Errors          | Throws raw `Error`        | `AgentickError` subclasses (ADR 41) |
-| Effect-typed    | No                        | Yes (via spec-next errors)          |
-| Pluggable       | Yes (keychain/libsecret/env/memory) | Yes (same set + encrypted-file + KV + adopter-written) |
+| Concern      | v1 `secrets`                        | v2 `credentials-next`                                  |
+| ------------ | ----------------------------------- | ------------------------------------------------------ |
+| Value type   | `string` only                       | Generic `T` per call site                              |
+| Namespacing  | Flat key-space                      | `(namespace, key)` tuples                              |
+| Reactivity   | None — poll if you care             | `onChange` + harness PubSub fan-out                    |
+| Enumeration  | `list()` over flat keys             | `keys(namespace)` per-domain                           |
+| Errors       | Throws raw `Error`                  | `AgentickError` subclasses (ADR 41)                    |
+| Effect-typed | No                                  | Yes (via spec-next errors)                             |
+| Pluggable    | Yes (keychain/libsecret/env/memory) | Yes (same set + encrypted-file + KV + adopter-written) |
 
 The shape is intentionally similar to v1's, just with the type system
 and reactivity v2 has elsewhere — adopters porting from v1 will find
@@ -180,6 +180,7 @@ interface CredentialsStore {
 ```
 
 Namespace conventions:
+
 - `mcp:<serverId>` — MCP server credentials
 - `gateway:bearer` — gateway service auth
 - `sandbox:<runtimeId>` — sandbox runtime credentials
@@ -246,10 +247,7 @@ notification. Implements `CredentialsHarnessProtocol` (lives in
 `@agentick/spec`).
 
 ```ts
-import {
-  CredentialsHarness,
-  inMemoryCredentialsStore,
-} from "@agentick/credentials";
+import { CredentialsHarness, inMemoryCredentialsStore } from "@agentick/credentials";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 
 const harness = new CredentialsHarness(
@@ -272,6 +270,7 @@ await harness.close();
 ```
 
 Surface (matches `CredentialsHarnessProtocol`):
+
 - `get<T>(namespace, key)` / `set<T>(namespace, key, value)` /
   `delete(namespace, key)` / `has(namespace, key)` /
   `keys(namespace)` — proxies to the underlying store.
@@ -295,13 +294,13 @@ All `AgentickError` subclasses; round-trip-safe via the spec-next
 codec (#257). Re-exported from `@agentick/credentials` for
 convenience.
 
-| Class                            | When it fires                                                         |
-|----------------------------------|-----------------------------------------------------------------------|
-| `CredentialsError` (abstract)    | Base — `err instanceof CredentialsError` catches all                  |
-| `CredentialsNotFound`            | Caller asserted presence but key absent (`get` itself returns undef) |
-| `CredentialsBackendUnavailable`  | Backend unreachable — keychain locked, KV refused, env missing       |
-| `CredentialsCorrupted`           | Read succeeded; value cannot be deserialized                          |
-| `CredentialsWriteFailed`         | Write rejected — disk full, keychain denied, read-only store         |
+| Class                           | When it fires                                                        |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `CredentialsError` (abstract)   | Base — `err instanceof CredentialsError` catches all                 |
+| `CredentialsNotFound`           | Caller asserted presence but key absent (`get` itself returns undef) |
+| `CredentialsBackendUnavailable` | Backend unreachable — keychain locked, KV refused, env missing       |
+| `CredentialsCorrupted`          | Read succeeded; value cannot be deserialized                         |
+| `CredentialsWriteFailed`        | Write rejected — disk full, keychain denied, read-only store         |
 
 ## Verified by
 

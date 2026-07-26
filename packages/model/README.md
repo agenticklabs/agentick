@@ -350,8 +350,8 @@ source of numbers.
 
 ## Provider packages
 
-| Package                          | Factory                       |
-| -------------------------------- | ----------------------------- |
+| Package                     | Factory                       |
+| --------------------------- | ----------------------------- |
 | `@agentick/model-openai`    | `openai(model?, options?)`    |
 | `@agentick/model-anthropic` | `anthropic(model?, options?)` |
 | `@agentick/model-google`    | `google(model?, options?)`    |

@@ -90,7 +90,7 @@ today — pure local substrate, zero overhead.
 | 3.2   | Effect.async cancel + wire validation + namespace enforcement + InboxError round-trip + spec-evolution-safe guards      | **shipped** |
 | 4     | First real wire adapters — `cluster-broker-next` base + `cluster-net-next` (TCP / Unix) + `cluster-ws-next` (WebSocket) | **done**    |
 | 5     | Gateway/App substrate-seam integration + Otto cluster demo                                                              | **done**    |
-| 6     | `@agentick/cluster-redis` — cross-machine via Redis                                                                | **done**    |
+| 6     | `@agentick/cluster-redis` — cross-machine via Redis                                                                     | **done**    |
 | 7+    | NATS, MessagePack/protobuf codecs, durability (rung d)                                                                  | pending     |
 
 ## API surface (Phase 1)

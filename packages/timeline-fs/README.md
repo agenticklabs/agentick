@@ -50,8 +50,8 @@ jq -c '.entry.message.role' ./.agentick/transcripts/*.jsonl
 
 ### `fsTimelineStore(options): TimelineStore`
 
-| Option | Type     | Description                                                                 |
-| ------ | -------- | --------------------------------------------------------------------------- |
+| Option | Type     | Description                                                                |
+| ------ | -------- | -------------------------------------------------------------------------- |
 | `dir`  | `string` | Directory the per-session `.jsonl` files live in. Created lazily on write. |
 
 `backend` is `"fs"`. Implements the full [`TimelineStore`](../timeline/src/store.ts)

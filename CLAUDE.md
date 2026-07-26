@@ -165,8 +165,8 @@ Typed content blocks for composing rich message content:
 #### Model Components
 
 | Component       | Import from              | Purpose                                     |
-| --------------- | ----------------------- | ------------------------------------------- |
-| `<Model>`       | `agentick`              | Generic model config (takes `EngineModel`)  |
+| --------------- | ------------------------ | ------------------------------------------- |
+| `<Model>`       | `agentick`               | Generic model config (takes `EngineModel`)  |
 | `<OpenAIModel>` | `@agentick/model-openai` | OpenAI JSX component (takes `model` string) |
 | `<GoogleModel>` | `@agentick/model-google` | Google JSX component (takes `model` string) |
 
@@ -217,7 +217,7 @@ const ShellTool = createTool({
 });
 ```
 
-**`use()` — render-captured (the escape hatch).** For genuinely *tree-positional* context — a value set by an ancestor provider, reachable only during render (a custom React Context). `use()` runs at render, captures from the component tree, and passes the result to the handler as `deps` (merged with `{ ctx }`). Reserve it for tree-positional context; session/app harnesses belong on `ctx`. Direct `.run()` calls get `undefined` deps.
+**`use()` — render-captured (the escape hatch).** For genuinely _tree-positional_ context — a value set by an ancestor provider, reachable only during render (a custom React Context). `use()` runs at render, captures from the component tree, and passes the result to the handler as `deps` (merged with `{ ctx }`). Reserve it for tree-positional context; session/app harnesses belong on `ctx`. Direct `.run()` calls get `undefined` deps.
 
 The workspace is the v2 package tree under **`packages/`**. v1 lives on and
 versions from `master`; this branch (`feat/v2`) is the v2 line.
@@ -355,16 +355,15 @@ cross-package utilities: `waitFor`, `waitForStable`, `isEqual`, `mergeLayered`,
 
 ### v2 — `packages/`
 
-| What                     | Where                               |
-| ------------------------ | ----------------------------------- |
-| Protocol seam (spec)     | `packages/spec/src/`           |
-| Foundation (bus/journal) | `packages/runtime/src/`        |
-| JSX compiler harness     | `packages/compiler-react/src/` |
-| Compiler base + collect  | `packages/compiler/src/`       |
-| Built-in harnesses       | `packages/<harness>/src/`      |
-| Session / App            | `packages/session/src/`, `packages/app/src/` |
+| What                     | Where                                               |
+| ------------------------ | --------------------------------------------------- |
+| Protocol seam (spec)     | `packages/spec/src/`                                |
+| Foundation (bus/journal) | `packages/runtime/src/`                             |
+| JSX compiler harness     | `packages/compiler-react/src/`                      |
+| Compiler base + collect  | `packages/compiler/src/`                            |
+| Built-in harnesses       | `packages/<harness>/src/`                           |
+| Session / App            | `packages/session/src/`, `packages/app/src/`        |
 | Gateway / transports     | `packages/gateway/src/`, `packages/transport*/src/` |
-| Client                   | `packages/client*/src/`        |
-| Tests                    | `packages/*/src/**/*.spec.ts`  |
-| Canonical example        | `example/v2-real/`                  |
-
+| Client                   | `packages/client*/src/`                             |
+| Tests                    | `packages/*/src/**/*.spec.ts`                       |
+| Canonical example        | `example/v2-real/`                                  |

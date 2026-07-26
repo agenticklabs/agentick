@@ -504,8 +504,8 @@ Two different reactive state bridges, **each now living in its own
 harness's `/react` subpath** (ADR 27 — they are no longer exported by
 this package):
 
-| Hook                            | Import from                  | Bridge        | Visibility             | Purpose                                                                                                   |
-| ------------------------------- | ---------------------------- | ------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| Hook                            | Import from             | Bridge        | Visibility             | Purpose                                                                                                   |
+| ------------------------------- | ----------------------- | ------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
 | `useKnob(id, initial)`          | `@agentick/knobs/react` | `KnobBridge`  | **Model-visible**      | Surface in `knobs.list()`; settable via the executor's `knob_set` tool. Agent config the model can tweak. |
 | `useSessionState(key, initial)` | `@agentick/state/react` | `StateBridge` | **Framework-internal** | Component state that survives mounts / hibernate-resume but is NOT visible to the model.                  |
 
@@ -569,7 +569,7 @@ renderer.
 | **Authoring a prompt**                                                         | `renderTemplate` — render JSX to a string, hand to a model                               |
 | **MCP server prompt / resource body**                                          | `renderTemplate` — server returns formatted text                                         |
 | **Tool description with rich semantic content**                                | `renderTemplate` — `<Section>` / `<H1>` / `<Code>` etc. in your description, render once |
-| **Skill content** (`@agentick/skills`)                                    | `renderTemplate` — JSX-authored skill bodies become wire strings                         |
+| **Skill content** (`@agentick/skills`)                                         | `renderTemplate` — JSX-authored skill bodies become wire strings                         |
 | **Snapshot tests for JSX templates**                                           | `compileTemplate` — assert against a stable `RenderedTree`                               |
 | **Docs generator / static site that embeds prompts**                           | `renderTemplate` — JSX in, markdown out                                                  |
 | **Agentic loop, tool dispatch, hibernate/resume, channels, reactive `<Tool>`** | `createApp` — full compiler harness                                                      |
