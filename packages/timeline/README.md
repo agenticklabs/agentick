@@ -60,6 +60,60 @@ await session.timeline.history({ limit: 50 }); // seq-cursored durable read
 await session.timeline.compact(strategy); // rewrite the projection
 ```
 
+### Reading it from a component — `useTimeline`
+
+`useTimeline()` is the same projection snapshot, as a hook. That's enough to build your own `<Timeline>` — map the entries and render whatever you want:
+
+```tsx
+import { Message, Project } from "@agentick/compiler-react";
+import { useTimeline } from "@agentick/timeline/react";
+import type { MessageTimelineEntry } from "@agentick/spec";
+
+const isMessage = (e: { kind: string }): e is MessageTimelineEntry => e.kind === "message";
+
+export function MyTimeline() {
+  const { entries } = useTimeline(); // the projection — what the model sees
+
+  return (
+    <Project projectionKey="timeline">
+      {entries
+        .filter(isMessage)
+        .filter((e) => e.visibility !== "log") // journaled, never rendered
+        .map((e) => (
+          <Message key={e.message.id} {...e.message} />
+        ))}
+    </Project>
+  );
+}
+```
+
+That is, near enough, what `<Timeline>` does — it adds the filters, the token budget, and the render prop on top.
+
+> [!IMPORTANT]
+> The `<Project projectionKey="timeline">` wrapper is not decoration. It's what claims the `timeline` surfacing key and suppresses the default fold. Map entries into `<Message>` without it and the conversation lands in context **twice** — once from your component, once from the default projection.
+
+Both tiers are reachable from render, so a component can also report on the projection rather than render it:
+
+```tsx
+import { Section, useBridges } from "@agentick/compiler-react";
+import { useTimeline } from "@agentick/timeline/react";
+
+export function CompactionNotice() {
+  const { entries } = useTimeline();
+  const { timeline } = useBridges();
+  const dropped = timeline.readPersisted().length - entries.length;
+  if (dropped <= 0) return null;
+
+  return (
+    <Section id="compaction-notice">
+      {`${dropped} earlier turns were compacted out of context. Say so if you need detail from them.`}
+    </Section>
+  );
+}
+```
+
+The hook returns `{ entries, version }` and is backed by `useSyncExternalStore`, so a component re-renders as the projection's `version` advances. It is read-only by design — writes go through `session.timeline` or the declared commands, never through the hook. For the uncompacted log, reach the bridge directly as above.
+
 ## No pending queue
 
 Input **appends the moment it arrives** — at `send()` and mid-execution — and consumption is non-destructive. Every tick re-renders the whole log, so nothing is ever "consumed away." The distinctions other frameworks model as tiers are derived facts here:
@@ -327,6 +381,7 @@ Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timel
 - **Richer entry kinds** — non-message records beyond turn boundaries are still coarse; `role: "event"` conflation is deferred.
 - **`<Timeline>` turn affordances** — trailing-input styling and boundary turn-separators aren't built.
 - **Cursor vs. seq** — the live tail is bus-cursor-ordered while durable history is seq-ordered, and the two are deliberately not unified. An app doing true infinite-scroll-up reconciles final ordering itself.
+- **`useTimeline` has no dedicated suite.** It is exercised through `<Timeline>`, which reads the projection through it; the re-render-on-version-advance path isn't pinned on its own.
 
 ## Verified by
 
