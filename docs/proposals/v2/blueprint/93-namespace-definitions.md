@@ -58,8 +58,15 @@ Definitions also accept the namespace's hook/guard seams as properties —
 pure colocation sugar over harness-scoped command middleware (no new
 mechanism):
 
-- **Naming:** inside a definition the layer segment DROPS —
-  `defineTimeline({ onBeforeAppend })`; app-level config keeps the full
+- **Placement (Ryan correction): hooks live under a `hooks:` bag at
+  BOTH sites** — `createApp({ hooks: {...} })` and
+  `defineX({ hooks: {...} })`. The bag is not a wrapper (the
+  flat-options rule targets semantically empty envelopes): it is the
+  cascade's own boundary — hook bags merge down the inheritance chain —
+  and it keeps the definition's top level for structural slots
+  (store/hydrate/compact) instead of 2×N verb keys.
+- **Naming:** inside a definition's bag the layer segment DROPS
+  (`hooks: { onBeforeAppend }`); the app-level bag keeps the full
   discriminated name (`onBeforeTimelineAppend`). Both desugar to the
   same command-scoped middleware on the same op.
 - **Ordering:** broader scope wraps narrower (chain of responsibility) —
@@ -181,3 +188,10 @@ Same store, different doors, no shared seam:
 10. **No big bang.** Namespaces convert as touched; two conventions
     coexisting mid-rollout is acceptable ONLY because pre-cut; the cut
     requires the sweep complete (add to the cut checklist).
+11. **The interceptor-inheritance gap must close in D1.** The app
+    installer does not expose the interceptor handle, so app-level
+    hooks/guards do not wrap every namespace today (subscription fires
+    escaped `app.guard` — the ADR-92 TODO at the subscriptions
+    extension). Once definitions ship `hooks:` bags, adopters will
+    assume the app bag wraps them all — make the cascade total before
+    the sugar advertises it.
