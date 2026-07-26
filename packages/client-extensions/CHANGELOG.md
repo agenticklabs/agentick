@@ -1,5 +1,12 @@
 # @agentick/client-extensions
 
+## 1.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/spec@1.0.0-next.4
+
 ## 1.0.0-next.3
 
 ### Patch Changes

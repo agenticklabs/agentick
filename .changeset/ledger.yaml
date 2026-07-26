@@ -14,3 +14,7 @@
   dir: packages/spec
   intents:
     - wire-identity-hook-ctx
+"@agentick/spec@1.0.0-next.4":
+  dir: packages/spec
+  intents:
+    - session-principal-completion
