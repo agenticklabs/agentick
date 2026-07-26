@@ -26,7 +26,7 @@
  * @see docs/proposals/v2/blueprint/01-harness-principle.md
  */
 
-import { Effect, Fiber, type Runtime } from "effect";
+import { Effect, Fiber, Runtime } from "effect";
 import { omitUndefined, isThenable } from "@agentick/utils";
 import type {
   AfterHook,
@@ -52,6 +52,7 @@ import type {
   MessageInbox,
   MessageInboxFactory,
   Operation,
+  OperationCtx,
   OperationJournal,
   OperationJournalFactory,
   OperationOrigin,
@@ -1249,6 +1250,45 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     extraLabels?: Readonly<Record<string, string>>,
   ): void {
     attachOperationFacets(target, this.operationFacets(scope, runtime, op, extraLabels));
+  }
+
+  /**
+   * In-fiber: derive THIS operation's branded {@link OperationCtx} (ADR 91) —
+   * the trunk read from the ambient `getContext` FiberRef + this harness's
+   * lazy `log`/`trace`/`metrics`/`run`/`runner` facets. A command body threads
+   * the result into a STARVED adopter callback — a `ResourceResolver`, a
+   * `PromptDeclaration.render` — so that callback sees the invoking op's
+   * identity (sessionId / opId / `user`) and diagnostics instead of nothing.
+   * Runs in-fiber so the captured op runtime parents `ctx.trace` child spans
+   * and `ctx.run` ad-hoc ops under the enclosing operation.
+   */
+  protected currentOperationCtx(): Effect.Effect<Derived<OperationCtx>> {
+    return Effect.gen(this, function* () {
+      const parent = yield* getContext;
+      const runtime = yield* Effect.runtime<never>();
+      return deriveContext(parent, this.operationFacets(parent, runtime, parent.op));
+    });
+  }
+
+  /**
+   * Off-fiber: derive a branded {@link OperationCtx} for a boundary that has
+   * NO ambient fiber trunk to read — a task work body submitted from a plain
+   * (non-Effect) `submit` call, say. `parent` supplies the trunk (a task's
+   * `record.scope` carries its owning `sessionId`); the harness's facets ride
+   * over it. `extras` composes the boundary's own fields (a task's
+   * `signal`/`onProgress`/…) INTO the same branded mint (ADR 91 §Phase-2 brand
+   * totalization) — lazy getters in `extras` are preserved, not forced. No
+   * captured runtime ⇒ `ctx.trace` spans + `ctx.run` ops run as roots.
+   */
+  protected deriveOperationCtx<X extends object = Record<never, never>>(
+    parent: RuntimeContext,
+    extras?: X,
+  ): Derived<OperationCtx & X> {
+    return deriveContext(
+      parent,
+      this.operationFacets(parent, Runtime.defaultRuntime, parent.op),
+      extras,
+    );
   }
 
   protected emitLog(

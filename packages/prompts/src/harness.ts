@@ -58,6 +58,7 @@ import type {
   PromptsRemoveInput,
   PromptsSnapshotEntry,
   PromptsUpdateInput,
+  OperationCtx,
   Store,
   StandardSchemaIssue,
   StandardSchemaV1,
@@ -596,60 +597,70 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   private applyInvoke(
     input: PromptsInvokeInput,
   ): Effect.Effect<PromptsGetResult, PromptsError, never> {
-    return Effect.tryPromise({
-      try: async () => {
-        // Lookup-on-miss: if the name isn't yet registered, ask
-        // configured loaders. On hit, the prompt is registered (a
-        // nested `prompts:register` command) + invoke proceeds; on
-        // miss, `renderToMessages` throws `PromptNotFound`.
-        if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
-          await this.resolve(input.name);
-        }
-        const result = await this.renderToMessages(input.name, input.args);
-        // Append the rendered messages directly to the session timeline
-        // (ADR 53 — input appends the moment it exists; no queue/drain
-        // tier). The next render sees them via <Timeline/>. When no
-        // timeline is wired (e.g., test setup without session), skip —
-        // adopters use `get()` for that path.
-        if (this.timeline) {
-          const ts = Date.now();
-          for (const msg of result.messages) {
-            await this.timeline.append({
-              kind: "message",
-              message: {
-                id: `m_${ulid()}`,
-                role: msg.role,
-                content: msg.content,
-                ts,
-                ...omitUndefined({ metadata: msg.metadata }),
-              },
-            });
+    // ADR 91 §2 — derive the invoking op's branded ctx in-fiber and thread it
+    // into `render(args, ctx)`, so a dynamic prompt can render per-principal.
+    return Effect.gen(this, function* () {
+      const ctx = yield* this.currentOperationCtx();
+      return yield* Effect.tryPromise({
+        try: async () => {
+          // Lookup-on-miss: if the name isn't yet registered, ask
+          // configured loaders. On hit, the prompt is registered (a
+          // nested `prompts:register` command) + invoke proceeds; on
+          // miss, `renderToMessages` throws `PromptNotFound`.
+          if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
+            await this.resolve(input.name);
           }
-        }
-        return result;
-      },
-      catch: (cause): PromptsError =>
-        isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
+          const result = await this.renderToMessages(input.name, input.args, ctx);
+          // Append the rendered messages directly to the session timeline
+          // (ADR 53 — input appends the moment it exists; no queue/drain
+          // tier). The next render sees them via <Timeline/>. When no
+          // timeline is wired (e.g., test setup without session), skip —
+          // adopters use `get()` for that path.
+          if (this.timeline) {
+            const ts = Date.now();
+            for (const msg of result.messages) {
+              await this.timeline.append({
+                kind: "message",
+                message: {
+                  id: `m_${ulid()}`,
+                  role: msg.role,
+                  content: msg.content,
+                  ts,
+                  ...omitUndefined({ metadata: msg.metadata }),
+                },
+              });
+            }
+          }
+          return result;
+        },
+        catch: (cause): PromptsError =>
+          isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
+      });
     });
   }
 
   private applyGet(input: PromptsGetInput): Effect.Effect<PromptsGetResult, PromptsError, never> {
-    return Effect.tryPromise({
-      try: async () => {
-        // Same lookup-on-miss path as `applyInvoke`.
-        if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
-          await this.resolve(input.name);
-        }
-        return this.renderToMessages(input.name, input.args);
-      },
-      catch: (cause): PromptsError =>
-        isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
+    // ADR 91 §2 — same in-fiber ctx derivation + threading as `applyInvoke`.
+    return Effect.gen(this, function* () {
+      const ctx = yield* this.currentOperationCtx();
+      return yield* Effect.tryPromise({
+        try: async () => {
+          // Same lookup-on-miss path as `applyInvoke`.
+          if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
+            await this.resolve(input.name);
+          }
+          return this.renderToMessages(input.name, input.args, ctx);
+        },
+        catch: (cause): PromptsError =>
+          isPromptsError(cause) ? cause : new PromptsBackendError({ cause }),
+      });
     });
   }
 
   private async renderToMessages(
     name: string,
     rawArgs: Readonly<Record<string, unknown>> | undefined,
+    ctx: OperationCtx,
   ): Promise<PromptsGetResult> {
     const decl = this.declarationOf(name);
     if (!decl) throw new PromptNotFound({ promptName: name });
@@ -657,11 +668,11 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // 1. Validate args against the declared schemas.
     const args = await validateArgs(name, decl.arguments, rawArgs ?? {});
 
-    // 2. Resolve the content — `render(args)` wins; fall back to `template`.
+    // 2. Resolve the content — `render(args, ctx)` wins; fall back to `template`.
     let content: unknown;
     if (decl.render) {
       try {
-        content = await Promise.resolve(decl.render(args));
+        content = await Promise.resolve(decl.render(args, ctx));
       } catch (cause) {
         throw new PromptRenderFailed({ promptName: name, cause });
       }

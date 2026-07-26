@@ -41,6 +41,7 @@ import type {
   TaskReport,
   TaskWork,
   TaskWorkContext,
+  TaskWorkVerbs,
 } from "@agentick/spec";
 
 import { assertInteractive, buildTaskElicit } from "./task-elicit.js";
@@ -66,6 +67,7 @@ export class InProcessTaskExecutor implements TaskExecutor {
     report: TaskReport,
     signal: AbortSignal,
     hooks?: TaskExecutorHooks,
+    deriveCtx?: (verbs: TaskWorkVerbs) => TaskWorkContext,
   ): TaskExecution {
     // Wrap an external-input pause: flip `working → input_required` for
     // the await, then restore `working` when it settles. The harness's
@@ -100,17 +102,22 @@ export class InProcessTaskExecutor implements TaskExecutor {
       return Promise.resolve(input).finally(restore);
     }) as TaskWorkContext["awaitingInput"];
 
-    // Build the work ctx here — onProgress / setStatusMessage funnel into
-    // the ONE report path. The signal is harness-owned (aborts on cancel
-    // / close); the work fn observes it. `elicit` composes escalation
+    // Build the executor's task VERBS here — onProgress / setStatusMessage
+    // funnel into the ONE report path. The signal is harness-owned (aborts on
+    // cancel / close); the work fn observes it. `elicit` composes escalation
     // (ADR 69) over `awaitingInput` + the harness `hooks`.
-    const ctx: TaskWorkContext = {
+    const verbs: TaskWorkVerbs = {
       signal,
       onProgress: (update) => report({ progress: update }),
       setStatusMessage: (message) => report({ statusMessage: message }),
       awaitingInput,
       elicit: buildTaskElicit({ record, awaitingInput, hooks }),
     };
+    // ADR 91 §2 — compose the verbs OVER the submitting op's branded
+    // trunk+facets so the work body reads its `sessionId` and can `ctx.log`.
+    // The harness always supplies `deriveCtx`; a bare executor call (a test)
+    // falls back to a verbs-only ctx (facet-less — `ctx.log` etc. absent).
+    const ctx: TaskWorkContext = deriveCtx ? deriveCtx(verbs) : (verbs as TaskWorkContext);
 
     // Invoke work SYNCHRONOUSLY so its body runs (registering signal
     // listeners, etc.) before start() returns — a synchronous cancel()

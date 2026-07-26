@@ -27,6 +27,7 @@ import type { Effect } from "effect";
 
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
+import type { OperationCtx } from "../data/runtime-context.js";
 import type { Elicit } from "./elicit-api.js";
 import type { SendInput } from "./session-harness.js";
 
@@ -171,12 +172,16 @@ export type TaskEvent =
 // ============================================================================
 
 /**
- * Hook surface the harness hands to the work function on
- * {@link TasksHarnessProtocol.submit}. `signal` aborts when the task
- * is cancelled or the harness is closed; `onProgress` fans
- * {@link ProgressUpdate} events to subscribers.
+ * The task-specific verbs an executor supplies to a running task —
+ * `signal` aborts when the task is cancelled or the harness is closed;
+ * `onProgress` fans {@link ProgressUpdate} events to subscribers;
+ * `setStatusMessage` / `awaitingInput` / `elicit` are the pause + escalation
+ * seams. These are the boundary EXTRAS the executor builds locally; the
+ * framework composes them over the trunk+facets to form the full
+ * {@link TaskWorkContext} the work body receives (ADR 91 §2 brand
+ * totalization — see {@link TaskExecutor.start}'s `deriveCtx`).
  */
-export interface TaskWorkContext {
+export interface TaskWorkVerbs {
   readonly signal: AbortSignal;
   onProgress(update: ProgressUpdate): void;
   /**
@@ -233,6 +238,18 @@ export interface TaskWorkContext {
    */
   readonly elicit: Elicit;
 }
+
+/**
+ * The full ctx a task work body receives (ADR 91 §2): the framework spine
+ * ({@link OperationCtx} — the submitting op's trunk, so a task reads its
+ * `sessionId`, plus the `log` / `trace` / `metrics` / `run` facets, so a task
+ * can `ctx.log(...)` and open child spans) intersected with the executor's
+ * {@link TaskWorkVerbs} (`signal` / `onProgress` / `awaitingInput` / `elicit`
+ * / `setStatusMessage`). The harness derives the trunk+facets from the
+ * submitting crossing via `deriveContext` and composes the executor's verbs in
+ * as branded boundary extras — see {@link TaskExecutor.start}'s `deriveCtx`.
+ */
+export type TaskWorkContext = OperationCtx & TaskWorkVerbs;
 
 // ============================================================================
 // Task-completion wake (TASK-WAKE seam)

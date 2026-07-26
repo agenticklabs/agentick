@@ -29,6 +29,17 @@ import {
 } from "../index.js";
 
 import { DefaultOAuthProvider } from "../oauth/index.js";
+import { deriveTestContext } from "@agentick/runtime/testing";
+import type { CompletionContext } from "../protocol/completions.js";
+
+/**
+ * A full {@link CompletionContext} for the builder tests (ADR 91 §2 —
+ * `CompletionContext extends OperationCtx`): the trunk+facets from
+ * `deriveTestContext` plus the sibling-argument map the builders read.
+ */
+const completionCtx = (
+  resolvedArguments: Readonly<Record<string, string>> = {},
+): CompletionContext => ({ ...deriveTestContext(), resolvedArguments });
 
 // ---------------------------------------------------------------------------
 // protocol/errors
@@ -134,7 +145,7 @@ describe("protocolError + stripMcpErrorPrefix", () => {
 // ---------------------------------------------------------------------------
 
 describe("completion builders", () => {
-  const ctx = { resolvedArguments: {} } as const;
+  const ctx = completionCtx();
 
   it("completeFromList prefix-filters", async () => {
     const r = await completeFromList(["alpha", "alphabet", "beta"])("alph", ctx);
@@ -173,7 +184,7 @@ describe("completion builders", () => {
     const handler = completeDependent({ requires: ["projectId"] }, (_, deps) => [
       `contract-${deps.projectId}`,
     ]);
-    const r = await handler("any", { resolvedArguments: { projectId: "p1" } });
+    const r = await handler("any", completionCtx({ projectId: "p1" }));
     expect(r.values).toEqual(["contract-p1"]);
   });
 
@@ -201,6 +212,26 @@ describe("completion builders", () => {
     };
     expect(r.values).toHaveLength(COMPLETION_MAX_VALUES);
     expect(r.hasMore).toBe(true);
+  });
+
+  it("ADR 91 §2 — threads the request ctx (trunk + facets) into the handler", async () => {
+    let seen: CompletionContext | undefined;
+    const handler = completeFromAsync((value, c) => {
+      seen = c;
+      return [`${value}!`];
+    });
+    const requestCtx: CompletionContext = {
+      ...deriveTestContext({ sessionId: "compl-91" }),
+      resolvedArguments: { projectId: "p1" },
+    };
+    const r = await handler("q", requestCtx);
+    expect(r.values).toEqual(["q!"]);
+    // The handler reads the request's trunk (sessionId) + sibling arguments +
+    // the log/run facets off the SAME ctx.
+    expect(seen?.sessionId).toBe("compl-91");
+    expect(seen?.resolvedArguments).toEqual({ projectId: "p1" });
+    expect(typeof seen?.log).toBe("function");
+    expect(typeof seen?.run).toBe("function");
   });
 });
 

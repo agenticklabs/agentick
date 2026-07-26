@@ -292,6 +292,15 @@ list (clients probe freely, no protocol error). `ref/resource`
 (resource-template completion) resolves to empty until the resource
 substrate lands (Wave 4).
 
+**Handler context (ADR 91 §2).** `CompletionContext extends OperationCtx` —
+beyond `resolvedArguments` (the sibling-argument values), a handler now reads
+the SAME per-request trunk (sessionId / the `mcp.user` authenticated identity)
+and the `log` / `trace` / `run` facets the completions projection derives from
+the request ctx. So a DB-backed completion scopes its query to the
+authenticated principal; a prefix-match handler ignores everything but
+`resolvedArguments`. The extra trunk/facet fields are additive — existing
+handlers that read only `resolvedArguments` are unchanged.
+
 ---
 
 ## Structured logging (`ctx.log` / `ctx.progress`)

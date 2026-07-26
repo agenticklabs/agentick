@@ -64,6 +64,8 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
+import type { McpAuthenticatedUser } from "@agentick/spec";
+
 import type { McpConnectionInfo } from "../security/stages.js";
 import { buildWwwAuthenticate } from "../security/www-authenticate.js";
 import type { AcceptHandler, AuthPreGate, ServerTransport } from "./types.js";
@@ -380,15 +382,23 @@ function createHttpCore(options: {
     gate: AuthPreGate | undefined,
     req: IncomingMessage,
     res: ServerResponse,
-  ): Promise<boolean> {
+  ): Promise<
+    { proceed: false } | { proceed: true; user: McpAuthenticatedUser | null | undefined }
+  > {
     if (oauthConfigured && gate?.enforce) {
-      const authenticated = await gate.verify(buildConnectionInfo(req));
-      if (!authenticated) {
+      const verdict = await gate.verify(buildConnectionInfo(req));
+      if (!verdict.ok) {
         writeUnauthorized(res, challengeUrl);
-        return false;
+        return { proceed: false };
       }
+      // ADR 91 §Phase-2 — carry the pre-gate's authenticated identity forward
+      // (`null` = pre-gate ran, anonymous) so `routeMcp` stamps it onto the
+      // accept-path info; instructions resolution won't re-authenticate.
+      return { proceed: true, user: verdict.user ?? null };
     }
-    return true;
+    // Gate dormant (no OAuth / open deployment): no pre-gate ran, so forward
+    // `undefined` — instructions resolution keeps its own best-effort auth run.
+    return { proceed: true, user: undefined };
   }
 
   /**
@@ -407,6 +417,7 @@ function createHttpCore(options: {
     req: IncomingMessage,
     res: ServerResponse,
     parsedBody: unknown,
+    authenticatedUser?: McpAuthenticatedUser | null,
   ): Promise<void> {
     const sessionId = headerString(req.headers["mcp-session-id"]);
 
@@ -466,7 +477,15 @@ function createHttpCore(options: {
       return;
     }
 
-    await accept(sdkTransport, buildConnectionInfo(req));
+    // ADR 91 §Phase-2 — stamp the pre-gate's forward-derived identity onto the
+    // accept-path info so instructions resolution seeds `mcp.user` from it
+    // instead of re-running the authenticator. Present-but-`undefined` (dormant
+    // gate) reads as "no pre-gate" downstream, so keep it off in that case.
+    const info =
+      authenticatedUser !== undefined
+        ? { ...buildConnectionInfo(req), authenticatedUser }
+        : buildConnectionInfo(req);
+    await accept(sdkTransport, info);
     await sdkTransport.handleRequest(req, res, body);
   }
 
@@ -533,11 +552,12 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
     // HTTP auth pre-gate (RFC 9728 discovery challenge). Runs on the MCP
     // path only — the well-known discovery endpoint and foreign paths
     // already returned above.
-    if (!(await core.runPreGate(gate, req, res))) return;
+    const pre = await core.runPreGate(gate, req, res);
+    if (!pre.proceed) return;
 
     // The listening transport owns the stream — no host body parser ran,
     // so pass `undefined` (the SDK / core reads it).
-    await core.routeMcp(accept, req, res, undefined);
+    await core.routeMcp(accept, req, res, undefined, pre.user);
   };
 
   return {
@@ -768,8 +788,9 @@ export function httpMiddlewareTransport(
           core.writeMetadata(req, res);
           return;
         }
-        if (!(await core.runPreGate(gate, req, res))) return;
-        await core.routeMcp(accept, req, res, parsedBody);
+        const pre = await core.runPreGate(gate, req, res);
+        if (!pre.proceed) return;
+        await core.routeMcp(accept, req, res, parsedBody, pre.user);
       } catch (err) {
         if (!res.headersSent) {
           writeJsonRpcError(res, 500, `Internal transport error: ${String(err)}`);

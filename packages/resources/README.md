@@ -58,6 +58,14 @@ resources.registerTemplate("db://users/{id}", (uri) => [
   { uri, mimeType: "application/json", text: loadUser(parseId(uri)) },
 ]);
 
+// A resolver also receives the INVOKING op's ctx (ADR 91 §2) as an optional
+// second param — the trunk (sessionId / opId / `user`) + `log` / `trace` /
+// `run` facets. The `read` path threads the ctx of the op that invoked it, so
+// an identity-scoped resolver resolves per-principal content:
+resources.register("knowify://me", (uri, ctx) => [
+  { uri, mimeType: "application/json", text: loadProfile(ctx?.user) },
+]);
+
 const contents = await resources.read("db://users/42"); // runs the template resolver
 const { resources: page, nextCursor } = await resources.list();
 
@@ -176,11 +184,7 @@ opt-in `/mcp` subpath (ADR 65), so a filesystem boundary declared as an
 MCP **root** is also **readable** as a resource:
 
 ```ts
-import {
-  sandboxFileResolver,
-  fsFileResolver,
-  registerFileResolver,
-} from "@agentick/sandbox/mcp";
+import { sandboxFileResolver, fsFileResolver, registerFileResolver } from "@agentick/sandbox/mcp";
 
 // Read through a sandbox (ACL-gated; text, per the handle contract):
 registerFileResolver(resources, sandboxFileResolver(sandbox));

@@ -34,6 +34,7 @@
  */
 
 import type { ResourceContents } from "../data/content-blocks.js";
+import type { OperationCtx } from "../data/runtime-context.js";
 import type { Unsubscribe } from "./inbox.js";
 
 // ============================================================================
@@ -45,18 +46,31 @@ import type { Unsubscribe } from "./inbox.js";
  * content — one or more {@link ResourceContents} (text or blob). Reads
  * from wherever the content already lives; the harness never duplicates
  * it. May be sync or async.
+ *
+ * The optional second parameter is the invoking crossing's {@link
+ * OperationCtx} (ADR 91 §2) — the trunk (sessionId / opId / `mcp.user`
+ * identity) plus the `log` / `trace` / `metrics` / `run` facets. Optional in
+ * the SIGNATURE so a resolver declaration stays pure and trivially testable;
+ * REQUIRED in the LAW — the framework read path always threads the ctx of the
+ * op that invoked `read`. A `knowify://me` resolver reads `ctx?.user` /
+ * `ctx?.mcp?.user` to resolve identity-scoped content.
  */
 export type ResourceResolver = (
   uri: string,
+  ctx?: OperationCtx,
 ) => readonly ResourceContents[] | Promise<readonly ResourceContents[]>;
 
 /**
  * Runs on `read(uri)` for a URI-template binding. Receives the CONCRETE
  * uri that matched the template (not the template itself), so the
- * resolver can parse its own parameters out of the uri.
+ * resolver can parse its own parameters out of the uri. The optional second
+ * parameter is the invoking crossing's {@link OperationCtx} — same contract
+ * as {@link ResourceResolver} (optional in signature, threaded by the read
+ * path in law).
  */
 export type TemplateResolver = (
   uri: string,
+  ctx?: OperationCtx,
 ) => readonly ResourceContents[] | Promise<readonly ResourceContents[]>;
 
 // ============================================================================

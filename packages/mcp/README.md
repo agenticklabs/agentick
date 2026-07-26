@@ -14,8 +14,8 @@ published independently.
 
 ## Subpath map
 
-| Import path                  | Purpose                                                                                         |
-| ---------------------------- | ----------------------------------------------------------------------------------------------- |
+| Import path             | Purpose                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
 | `@agentick/mcp`         | **Client** harness + `withMCP` extension. Outbound: Agentick → MCP servers.                     |
 | `@agentick/mcp/server`  | **Server** harness. Inbound: MCP clients → Agentick.                                            |
 | `@agentick/mcp/oauth`   | OAuth 2.1 utilities shared by both sides.                                                       |
@@ -29,7 +29,7 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 
 | Phase                                                                                    | Status      |
 | ---------------------------------------------------------------------------------------- | ----------- |
-| **Client** (outbound, `@agentick/mcp`)                                              |             |
+| **Client** (outbound, `@agentick/mcp`)                                                   |             |
 | #1 Skeleton — OAuth + protocol utilities + in-memory transport                           | ✅          |
 | #2 `McpClientHarness` — Transport / Auth / Protocol / Lifecycle                          | ✅          |
 | #3 `withMCP` extension + ToolBridge integration                                          | ✅          |
@@ -38,8 +38,8 @@ code. See ADR 23 §6 (Package layout) and ADR 40 §1.
 | #134b OAuth-via-elicit — URL-mode elicit on auth-needed                                  | ✅          |
 | #146 Client completeness — resources / prompts / completion / sampling / roots / logging | ✅ (Wave 2) |
 | #154 `withMCP` auto-wires OAuth elicit via transport factory                             | ⏳          |
-| **Server** (inbound, `@agentick/mcp/server`)                                        |             |
-| #171a `@agentick/tool/transforms` subpath (transform primitives)                    | ✅          |
+| **Server** (inbound, `@agentick/mcp/server`)                                             |             |
+| #171a `@agentick/tool/transforms` subpath (transform primitives)                         | ✅          |
 | #171b Server subpath + spec types + `McpServerHarness` skeleton                          | ✅          |
 | #171c stdio + in-memory transport + tools projection + security pipeline                 | ✅          |
 | #310 **Tools `list_changed`** emission on `ToolCatalog` mutations                        | ✅          |
@@ -477,12 +477,13 @@ never drift. The connected client observes
 Two server-side Streamable-HTTP shapes, both wrapping the SDK
 `StreamableHTTPServerTransport` and sharing one session-routing core
 (per-`Mcp-Session-Id` dispatch, SSE, DELETE teardown, RFC 9728 discovery
-+ `401` pre-gate are identical between them):
 
-- **`httpTransport({ port })`** — owns a listening socket (or attaches to
+- `401` pre-gate are identical between them):
+
+* **`httpTransport({ port })`** — owns a listening socket (or attaches to
   a caller-supplied `http.Server` via `{ server }`). Use it when Agentick
   owns the HTTP endpoint.
-- **`httpMiddlewareTransport()`** — owns NO socket. `listen()` merely
+* **`httpMiddlewareTransport()`** — owns NO socket. `listen()` merely
   captures the harness closures; the **host** drives requests through
   `handler(req, res, parsedBody?)` from inside its own middleware chain.
   Use it when the process already owns an express / Nest / Fastify server
@@ -497,7 +498,9 @@ const mcp = httpMiddlewareTransport({ oauth: { metadata } });
 const server = new McpServerHarness(scopeId, journal, bus, inbox, {
   name: "my-server",
   transports: [mcp],
-  tools: [/* ... */],
+  tools: [
+    /* ... */
+  ],
   auth: { authenticator: bearerTokenAuth({ tokens }) },
 });
 await server.ready;
@@ -1100,7 +1103,7 @@ Defer until production load demands it; design space documented in
   (text + blob), with `subscribe` / `updated` / `list_changed`;
   `resources` advertised when a source is wired.
 - **Per-connection `instructions`** — **landed.** `instructions: string |
-  ((ctx) => string | Promise<string>)` projects into
+((ctx) => string | Promise<string>)` projects into
   `InitializeResult.instructions`; the function form is evaluated per
   `initialize` against the identity-resolved request context (never cached
   across connections).

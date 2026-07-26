@@ -487,22 +487,28 @@ export class ResourcesHarness
   private applyRead(
     input: ResourcesReadInput,
   ): Effect.Effect<readonly ResourceContents[], ResourcesError, never> {
-    return Effect.tryPromise({
-      try: async (): Promise<readonly ResourceContents[]> => {
-        let resolver = this.resolverFor(input.uri);
-        // Lookup-on-miss: an unresolved uri asks the durable loaders, which
-        // re-attach the resolver to the sidecar on a hit.
-        if (resolver === null && this.loaders.length > 0) {
-          await this.resolveFromLoaders(input.uri);
-          resolver = this.resolverFor(input.uri);
-        }
-        if (resolver === null) throw new ResourceNotFound({ uri: input.uri });
-        return resolver(input.uri);
-      },
-      // A ResourcesError (ResourceNotFound) passes through as-is; anything the
-      // resolver throws is wrapped as a resolver failure.
-      catch: (cause): ResourcesError =>
-        isResourcesError(cause) ? cause : new ResourceResolverFailed({ uri: input.uri, cause }),
+    // ADR 91 §2 — derive the invoking op's branded ctx in-fiber and thread it
+    // into the resolver as its second arg, so an identity-scoped resolver
+    // (`knowify://me`) sees the crossing's `sessionId` / `user` / `log`.
+    return Effect.gen(this, function* () {
+      const ctx = yield* this.currentOperationCtx();
+      return yield* Effect.tryPromise({
+        try: async (): Promise<readonly ResourceContents[]> => {
+          let resolver = this.resolverFor(input.uri);
+          // Lookup-on-miss: an unresolved uri asks the durable loaders, which
+          // re-attach the resolver to the sidecar on a hit.
+          if (resolver === null && this.loaders.length > 0) {
+            await this.resolveFromLoaders(input.uri);
+            resolver = this.resolverFor(input.uri);
+          }
+          if (resolver === null) throw new ResourceNotFound({ uri: input.uri });
+          return resolver(input.uri, ctx);
+        },
+        // A ResourcesError (ResourceNotFound) passes through as-is; anything the
+        // resolver throws is wrapped as a resolver failure.
+        catch: (cause): ResourcesError =>
+          isResourcesError(cause) ? cause : new ResourceResolverFailed({ uri: input.uri, cause }),
+      });
     });
   }
 

@@ -36,6 +36,7 @@ import type {
   ChannelPublisher,
   ChannelSnapshotProvider,
   ContentBlock,
+  Derived,
   DispatchInput,
   DispatchResult,
   ElicitationHarnessProtocol,
@@ -47,6 +48,7 @@ import type {
   NormalizedToolResult,
   Operation,
   OperationJournal,
+  ProgressToken,
   RegisterToolInput,
   RemoveBoundToolsInput,
   RespondToToolCallInput,
@@ -829,109 +831,125 @@ export class ToolExecutorHarness
       // come from the telemetry provider when wired, else the off-path
       // singletons. App-identity labels seed UNDER the per-dispatch defaults so
       // `tool` / `op` always win (ADR 78).
-      const derived = deriveContext(ambient, {
-        log: (level, data, logger, trace) => {
-          void Effect.runFork(this.emitLog(dispatchScope, level, data, logger, trace));
+      // ADR 91 §Phase-2 brand totalization — mint the WHOLE dispatch ctx in
+      // ONE `deriveContext` call: the facets (2nd arg) attach as lazy getters,
+      // and every boundary field (3rd `extras` arg) composes IN as branded
+      // descriptors. No post-derivation spread (which would erase the brand
+      // AND eagerly force the lazy facet getters). Precedence stays: facets ▸
+      // extras ▸ trunk — so the explicit work-path ids in `extras` (from
+      // `input.context`, authoritative) win over the ambient trunk, and the
+      // `ctxExtensions` (spread first) lose to the hardcoded universal fields.
+      const dispatchCtx = deriveContext(
+        ambient,
+        {
+          log: (level, data, logger, trace) => {
+            void Effect.runFork(this.emitLog(dispatchScope, level, data, logger, trace));
+          },
+          namespace: this.telemetryNamespace,
+          defaultLabels: { ...this.defaultMetricLabels, tool: input.name, op: "ToolDispatch" },
+          surface: "tool",
+          scope: dispatchScope,
+          runOperation: this.runOperation.bind(this),
+          runtime: capturedRuntime,
+          ...omitUndefined({ telemetry }),
         },
-        namespace: this.telemetryNamespace,
-        defaultLabels: { ...this.defaultMetricLabels, tool: input.name, op: "ToolDispatch" },
-        surface: "tool",
-        scope: dispatchScope,
-        runOperation: this.runOperation.bind(this),
-        runtime: capturedRuntime,
-        ...omitUndefined({ telemetry }),
-      });
-      const ctx: ToolHandlerCtx = {
-        // ADR 66 — opaque, harness-agnostic extension slots (e.g.
-        // `ctx.sandbox`). Spread FIRST so the hardcoded universal fields
-        // below always win over any accidental key collision. Typed by
-        // `ToolHandlerCtxExtensions` augmentations; values point at live
-        // bridges (dispatch-resolved, not render-captured).
-        ...this.ctxExtensions,
-        // Trunk (ADR 91) + Observability/Ops facets, derived from the ambient
-        // crossing. The explicit work-path ids below override the trunk's on
-        // collision (they come from `input.context`, the authoritative source).
-        ...derived,
-        toolCallId: input.toolCallId,
-        ...omitUndefined({
-          sessionId: input.context.sessionId,
-          executionId: input.context.executionId,
-          tickId: input.context.tickId,
-        }),
-        signal: controller.signal,
-        // Resolved task mode for THIS dispatch (#174). Mirrors
-        // `DispatchInput.task` after default → `"auto"`. Handlers
-        // with a sync-or-task choice (MCP `supported` tools) read
-        // this to decide per-call whether to take the task wire.
-        // Pre-flight conflicts (e.g. `"ref"` against `"unsupported"`)
-        // were already rejected above, so this value is always
-        // valid for the resolved tool's `taskSupport`.
-        task: input.task ?? "auto",
-        // ADR 43 — transport discriminator. In-process dispatch from
-        // the tool-executor always uses `"in-process"`; MCP-server
-        // projection populates `"mcp"` instead.
-        transport: "in-process" as const,
-        // Substrate primitives surfaced for ad-hoc handler use
-        // (`ctx.elicitation.elicit(...)`, `ctx.tasks.submit(...)`).
-        // Always present in production; the optional spec field
-        // covers test fixtures that omit them.
-        elicitation: this.elicitation,
-        // ADR 43 — `ctx.elicit` is the sugar wrapper over the raw
-        // protocol. Same `Elicit` interface as the MCP-server side
-        // (built by `buildMcpElicit`), so tool handlers calling
-        // `ctx.elicit.text(...)` work identically across transports.
-        elicit: buildSessionElicit({ harness: this.elicitation }),
-        ...omitUndefined({ tasks: this.tasks }),
-        // ADR 62 — the session's read-projection seam. Handlers resolve
-        // readable content by URI (`ctx.resource.read(uri)`); the
-        // AppHarness wired the single per-session ResourcesHarness here.
-        ...omitUndefined({ resource: this.resources }),
-        setState: (key: string, value: unknown): void => {
-          this.stateStore.set(key, value);
-        },
-        emit: (seed: HandlerChannelSeed): void => {
-          // Always retain seeds for observability tests / inspection;
-          // route to the publisher when one is wired.
-          channelEmits.push(seed);
-          if (publisher) {
-            const channel = seed.name.replace(/^session:channel:/, "");
-            Effect.runFork(
-              publisher.publish({
-                channel,
-                payload: seed.payload,
-                ...omitUndefined({ metadata: seed.metadata }),
-                parentOpId: opIdForCausality,
-                scope: {
-                  ...omitUndefined({
-                    sessionId: input.context.sessionId,
-                    executionId: input.context.executionId,
-                    tickId: input.context.tickId,
-                  }),
-                },
+        {
+          // ADR 66 — opaque, harness-agnostic extension slots (e.g.
+          // `ctx.sandbox`). Listed FIRST so the hardcoded universal fields
+          // below always win over any accidental key collision. Typed by
+          // `ToolHandlerCtxExtensions` augmentations; values point at live
+          // bridges (dispatch-resolved, not render-captured).
+          ...this.ctxExtensions,
+          toolCallId: input.toolCallId,
+          ...omitUndefined({
+            sessionId: input.context.sessionId,
+            executionId: input.context.executionId,
+            tickId: input.context.tickId,
+          }),
+          signal: controller.signal,
+          // Resolved task mode for THIS dispatch (#174). Mirrors
+          // `DispatchInput.task` after default → `"auto"`. Handlers
+          // with a sync-or-task choice (MCP `supported` tools) read
+          // this to decide per-call whether to take the task wire.
+          // Pre-flight conflicts (e.g. `"ref"` against `"unsupported"`)
+          // were already rejected above, so this value is always
+          // valid for the resolved tool's `taskSupport`.
+          task: input.task ?? "auto",
+          // ADR 43 — transport discriminator. In-process dispatch from
+          // the tool-executor always uses `"in-process"`; MCP-server
+          // projection populates `"mcp"` instead.
+          transport: "in-process" as const,
+          // Substrate primitives surfaced for ad-hoc handler use
+          // (`ctx.elicitation.elicit(...)`, `ctx.tasks.submit(...)`).
+          // Always present in production; the optional spec field
+          // covers test fixtures that omit them.
+          elicitation: this.elicitation,
+          // ADR 43 — `ctx.elicit` is the sugar wrapper over the raw
+          // protocol. Same `Elicit` interface as the MCP-server side
+          // (built by `buildMcpElicit`), so tool handlers calling
+          // `ctx.elicit.text(...)` work identically across transports.
+          elicit: buildSessionElicit({ harness: this.elicitation }),
+          ...omitUndefined({ tasks: this.tasks }),
+          // ADR 62 — the session's read-projection seam. Handlers resolve
+          // readable content by URI (`ctx.resource.read(uri)`); the
+          // AppHarness wired the single per-session ResourcesHarness here.
+          ...omitUndefined({ resource: this.resources }),
+          setState: (key: string, value: unknown): void => {
+            this.stateStore.set(key, value);
+          },
+          emit: (seed: HandlerChannelSeed): void => {
+            // Always retain seeds for observability tests / inspection;
+            // route to the publisher when one is wired.
+            channelEmits.push(seed);
+            if (publisher) {
+              const channel = seed.name.replace(/^session:channel:/, "");
+              Effect.runFork(
+                publisher.publish({
+                  channel,
+                  payload: seed.payload,
+                  ...omitUndefined({ metadata: seed.metadata }),
+                  parentOpId: opIdForCausality,
+                  scope: {
+                    ...omitUndefined({
+                      sessionId: input.context.sessionId,
+                      executionId: input.context.executionId,
+                      tickId: input.context.tickId,
+                    }),
+                  },
+                }),
+              );
+            }
+          },
+          // ADR 64/78/19/83 — the Observability (`log`/`trace`/`metrics`) + Ops
+          // (`run`/`runner`) facets ride in via the `deriveContext` facets arg
+          // above (lazy getters). `log` emits
+          // ONE discrete bus event (`tool:signal:log`, phase `terminal`,
+          // bus-only) scoped to this dispatch; projections subscribe (MCP →
+          // notifications/message; agentick client → subscribe/onLog).
+          // ADR 64 — `progress` signal. Emits ONE discrete bus event
+          // (`tool:signal:progress`, phase `terminal`, bus-only) scoped to
+          // this dispatch. Fire-and-forget: launched with `Effect.runFork`,
+          // never awaited, never throws into the handler.
+          progress: (
+            token: ProgressToken,
+            p: { progress: number; total?: number; message?: string },
+          ): void => {
+            void Effect.runFork(
+              this.emitProgress(dispatchScope, {
+                token,
+                progress: p.progress,
+                ...(p.total !== undefined ? { total: p.total } : {}),
+                ...(p.message !== undefined ? { message: p.message } : {}),
               }),
             );
-          }
+          },
         },
-        // ADR 64/78/19/83 — the Observability (`log`/`trace`/`metrics`) + Ops
-        // (`run`/`runner`) facets ride in via `...derived` above. `log` emits
-        // ONE discrete bus event (`tool:signal:log`, phase `terminal`,
-        // bus-only) scoped to this dispatch; projections subscribe (MCP →
-        // notifications/message; agentick client → subscribe/onLog).
-        // ADR 64 — `progress` signal. Emits ONE discrete bus event
-        // (`tool:signal:progress`, phase `terminal`, bus-only) scoped to
-        // this dispatch. Fire-and-forget: launched with `Effect.runFork`,
-        // never awaited, never throws into the handler.
-        progress: (token, p): void => {
-          void Effect.runFork(
-            this.emitProgress(dispatchScope, {
-              token,
-              progress: p.progress,
-              ...(p.total !== undefined ? { total: p.total } : {}),
-              ...(p.message !== undefined ? { message: p.message } : {}),
-            }),
-          );
-        },
-      };
+      );
+      // The dispatch seam demands the brand: only a `deriveContext` output
+      // satisfies `Derived<ToolHandlerCtx>` — a hand-assembled bag fails to
+      // compile here (ADR 91 §Enforcement). A branded value still satisfies the
+      // plain `ToolHandlerCtx` a handler receives, so adopters are unaffected.
+      const ctx: Derived<ToolHandlerCtx> = dispatchCtx;
 
       // ─── Confirmation gate ──────────────────────────────────────────
       // Tools whose `requiresConfirmation` resolves truthy route through

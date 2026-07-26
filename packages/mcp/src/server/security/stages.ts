@@ -34,6 +34,17 @@ export interface McpConnectionInfo {
   readonly origin?: string;
   /** Free-form headers / metadata the transport surfaced. */
   readonly headers?: Readonly<Record<string, string | undefined>>;
+  /**
+   * Identity the HTTP auth pre-gate ({@link import("../transports/types.js").AuthPreGate})
+   * resolved for this crossing, FORWARD-DERIVED onto the info handed to
+   * `accept` (ADR 91 §Phase-2 single-authenticator). Present ⇒ the pre-gate
+   * already ran the `Authenticator`, so instructions resolution seeds
+   * `ctx.mcp.user` from this instead of running the authenticator a second
+   * time. `null` = pre-gate ran and the crossing was anonymous; `undefined` =
+   * no pre-gate ran (trusted transport / no OAuth), so instructions resolution
+   * falls back to its own best-effort authenticator run.
+   */
+  readonly authenticatedUser?: McpAuthenticatedUser | null;
 }
 
 // ============================================================================

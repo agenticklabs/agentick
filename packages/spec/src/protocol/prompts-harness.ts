@@ -21,6 +21,7 @@
  */
 
 import type { MessageEntry } from "../data/entries.js";
+import type { OperationCtx } from "../data/runtime-context.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { Unsubscribe } from "./inbox.js";
 
@@ -78,8 +79,16 @@ export interface PromptDeclaration {
    * Dynamic content factory. Receives validated args; returns content
    * the harness compiles into messages. Framework-typed at the
    * adapter layer (React: `(args) => ReactNode`).
+   *
+   * The optional second parameter is the invoking crossing's {@link
+   * OperationCtx} (ADR 91 §2) — the trunk (sessionId / opId / identity) plus
+   * the `log` / `trace` / `metrics` / `run` facets. Optional in the SIGNATURE
+   * (a declaration stays pure and trivially testable); REQUIRED in the LAW —
+   * the harness `render` path and the MCP `prompts/get` projection always
+   * thread the ctx of the invoking op. A dynamic prompt reads `ctx?.user` /
+   * the MCP identity to render per-principal content.
    */
-  readonly render?: (args: Readonly<Record<string, unknown>>) => unknown;
+  readonly render?: (args: Readonly<Record<string, unknown>>, ctx?: OperationCtx) => unknown;
   /** Adopter-defined metadata (version, tags, source URL, etc.). */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }

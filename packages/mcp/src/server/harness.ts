@@ -20,8 +20,10 @@
 import { Effect } from "effect";
 import { BaseHarness, deriveContext, ulid, type Unsubscribe } from "@agentick/runtime";
 import type {
+  Derived,
   EventBus,
   EventScope,
+  McpAuthenticatedUser,
   McpServerConnectionInfo,
   McpServerHarnessProtocol,
   McpRequestContext,
@@ -29,6 +31,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  ProgressToken,
   Prompts,
   Resources,
 } from "@agentick/spec";
@@ -549,7 +552,7 @@ export class McpServerHarness
     // equivalent) — install unconditionally per connection.
     cleanup.push(installProgressProjection({ sdkServer, bus: this.bus, connectionScope }));
 
-    const buildRequestContext = (): McpRequestContext => {
+    const buildRequestContext = (): Derived<McpRequestContext> => {
       // Pull the client's negotiated capabilities + identity from the
       // SDK Server post-initialize. Undefined before initialize
       // completes (which it always has by the time any request handler
@@ -560,22 +563,30 @@ export class McpServerHarness
       const sdkClientInfo = sdkServer.getClientVersion?.() ?? null;
       const clientRoots = clientRootsIngest.current();
 
-      // ADR 43 — unified ToolHandlerCtx with `transport: "mcp"` +
-      // MCP-specific extras nested under `mcp:`. Tool handlers receive
-      // the SAME ctx shape whether dispatched in-process or via MCP.
-      const ctx: McpRequestContext = {
-        // The branded ctx spine (ADR 91). `deriveContext` derives the trunk
-        // from the CONNECTION crossing (`connectionScope` — the off-fiber
-        // parent) and attaches the Observability + Ops facets in ONE call (no
-        // direct `deriveObservability` / `deriveOps` — grep gate). `log` emits
-        // ONE discrete bus event scoped to THIS connection; `installLogProjection`
-        // (above) forwards it to the wire (`notifications/message`).
-        // `trace`/`metrics` go to the server's telemetry PROVIDER, NOT the wire
-        // — off-path no-ops here (they never touch the bus). The ctx is
-        // assembled OFF-fiber (no enclosing op runtime), so `ctx.run` ad-hoc
-        // ops run as ROOT ops on this server harness's runner — still journaled
-        // + interceptor-folded, just not parented under a caller op.
-        ...deriveContext(connectionScope, {
+      // Attach `elicit` sugar when wired AND the client advertised the
+      // capability. Computed BEFORE the mint so it composes as a branded extra
+      // (a post-mint `{ ...ctx, elicit }` would erase the brand + force the
+      // lazy facets). Tool handlers check for presence — the slot is optional.
+      let elicitExtra: ReturnType<typeof buildMcpElicit> | undefined;
+      if (this.elicitWired) {
+        const elicit = buildMcpElicit({ sdkServer, clientCapabilities: sdkClientCaps });
+        if (elicit.canDoForm() || elicit.canDoUrl()) elicitExtra = elicit;
+      }
+
+      // ADR 43 / 91 — unified ToolHandlerCtx with `transport: "mcp"` +
+      // MCP-specific extras nested under `mcp:`. Minted in ONE branded
+      // `deriveContext` call (ADR 91 §Phase-2): the facets attach as lazy
+      // getters, every boundary field composes IN as a branded descriptor. No
+      // post-derivation spread (which erases the brand AND forces the lazy
+      // facets). The trunk derives from the CONNECTION crossing
+      // (`connectionScope` — off-fiber parent), so `ctx.run` ad-hoc ops run as
+      // ROOT ops on this server harness's runner. `log` emits ONE bus event
+      // scoped to this connection (`installLogProjection` forwards it to
+      // `notifications/message`); `trace`/`metrics` go to the telemetry
+      // provider, off-path here.
+      const built = deriveContext(
+        connectionScope,
+        {
           log: (level, data, logger, trace) => {
             void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
           },
@@ -583,71 +594,64 @@ export class McpServerHarness
           surface: "mcp",
           scope: connectionScope,
           runOperation: this.runOperation.bind(this),
-        }),
-        // Universal ToolHandlerCtx fields. The MCP server doesn't have
-        // a `toolCallId` until the tool-call handler runs and the
-        // tools projection generates one; we synthesize a default here
-        // that the tool-projection layer overwrites per-call. Same for
-        // `task` — MCP tools default to `"auto"` until per-call wire
-        // metadata flips them.
-        toolCallId: `mcp:req:${ulid()}`,
-        signal: new AbortController().signal,
-        setState: () => {
-          /* no-op for MCP-server ctx — sessions own this */
         },
-        emit: () => {
-          /* no-op for MCP-server ctx — sessions own channel emit */
+        {
+          // Universal ToolHandlerCtx fields. The MCP server has no `toolCallId`
+          // until the tool-call handler runs (the tools projection overwrites
+          // this default per-call); `task` defaults to `"auto"` until per-call
+          // wire metadata flips it.
+          toolCallId: `mcp:req:${ulid()}`,
+          signal: new AbortController().signal,
+          setState: () => {
+            /* no-op for MCP-server ctx — sessions own this */
+          },
+          emit: () => {
+            /* no-op for MCP-server ctx — sessions own channel emit */
+          },
+          progress: (
+            token: ProgressToken,
+            p: { progress: number; total?: number; message?: string },
+          ): void => {
+            void Effect.runFork(
+              this.emitProgress(connectionScope, {
+                token,
+                progress: p.progress,
+                ...(p.total !== undefined ? { total: p.total } : {}),
+                ...(p.message !== undefined ? { message: p.message } : {}),
+              }),
+            );
+          },
+          task: "auto" as const,
+          transport: "mcp" as const,
+          // #171d.3 — the server's TasksHarness. Handlers calling
+          // `ctx.tasks!.submit(...)` get a TaskHandle the tools projection
+          // recognises (via isTaskHandle) and routes to the per-connection task
+          // registry → CreateTaskResult + notifications/tasks/status.
+          tasks: this.serverTasks,
+          mcp: {
+            serverId: this.scopeId,
+            connectionId,
+            transportKind: info.transportKind,
+            connectedAt,
+            user: null,
+            clientInfo: sdkClientInfo
+              ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
+              : null,
+            clientCapabilities: sdkClientCaps,
+            // ADR 65 — inbound roots, read fresh per request so a
+            // `roots/list_changed` re-pull is reflected on the next call.
+            // Omitted when the client never advertised `roots`.
+            ...(clientRoots !== undefined ? { clientRoots } : {}),
+          },
+          metadata: omitUndefined({
+            ...(info.headers ? { headers: info.headers } : {}),
+            origin: info.origin,
+            remoteAddress: info.remoteAddress,
+          }),
+          ...(elicitExtra !== undefined ? { elicit: elicitExtra } : {}),
         },
-        progress: (token, p): void => {
-          void Effect.runFork(
-            this.emitProgress(connectionScope, {
-              token,
-              progress: p.progress,
-              ...(p.total !== undefined ? { total: p.total } : {}),
-              ...(p.message !== undefined ? { message: p.message } : {}),
-            }),
-          );
-        },
-        task: "auto",
-        transport: "mcp" as const,
-        // #171d.3 — the server's TasksHarness. Handlers calling
-        // `ctx.tasks!.submit(...)` get a TaskHandle that the tools
-        // projection layer recognises (via isTaskHandle) and routes
-        // to the per-connection task registry → CreateTaskResult on
-        // the wire + notifications/tasks/status fan-out.
-        tasks: this.serverTasks,
-        mcp: {
-          serverId: this.scopeId,
-          connectionId,
-          transportKind: info.transportKind,
-          connectedAt,
-          user: null,
-          clientInfo: sdkClientInfo
-            ? { name: sdkClientInfo.name, version: sdkClientInfo.version }
-            : null,
-          clientCapabilities: sdkClientCaps,
-          // ADR 65 — inbound roots, read fresh per request so a
-          // `roots/list_changed` re-pull is reflected on the next call.
-          // Omitted when the client never advertised `roots` (or the
-          // first pull hasn't resolved) — advisory, never a control path.
-          ...(clientRoots !== undefined ? { clientRoots } : {}),
-        },
-        metadata: omitUndefined({
-          ...(info.headers ? { headers: info.headers } : {}),
-          origin: info.origin,
-          remoteAddress: info.remoteAddress,
-        }),
-      };
-
-      // Attach `elicit` sugar when wired AND the client advertised
-      // the capability. Tool handlers must check for presence — the
-      // slot is optional per spec.
-      if (this.elicitWired) {
-        const elicit = buildMcpElicit({ sdkServer, clientCapabilities: sdkClientCaps });
-        if (elicit.canDoForm() || elicit.canDoUrl()) {
-          return { ...ctx, elicit };
-        }
-      }
+      );
+      const ctx: Derived<McpRequestContext> = built;
       return ctx;
     };
 
@@ -753,9 +757,12 @@ export class McpServerHarness
   private buildAuthPreGate(): AuthPreGate {
     return {
       enforce: this.security.authenticator !== allowAllAuth,
+      // ADR 91 §Phase-2 — return the authenticated identity, not just a
+      // boolean, so the transport forward-derives it onto the accept path's
+      // `McpConnectionInfo` and instructions resolution needn't re-authenticate.
       verify: async (info) => {
         const result = await this.security.authenticator(this.buildPreGateContext(info));
-        return result.authenticated;
+        return result.authenticated ? { ok: true, user: result.user } : { ok: false };
       },
     };
   }
@@ -766,7 +773,7 @@ export class McpServerHarness
    * runs before the crossing is handed to the SDK), carrying only the
    * identity material an `Authenticator` reads.
    */
-  private buildPreGateContext(info: McpConnectionInfo): McpRequestContext {
+  private buildPreGateContext(info: McpConnectionInfo): Derived<McpRequestContext> {
     return this.buildOffConnectionContext(info, "pregate");
   }
 
@@ -784,14 +791,17 @@ export class McpServerHarness
   private buildOffConnectionContext(
     info: McpConnectionInfo,
     label: "pregate" | "init",
-  ): McpRequestContext {
+  ): Derived<McpRequestContext> {
     const connectionScope: Partial<EventScope> = { mcpServerId: this.scopeId };
-    return {
-      // The branded ctx spine (ADR 91), derived from the off-connection crossing
-      // (`connectionScope`) with explicit anonymous identity (`mcp.user: null`
-      // below). ONE facet constructor — no direct `deriveObservability` /
-      // `deriveOps` (grep gate). Off-fiber: `ctx.run` ops run as roots.
-      ...deriveContext(connectionScope, {
+    // ADR 91 §Phase-2 — mint branded in ONE `deriveContext` call (no
+    // brand-erasing / facet-forcing spread). Off-fiber crossing: `ctx.run` ops
+    // run as roots. `mcp.user` seeds from `info.authenticatedUser` when the
+    // HTTP pre-gate already authenticated this crossing and FORWARD-DERIVED its
+    // identity onto `info` (ADR 91 §Phase-2 single-authenticator) — else
+    // explicit anonymous identity (`null`).
+    const built = deriveContext(
+      connectionScope,
+      {
         log: (level, data, logger, trace) => {
           void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
         },
@@ -799,36 +809,40 @@ export class McpServerHarness
         surface: "mcp",
         scope: connectionScope,
         runOperation: this.runOperation.bind(this),
-      }),
-      toolCallId: `mcp:${label}:${ulid()}`,
-      signal: new AbortController().signal,
-      setState: () => {
-        /* no-op — no session behind an off-connection crossing */
       },
-      emit: () => {
-        /* no-op — no channel behind an off-connection crossing */
+      {
+        toolCallId: `mcp:${label}:${ulid()}`,
+        signal: new AbortController().signal,
+        setState: () => {
+          /* no-op — no session behind an off-connection crossing */
+        },
+        emit: () => {
+          /* no-op — no channel behind an off-connection crossing */
+        },
+        progress: () => {
+          /* no-op — no progress token before the SDK sees the request */
+        },
+        task: "auto" as const,
+        transport: "mcp" as const,
+        tasks: this.serverTasks,
+        mcp: {
+          serverId: this.scopeId,
+          connectionId: `conn:${label}:${ulid()}`,
+          transportKind: info.transportKind,
+          connectedAt: Date.now(),
+          user: info.authenticatedUser ?? null,
+          clientInfo: null,
+          clientCapabilities: null,
+        },
+        metadata: omitUndefined({
+          ...(info.headers ? { headers: info.headers } : {}),
+          origin: info.origin,
+          remoteAddress: info.remoteAddress,
+        }),
       },
-      progress: () => {
-        /* no-op — no progress token before the SDK sees the request */
-      },
-      task: "auto",
-      transport: "mcp" as const,
-      tasks: this.serverTasks,
-      mcp: {
-        serverId: this.scopeId,
-        connectionId: `conn:${label}:${ulid()}`,
-        transportKind: info.transportKind,
-        connectedAt: Date.now(),
-        user: null,
-        clientInfo: null,
-        clientCapabilities: null,
-      },
-      metadata: omitUndefined({
-        ...(info.headers ? { headers: info.headers } : {}),
-        origin: info.origin,
-        remoteAddress: info.remoteAddress,
-      }),
-    };
+    );
+    const ctx: Derived<McpRequestContext> = built;
+    return ctx;
   }
 
   /**
@@ -857,28 +871,34 @@ export class McpServerHarness
    * `mcp.user: null`, and the instructions function decides how to handle
    * anonymity.
    *
-   * The `base` ctx now derives through `deriveContext` (via
-   * {@link buildOffConnectionContext}) — the ADR 91 trunk sweep. The
-   * FORWARD-DERIVATION of the authenticated identity (retiring the
-   * authenticator run duplicated with the HTTP pre-gate) is NOT done here: the
-   * pre-gate authenticates at the transport/handshake layer and forwards only
-   * `info`, so collapsing the two runs needs the pre-gate to persist its
-   * authenticated user across the transport → `acceptConnection` boundary — a
-   * cross-layer change beyond this behavior-preserving slice.
-   * TODO(ADR-91 phase-2): thread the pre-gate's authenticated ctx into the
-   * instructions ctx so `security.authenticator` runs once per initialize.
+   * ADR 91 §Phase-2 single-authenticator (forward-derivation): when the HTTP
+   * pre-gate already authenticated this crossing it stamps the identity onto
+   * `info.authenticatedUser`, which {@link buildOffConnectionContext} seeds
+   * into `ctx.mcp.user` — so this DOES NOT run the authenticator again (the
+   * redundant instructions-time run is retired; the per-operation authenticate
+   * stage still runs downstream, defense in depth). Only a crossing that was
+   * NOT pre-gated (trusted transport / no OAuth ⇒ `authenticatedUser` absent)
+   * falls back to a best-effort authenticator run here, so stdio / in-memory
+   * instructions keep their prior identity behavior.
    */
-  private async buildInstructionsContext(info: McpConnectionInfo): Promise<McpRequestContext> {
-    const base = this.buildOffConnectionContext(info, "init");
+  private async buildInstructionsContext(
+    info: McpConnectionInfo,
+  ): Promise<Derived<McpRequestContext>> {
+    // Fast path: the pre-gate forward-derived an identity (or explicit anon) —
+    // a single branded mint, no second authenticator run.
+    if (info.authenticatedUser !== undefined) {
+      return this.buildOffConnectionContext(info, "init");
+    }
+    // No pre-gate ran (trusted transport / no OAuth): resolve identity here,
+    // best-effort, then mint once with it seeded via `authenticatedUser`.
+    let user: McpAuthenticatedUser | null = null;
     try {
-      const authn = await this.security.authenticator(base);
-      if (authn.authenticated) {
-        return { ...base, mcp: { ...base.mcp, user: authn.user } };
-      }
+      const authn = await this.security.authenticator(this.buildOffConnectionContext(info, "init"));
+      if (authn.authenticated) user = authn.user;
     } catch {
       /* fall through with mcp.user: null */
     }
-    return base;
+    return this.buildOffConnectionContext({ ...info, authenticatedUser: user }, "init");
   }
 
   // ─────────── Internal — used by transport + projection layers (#171c+) ───────────

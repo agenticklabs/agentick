@@ -39,8 +39,15 @@
 
 import { Effect } from "effect";
 import { reasonOf, ulid } from "@agentick/utils";
-import type { Elicit, TaskRecord, TaskTransition, TaskWorkContext } from "@agentick/spec";
+import type {
+  Elicit,
+  TaskRecord,
+  TaskTransition,
+  TaskWorkContext,
+  TaskWorkVerbs,
+} from "@agentick/spec";
 import { deserializeAgentickError } from "@agentick/spec";
+import { deriveContext, type ContextFacets, type RunOperationFn } from "@agentick/runtime";
 
 import { defaultTaskHandlerRegistry, type TaskHandlerRegistry } from "./handler-registry.js";
 import { assertInteractive } from "./task-elicit.js";
@@ -299,7 +306,7 @@ async function runOnce(
     return Promise.resolve(input).finally(restore);
   }) as TaskWorkContext["awaitingInput"];
 
-  const ctx: TaskWorkContext = {
+  const verbs: TaskWorkVerbs = {
     signal: controller.signal,
     // Progress / status-message updates funnel into the SAME transition
     // seam as the in-process executor — one field per report.
@@ -320,6 +327,25 @@ async function runOnce(
     // guard — a detached task's `ctx.elicit` throws before any IPC.
     elicit: buildIpcElicit({ record, awaitingInput, pending: pendingElicits }),
   };
+  // ADR 91 §2 — compose the verbs over a trunk+facets ctx. A forked worker
+  // has NO harness operation runner and cannot reach the parent's live
+  // facets across the process boundary, so the facets are DEGRADED but
+  // honestly typed: trunk from `record.scope` (carries the owning
+  // `sessionId`), `log` dropped, `trace`/`metrics` collapse to the off-path
+  // singletons, and `run`/`runner` THROW (no ladder in a bare child) rather
+  // than silently no-op. The task still reads `ctx.sessionId`.
+  // TODO(phase-3): bridge worker `ctx.log` frames back over IPC to the parent
+  // bus so a worker task's logs correlate to its session.
+  const workerFacets: ContextFacets = {
+    log: () => {},
+    namespace: "agentick",
+    surface: "tasks",
+    scope: record.scope,
+    runOperation: (() => {
+      throw new Error("ctx.run is unavailable in a worker task (no operation runner in the child)");
+    }) as RunOperationFn,
+  };
+  const ctx: TaskWorkContext = deriveContext(record.scope, workerFacets, verbs);
 
   let terminal: TaskTransition;
   try {

@@ -373,7 +373,7 @@ const ctx = deriveContext(parentTrunk, { log, namespace, surface, scope, runOper
 // In-fiber Effect callers: read the parent from the ambient FiberRef. The
 // ambient form is Effect-native (a synchronous ambient read is the
 // `readContext()` trap), so it yields an Effect.
-const ctx = yield* deriveContext({ log, namespace, surface, scope, runOperation });
+const ctx = yield * deriveContext({ log, namespace, surface, scope, runOperation });
 ```
 
 The brand is the enforcement point: a framework seam-invocation site typed to

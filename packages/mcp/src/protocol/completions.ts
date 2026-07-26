@@ -1,3 +1,4 @@
+import type { OperationCtx } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
 /**
@@ -10,10 +11,14 @@ import { omitUndefined } from "@agentick/utils";
  * `hasMore: true` is set.
  *
  * **v1 origin:** ported from `packages/mcp/src/protocol/completions.ts`.
- * The context type is intentionally narrower than v1's
- * `MCPCompletionContext` — server-side handler context (auth, session,
- * etc.) belongs to the future MCP server work; this file only needs
- * `resolvedArguments`.
+ * The context type extends the framework spine ({@link OperationCtx}) with
+ * `resolvedArguments` (ADR 91 §2): a completion handler now reads the trunk
+ * (sessionId / `mcp.user` identity) plus the `log` / `trace` / `run` facets
+ * off the SAME ctx it reads sibling arguments from — so a DB-backed
+ * completion can scope its query to the authenticated principal. The
+ * completions projection derives it per-request via `deriveContext`; the new
+ * facet/trunk fields are additive, so existing `CompletionHandler`
+ * implementations (which read only `resolvedArguments`) are unchanged.
  */
 
 /** Spec-mandated max values per `completion/complete` response. */
@@ -35,11 +40,16 @@ export interface CompletionResult {
 }
 
 /**
- * Context surfaced to a completion handler. `resolvedArguments` carries
- * the values of any sibling arguments the user has already entered
- * (the protocol's `context.arguments` field).
+ * Context surfaced to a completion handler. Extends the framework spine
+ * ({@link OperationCtx}, ADR 91 §2) — the trunk (sessionId / opId / the
+ * `mcp.user` authenticated identity) plus the `log` / `trace` / `metrics` /
+ * `run` facets — with `resolvedArguments`, the sibling-argument values the
+ * user has already entered (the protocol's `context.arguments` field). A
+ * DB-backed completion reads `ctx.user` / the MCP identity to scope its
+ * query; a simple prefix-match handler ignores everything but
+ * `resolvedArguments`.
  */
-export interface CompletionContext {
+export interface CompletionContext extends OperationCtx {
   /**
    * Already-resolved sibling arguments for the same prompt or
    * resource template. Empty object when the request omits

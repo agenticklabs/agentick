@@ -37,7 +37,13 @@ import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
 import type { CollectionStore } from "./store.js";
 import type { StoreCtx } from "./store-ctx.js";
-import type { ProgressUpdate, TaskFailure, TaskStatus, TaskWorkContext } from "./tasks-harness.js";
+import type {
+  ProgressUpdate,
+  TaskFailure,
+  TaskStatus,
+  TaskWorkContext,
+  TaskWorkVerbs,
+} from "./tasks-harness.js";
 import type { Elicit, ElicitFn } from "./elicit-api.js";
 
 // ============================================================================
@@ -252,6 +258,16 @@ export interface TaskExecutor {
    * `hooks` (optional, ADR 69) carries the escalation wiring the executor
    * composes into `ctx.elicit`. Omitted for executors / call sites with
    * no escalation configured — the ctx's `elicit` then throws on use.
+   *
+   * `deriveCtx` (optional, ADR 91 §2) composes the executor's locally-built
+   * {@link TaskWorkVerbs} OVER the submitting op's branded trunk+facets to
+   * form the full {@link TaskWorkContext} the work body receives — so a task
+   * reads its `sessionId` and can `ctx.log(...)`. The harness always supplies
+   * it (the trunk+facets live harness-side); it is optional in the SIGNATURE
+   * (a bare executor call — a test — may omit it and fall back to a
+   * verbs-only, facet-less ctx). Preserves the lazy facet getters (it routes
+   * through `deriveContext`, which composes extras as descriptors, never a
+   * forcing spread).
    */
   start(
     record: TaskRecord,
@@ -259,6 +275,7 @@ export interface TaskExecutor {
     report: TaskReport,
     signal: AbortSignal,
     hooks?: TaskExecutorHooks,
+    deriveCtx?: (verbs: TaskWorkVerbs) => TaskWorkContext,
   ): TaskExecution;
   /**
    * Re-attach to an already-running execution described by `record`

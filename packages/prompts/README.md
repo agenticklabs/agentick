@@ -10,12 +10,12 @@ Mirrors MCP's `prompts/*` shape per [ADR 23](../../docs/proposals/v2/blueprint/2
 
 The core handles two content shapes natively. Anything else flows through a registered `PromptRenderer`.
 
-| Content type                               | Where rendered                                               | Output                                            |
-| ------------------------------------------ | ------------------------------------------------------------ | ------------------------------------------------- |
-| `string`                                   | core                                                         | single `system`-role `MessageEntry`               |
-| `readonly MessageEntry[]`                  | core                                                         | passthrough — used as-is                          |
+| Content type                               | Where rendered                                          | Output                                            |
+| ------------------------------------------ | ------------------------------------------------------- | ------------------------------------------------- |
+| `string`                                   | core                                                    | single `system`-role `MessageEntry`               |
+| `readonly MessageEntry[]`                  | core                                                    | passthrough — used as-is                          |
 | `ReactNode`                                | [`@agentick/prompts-react`](../prompts-react) (binding) | compiled via `renderTemplate` to `MessageEntry[]` |
-| Custom (Solid / Angular / domain-specific) | adopter-registered `PromptRenderer`                          | adopter-defined                                   |
+| Custom (Solid / Angular / domain-specific) | adopter-registered `PromptRenderer`                     | adopter-defined                                   |
 
 ## Quick start — text-only (no framework)
 
@@ -90,6 +90,8 @@ withPrompts({
 ```
 
 Each prompt's `render(args)` returns the content shape its renderer handles. The harness dispatches at invoke time via `renderer.handles(content)`. On-disk directory loaders (a `fromDirectory` over `.tsx`) need a bundler / transform pipeline and are a framework-binding concern — see the [Loaders](#loaders) note below.
+
+`render` also receives the invoking op's ctx (ADR 91 §2) as an optional second param — `render(args, ctx?)`. The ctx carries the trunk (sessionId / opId / `user`) plus the `log` / `trace` / `run` facets; the `render` / `invoke` paths thread the ctx of the op that invoked them, so a dynamic prompt can render per-principal content (`render: (args, ctx) => greet(ctx?.user)`). Optional in the signature (declarations stay pure and trivially testable), always threaded by the framework.
 
 ## The `withPrompts` slot — three accepted shapes
 

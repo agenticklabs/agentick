@@ -70,7 +70,13 @@ export function installCompletionsHandlers(
       const resolvedArguments = request.params.context?.arguments ?? {};
 
       const baseCtx = options.buildContext();
-      await evaluateRequestPipeline(options.security, baseCtx, {
+      // The pipeline may authenticate + augment identity — thread its returned
+      // ctx (ADR 91 §2) so the completion handler sees the SAME trunk (the
+      // request's `mcp.user` identity) + `log`/`trace`/`run` facets it reads
+      // sibling arguments from. A DB-backed completion scopes its query to the
+      // authenticated principal off this ctx; a prefix-match handler ignores
+      // everything but `resolvedArguments`.
+      const { ctx } = await evaluateRequestPipeline(options.security, baseCtx, {
         type: "completion",
         name: ref.type === "ref/prompt" ? ref.name : ref.uri,
       });
@@ -80,7 +86,7 @@ export function installCompletionsHandlers(
         return { completion: { values: [] } };
       }
 
-      const raw = await handler(argument.value, { resolvedArguments });
+      const raw = await handler(argument.value, { ...ctx, resolvedArguments });
       const result = normalizeCompletionResult(raw);
       // CompletionResult uses readonly arrays; the SDK wire type wants
       // mutable — spread into a fresh array at the boundary.

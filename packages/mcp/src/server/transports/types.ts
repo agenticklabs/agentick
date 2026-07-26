@@ -14,6 +14,7 @@
  * connection until `close()`.
  */
 
+import type { McpAuthenticatedUser } from "@agentick/spec";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
 import type { McpConnectionInfo } from "../security/stages.js";
@@ -62,12 +63,30 @@ export interface AuthPreGate {
   /**
    * Verify the crossing from the connection snapshot the transport
    * built (`headers` / `origin` / `remoteAddress` — the same
-   * {@link McpConnectionInfo} the accept path carries). Resolves
-   * `true` when the credential authenticates; `false` to challenge with
-   * a `401`. Runs the server's configured `Authenticator` against a
-   * minimal request context synthesized from `info`.
+   * {@link McpConnectionInfo} the accept path carries). Runs the server's
+   * configured `Authenticator` against a minimal request context synthesized
+   * from `info` and returns the {@link AuthPreGateVerdict}: `ok: false` to
+   * challenge with a `401`; `ok: true` (with the resolved `user`) to proceed.
+   *
+   * The `user` is FORWARD-DERIVED (ADR 91 §Phase-2): the transport stamps it
+   * onto the {@link McpConnectionInfo} it hands to `accept`, so the harness
+   * seeds `ctx.mcp.user` from it at instructions-resolution time instead of
+   * running the `Authenticator` a SECOND time. The per-operation authenticate
+   * stage still runs downstream (defense in depth); only the redundant
+   * instructions-time run is retired.
    */
-  verify(info: McpConnectionInfo): Promise<boolean>;
+  verify(info: McpConnectionInfo): Promise<AuthPreGateVerdict>;
+}
+
+/**
+ * Outcome of {@link AuthPreGate.verify}. `ok: false` ⇒ challenge the crossing
+ * with a `401`. `ok: true` ⇒ proceed, carrying the authenticated `user`
+ * (`null` = anonymous but allowed) for forward-derivation onto the accept
+ * path's {@link McpConnectionInfo}.
+ */
+export interface AuthPreGateVerdict {
+  readonly ok: boolean;
+  readonly user?: McpAuthenticatedUser | null;
 }
 
 /**

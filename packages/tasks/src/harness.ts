@@ -98,6 +98,7 @@ import type {
   TaskWakePolicy,
   TaskWork,
   TaskWorkContext,
+  TaskWorkVerbs,
   TasksHarnessProtocol,
 } from "@agentick/spec";
 import {
@@ -530,12 +531,21 @@ export class TasksHarness
     // synchronously (so signal listeners register before submit returns);
     // a by-ref executor ignores `work` (undefined here) and resolves
     // `record.handlerRef` on the far side. Both drive the ONE `report`.
+    // ADR 91 §2 — the branded trunk+facets live harness-side; hand the
+    // executor a `deriveCtx` that composes its locally-built verbs OVER this
+    // task's trunk (`record.scope` carries the owning `sessionId`) + this
+    // harness's `log`/`trace`/`metrics`/`run` facets. The executor mints the
+    // full `TaskWorkContext` from it; the work body reads `ctx.sessionId` and
+    // can `ctx.log(...)`.
+    const deriveCtx = (verbs: TaskWorkVerbs): TaskWorkContext =>
+      this.deriveOperationCtx(record.scope, verbs);
     const execution = executor.start(
       record,
       work as TaskWork,
       this.makeReport(live),
       live.controller.signal,
       this.makeHooks(live),
+      deriveCtx,
     );
     // Sync-completing work (e.g. `Effect.succeed`) may have already driven
     // the record terminal during `start` — don't stash a dead handle.

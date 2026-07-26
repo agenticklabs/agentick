@@ -116,8 +116,8 @@ sugar. Both are replaced by **`session.tools`**, which reads exactly like the
 sibling handles (`session.knobs` / `session.state`):
 
 ```ts
-session.tools.list({ exposure: "model" });     // sync View — ToolInfo[] (precedence-resolved)
-session.tools.get("resource_read")?.info;       // per-tool handle + wire-safe projection
+session.tools.list({ exposure: "model" }); // sync View — ToolInfo[] (precedence-resolved)
+session.tools.get("resource_read")?.info; // per-tool handle + wire-safe projection
 await session.tools.get("resource_read")?.dispatch({ uri });
 await session.tools.dispatch("resource_read", { uri }); // host door, via: "dispatch"
 session.tools.has("resource_read");
@@ -739,8 +739,8 @@ import "@agentick/tool-executor/client";
 
 const tools = client.session(id).tools;
 await tools.refresh({ exposure: "model" }); // → session/list_tools
-tools.list();                                // Enumerable<ToolInfo> snapshot
-tools.get("resource_read");                  // by name
+tools.list(); // Enumerable<ToolInfo> snapshot
+tools.get("resource_read"); // by name
 await tools.dispatch("resource_read", { uri }); // → session/dispatch → content blocks
 ```
 
@@ -800,7 +800,7 @@ package root:
 | `withScope`                                  | Bind declarations to a scope for the duration of an async body; cleanup in `finally`                           |
 | `permissiveValidator` / `fromStandardSchema` | Validators — accept-anything, and a Standard Schema v1 adapter (Zod/Valibot/…)                                 |
 | `respondToToolCall` (method)                 | Land a client's relayed tool-call result — resumes a suspended client dispatch (mirrors `elicitation.respond`) |
-| `@agentick/tool-executor/client`        | Client `SessionHandle` verbs `setClientTools` / `respondToToolCall` (stage 2 write side)                       |
+| `@agentick/tool-executor/client`             | Client `SessionHandle` verbs `setClientTools` / `respondToToolCall` (stage 2 write side)                       |
 
 `toClientToolRegistration` + the `ClientToolDeclaration` / `ClientToolAnnotations`
 types + the `session/set_client_tools` / `session/respond_to_tool_call` wire

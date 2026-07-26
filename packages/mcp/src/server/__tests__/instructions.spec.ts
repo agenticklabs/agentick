@@ -157,4 +157,57 @@ describe("instructions — identity-visible over an authenticated HTTP crossing"
     await harness.close();
     await transport.close();
   });
+
+  it("runs the authenticator EXACTLY ONCE for an initialize (ADR 91 §2 forward-derivation)", async () => {
+    // Pre-ADR-91: the HTTP pre-gate authenticated the crossing, then
+    // buildInstructionsContext re-ran the authenticator to populate
+    // ctx.mcp.user — TWO runs per initialize. ADR 91 §Phase-2 forward-derives
+    // the pre-gate's identity onto the accept-path McpConnectionInfo, so
+    // instructions resolution reuses it: exactly ONE run.
+    let authCalls = 0;
+    const base = bearerTokenAuth({ tokens: { [TOKEN]: { id: "alice" } } });
+    const countingAuth = async (
+      ctx: McpRequestContext,
+    ): Promise<Awaited<ReturnType<typeof base>>> => {
+      authCalls += 1;
+      return base(ctx);
+    };
+
+    const transport: HttpServerTransportHandle = httpTransport({ port: 0 });
+    const fn: McpServerInstructions = (ctx) =>
+      `Hello ${ctx.mcp.user?.id ?? "anonymous"} — server ready.`;
+    const harness = new McpServerHarness(
+      `srv:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        name: "instr-http-once",
+        transports: [transport],
+        serverInfo: { name: "test", version: "0.0.0" },
+        instructions: fn,
+        auth: { authenticator: countingAuth },
+      },
+    );
+    await harness.ready;
+    await harness.start();
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const url = `http://127.0.0.1:${addr.port}/mcp`;
+
+    const clientTransport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+    });
+    const client = new McpClient({ name: "c", version: "0.0.0" }, { capabilities: {} });
+    await client.connect(clientTransport);
+
+    // Identity still reaches the instructions fn — via the forwarded pre-gate
+    // identity, NOT a second authenticator run.
+    expect(client.getInstructions()).toBe("Hello alice — server ready.");
+    expect(authCalls).toBe(1);
+
+    await client.close();
+    await harness.close();
+    await transport.close();
+  });
 });

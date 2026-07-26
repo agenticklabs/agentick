@@ -47,6 +47,7 @@ import type {
   EventSurface,
   MetricLabels,
   Observability,
+  OperationCtx,
   Ops,
   RuntimeContext,
 } from "@agentick/spec";
@@ -87,8 +88,8 @@ export interface ContextFacets {
   readonly runtime?: Runtime.Runtime<never>;
 }
 
-/** The trunk+facets a derived boundary ctx carries, before the brand. */
-type OperationCtx = RuntimeContext & Observability & Ops;
+// `OperationCtx` (the trunk + Observability + Ops intersection) is the
+// spec-owned spine name (ADR 91 §1); re-imported above rather than re-declared.
 
 /**
  * Attach the LAZY {@link Observability} + {@link Ops} facet getters onto
@@ -127,34 +128,67 @@ export function attachOperationFacets(target: object, facets: ContextFacets): vo
 }
 
 /**
- * Derive a branded boundary context from a parent trunk + facets — the ONLY
- * legal boundary-ctx constructor (ADR 91).
+ * Derive a branded boundary context from a parent trunk + facets (+ optional
+ * boundary extras) — the ONLY legal boundary-ctx constructor (ADR 91).
  *
- * Two overloads:
- *   - `deriveContext(parent, facets)` — off-fiber boundaries (MCP accept, a
- *     session's construction identity) pass the parent trunk explicitly.
+ * Overloads:
+ *   - `deriveContext(parent, facets, extras?)` — off-fiber boundaries (MCP
+ *     accept, the tool-dispatch/wire crossings, a task's work ctx, a session's
+ *     construction identity) pass the parent trunk explicitly. The optional
+ *     `extras` (ADR 91 §Phase-2 "brand totalization") composes the boundary's
+ *     OWN fields — `toolCallId` / `transport` on a tool ctx, the wire
+ *     `session`/`app` handles, a task's `signal`/`onProgress` — INTO the same
+ *     branded mint, so the WHOLE composed ctx (`Derived<OperationCtx & X>`)
+ *     carries the brand instead of a post-derivation spread that erases it.
  *   - `deriveContext(facets)` — in-fiber Effect callers read the parent trunk
  *     from the ambient FiberRef (`getContext`). Effect-native: a synchronous
  *     ambient read is the `readContext()` trap (a nested `runSync` starts a
  *     fresh root fiber that doesn't inherit the FiberRef), so the ambient form
  *     yields an `Effect` that reads the trunk in-fiber.
+ *
+ * ## Extras + lazy facets compose without eager forcing
+ *
+ * `extras` is applied via {@link Object.getOwnPropertyDescriptors} +
+ * `Object.defineProperties`, NOT a spread — so an extra defined as a LIVE
+ * GETTER (the wire ctx's `session`/`app` handles resolve lazily) is copied as a
+ * getter and is NOT forced at derivation time. The five facet getters
+ * (`log`/`trace`/`metrics`/`run`/`runner`) are attached LAST, so a facet key
+ * always wins over a colliding extra, and they too stay lazy. Precedence:
+ * facets ▸ extras ▸ trunk.
  */
 export function deriveContext(facets: ContextFacets): Effect.Effect<Derived<OperationCtx>>;
-export function deriveContext(parent: RuntimeContext, facets: ContextFacets): Derived<OperationCtx>;
+export function deriveContext<X extends object = Record<never, never>>(
+  parent: RuntimeContext,
+  facets: ContextFacets,
+  extras?: X,
+): Derived<OperationCtx & X>;
 export function deriveContext(
   a: RuntimeContext | ContextFacets,
   b?: ContextFacets,
-): Derived<OperationCtx> | Effect.Effect<Derived<OperationCtx>> {
+  c?: object,
+): Derived<OperationCtx> | Derived<OperationCtx & object> | Effect.Effect<Derived<OperationCtx>> {
   if (b === undefined) {
     const facets = a as ContextFacets;
     return Effect.map(getContext, (parent) => deriveFrom(parent, facets));
   }
-  return deriveFrom(a as RuntimeContext, b);
+  return deriveFrom(a as RuntimeContext, b, c);
 }
 
-/** The branded synchronous core — the single `as Derived` cast lives here. */
-function deriveFrom(parent: RuntimeContext, facets: ContextFacets): Derived<OperationCtx> {
+/**
+ * The branded synchronous core — the single `as Derived` cast lives here.
+ * Composition order is precedence order: the trunk copies in first, the
+ * boundary `extras` land as descriptors OVER it (getters preserved, never
+ * forced), and the facet getters attach LAST so they win any key collision.
+ */
+function deriveFrom<X extends object = Record<never, never>>(
+  parent: RuntimeContext,
+  facets: ContextFacets,
+  extras?: X,
+): Derived<OperationCtx & X> {
   const ctx = { ...parent };
+  if (extras !== undefined) {
+    Object.defineProperties(ctx, Object.getOwnPropertyDescriptors(extras));
+  }
   attachOperationFacets(ctx, facets);
-  return ctx as Derived<OperationCtx>;
+  return ctx as Derived<OperationCtx & X>;
 }

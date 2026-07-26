@@ -30,6 +30,8 @@
  */
 
 import type { EventScope } from "./events.js";
+import type { Observability } from "./observability.js";
+import type { Ops } from "./ops.js";
 
 // ============================================================================
 // Adopter extension slot
@@ -131,6 +133,34 @@ export interface RuntimeContext extends EventScope {
 
 /** The "no scope active" value. */
 export const EMPTY_CONTEXT: RuntimeContext = Object.freeze({});
+
+// ============================================================================
+// The composed boundary shape (ADR 91 §1 — "that intersection IS the spine")
+// ============================================================================
+
+/**
+ * `OperationCtx` — the trunk + the two capability facets: the canonical
+ * boundary-context shape every framework handler/callback seam receives
+ * (ADR 91 §1). It is exactly {@link RuntimeContext} (causality/identity data)
+ * intersected with {@link Observability} (`log`/`trace`/`metrics`) and
+ * {@link Ops} (`run`/`runner`) — the derived facets a boundary crossing
+ * attaches over the pure-data trunk.
+ *
+ * This is the ONE name for that intersection: seams (`ResourceResolver`,
+ * `PromptDeclaration.render`, `CompletionContext`, `TaskWorkContext`, …) and
+ * the runtime `deriveContext` all reference `OperationCtx` rather than
+ * re-writing `RuntimeContext & Observability & Ops` at each site. The
+ * runtime's `InterceptorCtx` is the same intersection under its own boundary
+ * name.
+ *
+ * A boundary ctx that additionally carries boundary-specific facets is
+ * `OperationCtx & <boundary facets>`. The branded, framework-minted form is
+ * `Derived<OperationCtx>` (or `Derived<OperationCtx & X>`) — see
+ * {@link Derived}.
+ *
+ * @see docs/proposals/v2/blueprint/91-ctx-spine.md §1
+ */
+export type OperationCtx = RuntimeContext & Observability & Ops;
 
 // ============================================================================
 // The derivation brand (ADR 91 §Enforcement)
