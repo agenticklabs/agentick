@@ -30,3 +30,7 @@
   dir: packages/spec
   intents:
     - ctx-spine-phase1
+"@agentick/spec@1.0.0-next.8":
+  dir: packages/spec
+  intents:
+    - ctx-spine-phase2

@@ -1,5 +1,17 @@
 # @agentick/compiler-react
 
+## 1.0.0-next.8
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.8
+  - @agentick/formatters@1.0.0-next.8
+  - @agentick/runtime@1.0.0-next.8
+  - @agentick/spec@1.0.0-next.8
+  - @agentick/tool@1.0.0-next.8
+  - @agentick/utils@1.0.0-next.8
+
 ## 1.0.0-next.7
 
 ### Patch Changes
