@@ -62,7 +62,9 @@
   },
   "devDependencies": {
     "@agentick/app": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
     "@agentick/gateway": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/timeline": "workspace:*",
     "effect": "^3.22.0",

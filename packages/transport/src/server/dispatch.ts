@@ -476,8 +476,12 @@ function buildWireExtensionContext(
     gateway: host,
     // Authn happened ONCE at ingress (ADR 51 §4.1); dispatch only
     // carries the stamped identity. The dynamic command lane's
-    // Authorizer gate consumes it.
-    ...omitUndefined({ principal: identity?.principal, app, session }),
+    // Authorizer gate consumes `principal` (the scalar projection); the full
+    // structured `identity` (user record + scopes) is projected too so a wire
+    // handler — and the gateway's before-hooks, into whose op ctx
+    // `runWireDispatch` threads it — can read richer identity than the
+    // principal string. Both undefined on the unauthenticated local pole.
+    ...omitUndefined({ principal: identity?.principal, identity, app, session }),
     // TODO(phase-F): resolve HookBridges from the session's session-extension
     // registry when the mcpControlWireExtension needs `ctx.bridges().mcp`.
     // For Phase B/C, no framework-shipped extension uses bridges — the empty

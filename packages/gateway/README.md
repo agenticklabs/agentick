@@ -487,6 +487,42 @@ The source runs at the transport server via `authenticateIngress` (the ADR 50
 `GatewayInstaller.interceptIngress` seam generalizes where it's wired). Identity
 is stamped once; everything downstream reads the stamp — it is never re-derived.
 
+#### Reading the caller's identity in a wire hook
+
+Authorization (§2–§4) is coarse and structural — it decides _whether_ a call
+proceeds. When a handler must instead **act on** who is calling — stamp the
+authenticated principal onto a record, branch on a tenant — the stamped
+`IngressIdentity` is threaded onto every `wire:<method>` op, so a gateway
+`onBeforeWire<...>` hook reads it from its ctx and reshapes params. The recipe
+for the multi-tenant case (the caller cannot forge identity — it comes from the
+ingress stamp, never from params, so the hook can clobber a smuggled value):
+
+```ts
+// Stamp the AUTHENTICATED caller onto the new session's metadata, OVERRIDING
+// anything the client put in the request body. The hook is the authority.
+gateway.hook({
+  onBeforeWireAppCreateSession: (params, ctx) => ({
+    ...params,
+    metadata: { ...params.metadata, principal: ctx.identity?.principal },
+  }),
+});
+```
+
+`ctx.identity` is the full `IngressIdentity` (`{ principal, user?, scopes? }`) —
+the structured twin of the `ctx.principal` string, carrying the adopter-shaped
+`user` record and the credential's scopes. It is `undefined` on the
+unauthenticated local pole, and rides ONLY the `wire:*` op: an inner non-wire op
+the handler triggers (`app:create-session`) sees no identity, so request identity
+never leaks into ordinary command ctx.
+
+> **Verified by** `@agentick/transport` — `wire-identity-hook.spec.ts` (the hook
+> stamps identity over a client-smuggled principal; unauthenticated → `ctx.identity`
+> undefined + params pass through untouched; a wire-extension handler reads the
+> full structured `ctx.identity` alongside `ctx.principal`; a non-wire op sees
+> none). The carrier is `EventScope.identity` (`@agentick/spec`), threaded onto
+> the wire op in `runWireDispatch`. See
+> [ADR 51 §4.1](../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md).
+
 ### 2. Authorization — the `Authorizer` (your policy)
 
 `createGateway({ authorizer })` sets the policy. The triad (ADR 51 §4.2): the

@@ -45,6 +45,7 @@ import type { Ops } from "../data/ops.js";
 import type { HandlerVerdict } from "../data/outcomes.js";
 import type { WireMethod, WireParams, WireResult } from "./params.js";
 import type { WireNotificationMethod, WireNotificationParams } from "./notifications.js";
+import type { IngressIdentity } from "./authorizer.js";
 
 // ============================================================================
 // WireMethodAuth — per-method auth declaration
@@ -303,8 +304,22 @@ export interface WireExtensionContext extends Observability, Ops {
    * Undefined on unauthenticated connections (the local pole). The
    * dynamic command lane's Authorizer gate consumes this; porcelain
    * handlers may read it for principal-scoped behavior.
+   *
+   * The scalar CONVENIENCE projection of {@link identity} — the "who" as a
+   * string. Read {@link identity} for the structured object (`user`,
+   * `scopes`).
    */
   readonly principal?: string;
+  /**
+   * The full structured ingress identity (ADR 34/51 §4.1) — the object
+   * behind {@link principal}. Carries the adopter-shaped `user` record
+   * (`{ tenantId, userId, … }`) and the credential's `scopes`, so a wire
+   * handler (or a gateway `onBeforeWire<...>` hook reading the op ctx, into
+   * which the gateway threads this) can key on richer identity than the
+   * principal string alone. Undefined on unauthenticated connections (the
+   * local pole).
+   */
+  readonly identity?: IngressIdentity;
   /** Active session, when the method is session-scoped. */
   readonly session?: SessionHarnessProtocol<unknown>;
   /** Active app, when the method is app-scoped or session-scoped. */

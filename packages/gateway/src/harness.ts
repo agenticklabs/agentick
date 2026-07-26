@@ -689,7 +689,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     ctx: WireExtensionContext,
     run: (params: unknown) => Promise<R>,
   ): Promise<R> {
-    const scope = { gatewayId: this.scopeId };
+    // Thread the per-request ingress identity (ADR 34/51) onto the wire op's
+    // scope — the same carrier `origin` rides (see operation-runner's ctxScope
+    // build). This is the ONE hop that lets a gateway `onBeforeWire<...>` hook
+    // read `ctx.identity` (WHO is calling) and reshape params: the op scope →
+    // ctxScope → the interceptor cascade's InterceptorCtx. Client-unsettable —
+    // it comes from the identity the transport authenticated, never from params.
+    // `omitUndefined` keeps the scope clean on the unauthenticated local pole
+    // (no identity → the field is absent, non-wire ops are unaffected).
+    const scope = omitUndefined({ gatewayId: this.scopeId, identity: ctx.identity });
     // `wire:` prefix (ADR 83 wire section): the wire op name must NOT
     // collide with the op it delegates to (`session/send` vs `session:send`
     // both Pascalize to `SessionSend`). Prefixed → `WireSessionSend`, so the

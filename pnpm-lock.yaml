@@ -1742,9 +1742,15 @@ importers:
       '@agentick/app':
         specifier: workspace:*
         version: link:../app
+      '@agentick/compiler-react':
+        specifier: workspace:*
+        version: link:../compiler-react
       '@agentick/gateway':
         specifier: workspace:*
         version: link:../gateway
+      '@agentick/model-executor':
+        specifier: workspace:*
+        version: link:../model-executor
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime

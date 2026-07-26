@@ -125,6 +125,25 @@ export interface EventScope extends EventScopeExtensions {
    * enforcement; enforcement happened at the boundary that stamped it.
    */
   readonly origin?: OperationOrigin;
+  /**
+   * The full authenticated ingress identity (ADR 34/51 §4.1) — the
+   * STRUCTURED twin of {@link principal}. Where `principal` is the scalar
+   * identity-scope key (the "who" projected to a string), this carries the
+   * whole {@link import("../wire/authorizer.js").IngressIdentity}: the
+   * adopter-shaped `user` record and the credential's `scopes`.
+   *
+   * Stamped at the wire boundary: the gateway threads the per-request
+   * ingress identity onto its `wire:<method>` op so a before-hook
+   * (`onBeforeWire<...>`) can read WHO is calling and reshape params
+   * accordingly. Absent off the wire path (in-process calls carry no
+   * ingress identity → `undefined`), and never client-settable — the
+   * gateway populates it from the identity it authenticated, not from
+   * request params.
+   *
+   * A fact on the identity axis (twin of {@link principal}/{@link origin}),
+   * not a decision: nothing consults it for enforcement.
+   */
+  readonly identity?: import("../wire/authorizer.js").IngressIdentity;
 }
 
 /**

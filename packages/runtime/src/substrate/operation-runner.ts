@@ -287,6 +287,13 @@ class OperationRunnerImpl implements OperationRunner {
         // origin stamp) without unpacking an envelope. Undefined when the op
         // carries no origin.
         origin: scope.origin,
+        // The structured ingress identity (ADR 34/51), twin of `origin` on the
+        // identity axis. The gateway threads the authenticated per-request
+        // identity onto its `wire:<method>` op scope; carrying it here lets a
+        // before-hook / middleware read `ctx.identity` (WHO is calling) and
+        // reshape params. `undefined` for every non-wire op (their scope carries
+        // no identity) — no leakage into ordinary command ctx.
+        identity: scope.identity,
         opId: resolvedOp.opId,
         parentOpId: resolvedOp.parentOpId,
         correlationId: resolvedOp.correlationId,
