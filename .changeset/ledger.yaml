@@ -18,6 +18,10 @@
   dir: packages/spec
   intents:
     - conformance-off-main-barrel
+"@agentick/spec@1.0.0-next.10":
+  dir: packages/spec
+  intents:
+    - slice-a-residuals
 "@agentick/spec@1.0.0-next.2":
   dir: packages/spec
   intents:
