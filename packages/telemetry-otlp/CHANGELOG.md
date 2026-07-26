@@ -1,5 +1,12 @@
 # @agentick/telemetry-otlp
 
+## 1.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/spec@1.0.0-next.3
+
 ## 1.0.0-next.2
 
 ### Patch Changes

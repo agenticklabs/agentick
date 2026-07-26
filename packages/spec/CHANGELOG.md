@@ -1,5 +1,15 @@
 # @agentick/spec
 
+## 1.0.0-next.3
+
+### Patch Changes
+
+- Per-request ingress identity now reaches wire hook/middleware ctx
+  (ctx.identity: IngressIdentity, riding EventScope like origin) and
+  WireExtensionContext.identity carries the structured object beside the
+  principal string — enabling adopter-space principal-override hooks on
+  session-creating wire methods.
+
 ## 1.0.0-next.2
 
 ### Patch Changes

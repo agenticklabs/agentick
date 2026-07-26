@@ -1,6 +1,6 @@
 {
   "name": "@agentick/gates",
-  "version": "1.0.0-next.2",
+  "version": "1.0.0-next.3",
   "description": "Gates — knob-backed continuation conditions. Two species: latch gates (activateWhen, model-cleared via set_knob) and verified gates (satisfied predicate, evaluated every tick, auto-clears, read-only knob). Compiler-agnostic descriptor types + factory at the top level; React hook in /react subpath. Not a harness; gates have no independent state — the gate's value IS a knob value. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
