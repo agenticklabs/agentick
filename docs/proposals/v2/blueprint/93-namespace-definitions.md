@@ -52,6 +52,32 @@ is the op layer; write mediation is decoration.
 **Non-members (do not force):** gates (tree/loop concern, no store),
 model/executors/compiler (first-class slots, no storage semantics).
 
+## Definition-level hooks (amendment, Ryan 2026-07-26)
+
+Definitions also accept the namespace's hook/guard seams as properties —
+pure colocation sugar over harness-scoped command middleware (no new
+mechanism):
+
+- **Naming:** inside a definition the layer segment DROPS —
+  `defineTimeline({ onBeforeAppend })`; app-level config keeps the full
+  discriminated name (`onBeforeTimelineAppend`). Both desugar to the
+  same command-scoped middleware on the same op.
+- **Ordering:** broader scope wraps narrower (chain of responsibility) —
+  app-level before-hooks run FIRST, definition-level run inside them,
+  then the op body; afters unwind in reverse. Same law for guards:
+  app-level verdicts outrank definition-level. Rationale: governance
+  outranks local policy — an app guard must veto before layer-local
+  logic runs.
+
+## Resources ruling (amendment, Ryan 2026-07-26)
+
+The filesystem's role in resources is the SOURCE, not the store:
+`resourcesFromDirectory(dir)` is a named hydrator+resolver pair
+(directory → declarations; file resolver → content on read), the
+namespace's flagship source — parallel to skills'
+`hydrateFromDirectory`. The declaration store defaults to memory like
+every namespace (persisting the catalog ≠ serving files).
+
 ## Substrate alignment
 
 - **Journal:** untouched on the write path (appends journal as ops,
