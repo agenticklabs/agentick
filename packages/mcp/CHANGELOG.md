@@ -1,5 +1,32 @@
 # @agentick/mcp
 
+## 1.0.0-next.11
+
+### Minor Changes
+
+- MCP server capability-extensions seam: `McpServerOptions.extensions`
+  (typed off the SDK's `ServerCapabilities["extensions"]`) advertises
+  spec extensions in the `initialize` result — e.g. the MCP Apps
+  negotiation `{"io.modelcontextprotocol/ui": { mimeTypes:
+  ["text/html;profile=mcp-app"] }}`. A separate slot from `capabilities`
+  deliberately: wired capabilities are harness-verified ("no lying on
+  the wire"), extension claims are adopter-owned. Absent/empty →
+  advertised capabilities byte-identical to before; the bag is copied at
+  construction; client-side passthrough pinned by test.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/elicitation@1.0.0-next.11
+  - @agentick/prompts@1.0.0-next.11
+  - @agentick/pubsub@1.0.0-next.11
+  - @agentick/runtime@1.0.0-next.11
+  - @agentick/spec@1.0.0-next.11
+  - @agentick/tasks@1.0.0-next.11
+  - @agentick/tool@1.0.0-next.11
+  - @agentick/tool-executor@1.0.0-next.11
+  - @agentick/utils@1.0.0-next.11
+
 ## 1.0.0-next.10
 
 ### Patch Changes

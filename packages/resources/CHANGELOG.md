@@ -1,5 +1,18 @@
 # @agentick/resources
 
+## 1.0.0-next.11
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.11
+  - @agentick/compiler-react@1.0.0-next.11
+  - @agentick/pubsub@1.0.0-next.11
+  - @agentick/runtime@1.0.0-next.11
+  - @agentick/spec@1.0.0-next.11
+  - @agentick/store@1.0.0-next.11
+  - @agentick/utils@1.0.0-next.11
+
 ## 1.0.0-next.10
 
 ### Patch Changes

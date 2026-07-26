@@ -1,5 +1,12 @@
 # @agentick/timeline-postgres
 
+## 1.0.0-next.11
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/timeline@1.0.0-next.11
+
 ## 1.0.0-next.10
 
 ### Patch Changes
