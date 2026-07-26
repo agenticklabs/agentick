@@ -1,0 +1,157 @@
+# ADR 93 — Namespace definitions: `defineX`, the genesis seam, and the client read doors
+
+**Status:** DRAFT (converged in design conversation with Ryan, 2026-07-26)
+**Builds on:** ADR 42 (dichotomy — definitions are its declarative arm, named),
+ADR 49 (stores-not-snapshots — store stays the port; genesis authority moves),
+ADR 66/91 (ctx facets — `ctx.store` is a boundary facet), ADR 90/92 (reads are
+commands — the client door), the data-layer plan (§2.7 bounded projection,
+Phase-2 journal seam — `hydrate` is its adopter door)
+
+## The law
+
+> A store-bearing namespace is configured by a **definition**:
+> `defineX({ store?, hydrate?, ...policy seams })`.
+> The **store** is the durability/query port (unchanged: certifiable,
+> decoratable, ecosystem-facing). **`hydrate(ctx)`** is the genesis seam —
+> an async function of the derived ctx returning the namespace's initial
+> state; `ctx.store` is the definition's own store as a typed facet; each
+> namespace names a default hydrator (timeline: `hydrateFromStore()`;
+> skills/prompts: none). Remaining seams are that namespace's shaping
+> verbs (timeline: `compact(entries, ctx)`). Genesis output is SEED, never
+> re-appended to the store. One definition object is consumed by both
+> `createApp({ x })` and `withX(...)`, and is what the file grammar's
+> namespace files will default-export.
+
+Signature grammar (uniform with every ADR 91 seam): `(subject, ctx)` —
+the subject positional, reality + facets on ctx. `hydrate` has no
+subject: `hydrate(ctx)`.
+
+`defineXStore({...})` is the port's typed inline constructor (minimal
+verbs; optional verbs defaulted), certified by the existing
+`runXStoreConformance` suites.
+
+## The layer stack (nothing moves; one layer is added)
+
+ops (hooks/guards/journal — ADR 92) → **definition seams (genesis +
+shaping policy — THIS ADR)** → store decoration (adopter-composed
+wrapping) → the port (mechanism). Stores do NOT get hooks — interception
+is the op layer; write mediation is decoration.
+
+## Per-namespace map
+
+| Namespace | Definition | Genesis default | Notes |
+| --- | --- | --- | --- |
+| timeline | `defineTimeline({ store?, hydrate?, compact?, writePolicy? })` | `hydrateFromStore()` (ADR 49 open-or-rehydrate preserved) | proving instance; §2.7 bounded projection rides along so a bounded hydrator really loads N |
+| skills | `defineSkills({ store?, hydrate? })` | none (explicit) | UNIFIES sources: directory/URL/literal become named hydrators (`hydrateFromDirectory`, `composeHydrators`); tiered catalogs are hydrators reading `ctx.principal` |
+| prompts | `definePrompts({ store?, hydrate? })` | none | kills the withPrompts-lacks-store asymmetry |
+| tasks | `defineTasks({ store?, executor?, hydrate? })` | none | `hydrate` = pending-task reload on resume (currently undefined semantics → adopter policy) |
+| sessions (registry) | `defineSessions({ store?, evict? })` | n/a | `evict(ctx) ⇒ verdict` turns the idle-eviction sweep into a seam (pairs with ADR 92 Slice B) |
+| knobs / state / credentials | `defineKnobs/State/Credentials({ store? })` | store-backed | thin members; conforming costs nothing |
+| resources | `defineResources({ hydrate? })` | none | tree-mounted declarations stay tree concerns; per-URI resolvers stay subject seams |
+
+**Non-members (do not force):** gates (tree/loop concern, no store),
+model/executors/compiler (first-class slots, no storage semantics).
+
+## Substrate alignment
+
+- **Journal:** untouched on the write path (appends journal as ops,
+  layered records per ADR 92). COMPLETED on the read path: `hydrate` is
+  the adopter door to the data-layer Phase-2 dream — an event-sourced
+  namespace is a hydrator folding `ctx.journalReader`. Event sourcing
+  becomes something an adopter writes, not something the framework
+  promises.
+- **ADR 42:** definitions ARE the declarative form; live-instance form
+  unchanged; no third form.
+- **ADR 48/51:** genesis runs with the session's derived ctx — principal
+  and identity are simply *there* (the Knowify tiered catalog is the
+  proof case).
+
+## The client read doors (client hydration ≠ agent hydration)
+
+Agent genesis shapes MODEL reality; client hydration shapes UI reality.
+Same store, different doors, no shared seam:
+
+1. **Standard reads are wire-exposable commands** (ADR 90/92): the
+   framework ships `timeline:history` (cursor paging → client
+   scroll-back via the window's `prepend`), and per the
+   enumeration-is-foundational rule every client-projected collection
+   ships enumerate + added/removed (tasks, skills, prompts). Wire
+   exposure is GRANT-gated (deny by default); tenancy is a GUARD
+   reading the caller's identity; retention is journal policy
+   (bus-only). The client SDK grows the typed consuming faces.
+2. **Bespoke reads are adopter commands**: a custom projection for a UI
+   is one declared command whose handler reads the adopter's store
+   (typed, guard-gated, same grammar). NO generic client→store query
+   passthrough — arbitrary client queries against store shape are an
+   injection surface and a coupling trap; the command is the
+   attenuation point.
+3. **The bright line holds:** the framework owns no client cache; the
+   client window remains a fold over the event stream plus explicit
+   paged reads.
+
+## Rendered moot (deletions, no shims)
+
+1. `WithTimelineOptions.initial` → `hydrate: () => entries`.
+2. `importSnapshot`-as-resume + `rehydrateStrategy` (timeline) → the
+   store+hydrate path is THE resume story; rehydrate shaping folds into
+   `hydrate`/`compact`.
+3. Skills' parallel source-config vocabulary → named hydrators.
+4. The prompts/skills store-option asymmetry.
+
+## Rollout
+
+- **D1 — timeline (proving instance):** `defineTimeline` +
+  `defineTimelineStore`, `hydrate`/`compact` seams with `ctx.store`
+  facet + named hydrators, §2.7 bounded projection, the moot-list
+  deletions, `AppOptions.timeline` slot. Gate: full suite + kill/resume
+  + a bounded-hydration proof (N-entry store, tail-k hydrator, memory
+  holds k).
+- **D2 — timeline client completion:** `timeline:history` wire grant +
+  client scroll-back face (`history` → `prepend`), guard recipe for
+  principal scoping documented.
+- **D3 — skills + prompts:** source unification; the Knowify tiered
+  hydrator lands in the follow-up slice as the consumer proof.
+- **D4 — the rest as touched:** tasks (with resume semantics), sessions
+  (`evict` seam, pairs with ADR 92 Slice B), knobs/state/credentials.
+  Store-DX docs (contract tables, project-don't-translate guide,
+  teaching conformance failures) ride the README fan-out.
+
+## Landmines (named, each with its defusal)
+
+1. **Fork/spawn double-genesis.** `hydrate` must NOT run for forks
+   (a fork inherits the parent's image; re-running genesis duplicates
+   or diverges). Law: hydrate runs on CREATE and RESUME, never on
+   FORK/SPAWN-inherit. Test in D1.
+2. **Genesis/restore ordering.** hydrate runs before first render,
+   after identity stamping, before the write pump starts; a hydrator
+   throwing = session creation fails typed (no half-genesis session).
+   Define once in D1, conformance-case it.
+3. **Seed-not-write discipline.** The #1 adopter footgun (duplicating
+   hydrators). Stated in the definition contract + a conformance case
+   asserting genesis entries don't hit `append`.
+4. **§2.7 memory-shape change.** Dropping the in-memory persisted tier
+   changes `readPersisted()` semantics (becomes a store read / bounded
+   view). Touches the client window seed and kill/resume suites —
+   the churny part of D1; sequence it inside D1, not across slices.
+5. **`AppOptions` reshape.** `timeline:` top-level (flat-options rule)
+   breaks `session.timeline` consumers — Ernesto's
+   `buildErnestoAppConfig` updates in the same window as D1's publish.
+6. **TS inference through the definition.** `ctx.store` typing flows
+   from the `store` slot via generics; interplay with the `Derived`
+   brand needs a type-test file (the `@ts-expect-error` pattern from
+   ADR 91).
+7. **Wire-read tenancy defaults.** Exposing `timeline:history` without
+   a guard is a cross-tenant read hole. The grant recipe ships WITH the
+   principal-scoping guard example; the same-principal target rule
+   (ADR 48) covers session-scoped reads — verify in D2's gate.
+8. **Skills directory-source migration.** `hydrateFromDirectory` must
+   preserve SKILL.md semantics exactly (the file grammar depends on
+   it); delete the old source options only in the same commit that
+   proves parity.
+9. **Slice collisions.** D1 touches timeline/store/spec while ADR 92
+   Slice B (session close/evict) and Family 3 (tasks submit) are
+   queued — sequence: Slice B → D1 → D2 → D3; tasks' definition (D4)
+   lands WITH Family 3's async submit, not before.
+10. **No big bang.** Namespaces convert as touched; two conventions
+    coexisting mid-rollout is acceptable ONLY because pre-cut; the cut
+    requires the sweep complete (add to the cut checklist).
