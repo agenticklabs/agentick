@@ -20,10 +20,14 @@
  * @see docs/proposals/v2/blueprint/23-mcp-as-harness.md §Prompts
  */
 
+import type { Effect } from "effect";
 import type { MessageEntry } from "../data/entries.js";
+import type { SubstrateError } from "../data/errors.js";
+import type { PromptsErrorChannel } from "../errors/harnesses.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { HarnessFx } from "./middleware.js";
 
 // ============================================================================
 // Argument descriptor
@@ -181,6 +185,39 @@ export {
  *     `SessionExtension` that swaps in a subclass.
  */
 /**
+ * The prompts harness's **canonical** render surface: the composable Effect
+ * twin of the `prompts:render` command (ADR 77, the dual-typed edge). Returns
+ * the operation Effect un-run, so an in-process caller composes it with
+ * `yield*` and stays in ONE fiber tree; `prompts.render(input)` is the derived
+ * Promise facade.
+ *
+ * ## Why this is on the PROTOCOL, not just the concrete class
+ *
+ * Same rule as {@link import("./resources-harness.js").ResourcesFx}: the MCP
+ * server's prompts projection holds `Prompts` (the protocol) and renders from
+ * INSIDE the `mcp:command:get-prompt` crossing operation. Through the Promise
+ * facade the render re-enters Effect on a fresh ROOT fiber inheriting no
+ * FiberRef, so the declaration's `render(args, ctx)` receives a ctx with no
+ * connection identity (ADR 92 §Slice A, the residual ADR 91 stop-rule #2).
+ * Composed on the crossing's captured runtime, the chain connection →
+ * crossing → `prompts:command:render` → `render(args, ctx)` stays intact.
+ *
+ * SCOPE: the read path only. `register` / `update` / `remove` / `invoke` are
+ * write verbs no in-fiber consumer composes yet; they migrate here when one
+ * appears (the `ExecutorFx` precedent — declare what is consumed).
+ */
+export interface PromptsFx extends HarnessFx {
+  /**
+   * Render a prompt to messages WITHOUT queueing — the Effect twin of
+   * {@link PromptsHarnessProtocol.render}. Runs the declaration's
+   * `render(args, ctx)` with the invoking operation's {@link OperationCtx}.
+   */
+  render(
+    input: PromptsGetInput,
+  ): Effect.Effect<PromptsGetResult, PromptsErrorChannel | SubstrateError, never>;
+}
+
+/**
  * Adopter-facing alias for {@link PromptsHarnessProtocol}. Use this in
  * surface APIs (function signatures, slot types in extension options)
  * so adopters never have to type "Harness" in their code.
@@ -215,6 +252,13 @@ export function isPromptsInstance(v: unknown): v is Prompts {
 export interface PromptsHarnessProtocol {
   readonly id: string;
   readonly ready: Promise<void>;
+  /**
+   * The Effect-canonical render surface (ADR 77, the dual-typed edge) — the
+   * twin an in-fiber caller composes with `yield*`. On the PROTOCOL so a
+   * protocol-typed ref (the MCP server's prompts projection) can compose
+   * without severing the fiber at the Promise facade. See {@link PromptsFx}.
+   */
+  readonly fx: PromptsFx;
   close(): Promise<void>;
 
   // ─── Sync surface ─────────────────────────────────────────────

@@ -12,6 +12,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createGateway } from "@agentick/gateway";
 import {
+  collectAdmissionFailures,
   runIngressAuthnConformance,
   spyAuthorizer,
   type IngressAuthnFactory,
@@ -54,6 +55,7 @@ const factory: IngressAuthnFactory = {
   async withServer(opts, body) {
     const spy = spyAuthorizer();
     const gateway = await createGateway({ authorizer: spy.authorizer });
+    const admission = collectAdmissionFailures(gateway);
     const node = createServer();
     const server = httpServer({
       httpServer: node,
@@ -69,6 +71,7 @@ const factory: IngressAuthnFactory = {
     const url = `http://127.0.0.1:${port}/`;
 
     const server_iface: IngressAuthnServer = {
+      admissionFailures: admission.admissionFailures,
       async crossing(token) {
         const before = spy.seen.length;
         const res = await post(url, token);
@@ -89,6 +92,7 @@ const factory: IngressAuthnFactory = {
     try {
       return await body(server_iface);
     } finally {
+      admission.stop();
       await server.close();
       await new Promise<void>((res, rej) => node.close((e) => (e ? rej(e) : res())));
       await gateway.close();

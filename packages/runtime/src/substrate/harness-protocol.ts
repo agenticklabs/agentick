@@ -12,7 +12,7 @@
  * @see docs/proposals/v2/blueprint/77-effect-spine.md
  */
 
-import { Cause, Effect, Exit, Fiber, ManagedRuntime, Option, Queue } from "effect";
+import { Cause, Effect, Exit, Fiber, ManagedRuntime, Option, Queue, Runtime } from "effect";
 import { unwrapExit } from "@agentick/utils";
 import type { AsyncStream } from "@agentick/spec";
 
@@ -39,6 +39,38 @@ export async function runHarnessProtocol<R>(
   runtime?: ManagedRuntime.ManagedRuntime<never, never>,
 ): Promise<R> {
   const exit = await (runtime ? runtime.runPromiseExit(eff) : Effect.runPromiseExit(eff));
+  return unwrapExit(exit) as R;
+}
+
+/**
+ * Run an operation-bearing Effect to a Promise **on a CAPTURED FIBER
+ * RUNTIME** — the trunk-preserving sibling of {@link runHarnessProtocol}.
+ *
+ * `runHarnessProtocol`'s default path (`Effect.runPromiseExit`) starts a ROOT
+ * fiber that inherits no FiberRef, so an operation run through it becomes an
+ * orphaned root: no `parentOpId`, no ambient `RuntimeContext`, and every seam
+ * it feeds (a resource resolver, a prompt `render`) sees an identity-free ctx.
+ * A `Runtime.Runtime<never>` captured IN-FIBER (`yield* Effect.runtime()`
+ * inside an operation body) carries that fiber's FiberRefs, so an Effect run on
+ * it inherits the enclosing operation's trunk — its ops nest and its ctx
+ * derivations see the real identity.
+ *
+ * This is the same mechanism `ctx.run` uses (see `deriveOps`); the difference
+ * is what gets run: `ctx.run` mints an ad-hoc op around a plain callback, this
+ * runs an ALREADY-BUILT operation Effect — a harness's `.fx` twin — from a
+ * Promise-shaped boundary that sits inside the op (an SDK request handler).
+ *
+ * The Exit is normalized exactly as in {@link runHarnessProtocol}, so the
+ * rejection reason is the body's own typed error and error identity survives
+ * the crossing (`instanceof` / `_tag` checks downstream still hold).
+ *
+ * @see docs/proposals/v2/blueprint/92-operation-grammar-completion.md §Slice A
+ */
+export async function runHarnessProtocolOn<R>(
+  runtime: Runtime.Runtime<never>,
+  eff: Effect.Effect<R, unknown, never>,
+): Promise<R> {
+  const exit = await Runtime.runPromiseExit(runtime)(eff);
   return unwrapExit(exit) as R;
 }
 

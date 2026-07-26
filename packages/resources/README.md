@@ -211,6 +211,36 @@ resources stays content-agnostic (it owns the seam, not the backend).
 Beyond the protocol surface the class also exposes `setLoaders(loaders)`,
 `reload()`, and `hydrate()`.
 
+### `harness.fx` — the Effect-canonical read face
+
+`read` / `list` / `listTemplates` are declared commands, so each has an
+Effect twin: `fx.read({ uri })`, `fx.list({ cursor? })`,
+`fx.listTemplates({ cursor? })`. Same command, un-run — the positional
+Promise methods (`read(uri)`) are the edge facade with `runPromise` applied
+at the boundary.
+
+Reach for `fx` when the caller is already inside an operation and the read
+must stay in ITS fiber tree. That is not a performance preference — it is
+what carries identity into your resolver:
+
+```ts
+// Inside an enclosing operation — composed in ITS fiber tree:
+Effect.gen(function* () {
+  const contents = yield* resources.fx.read({ uri });
+  // → resources:command:read is a CHILD of the enclosing op, and the
+  //   resolver's `ctx` carries the caller's identity + the enclosing opId
+  //   as parentOpId.
+});
+
+await resources.read(uri);
+// → a fresh ROOT fiber: no ambient trunk to inherit, so the resolver sees
+//   only the harness's own scope. Correct for a top-level adopter call.
+```
+
+The MCP server's `resources/read` projection is the reference consumer: it
+runs `fx.read` on the crossing operation's runtime, which is how a wire
+caller's identity reaches an identity-scoped resolver (ADR 92 §Slice A).
+
 ### `InMemoryResourceStore` · `ResourceStore` · `ResourceLoader`
 
 The bundled in-memory default store, its port (`ResourceStore extends

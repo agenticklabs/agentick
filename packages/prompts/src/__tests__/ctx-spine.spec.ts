@@ -8,8 +8,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, withContext } from "@agentick/runtime";
 import type { OperationCtx } from "@agentick/spec";
 
 import { PromptsHarness } from "../harness.js";
@@ -48,6 +49,84 @@ describe("ADR 91 §2 — prompt render ctx", () => {
     // Facets present.
     expect(typeof received?.log).toBe("function");
     expect(typeof received?.run).toBe("function");
+
+    await h.close();
+  });
+});
+
+// ============================================================================
+// ADR 92 §Slice A — the Effect-canonical render face (`fx`)
+// ============================================================================
+
+/**
+ * The trunk a `render(args, ctx)` sees is only as good as the FIBER the render
+ * runs on. `render(input)` is the edge facade: a ROOT fiber, so an enclosing
+ * operation's trunk is not there to inherit. `fx.render(input)` is the same
+ * command un-run — composed by an in-fiber caller (the MCP server's
+ * `get-prompt` crossing) it inherits the ambient trunk, which is what carries
+ * wire identity into a dynamic prompt.
+ */
+describe("ADR 92 §Slice A — fx.render composes in-fiber", () => {
+  const harnessWith = async (
+    id: string,
+    onRender: (ctx?: OperationCtx) => void,
+  ): Promise<PromptsHarness> => {
+    const h = new PromptsHarness(
+      id,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {},
+    );
+    await h.ready;
+    await h.register({
+      declaration: {
+        name: "who",
+        description: "identity-scoped prompt",
+        render: (_args, ctx) => {
+          onRender(ctx);
+          return "hi";
+        },
+      },
+    });
+    return h;
+  };
+
+  it("inherits the ambient trunk — identity + the enclosing opId as parent", async () => {
+    let received: OperationCtx | undefined;
+    const h = await harnessWith("prompt-fx", (ctx) => {
+      received = ctx;
+    });
+
+    const result = await Effect.runPromise(
+      withContext(
+        { opId: "op:outer", identity: { principal: "user-42", scopes: ["read:all"] } },
+        h.fx.render({ name: "who" }),
+      ),
+    );
+
+    expect(result.messages).toHaveLength(1);
+    expect(received?.identity?.principal).toBe("user-42");
+    expect(received?.parentOpId).toBe("op:outer");
+
+    await h.close();
+  });
+
+  it("the Promise facade does NOT — a root fiber has no trunk to inherit", async () => {
+    let received: OperationCtx | undefined;
+    const h = await harnessWith("prompt-facade", (ctx) => {
+      received = ctx;
+    });
+
+    await Effect.runPromise(
+      withContext(
+        { opId: "op:outer", identity: { principal: "user-42" } },
+        Effect.promise(() => h.render({ name: "who" })),
+      ),
+    );
+
+    expect(received?.identity).toBeUndefined();
+    expect(received?.parentOpId).toBeUndefined();
 
     await h.close();
   });

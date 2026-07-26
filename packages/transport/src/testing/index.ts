@@ -23,7 +23,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { AuthSource, Authorizer } from "@agentick/spec";
+import type {
+  AuthSource,
+  Authorizer,
+  GatewayHarnessProtocol,
+  IngressAdmissionFailure,
+} from "@agentick/spec";
+import { GATEWAY_ADMISSION_FAILED } from "@agentick/spec";
 
 import { staticTokenAuthSource } from "../server/auth-source.js";
 
@@ -46,6 +52,54 @@ export function ingressAuthnAuthSource(opts?: { readonly allowAnonymous?: boolea
     },
     ...(opts?.allowAnonymous ? { allowAnonymous: true } : {}),
   });
+}
+
+/**
+ * Collect every `gateway:admission:failed` event a gateway publishes (ADR 92
+ * §Family 1.3). Attach at server setup, BEFORE any crossing — the events are
+ * observed live, not replayed.
+ *
+ * Each transport factory wires this and returns `admissionFailures` on its
+ * {@link IngressAuthnServer}, so the "a refused crossing leaves a trace" law is
+ * asserted once in the conformance suite and enforced at every edge.
+ */
+export function collectAdmissionFailures(gateway: GatewayHarnessProtocol): {
+  /** Failures seen so far. Settles the bus fan-out before reading. */
+  readonly admissionFailures: () => Promise<readonly IngressAdmissionFailure[]>;
+  /** Detach the collector (call from the factory's teardown). */
+  readonly stop: () => void;
+} {
+  const seen: IngressAdmissionFailure[] = [];
+  const stream = gateway.events({
+    surface: "gateway",
+    name: { exact: GATEWAY_ADMISSION_FAILED },
+  });
+  const iterator = stream[Symbol.asyncIterator]();
+  let stopped = false;
+
+  void (async () => {
+    try {
+      while (!stopped) {
+        const next = await iterator.next();
+        if (next.done === true) break;
+        seen.push(next.value.payload as IngressAdmissionFailure);
+      }
+    } catch {
+      // The stream tears down with the gateway; nothing left to collect.
+    }
+  })();
+
+  return {
+    admissionFailures: async () => {
+      // One macrotask for the bus fan-out to reach this subscriber.
+      await new Promise((r) => setTimeout(r, 20));
+      return [...seen];
+    },
+    stop: () => {
+      stopped = true;
+      void iterator.return?.();
+    },
+  };
 }
 
 /** A spy Authorizer: allows every dispatch, records each principal seen. */
@@ -80,6 +134,13 @@ export interface IngressAuthnServer {
    * distinguish an edge refusal from a local-pole fallthrough.
    */
   crossing(token?: string): Promise<{ principal?: string }>;
+  /**
+   * Every `gateway:admission:failed` event this server's gateway has
+   * published so far (ADR 92 §Family 1.3), in order. Required of every edge:
+   * a refused crossing that leaves no trace is the gap this closes, so the
+   * law is asserted at every transport rather than one.
+   */
+  admissionFailures(): Promise<readonly IngressAdmissionFailure[]>;
   /**
    * Two crossings over ONE transport session, carrying `tokenA` then
    * `tokenB`. Per-connection transports return the connection identity
@@ -211,5 +272,64 @@ export function runIngressAuthnConformance(factory: IngressAuthnFactory): void {
         );
       },
     );
+
+    // ── admission-failure visibility (ADR 92 §Family 1.3) ─────────────
+    //
+    // A refused crossing produces no operation — nothing ran — so without
+    // this event a client probing an edge leaves NO trace at all. Every
+    // transport must publish it; the `none` edge refuses an unacceptable
+    // anonymous crossing, the bearer edges refuse a bad token.
+
+    it("a refused crossing publishes gateway:admission:failed", async () => {
+      await factory.withServer({ authSource: ingressAuthnAuthSource() }, async (server) => {
+        // `none` edges have no token to send; their AuthSource refuses the
+        // anonymous crossing outright, which is the same admission refusal.
+        await expect(
+          server.crossing(bearer ? "not-a-real-token" : undefined),
+        ).rejects.toBeDefined();
+
+        const failures = await server.admissionFailures();
+        expect(failures).toHaveLength(1);
+        expect(failures[0]!.failureClass).toBe("authenticate");
+        expect(failures[0]!.transportKind).toBe(factory.kind);
+      });
+    });
+
+    it("the admission-failure payload never carries credential material", async () => {
+      await factory.withServer({ authSource: ingressAuthnAuthSource() }, async (server) => {
+        const secret = "tok-super-secret";
+        await expect(server.crossing(bearer ? secret : undefined)).rejects.toBeDefined();
+
+        const failures = await server.admissionFailures();
+        expect(failures).toHaveLength(1);
+        const serialized = JSON.stringify(failures[0]);
+        // Neither the token nor a header bag may reach the audit trail.
+        expect(serialized).not.toContain(secret);
+        expect(serialized).not.toContain("Bearer");
+        expect(serialized).not.toContain("authorization");
+        expect(Object.keys(failures[0]!)).not.toContain("credential");
+      });
+    });
+
+    it("an ADMITTED crossing publishes nothing", async () => {
+      await factory.withServer(
+        {
+          authSource: bearer
+            ? ingressAuthnAuthSource()
+            : ingressAuthnAuthSource({ allowAnonymous: true }),
+        },
+        async (server) => {
+          await server.crossing(bearer ? alice : undefined);
+          expect(await server.admissionFailures()).toHaveLength(0);
+        },
+      );
+    });
+
+    it("no AuthSource → the local pole is admitted, never reported", async () => {
+      await factory.withServer({}, async (server) => {
+        await server.crossing(bearer ? alice : undefined);
+        expect(await server.admissionFailures()).toHaveLength(0);
+      });
+    });
   });
 }

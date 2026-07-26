@@ -12,9 +12,11 @@
  *   2. Work inside a crossing PARENTS under it — a handler's `ctx.run` op
  *      carries the crossing's opId as `parentOpId` and inherits the connection
  *      dim + identity (the ADR's composition rule).
- *   3. The identity payoff (ADR 91 stop-rule #2): over the wire, an in-fiber
- *      handler seam receives an `OperationCtx` whose TRUNK carries the
- *      request's identity — not a fabricated one.
+ *   3. The identity payoff (ADR 91 stop-rule #2): over the wire, EVERY handler
+ *      seam — the in-fiber ones (tool handler, completion handler) and the ones
+ *      reached THROUGH a harness command (resource resolver, prompt render) —
+ *      receives an `OperationCtx` whose TRUNK carries the request's identity,
+ *      not a fabricated one.
  *   4. A guard veto on a crossing actually blocks the work.
  *   5. Journal policy is honored per op class (`call-tool` + `initialize`
  *      persisted; reads/lists/completions bus-only).
@@ -417,6 +419,109 @@ describe("identity reaches the handler ctx over the wire", () => {
       (e) => e.phase === "requested",
     )!;
     expect(seen?.opId).toBe(crossing.opId);
+  });
+
+  // ── The residual seams (ADR 92 §Slice A follow-up) ──────────────────────
+  //
+  // A resolver / a prompt `render` is NOT reached in-fiber like a tool handler:
+  // the projection calls the harness, which re-enters Effect. Through the
+  // Promise facade that is a fresh ROOT fiber inheriting no FiberRef, so the
+  // seam saw an identity-free ctx and the inner command journaled as an orphan.
+  // The projections now compose the harness's `.fx` twin on the CROSSING's
+  // captured runtime, which is what these two pin.
+
+  it("a resource resolver's ctx trunk carries the request's identity + the crossing's coordinates", async () => {
+    const resourcesBus = new LocalEventBus();
+    const resources = new ResourcesHarness(
+      "res",
+      new MemoryJournal({}),
+      resourcesBus,
+      new LocalInbox(),
+    );
+    await resources.ready;
+
+    let seen: OperationCtx | undefined;
+    resources.register("mem://who", (uri, ctx) => {
+      seen = ctx;
+      return [{ uri, text: "A" } as ResourceContents];
+    });
+
+    // Watch the RESOURCES harness's own bus: the inner command must show up as
+    // a linked record (layered execution = layered journal records).
+    const innerOps: ProtocolEvent[] = [];
+    const innerFiber = Effect.runFork(
+      Stream.runForEach(resourcesBus.subscribe({ surface: "resources" }), (e) =>
+        Effect.sync(() => {
+          innerOps.push(e);
+        }),
+      ),
+    );
+
+    const r = (active = await rig({ resources, auth: alwaysAda }));
+    const client = await r.connect();
+    const result = await client.readResource({ uri: "mem://who" });
+    await settle();
+
+    // Wire behavior is unchanged — the content still arrives.
+    expect(result.contents[0]).toMatchObject({ uri: "mem://who", text: "A" });
+
+    const crossing = opsNamed(r.events, "mcp:command:read-resource").find(
+      (e) => e.phase === "requested",
+    )!;
+    // The RESOLVER's ctx: the request's identity on the trunk, not a fabricated
+    // one, plus the crossing's connection dim and its opId as the parent.
+    expect(seen?.identity?.principal).toBe("user-42");
+    expect(seen?.identity?.scopes).toEqual(["read:all"]);
+    expect(seen?.mcpConnectionId).toBe(crossing.scope.mcpConnectionId);
+    expect(seen?.parentOpId).toBe(crossing.opId);
+
+    // And the inner command is a real linked record, not an orphaned root.
+    const inner = innerOps.find(
+      (e) => e.name === "resources:command:read" && e.phase === "requested",
+    )!;
+    expect(inner).toBeDefined();
+    expect(inner.parentOpId).toBe(crossing.opId);
+    expect(inner.scope.mcpConnectionId).toBe(crossing.scope.mcpConnectionId);
+    expect(inner.scope.identity).toEqual(crossing.scope.identity);
+
+    await Effect.runPromise(Fiber.interrupt(innerFiber));
+  });
+
+  it("a prompt render's ctx trunk carries the request's identity + the crossing's coordinates", async () => {
+    const prompts = new PromptsHarness(
+      "pr",
+      new MemoryJournal({}),
+      new LocalEventBus(),
+      new LocalInbox(),
+    );
+    await prompts.ready;
+
+    let seen: OperationCtx | undefined;
+    await prompts.register({
+      declaration: {
+        name: "whoami",
+        description: "w",
+        render: (_args, ctx) => {
+          seen = ctx;
+          return "you";
+        },
+      },
+    });
+
+    const r = (active = await rig({ prompts, auth: alwaysAda }));
+    const client = await r.connect();
+    const got = await client.getPrompt({ name: "whoami" });
+    await settle();
+
+    expect(got.messages[0]).toMatchObject({ role: "user" });
+
+    const crossing = opsNamed(r.events, "mcp:command:get-prompt").find(
+      (e) => e.phase === "requested",
+    )!;
+    expect(seen?.identity?.principal).toBe("user-42");
+    expect(seen?.identity?.scopes).toEqual(["read:all"]);
+    expect(seen?.mcpConnectionId).toBe(crossing.scope.mcpConnectionId);
+    expect(seen?.parentOpId).toBe(crossing.opId);
   });
 });
 

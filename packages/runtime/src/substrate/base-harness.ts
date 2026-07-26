@@ -142,7 +142,7 @@ export type { AsyncStream } from "@agentick/spec";
 // to `harness-protocol.ts` / `command-runner.ts`; re-export here so the package's
 // public surface (`@agentick/runtime`) is unchanged — a re-home, not a
 // public-API change.
-export { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
+export { runHarnessProtocol, runHarnessProtocolOn, runHarnessStream } from "./harness-protocol.js";
 export {
   createCommandRunner,
   type CommandRunner,

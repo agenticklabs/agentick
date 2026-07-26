@@ -32,7 +32,12 @@ import type { AppHarnessProtocol } from "./app-harness.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
 import type { WireExtensionContext } from "../wire/extension.js";
 import type { WireMethod } from "../wire/params.js";
-import type { AuthorizeInput, AuthorizeResult, ConnectionInfo } from "../wire/authorizer.js";
+import type {
+  AuthorizeInput,
+  AuthorizeResult,
+  ConnectionInfo,
+  IngressContext,
+} from "../wire/authorizer.js";
 
 // ============================================================================
 // Gateway substrate parent
@@ -356,6 +361,64 @@ export interface GatewayHarnessProtocol {
    * filter predicate.
    */
   emitCapabilitiesChanged?(): void;
+
+  /**
+   * Publish the {@link GATEWAY_ADMISSION_FAILED} event for an ingress crossing
+   * that was REFUSED at admission (ADR 92 §Family 1.3). A transport edge calls
+   * this from its rejection path — `authenticateIngress` reports the failure to
+   * the caller, which forwards it here.
+   *
+   * Deliberately an EVENT, not an operation: admission denied means no work
+   * unit exists, so there is nothing to journal as one. But the audit trail
+   * must still see the attempt — a probing client that never gets past 401
+   * would otherwise leave no trace at all. Twin of the MCP server's
+   * `mcpServer:admission:failed`.
+   *
+   * Optional on the protocol so lightweight stub hosts need not implement it
+   * (same convention as {@link emitCapabilitiesChanged}); the reference
+   * `GatewayHarness` always does.
+   */
+  emitAdmissionFailure?(failure: IngressAdmissionFailure): void;
+}
+
+/**
+ * Event name for the ingress admission-failure signal (ADR 92 §Family 1.3).
+ * Published on `surface: "gateway"` with `phase: "terminal"` /
+ * `outcome: "failed"`; payload is {@link IngressAdmissionFailure}.
+ */
+export const GATEWAY_ADMISSION_FAILED = "gateway:admission:failed";
+
+/**
+ * How an inbound crossing failed admission at a transport edge.
+ *
+ * One member today: the configured {@link import("../wire/authorizer.js").AuthSource}
+ * refused the crossing. Kept a union because the edge has other admission
+ * gates that are candidates for the same visibility (the web-security
+ * origin/host check ahead of authn) — see the TODO at the http/ws edges.
+ */
+export type IngressAdmissionFailureClass = "authenticate";
+
+/**
+ * The admission-failure payload — the connection SHAPE plus why it was
+ * refused.
+ *
+ * **Never credential material.** No token, no `Authorization` header, no
+ * header bag: the credentials-never-cross-the-wire law extends to the audit
+ * trail, which is exactly where a leaked bearer would be most durable. The
+ * `reason` is the rejecting `AuthSource`'s own message, reduced to a string —
+ * an AuthSource that puts a token in its error message leaks it into its own
+ * error either way; the framework adds nothing.
+ */
+export interface IngressAdmissionFailure {
+  readonly failureClass: IngressAdmissionFailureClass;
+  /** Which edge produced the refused crossing. */
+  readonly transportKind: IngressContext["transportKind"];
+  /** Connection id where the transport has one (stateful edges). */
+  readonly connectionId?: string;
+  /** Peer address, when the edge knows one — the audit trail's attribution. */
+  readonly remoteAddress?: string;
+  /** Short, non-sensitive description of the refusal. */
+  readonly reason?: string;
 }
 
 /**

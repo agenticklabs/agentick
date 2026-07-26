@@ -8,7 +8,7 @@
 export { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
 export { projectClientResult, projectClientNotification } from "./client-projection.js";
 export { BaseConnectionContext } from "./connection-context.js";
-export { authenticateIngress } from "./ingress.js";
+export { authenticateIngress, type IngressRejectionReporter } from "./ingress.js";
 export {
   CSRF_HEADER,
   DEFAULT_BIND_HOST,

@@ -157,6 +157,18 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
         },
       },
       options.authSource,
+      // ADR 92 §Family 1.3 — a refused upgrade leaves an audit trace. The edge
+      // enriches with the peer address it alone knows; the credential never
+      // travels with it.
+      // TODO(ADR-92): the `security.checkAccess` origin/host refusal above is
+      // the other admission gate at this edge and deserves the same visibility
+      // (a second `IngressAdmissionFailureClass`).
+      (failure) =>
+        options.gateway.emitAdmissionFailure?.(
+          req.socket.remoteAddress !== undefined
+            ? { ...failure, remoteAddress: req.socket.remoteAddress }
+            : failure,
+        ),
     )
       .then((ctx) => finishUpgrade(ctx.identity))
       .catch(() => {

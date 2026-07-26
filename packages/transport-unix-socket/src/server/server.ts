@@ -66,6 +66,10 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
     void authenticateIngress(
       { transportKind: "unix", credential: { kind: "none" } },
       options.authSource,
+      // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. A unix
+      // socket is host-local, so there is no peer address to attribute; the
+      // failure carries the transport kind and the refusal reason only.
+      (failure) => options.gateway.emitAdmissionFailure?.(failure),
     )
       .then(async (ingress) => {
         // ADR 84 §4 — per-connection admission. Fire `gateway:accept` AFTER

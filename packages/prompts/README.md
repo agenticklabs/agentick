@@ -170,6 +170,33 @@ The split **composes** rather than being hand-rolled: an eager `View<PromptDecla
 > The wire read projections are the serializable `PromptDeclarationRecord` slice
 > (`template`/`render` fns never cross).
 
+### `harness.fx.render` — the Effect-canonical render face
+
+`render` is a declared command, so it has an Effect twin: `fx.render(input)`
+is the same command un-run, with `render(input)` as the edge facade
+(`runPromise` at the boundary).
+
+Reach for it when the caller is already inside an operation and the render
+must stay in ITS fiber tree — which is what carries identity into a dynamic
+prompt:
+
+```ts
+// Inside an enclosing operation — composed in ITS fiber tree:
+Effect.gen(function* () {
+  const result = yield* prompts.fx.render({ name, args });
+  // → prompts:command:render is a CHILD of the enclosing op, and the
+  //   declaration's `render(args, ctx)` sees the caller's identity.
+});
+
+await prompts.render({ name, args });
+// → a fresh ROOT fiber: no ambient trunk to inherit. Correct for a
+//   top-level adopter call.
+```
+
+The MCP server's `prompts/get` projection is the reference consumer: it runs
+`fx.render` on the crossing operation's runtime, so a wire caller's identity
+reaches a per-principal prompt (ADR 92 §Slice A).
+
 ### `invoke` vs `render`
 
 - **`invoke`** — renders + queues each message onto `bridges.timeline.queue` (same path explicit user input takes). On the next `session.send`, queued messages drain into the durable timeline before the first tick. Use when the prompt is part of the conversation.

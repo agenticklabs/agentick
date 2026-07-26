@@ -882,6 +882,45 @@ store as where the full content survives — fetchable via the `session/timeline
 wire read (the cursored page over `TimelineStore.history`; handler in
 `sessionWireExtension`).
 
+## Admission failures on the bus (ADR 92 §Family 1.3)
+
+### `gateway.emitAdmissionFailure(failure): void`
+
+Appends a `gateway:admission:failed` event (`GATEWAY_ADMISSION_FAILED`) on
+the gateway surface, scoped to `{ gatewayId, origin: "wire" }`, with
+`phase: "terminal"` / `outcome: "failed"`.
+
+An ingress crossing refused at admission runs no work, so there is no
+operation to journal — but the attempt must still be visible, or a client
+probing the edge leaves no trace at all. Every server transport calls this
+from its rejection path (via `authenticateIngress`'s reporter); adopters
+rarely call it directly. Twin of the MCP server's
+`mcpServer:admission:failed`.
+
+```ts
+for await (const e of gateway.events({
+  surface: "gateway",
+  name: { exact: GATEWAY_ADMISSION_FAILED },
+})) {
+  const f = e.payload as IngressAdmissionFailure;
+  metrics.count("ingress.refused", { transport: f.transportKind });
+  log.warn({ from: f.remoteAddress, why: f.reason });
+}
+```
+
+**Payload = connection shape, never credential material.** `failureClass`
+(`"authenticate"` today), `transportKind`, and the optional
+`connectionId` / `remoteAddress` / `reason`. No token, no `Authorization`
+header, no header bag — the credentials-never-cross-the-wire law extends to
+the audit trail, which is exactly where a leaked bearer would be most
+durable.
+
+> **Verified by** `@agentick/transport`'s `runIngressAuthnConformance`,
+> which every server transport runs against a REAL server: a refused
+> crossing emits exactly one event with the right class and transport kind,
+> an admitted crossing emits none, the local pole (no `AuthSource`) emits
+> none, and the serialized payload contains no credential.
+
 ## Server-initiated notifications — the control-plane bus (ADR 47)
 
 The gateway signals control-plane changes to connected clients over

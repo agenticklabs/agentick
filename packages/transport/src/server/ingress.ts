@@ -23,7 +23,19 @@
  * @see docs/proposals/v2/blueprint/61-ingress-authentication.md
  */
 
-import type { AuthSource, IngressContext } from "@agentick/spec";
+import type { AuthSource, IngressAdmissionFailure, IngressContext } from "@agentick/spec";
+
+/**
+ * Report a REFUSED crossing (ADR 92 §Family 1.3). The helper builds the
+ * failure from what the crossing itself carries; the edge supplies this
+ * callback, enriches with whatever else it knows (a peer address), and
+ * publishes it on its host's bus via `DispatchHost.emitAdmissionFailure`.
+ *
+ * A callback rather than a host reference on purpose: the helper stays a pure
+ * function of its inputs — testable with a recording callback, with no bus, no
+ * gateway, and no knowledge of where the report lands.
+ */
+export type IngressRejectionReporter = (failure: IngressAdmissionFailure) => void;
 
 /**
  * Run ingress authentication for one crossing and return the enriched
@@ -31,30 +43,47 @@ import type { AuthSource, IngressContext } from "@agentick/spec";
  * caller; left undefined for the local pole).
  *
  * Throws whatever the `AuthSource` throws — fail-closed. The caller
- * (transport edge) maps the throw to its native rejection.
+ * (transport edge) maps the throw to its native rejection, and `onRejected`
+ * (when supplied) sees the refusal first so the audit trail records the
+ * attempt. The report is a side-channel: it never alters admission, and a
+ * throwing reporter is nobody's problem but its own (it propagates — a
+ * reporter that throws is a bug at the edge, not a silent condition).
  */
 export async function authenticateIngress(
   context: IngressContext,
   authSource?: AuthSource,
+  onRejected?: IngressRejectionReporter,
 ): Promise<IngressContext> {
-  // TODO(ADR-92 slice-A): a rejected ingress should publish an
-  // admission-failure bus EVENT (connection info + failure class, never the
-  // credential) so the audit trail sees probing — the MCP server already does
-  // this at `McpServerHarness.emitAdmissionFailure`. It cannot be done here:
-  // this helper is a pure function with no bus and no host reference, and its
-  // three callers (transport-http/src/server/server.ts:526,
-  // transport-websocket/src/server/server.ts:150,
-  // transport-unix-socket/src/server/server.ts:66) each hold a `DispatchHost`
-  // (the gateway harness, which HAS a bus) but never pass it in. `AuthSource`
-  // is configured per-transport, not owned by the gateway, so there is no
-  // gateway-side wrap point either. Unblocking it means threading an emitter —
-  // one seam, three edges — which is a deliberate follow-up, not a drive-by.
-
   // No AuthSource → local/trusted pole. No principal stamped.
   if (!authSource) return context;
 
   // Configured AuthSource → run it. A rejection propagates (fail
   // closed); we deliberately do NOT catch-and-continue.
-  const identity = await authSource.authenticate(context.credential);
-  return { ...context, identity };
+  try {
+    const identity = await authSource.authenticate(context.credential);
+    return { ...context, identity };
+  } catch (cause) {
+    if (onRejected) {
+      const reason = admissionReason(cause);
+      // NEVER `context.credential` — not the token, not the header bag.
+      onRejected({
+        failureClass: "authenticate",
+        transportKind: context.transportKind,
+        ...(context.connectionId !== undefined ? { connectionId: context.connectionId } : {}),
+        ...(reason !== undefined ? { reason } : {}),
+      });
+    }
+    throw cause;
+  }
+}
+
+/**
+ * Reduce a rejection to a short string for the audit event. An `Error`
+ * contributes only its message; anything else is stringified.
+ */
+function admissionReason(cause: unknown): string | undefined {
+  if (cause === undefined || cause === null) return undefined;
+  if (typeof cause === "string") return cause;
+  if (cause instanceof Error) return cause.message;
+  return String(cause);
 }

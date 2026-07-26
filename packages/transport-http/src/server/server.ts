@@ -325,7 +325,12 @@ async function handlePost(
   // independent of body). A configured AuthSource that rejects → 401.
   // The resulting identity is a request-scoped local — it is threaded
   // into this request's dispatch calls and never stored on the session.
-  const authResult = await authenticateHttpRequest(req, authSource, sessionIdHeader ?? undefined);
+  const authResult = await authenticateHttpRequest(
+    req,
+    authSource,
+    sessionIdHeader ?? undefined,
+    gateway,
+  );
   if (!authResult.ok) {
     writeUnauthorized(res);
     return;
@@ -468,7 +473,12 @@ async function handleGet(
   // Authenticate at stream-open (ADR 61). The notification stream
   // dispatches no requests, but a configured AuthSource must still gate
   // who may open it — fail closed.
-  const authResult = await authenticateHttpRequest(req, authSource, sessionIdHeader ?? undefined);
+  const authResult = await authenticateHttpRequest(
+    req,
+    authSource,
+    sessionIdHeader ?? undefined,
+    gateway,
+  );
   if (!authResult.ok) {
     writeUnauthorized(res);
     return;
@@ -519,6 +529,7 @@ async function authenticateHttpRequest(
   req: IncomingMessage,
   authSource: AuthSource | undefined,
   connectionId: string | undefined,
+  host: DispatchHost,
 ): Promise<{ ok: true; identity?: IngressIdentity } | { ok: false }> {
   const auth = req.headers.authorization;
   const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
@@ -534,6 +545,18 @@ async function authenticateHttpRequest(
         ...(connectionId !== undefined ? { connectionId } : {}),
       },
       authSource,
+      // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. The
+      // edge enriches with the peer address it alone knows; the credential
+      // never travels with it.
+      // TODO(ADR-92): the web-security origin/host refusal ahead of authn is
+      // the other admission gate at this edge and deserves the same
+      // visibility (a second `IngressAdmissionFailureClass`).
+      (failure) =>
+        host.emitAdmissionFailure?.(
+          req.socket.remoteAddress !== undefined
+            ? { ...failure, remoteAddress: req.socket.remoteAddress }
+            : failure,
+        ),
     );
     return ctx.identity !== undefined ? { ok: true, identity: ctx.identity } : { ok: true };
   } catch {

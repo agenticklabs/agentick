@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createGateway } from "@agentick/gateway";
 import {
+  collectAdmissionFailures,
   runIngressAuthnConformance,
   spyAuthorizer,
   type IngressAuthnFactory,
@@ -89,6 +90,7 @@ const factory: IngressAuthnFactory = {
   async withServer(opts, body) {
     const spy = spyAuthorizer();
     const gateway = await createGateway({ authorizer: spy.authorizer });
+    const admission = collectAdmissionFailures(gateway);
     const path = join(tmpdir(), `agentick-ingress-${process.pid}-${++sockSeq}.sock`);
     const server = unixSocketServer({
       path,
@@ -99,6 +101,7 @@ const factory: IngressAuthnFactory = {
     await new Promise<void>((r) => server.server.once("listening", () => r()));
 
     const server_iface: IngressAuthnServer = {
+      admissionFailures: admission.admissionFailures,
       async crossing() {
         const conn = await connectUnix(path);
         const before = spy.seen.length;
@@ -123,6 +126,7 @@ const factory: IngressAuthnFactory = {
     try {
       return await body(server_iface);
     } finally {
+      admission.stop();
       await server.close();
       await gateway.close();
     }

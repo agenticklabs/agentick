@@ -205,6 +205,35 @@ degenerate single-interceptor form. The multi-interceptor
 `GatewayInstaller.interceptIngress` chain and the `platform` (federated
 connector) credential are later slices.
 
+#### A refused crossing leaves a trace (ADR 92 §Family 1.3)
+
+Admission stays PRE-OP — a refused crossing ran no work, so there is no
+operation to journal. But an audit trail that records nothing when a client
+is probing an edge is worse than useless, so the helper takes an optional
+third argument: a reporter it calls on the rejection path, before rethrowing.
+
+```ts
+await authenticateIngress(ingressContext, options.authSource, (failure) =>
+  options.gateway.emitAdmissionFailure?.({
+    ...failure,
+    // The edge enriches with what only it knows.
+    ...(remoteAddress !== undefined ? { remoteAddress } : {}),
+  }),
+);
+```
+
+The helper stays a pure function of its inputs — no bus, no gateway
+reference, testable with a recording callback. Every server transport wires
+it to its `DispatchHost` (the gateway), which publishes
+`gateway:admission:failed` on the gateway surface. The payload carries the
+connection SHAPE (`failureClass`, `transportKind`, `connectionId?`,
+`remoteAddress?`, `reason?`) and **never credential material** — no token,
+no header bag. The audit trail is the last place a bearer should be durable.
+
+The law is asserted for every edge by `runIngressAuthnConformance` (a
+refused crossing emits exactly one event; an admitted one emits none; the
+payload contains no credential), so a new transport cannot skip it.
+
 ### Web security defaults (STATUS A2 §4c)
 
 Ingress authn answers _who_ is calling; web security answers _whether the

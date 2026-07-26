@@ -13,9 +13,12 @@
  * `fakeResources()` for consumers that should hit the real code path.
  */
 
+import { Effect } from "effect";
 import type {
   ResourceContents,
   ResourceDescriptor,
+  ResourcesErrorChannel,
+  ResourcesFx,
   ResourcesHarnessProtocol,
   ResourcesListResult,
   ResourcesListTemplatesResult,
@@ -47,10 +50,36 @@ export function stubResources(options: StubResourcesOptions = {}): ResourcesHarn
   const updated = createKeyedNotifier();
   const listChanged = createNotifier();
 
+  const read = (uri: string): Promise<readonly ResourceContents[]> => {
+    const hit = contents[uri];
+    if (hit === undefined) return Promise.reject(new ResourceNotFound({ uri }));
+    return Promise.resolve(hit);
+  };
+
+  /**
+   * The `.fx` twins over the canned answers. A stub has no substrate, so these
+   * are plain lifts — the same VALUES the Promise face serves, on the Effect
+   * channel, with no operation envelope and nothing to parent under. A consumer
+   * that needs the real op semantics (journal, interceptors, in-fiber
+   * parenting) wants `fakeResources()`, not this.
+   */
+  const fx: ResourcesFx = {
+    use: () => () => {},
+    read: (input) =>
+      Effect.tryPromise({
+        try: () => read(input.uri),
+        // The only rejection the canned read produces is its own ResourceNotFound.
+        catch: (cause) => cause as ResourcesErrorChannel,
+      }),
+    list: () => Effect.succeed({ resources }),
+    listTemplates: () => Effect.succeed({ templates }),
+  };
+
   return {
     id,
     ready: Promise.resolve(),
     backend: "stub",
+    fx,
     async close(): Promise<void> {
       /* no-op */
     },
@@ -73,11 +102,7 @@ export function stubResources(options: StubResourcesOptions = {}): ResourcesHarn
     listTemplates(): Promise<ResourcesListTemplatesResult> {
       return Promise.resolve({ templates });
     },
-    read(uri: string): Promise<readonly ResourceContents[]> {
-      const hit = contents[uri];
-      if (hit === undefined) return Promise.reject(new ResourceNotFound({ uri }));
-      return Promise.resolve(hit);
-    },
+    read,
     subscribe(uri: string, listener: () => void): Unsubscribe {
       return updated.subscribe(uri, listener);
     },

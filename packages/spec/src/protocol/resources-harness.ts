@@ -33,9 +33,13 @@
  * @see docs/proposals/v2/blueprint/62-resources-harness.md
  */
 
+import type { Effect } from "effect";
 import type { ResourceContents } from "../data/content-blocks.js";
+import type { SubstrateError } from "../data/errors.js";
+import type { ResourcesErrorChannel } from "../errors/harnesses.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { HarnessFx } from "./middleware.js";
 
 // ============================================================================
 // Resolvers — read EXISTING content; the harness stores none
@@ -182,6 +186,55 @@ export interface ResourcesListTemplatesInput {
 }
 
 // ============================================================================
+// Async surface — the Effect-canonical twin (`.fx`)
+// ============================================================================
+
+/**
+ * The resources harness's **canonical** read surface: the composable Effect
+ * twins of its three declared read commands (ADR 77, the dual-typed edge).
+ * Each method returns the operation Effect un-run, so an in-process caller
+ * composes it with `yield*` and stays in ONE fiber tree; the positional
+ * Promise methods on {@link ResourcesHarnessProtocol} (`read(uri)`) are the
+ * edge facade, `runHarnessProtocol` applied at the boundary.
+ *
+ * ## Why this is on the PROTOCOL, not just the concrete class
+ *
+ * A protocol-typed ref must be able to compose in-fiber. The MCP server's
+ * resources projection holds `Resources` (the protocol) and runs its reads
+ * from INSIDE the `mcp:command:read-resource` crossing operation: going
+ * through the Promise facade would re-enter Effect on a fresh ROOT fiber that
+ * inherits no FiberRef, which severs the trunk — the read would journal as an
+ * orphaned root and the {@link ResourceResolver} would receive a ctx with no
+ * connection identity (ADR 92 §Slice A, the residual ADR 91 stop-rule #2).
+ * Composing `fx.read` on the crossing's captured runtime keeps the chain
+ * connection → crossing → `resources:command:read` → resolver intact. Same
+ * rationale as `ExecutorProtocol.fx` for the loop executor.
+ *
+ * Arity note: these take the declared COMMAND INPUT (`{ uri }`), not the
+ * protocol's positional sugar (`read(uri)`) — so this is deliberately NOT a
+ * `PromiseView` source for the protocol's read methods; the two surfaces
+ * share the command, not a mapped type.
+ */
+export interface ResourcesFx extends HarnessFx {
+  /**
+   * Resolve a uri to its content — the Effect twin of
+   * {@link ResourcesHarnessProtocol.read}. Runs the matching resolver with
+   * the invoking operation's {@link OperationCtx}.
+   */
+  read(
+    input: ResourcesReadInput,
+  ): Effect.Effect<readonly ResourceContents[], ResourcesErrorChannel | SubstrateError, never>;
+  /** Enumerate fixed-resource descriptors, paginated (Effect twin of `list`). */
+  list(
+    input: ResourcesListInput,
+  ): Effect.Effect<ResourcesListResult, ResourcesErrorChannel | SubstrateError, never>;
+  /** Enumerate template descriptors, paginated (Effect twin of `listTemplates`). */
+  listTemplates(
+    input: ResourcesListTemplatesInput,
+  ): Effect.Effect<ResourcesListTemplatesResult, ResourcesErrorChannel | SubstrateError, never>;
+}
+
+// ============================================================================
 // Protocol
 // ============================================================================
 
@@ -197,6 +250,13 @@ export interface ResourcesHarnessProtocol {
   readonly ready: Promise<void>;
   /** Backend discriminator (e.g. `"memory"`). Diagnostic. */
   readonly backend: string;
+  /**
+   * The Effect-canonical read surface (ADR 77, the dual-typed edge) — the
+   * twins an in-fiber caller composes with `yield*`. On the PROTOCOL so a
+   * protocol-typed ref (the MCP server's resources projection) can compose
+   * without severing the fiber at the Promise facade. See {@link ResourcesFx}.
+   */
+  readonly fx: ResourcesFx;
   close(): Promise<void>;
 
   // ─── Registration (bind a URI/template to a resolver) ─────────────

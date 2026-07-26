@@ -50,6 +50,7 @@ import type {
   PromptDeclarationRecord,
   PromptStoreQuery,
   PromptsError,
+  PromptsFx,
   PromptsGetInput,
   PromptsGetResult,
   PromptsHarnessProtocol,
@@ -295,6 +296,21 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
             .sort((a, b) => a.name.localeCompare(b.name)),
         ),
     });
+  }
+
+  /**
+   * The Effect-canonical render surface (ADR 77, the dual-typed edge) — the
+   * composable Effect twin of `render`. An in-fiber caller (the MCP server's
+   * prompts projection, running inside its `mcp:command:get-prompt` crossing)
+   * reaches this so the render composes in the SAME fiber tree: the
+   * `prompts:command:render` op parents under the crossing and the
+   * declaration's `render(args, ctx)` sees the crossing's identity. Through the
+   * Promise facade it would re-enter Effect on a root fiber and lose both. Both
+   * faces dispatch the SAME declared command — `fx` is the sugar over
+   * `commandEffect`, typed via {@link PromptsFx}.
+   */
+  get fx(): PromptsFx {
+    return this.fxProxy() as unknown as PromptsFx;
   }
 
   /**

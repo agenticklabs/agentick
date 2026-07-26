@@ -13,6 +13,7 @@ import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import { createGateway } from "@agentick/gateway";
 import {
+  collectAdmissionFailures,
   runIngressAuthnConformance,
   spyAuthorizer,
   type IngressAuthnFactory,
@@ -73,6 +74,7 @@ const factory: IngressAuthnFactory = {
   async withServer(opts, body) {
     const spy = spyAuthorizer();
     const gateway = await createGateway({ authorizer: spy.authorizer });
+    const admission = collectAdmissionFailures(gateway);
     const httpServer = createServer();
     const server = websocketServer({
       httpServer,
@@ -84,6 +86,7 @@ const factory: IngressAuthnFactory = {
     const url = `ws://127.0.0.1:${port}`;
 
     const server_iface: IngressAuthnServer = {
+      admissionFailures: admission.admissionFailures,
       async crossing(token) {
         const conn = await connectWs(url, token);
         const before = spy.seen.length;
@@ -106,6 +109,7 @@ const factory: IngressAuthnFactory = {
     try {
       return await body(server_iface);
     } finally {
+      admission.stop();
       await server.close();
       await new Promise<void>((res, rej) => httpServer.close((e) => (e ? rej(e) : res())));
       await gateway.close();

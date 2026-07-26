@@ -104,10 +104,37 @@ export interface McpCrossing<R> {
   /**
    * The SDK request handler body. Receives the POST-CASCADE input (so an
    * `InputSanitizer` or an adopter `onBeforeCallTool` hook that reshapes the
-   * arguments is honored) and the authenticated request ctx.
+   * arguments is honored), the authenticated request ctx, and the crossing's
+   * {@link OnCrossingFiber} runner for composing harness `.fx` twins.
    */
-  readonly run: (input: McpCrossingInput, ctx: Derived<McpRequestContext>) => Promise<R>;
+  readonly run: (
+    input: McpCrossingInput,
+    ctx: Derived<McpRequestContext>,
+    onFiber: OnCrossingFiber,
+  ) => Promise<R>;
 }
+
+/**
+ * Run a harness's Effect-canonical (`.fx`) twin ON THE CROSSING'S FIBER —
+ * the capability a projection body needs to keep the trunk (ADR 92 §Slice A).
+ *
+ * The SDK hands us a Promise-shaped request handler, so a projection body is
+ * plain async code sitting INSIDE the crossing operation's fiber but unable to
+ * `yield*`. Calling a harness's Promise facade from there (`resources.read(uri)`)
+ * re-enters Effect on a fresh ROOT fiber that inherits no FiberRef: the inner
+ * `resources:command:read` op journals as an orphan and its resolver receives a
+ * ctx with no connection identity. Running the harness's `.fx` twin through
+ * THIS instead runs it on the runtime captured inside the crossing body, so the
+ * FiberRef trunk flows: the inner command becomes a proper child (crossing opId
+ * as `parentOpId`, connection dim + identity inherited) and `currentOperationCtx()`
+ * in the harness sees the crossing's identity.
+ *
+ * The inner command keeps its own `origin` (host) — the WIRE origin belongs to
+ * the crossing, which already ran admission and the security stages; stamping
+ * `wire` on the inner read would re-submit it to the wire-exposure grant gate
+ * that the crossing has already satisfied.
+ */
+export type OnCrossingFiber = <A>(effect: Effect.Effect<A, unknown, never>) => Promise<A>;
 
 /**
  * The capability a projection receives instead of `{ security, buildContext }`
@@ -188,10 +215,11 @@ export function securityStageInterceptors(args: {
 export function crossingBody<R>(
   run: McpCrossing<R>["run"],
   ctx: Derived<McpRequestContext>,
+  onFiber: OnCrossingFiber,
 ): (input: McpCrossingInput) => Effect.Effect<R, unknown, never> {
   return (input) =>
     Effect.tryPromise({
-      try: () => run(input, ctx),
+      try: () => run(input, ctx, onFiber),
       catch: (cause) => cause,
     });
 }

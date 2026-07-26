@@ -12,8 +12,11 @@
  *
  *   1. Apply the per-connection `filter` over the canonical declarations.
  *   2. For `prompts/list`, return the projected list.
- *   3. For `prompts/get`, render via `harness.render(...)` and map the
- *      resulting `MessageEntry[]` to MCP's `PromptMessage[]` wire form.
+ *   3. For `prompts/get`, render via `source.fx.render(...)` composed on the
+ *      crossing's fiber (ADR 92 §Slice A — so `prompts:command:render` is a
+ *      CHILD of the crossing and the declaration's `render(args, ctx)` sees the
+ *      caller's identity) and map the resulting `MessageEntry[]` to MCP's
+ *      `PromptMessage[]` wire form.
  *
  * MCP `PromptMessage.role` is restricted to `"user" | "assistant"` —
  * v2's `MessageRole` is broader. We map:
@@ -94,7 +97,7 @@ export function installPromptsHandlers(
         verb: "get-prompt",
         operation: { type: "prompt_get", name: request.params.name },
         params: { name: request.params.name },
-        run: async (_input, ctx): Promise<GetPromptResult> => {
+        run: async (_input, ctx, onFiber): Promise<GetPromptResult> => {
           // Re-project so per-connection filter decides visibility for
           // this specific get. A prompt hidden from `list` must not be
           // fetchable via `get` either — symmetric to the tools-projection
@@ -111,14 +114,17 @@ export function installPromptsHandlers(
             });
           }
 
-          // TODO(ADR-92 slice-A): `Prompts.render` re-enters Effect on a fresh
-          // root fiber, so the declaration's `render(args, ctx?)` still receives
-          // the prompts harness's own op ctx — NOT this crossing's identity. Same
-          // wall as the resources read; see the resources/prompts stop-rule.
-          const result: PromptsGetResult = await options.source.render({
-            name: request.params.name,
-            ...(request.params.arguments ? { args: request.params.arguments } : {}),
-          });
+          // ON THE CROSSING'S FIBER (ADR 92 §Slice A): `prompts:command:render`
+          // runs as a CHILD of this crossing, so the declaration's
+          // `render(args, ctx)` receives an `OperationCtx` carrying the caller's
+          // identity + the connection dim. Through the Promise facade the render
+          // re-entered Effect on a fresh root fiber and saw neither.
+          const result: PromptsGetResult = await onFiber(
+            options.source.fx.render({
+              name: request.params.name,
+              ...(request.params.arguments ? { args: request.params.arguments } : {}),
+            }),
+          );
 
           return {
             description: result.description,

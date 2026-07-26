@@ -10,6 +10,14 @@
  * (exactly like `projection/prompts.ts`). Reads route through the
  * harness's declared `read` command; the resolver runs there.
  *
+ * Every harness read composes through the crossing's `onFiber` runner
+ * (`source.fx.*`, ADR 92 §Slice A) rather than the Promise facade, so the
+ * `resources:command:*` op it drives is a CHILD of the `mcp:command:*`
+ * crossing — inheriting its connection dim + identity — and the resolver
+ * receives an `OperationCtx` carrying the caller's identity (ADR 91
+ * stop-rule #2). Through the Promise facade each read would re-enter Effect
+ * on a fresh root fiber and lose both.
+ *
  * Provider seam only: this projects agentick's OWN resources OUT. Reading
  * an external server's resources is a `McpClientHarness` concern (Wave 2);
  * compose it via a wrapping resolver, not here.
@@ -40,11 +48,12 @@ import type {
   ResourceContents,
   ResourceDescriptor,
   Resources,
+  ResourcesListInput,
   ResourceTemplateDescriptor,
 } from "@agentick/spec";
 import type { Unsubscribe } from "@agentick/runtime";
 
-import type { RunCrossing } from "./crossing.js";
+import type { OnCrossingFiber, RunCrossing } from "./crossing.js";
 
 /** JSON-RPC error code MCP reserves for "resource not found". */
 const RESOURCE_NOT_FOUND = -32002;
@@ -85,8 +94,8 @@ export function installResourcesHandlers(
       runCrossing({
         verb: "list-resources",
         operation: { type: "resource_list" },
-        run: async (_input, ctx): Promise<ListResourcesResult> => {
-          const page = await source.list(request.params?.cursor);
+        run: async (_input, ctx, onFiber): Promise<ListResourcesResult> => {
+          const page = await onFiber(source.fx.list(cursorInput(request.params?.cursor)));
           const projected = filter ? page.resources.filter((r) => filter(r, ctx)) : page.resources;
           const result: ListResourcesResult = { resources: projected.map(toWireResource) };
           if (page.nextCursor !== undefined) result.nextCursor = page.nextCursor;
@@ -102,8 +111,8 @@ export function installResourcesHandlers(
       runCrossing({
         verb: "list-resource-templates",
         operation: { type: "resource_list" },
-        run: async (): Promise<ListResourceTemplatesResult> => {
-          const page = await source.listTemplates(request.params?.cursor);
+        run: async (_input, _ctx, onFiber): Promise<ListResourceTemplatesResult> => {
+          const page = await onFiber(source.fx.listTemplates(cursorInput(request.params?.cursor)));
           const result: ListResourceTemplatesResult = {
             resourceTemplates: page.templates.map(toWireResourceTemplate),
           };
@@ -121,24 +130,22 @@ export function installResourcesHandlers(
         verb: "read-resource",
         operation: { type: "resource_read", name: request.params.uri },
         params: { uri: request.params.uri },
-        run: async (_input, ctx): Promise<ReadResourceResult> => {
+        run: async (_input, ctx, onFiber): Promise<ReadResourceResult> => {
           // A fixed resource hidden by the per-connection filter must not be
           // readable either. Templated / unknown uris carry no fixed
           // descriptor, so the filter doesn't apply — the harness decides
           // found / not-found. Only pay the catalog walk when a filter is set.
-          if (filter && !(await isReadable(source, filter, ctx, request.params.uri))) {
+          if (filter && !(await isReadable(source, filter, ctx, onFiber, request.params.uri))) {
             throw notFound(request.params.uri);
           }
 
-          // TODO(ADR-92 slice-A): the inner `resources:command:read` op this
-          // drives is still an ORPHANED ROOT — `Resources.read(uri)` re-enters
-          // Effect through `runHarnessProtocol`'s `Effect.runPromiseExit`, which
-          // starts a fresh root fiber that inherits no FiberRef, so the crossing's
-          // opId + identity cannot reach it. Unblocking it needs an Effect-native
-          // face on the read (`Resources.fx.read`) that this projection can run on
-          // the crossing's captured runtime. See the resources/prompts stop-rule.
+          // ON THE CROSSING'S FIBER (ADR 92 §Slice A): `resources:command:read`
+          // runs as a CHILD of this crossing, so the resolver's `OperationCtx`
+          // carries the caller's identity + the connection dim. `onFiber`
+          // normalizes the Exit exactly like the Promise facade did, so
+          // `ResourceNotFound` still arrives as itself.
           try {
-            const contents = await source.read(request.params.uri);
+            const contents = await onFiber(source.fx.read({ uri: request.params.uri }));
             return { contents: contents.map(toWireContents) };
           } catch (err) {
             if (isResourceNotFound(err)) throw notFound(request.params.uri);
@@ -274,17 +281,27 @@ async function isReadable(
   source: Resources,
   filter: ResourcesFilter,
   ctx: McpRequestContext,
+  onFiber: OnCrossingFiber,
   uri: string,
 ): Promise<boolean> {
   let cursor: string | undefined;
   do {
-    const page = await source.list(cursor);
+    const page = await onFiber(source.fx.list(cursorInput(cursor)));
     const match = page.resources.find((r) => r.uri === uri);
     if (match) return filter(match, ctx);
     cursor = page.nextCursor;
   } while (cursor !== undefined);
   // Not a fixed resource — templated or unknown; let the harness decide.
   return true;
+}
+
+/**
+ * The command-input form of the positional `list(cursor?)` sugar. `cursor` is
+ * optional-ABSENT on the input record, so an undefined wire cursor must be
+ * omitted rather than passed as `undefined`.
+ */
+function cursorInput(cursor: string | undefined): ResourcesListInput {
+  return cursor !== undefined ? { cursor } : {};
 }
 
 function isResourceNotFound(err: unknown): boolean {

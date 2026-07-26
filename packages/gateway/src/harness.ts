@@ -57,6 +57,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  IngressAdmissionFailure,
   Middleware,
   Operation,
   OperationJournal,
@@ -82,6 +83,7 @@ import {
   DEFAULT_JOURNALING_POLICY,
   deriveHookNames,
   parseHookKey,
+  GATEWAY_ADMISSION_FAILED,
   GATEWAY_CAPABILITIES_CHANGED,
   GatewayBridgeSlotOccupied,
   GatewayClosedError,
@@ -849,6 +851,32 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         timestamp: Date.now(),
         scope: { gatewayId: this.scopeId },
         payload: {},
+      } as ProtocolEvent),
+    );
+  }
+
+  /**
+   * Publish an ingress admission failure (ADR 92 §Family 1.3) — a crossing a
+   * transport edge REFUSED before any work unit existed. Called by the edge's
+   * rejection path (`authenticateIngress`'s reporter), so the audit trail sees
+   * probing that never got past 401 instead of nothing at all.
+   *
+   * An EVENT, not an operation: nothing ran, so there is no work to journal —
+   * only the attempt to record. Twin of `mcpServer:admission:failed`. The
+   * payload carries the connection shape and a failure class; the
+   * credential never enters it (see {@link IngressAdmissionFailure}).
+   */
+  emitAdmissionFailure(failure: IngressAdmissionFailure): void {
+    void Effect.runPromise(
+      this.bus.append({
+        id: `evt_${ulid()}`,
+        surface: SURFACE,
+        name: GATEWAY_ADMISSION_FAILED,
+        phase: "terminal",
+        outcome: "failed",
+        timestamp: Date.now(),
+        scope: { gatewayId: this.scopeId, origin: "wire" },
+        payload: { ...failure },
       } as ProtocolEvent),
     );
   }

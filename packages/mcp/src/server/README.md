@@ -395,18 +395,43 @@ server.guard((input, ctx) =>
 
 A veto blocks the handler before it runs and terminates the op `vetoed`.
 
-### Known gap — resource resolvers and prompt render
+### Identity reaches every handler seam
 
-A `ResourceResolver` / `PromptDeclaration.render` invoked through
-`resources/read` or `prompts/get` still receives its OWN harness op's ctx,
-not the crossing's identity. `Resources.read(uri)` and `Prompts.render(...)`
-re-enter Effect through `runHarnessProtocol`'s `Effect.runPromiseExit`,
-which starts a fresh root fiber that inherits no `FiberRef` — so neither the
-crossing's `opId` nor its identity can reach the inner op, and it still
-journals as an orphaned root. Closing it needs an Effect-native face on
-those reads (`Resources.fx.read`) that the projection can run on the
-crossing's captured runtime. Seams that ARE reached today: tool handlers and
-completion handlers (both receive the crossing's branded ctx directly).
+**ADR 91 stop-rule #2 is closed.** Over the wire, every seam an adopter
+writes receives an `OperationCtx` whose TRUNK carries the request's
+authenticated identity:
+
+| Seam                                | How it is reached                          |
+| ----------------------------------- | ------------------------------------------ |
+| tool handler                        | the crossing's branded ctx, directly       |
+| completion handler                  | the crossing's branded ctx, directly       |
+| `ResourceResolver` (fixed/template) | through `resources:command:read`, in-fiber |
+| `PromptDeclaration.render`          | through `prompts:command:render`, in-fiber |
+
+The last two used to be blind. A resolver is not called by the projection —
+it is called by the resources harness, one command deeper. Through the
+harness's Promise facade (`resources.read(uri)`) that command re-entered
+Effect on a fresh ROOT fiber inheriting no `FiberRef`: it journaled as an
+orphaned root and the resolver saw no identity. The projections now compose
+the harness's Effect-canonical twin (`source.fx.read(...)`,
+`source.fx.render(...)`) on the runtime captured INSIDE the crossing
+operation, so the trunk flows. The inner command is a real linked record —
+`parentOpId` = the crossing's `opId`, connection dimension and identity
+inherited — and `currentOperationCtx()` in the harness derives the
+resolver's ctx from it.
+
+```ts
+resources.register("knowify://me", async (uri, ctx) => {
+  // Over the wire this is the MCP caller's identity, not a fabrication.
+  const principal = ctx?.identity?.principal;
+  return [{ uri, text: await profileFor(principal) }];
+});
+```
+
+Verified by `crossing-operations.spec.ts` §3 — a real SDK client over an
+in-memory transport pair, asserting the resolver's / render's `ctx.identity`,
+`ctx.mcpConnectionId` and `ctx.parentOpId` against the crossing op observed
+on the bus.
 
 ---
 

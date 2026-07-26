@@ -42,6 +42,7 @@ export {
   spanAttributes,
   spanMiddleware,
   runHarnessProtocol,
+  runHarnessProtocolOn,
   runHarnessStream,
   createCommandRunner,
   createOperationRunner,

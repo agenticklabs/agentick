@@ -22,6 +22,7 @@ import {
   BaseHarness,
   deriveContext,
   runHarnessProtocol,
+  runHarnessProtocolOn,
   ulid,
   withCallMiddleware,
   type Unsubscribe,
@@ -91,6 +92,7 @@ import {
   securityStageInterceptors,
   type McpCrossing,
   type McpCrossingInput,
+  type OnCrossingFiber,
   type RunCrossing,
 } from "./projection/crossing.js";
 import { allowAllAuth, resolveSecurity, type ResolvedSecurity } from "./security/index.js";
@@ -905,7 +907,6 @@ export class McpServerHarness
         command,
       });
 
-      const body = crossingBody(crossing.run, ctx);
       const opEffect = this.runOperation(op, (input) =>
         Effect.gen(this, function* () {
           // ADR 64/78/91 — bind the ctx to the RUNNING op: the captured runtime
@@ -919,7 +920,12 @@ export class McpServerHarness
           // only its own opId, which the handler reads and its `ctx.run`
           // children inherit as THEIR parent.
           Object.assign(ctx, { opId: op.opId });
-          return yield* body(input);
+          // The same captured runtime, handed to the body as the seam for
+          // composing harness `.fx` twins ON THIS FIBER (ADR 92 §Slice A) — the
+          // projection's resource reads / prompt renders inherit the trunk
+          // instead of re-entering Effect as orphaned roots.
+          const onFiber: OnCrossingFiber = (effect) => runHarnessProtocolOn(runtime, effect);
+          return yield* crossingBody(crossing.run, ctx, onFiber)(input);
         }),
       );
       // `runHarnessProtocol` unwraps the Exit so a rejected stage throws its

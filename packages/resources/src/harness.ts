@@ -75,6 +75,7 @@ import type {
   ResourceMeta,
   ResourceResolver,
   ResourcesError,
+  ResourcesFx,
   ResourcesHarnessProtocol,
   ResourcesListInput,
   ResourcesListResult,
@@ -276,6 +277,21 @@ export class ResourcesHarness
       scope,
       handler: (i: ResourcesListTemplatesInput) => this.applyListTemplates(i),
     });
+  }
+
+  /**
+   * The Effect-canonical read surface (ADR 77, the dual-typed edge) — the
+   * composable Effect twins of `read` / `list` / `listTemplates`. An in-fiber
+   * caller (the MCP server's resources projection, running inside its
+   * `mcp:command:read-resource` crossing) reaches these so the read composes in
+   * the SAME fiber tree: the `resources:command:read` op parents under the
+   * crossing and the {@link ResourceResolver} sees the crossing's identity.
+   * Through the positional Promise facade it would re-enter Effect on a root
+   * fiber and lose both. Both faces dispatch the SAME declared command — `fx`
+   * is the sugar over `commandEffect`, typed via {@link ResourcesFx}.
+   */
+  get fx(): ResourcesFx {
+    return this.fxProxy() as unknown as ResourcesFx;
   }
 
   /**
