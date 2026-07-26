@@ -23,6 +23,23 @@
  * response; client echoes it on subsequent requests. Load balancers
  * sticky-route by that header.
  *
+ * ## Shared-server citizenship (ownership-aware routing)
+ *
+ * A single Node `http.Server` may carry MANY `request` listeners — this
+ * transport's plus the adopter's framework (Express, a `/health` handler, a
+ * second agentick transport on another path). Unlike `upgrade` (first-wins),
+ * EVERY `request` listener fires for EVERY request. So a non-matching request
+ * (`url` outside our `path`) must be handled by ownership:
+ *   - `ownsServer: true` (the `httpServerTransport({ port })` branch created +
+ *     owns the listener) — nothing else answers, so we write a `404` and end.
+ *   - `ownsServer: false` (attached to an adopter-supplied server; also the
+ *     DEFAULT for direct `httpServer(options)` calls, which take `httpServer`
+ *     from the caller by definition) — we IGNORE it (return WITHOUT writing),
+ *     leaving the adopter's own `request` listener to answer. Writing a 404
+ *     here would double-respond against the adopter's framework (a
+ *     "headers already sent" clobber) — the same bad-citizen class as the WS
+ *     upgrade-destroy bug.
+ *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
@@ -51,6 +68,18 @@ import { encodeSseFrame } from "../shared/sse.js";
 export interface HttpServerOptions extends WebSecurityOptions {
   readonly httpServer: HttpServerNode;
   readonly gateway: DispatchHost;
+  /**
+   * Whether this transport OWNS the `httpServer` (it created + listens on
+   * it) or is merely ATTACHED to an adopter-supplied one. Governs
+   * non-matching-request behavior: owned → write `404` (nothing else
+   * answers); attached → return without writing, leaving the adopter's own
+   * `request` listener to answer (every `request` listener fires per
+   * request, so a 404 here would double-respond). The `httpServerTransport`
+   * wrapper sets this from the config branch it took. DEFAULT `false`: a
+   * direct `httpServer(options)` call takes `httpServer` from the caller by
+   * definition, so it does not own the server.
+   */
+  readonly ownsServer?: boolean;
   readonly path?: string;
   /** Idle ping interval on the persistent GET stream (ms). Default 30s. */
   readonly heartbeatIntervalMs?: number;
@@ -73,6 +102,7 @@ const SESSION_ID_HEADER = "mcp-session-id";
 
 export function httpServer(options: HttpServerOptions): HttpServerHandle {
   const path = options.path ?? "/";
+  const ownsServer = options.ownsServer ?? false;
   const heartbeatMs = options.heartbeatIntervalMs ?? 30_000;
   const security = resolveWebSecurity(options);
 
@@ -90,8 +120,15 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
   const handler = (req: IncomingMessage, res: ServerResponse): void => {
     const url = req.url ?? "/";
     if (!url.startsWith(path)) {
-      res.statusCode = 404;
-      res.end();
+      // Non-matching request. Owned server → 404 (nothing else answers).
+      // Attached server → IGNORE (return without writing), leaving the
+      // adopter's own `request` listener to answer. Every `request` listener
+      // fires for every request, so writing a 404 here would double-respond
+      // against the adopter's framework.
+      if (ownsServer) {
+        res.statusCode = 404;
+        res.end();
+      }
       return;
     }
 

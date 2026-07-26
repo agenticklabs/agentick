@@ -11,7 +11,12 @@
  * An adopter with an existing Node server (shared with an HTTP transport, an
  * `https.Server`, Express's underlying server) passes `{ httpServer }` instead
  * of `{ port }`. The wrapper attaches to it and, since it did not create it,
- * does NOT close it.
+ * does NOT close it. It also passes `ownsServer: false` so the upgrade handler
+ * leaves non-matching upgrades (socket.io, another transport) untouched — a
+ * shared server may carry many `upgrade` listeners, and destroying a
+ * non-matching socket would kill the other consumers. The `{ port }` branch
+ * passes `ownsServer: true`: it owns the listener, so a non-matching upgrade
+ * can be safely destroyed.
  *
  * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md §2
  */
@@ -28,7 +33,7 @@ import {
 /** Port-owning config — the wrapper creates and binds the Node server. */
 export interface WebSocketServerTransportPortConfig extends Omit<
   WebSocketServerOptions,
-  "gateway" | "httpServer"
+  "gateway" | "httpServer" | "ownsServer"
 > {
   readonly port: number;
   /**
@@ -45,7 +50,7 @@ export interface WebSocketServerTransportPortConfig extends Omit<
  */
 export type WebSocketServerTransportConfig =
   | WebSocketServerTransportPortConfig
-  | Omit<WebSocketServerOptions, "gateway">;
+  | Omit<WebSocketServerOptions, "gateway" | "ownsServer">;
 
 export function webSocketServerTransport(config: WebSocketServerTransportConfig): ServerTransport {
   let wsHandle: WebSocketServerHandle | undefined;
@@ -65,14 +70,29 @@ export function webSocketServerTransport(config: WebSocketServerTransportConfig)
 
       if ("httpServer" in config) {
         // Adopter owns the Node server; just attach the WS upgrade handler.
-        wsHandle = websocketServer({ ...config, gateway: host, transportId: id });
+        // `ownsServer: false` — leave non-matching upgrades for other
+        // listeners on the shared server (see server.ts module doc).
+        wsHandle = websocketServer({
+          ...config,
+          gateway: host,
+          transportId: id,
+          ownsServer: false,
+        });
         return;
       }
 
       const { port, host: bindHost, ...rest } = config;
       const server = createServer();
       ownedServer = server;
-      wsHandle = websocketServer({ ...rest, httpServer: server, gateway: host, transportId: id });
+      // `ownsServer: true` — we created + own this listener, so destroying a
+      // non-matching upgrade is correct (nothing else can claim it).
+      wsHandle = websocketServer({
+        ...rest,
+        httpServer: server,
+        gateway: host,
+        transportId: id,
+        ownsServer: true,
+      });
       const listenHost = bindHost ?? DEFAULT_BIND_HOST;
       await new Promise<void>((resolve, reject) => {
         const onError = (err: Error): void => reject(err);

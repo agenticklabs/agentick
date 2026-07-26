@@ -55,6 +55,7 @@
     "@agentick/gateway": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
+    "@agentick/transport-http": "workspace:*",
     "@agentick/utils": "workspace:*",
     "@types/ws": "^8.5.13",
     "effect": "^3.22.0",

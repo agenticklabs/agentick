@@ -7,6 +7,27 @@
  * Adopters pass a Node `http.Server` (or `https.Server`); we attach
  * a `WebSocketServer` to it.
  *
+ * ## Shared-server citizenship (ownership-aware upgrade)
+ *
+ * A single Node `http.Server` may carry MANY `upgrade` listeners — this
+ * transport's plus the adopter's own (socket.io's Engine.IO on
+ * `/socket.io/`, a second agentick transport, etc.). Node's `upgrade`
+ * semantics are FIRST-WINS: the first listener that handles the socket
+ * claims it; if NO listener handles it, Node destroys the socket itself.
+ *
+ * So a non-matching upgrade (`url` outside our `path`) must be handled by
+ * ownership:
+ *   - `ownsServer: true` (the `webSocketServerTransport({ port })` branch
+ *     created + owns the listener) — nothing else can legitimately claim a
+ *     non-matching upgrade, so we `socket.destroy()` it.
+ *   - `ownsServer: false` (attached to an adopter-supplied server, the
+ *     `{ httpServer }` branch; also the DEFAULT for direct
+ *     `websocketServer(options)` calls, which take `httpServer` from the
+ *     caller by definition) — we IGNORE it (return without touching the
+ *     socket), leaving it for another `upgrade` listener or Node's own
+ *     unhandled-upgrade teardown. Destroying it here would kill every other
+ *     websocket consumer sharing the server.
+ *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
@@ -28,6 +49,17 @@ import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.
 export interface WebSocketServerOptions extends Omit<WebSecurityOptions, "csrf"> {
   readonly httpServer: HttpServer;
   readonly gateway: DispatchHost;
+  /**
+   * Whether this transport OWNS the `httpServer` (it created + listens on
+   * it) or is merely ATTACHED to an adopter-supplied one. Governs
+   * non-matching-upgrade behavior: owned → destroy the socket (nothing else
+   * can claim it); attached → leave it untouched for other `upgrade`
+   * listeners (shared-server citizenship). The `webSocketServerTransport`
+   * wrapper sets this from the config branch it took. DEFAULT `false`: a
+   * direct `websocketServer(options)` call takes `httpServer` from the
+   * caller by definition, so it does not own the server.
+   */
+  readonly ownsServer?: boolean;
   /**
    * Stable id of the owning `ServerTransport`, threaded into the
    * `gateway:accept` op's `ConnectionInfo.transportId` (ADR 84 §4). The
@@ -69,6 +101,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
   });
 
   const path = options.path ?? "/";
+  const ownsServer = options.ownsServer ?? false;
   const security = resolveWebSecurity(options);
 
   const upgradeHandler = (
@@ -78,7 +111,12 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
   ): void => {
     const url = req.url ?? "";
     if (!url.startsWith(path)) {
-      socket.destroy();
+      // Non-matching upgrade. Owned server → destroy (nothing else can
+      // claim it). Attached server → IGNORE, leaving it for another
+      // `upgrade` listener (socket.io, a second transport) or Node's own
+      // unhandled-upgrade teardown. Destroying here would kill every other
+      // websocket consumer on a shared server.
+      if (ownsServer) socket.destroy();
       return;
     }
     // Security defaults (STATUS A2 §4c): host allow-list + cross-site

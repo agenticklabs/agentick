@@ -11,7 +11,11 @@
  * An adopter that already has a Node `http.Server` (Express's underlying
  * server, an `https.Server`, a shared listener) passes `{ httpServer }` instead
  * of `{ port }` — the wrapper mounts on it and, since it did not create it,
- * does NOT close it.
+ * does NOT close it. It also passes `ownsServer: false` so the request handler
+ * leaves non-matching requests untouched for the adopter's own `request`
+ * listener (every `request` listener fires per request, so a 404 would
+ * double-respond). The `{ port }` branch passes `ownsServer: true`: it owns the
+ * listener, so a non-matching request is safely 404'd.
  *
  * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md §2
  */
@@ -24,7 +28,7 @@ import { httpServer, type HttpServerHandle, type HttpServerOptions } from "./ser
 /** Port-owning config — the wrapper creates and binds the Node server. */
 export interface HttpServerTransportPortConfig extends Omit<
   HttpServerOptions,
-  "gateway" | "httpServer"
+  "gateway" | "httpServer" | "ownsServer"
 > {
   readonly port: number;
   /**
@@ -41,7 +45,7 @@ export interface HttpServerTransportPortConfig extends Omit<
  */
 export type HttpServerTransportConfig =
   | HttpServerTransportPortConfig
-  | Omit<HttpServerOptions, "gateway">;
+  | Omit<HttpServerOptions, "gateway" | "ownsServer">;
 
 export function httpServerTransport(config: HttpServerTransportConfig): ServerTransport {
   let handle: HttpServerHandle | undefined;
@@ -56,15 +60,19 @@ export function httpServerTransport(config: HttpServerTransportConfig): ServerTr
       if (handle) return; // idempotent — already bound
 
       if ("httpServer" in config) {
-        // Adopter owns the Node server; just mount and route.
-        handle = httpServer({ ...config, gateway: host });
+        // Adopter owns the Node server; just mount and route. `ownsServer:
+        // false` — leave non-matching requests for the adopter's own
+        // `request` listener (see server.ts module doc).
+        handle = httpServer({ ...config, gateway: host, ownsServer: false });
         return;
       }
 
       const { port, host: bindHost, ...rest } = config;
       const server = createServer();
       ownedServer = server;
-      handle = httpServer({ ...rest, httpServer: server, gateway: host });
+      // `ownsServer: true` — we created + own this listener, so a
+      // non-matching request is safely 404'd (nothing else answers).
+      handle = httpServer({ ...rest, httpServer: server, gateway: host, ownsServer: true });
       const listenHost = bindHost ?? DEFAULT_BIND_HOST;
       await new Promise<void>((resolve, reject) => {
         const onError = (err: Error): void => reject(err);

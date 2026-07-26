@@ -1914,6 +1914,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/transport-http':
+        specifier: workspace:*
+        version: link:../transport-http
       '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
