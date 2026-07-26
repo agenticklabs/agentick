@@ -9,7 +9,12 @@
  *   wsTransport({ port })     — WebSocket listener (multi-connection)
  */
 
-export type { AcceptHandler, ServerTransport, ServerTransportFactory } from "./types.js";
+export type {
+  AcceptHandler,
+  AuthPreGate,
+  ServerTransport,
+  ServerTransportFactory,
+} from "./types.js";
 export { stdioTransport } from "./stdio.js";
 export { inMemoryServerTransport, type InMemoryServerTransportHandle } from "./in-memory.js";
 export {

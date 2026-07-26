@@ -32,10 +32,23 @@
  * configured the transport also answers `GET
  * /.well-known/oauth-protected-resource` with the protected-resource
  * metadata document, so clients can locate the authorization server.
- * This is discovery only — token verification stays in the adopter's
- * `Authenticator` security stage. See {@link OAuthTransportOptions}.
+ * Discovery is served unauthenticated — that is its purpose.
  *
- * @see ./types.ts for the `ServerTransport` + `AcceptHandler` contract
+ * HTTP auth pre-gate (RFC 9728 challenge). When the harness threads an
+ * {@link AuthPreGate} whose `enforce` is set AND `oauth` is configured
+ * here, EVERY inbound MCP request (POST rpc, GET events stream) is
+ * verified at the HTTP crossing BEFORE the SDK sees it — a failed or
+ * absent credential gets `401 + WWW-Authenticate: Bearer
+ * resource_metadata="…"` (the discovery challenge the SDK's committed
+ * `200` makes impossible from inside a request handler). The well-known
+ * metadata endpoint is exempt (discovery must work unauthenticated).
+ * Without `oauth` configured, the pre-gate stays dormant and behavior is
+ * unchanged (per-operation security pipeline only). Token verification
+ * itself still lives in the adopter's `Authenticator` — the pre-gate
+ * runs that same stage; it does not introduce a parallel one.
+ * See {@link OAuthTransportOptions}.
+ *
+ * @see ./types.ts for the `ServerTransport` + `AcceptHandler` + `AuthPreGate` contract
  */
 
 import { randomUUID } from "node:crypto";
@@ -52,7 +65,7 @@ import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/s
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import type { McpConnectionInfo } from "../security/stages.js";
-import type { AcceptHandler, ServerTransport } from "./types.js";
+import type { AcceptHandler, AuthPreGate, ServerTransport } from "./types.js";
 
 const DEFAULT_PATH = "/mcp";
 /** Reject POST bodies larger than this before buffering the whole thing. */
@@ -84,17 +97,20 @@ export interface OAuthTransportOptions {
    */
   readonly metadata?: OAuthProtectedResourceMetadata;
 
-  // NOTE: a `resourceMetadataUrl` field (metadata hosted elsewhere) is
-  // deliberately NOT shipped yet. Its only consumer is the
-  // `WWW-Authenticate: Bearer resource_metadata="…"` challenge on a 401,
-  // which is currently blocked — the per-request `Authenticator`
-  // rejection is raised inside an SDK request handler, after the SDK's
-  // `StreamableHTTPServerTransport` has already committed a `200`
-  // response (SSE / JSON), so the transport can neither set the status
-  // to 401 nor inject the header. Shipping it now would be an inert
-  // option. See the transport README's "OAuth resource-server
-  // discovery" § (Known gap). TODO(oauth-401): add it alongside the
-  // challenge mechanism (HTTP pre-gate or transport challenge seam).
+  /**
+   * URL populating the `resource_metadata` parameter of the
+   * `WWW-Authenticate: Bearer resource_metadata="…"` challenge the HTTP
+   * pre-gate emits on a `401`. Set this when the protected-resource
+   * metadata is hosted ELSEWHERE (a separate authorization service) than
+   * this transport. When omitted but `metadata` is served here, the
+   * challenge URL is derived from `metadata.resource` (the well-known
+   * path on the resource's origin). When neither is available and the
+   * pre-gate fires, the `401` carries a bare `WWW-Authenticate: Bearer` (RFC 6750 MUST; a
+   * bare challenge — there is nothing to point a client at).
+   *
+   * @see https://datatracker.ietf.org/doc/html/rfc9728 §5.1
+   */
+  readonly resourceMetadataUrl?: string;
 }
 
 export interface HttpTransportOptions {
@@ -232,6 +248,52 @@ function protectedResourcePaths(resource: string): Set<string> {
   return paths;
 }
 
+/**
+ * Derive the absolute `resource_metadata` challenge URL from a
+ * protected-resource `resource` identifier — the well-known document
+ * URL on the resource's own origin (RFC 9728 §3.1 path-suffixed form).
+ * Matches the path this transport serves the document at.
+ *
+ * @example
+ *   "https://api.example.com/mcp"
+ *   → "https://api.example.com/.well-known/oauth-protected-resource/mcp"
+ */
+function deriveResourceMetadataUrl(resource: string): string | undefined {
+  try {
+    const u = new URL(resource);
+    const suffix = u.pathname && u.pathname !== "/" ? u.pathname : "";
+    return `${u.origin}${PROTECTED_RESOURCE_WELL_KNOWN}${suffix}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Emit the RFC 9728 `401` discovery challenge. When a
+ * `resource_metadata` URL is available the `WWW-Authenticate` header
+ * points the client at the protected-resource metadata document;
+ * otherwise the bare `Bearer` scheme is sent with no params —
+ * RFC 6750 §3 makes `WWW-Authenticate` a MUST on a protected
+ * resource's 401, even when there is nothing further to discover.
+ */
+function writeUnauthorized(res: ServerResponse, resourceMetadataUrl: string | undefined): void {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "WWW-Authenticate":
+      resourceMetadataUrl !== undefined
+        ? `Bearer resource_metadata="${resourceMetadataUrl}"`
+        : "Bearer",
+  };
+  res.writeHead(401, headers);
+  res.end(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: { code: -32001, message: "Unauthorized" },
+      id: null,
+    }),
+  );
+}
+
 /** Emit a minimal JSON-RPC error response (no live session to route through). */
 function writeJsonRpcError(res: ServerResponse, status: number, message: string): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -257,6 +319,17 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
       ? protectedResourcePaths(oauthMetadata.resource)
       : new Set<string>();
 
+  // HTTP auth pre-gate config (RFC 9728). `oauthConfigured` is the
+  // transport's half of the enforcement split — the pre-gate fires only
+  // when oauth is configured here AND the harness marks the authenticator
+  // real (`gate.enforce`). `challengeUrl` populates the `resource_metadata`
+  // parameter: an explicit `resourceMetadataUrl`, else derived from the
+  // served `metadata.resource`, else `undefined` (bare 401, no header).
+  const oauthConfigured = options.oauth !== undefined;
+  const challengeUrl =
+    options.oauth?.resourceMetadataUrl ??
+    (oauthMetadata !== undefined ? deriveResourceMetadataUrl(oauthMetadata.resource) : undefined);
+
   /** Live SDK transports keyed by `Mcp-Session-Id`. */
   const sessions = new Map<string, StreamableHTTPServerTransport>();
 
@@ -266,6 +339,7 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
 
   const handle = async (
     accept: AcceptHandler,
+    gate: AuthPreGate | undefined,
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> => {
@@ -294,6 +368,23 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
         writeJsonRpcError(res, 404, `Not found: ${url.pathname}`);
       }
       return;
+    }
+
+    // HTTP auth pre-gate (RFC 9728 discovery challenge). Runs on the MCP
+    // path only — the well-known discovery endpoint and foreign paths
+    // already returned above. Fires only under the enforcement split:
+    // oauth configured here AND the harness marked the authenticator
+    // real. On failure the crossing is rejected with a `401` BEFORE the
+    // SDK transport is touched, so the `WWW-Authenticate` challenge can
+    // actually reach the wire. The per-operation pipeline still runs
+    // downstream (defense in depth — the pre-gate authenticates the
+    // crossing; the pipeline authorizes each operation).
+    if (oauthConfigured && gate?.enforce) {
+      const authenticated = await gate.verify(buildConnectionInfo(req));
+      if (!authenticated) {
+        writeUnauthorized(res, challengeUrl);
+        return;
+      }
     }
 
     const sessionId = headerString(req.headers["mcp-session-id"]);
@@ -356,12 +447,12 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
   return {
     kind: "http",
 
-    async listen(accept: AcceptHandler): Promise<void> {
+    async listen(accept: AcceptHandler, gate?: AuthPreGate): Promise<void> {
       if (closed) {
         throw new Error("httpTransport: cannot listen after close()");
       }
       requestListener = (req, res): void => {
-        void handle(accept, req, res).catch((err) => {
+        void handle(accept, gate, req, res).catch((err) => {
           if (!res.headersSent) {
             writeJsonRpcError(res, 500, `Internal transport error: ${String(err)}`);
           } else {

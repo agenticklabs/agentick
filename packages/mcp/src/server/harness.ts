@@ -71,10 +71,10 @@ import { installClientRootsIngest } from "./projection/roots.js";
 import { installResourcesHandlers, type ResourcesFilter } from "./projection/resources.js";
 import { createServerTaskRegistry, installTasksHandlers } from "./projection/tasks.js";
 import { installToolsHandlers } from "./projection/tools.js";
-import { resolveSecurity, type ResolvedSecurity } from "./security/index.js";
+import { allowAllAuth, resolveSecurity, type ResolvedSecurity } from "./security/index.js";
 import { evaluateConnectionGuard, isMcpSecurityError } from "./security/pipeline.js";
 import type { McpConnectionInfo } from "./security/stages.js";
-import type { ServerTransport } from "./transports/types.js";
+import type { AuthPreGate, ServerTransport } from "./transports/types.js";
 import { isFalsey, isNull, omitUndefined } from "@agentick/utils";
 
 const SURFACE = "mcpServer" as const;
@@ -378,10 +378,11 @@ export class McpServerHarness
       }
     }
 
+    const preGate = this.buildAuthPreGate();
     for (const transport of this.transports) {
       await transport.listen(async (sdkTransport, info) => {
         await this.acceptConnection(sdkTransport, info);
-      });
+      }, preGate);
     }
   }
 
@@ -737,6 +738,81 @@ export class McpServerHarness
 
     // 6. Connect SDK Server to the transport — starts processing.
     await sdkServer.connect(transport);
+  }
+
+  /**
+   * Build the HTTP-level auth pre-gate threaded to network transports at
+   * `listen()` time (RFC 9728 discovery challenge; ADR 40 §5). This is
+   * the harness's half of the enforcement split: `enforce` is set iff the
+   * resolved authenticator is a REAL (non-`allowAll`) stage. The transport
+   * ANDs it with its own oauth-configured state — the pre-gate fires only
+   * when BOTH hold. `verify` runs the SAME configured `Authenticator`
+   * (no parallel auth config) against a minimal request context
+   * synthesized from the connection snapshot the transport built. Trusted
+   * transports (stdio, in-memory) ignore the gate entirely.
+   */
+  private buildAuthPreGate(): AuthPreGate {
+    return {
+      enforce: this.security.authenticator !== allowAllAuth,
+      verify: async (info) => {
+        const result = await this.security.authenticator(this.buildPreGateContext(info));
+        return result.authenticated;
+      },
+    };
+  }
+
+  /**
+   * Minimal `McpRequestContext` for the HTTP auth pre-gate. Built
+   * OFF-connection (no SDK Server / session exists yet — the pre-gate
+   * runs before the crossing is handed to the SDK), carrying only the
+   * identity material an `Authenticator` reads: the transport-supplied
+   * headers / origin / remoteAddress plus the `mcp` discriminator block.
+   * Observability + ops facets mirror {@link acceptConnection}'s ctx so a
+   * custom authenticator that logs / runs ops behaves identically.
+   */
+  private buildPreGateContext(info: McpConnectionInfo): McpRequestContext {
+    const connectionScope: Partial<EventScope> = { mcpServerId: this.scopeId };
+    return {
+      toolCallId: `mcp:pregate:${ulid()}`,
+      signal: new AbortController().signal,
+      setState: () => {
+        /* no-op — no session behind a pre-gate crossing */
+      },
+      emit: () => {
+        /* no-op — no channel behind a pre-gate crossing */
+      },
+      ...deriveObservability({
+        log: (level, data, logger, trace) => {
+          void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
+        },
+        namespace: this.telemetryNamespace,
+      }),
+      ...deriveOps({
+        surface: "mcp",
+        scope: connectionScope,
+        runOperation: this.runOperation.bind(this),
+      }),
+      progress: () => {
+        /* no-op — no progress token before the SDK sees the request */
+      },
+      task: "auto",
+      transport: "mcp" as const,
+      tasks: this.serverTasks,
+      mcp: {
+        serverId: this.scopeId,
+        connectionId: `conn:pregate:${ulid()}`,
+        transportKind: info.transportKind,
+        connectedAt: Date.now(),
+        user: null,
+        clientInfo: null,
+        clientCapabilities: null,
+      },
+      metadata: omitUndefined({
+        ...(info.headers ? { headers: info.headers } : {}),
+        origin: info.origin,
+        remoteAddress: info.remoteAddress,
+      }),
+    };
   }
 
   // ─────────── Internal — used by transport + projection layers (#171c+) ───────────

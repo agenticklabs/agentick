@@ -444,27 +444,74 @@ auth: {
 }
 ```
 
-### Known gap — the `WWW-Authenticate` challenge on 401
+### The `401` challenge — an HTTP-level auth pre-gate
 
 The RFC 9728 flow expects an unauthorized HTTP request to return `401`
 with `WWW-Authenticate: Bearer resource_metadata="…"` so the client can
-_discover_ the metadata endpoint. That challenge is **not emitted
-today**. The reason is an SDK coupling: the `authenticator` runs inside
-an SDK request handler, by which point the SDK's
-`StreamableHTTPServerTransport` has already committed a `200` response
-(SSE / JSON) and dispatched to it (`webStandardStreamableHttp.js` —
-`handlePostRequest` opens the SSE stream / resolves the JSON promise
-_before_ invoking `onmessage`) — the transport can neither set the
-status to `401` nor inject a header.
+_discover_ the metadata endpoint. A per-operation `Authenticator` cannot
+emit this: it runs inside an SDK request handler, by which point the
+SDK's `StreamableHTTPServerTransport` has already committed a `200`
+response (SSE / JSON) and dispatched to it (`webStandardStreamableHttp.js`
+— `handlePostRequest` opens the SSE stream / resolves the JSON promise
+_before_ invoking `onmessage`) — from there the transport can neither
+set the status to `401` nor inject a header.
 
-A companion `oauth.resourceMetadataUrl` field (metadata hosted
-elsewhere, populating the challenge's `resource_metadata` parameter) is
-therefore **deliberately not shipped yet** — its only consumer is the
-blocked challenge, so it would be an inert option. Emitting the
-challenge requires lifting auth to an HTTP pre-gate (or a
-transport-level challenge seam); `resourceMetadataUrl` lands alongside
-it. Until then, clients that already know the metadata URL (or are
-configured with it) can still fetch the served document.
+The challenge is therefore raised at the HTTP **crossing**, before the
+SDK sees the request. `httpTransport` carries an **auth pre-gate**: when
+armed, every inbound MCP request (POST rpc, GET events stream) is
+verified at the HTTP layer BEFORE any SDK handling. On failure the
+transport responds `401` with `WWW-Authenticate: Bearer
+resource_metadata="<url>"` and never touches the SDK transport. The
+well-known metadata endpoint is **exempt** — discovery must work
+unauthenticated, that is its purpose.
+
+**The pre-gate reuses the server's `Authenticator` — it is NOT a parallel
+auth config.** The harness threads its resolved `Authenticator` to the
+transport at `listen()` time (the `AuthPreGate` seam on `ServerTransport`);
+the transport runs that same stage against a minimal request context
+synthesized from the HTTP request's headers. Trusted transports (stdio,
+in-memory) ignore the seam — no HTTP crossing to challenge.
+
+**Division of labour is preserved.** The pre-gate authenticates the
+_crossing_ (defense at the door); the per-operation security pipeline
+still runs downstream and authorizes each _operation_ (defense in depth).
+Two layers, two jobs — the pre-gate does not replace the pipeline.
+
+**Enforcement split (spec model, with an escape hatch).** The pre-gate
+fires only when BOTH halves agree:
+
+- the server has a **real** (non-`allowAll`) `Authenticator` — the
+  harness's `enforce` flag, AND
+- **`oauth` is configured** on the transport — the transport's own state.
+
+| Server auth        | `oauth` on transport | Behavior                                                                                         |
+| ------------------ | -------------------- | ------------------------------------------------------------------------------------------------ |
+| real authenticator | configured           | Pre-gate ALL requests — everything `401`s until authorized (the MCP authorization spec's model). |
+| real authenticator | absent               | **Unchanged.** Per-operation pipeline only; `initialize` / `ping` stay reachable.                |
+| `allowAll` (open)  | any                  | Pre-gate dormant (`enforce: false`) — open deployment, unchanged.                                |
+
+This keeps non-OAuth bearer deployments (a static `Authorization: Bearer`
+with no discovery flow) working exactly as before: no `oauth` means no
+pre-gate, and `initialize` reaches the SDK as it always did.
+
+**The challenge URL** populating `resource_metadata`:
+
+- `oauth.resourceMetadataUrl` when set (metadata hosted on a separate
+  authorization service), else
+- derived from the served `oauth.metadata` (`metadata.resource` → the
+  well-known document URL on the resource's origin), else
+- **omitted** — when neither is resolvable the `401` is bare (no
+  `WWW-Authenticate` header; there is nothing to point a client at).
+
+```ts
+const transport = httpTransport({
+  port: 8080,
+  oauth: {
+    metadata, // served at the well-known path AND derives the challenge url
+    // resourceMetadataUrl: "https://auth.example.com/.well-known/..." // if hosted elsewhere
+  },
+});
+```
 
 ---
 
@@ -603,6 +650,15 @@ Spec types are re-exported for adopters' convenience: `McpRequestContext`,
   owned (`{ port }`) and attached (caller-supplied `server`) modes, the
   405 on non-GET, shared-server citizenship (attached mode leaves foreign
   paths for the caller's own routes), and the `oauth`-absent 404.
+  Plus the HTTP auth pre-gate (RFC 9728 challenge): absent + bad
+  credential each `401` with `WWW-Authenticate: Bearer
+resource_metadata="…"` (derived url AND explicit `resourceMetadataUrl`)
+  on both the POST rpc + GET events-stream paths; the well-known endpoint
+  stays reachable unauthenticated behind the gate; a valid token passes
+  through to the full round-trip; the bare `401` (no header) when no url
+  is resolvable; the enforcement split (no `oauth` → pre-gate dormant,
+  unauthenticated crossing reaches the SDK as before); and attached-mode
+  citizenship (the pre-gate guards only the MCP path, not foreign routes).
 - `__tests__/tools-slot.spec.ts` — trichotomy contract for the tools slot
   (every form + the xor-discrimination boundary cases).
 - `__tests__/projection-elicit.spec.ts` — `ctx.elicit` sugar surface +

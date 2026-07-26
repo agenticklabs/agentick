@@ -328,6 +328,209 @@ describe("httpTransport — OAuth resource-server discovery (RFC 9728)", () => {
   });
 });
 
+describe("httpTransport — HTTP auth pre-gate (RFC 9728 challenge)", () => {
+  /** Expected `resource_metadata` URL derived from OAUTH_METADATA.resource. */
+  const EXPECTED_CHALLENGE_URL = "https://api.example.com/.well-known/oauth-protected-resource/mcp";
+
+  it("challenges an absent credential with 401 + WWW-Authenticate on the MCP path", async () => {
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const mcpUrl = `http://127.0.0.1:${addr.port}/mcp`;
+
+    // A POST with no Authorization header is rejected at the crossing —
+    // before the SDK ever sees it — so the discovery challenge reaches
+    // the wire (impossible from inside an SDK request handler).
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${EXPECTED_CHALLENGE_URL}"`,
+    );
+    await res.body?.cancel();
+
+    // No SDK session was created — the crossing never reached the SDK.
+    expect(harness.connections()).toHaveLength(0);
+
+    await harness.close();
+    await transport.close();
+  });
+
+  it("challenges a bad token with 401 + the right resource_metadata url", async () => {
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const mcpUrl = `http://127.0.0.1:${addr.port}/mcp`;
+
+    // Bad token on a GET events-stream request is challenged too.
+    const res = await fetch(mcpUrl, {
+      method: "GET",
+      headers: { Authorization: "Bearer wrong-token", Accept: "text/event-stream" },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `Bearer resource_metadata="${EXPECTED_CHALLENGE_URL}"`,
+    );
+    await res.body?.cancel();
+
+    await harness.close();
+    await transport.close();
+  });
+
+  it("the well-known discovery endpoint stays reachable unauthenticated behind the pre-gate", async () => {
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const base = `http://127.0.0.1:${addr.port}`;
+
+    // No Authorization header — discovery MUST work (that is its purpose).
+    const md = await fetch(`${base}${WELL_KNOWN}`);
+    expect(md.status).toBe(200);
+    expect(await md.json()).toEqual(OAUTH_METADATA);
+
+    await harness.close();
+    await transport.close();
+  });
+
+  it("lets a valid token pass through the pre-gate to normal handling", async () => {
+    const transport = httpTransport({ port: 0, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const url = `http://127.0.0.1:${addr.port}/mcp`;
+
+    const clientTransport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+    });
+    const client = await makeHttpClient(clientTransport, "pregate-ok-srv");
+
+    // The crossing authenticated at the pre-gate; the full round-trip
+    // then proceeds through the SDK + per-operation pipeline.
+    const tools = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain("echo");
+    const result = await client.callTool("echo", { q: "gated" });
+    expect((result.content as { text: string }[])[0]!.text).toBe("echo: gated");
+    expect(harness.connections()).toHaveLength(1);
+
+    await client.close();
+    await harness.close();
+    await transport.close();
+  });
+
+  it("emits a bare 401 (no WWW-Authenticate) when no metadata url is resolvable", async () => {
+    // oauth configured (pre-gate armed) but with NO metadata + NO
+    // resourceMetadataUrl — the challenge has nothing to point at.
+    const transport = httpTransport({ port: 0, oauth: {} });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const mcpUrl = `http://127.0.0.1:${addr.port}/mcp`;
+
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe("Bearer"); // RFC 6750 §3: MUST on 401; bare scheme when no metadata url
+    await res.body?.cancel();
+
+    await harness.close();
+    await transport.close();
+  });
+
+  it("honors an explicit resourceMetadataUrl in the challenge", async () => {
+    const external = "https://elsewhere.example.com/.well-known/oauth-protected-resource";
+    const transport = httpTransport({
+      port: 0,
+      oauth: { metadata: OAUTH_METADATA, resourceMetadataUrl: external },
+    });
+    const harness = await startHarnessOn(transport);
+    const addr = transport.address();
+    if (addr === null) throw new Error("httpTransport did not bind a port");
+    const mcpUrl = `http://127.0.0.1:${addr.port}/mcp`;
+
+    const res = await fetch(mcpUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(`Bearer resource_metadata="${external}"`);
+    await res.body?.cancel();
+
+    await harness.close();
+    await transport.close();
+  });
+
+  it("stays dormant when oauth is not configured — unauthenticated requests reach the pipeline unchanged", async () => {
+    // No oauth on the transport → pre-gate never fires. The absent-token
+    // POST is NOT 401'd at the crossing; it reaches the SDK, which (per
+    // the existing baseline) opens a session and lets the per-operation
+    // pipeline gate individual operations. Proven by the connection being
+    // tracked — the crossing was accepted, not pre-gate-rejected.
+    const { harness, transport, url } = await makeHttpServer();
+    const clientTransport = new StreamableHTTPClientTransport(new URL(url), {
+      requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
+    });
+    const client = await makeHttpClient(clientTransport, "no-oauth-srv");
+
+    // initialize succeeded (SDK session opened) — the pre-gate did not
+    // intercept the crossing because oauth is unconfigured.
+    expect(harness.connections()).toHaveLength(1);
+    const tools = await client.listTools();
+    expect(tools.map((t) => t.name)).toContain("echo");
+
+    await client.close();
+    await harness.close();
+    await transport.close();
+  });
+
+  it("keeps attached-mode citizenship — pre-gate guards only the MCP path, not foreign routes", async () => {
+    const caller: HttpServer = createServer((req, res) => {
+      if (req.url === "/caller-route") {
+        res.writeHead(200, { "Content-Type": "text/plain" });
+        res.end("caller-handled");
+      }
+    });
+    await new Promise<void>((resolve) => caller.listen(0, "127.0.0.1", resolve));
+    const port = (caller.address() as AddressInfo).port;
+    const base = `http://127.0.0.1:${port}`;
+
+    const transport = httpTransport({ server: caller, oauth: { metadata: OAUTH_METADATA } });
+    const harness = await startHarnessOn(transport);
+
+    // Foreign path is untouched by the pre-gate — the caller's own
+    // listener answers it (no 401).
+    const foreign = await fetch(`${base}/caller-route`);
+    expect(foreign.status).toBe(200);
+    expect(await foreign.text()).toBe("caller-handled");
+
+    // Discovery still open.
+    const md = await fetch(`${base}${WELL_KNOWN}`);
+    expect(md.status).toBe(200);
+
+    // The MCP path IS gated.
+    const gated = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    expect(gated.status).toBe(401);
+    await gated.body?.cancel();
+
+    await harness.close();
+    await transport.close();
+    await new Promise<void>((resolve) => caller.close(() => resolve()));
+  });
+});
+
 describe("streamableHttpTransport — client factory + OAuth threading", () => {
   it("wires an authProvider whose redirect fires the session URL elicit", async () => {
     const elicitCalls: UrlElicitationRequest[] = [];
