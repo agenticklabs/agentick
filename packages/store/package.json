@@ -5,9 +5,9 @@
   "keywords": [
     "agentick",
     "collection",
+    "conformance",
     "store",
-    "substrate",
-    "conformance"
+    "substrate"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",

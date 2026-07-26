@@ -2,11 +2,14 @@
   "name": "@agentick/sandbox-lambda",
   "version": "1.0.0-next.7",
   "description": "AWS Lambda MicroVMs SandboxProvider — one Firecracker microVM per sandbox, an in-VM sandbox-agent serving the contract over HTTP+WS, exec streamed frame-by-frame, atomic editFile via applyEdits, domain-level egress via an in-VM proxy. The prod remote runtime (ADR 60).",
-  "type": "module",
-  "main": "src/index.ts",
   "bin": {
     "agentick-sandbox-agent": "./src/agent/bin.ts"
   },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "src/index.ts",
   "exports": {
     ".": {
       "types": "./src/index.ts",
@@ -24,29 +27,11 @@
       "default": "./src/testing/index.ts"
     }
   },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint src/",
-    "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
-  },
-  "dependencies": {
-    "@agentick/sandbox": "workspace:*",
-    "@aws-sdk/client-lambda-microvms": "^3.1080.0",
-    "ws": "^8.18.0"
-  },
-  "devDependencies": {
-    "@types/ws": "^8.18.1"
-  },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=20.19"
-  },
   "publishConfig": {
     "access": "public",
+    "bin": {
+      "agentick-sandbox-agent": "./dist/agent/bin.js"
+    },
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -65,9 +50,24 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "bin": {
-      "agentick-sandbox-agent": "./dist/agent/bin.js"
-    }
+    "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/sandbox": "workspace:*",
+    "@aws-sdk/client-lambda-microvms": "^3.1080.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

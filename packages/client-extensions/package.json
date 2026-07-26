@@ -21,6 +21,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/client-extensions"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -49,28 +52,6 @@
       "import": "./src/offline/index.ts",
       "default": "./src/offline/index.ts"
     }
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint src/",
-    "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
-  },
-  "dependencies": {
-    "@agentick/spec": "workspace:*"
-  },
-  "devDependencies": {
-    "@agentick/client-core": "workspace:*",
-    "@agentick/transport-in-process": "workspace:*",
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.18"
-  },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=20.19"
   },
   "publishConfig": {
     "access": "public",
@@ -103,5 +84,24 @@
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/client-core": "workspace:*",
+    "@agentick/transport-in-process": "workspace:*",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

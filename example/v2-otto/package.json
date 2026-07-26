@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@agentick/app": "workspace:*",
-    "@agentick/model-ai-sdk": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
     "@agentick/knobs": "workspace:*",
     "@agentick/mcp": "workspace:*",
-    "@agentick/compiler-react": "workspace:*",
+    "@agentick/model-ai-sdk": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/state": "workspace:*",

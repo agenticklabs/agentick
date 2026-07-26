@@ -2,6 +2,9 @@
   "name": "@agentick/gateway",
   "version": "1.0.0-next.7",
   "description": "GatewayHarness — v2 runtime-root harness (formerly @agentick/gateway/v2). Per ADR 31, hosts apps + owns top-level substrate.",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -15,6 +18,23 @@
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -37,27 +57,7 @@
     "@agentick/spec-conformance": "workspace:*",
     "@agentick/timeline": "workspace:*"
   },
-  "files": [
-    "dist"
-  ],
   "engines": {
     "node": ">=20.19"
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
-      },
-      "./testing": {
-        "types": "./dist/testing/index.d.ts",
-        "import": "./dist/testing/index.js",
-        "default": "./dist/testing/index.js"
-      }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
   }
 }

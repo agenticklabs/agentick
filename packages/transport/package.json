@@ -16,6 +16,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/transport"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -39,43 +42,6 @@
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
     }
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint src/",
-    "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
-  },
-  "dependencies": {
-    "@agentick/pubsub": "workspace:*",
-    "@agentick/spec": "workspace:*",
-    "@agentick/utils": "workspace:*"
-  },
-  "peerDependencies": {
-    "vitest": "^4.0.0"
-  },
-  "peerDependenciesMeta": {
-    "vitest": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@agentick/app": "workspace:*",
-    "@agentick/compiler-react": "workspace:*",
-    "@agentick/gateway": "workspace:*",
-    "@agentick/model-executor": "workspace:*",
-    "@agentick/runtime": "workspace:*",
-    "@agentick/timeline": "workspace:*",
-    "effect": "^3.22.0",
-    "typescript": "^5.7.3",
-    "vitest": "^4.0.18"
-  },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=20.19"
   },
   "publishConfig": {
     "access": "public",
@@ -103,5 +69,39 @@
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/pubsub": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/app": "workspace:*",
+    "@agentick/compiler-react": "workspace:*",
+    "@agentick/gateway": "workspace:*",
+    "@agentick/model-executor": "workspace:*",
+    "@agentick/runtime": "workspace:*",
+    "@agentick/timeline": "workspace:*",
+    "effect": "^3.22.0",
+    "typescript": "^5.7.3",
+    "vitest": "^4.0.18"
+  },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

@@ -7,8 +7,8 @@
     "agentick",
     "ai",
     "client",
-    "react",
     "hooks",
+    "react",
     "useSyncExternalStore"
   ],
   "license": "MIT",
@@ -18,6 +18,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/client-react"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -26,36 +29,6 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     }
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint src/",
-    "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
-  },
-  "dependencies": {
-    "@agentick/client-core": "workspace:*"
-  },
-  "peerDependencies": {
-    "react": ">=18.0.0"
-  },
-  "devDependencies": {
-    "@agentick/spec": "workspace:*",
-    "@agentick/tasks": "workspace:*",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.2",
-    "@types/react": "^19.2.5",
-    "@types/react-dom": "^19.2.3",
-    "happy-dom": "^17.6.3",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4"
-  },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=20.19"
   },
   "publishConfig": {
     "access": "public",
@@ -68,5 +41,32 @@
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/client-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@agentick/spec": "workspace:*",
+    "@agentick/tasks": "workspace:*",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "happy-dom": "^17.6.3",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

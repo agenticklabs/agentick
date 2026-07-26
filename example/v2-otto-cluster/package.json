@@ -10,9 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentick/cluster": "workspace:*",
     "@agentick/cluster-broker": "workspace:*",
     "@agentick/cluster-net": "workspace:*",
-    "@agentick/cluster": "workspace:*",
     "@agentick/runtime": "workspace:*"
   },
   "devDependencies": {

@@ -11,9 +11,9 @@
   },
   "dependencies": {
     "@agentick/app": "workspace:*",
-    "@agentick/model-ai-sdk": "workspace:*",
-    "@agentick/knobs": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
+    "@agentick/knobs": "workspace:*",
+    "@agentick/model-ai-sdk": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/state": "workspace:*",
     "@agentick/timeline": "workspace:*",

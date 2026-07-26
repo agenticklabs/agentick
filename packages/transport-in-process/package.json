@@ -16,6 +16,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/transport-in-process"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -24,6 +27,18 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -57,22 +72,7 @@
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
   },
-  "files": [
-    "dist"
-  ],
   "engines": {
     "node": ">=20.19"
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
-      }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
   }
 }

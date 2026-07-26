@@ -12,7 +12,7 @@ autoInstallPeers: true
 allowBuilds:
   esbuild: true
   onnxruntime-node: true
-  '@nestjs/core': false
+  "@nestjs/core": false
   isolated-vm: false
   msgpackr-extract: false
   msw: false

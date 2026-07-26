@@ -18,6 +18,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/transport-websocket"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -36,6 +39,28 @@
       "import": "./src/server/index.ts",
       "default": "./src/server/index.ts"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -62,32 +87,7 @@
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"
   },
-  "files": [
-    "dist"
-  ],
   "engines": {
     "node": ">=20.19"
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
-      },
-      "./client": {
-        "types": "./dist/client/index.d.ts",
-        "import": "./dist/client/index.js",
-        "default": "./dist/client/index.js"
-      },
-      "./server": {
-        "types": "./dist/server/index.d.ts",
-        "import": "./dist/server/index.js",
-        "default": "./dist/server/index.js"
-      }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
   }
 }

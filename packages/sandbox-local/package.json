@@ -2,6 +2,9 @@
   "name": "@agentick/sandbox-local",
   "version": "1.0.0-next.7",
   "description": "Local reference SandboxProvider — spawns commands in a temp workspace, path-confined fs, atomic editFile, dynamic mounts, and a 127.0.0.1 egress proxy (ADR 59).",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -10,23 +13,6 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     }
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "oxlint src/",
-    "format:check": "oxfmt --check src/",
-    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
-  },
-  "dependencies": {
-    "@agentick/sandbox": "workspace:*",
-    "@agentick/utils": "workspace:*"
-  },
-  "files": [
-    "dist"
-  ],
-  "engines": {
-    "node": ">=20.19"
   },
   "publishConfig": {
     "access": "public",
@@ -39,5 +25,19 @@
     },
     "main": "./dist/index.js",
     "types": "./dist/index.d.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/sandbox": "workspace:*",
+    "@agentick/utils": "workspace:*"
+  },
+  "engines": {
+    "node": ">=20.19"
   }
 }

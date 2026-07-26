@@ -6,9 +6,9 @@
     "agent",
     "agentick",
     "ai",
-    "resources",
     "harness",
-    "mcp"
+    "mcp",
+    "resources"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
@@ -17,6 +17,9 @@
     "url": "git+https://github.com/agenticklabs/agentick.git",
     "directory": "packages/resources"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": [
     "./src/index.ts",
@@ -47,6 +50,33 @@
       "default": "./src/testing/index.ts"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./react": {
+        "types": "./dist/react/index.d.ts",
+        "import": "./dist/react/index.js",
+        "default": "./dist/react/index.js"
+      },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -76,37 +106,7 @@
       "optional": true
     }
   },
-  "files": [
-    "dist"
-  ],
   "engines": {
     "node": ">=20.19"
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
-      },
-      "./react": {
-        "types": "./dist/react/index.d.ts",
-        "import": "./dist/react/index.js",
-        "default": "./dist/react/index.js"
-      },
-      "./client": {
-        "types": "./dist/client/index.d.ts",
-        "import": "./dist/client/index.js",
-        "default": "./dist/client/index.js"
-      },
-      "./testing": {
-        "types": "./dist/testing/index.d.ts",
-        "import": "./dist/testing/index.js",
-        "default": "./dist/testing/index.js"
-      }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
   }
 }

@@ -21,6 +21,9 @@
   "bin": {
     "agentick-mcp-server": "./src/server/bin.ts"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "sideEffects": [
     "./src/index.ts",
@@ -55,6 +58,36 @@
       "default": "./src/testing/index.ts"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "bin": {
+      "agentick-mcp-server": "./dist/server/bin.js"
+    },
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./oauth": {
+        "types": "./dist/oauth/index.d.ts",
+        "import": "./dist/oauth/index.js",
+        "default": "./dist/oauth/index.js"
+      },
+      "./server": {
+        "types": "./dist/server/index.d.ts",
+        "import": "./dist/server/index.js",
+        "default": "./dist/server/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -86,40 +119,7 @@
     "@types/react": "^19.2.5",
     "react": "^19.2.4"
   },
-  "files": [
-    "dist"
-  ],
   "engines": {
     "node": ">=20.19"
-  },
-  "publishConfig": {
-    "access": "public",
-    "exports": {
-      ".": {
-        "types": "./dist/index.d.ts",
-        "import": "./dist/index.js",
-        "default": "./dist/index.js"
-      },
-      "./oauth": {
-        "types": "./dist/oauth/index.d.ts",
-        "import": "./dist/oauth/index.js",
-        "default": "./dist/oauth/index.js"
-      },
-      "./server": {
-        "types": "./dist/server/index.d.ts",
-        "import": "./dist/server/index.js",
-        "default": "./dist/server/index.js"
-      },
-      "./testing": {
-        "types": "./dist/testing/index.d.ts",
-        "import": "./dist/testing/index.js",
-        "default": "./dist/testing/index.js"
-      }
-    },
-    "main": "./dist/index.js",
-    "types": "./dist/index.d.ts",
-    "bin": {
-      "agentick-mcp-server": "./dist/server/bin.js"
-    }
   }
 }

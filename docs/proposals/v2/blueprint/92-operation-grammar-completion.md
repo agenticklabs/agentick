@@ -58,18 +58,22 @@ families, plus one visibility note.
    the declarations form journals because the crossing itself is the
    op. The slice must assert this chain (child op scope carries the
    crossing's opId as parentOpId + the mcp connection dim).
-   **Ratified (Ryan, 2026-07-26): layered execution = layered journal
-   records, deliberately.** A crossing that traverses N real layers
-   (mcp crossing → tool dispatch → handler sub-ops) produces N linked
-   records; per-op-class journal policy trims chatty CLASSES, never
-   collapses real layers. Open consideration for Slice A (not
-   required): the MCP server's tool invocation currently bypasses the
-   tool-executor (`resolveFromCreatedTools` is MCP-local resolution) —
-   delegating to the ToolExecutor dispatch op would unify dispatch
-   machinery (confirmation gates, timeouts, aliases, client-tool
-   handling for free) AND yield the two-record layering naturally.
-   Evaluate under the three-consumers rule during Slice A; do not
-   force artificial layers where no real layer executes.
+   **Layering principle: layered execution = layered journal records.**
+   A crossing that traverses N REAL layers produces N linked records;
+   per-op-class journal policy trims chatty CLASSES, never collapses
+   real layers — and conversely, no artificial layers are forced where
+   no real layer executes.
+   **OPEN QUESTION (no presumption — Ryan explicitly unsure,
+   2026-07-26): MCP tool-invocation dispatch-unification.** The MCP
+   server's tool invocation currently bypasses the tool-executor
+   (`resolveFromCreatedTools` is MCP-local resolution). Delegating to
+   the ToolExecutor dispatch op would unify dispatch machinery
+   (confirmation gates, timeouts, aliases, client-tool handling) and
+   yield two-record layering — but it also couples the MCP server to
+   the executor and changes MCP tool semantics (confirmation gates
+   firing on external callers). Re-present with fresh analysis at
+   Slice A time; Slice A does NOT depend on it (the crossing op stands
+   alone).
 2. **Subscription dispatch** — a cron/scheduler fire or external driver
    invokes the subscription handler as a bare callback
    (`subscriptions/src/bridge.ts:121`). Time-triggered ingress with no
