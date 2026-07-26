@@ -25,6 +25,7 @@
  */
 
 export * from "./events.js";
+export * from "./runtime-context.js";
 export * from "./outcomes.js";
 export * from "./operations.js";
 export * from "./inbox.js";

@@ -166,8 +166,11 @@ one flat contract (`ctx.log`, `ctx.trace`, `ctx.metrics`) landed identically on
 every ctx-shaped surface (`ToolHandlerCtx` in-process, the MCP request ctx, and
 the runtime **interceptor ctx** — a `harness.use` middleware / `harness.guard` /
 command hook receives the SAME facets, as `InterceptorCtx = RuntimeContext &
-Observability & Ops`). `deriveObservability(deps)` is the ONE derivation; the few
-ctx assemblers call it, so there is one implementation behind N call sites.
+Observability & Ops`). `deriveContext(parent, facets)` is the ONE branded
+boundary-ctx constructor (ADR 91) — it copies the trunk + attaches these facets;
+the raw `deriveObservability` / `deriveOps` derivers are called in exactly one
+place behind it (a CI grep gate enforces it), so there is one implementation
+behind every ctx-assembly site. See "deriveContext" below.
 
 ```ts
 handler: async (input, { ctx }) => {
@@ -269,12 +272,19 @@ parented + hook-observed + guard-vetoed + run-only runner), and the cross-surfac
 ## RuntimeContext — scope identity that propagates through Effect fibers
 
 `RuntimeContext` is the ambient state a handler, middleware, or
-observer sees. It extends `EventScope` (the canonical event-routing
-identity coordinates from `@agentick/spec`) with operation-level
-state, diagnostic ephemera, and an adopter-augmentable `user` slot.
+observer sees — the **trunk** of the ctx spine (ADR 91). The TYPE (and
+`EMPTY_CONTEXT` / `RuntimeContextUser`) lives in `@agentick/spec` — it
+is pure data with zero runtime deps, so it sits behind the firewall;
+this package owns the FiberRef PROPAGATION mechanism (`getContext` /
+`withContext` / `readContext`) and re-exports the type for local
+imports. It extends `EventScope` (the canonical event-routing identity
+coordinates) with operation-level state, diagnostic ephemera, and an
+adopter-augmentable `user` slot. Every boundary ctx (a tool handler's
+`ctx`, an interceptor ctx, the MCP request ctx, the wire ctx) is
+DERIVED from this trunk via `deriveContext` (see below).
 
 ```ts
-import type { RuntimeContext } from "@agentick/runtime";
+import type { RuntimeContext } from "@agentick/runtime"; // re-exported from @agentick/spec
 
 interface RuntimeContext extends EventScope {
   // Inherited from EventScope: appId / sessionId / executionId /
@@ -296,14 +306,17 @@ interface RuntimeContext extends EventScope {
 
 ### Adopter extension via module augmentation
 
-`RuntimeContextUser` is an empty seed in spec-next. Adopters augment
-via `declare module` to type their own per-call ambient state.
-Mirrors the v1 `UserContext` pattern + the v2 `HookBridges` /
-`EventScopeExtensions` empty-seed convention used elsewhere.
+`RuntimeContextUser` is an empty seed in `@agentick/spec` (it moved
+there with the trunk — ADR 91). Adopters augment via `declare module
+"@agentick/spec"` to type their own per-call ambient state. Mirrors
+the `HookBridges` / `EventScopeExtensions` empty-seed convention used
+elsewhere. (Augmentation files must carry a top-level `export {}` — a
+type-only `declare module` with no import/export is a script that
+SHADOWS the module instead of augmenting it.)
 
 ```ts
 // In your app's setup:
-declare module "@agentick/runtime" {
+declare module "@agentick/spec" {
   interface RuntimeContextUser {
     readonly tenantId: string;
     readonly userId: string;
@@ -339,6 +352,35 @@ The `readContext()` function exists as an escape hatch for places that
 genuinely can't receive `ctx` as a parameter (top-level subscribers,
 plugin hooks with fixed signatures). Most code should NOT use it —
 receive `ctx` via deps and let closure semantics propagate it.
+
+### `deriveContext` — the ONE branded boundary-ctx constructor (ADR 91)
+
+Every boundary ctx the framework hands a seam derives from the invoking
+crossing's `RuntimeContext` — never a bag fabricated from nothing. The single
+constructor is `deriveContext`: it copies the parent trunk, attaches the lazy
+`Observability` + `Ops` facet getters, and stamps a spec-private `Derived<…>`
+brand. It is the sole caller of the raw `deriveObservability` / `deriveOps`
+derivers (a `check:ctx-derivers` grep gate fails the build on any other direct
+call).
+
+```ts
+import { deriveContext } from "@agentick/runtime";
+
+// Off-fiber boundary (MCP accept, a connection crossing): pass the parent
+// trunk explicitly.
+const ctx = deriveContext(parentTrunk, { log, namespace, surface, scope, runOperation, runtime });
+
+// In-fiber Effect callers: read the parent from the ambient FiberRef. The
+// ambient form is Effect-native (a synchronous ambient read is the
+// `readContext()` trap), so it yields an Effect.
+const ctx = yield* deriveContext({ log, namespace, surface, scope, runOperation });
+```
+
+The brand is the enforcement point: a framework seam-invocation site typed to
+accept `Derived<…>` (e.g. `InterceptorCtxRef`) rejects a hand-assembled bag at
+compile time; adopter handler signatures keep the plain interfaces (a branded
+value satisfies a plain one — zero adopter friction). Tests construct a branded
+ctx via `deriveTestContext` from the `@agentick/runtime/testing` subpath.
 
 ### Why no `runWithContext` (sync scoped-set)
 

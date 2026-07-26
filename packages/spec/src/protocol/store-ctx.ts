@@ -22,17 +22,12 @@
  *
  * ## Import discipline (data-layer plan §6-D)
  *
- * `RuntimeContext` lives in `@agentick/runtime`, NOT spec — and spec has
- * **zero** runtime deps (it is the firewall). So `StoreCtx` cannot literally
- * `extends RuntimeContext`. Instead it is defined **structurally** over
- * {@link EventScope} (which IS in spec) with the `RuntimeContext`-added fields
- * (`opId` / `parentOpId` / `op` / `correlationId` / `traceparent` / `user`)
- * inlined. The shapes are kept in lockstep by construction: a `RuntimeContext`
- * value is structurally assignable to `StoreCtx` (every field `StoreCtx` adds is
- * optional), which is exactly what the runtime relies on when it builds a
- * `StoreCtx` from harness slots (Run A) and, later, enriches it from
- * `getContext` (Run B). If `RuntimeContext` ever moves into spec, this can
- * collapse to a literal `extends`.
+ * `RuntimeContext` now lives in `@agentick/spec` (ADR 91 §1 moved the trunk out
+ * of `@agentick/runtime`), so `StoreCtx` `extends RuntimeContext` literally —
+ * the earlier structural inlining (and its `user: unknown` weakening) is gone.
+ * A `RuntimeContext` value is assignable here because every store-only field is
+ * optional; the runtime builds a `StoreCtx` from harness slots (Run A) and, later,
+ * enriches it from `getContext` (Run B).
  *
  * ## The event-sourcing seam (Run B)
  *
@@ -50,7 +45,8 @@
 
 import type { Stream } from "effect";
 
-import type { EventScope, EventQuery, ProtocolEvent } from "../data/events.js";
+import type { EventQuery, ProtocolEvent } from "../data/events.js";
+import type { RuntimeContext } from "../data/runtime-context.js";
 import type { JournalError } from "../data/errors.js";
 import type { JournalReadFrom } from "./journal.js";
 
@@ -98,12 +94,11 @@ export interface StoreCtxExtensions {}
 /**
  * The explicit runtime-scope carrier threaded into every store DATA method as
  * the FINAL parameter — the store-side twin of `AsyncMiddleware`'s explicit
- * `ctx`. Structurally a `RuntimeContext` (see the import-discipline note above)
- * plus three store-only fields.
+ * `ctx`. The {@link RuntimeContext} trunk (ADR 91) plus three store-only fields.
  *
- * The runtime fields (`opId` / `parentOpId` / `op` / `correlationId` /
- * `traceparent` / `user`) are inlined from `RuntimeContext` so a `RuntimeContext`
- * value is assignable here. Every field is optional — outside an active op scope
+ * The trunk fields (`opId` / `parentOpId` / `op` / `correlationId` /
+ * `traceparent` / `user` + the `EventScope` identity axis) come from
+ * `extends RuntimeContext`. Every field is optional — outside an active op scope
  * they are `undefined`.
  *
  *   - `opId` — the operation id. The **idempotency key** a durable store dedups
@@ -117,20 +112,7 @@ export interface StoreCtxExtensions {}
  * Pure in-memory stores (the bundled defaults) **accept and ignore** `ctx` —
  * they hold no durable state that identity/idempotency/as-of would change.
  */
-export interface StoreCtx extends EventScope, StoreCtxExtensions {
-  // ── Inlined from RuntimeContext (spec cannot import runtime; see note) ──
-  readonly opId?: string;
-  readonly parentOpId?: string;
-  readonly op?: string;
-  readonly correlationId?: string;
-  readonly traceparent?: string;
-  /**
-   * Adopter ambient state. Typed `unknown` here because its concrete shape
-   * (`RuntimeContextUser`) is declared in `@agentick/runtime`, which spec
-   * cannot import. A `RuntimeContext.user` value assigns cleanly.
-   */
-  readonly user?: unknown;
-
+export interface StoreCtx extends RuntimeContext, StoreCtxExtensions {
   // ── Store-only fields ──────────────────────────────────────────────────
   /** The READ slice of the harness's journal — the event-sourcing fold input. */
   readonly journalReader?: JournalReader;

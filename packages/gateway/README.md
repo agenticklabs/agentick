@@ -314,7 +314,9 @@ same registry adopter extensions use. Framework-supplied
 `WireExtension` values are pre-registered on every `GatewayHarness`
 at construction. Streaming methods (`session/send` with
 `_meta.progressToken`, `sub/subscribe` with server-allocated ids)
-consume the `ctx.transport` slot on `WireExtensionContext` —
+consume the `ctx.wire` slot on `WireExtensionContext` (renamed from
+`ctx.transport` — ADR 91; it is the wire-crossing's verbs, and the old
+name collided with `ToolHandlerCtx.transport`) —
 `progress(...)` for progress frames, `registerCancel(...)` for
 `notifications/cancelled` seam, `registerSubscription(...)` for
 subscription fan-out.

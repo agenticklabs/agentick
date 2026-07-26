@@ -21,3 +21,4 @@ export {
   type SpyTelemetrySink,
   type RecordedSinkMetric,
 } from "./spy-telemetry-sink.js";
+export { deriveTestContext } from "./derive-test-context.js";

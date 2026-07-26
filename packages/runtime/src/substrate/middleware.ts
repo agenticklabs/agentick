@@ -28,6 +28,7 @@ import type {
   BeforeHook,
   ChunkHooksOf,
   ChunkRegistrarsOf,
+  Derived,
   HooksOf,
   Middleware,
   Observability,
@@ -71,7 +72,9 @@ export type InterceptorCtx = RuntimeContext & Observability & Ops;
  * Process-global by design, exactly like {@link CallMiddlewareRef} /
  * `RuntimeContextRef`.
  */
-export const InterceptorCtxRef = FiberRef.unsafeMake<InterceptorCtx | undefined>(undefined);
+export const InterceptorCtxRef = FiberRef.unsafeMake<Derived<InterceptorCtx> | undefined>(
+  undefined,
+);
 
 /** Detached `run` — throws: the operation ladder is unreachable without a runner. */
 const detachedRun = (): never => {

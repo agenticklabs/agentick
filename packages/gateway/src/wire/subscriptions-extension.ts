@@ -5,11 +5,11 @@
  *
  * Wire methods:
  *   - `sub/subscribe` — open a durable subscription on a scope's
- *     event bus. Uses `ctx.transport.registerSubscription(...)` to
+ *     event bus. Uses `ctx.wire.registerSubscription(...)` to
  *     allocate a server-side id + fan out
  *     `notifications/subscription/event` frames.
  *   - `sub/unsubscribe` — client-initiated teardown. Uses
- *     `ctx.transport.closeSubscription(id)`.
+ *     `ctx.wire.closeSubscription(id)`.
  *
  * The namespace prefix rename (bare `subscribe` / `unsubscribe` →
  * `sub/subscribe` / `sub/unsubscribe`) satisfies the wire-extension
@@ -136,7 +136,7 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       }
 
       let cancelled = false;
-      const sub = ctx.transport.registerSubscription(async () => {
+      const sub = ctx.wire.registerSubscription(async () => {
         cancelled = true;
       });
 
@@ -160,7 +160,7 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       return { subscriptionId: sub.id };
     },
     "sub/unsubscribe": async ({ subscriptionId }, ctx) => {
-      ctx.transport.closeSubscription(subscriptionId);
+      ctx.wire.closeSubscription(subscriptionId);
       return null;
     },
   },

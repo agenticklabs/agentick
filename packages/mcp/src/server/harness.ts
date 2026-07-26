@@ -18,13 +18,7 @@
  */
 
 import { Effect } from "effect";
-import {
-  BaseHarness,
-  deriveObservability,
-  deriveOps,
-  ulid,
-  type Unsubscribe,
-} from "@agentick/runtime";
+import { BaseHarness, deriveContext, ulid, type Unsubscribe } from "@agentick/runtime";
 import type {
   EventBus,
   EventScope,
@@ -570,6 +564,26 @@ export class McpServerHarness
       // MCP-specific extras nested under `mcp:`. Tool handlers receive
       // the SAME ctx shape whether dispatched in-process or via MCP.
       const ctx: McpRequestContext = {
+        // The branded ctx spine (ADR 91). `deriveContext` derives the trunk
+        // from the CONNECTION crossing (`connectionScope` — the off-fiber
+        // parent) and attaches the Observability + Ops facets in ONE call (no
+        // direct `deriveObservability` / `deriveOps` — grep gate). `log` emits
+        // ONE discrete bus event scoped to THIS connection; `installLogProjection`
+        // (above) forwards it to the wire (`notifications/message`).
+        // `trace`/`metrics` go to the server's telemetry PROVIDER, NOT the wire
+        // — off-path no-ops here (they never touch the bus). The ctx is
+        // assembled OFF-fiber (no enclosing op runtime), so `ctx.run` ad-hoc
+        // ops run as ROOT ops on this server harness's runner — still journaled
+        // + interceptor-folded, just not parented under a caller op.
+        ...deriveContext(connectionScope, {
+          log: (level, data, logger, trace) => {
+            void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
+          },
+          namespace: this.telemetryNamespace,
+          surface: "mcp",
+          scope: connectionScope,
+          runOperation: this.runOperation.bind(this),
+        }),
         // Universal ToolHandlerCtx fields. The MCP server doesn't have
         // a `toolCallId` until the tool-call handler runs and the
         // tools projection generates one; we synthesize a default here
@@ -584,29 +598,6 @@ export class McpServerHarness
         emit: () => {
           /* no-op for MCP-server ctx — sessions own channel emit */
         },
-        // ADR 64/78 — the Observability facet. `log` emits ONE discrete
-        // bus event scoped to THIS connection; `installLogProjection`
-        // (above) forwards it to the wire (`notifications/message`).
-        // `trace`/`metrics` (spread from `observability` below) go to the
-        // server's telemetry PROVIDER, NOT the wire — off-path no-ops here
-        // until a server-side provider is wired (they never touch the bus,
-        // so nothing leaks onto the MCP wire). Fire-and-forget for `log`:
-        // launched via `Effect.runFork`, never awaited, never throws.
-        ...deriveObservability({
-          log: (level, data, logger, trace) => {
-            void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
-          },
-          namespace: this.telemetryNamespace,
-        }),
-        // ADR 19/83 — the Ops facet (`ctx.run` / `ctx.runner`). The MCP
-        // request ctx is assembled OFF-fiber (no enclosing op runtime), so
-        // ad-hoc ops run as ROOT ops on this server harness's runner — still
-        // journaled + interceptor-folded, just not parented under a caller op.
-        ...deriveOps({
-          surface: "mcp",
-          scope: connectionScope,
-          runOperation: this.runOperation.bind(this),
-        }),
         progress: (token, p): void => {
           void Effect.runFork(
             this.emitProgress(connectionScope, {
@@ -796,6 +787,19 @@ export class McpServerHarness
   ): McpRequestContext {
     const connectionScope: Partial<EventScope> = { mcpServerId: this.scopeId };
     return {
+      // The branded ctx spine (ADR 91), derived from the off-connection crossing
+      // (`connectionScope`) with explicit anonymous identity (`mcp.user: null`
+      // below). ONE facet constructor — no direct `deriveObservability` /
+      // `deriveOps` (grep gate). Off-fiber: `ctx.run` ops run as roots.
+      ...deriveContext(connectionScope, {
+        log: (level, data, logger, trace) => {
+          void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
+        },
+        namespace: this.telemetryNamespace,
+        surface: "mcp",
+        scope: connectionScope,
+        runOperation: this.runOperation.bind(this),
+      }),
       toolCallId: `mcp:${label}:${ulid()}`,
       signal: new AbortController().signal,
       setState: () => {
@@ -804,17 +808,6 @@ export class McpServerHarness
       emit: () => {
         /* no-op — no channel behind an off-connection crossing */
       },
-      ...deriveObservability({
-        log: (level, data, logger, trace) => {
-          void Effect.runFork(this.emitLog(connectionScope, level, data, logger, trace));
-        },
-        namespace: this.telemetryNamespace,
-      }),
-      ...deriveOps({
-        surface: "mcp",
-        scope: connectionScope,
-        runOperation: this.runOperation.bind(this),
-      }),
       progress: () => {
         /* no-op — no progress token before the SDK sees the request */
       },
@@ -863,6 +856,17 @@ export class McpServerHarness
    * authenticator that throws — still yields a context with
    * `mcp.user: null`, and the instructions function decides how to handle
    * anonymity.
+   *
+   * The `base` ctx now derives through `deriveContext` (via
+   * {@link buildOffConnectionContext}) — the ADR 91 trunk sweep. The
+   * FORWARD-DERIVATION of the authenticated identity (retiring the
+   * authenticator run duplicated with the HTTP pre-gate) is NOT done here: the
+   * pre-gate authenticates at the transport/handshake layer and forwards only
+   * `info`, so collapsing the two runs needs the pre-gate to persist its
+   * authenticated user across the transport → `acceptConnection` boundary — a
+   * cross-layer change beyond this behavior-preserving slice.
+   * TODO(ADR-91 phase-2): thread the pre-gate's authenticated ctx into the
+   * instructions ctx so `security.authenticator` runs once per initialize.
    */
   private async buildInstructionsContext(info: McpConnectionInfo): Promise<McpRequestContext> {
     const base = this.buildOffConnectionContext(info, "init");

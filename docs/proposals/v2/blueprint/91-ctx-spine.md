@@ -126,7 +126,18 @@ underneath.
   gate = full suite green + zero hand-assembled ctx sites remain
   (greppable: direct `deriveObservability`/`deriveOps` calls outside
   the deriver are the smell).
-- **Phase 2 — feed the starved seams** (the Family A application):
+- **Phase 2 — feed the starved seams** (the Family A application), plus
+  two carry-overs from the Phase 1 judge pass: **brand totalization** —
+  Phase 1 brands the interceptor seam (`InterceptorCtxRef` demands
+  `Derived`), but tool/MCP/wire compose their final ctxs by SPREADING
+  the derived trunk into a larger literal, which erases the brand at
+  the type level; `deriveContext` gains a boundary-extras parameter
+  (`deriveContext(parent, facets, extras): Derived<OperationCtx & X>`)
+  so the whole composition is minted branded, and the tool-dispatch,
+  MCP-request, and wire-dispatch seams then demand it. And the
+  **MCP single-authenticator forward-derivation** (stop-ruled in
+  Phase 1: needs the pre-gate's authenticated identity persisted across
+  the transport→harness boundary; `TODO(ADR-91 phase-2)` at the site).
   `ResourceResolver`/`TemplateResolver` gain `(uri, ctx?)`, prompt
   `render` gains `(args, ctx?)`, `CompletionContext` and
   `TaskWorkContext` extend the trunk + facets. Optional in the

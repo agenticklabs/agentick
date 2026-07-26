@@ -101,6 +101,7 @@ export {
   type DeriveObservabilityDeps,
 } from "./substrate/observability.js";
 export { deriveOps, type DeriveOpsDeps, type RunOperationFn } from "./substrate/ops.js";
+export { deriveContext, type ContextFacets } from "./substrate/derive-context.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
 export { ulid } from "./substrate/ulid.js";

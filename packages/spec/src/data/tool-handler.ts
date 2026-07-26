@@ -18,6 +18,7 @@ import type { Elicit } from "../protocol/elicit-api.js";
 import type { ContentBlock } from "./content-blocks.js";
 import type { Observability } from "./observability.js";
 import type { Ops } from "./ops.js";
+import type { RuntimeContext } from "./runtime-context.js";
 import type { ToolResultInput } from "./tool-result.js";
 import type { ProgressToken } from "./signals.js";
 
@@ -98,12 +99,14 @@ export interface ToolHandlerCtxExtensions {}
  *
  * @see docs/proposals/v2/blueprint/66-tool-dependency-resolution.md
  */
-export interface ToolHandlerCtx extends ToolHandlerCtxExtensions, Observability, Ops {
+export interface ToolHandlerCtx
+  extends ToolHandlerCtxExtensions, RuntimeContext, Observability, Ops {
   // ── Universal — every transport populates these ───────────────────
+  // The work-path identity (`sessionId` / `executionId` / `tickId`) +
+  // operation coordinates (`opId` / `principal` / `origin` / …) are the
+  // {@link RuntimeContext} trunk, derived from the dispatching crossing
+  // (ADR 91) — no longer re-declared flat here.
   readonly toolCallId: string;
-  readonly sessionId?: string;
-  readonly executionId?: string;
-  readonly tickId?: string;
   readonly signal: AbortSignal;
   setState(key: string, value: unknown): void;
   emit(seed: HandlerChannelSeed): void;

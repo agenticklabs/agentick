@@ -42,10 +42,10 @@ import type { HookBridges } from "../protocol/hook-bridges.js";
 import type { SessionHarnessProtocol } from "../protocol/session-harness.js";
 import type { Observability } from "../data/observability.js";
 import type { Ops } from "../data/ops.js";
+import type { RuntimeContext } from "../data/runtime-context.js";
 import type { HandlerVerdict } from "../data/outcomes.js";
 import type { WireMethod, WireParams, WireResult } from "./params.js";
 import type { WireNotificationMethod, WireNotificationParams } from "./notifications.js";
-import type { IngressIdentity } from "./authorizer.js";
 
 // ============================================================================
 // WireMethodAuth — per-method auth declaration
@@ -229,7 +229,7 @@ export interface SubscriptionHandle {
  * Framework-supplied extensions (`sessionWireExtension`'s
  * `session/send`, `subscriptionsWireExtension`'s `sub/subscribe`)
  * consume this slot. Most adopter extensions don't need it —
- * simple request/response handlers can ignore `ctx.transport`
+ * simple request/response handlers can ignore `ctx.wire`
  * entirely.
  *
  * The slot is always present on the context (never conditional),
@@ -298,28 +298,11 @@ export interface WireExtensionTransport {
  * `{ method }` label. Off the telemetry path they collapse to the shared
  * frozen no-op / passthrough singletons (zero-cost).
  */
-export interface WireExtensionContext extends Observability, Ops {
-  /**
-   * Authenticated caller identity, stamped at ingress (ADR 51 §4.1).
-   * Undefined on unauthenticated connections (the local pole). The
-   * dynamic command lane's Authorizer gate consumes this; porcelain
-   * handlers may read it for principal-scoped behavior.
-   *
-   * The scalar CONVENIENCE projection of {@link identity} — the "who" as a
-   * string. Read {@link identity} for the structured object (`user`,
-   * `scopes`).
-   */
-  readonly principal?: string;
-  /**
-   * The full structured ingress identity (ADR 34/51 §4.1) — the object
-   * behind {@link principal}. Carries the adopter-shaped `user` record
-   * (`{ tenantId, userId, … }`) and the credential's `scopes`, so a wire
-   * handler (or a gateway `onBeforeWire<...>` hook reading the op ctx, into
-   * which the gateway threads this) can key on richer identity than the
-   * principal string alone. Undefined on unauthenticated connections (the
-   * local pole).
-   */
-  readonly identity?: IngressIdentity;
+export interface WireExtensionContext extends RuntimeContext, Observability, Ops {
+  // Authenticated caller identity (`principal` scalar + `identity` structured,
+  // ADR 34/51 §4.1) is the {@link RuntimeContext} trunk's identity axis (via
+  // `EventScope`), no longer re-declared here — the gateway stamps it on the
+  // wire op's scope and it rides the trunk (ADR 91).
   /** Active session, when the method is session-scoped. */
   readonly session?: SessionHarnessProtocol<unknown>;
   /** Active app, when the method is app-scoped or session-scoped. */
@@ -352,12 +335,17 @@ export interface WireExtensionContext extends Observability, Ops {
     params: WireNotificationParams<K>,
   ) => void;
   /**
-   * Transport-level primitives for streaming operations — progress
+   * Wire-crossing primitives for streaming operations — progress
    * notifications, cancellation registration, subscription fan-out.
    * See {@link WireExtensionTransport}. Adopter extensions that only
    * do simple request/response can ignore this slot entirely.
+   *
+   * (ADR 91: renamed from `transport` — it is the wire-crossing's verbs, not a
+   * transport-kind discriminator; the name conflicted with
+   * `ToolHandlerCtx.transport`, which keeps the name because it genuinely
+   * discriminates the transport.)
    */
-  readonly transport: WireExtensionTransport;
+  readonly wire: WireExtensionTransport;
 }
 
 // ============================================================================

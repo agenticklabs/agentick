@@ -35,6 +35,7 @@ import type {
   EventBus,
   CommandExposure,
   CommandInfo,
+  Derived,
   EventBusFactory,
   EventPhase,
   EventScope,
@@ -46,8 +47,6 @@ import type {
   JournalingPolicy,
   LogLevel,
   Middleware,
-  Observability,
-  Ops,
   ProgressEventPayload,
   MessageEnvelope,
   MessageInbox,
@@ -92,12 +91,11 @@ import {
 } from "./op-signals.js";
 import { createOperationRunner, type OperationRunner } from "./operation-runner.js";
 import {
-  deriveObservability,
   type LogTraceContext,
   type TelemetryProvider,
   type TelemetryRuntime,
 } from "./observability.js";
-import { deriveOps } from "./ops.js";
+import { attachOperationFacets, deriveContext, type ContextFacets } from "./derive-context.js";
 
 export {
   OperationVeto,
@@ -1188,27 +1186,60 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     ctxScope: RuntimeContext,
     scope: EventScope,
     runtime: Runtime.Runtime<never>,
-  ): InterceptorCtx {
-    const ctx = { ...ctxScope };
-    this.defineOperationFacets(ctx, scope, runtime, ctxScope.op);
-    return ctx as InterceptorCtx;
+  ): Derived<InterceptorCtx> {
+    // The branded ctx spine (ADR 91): `deriveContext` copies the trunk +
+    // attaches the lazy facet getters + stamps the brand. It is the ONLY legal
+    // boundary-ctx constructor — `InterceptorCtxRef` demands the brand, so a
+    // hand-assembled bag fails to compile here.
+    return deriveContext(ctxScope, this.operationFacets(scope, runtime, ctxScope.op));
   }
 
   /**
-   * Define the LAZY {@link Observability} + {@link Ops} facet getters
+   * Assemble the {@link ContextFacets} for one of this harness's operations —
+   * the harness-level deps (`emitLog` behind `ctx.log`, the resolved telemetry
+   * provider behind `ctx.metrics`/`trace`, the bound `runOperation` behind
+   * `ctx.run`/`ctx.runner`) `deriveContext` / {@link attachOperationFacets}
+   * turn into the flat facet getters. `op` is the low-cardinality op-suffix
+   * metric label; `extraLabels` merge under it (the wire passes `{ method }`).
+   */
+  private operationFacets(
+    scope: EventScope,
+    runtime: Runtime.Runtime<never>,
+    op: string | undefined,
+    extraLabels?: Readonly<Record<string, string>>,
+  ): ContextFacets {
+    const telemetry: TelemetryRuntime | undefined =
+      this.telemetryProvider !== undefined
+        ? { runtime, ...omitUndefined({ meter: this.telemetryProvider.meter }) }
+        : undefined;
+    return {
+      log: (level, data, logger, trace) => {
+        void Effect.runFork(this.emitLog(scope, level, data, logger, trace));
+      },
+      namespace: this.telemetryNamespace,
+      // Low-cardinality default labels: app identity (if any) + any surface
+      // extras (the wire's `{ method }`) + the op suffix.
+      defaultLabels: omitUndefined({ ...this.defaultMetricLabels, ...extraLabels, op }),
+      surface: this.surface,
+      scope,
+      runOperation: this.operationRunner.runOperation,
+      runtime,
+      ...omitUndefined({ telemetry }),
+    };
+  }
+
+  /**
+   * Attach the LAZY {@link Observability} + {@link Ops} facet getters
    * (`log` / `trace` / `metrics` / `run` / `runner`) onto `target`, IN-FIBER —
-   * the ONE derivation shared by {@link buildInterceptorCtx} (the interceptor
-   * cascade's ctx) and any surface that hands a facet-bearing ctx to an
-   * off-fiber handler running INSIDE one of this harness's ops (the gateway's
-   * wire-extension dispatch — ADR 64/78).
+   * the in-place twin of {@link buildInterceptorCtx} for a surface that hands a
+   * facet-bearing ctx to an off-fiber handler running INSIDE one of this
+   * harness's ops (the gateway's wire-extension dispatch — ADR 64/78). Shares
+   * the {@link attachOperationFacets} core with `deriveContext`, so the raw
+   * `deriveObservability` / `deriveOps` derivers are called in exactly one place
+   * (ADR 91 §2 — the grep gate enforces it).
    *
    * `runtime` is the op runtime captured in-fiber (parent span + tracer), so
-   * `trace` child spans + `ctx.run` ops parent under the enclosing op. `op` is
-   * the low-cardinality op-suffix metric label; `extraLabels` merge under it
-   * (the wire passes `{ method }`). The getters are copied by DESCRIPTOR at the
-   * call sites that need laziness preserved (see the gateway wire path) — reading
-   * a facet builds + memoizes its half; an op that never touches telemetry pays
-   * only the two thunks.
+   * `trace` child spans + `ctx.run` ops parent under the enclosing op.
    */
   protected defineOperationFacets(
     target: object,
@@ -1217,37 +1248,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     op: string | undefined,
     extraLabels?: Readonly<Record<string, string>>,
   ): void {
-    const telemetry: TelemetryRuntime | undefined =
-      this.telemetryProvider !== undefined
-        ? { runtime, ...omitUndefined({ meter: this.telemetryProvider.meter }) }
-        : undefined;
-    let obsMemo: Observability | undefined;
-    const obs = (): Observability =>
-      (obsMemo ??= deriveObservability({
-        log: (level, data, logger, trace) => {
-          void Effect.runFork(this.emitLog(scope, level, data, logger, trace));
-        },
-        namespace: this.telemetryNamespace,
-        // Low-cardinality default labels: app identity (if any) + any surface
-        // extras (the wire's `{ method }`) + the op suffix.
-        defaultLabels: omitUndefined({ ...this.defaultMetricLabels, ...extraLabels, op }),
-        ...omitUndefined({ telemetry }),
-      }));
-    let opsMemo: Ops | undefined;
-    const ops = (): Ops =>
-      (opsMemo ??= deriveOps({
-        surface: this.surface,
-        scope,
-        runOperation: this.operationRunner.runOperation,
-        runtime,
-      }));
-    Object.defineProperties(target, {
-      log: { get: () => obs().log, enumerable: true, configurable: true },
-      trace: { get: () => obs().trace, enumerable: true, configurable: true },
-      metrics: { get: () => obs().metrics, enumerable: true, configurable: true },
-      run: { get: () => ops().run, enumerable: true, configurable: true },
-      runner: { get: () => ops().runner, enumerable: true, configurable: true },
-    });
+    attachOperationFacets(target, this.operationFacets(scope, runtime, op, extraLabels));
   }
 
   protected emitLog(

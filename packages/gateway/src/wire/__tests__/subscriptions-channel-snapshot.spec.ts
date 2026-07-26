@@ -76,7 +76,7 @@ function stubCtx(gateway: GatewayHarnessProtocol) {
   };
   const ctx = {
     gateway,
-    transport: {
+    wire: {
       registerSubscription: () => handle,
       closeSubscription: () => {},
     },

@@ -228,8 +228,9 @@ export interface WithMCPOptions {
    * readable from the active {@link RuntimeContext} (typed via
    * `RuntimeContextUser` augmentation):
    *
-   *     // Adopter app augments first:
-   *     declare module "@agentick/runtime" {
+   *     // Adopter app augments first (ADR 91 — the trunk + its user seed
+   *     // live in @agentick/spec now):
+   *     declare module "@agentick/spec" {
    *       interface RuntimeContextUser {
    *         readonly tenantId: string;
    *       }

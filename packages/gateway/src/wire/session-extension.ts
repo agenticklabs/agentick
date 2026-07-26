@@ -5,7 +5,7 @@
  *
  * Part of the ADR 46 eat-our-own-dogfood commitment (#295 Phase C +
  * #303 streaming primitives). Post-#303, `session/send` uses
- * `ctx.transport.progress(...)` and `ctx.transport.registerCancel(...)`
+ * `ctx.wire.progress(...)` and `ctx.wire.registerCancel(...)`
  * to bridge to the connection's `DispatchSink` — no direct sink
  * access needed.
  *
@@ -96,7 +96,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       // Register cancellation seam — `notifications/cancelled` from
       // the client aborts the underlying execution handle. The
       // dispatcher clears the in-flight entry when the RPC returns.
-      ctx.transport.registerCancel(() => {
+      ctx.wire.registerCancel(() => {
         void handle.abort("client cancelled");
       });
 
@@ -111,7 +111,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       //       reuses the existing stream").
       let stopSignalDrain: (() => void) | undefined;
       if (progressToken !== undefined) {
-        const reporter = ctx.transport.progress(progressToken);
+        const reporter = ctx.wire.progress(progressToken);
 
         // (1) Execution-event fan-out. Envelope-local counter — separate
         // from the wire's outer `cursor` (managed inside the reporter).

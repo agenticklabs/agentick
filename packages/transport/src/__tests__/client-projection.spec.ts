@@ -337,12 +337,12 @@ const sendExt = {
     "session/send": async (_params: unknown, ctx: WireExtensionContext) => {
       // Fan out oversized notifications through the transport slot — exactly
       // the real send handler's egress (subscription + progress).
-      const sub = ctx.transport.registerSubscription(async () => {});
+      const sub = ctx.wire.registerSubscription(async () => {});
       sub.publish({
         name: TIMELINE_APPEND_EVENT_NAME,
         payload: { entries: [{ kind: "message", message: { content: [bigToolResult()] } }] },
       });
-      ctx.transport.progress("p1").push({
+      ctx.wire.progress("p1").push({
         payload: { type: "tool-dispatch", content: [bigTextBlock()] },
       });
       return {
@@ -404,7 +404,7 @@ describe("dispatchRequest — client projection applied at the wire funnel", () 
       namespace: "session",
       methods: {
         "session/dispatch": async (_p: unknown, ctx: WireExtensionContext) => {
-          ctx.transport
+          ctx.wire
             .progress("p1")
             .push({ payload: { type: "tool-dispatch", content: [progBlock] } });
           return handlerResult;

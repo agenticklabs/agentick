@@ -222,7 +222,7 @@ export async function dispatchRequest(
           );
         } finally {
           // Streaming handlers may have registered a cancel callback
-          // via `ctx.transport.registerCancel(...)`; clear it now
+          // via `ctx.wire.registerCancel(...)`; clear it now
           // that the RPC has returned. No-op if not registered.
           sink.unregisterInFlight(req.id);
         }
@@ -426,7 +426,7 @@ async function authorizeDispatch(
  * extension handler. Resolves `session` / `app` from
  * `params.sessionId` / `params.appId`, wires `publish` to validate
  * against the extension's declared notifications, and constructs the
- * `transport` slot backed by the connection's {@link DispatchSink}.
+ * `wire` slot backed by the connection's {@link DispatchSink}.
  *
  * Consistency: when params carry BOTH `sessionId` and `appId`,
  * the builder validates the session belongs to the named app.
@@ -465,7 +465,7 @@ function buildWireExtensionContext(
   }
 
   const declaredNotifications = new Set<string>(extension.notifications ?? []);
-  const transport = buildTransportSlot(reqId, sink);
+  const wire = buildTransportSlot(reqId, sink);
 
   return {
     // ADR 64/78 — off-path facet placeholders (`log`/`trace`/`metrics`/`run`/
@@ -499,7 +499,7 @@ function buildWireExtensionContext(
       }
       sink.sendNotification({ method: name, params: notifParams });
     },
-    transport,
+    wire,
   };
 }
 

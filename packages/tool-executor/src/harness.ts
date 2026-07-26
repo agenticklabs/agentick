@@ -24,13 +24,7 @@ import { omitUndefined } from "@agentick/utils";
 import { buildSessionElicit } from "@agentick/elicitation";
 
 import { Cause, Effect, Exit, Option } from "effect";
-import {
-  deriveObservability,
-  deriveOps,
-  getContext,
-  runHarnessProtocol,
-  ulid,
-} from "@agentick/runtime";
+import { deriveContext, getContext, runHarnessProtocol, ulid } from "@agentick/runtime";
 import {
   BaseHarness,
   type GuardDecider,
@@ -826,26 +820,26 @@ export class ToolExecutorHarness
               ...omitUndefined({ meter: this.telemetryProvider.meter }),
             }
           : undefined;
-      const observability = deriveObservability({
+      // The branded ctx spine (ADR 91). `deriveContext` copies the ambient
+      // trunk (so the dispatch ctx carries the CROSSING's identity —
+      // sessionId/opId/principal — not fabricated ones) and attaches the
+      // Observability + Ops facets. It is the ONE facet constructor: the raw
+      // `deriveObservability` / `deriveOps` derivers are no longer called here
+      // (grep gate). `log` keeps its scope-bound bus-emit; `trace`/`metrics`
+      // come from the telemetry provider when wired, else the off-path
+      // singletons. App-identity labels seed UNDER the per-dispatch defaults so
+      // `tool` / `op` always win (ADR 78).
+      const derived = deriveContext(ambient, {
         log: (level, data, logger, trace) => {
           void Effect.runFork(this.emitLog(dispatchScope, level, data, logger, trace));
         },
         namespace: this.telemetryNamespace,
-        // App-identity ambient label (if any) seeded UNDER the per-dispatch
-        // defaults so `tool` / `op` always win. Keeps multi-app shared-sink
-        // metrics distinguishable (ADR 78).
         defaultLabels: { ...this.defaultMetricLabels, tool: input.name, op: "ToolDispatch" },
-        ...omitUndefined({ telemetry }),
-      });
-      // Ops facet (ADR 19/83) — `ctx.run` mints ad-hoc operations through THIS
-      // harness's runOperation (journal + interceptor fold), parented under
-      // the dispatch op via the captured runtime; `ctx.runner` is the run-only
-      // escape hatch.
-      const ops = deriveOps({
         surface: "tool",
         scope: dispatchScope,
         runOperation: this.runOperation.bind(this),
         runtime: capturedRuntime,
+        ...omitUndefined({ telemetry }),
       });
       const ctx: ToolHandlerCtx = {
         // ADR 66 — opaque, harness-agnostic extension slots (e.g.
@@ -854,6 +848,10 @@ export class ToolExecutorHarness
         // `ToolHandlerCtxExtensions` augmentations; values point at live
         // bridges (dispatch-resolved, not render-captured).
         ...this.ctxExtensions,
+        // Trunk (ADR 91) + Observability/Ops facets, derived from the ambient
+        // crossing. The explicit work-path ids below override the trunk's on
+        // collision (they come from `input.context`, the authoritative source).
+        ...derived,
         toolCallId: input.toolCallId,
         ...omitUndefined({
           sessionId: input.context.sessionId,
@@ -914,18 +912,11 @@ export class ToolExecutorHarness
             );
           }
         },
-        // ADR 64/78 — the Observability facet's `log` + `trace` + `metrics`.
-        // `log` emits ONE discrete bus event (`tool:signal:log`, phase
-        // `terminal`, bus-only) scoped to this dispatch; projections
-        // subscribe (MCP → notifications/message; agentick client →
-        // subscribe/onLog). `trace`/`metrics` are the telemetry half
-        // (no-ops off). See `observability` above.
-        log: observability.log,
-        trace: observability.trace,
-        metrics: observability.metrics,
-        // ADR 19/83 — the Ops facet ladder rungs 3+4.
-        run: ops.run,
-        runner: ops.runner,
+        // ADR 64/78/19/83 — the Observability (`log`/`trace`/`metrics`) + Ops
+        // (`run`/`runner`) facets ride in via `...derived` above. `log` emits
+        // ONE discrete bus event (`tool:signal:log`, phase `terminal`,
+        // bus-only) scoped to this dispatch; projections subscribe (MCP →
+        // notifications/message; agentick client → subscribe/onLog).
         // ADR 64 — `progress` signal. Emits ONE discrete bus event
         // (`tool:signal:progress`, phase `terminal`, bus-only) scoped to
         // this dispatch. Fire-and-forget: launched with `Effect.runFork`,

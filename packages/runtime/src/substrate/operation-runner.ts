@@ -74,6 +74,7 @@ import { Effect, type Runtime } from "effect";
 import { omitUndefined } from "@agentick/utils";
 import type {
   CommandOutcome,
+  Derived,
   EventPhase,
   EventScope,
   JournalError,
@@ -214,7 +215,7 @@ export interface OperationRunnerDeps {
     ctxScope: RuntimeContext,
     scope: EventScope,
     runtime: Runtime.Runtime<never>,
-  ) => InterceptorCtx;
+  ) => Derived<InterceptorCtx>;
 }
 
 /**
@@ -378,7 +379,7 @@ class OperationRunnerImpl implements OperationRunner {
                     const ictx = this.buildInterceptorCtx!(ctxScope, scope, runtime);
                     return yield* Effect.locally(
                       InterceptorCtxRef,
-                      ictx as InterceptorCtx | undefined,
+                      ictx as Derived<InterceptorCtx> | undefined,
                     )(core);
                   })
                 : core;

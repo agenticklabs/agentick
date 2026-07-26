@@ -1,9 +1,13 @@
 /**
- * RuntimeContext — ambient scope identity propagated through Effect fibers.
+ * RuntimeContext FiberRef substrate — the in-fiber PROPAGATION mechanism for
+ * the ctx trunk.
  *
- * Extends `EventScope` (the canonical event-routing identity coordinates,
- * declared in `@agentick/spec/data/events.ts`) with operation-level
- * state, diagnostic ephemera, and an adopter-augmentable `user` slot.
+ * The `RuntimeContext` TYPE (and `EMPTY_CONTEXT` / `RuntimeContextUser`) moved
+ * to `@agentick/spec` (ADR 91 §1 — the trunk is pure data with zero runtime
+ * deps, so it belongs behind the firewall). This module keeps the MECHANISM:
+ * the FiberRef that holds the active trunk and the `getContext` / `withContext`
+ * / `readContext` surface over it. The type is re-exported here so substrate
+ * imports stay local (clean-imports convention).
  *
  *   - **Inside Effect**: substrate code reads via `yield* getContext` and
  *     scopes via `withContext(scope, effect)`. FiberRef-backed.
@@ -14,117 +18,17 @@
  *     `Effect.runSync` starts a fresh root fiber that doesn't inherit
  *     the outer's FiberRef. Use `yield* getContext` inside Effect.
  *
- * Per ADR 45 — see `docs/proposals/v2/blueprint/45-runtime-context-model.md`.
- *
- * @see EventScope (the canonical identity coordinates this extends)
- * @see RuntimeContextUser (the adopter-augmentable extension slot)
+ * Per ADR 45/91 — see `docs/proposals/v2/blueprint/45-runtime-context-model.md`
+ * and `docs/proposals/v2/blueprint/91-ctx-spine.md`.
  */
 
 import { Effect, FiberRef } from "effect";
 
-import type { EventScope } from "@agentick/spec";
+import { EMPTY_CONTEXT, type RuntimeContext } from "@agentick/spec";
 
-// ============================================================================
-// Adopter extension slot
-// ============================================================================
-
-/**
- * Empty-seed augmentation slot for adopter-defined ambient state on
- * {@link RuntimeContext}. Adopter app code augments via module
- * declaration:
- *
- * @example
- *     // In your app's setup:
- *     declare module "@agentick/runtime" {
- *       interface RuntimeContextUser {
- *         readonly tenantId: string;
- *         readonly userId: string;
- *         readonly requestId?: string;
- *         readonly featureFlags?: Readonly<Record<string, boolean>>;
- *       }
- *     }
- *
- *     // Then anywhere ctx is in scope:
- *     async (input, { ctx }) => {
- *       const tenant = ctx.user?.tenantId;  // typed!
- *       // ...
- *     };
- *
- * Mirrors v1's `UserContext` augmentation pattern + the v2
- * `HookBridges` / `EventScopeExtensions` empty-seed convention.
- *
- * ⚠️  **The framework's auth-bearing primitives do NOT consult
- * `ctx.user` for authorization decisions.** Per ADR 45's structural-
- * identity rule, principal-bearing resources (MCP client harness,
- * sandbox runtime, etc.) encode the principal in their construction
- * identity. Adopters MAY put `userId` / `tenantId` in `ctx.user` for
- * their OWN telemetry / branching / logging, accepting that ambient
- * context across plain-async boundaries is best-effort (closure
- * capture handles 90% of cases; ambient-via-FiberRef breaks at
- * Promise boundaries).
- *
- * @see docs/proposals/v2/blueprint/45-runtime-context-model.md
- */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface RuntimeContextUser {}
-
-// ============================================================================
-// Scope shape
-// ============================================================================
-
-/**
- * The runtime scope a handler / middleware / observer sees. Extends
- * {@link EventScope} (with all augmented harness identifiers like
- * `sandboxId`, `mcpConnectionId`) and adds operation-level state +
- * diagnostic ephemera + adopter extension.
- *
- * Every field is optional — outside any active bracket they are
- * `undefined`. Adopters reading framework-typed fields should treat
- * `undefined` as "no active scope of this kind."
- */
-export interface RuntimeContext extends EventScope {
-  // ── Operation-level identity (NOT in EventScope because envelopes
-  //    already carry opId at the top level; the runtime version is for
-  //    code that wants to read "what's my current op" without unpacking
-  //    an envelope) ─────────────────────────────────────────────────
-
-  readonly opId?: string;
-  /** Parent operation id for causality. */
-  readonly parentOpId?: string;
-  /**
-   * The current operation's command SUFFIX (ADR 83 amendment) — the Pascal
-   * key `deriveHookNames` yields for `op.name` (e.g. `"tool:command:dispatch"`
-   * → `"ToolDispatch"`). Set by `runOperation` for the op's lifetime. An
-   * `on<Command>` middleware (a hook desugared onto the shared `.use` chain via
-   * `scopeToCommand`) self-scopes by comparing `ctx.op` to its command — the
-   * per-middleware replacement for the old keyed `Hooks` map lookup.
-   */
-  readonly op?: string;
-
-  // ── Diagnostic ephemera (per-request bundle, OTel trace context) ───
-
-  /** Request bundle id when one user request spawns many ops. */
-  readonly correlationId?: string;
-  /** W3C TraceContext header value when present. */
-  readonly traceparent?: string;
-
-  // ── Adopter extension (typed via module augmentation) ──────────────
-
-  /**
-   * Adopter-defined per-call ambient state. Typed via
-   * {@link RuntimeContextUser} module augmentation.
-   *
-   * Framework primitives do NOT read this for authorization. Adopters
-   * use it for telemetry, logging, branching, request correlation —
-   * whatever fits the propagation guarantees (closure-capture is
-   * sufficient for code-controlled async chains; ambient is
-   * best-effort).
-   */
-  readonly user?: RuntimeContextUser;
-}
-
-/** The "no scope active" value. */
-export const EMPTY_CONTEXT: RuntimeContext = Object.freeze({});
+// The trunk type + empty value + adopter-augmentation seed now live in spec.
+// Re-exported so `@agentick/runtime` consumers keep importing them from here.
+export { EMPTY_CONTEXT, type RuntimeContext, type RuntimeContextUser } from "@agentick/spec";
 
 // ============================================================================
 // FiberRef substrate
