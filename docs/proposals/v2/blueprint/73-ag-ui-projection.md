@@ -5,40 +5,40 @@
 client-next (state-sync via snapshot + `onStateChange`; `client.events()` reserved — the bus →
 `AsyncIterable` adapter is **#308**), ADR 53 (steering), abort-as-command, the gateway + transports
 (`in-process` / `ws` / `http`), ADR 23/26/27 (everything is a projection). **Sibling:** ADR 72 (the
-`ui://` → A2UI *widget* seam — a DIFFERENT axis; the two compose).
+`ui://` → A2UI _widget_ seam — a DIFFERENT axis; the two compose).
 
 ## TL;DR
 
-**AG-UI is the standard wire form of agentick's session *interaction surface*, which mostly already
+**AG-UI is the standard wire form of agentick's session _interaction surface_, which mostly already
 exists.** It's an event-based Agent↔User protocol (message deltas, tool calls, event-sourced state
 diffs, lifecycle, thinking + a return channel for input/interrupts/steering/state). Every one of
 those maps to a primitive agentick already emits (the bus / `ClientEvent` surface) or accepts (the
 session inbox). So AG-UI is a **thin codec** — `@agentick/ag-ui` on the gateway — not a new
-model. It is a *different axis* from ADR 72's `ui://` widget seam: AG-UI is the run *feed*, A2UI is
-the *widgets*; A2UI widgets can ride an AG-UI stream. **Closer to done** than the widget seam — the
+model. It is a _different axis_ from ADR 72's `ui://` widget seam: AG-UI is the run _feed_, A2UI is
+the _widgets_; A2UI widgets can ride an AG-UI stream. **Closer to done** than the widget seam — the
 substrate is here; the gaps are the streaming surface (#308) + the codec.
 
 ## The mapping — AG-UI event ↔ agentick primitive (both directions)
 
 **Server → client (agentick bus / `ClientEvent` → AG-UI events):**
 
-| AG-UI event | agentick source |
-| --- | --- |
-| message/text **deltas** | executor stream chunks (`AdapterDelta` / `stream:chunk`) + message events |
-| **tool call / result** | `tool_use` / `tool_result` dispatch events on the bus |
-| **state diff** (event-sourced) | knob / state / gate reactive changes + client state-sync (`onStateChange`, the handshake snapshot) |
-| **lifecycle** (start/complete/interrupt/cancel) | execution `ClientEvent` phases (`started`/`completed`/`failed`) + abort |
-| **thinking steps** | `reasoning` content blocks (ADR 57 signed-thinking round-trip; redaction respected) |
-| **custom** | `log` / arbitrary bus events (`signals.ts` fan) |
+| AG-UI event                                     | agentick source                                                                                    |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| message/text **deltas**                         | executor stream chunks (`AdapterDelta` / `stream:chunk`) + message events                          |
+| **tool call / result**                          | `tool_use` / `tool_result` dispatch events on the bus                                              |
+| **state diff** (event-sourced)                  | knob / state / gate reactive changes + client state-sync (`onStateChange`, the handshake snapshot) |
+| **lifecycle** (start/complete/interrupt/cancel) | execution `ClientEvent` phases (`started`/`completed`/`failed`) + abort                            |
+| **thinking steps**                              | `reasoning` content blocks (ADR 57 signed-thinking round-trip; redaction respected)                |
+| **custom**                                      | `log` / arbitrary bus events (`signals.ts` fan)                                                    |
 
 **Client → server (AG-UI return channel → agentick inbox):**
 
-| AG-UI return | agentick sink |
-| --- | --- |
-| user **input** (text / media) | `session.send({ messages })` |
-| **interrupts** (pause / cancel) | abort-as-command (declared command on the session) |
+| AG-UI return                           | agentick sink                                                        |
+| -------------------------------------- | -------------------------------------------------------------------- |
+| user **input** (text / media)          | `session.send({ messages })`                                         |
+| **interrupts** (pause / cancel)        | abort-as-command (declared command on the session)                   |
 | **agent steering** (mid-flow redirect) | ADR 53 steering — `session.queue` / new input appended mid-execution |
-| **state mutations** | a knob set / `dispatch("set_knob")` / state write |
+| **state mutations**                    | a knob set / `dispatch("set_knob")` / state write                    |
 
 Every arrow is an existing seam. The client→server arrows all land on the **addressable session
 inbox** — the same substrate the escalation relay (ADR 69) and `ui://` tool-calls (ADR 72) use.
@@ -57,7 +57,7 @@ The first draft oversold this as "a thin codec over everything." Corrected: it s
      restructuring knobs/state/gates to be event-sourced (bigger). A decision, not a codec.
   2. **Steering — CORRECTION (this is NOT a divergence).** AG-UI has NO dedicated steering
      events. Its control is **interrupt-then-resume**: `RunFinished{outcome:{type:"interrupt",
-     interrupts}}` → the client resumes by starting a NEW run with a `resume` array (+ `parentRunId`
+interrupts}}` → the client resumes by starting a NEW run with a `resume` array (+ `parentRunId`
      branching). That IS our `input_required` (ADR 68) + escalation (ADR 69) + resume-with-input —
      and ours is RICHER (the interrupt bubbles up the ownership tree with interception/lineage,
      T2a; AG-UI's is flat), plus we have append-steering (ADR 53) + abort-as-command. So there is
@@ -70,12 +70,12 @@ best resolved by ADOPTING AG-UI's model natively — see below.
 
 ## Adopt FROM AG-UI (run along our native seams) — the inverse of projecting
 
-The valuable move isn't only "project to AG-UI"; it's adopting the few things AG-UI models *better*
+The valuable move isn't only "project to AG-UI"; it's adopting the few things AG-UI models _better_
 than us into our native seams, which ALSO makes the projection fall out. Discovery (against the
 AG-UI event spec):
 
 - **`StateDelta` — RFC 6902 JSON Patch. ADOPT (load-bearing).** AG-UI syncs state as an initial
-  snapshot + **JSON-Patch deltas**; we emit *full snapshots* (`onStateChange`). Adopt the
+  snapshot + **JSON-Patch deltas**; we emit _full snapshots_ (`onStateChange`). Adopt the
   snapshot-delta pattern **natively**: the reactive knobs/state/gates seam emits **JSON-Patch ops
   on the bus** on change (with an initial snapshot). This makes native state-sync efficient (diff,
   not whole store) AND makes the AG-UI `StateDelta` projection fall out — dissolving the ONLY real
@@ -83,7 +83,7 @@ AG-UI event spec):
 - **`StepStarted` / `StepFinished` — ALREADY HAVE (project, don't adopt).** These map directly to
   our `tick_start` / `tick_end` — a start/end lifecycle pair around a unit of work. Project 1:1
   (each tick → a step). The ONLY thing we lack is a semantic `stepName` (a tick is one model call,
-  numbered; an AG-UI step can be a *named* subtask spanning multiple ticks). An optional
+  numbered; an AG-UI step can be a _named_ subtask spanning multiple ticks). An optional
   `step("searching")` author API would add coarser human-meaningful steps — a small sugar for
   legibility, NOT a divergence or a required adoption.
 - **`ActivitySnapshot` / `ActivityDelta` — SKIP (covered).** "Structured in-progress activity" is
@@ -100,18 +100,21 @@ knobs/state/gates seam as RFC-6902 JSON-Patch ops (initial snapshot + deltas). A
 improvement first; the AG-UI projection is a free consequence.
 
 ## Why it's a projection, not a new model
+
 We already own the bus, the execution lifecycle, the reactive state, and the inbox. AG-UI is a wire
-*codec* over them — exactly as the MCP server harness projects tools/tasks/elicitation to the MCP
+_codec_ over them — exactly as the MCP server harness projects tools/tasks/elicitation to the MCP
 wire without owning them. Owning the native surface + projecting keeps us spec-stable: if AG-UI's
 event vocabulary shifts, only the codec moves.
 
 ## Transport
+
 AG-UI is **transport-agnostic** ("builds on HTTP/WebSockets as an abstraction layer"). It rides
 agentick's existing transports — the `ws` / `http` transports already carry the gateway↔client
-channel; AG-UI is a message *encoding* on that channel (SSE is the common AG-UI framing; our http
+channel; AG-UI is a message _encoding_ on that channel (SSE is the common AG-UI framing; our http
 transport can serve it). No new transport, a new codec + framing.
 
 ## What's actually missing (the build)
+
 1. **`client.events()` streaming surface (#308)** — the bus-`Stream` → `AsyncIterable` adapter is
    reserved but not built; AG-UI's server→client stream needs it (or the gateway emits AG-UI events
    directly off the bus).
@@ -122,6 +125,7 @@ transport can serve it). No new transport, a new codec + framing.
    `onStateChange` — do we emit diffs or full snapshots?).
 
 ## Rejected
+
 - **AG-UI as the native event model.** Couples the substrate to one spec. We own the bus + inbox
   and project (the ADR-40-inversion, same as ADR 72).
 - **A separate AG-UI event system.** The bus IS the event system; AG-UI is a codec over it.
@@ -129,7 +133,8 @@ transport can serve it). No new transport, a new codec + framing.
   widgets. Separate packages (`@agentick/ag-ui` vs `@agentick/a2ui`); they compose.
 
 ## Open (workshop)
-1. **State sync shape** — AG-UI wants event-sourced *diffs* for shared typed stores; agentick today
+
+1. **State sync shape** — AG-UI wants event-sourced _diffs_ for shared typed stores; agentick today
    does snapshot + `onStateChange`. Emit diffs, or send snapshots and let the client diff? (Knobs/
    state/gates are the shared store.)
 2. **Thinking-steps mapping** — map `reasoning` blocks to AG-UI thinking events with the ADR-57

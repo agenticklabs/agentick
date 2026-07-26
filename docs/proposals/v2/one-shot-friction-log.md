@@ -3,7 +3,7 @@
 > **What this is.** The friction discovered while authoring the
 > [one-shot dashboard prompt](./one-shot-dashboard-prompt.md) against the **real**
 > `feat/v2` client surface. Every item here is a place where writing an
-> *accurate* prompt required a hedge, a workaround, or a warning about a
+> _accurate_ prompt required a hedge, a workaround, or a warning about a
 > confusing/stale name. Per the B1 mandate: **each hedge the prompt needs is a
 > discovered ergonomics defect.** This log is the B2 work list.
 >
@@ -20,6 +20,7 @@
 ## Ranked — Top 10
 
 ### 1. Knob descriptors are not on the wire — the client sees values, not schema
+
 **Severity: HIGH.** Confidence: high.
 
 `session.knobs` projects `KnobsState = Readonly<Record<string, KnobPrimitive>>`
@@ -42,10 +43,11 @@ hydrate a descriptor list out-of-band server-side.
   options/group. This is the single biggest "I can't build the obvious UI" gap.
 
 ### 2. No client wire path to read timeline history — scroll-back needs a server you build
+
 **Severity: HIGH (known/deferred).** Confidence: high.
 
 `timelineView` is a **fold over the live event stream** plus two manual splices
-(`prepend`/`append`). It has no way to *read* durable history: the `initial` seed
+(`prepend`/`append`). It has no way to _read_ durable history: the `initial` seed
 and every `prepend` page must be fetched **server-side** from
 `TimelineStore.history(...)` and shipped to the client through an endpoint the
 adopter writes. A thin browser client cannot page its own scroll-back. The worked
@@ -62,16 +64,17 @@ chat feature, is adopter homework.
   deferred item; B1 confirms it bites the first real dashboard.
 
 ### 3. `fromCursor` can't resume the live tail from a store hydrate (bus Cursor ≠ store seq)
+
 **Severity: HIGH.** Confidence: high.
 
 `timelineView({ initial, fromCursor })` wants a bus `Cursor` to resume the live
-tail *after* the seeded history. But durable history is keyed by timeline `seq`,
+tail _after_ the seeded history. But durable history is keyed by timeline `seq`,
 and the live append events are keyed by bus `Cursor` — **two numbering systems**.
 A store-only hydrate cannot produce the `Cursor`, so `fromCursor` stays
 `undefined`, the client tails "from now," and there is a **race window**: appends
 between the history read and the subscription open are either missed or
 duplicated. The framework punts reconciliation of that overlap to the app (by
-`message.metadata.clientId`), which only helps for the app's *own* optimistic
+`message.metadata.clientId`), which only helps for the app's _own_ optimistic
 sends — not for a concurrent writer or an agent turn landing in the gap.
 
 - **Files:** `packages-next/timeline/src/client/timeline-view.ts:22-34, 58-68`;
@@ -84,6 +87,7 @@ sends — not for a concurrent writer or an agent turn landing in the gap.
   (like knobs/tasks) would eliminate the seam entirely.
 
 ### 4. `session.elicitations` is a property, but the docs/README call it `elicitations()`
+
 **Severity: HIGH (correctness trap in the docs).** Confidence: high (85% — the
 working example uses the property; the factory returns an object, not a function).
 
@@ -108,12 +112,13 @@ code on the first try. The one place that actually runs
   and asserts `typeof session.elicitations === "object"`.
 
 ### 5. Tool-confirmation ownership is a footgun — two paths race on the same reply
+
 **Severity: MEDIUM-HIGH.** Confidence: high.
 
-Tool confirmations are delivered as *ordinary elicitations* with
+Tool confirmations are delivered as _ordinary elicitations_ with
 `hints.kind === "tool_confirmation"`. So they show up in **both**
 `session.elicitations` (generic loop) **and** `session.confirmClientTools(policy)`.
-If a dashboard wires a generic elicitation modal *and* a confirmation policy — the
+If a dashboard wires a generic elicitation modal _and_ a confirmation policy — the
 natural thing to do — both respond to the same `correlationId`: last-responder-
 wins / double-respond. The only guard is a prose caveat in the doc comment. The
 accept **value shape** is also a hidden contract: a plain elicitation is
@@ -129,6 +134,7 @@ undiscoverable without reading the gate's schema.
   structural, not a comment. Type the accept value per `hints.kind`.
 
 ### 6. No first-party React bindings for the client — every adopter re-hand-rolls `useSyncExternalStore`
+
 **Severity: MEDIUM.** Confidence: high.
 
 The live views (`timelineView`, `session.knobs`, `session.tasks`) are shaped to be
@@ -147,6 +153,7 @@ hook as a **commented-out** snippet, acknowledging the gap.
   the single biggest ergonomics multiplier for the actual target audience.
 
 ### 7. Streaming deltas have no batching helper — the quadratic-markdown trap is unguarded
+
 **Severity: MEDIUM.** Confidence: high.
 
 `handle.events()` yields `content-delta` per token. The naive binding —
@@ -154,7 +161,7 @@ hook as a **commented-out** snippet, acknowledging the gap.
 quadratic and visibly stutters. The framework ships the fine-grained stream
 (correct) but no batching/accumulation utility, so every adopter must independently
 learn the lesson and hand-roll rAF batching + a stream-event reducer. The prompt
-has to *teach* this defensively.
+has to _teach_ this defensively.
 
 - **Files:** `packages-next/spec/src/data/streaming.ts` (the event union is right;
   there's just no consumer-side accumulator for it on the client).
@@ -164,6 +171,7 @@ has to *teach* this defensively.
   known footgun into a one-liner.
 
 ### 8. Client send handle is synchronous while the server's is a ProcedurePromise — asymmetry to explain
+
 **Severity: MEDIUM.** Confidence: high.
 
 Server-side, `session.send(...)` is a `ProcedurePromise` you `await` (or
@@ -181,12 +189,13 @@ and get a resolved handle whose `events()` they've already missed the start of.
   #9).
 
 ### 9. Request channels (elicitation, client-tool-call) are live-only — subscribe-before-send or miss it
+
 **Severity: MEDIUM.** Confidence: medium (depends on server replay behavior I did
 not exercise).
 
 Elicitation and client-tool-call streams filter the live subscription to `request`
 envelopes and **opt out** of the snapshot fold (each frame is a discrete request,
-not state). So a request emitted *before* the client attaches its subscription can
+not state). So a request emitted _before_ the client attaches its subscription can
 be missed — there is no "here are the currently-pending requests" snapshot at
 connect. For a dashboard that resumes a session with an in-flight elicitation
 (agent already blocked waiting on the user), the pending ask may not re-surface.
@@ -201,6 +210,7 @@ status-keyed-by-known-id / live-only is a leaky boot story.
   server replay before sizing.
 
 ### 10. `session.queue(...)` is a dangling wire stub with no server handler
+
 **Severity: LOW-MEDIUM (trap).** Confidence: high.
 **RESOLVED (onBusy redesign):** `session/queue` deleted end-to-end; the
 semantic is `send({ onBusy: "queue" })` (`delivery` was renamed `onBusy`,
@@ -224,6 +234,7 @@ MethodNotFound.
 ## Additional (below the top 10)
 
 ### 11. `FakeLanguageModelExecutor` is named as the test double, but adopters want `scriptedAdapter`
+
 **Severity: LOW.** Confidence: high. The B1 charter and docs name
 `FakeLanguageModelExecutor` as the "test without tokens" story, but its
 constructor takes raw substrate handles (`scopeId, journal, bus, inbox, options`
@@ -236,15 +247,18 @@ harness-internal tests. (Naming: post-cut `LanguageModelExecutor` rename is
 already tracked.)
 
 ### 12. Cross-origin dev is silently fatal without `allowedOrigins`
+
 **Severity: LOW (docs).** Confidence: high. The safe-by-default web-security
 policy rejects the Vite dev origin (`localhost:5173` is cross-origin to the API
 port) with a bare `403` and no hint. Correct and intentional, but a first-run dev
 hits a wall with no signal pointing at `allowedOrigins`.
+
 - **Files:** `packages-next/transport/src/server/web-security.ts:240-268`.
 - **Fix:** a dev-mode log line on a rejected cross-site request naming the
   `allowedOrigins` knob; a documented "serve client same-origin in prod" note.
 
 ### 13. `session.knobs.set(key, value)` uses `key`, but the harness op input is `{ id, value }` / `{ name }`
+
 **Severity: LOW.** Confidence: medium. The client write sends `{ sessionId, key,
 value }` (`knobs-handle.ts:50`) while the server-side inputs speak `id` /
 `name` (`KnobsSetInput`, `KnobsDispatchInput`). Cosmetic vocabulary drift across
@@ -252,6 +266,7 @@ the boundary; not a bug, but a reader comparing the two sides stumbles.
 **Fix:** align the wire param name to `id`.
 
 ### 14. `client.events()` has surfaces with no live source yet
+
 **Severity: LOW.** Confidence: high. `client.events()` is documented as an
 observability stream over `connection` / `request` / `subscription` / `auth` /
 `wire` / `extension` surfaces, but only `connection` has a live emit source today

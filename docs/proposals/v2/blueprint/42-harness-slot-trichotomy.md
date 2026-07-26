@@ -148,10 +148,7 @@ harness ergonomic design under the convention.
 type HarnessSlot<Instance, Config> = Instance | Config;
 
 // When the harness has a single dominant declaration type, add a third case
-type HarnessSlotWithShorthand<Instance, Config, Decl> =
-  | Instance
-  | Config
-  | readonly Decl[];
+type HarnessSlotWithShorthand<Instance, Config, Decl> = Instance | Config | readonly Decl[];
 ```
 
 Treat these as illustration only — DO NOT export a load-bearing generic
@@ -160,15 +157,15 @@ ad-hoc, satisfying the convention.
 
 ### 2. Naming rules (load-bearing)
 
-| Concept | Rule | Example |
-| --- | --- | --- |
-| Public type for the harness | Noun. No "Harness", no "Protocol", no "Impl". | `Prompts`, `Tools`, `Skills`, `Tasks` |
-| Slot name on parent options | Noun, plural if the harness manages a collection. | `prompts:`, `tools:`, `skills:`, `mcpServers:` |
-| Pre-built escape-hatch field in Config | `use:` | `{ declarations: [...], use: existing, filter: ... }` — but never both |
-| Per-connection visibility filter | `filter:` | `filter: (decl, ctx) => boolean` |
-| Transforms (when applicable) | `transforms:` | `transforms: readonly Transform<Ctx>[]` |
-| Runtime read getter on parent | `parent.<slotName>: Instance \| null` | `server.prompts`, `app.tools` |
-| Type alias for adopter-facing protocols | `export type Prompts = PromptsHarnessProtocol;` | Lives in `spec-next/protocol/<surface>.ts` |
+| Concept                                 | Rule                                              | Example                                                                |
+| --------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------- |
+| Public type for the harness             | Noun. No "Harness", no "Protocol", no "Impl".     | `Prompts`, `Tools`, `Skills`, `Tasks`                                  |
+| Slot name on parent options             | Noun, plural if the harness manages a collection. | `prompts:`, `tools:`, `skills:`, `mcpServers:`                         |
+| Pre-built escape-hatch field in Config  | `use:`                                            | `{ declarations: [...], use: existing, filter: ... }` — but never both |
+| Per-connection visibility filter        | `filter:`                                         | `filter: (decl, ctx) => boolean`                                       |
+| Transforms (when applicable)            | `transforms:`                                     | `transforms: readonly Transform<Ctx>[]`                                |
+| Runtime read getter on parent           | `parent.<slotName>: Instance \| null`             | `server.prompts`, `app.tools`                                          |
+| Type alias for adopter-facing protocols | `export type Prompts = PromptsHarnessProtocol;`   | Lives in `spec-next/protocol/<surface>.ts`                             |
 
 **Why these specific words?**
 
@@ -271,6 +268,7 @@ slot?: boolean | { readonly enabled: boolean };
 ```
 
 Rules:
+
 - **Default to ON.** The real gate is downstream (in MCP elicit's
   case, the connected client's capability advertisement). An off-by-
   default flag would hide the API without preventing anything that
@@ -343,6 +341,7 @@ the gaps that should generate follow-up tasks; items marked ✅ already
 satisfy the convention.
 
 ### `@agentick/mcp/server` → `prompts` slot
+
 - 1. Array shorthand: ✅ (lands with #171d.1b)
 - 2. Instance shorthand: ✅
 - 3. `use:` escape hatch: ✅
@@ -352,6 +351,7 @@ satisfy the convention.
 - 7. Test coverage: ✅
 
 ### `@agentick/mcp/server` → `tools` slot — landed via Slice 2 (#265)
+
 - 1. Array shorthand: ✅ — `tools: CreatedTool[]` is the 90% case.
      The two-collection problem (declarations + handlers) is solved
      by `CreatedTool` carrying both: server splits `t.declaration`
@@ -378,6 +378,7 @@ satisfy the convention.
      patterns + the xor-discrimination boundary cases.
 
 ### `@agentick/skills` → `withSkills` — landed via Slice 3 (#266)
+
 - 1. Array shorthand: ✅ — `withSkills([{ name, description, content }, ...])`
      is sugar for `{ initial: [...] }`. The earlier note about
      "loader-driven harnesses exempt from the shorthand" was
@@ -388,7 +389,7 @@ satisfy the convention.
 - 3. `use:` escape hatch: ✅ — `WithSkillsOptions.use: Skills`.
      Mutually exclusive with `initial`/`loaders`.
 - 4. `Skills` alias: ✅ — `export type Skills = SkillsHarnessProtocol`
-     + `isSkillsInstance` structural guard in spec-next.
+     - `isSkillsInstance` structural guard in spec-next.
 - 5. Lifecycle docs: ✅ — README §"The withSkills slot — three
      accepted shapes" + extension.ts JSDoc cover Form A/B/C lifecycle
      ownership explicitly.
@@ -400,6 +401,7 @@ satisfy the convention.
      `loaders.spec.ts` end-to-end still green.
 
 ### `@agentick/prompts` → `withPrompts` — landed via Slice 3 (#266)
+
 - 1. Array shorthand: ✅ — `withPrompts([{ declaration }, ...])` →
      `{ initial: [...] }`.
 - 2. Instance shorthand: ✅ — `withPrompts(myPromptsInstance)` →
@@ -416,16 +418,17 @@ satisfy the convention.
 - 7. Test coverage: ✅ — `slot-trichotomy.spec.ts` (11 tests).
 
 ### `@agentick/tasks` → `withTasks` — alias-only, slot deferred (#266)
+
 - 1-3. Trichotomy: ⚠ INTENTIONALLY EXEMPT — per ADR 42 §"What this
-     ADR does NOT decide", the per-session `TasksHarness` is owned by
-     the parent `AppHarness` via the single-construction-site pattern
-     (#159), not by `withTasks`. The only slot today is
-     `registerModelTools` (boolean opt-out for the auto-registered
-     `session_tasks_*` tools). Documented in the package README.
+  ADR does NOT decide", the per-session `TasksHarness` is owned by
+  the parent `AppHarness` via the single-construction-site pattern
+  (#159), not by `withTasks`. The only slot today is
+  `registerModelTools` (boolean opt-out for the auto-registered
+  `session_tasks_*` tools). Documented in the package README.
 - 4. `Tasks` alias: ✅ — `export type Tasks = TasksHarnessProtocol`
-     + `isTasksInstance` structural guard in spec-next. The alias
-     exists for downstream code that takes a `Tasks` reference
-     directly (cross-harness wiring, custom bridges).
+     - `isTasksInstance` structural guard in spec-next. The alias
+       exists for downstream code that takes a `Tasks` reference
+       directly (cross-harness wiring, custom bridges).
 - 5. Lifecycle docs: ✅ — README §"About the trichotomy" calls out
      the exemption + reason.
 - 6. `session.tasks` getter: present; types still leak "Harness"
@@ -435,11 +438,13 @@ satisfy the convention.
      doesn't apply.
 
 ### `@agentick/eval` → `app` slot
+
 - Differs from harness slots — it accepts a factory thunk, not a
   harness instance. Out of scope for this ADR; the thunk form is
   documented in ADR 37.
 
 ### `@agentick/gateway` → `mcpServers` slot
+
 - Already accepts an array of `McpServerOptions` — the shorthand form
   matches the convention. Each entry's INTERIOR (tools, prompts, ...)
   is what gets audited via the rows above.
@@ -449,10 +454,12 @@ satisfy the convention.
 ## Migration plan
 
 ### Slice 1 — Codify (this ADR)
+
 Lands the convention. No code changes; documentation only. Future
 slices reference this ADR.
 
 ### Slice 2 — Refresh `Tools` alias + slot — ✅ LANDED (#265)
+
 Added `export type Tools = ToolExecutorProtocol;` + `isToolsInstance`
 to spec. Refactored the mcp-server `tools` slot to accept the array
 shorthand (`CreatedTool[]`) plus a config object that supports either
@@ -465,6 +472,7 @@ own `ToolHandlerCtx` and would clobber the MCP `transport`/`mcp.*`
 discriminator fields). See audit row above + `tools-slot.spec.ts`.
 
 ### Slice 3 — Refresh `Skills` + `Prompts` + `Tasks` aliases + their parent slots — ✅ LANDED (#266)
+
 spec-next exports `Skills` / `Tasks` adopter aliases (Prompts already
 existed) + matching `isSkillsInstance` / `isPromptsInstance` /
 `isTasksInstance` structural guards. Lifted `isPromptsInstance` out
@@ -486,11 +494,13 @@ extension would collide on the inbox address. README §"About the
 trichotomy" calls out the exemption.
 
 ### Slice 4 — Update reusable conformance fixtures
+
 Add a `runHarnessSlotConformance` helper to `spec-conformance-next`
 that adopters can run against their own slots to verify the seven
 checklist items pass. Becomes the executable form of this ADR. ETA: ~1 day.
 
 ### Slice 5 — Sweep adopter examples + READMEs
+
 Every example in `example/`, every adopter-facing snippet in every
 README, uses the new shapes (preferring the array shorthand where it
 applies). ETA: ~1 day.

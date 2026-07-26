@@ -54,20 +54,22 @@ ships the pipes; the adopter composes the rest from primitives that already exis
 
 ```ts
 // spec: feature-detected, NOT on core ClientTransport.
-interface TransportCapabilities { /* … */ readonly media: boolean; }
+interface TransportCapabilities {
+  /* … */ readonly media: boolean;
+}
 
 interface MediaTransport {
-  openUplink(ref: MediaSessionRef): MediaUplink;     // client → server
+  openUplink(ref: MediaSessionRef): MediaUplink; // client → server
   openDownlink(ref: MediaSessionRef): MediaDownlink; // server → client
 }
 interface MediaUplink {
-  send(frame: MediaFrame): Promise<void>;            // awaiting = backpressure
+  send(frame: MediaFrame): Promise<void>; // awaiting = backpressure
   close(reason?: string): Promise<void>;
 }
 ```
 
 Backpressure is load-bearing (Knowify's Google `write(): boolean` + pause):
-*awaiting* `send` is the signal; the `WritableStream` projection maps it to the
+_awaiting_ `send` is the signal; the `WritableStream` projection maps it to the
 writer's `ready`.
 
 ## `MediaSession` and `MediaFrame`
@@ -78,7 +80,10 @@ media stream within it. Multiple concurrent `streamId`s per conversation fall ou
 for free (mic uplink + screen-share video = two streams).
 
 ```ts
-interface MediaSessionRef { readonly sessionId: string; readonly streamId: string; }
+interface MediaSessionRef {
+  readonly sessionId: string;
+  readonly streamId: string;
+}
 
 // General media, NOT audio-specific — video/image/screen ride the same session.
 interface MediaFrame {
@@ -87,11 +92,11 @@ interface MediaFrame {
   readonly payload: Uint8Array;
 }
 interface MediaEnvelope {
-  readonly format: string;      // "audio/pcm" | "audio/pcmu" | "image/jpeg" | …
+  readonly format: string; // "audio/pcm" | "audio/pcmu" | "image/jpeg" | …
   readonly sampleRate?: number; // never hardcode a rate — carry it
   readonly channels?: number;
-  readonly timestamp: number;   // ms, monotonic within the session
-  readonly seq: number;         // ordering
+  readonly timestamp: number; // ms, monotonic within the session
+  readonly seq: number; // ordering
 }
 ```
 
@@ -100,34 +105,34 @@ interface MediaEnvelope {
 `session.live` is a thin facet (factory + registry); `session.live.start()` returns
 a `LiveSessionHandle` **auto-bound to `(sessionId, streamId)`** — the caller never
 threads ids again. The media surface is **imperative (spec) + stream (projection)**,
-and it is asymmetric by direction: the client *sends* uplink and *receives*
+and it is asymmetric by direction: the client _sends_ uplink and _receives_
 downlink.
 
 ```ts
 // ─── SPEC (portable; imperative + callback; Node === browser) ───
 interface LiveSessionHandle {
-  readonly ref: MediaSessionRef;                     // { sessionId, streamId } — auto-bound
-  readonly status: LiveState;                        // idle|listening|thinking|speaking|closed
+  readonly ref: MediaSessionRef; // { sessionId, streamId } — auto-bound
+  readonly status: LiveState; // idle|listening|thinking|speaking|closed
 
-  sendFrame(frame: MediaFrame): Promise<void>;       // UPLINK push; await = backpressure
+  sendFrame(frame: MediaFrame): Promise<void>; // UPLINK push; await = backpressure
   onFrame(cb: (f: MediaFrame) => void): Unsubscribe; // DOWNLINK observe (client receives)
   onTranscript(cb: (t: TranscriptDelta) => void): Unsubscribe;
   onState(cb: (s: LiveState) => void): Unsubscribe;
 
-  interrupt(playedMs?: number): Promise<void>;       // manual barge-in signal (see note)
-  stop(): Promise<void>;                             // graceful end of the continuous stream
-  abort(reason?: string): Promise<void>;            // hard kill
+  interrupt(playedMs?: number): Promise<void>; // manual barge-in signal (see note)
+  stop(): Promise<void>; // graceful end of the continuous stream
+  abort(reason?: string): Promise<void>; // hard kill
 }
 ```
 
 ```ts
 // ─── RUNTIME/CLIENT (first-class projections over the spec) ───
-handle.uplink                   // WritableStream<MediaFrame> — sink.write = sendFrame; ready ⇒ backpressure
-handle.downlink                 // ReadableStream<MediaFrame> — enqueues from onFrame
+handle.uplink; // WritableStream<MediaFrame> — sink.write = sendFrame; ready ⇒ backpressure
+handle.downlink; // ReadableStream<MediaFrame> — enqueues from onFrame
 ```
 
 `sendFrame` (not `send`) deliberately avoids collision with `session.send`
-(message send). There is **no** client-side downlink *send*; the client *receives*
+(message send). There is **no** client-side downlink _send_; the client _receives_
 downlink via `onFrame`/`downlink`. The mirror `sendFrame`-for-downlink lives on the
 server (below). Producing/consuming frames — capture, resample, VAD, encode,
 playback — is the app's business, composed as `TransformStream`s:
@@ -135,7 +140,7 @@ playback — is the app's business, composed as `TransformStream`s:
 ```ts
 const live = await client.session(id).live.start();
 micStream.pipeThrough(pcm16Worklet).pipeThrough(encodeFrames).pipeTo(live.uplink); // compose
-live.downlink.pipeTo(playbackSink);                                                 // or onFrame(cb)
+live.downlink.pipeTo(playbackSink); // or onFrame(cb)
 live.onTranscript((t) => render(t));
 // a Node (server-to-server) client with no MediaStream just: for (…) await live.sendFrame(frame)
 ```
@@ -156,26 +161,27 @@ right per-stream context; the app wires everything else with existing primitives
 // server stream context — the mirror of the client handle
 interface LiveStream {
   readonly ref: MediaSessionRef;
-  readonly session: SessionHarnessProtocol;          // .send(), dispatch, timeline — EXISTING
+  readonly session: SessionHarnessProtocol; // .send(), dispatch, timeline — EXISTING
 
-  onFrame(cb: (f: MediaFrame) => void): Unsubscribe;  // UPLINK observe (server receives)
-  readonly uplink: ReadableStream<MediaFrame>;        // projection
-  sendFrame(frame: MediaFrame): Promise<void>;        // DOWNLINK push (server sends)
-  readonly downlink: WritableStream<MediaFrame>;      // projection
+  onFrame(cb: (f: MediaFrame) => void): Unsubscribe; // UPLINK observe (server receives)
+  readonly uplink: ReadableStream<MediaFrame>; // projection
+  sendFrame(frame: MediaFrame): Promise<void>; // DOWNLINK push (server sends)
+  readonly downlink: WritableStream<MediaFrame>; // projection
 
-  emitTranscript(t: TranscriptDelta): void;           // → control channel → client.onTranscript
+  emitTranscript(t: TranscriptDelta): void; // → control channel → client.onTranscript
   emitState(s: LiveState): void;
 }
 
 withLive({
-  onStream(stream: LiveStream) {                       // a new (sessionId, streamId) opened
-    const stt = myStt.open();                          // APP's STT — no framework interface
+  onStream(stream: LiveStream) {
+    // a new (sessionId, streamId) opened
+    const stt = myStt.open(); // APP's STT — no framework interface
     stream.onFrame((f) => stt.write(f));
     stt.onTranscript((t) => {
       stream.emitTranscript(t);
       if (t.final) {
         const exec = stream.session.send({ messages: [assemble(t.text)] }); // EXISTING primitive
-        pipeReplyToTts(exec, stream.downlink);         // app glue: reply → app's TTS → downlink
+        pipeReplyToTts(exec, stream.downlink); // app glue: reply → app's TTS → downlink
       }
     });
   },
@@ -188,7 +194,7 @@ stream and closes its transport half).
 ### Hooks & interception (harness for free, but not symmetric)
 
 `live` is a harness, so it inherits `BaseHarness.runOperation` + `HookBridges` —
-the before/after hook *machinery* is free. But two rules hold:
+the before/after hook _machinery_ is free. But two rules hold:
 
 - **Server hooks are lifecycle-grained and opt-in by declaration.** You get
   `onBeforeLive<Op>`/`onAfterLive<Op>` only for operations declared as hookable
@@ -218,7 +224,7 @@ only the pipe + routing + a hook.
 
 ## Explicitly NOT in scope
 
-VAD/STT/TTS implementations (seams live in *app* or optional adapter pkgs; Silero
+VAD/STT/TTS implementations (seams live in _app_ or optional adapter pkgs; Silero
 is a separate pkg) · WebRTC/SIP/jitter/AEC (adapter interface + reference
 WS-binary) · message-assembly policy · turn-detection models · a barge-in
 subsystem (app-composed) · **the entire engine layer** — `pipelineEngine`,
@@ -247,7 +253,7 @@ deferred (Future directions).
 
 **Media transport is a CAPABILITY, not a package — the in-band rule.**
 `MediaTransport` is implemented BY a transport that already owns a connection;
-media rides the *same wire* as control. So there is deliberately **no
+media rides the _same wire_ as control. So there is deliberately **no
 `transport-ws-media-next` package**: the network media plane is a **native
 capability of `@agentick/transport-websocket`** (flip `binaryFrames`/`media` to
 `true`; add a `MediaFrame` binary codec beside the existing JSON codec +
@@ -261,9 +267,9 @@ package.
 connection?", not "is it media?"):
 
 - **In-band** (shares the control connection: WebSocket, in-process) → a
-  *capability added to that transport*. No new package.
+  _capability added to that transport_. No new package.
 - **Out-of-band** (brings its OWN connection: WebRTC / SIP — SDP/ICE, media
-  tracks, independent lifecycle) → a *new transport package*
+  tracks, independent lifecycle) → a _new transport package_
   (`transport-webrtc-next`). This is the only case a media package is justified.
 
 Every transport DECLARES `capabilities.media` (a required flag); only
@@ -276,7 +282,7 @@ loud, correctly).
 **WebRTC — adopt, don't build; and the plane split.** When it lands,
 `transport-webrtc-next` is a **provider-adapter shape, not an SFU we implement**:
 because `MediaTransport` is just `openUplink`/`openDownlink` of opaque
-`MediaFrame`s, a LiveKit / Daily / Twilio / OpenAI-Realtime *room* is *itself* a
+`MediaFrame`s, a LiveKit / Daily / Twilio / OpenAI-Realtime _room_ is _itself_ a
 `MediaTransport` — the adapter plugs a provider's WebRTC media plane into the seam
 and agentick gets UDP/Opus/jitter-buffer/PLC/AEC/NAT-traversal/video for free
 (the wins WS-binary can't match: no TCP head-of-line stall, ~10× less bandwidth via
@@ -285,7 +291,7 @@ Opus+DTX, native video tracks). It earns its complexity specifically for
 server-to-server glue, where WS-binary is simpler and fine.
 
 Crucially, **the media plane and the control plane may ride DIFFERENT transports.**
-`MediaTransport` is a *separately injectable* capability, not fused to the control
+`MediaTransport` is a _separately injectable_ capability, not fused to the control
 transport's methods — `inProcessTransport({ gateway, media })` already proved the
 shape. So the canonical realtime split — **JSON-RPC control on WebSocket, media
 frames on WebRTC** (`webSocketTransport({ …, media: webrtcMedia(…) })`) — is
@@ -304,7 +310,7 @@ once enough live agents exist to reveal the real shape.
   `TtsEngine` seams (validated against Google streaming-STT in ADR 88a). Packages
   the `onStream` glue once it's written a few times.
 - **`TurnArbiter`** — a verdict seam (proceed/veto/defer/replace/interrupt) for
-  turn-triggering + barge-in. It is a *specialization of the existing `guard`*, so
+  turn-triggering + barge-in. It is a _specialization of the existing `guard`_, so
   it does not need its own abstraction yet; inline/guard suffices.
 - **Capability record + `RealtimeModel` archetype** — pipeline-vs-realtime behind
   one surface; OpenAI Realtime / Gemini Live as `LoopExecutorFactory`s. Note: even
@@ -316,7 +322,7 @@ once enough live agents exist to reveal the real shape.
   connectors/schedulers. Its consumers: S2S voice, full-duplex text, AI-SDK
   ceded-loop interop, autonomous agents. Reactive full-duplex is mostly the
   existing `guard` (admission verdicts) + ADR 53 (facts) + coalescing; only
-  *proactive self-trigger* is genuinely new.
+  _proactive self-trigger_ is genuinely new.
 - **The 2-track reflex tier** — a fast arbiter model that defends the real-time
   deadline (barge-in, reflexes) while the deliberative model thinks, engaging only
   under contention. Research-grade; lives in the `TurnArbiter`/`guard` slot when it

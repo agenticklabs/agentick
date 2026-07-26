@@ -6,6 +6,7 @@ tagged by `Workstream`. Group the board by Workstream to see this live; filter
 `Gate = ryan-review` for the decision queue.
 
 **Framing decisions locked (this session):**
+
 - **Agnosticism is fulfilled by per-framework compiler front-ends over the neutral IR**
   (React JSX→IR = the "react story"; Angular component→IR = the angular story). The
   dep-less/functional compiler is therefore **optional** (a zero-dep convenience), **NOT a
@@ -51,7 +52,7 @@ Run in parallel; mostly delegated small fixes.
 
 - #162 (local / openclaw-style: gateway + fs timeline store + sandbox + skills) and #163
   (cloud / ernesto-shaped: gateway + auth adapter + durable stores). Building these surfaces
-  the *real* remaining gaps better than more audits — fix what they find.
+  the _real_ remaining gaps better than more audits — fix what they find.
 
 ## Phase 3 — metapackages + cut gates (LAST)
 
@@ -85,14 +86,16 @@ That makes the sandbox tiers an **isolation + environment hierarchy**, and it mo
 center of gravity of the cut from "does it work locally" to "does it run in prod."
 
 ### Sandbox provider hierarchy (isolation strength ↑ = environment)
-| Provider | Env | Isolation | Shape |
-|---|---|---|---|
-| `sandbox-local-next` | local dev | seatbelt / bwrap / unshare + cgroup (#240) — *weakest*; dev-safety | same-host, in-process handle |
-| `sandbox-docker-next` | test / staging | container (`NetworkMode`, cgroups) — *medium* | same-host, in-process handle |
-| **`sandbox-lambda-next`** | **prod** | **Firecracker microVM — *strongest*, the microVM IS the jail** | **REMOTE** (invoke boundary), **ephemeral** |
+
+| Provider                  | Env            | Isolation                                                          | Shape                                       |
+| ------------------------- | -------------- | ------------------------------------------------------------------ | ------------------------------------------- |
+| `sandbox-local-next`      | local dev      | seatbelt / bwrap / unshare + cgroup (#240) — _weakest_; dev-safety | same-host, in-process handle                |
+| `sandbox-docker-next`     | test / staging | container (`NetworkMode`, cgroups) — _medium_                      | same-host, in-process handle                |
+| **`sandbox-lambda-next`** | **prod**       | **Firecracker microVM — _strongest_, the microVM IS the jail**     | **REMOTE** (invoke boundary), **ephemeral** |
 
 Consequences that reshape earlier decisions:
-- **Prod isolation = Lambda's Firecracker microVM**, so local's OS-jail (#240) is *dev-safety*,
+
+- **Prod isolation = Lambda's Firecracker microVM**, so local's OS-jail (#240) is _dev-safety_,
   not the prod security story — it drops in urgency (still do it, but it's not cut-gating).
 - Lambda is a **REMOTE, ephemeral** provider: handle ops cross the invoke boundary (RPC-shaped —
   the async `SandboxHandle` contract already supports it); no persistent fs (EFS mount = the
@@ -103,6 +106,7 @@ Consequences that reshape earlier decisions:
   capability-tiers, `SandboxUnsupportedError`). The conformance suite is the guardrail.
 
 ### The critical path to a PROD-ready cut (reordered)
+
 1. **Sandbox foundation:** repackaging (in flight) → **`sandbox-lambda-next` (prod)** + `sandbox-docker-next` (test/staging), in parallel → `#240` local isolation (dev-safety, non-gating).
 2. **Auth ingress (#302):** prod needs real principal→actor; also unblocks connector actors.
 3. **Durable stores (#132 fs/postgres TimelineStore + KV):** the cloud persona needs them.
@@ -112,6 +116,7 @@ Consequences that reshape earlier decisions:
 6. Metapackages (#161) + cut gates (#167/#164) — last.
 
 ### Can't-ship-crap guardrails (non-negotiable through all of it)
+
 Every provider passes `runSandboxProviderConformance` against the REAL backend (no fakes — the
 stat/readdir lesson). The cloud persona is the integration truth, not a demo. Adversarial judge
 on every delegation. Fresh `pnpm -w typecheck` gate (the vitest-strips-types false-green trap).

@@ -28,8 +28,8 @@ stories:
   the reference shape — this ADR generalizes it.
 - **Class B — re-derivable.** Sections, compiled context, tool registry,
   knob descriptors, formatter bindings. Persisted by nothing; recovered by
-  **re-render**. *The JSX tree is the schema; render is the recovery
-  path.* (Tools are "compiled per tick" — already ratified.)
+  **re-render**. _The JSX tree is the schema; render is the recovery
+  path._ (Tools are "compiled per tick" — already ratified.)
 - **Class C — ephemeral.** `useData` cache (re-fetches by contract),
   in-flight operations, task progress, state-harness K/V and knob values
   by default. Lost on restart unless the harness offers an opt-in store
@@ -38,14 +38,14 @@ stories:
 Consequences:
 
 - **The timeline persisted tier is an append-only event log; recovery is
-  its fold (re-render).** This is event sourcing over *outcome* events —
+  its fold (re-render).** This is event sourcing over _outcome_ events —
   see "Relationship to event sourcing." Three logs, one per plane:
   timeline (domain, recovery-bearing), operation journal (command +
   telemetry, never recovery-bearing), bus (transport). One mutation
   writes all three, in that order.
 - **The journal is an observability + idempotency ledger, not a recovery
-  log.** `findOrphaned` remains the crash *diagnostic*; the timeline is
-  the crash *recovery*. Commands don't deterministically replay, so
+  log.** `findOrphaned` remains the crash _diagnostic_; the timeline is
+  the crash _recovery_. Commands don't deterministically replay, so
   recovery ≠ journal replay. L7 becomes a TTL/LRU retention fix.
 - **Snapshots move state across space; the log moves it across time.**
   `SnapshotCapable` stays for the space-movement jobs (spawn seeding,
@@ -78,13 +78,13 @@ designated authority**:
    "not implementable until continuation primitives ship").
 
 Neither matches what adopters actually do. The tension was already
-acknowledged in-session: *"snapshots make sense unless the data/state is
+acknowledged in-session: _"snapshots make sense unless the data/state is
 already persisted elsewhere (Pg/other db) and that is the source of
-truth."* This ADR resolves it in favor of that instinct.
+truth."_ This ADR resolves it in favor of that instinct.
 
 Undecided durability semantics back-pressure everything downstream:
 persistence backends can't be written (what would they store?), E11 can't
-be answered (migrate *what* on restore?), L7's fix depends on whether
+be answered (migrate _what_ on restore?), L7's fix depends on whether
 evicting an idempotency key is a correctness event, and the cluster
 failover story (H4–H7) has no mechanism.
 
@@ -93,20 +93,20 @@ failover story (H4–H7) has no mechanism.
 Every bundled harness declares its class in its README. Current
 assignments:
 
-| Harness / state            | Class | Durability story                                                            |
-| -------------------------- | ----- | --------------------------------------------------------------------------- |
-| Timeline (persisted tier)  | **A** | `TimelineStore` port (this ADR)                                             |
-| Timeline (projection tier) | B     | Derived view; rebuilt from persisted tier + `ProjectionStrategy`            |
-| Credentials                | **A** | `CredentialsStore` port (shipped — the template)                            |
-| Skills / Prompts catalogs  | **A** | Loaders are the read side today; a write-capable store port is additive     |
-| Sections / compiled context| B     | Re-render                                                                   |
-| Tool registry              | B     | Compiled per tick from the rendered tree                                    |
-| Knob descriptors           | B     | Re-declared on mount                                                        |
-| Knob values                | C     | Seedable via `initialKnobs`; adopters needing durable knobs use state + KV  |
-| State harness K/V          | C     | Opt-in `KeyValueStore` port (this ADR)                                      |
-| `useData` cache            | C     | Re-fetch by contract                                                        |
-| Tasks (progress/results)   | C     | v2.0: documented lost-on-restart; store port with #292 lifetime work        |
-| In-flight operations       | C     | `findOrphaned` reports them; the execution is not resumed (v2.x rung (d))   |
+| Harness / state             | Class | Durability story                                                           |
+| --------------------------- | ----- | -------------------------------------------------------------------------- |
+| Timeline (persisted tier)   | **A** | `TimelineStore` port (this ADR)                                            |
+| Timeline (projection tier)  | B     | Derived view; rebuilt from persisted tier + `ProjectionStrategy`           |
+| Credentials                 | **A** | `CredentialsStore` port (shipped — the template)                           |
+| Skills / Prompts catalogs   | **A** | Loaders are the read side today; a write-capable store port is additive    |
+| Sections / compiled context | B     | Re-render                                                                  |
+| Tool registry               | B     | Compiled per tick from the rendered tree                                   |
+| Knob descriptors            | B     | Re-declared on mount                                                       |
+| Knob values                 | C     | Seedable via `initialKnobs`; adopters needing durable knobs use state + KV |
+| State harness K/V           | C     | Opt-in `KeyValueStore` port (this ADR)                                     |
+| `useData` cache             | C     | Re-fetch by contract                                                       |
+| Tasks (progress/results)    | C     | v2.0: documented lost-on-restart; store port with #292 lifetime work       |
+| In-flight operations        | C     | `findOrphaned` reports them; the execution is not resumed (v2.x rung (d))  |
 
 ## The store port pattern
 
@@ -140,7 +140,7 @@ spec-next carries observation shapes only if they cross the wire.
 ### Two archetypes
 
 The store port has exactly two shapes, and a harness picks by what its
-state fundamentally *is*:
+state fundamentally _is_:
 
 - **Append-log port** — `load` / `append` (+ enumeration, + destructive
   `prune`). The state is a fold over immutable append-only history.
@@ -148,10 +148,10 @@ state fundamentally *is*:
   archetype (see "Relationship to event sourcing").
 - **Current-state KV port** — `get` / `set` / `delete` / `keys`. No
   events, no fold, no history. **Credentials, state K/V, task records.**
-  A secret has no useful history; you want its *current* value, not its
+  A secret has no useful history; you want its _current_ value, not its
   audit trail. These are emphatically **not** event-sourced.
 
-Event sourcing is thus the persistence model of *one archetype*, not the
+Event sourcing is thus the persistence model of _one archetype_, not the
 framework. The universal thing is the store port; ES is what an
 append-log-backed harness looks like.
 
@@ -162,7 +162,7 @@ Binds to the existing two-tier model
 store-backed; the **projection tier** stays derived and is never stored.
 
 The persisted tier is an **append-only event log** — the port has no
-wholesale `replace`. Compaction operates on the *projection* tier only
+wholesale `replace`. Compaction operates on the _projection_ tier only
 (see below); the durable log is never rewritten. The single destructive
 operation, `prune`, exists for retention / GDPR-class erasure and is
 **never called by compaction**.
@@ -205,7 +205,7 @@ trails (write-behind) with a flush barrier.**
   loop.
 - A per-session write-behind pump drains appended entries to the store
   in order. **Compaction never touches the store.** `compact` operates
-  on the *projection* tier — it folds/summarizes the derived view for
+  on the _projection_ tier — it folds/summarizes the derived view for
   context-window management. The persisted tier (the durable log) is
   append-only and grows monotonically; the projection is the mutable,
   recompute-from-log view. This is the production-validated split
@@ -213,7 +213,7 @@ trails (write-behind) with a flush barrier.**
 - **Flush barrier:** `TimelineHarnessProtocol` gains
   `flush(): Promise<void>` — awaits the pump. The loop executor awaits
   it at **execution end** (and session `close()` awaits it). Invariant:
-  *any process that loads the store sees every completed execution.* A
+  _any process that loads the store sees every completed execution._ A
   crash mid-execution loses at most the in-flight turn — consistent with
   what the user experiences (the model call died anyway), and identical
   at both poles.
@@ -230,7 +230,7 @@ trails (write-behind) with a flush barrier.**
 holds is a **resume**: the timeline harness loads `store.load(sessionId)`
 into the persisted tier during `ready`, before first render. Class B
 state reconstructs on the first render; Class C applies its per-harness
-policy. `SessionSnapshot` remains a *read projection* for observation
+policy. `SessionSnapshot` remains a _read projection_ for observation
 (status listings, wire), not a durability vehicle.
 
 This is deliberately the same call, not a separate `resumeSession` —
@@ -246,8 +246,8 @@ two-pole test applied to dependencies):
 2. **JSONL file** (`@agentick/timeline-fs`) — zero-dep file
    persistence, one append-only transcript file per session.
    Human-greppable; the local-pole durable shape.
-3. **SQLite** (`@agentick/timeline-sqlite`) — the *recommended
-   first durable adapter* and a natural single-node event store
+3. **SQLite** (`@agentick/timeline-sqlite`) — the _recommended
+   first durable adapter_ and a natural single-node event store
    (append-only rows, range reads for the fold). **A separate package,
    never bundled into the `agentick` metapackage** — a SQLite driver is
    a native dependency (node-gyp) and its compile cost must stay opt-in.
@@ -270,7 +270,7 @@ is written, not here.
 **`seq` semantics are pinned on the port (#133, landed):** `seq` is
 **store-assigned, strictly increasing, never reused, and stable across
 `prune`** — a `BIGSERIAL` column, not a positional index. `append` returns
-the assigned seqs; `prune(before: { seq })` erases by *absolute* seq and
+the assigned seqs; `prune(before: { seq })` erases by _absolute_ seq and
 survivors keep theirs. The conformance suite validates this against
 `MemoryTimelineStore` (which tracks `baseSeq + index`), so a Postgres
 serial adapter is conformant out of the box and no cursored recipe is
@@ -291,17 +291,21 @@ per-backend factory returning an object that `implements TimelineStore`
 directly —
 
 ```ts
-export function fsTimelineStore(opts): TimelineStore { /* … */ }
-export function postgresTimelineStore(opts): TimelineStore { /* … */ }
+export function fsTimelineStore(opts): TimelineStore {
+  /* … */
+}
+export function postgresTimelineStore(opts): TimelineStore {
+  /* … */
+}
 ```
 
 Reasoning (weighed across elegance / idiom / performance):
 
 - **No shared code to hoist.** The two archetypes (append-log, current-state
-  KV) share a *pattern* (the 7 points) + the *conformance discipline*, not
+  KV) share a _pattern_ (the 7 points) + the _conformance discipline_, not
   code — a `defineStore` supertype would abstract over ~3 lines (`backend`
   label, reject-on-error, enumeration). False unification.
-- **A helper can't own the one hard invariant.** `seq` is *backend-assigned*
+- **A helper can't own the one hard invariant.** `seq` is _backend-assigned_
   (`BIGSERIAL` / line ordinal); a helper that owned `seq` would hold an
   in-process per-session counter and forbid DB-assigned serials — breaking
   the stateless-replica resume story. It could own only trivia
@@ -316,13 +320,13 @@ Reasoning (weighed across elegance / idiom / performance):
   `<backend>X(opts)`, not `define*`.
 - If author ergonomics ever demand it, ship **pure utilities** (a load↔history
   seq-tag deriver, a default codec) from `timeline-next` — primitives, not a
-  wrapper — and only when a *fourth* backend asks (three-consumers rule).
+  wrapper — and only when a _fourth_ backend asks (three-consumers rule).
 
 **Escape hatches live in the Postgres factory's options — the library never
 owns your schema:** `postgresTimelineStore({ executor /* BYO pg.Pool | {query} */,
 table, columns /* map onto existing columns */, sql /* per-op FULL override */,
 codec /* jsonb + schema_ver */, migrate: "off" /* default; "create-if-absent"
-opt-in — never forced */ })`. Default DDL is *shipped for manual apply*, not
+opt-in — never forced */ })`. Default DDL is _shipped for manual apply_, not
 auto-run.
 
 **Performance:** the write-behind pump hands `append(sessionId, entries[])` a
@@ -351,7 +355,7 @@ is ephemeral and the README says so.
   past its window is a correctness non-event because the journal is not
   load-bearing for recovery.
 - **Observability/audit** — devtools and the future persistence-backed
-  production inspector consume it. A durable journal *adapter* is an
+  production inspector consume it. A durable journal _adapter_ is an
   observability feature, not a recovery feature.
 - **Crash diagnostics** — `findOrphaned` reports operations stuck
   without a terminal at boot. v2.0 reports; it does not resume.
@@ -364,7 +368,7 @@ wait for it.
 
 ## Relationship to event sourcing
 
-This ADR *is* event sourcing for the timeline — stated in the
+This ADR _is_ event sourcing for the timeline — stated in the
 framework's own vocabulary. Naming it precisely prevents two recurring
 questions ("why don't we just replay the journal?" and "shouldn't the
 event log be more comprehensive?").
@@ -376,11 +380,11 @@ event-sourcing-sufficiency and telemetry-comprehensiveness are different
 virtues, and one log cannot serve both without the ES fold bloating with
 events it must skip:
 
-| Plane | Log | Virtue | Recovery-bearing? |
-| --- | --- | --- | --- |
-| **Domain** | Timeline persisted tier | **Sufficiency** — exactly the outcome events whose fold reconstructs state | **Yes — the only one** |
-| **Command / telemetry** | `OperationJournal` | **Comprehensiveness** — every operation envelope, every phase | No (commands don't deterministically replay) |
-| **Transport** | Bus | Fan-out | No (bounded-retention, not a log of record) |
+| Plane                   | Log                     | Virtue                                                                     | Recovery-bearing?                            |
+| ----------------------- | ----------------------- | -------------------------------------------------------------------------- | -------------------------------------------- |
+| **Domain**              | Timeline persisted tier | **Sufficiency** — exactly the outcome events whose fold reconstructs state | **Yes — the only one**                       |
+| **Command / telemetry** | `OperationJournal`      | **Comprehensiveness** — every operation envelope, every phase              | No (commands don't deterministically replay) |
+| **Transport**           | Bus                     | Fan-out                                                                    | No (bounded-retention, not a log of record)  |
 
 One mutation touches all three planes, in order:
 
@@ -396,16 +400,16 @@ formal answer to "why not replay the journal."
 
 ### Outcome events, not command events (why recovery ≠ journal replay)
 
-The ES fold must be deterministic. What you choose as your *events*
+The ES fold must be deterministic. What you choose as your _events_
 decides whether it can be:
 
 - **Command events** (`call-tool`, `model-tick`) → fold = **re-execute**
   → non-deterministic, expensive, wrong. You cannot replay an LLM call.
-- **Outcome events** (the assistant message, the tool *result*) → fold =
+- **Outcome events** (the assistant message, the tool _result_) → fold =
   **re-render the declarative tree given the outcomes** → pure, cheap,
   correct.
 
-Timeline entries are *outcomes*. The operation journal holds *commands*.
+Timeline entries are _outcomes_. The operation journal holds _commands_.
 That is precisely why the timeline is recovery-bearing and the journal
 is not — and why re-render (over recorded outcomes) is a sound fold
 while journal-replay (over side-effecting commands) is not.
@@ -416,16 +420,16 @@ Event sourcing is the persistence model of the **append-log port**
 archetype (timeline). The **current-state KV** archetype (credentials,
 state K/V, task records) is not event-sourced and should never be — a
 secret has no useful history; you want its current value, not its audit
-trail. The framework's universal primitive is the store *port*; ES is
+trail. The framework's universal primitive is the store _port_; ES is
 what an append-log-backed harness looks like. (See "Two archetypes.")
 
 ## Snapshot demotion
 
-**Snapshots move state across *space*; the log moves state across
-*time*.** A snapshot ships a session's live state from one process to
+**Snapshots move state across _space_; the log moves state across
+_time_.** A snapshot ships a session's live state from one process to
 another (space); the append-only log reconstructs a session after a
 crash (time). They are not competitors — they serve orthogonal axes.
-The smell this ADR kills is using a snapshot where *log-across-time* is
+The smell this ADR kills is using a snapshot where _log-across-time_ is
 the honest mechanism (crash recovery, resume). Used for space-movement,
 snapshots are correct and stay.
 
@@ -439,7 +443,7 @@ space-movement jobs:
    ship a snapshot as an optimization over cold rehydrate. Optimization,
    not mechanism: cold rehydrate (log-across-time) must always work.
 
-What changes is the *contract language*: no harness may rely on
+What changes is the _contract language_: no harness may rely on
 snapshot/restore as its durability (across-time) story for Class A
 state, and no new code should add snapshot plumbing where a store port
 is the honest answer.
@@ -472,9 +476,9 @@ cluster workstream; interface sketch deferred to that note.)
 
 1. **Paged/lazy timeline load.** `load()` returns the full persisted
    tier; very long sessions may want `load(sessionId, { from, limit })`
-   + lazy tail. Defer until a real adopter hits it (Knowify compacts
-   aggressively; local transcripts are small). The port can grow an
-   optional method without breaking conformance.
+   - lazy tail. Defer until a real adopter hits it (Knowify compacts
+     aggressively; local transcripts are small). The port can grow an
+     optional method without breaking conformance.
 2. **Entry wire-shape versioning (E11 residue).** Stored `TimelineEntry`
    rows outlive deploys. Proposal: stamp `specVersion` per store record;
    adapters run pure migration functions at load. Needs a one-pager when
@@ -486,7 +490,7 @@ cluster workstream; interface sketch deferred to that note.)
    `remember`-style agent-written skills need a write-capable store.
    Additive follow-up; the port pattern applies verbatim.
 5. **`TimelineStore` → `TranscriptStore` rename (deferred).** The
-   persisted tier is precisely a *transcript* — the immutable record of
+   persisted tier is precisely a _transcript_ — the immutable record of
    what was said — so the append-log port is arguably `TranscriptStore`,
    even if the harness stays `timeline` (which correctly names the
    living structure: transcript + projection + queue). Attractive, but a

@@ -9,14 +9,15 @@ secure-exec provider, #226 (Lambda).
 
 ## The problem
 
-v2 shipped the sandbox *substrate* (`packages/sandbox` — bridge, harness, ACL,
+v2 shipped the sandbox _substrate_ (`packages/sandbox` — bridge, harness, ACL,
 elicitation permission gate, React `<Sandbox>`/tools) but **zero concrete providers**, and
 it **narrowed the handle to 4 methods and left three lossy fakes**:
+
 - `editFile` (`harness.ts:549` `applyEditsLocal`) — naive `string.replace`; only
   replace/delete/insert-before/after; no fuzzy matching, no range, non-atomic,
   `expectedHash` ignored. A silent correctness regression from v1's `applyEdits`.
 - `stat` (`harness.ts:344`) — reads the file and **fabricates** `{size, kind:"file",
-  mtime:Date.now()}`.
+mtime:Date.now()}`.
 - `readdir` (`harness.ts:370`) — `exec("ls -1A")`, labels **every** entry `kind:"file"`.
 
 Fakes are worse than gaps — they lie silently. Porting v1's providers onto this handle
@@ -79,7 +80,7 @@ the already-specced `SandboxExecDelta` (`exec:delta`).
 ## Network firewall — three-layer split (survey, adopted)
 
 1. **Types → `spec-next`**: `NetworkRule`, `ProxiedRequest`, `network: boolean | readonly
-   NetworkRule[]` — wire vocabulary any egress-enforcing provider + observability shares.
+NetworkRule[]` — wire vocabulary any egress-enforcing provider + observability shares.
 2. **Pure matcher → a shared `@agentick/sandbox-net` helper**: `matchRequest` /
    `matchDomain` (first-match-wins, default-deny, `*.domain` wildcards) — OS-free, reusable
    by docker/remote. (Putting it in `local` would force docker→local — wrong direction.)
@@ -96,7 +97,7 @@ the already-specced `SandboxExecDelta` (`exec:delta`).
   remote/CRIU-style provider (the cloud persona #163 pulls it back then).
 - **Diff-preview UX (#220) — DEFER (rider).** The tool-executor confirmation seam surfaces
   the pending input but has **no structured `confirmationPreview:{type:"diff"}` slot**;
-  ACL-elicitation covers *approval*. Re-adding the diff needs a seam addition — its own
+  ACL-elicitation covers _approval_. Re-adding the diff needs a seam addition — its own
   issue, not this ADR.
 - **secure-exec — DEFER.** Validate the contract on local + docker (real exec/fs/net)
   first; port secure-exec after as the capability-tier (no-mounts/no-streaming) test case.
@@ -118,6 +119,7 @@ proxy/setup) + `sandbox-docker-next` (+ `NetworkMode`) + `sandbox-net-next` matc
 conformance suite. **Out:** hibernate wiring, diff-preview UX, secure-exec, Lambda.
 
 ## Rejected
+
 - **Keep the 4-method handle + the three fakes.** Fakes lie; a `stat` that fabricates
   mtime is worse than none. Delete them; bash covers the model's need.
 - **Build "real" `stat`/`readdir` handle methods + tools.** Unnecessary — `bash` is the
@@ -149,7 +151,7 @@ command.
   shape as session `requiredScopes` + downscoping.
 
 This SUPERSEDES the "create-time config" framing and the "Runtime addMount/removeMount
-tools" rejection above (rejected as *model tools*; correct as *harness commands*).
+tools" rejection above (rejected as _model tools_; correct as _harness commands_).
 
 ## Amendment 2026-07-07 — packaging correction: providers dep the BASE (`sandbox-next`), mirror `model-next`
 
@@ -158,6 +160,7 @@ tools" rejection above (rejected as *model tools*; correct as *harness commands*
 is being cleaned up by hand.
 
 ### How we deviated (so it doesn't recur)
+
 A locally-reasonable chain drifted, unchecked against precedent: `SandboxHandle` correctly
 belongs in spec (it's the reconciler↔harness **bridge** type — `reconciler-react` references
 it without depending on the harness, same firewall reason as `HookBridges`). From there:
@@ -170,11 +173,13 @@ layer).** The rule: when packaging a subsystem, copy the closest precedent's sha
 then justify any divergence — don't re-derive.
 
 ### The grain (model layer, the mirror)
+
 `@agentick/model-openai` **deps** `@agentick/model`. The `LanguageModelAdapter`
 contract + shared code live in `model-next` (the base), NOT spec. Sandbox mirrors this
 exactly.
 
 ### Target topology + dep graph
+
 ```
 spec-next            SandboxHandle, SandboxBridge, Sandbox{Exec,Edit,Mount,Create,Snapshot} wire types,
    ↑                 NetworkRule, ProxiedRequest, sandbox error tags.  ← reconciler-react reaches THESE; never the harness.
@@ -186,6 +191,7 @@ sandbox-docker-next  provider — deps `sandbox-next`   (Wave 2b)
 ```
 
 ### Moves (exhaustive)
+
 1. `SandboxProvider` interface: **spec → `sandbox-next`** (server-side factory, not a wire type; reconciler never constructs it). Everything else in `spec/data/sandbox.ts` STAYS (handle/bridge/exec/edit/mount/create/snapshot/network/errors).
 2. `applyEdits` + `EditError`: `sandbox-edit` → `sandbox-next/src/edit.ts`. **Delete `sandbox-edit`.**
 3. `matchRequest`/`matchDomain`: `sandbox-net` → `sandbox-next/src/net.ts`. **Delete `sandbox-net`.** (`NetworkRule`/`ProxiedRequest` types stay in spec.)
@@ -194,6 +200,7 @@ sandbox-docker-next  provider — deps `sandbox-next`   (Wave 2b)
 6. `sandbox-next` main entry **React-free**: move the stray React ref + `react/tools.tsx` + `<Sandbox>` behind the **`sandbox-next/react`** subpath.
 
 ### Invariants (green checks)
+
 - `sandbox-local-next/package.json` deps `@agentick/sandbox` — not `-edit`/`-net`, not spec-only.
 - `sandbox-edit` + `sandbox-net` gone everywhere (dirs, lockfile, `website/typedoc.json`, `config.mts`).
 - `sandbox-next` main entry imports zero React (React only via `/react`).
@@ -201,13 +208,14 @@ sandbox-docker-next  provider — deps `sandbox-next`   (Wave 2b)
 - No cycle: `sandbox-next` deps no provider. Fresh typecheck + vitest + lint green.
 
 ### Principle (one line)
+
 Provider contract + shared code in the **base**; concrete impls dep the base; **spec holds only firewall wire/bridge types**; conformance + doubles ship with the contract. OS isolation (seatbelt/bwrap/unshare/cgroup, #240) is a separate FUNCTIONAL gap in `sandbox-local`, independent of this repackaging.
 
 ## Amendment 2026-07-07 (2) — CORRECTION: `SandboxHandle` is NOT a wire type; it moves to the base too
 
 The (1) amendment kept `SandboxHandle` in spec on the claim that the reconciler bridge
 references it. **That claim is false** (verified): `SandboxBridge` registers
-`Map<string, SandboxHarness>` — *harnesses*, not handles — and `reconciler-react`
+`Map<string, SandboxHarness>` — _harnesses_, not handles — and `reconciler-react`
 references `SandboxHandle` **zero** times. The handle is a live, non-serializable object
 (fds/container id/workspace) consumed only server-side by the harness that wraps it 1:1.
 
@@ -218,10 +226,11 @@ handle methods (raw capability vs governed sandbox). The handle is real and need
 is the **provider↔harness internal contract**, not a wire/bridge type.
 
 **Corrected spec ↔ base split — the test is "is it serialized across the inbox/wire?":**
+
 - **`spec-next` keeps ONLY the serialized shapes:** the harness command payloads/results
   (the inbox-addressable data — `SandboxExec*`/`SandboxEdit*`/mount inputs/results),
   `NetworkRule`, `ProxiedRequest`, the sandbox error tags. (Note: `onOutput`/`signal` on
-  exec are runtime-only; the *serialized* command input is their subset.)
+  exec are runtime-only; the _serialized_ command input is their subset.)
 - **`sandbox-next` (base) holds the CONSTRUCTION contracts + live-object interfaces:**
   `SandboxProvider`, **`SandboxHandle`**, `SandboxCreateOptions`, `SandboxSnapshot`, plus
   the harness/bridge impl, `applyEdits`, the net matcher. `SandboxBridge` is already here.

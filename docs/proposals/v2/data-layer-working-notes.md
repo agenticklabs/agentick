@@ -31,8 +31,8 @@ data — store it anywhere, query it their way, use their own client state — o
   inference.
 - **The framework owns NO client cache.** Client feeds the store's data into its
   OWN state layer (ngrx / TanStack / PouchDB / custom). Framework provides loaders
-  + a change signal; the app owns merge / cache / consistency.
-  - **THE BRIGHT LINE:** the moment we own merge/cache/consistency we've signed up
+  - a change signal; the app owns merge / cache / consistency.
+  * **THE BRIGHT LINE:** the moment we own merge/cache/consistency we've signed up
     to build a **sync engine** (Replicache / Zero / ElectricSQL / Meteor) — a
     multi-year product, not a feature. Every pull toward "make the client smarter
     about merging" is the wheel we must NOT rebuild.
@@ -65,7 +65,7 @@ data — store it anywhere, query it their way, use their own client state — o
 // the framework's keyhole — the ONLY thing it depends on
 interface Backing<T> {
   append(ctx: Ctx, entry: T): Promise<Cursor>;
-  read(ctx: Ctx): Promise<readonly T[]>;   // the store-BOUNDED current working set (see open #1)
+  read(ctx: Ctx): Promise<readonly T[]>; // the store-BOUNDED current working set (see open #1)
 }
 // the user's store = Backing + a whole room; the room's public methods are the
 // (language-agnostic) wire surface the client calls. Framework never sees the room.
@@ -116,6 +116,7 @@ interface Backing<T> {
 ## Next concrete step (agreed method — stop designing in the abstract)
 
 SPIKE in isolation, zero churn:
+
 1. `Backing` (append + read) + a default in-memory store.
 2. Express the EXISTING timeline as a store fulfilling `Backing` + a rich `query`
    (canonical cursor) — WITHOUT touching other packages.
@@ -129,9 +130,9 @@ learned cheap, no churn spent.
 
 ## Meta (how to work this)
 
-- Taste judges *things*, not ideas → build small concrete artifacts to react to.
+- Taste judges _things_, not ideas → build small concrete artifacts to react to.
 - Parity is the fear → inventory current behavior from the **conformance suites**
-  + ADRs alongside the spike; every behavior maps or is a *documented deliberate
-  drop*, never accidental.
+  - ADRs alongside the spike; every behavior maps or is a _documented deliberate
+    drop_, never accidental.
 - Incremental adoptability is a criterion → if it can't be adopted one store at a
   time coexisting with the old, that's a disqualifier, not a migration cost.

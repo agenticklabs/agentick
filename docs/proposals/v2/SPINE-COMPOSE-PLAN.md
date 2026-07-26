@@ -26,7 +26,7 @@ consumer composes it).
 `packages-next/loop-executor/src/__tests__/characterization.spec.ts` — **28 tests**.
 
 - [x] **Executor-failure paths** — `failed`→`executor_failed`, `canceled`→`aborted`,
-      `vetoed`→`vetoed` (incl. fail-on-Nth-tick). *(Via the improved fake's scripted `outcome`.)*
+      `vetoed`→`vetoed` (incl. fail-on-Nth-tick). _(Via the improved fake's scripted `outcome`.)_
 - [x] **Streaming vs non-streaming** — gating; streaming forwards deltas; non-streaming
       synthesizes; **streaming `.result`-reject → `executor_failed`**.
 - [x] **Tool-dispatch outcomes** — soft error (`isError`), hard throw (caught, `error`
@@ -36,10 +36,11 @@ consumer composes it).
 - [x] **maxTicks cap** — `max_ticks` stop.
 
 **Mitigations baked in (design, not just boxes):**
+
 - [x] **Differential seam** — `runChar(makeLoop?)`; the SAME scenarios run against the
-      future `Effect.gen` loop → validate the rewrite by *diffing traces*, not hoping.
+      future `Effect.gen` loop → validate the rewrite by _diffing traces_, not hoping.
 - [x] **Invariant assertions** — `assertLoopInvariants` (bounds, defined outcome,
-      monotone usage, no-dangling) → catches whole *classes* of drift.
+      monotone usage, no-dangling) → catches whole _classes_ of drift.
 
 **Gate:** ✅ met. The loop is now safe to compose (Stage 3).
 
@@ -50,12 +51,12 @@ consumer composes it).
 - [x] **`BaseHarness.fxProxy()`** — a `Proxy` exposing each declared command's composable
       Effect under its ergonomic action name (`fx.<action>` → `commandEffect(<surface>:<action>)`),
       auto-derived from the naming convention. Returns the Effect (not a Promise); the plain
-      `harness.<action>()` stays the edge facade. *(The runtime already existed as
-      `commandEffect` — timeline's `drain` composes over it; `.fx` is the sugar.)* Proven in
+      `harness.<action>()` stays the edge facade. _(The runtime already existed as
+      `commandEffect` — timeline's `drain` composes over it; `.fx` is the sugar.)_ Proven in
       `base-harness.spec` (fx.add composes; plain method is a Promise; fx twins nest in one gen).
 - [x] **Per-harness typed `get fx()`** over `fxProxy()` — **knobs is the reference harness**.
       `KnobsFx` (spec) declares the Effect twins; `get fx(): KnobsFx { return this.fxProxy() as
-      unknown as KnobsFx; }`. The typed getter (over an index-signature base) sidesteps the
+    unknown as KnobsFx; }`. The typed getter (over an index-signature base) sidesteps the
       getter-override/contravariance friction. Proven in `knobs/fx-surface.spec`.
 - [x] **`PromiseView<T>`** mapped type (spec) — homomorphic; rewrites each Effect-returning method
       to its awaited Promise form, drops `E`/`Ctx`. **Effect is canonical, Promise derived** — the
@@ -75,18 +76,14 @@ edge-facade derivation. Stage 2 replicates the twin onto the spine protocols.
       registry commands (they build their Operation inline), so `.fx` is NOT `fxProxy`-derived; the
       harness hand-exposes the `runOperation(op, body)` Effect its `run` already builds. Uniform
       contract stays the typed seam (`get fx()` + `PromiseView`); only the impl behind it differs.
-- [x] **Streaming edge de-risked + made singular** (`d2525696`) — the DUAL of the Promise edge:
-      - `AsyncStream<Item, Result>` (spec) — the streaming facade type, dual of `Promise<A>`.
-      - `runHarnessStream` (runtime) — the bridge, sibling of `runHarnessProtocol`. All the
-        Queue/fork/Promise machinery lives here ONCE; each streaming edge supplies only its
-        sink-fold `build` + policy hooks. Executor's `executeStream` facade rewritten over it
-        (~120 lines → the reused bridge); the 8 backpressure/cancellation tests stay green.
-      - `ExecutorFx.executeStream(input, sink): Effect<TOutput, E>` — the canonical sink-fold twin.
-        The ONE exception to `PromiseView`: its facade differs in arity (`(input): AsyncStream`),
-        so hand-declared on both surfaces — they share the bridge, not a mapped type.
-      - **Finding:** the Effect-native streaming side is *simpler* than the facade — the loop
-        composes `yield* executor.fx.executeStream(input, sink)` in one fiber, no queue. Machinery
-        exists only to bridge one Effect stream into JS's two-consumer shape.
+- [x] **Streaming edge de-risked + made singular** (`d2525696`) — the DUAL of the Promise edge: - `AsyncStream<Item, Result>` (spec) — the streaming facade type, dual of `Promise<A>`. - `runHarnessStream` (runtime) — the bridge, sibling of `runHarnessProtocol`. All the
+      Queue/fork/Promise machinery lives here ONCE; each streaming edge supplies only its
+      sink-fold `build` + policy hooks. Executor's `executeStream` facade rewritten over it
+      (~120 lines → the reused bridge); the 8 backpressure/cancellation tests stay green. - `ExecutorFx.executeStream(input, sink): Effect<TOutput, E>` — the canonical sink-fold twin.
+      The ONE exception to `PromiseView`: its facade differs in arity (`(input): AsyncStream`),
+      so hand-declared on both surfaces — they share the bridge, not a mapped type. - **Finding:** the Effect-native streaming side is _simpler_ than the facade — the loop
+      composes `yield* executor.fx.executeStream(input, sink)` in one fiber, no queue. Machinery
+      exists only to bridge one Effect stream into JS's two-consumer shape.
 - [ ] **Remaining executor twins** — `project` / `execute` / `normalize` / `abort` into `ExecutorFx`
       (loud `TODO(stage-2)` on the harness). Migrate the protocol's inline Promise methods to
       `PromiseView<Pick<ExecutorFx, …>>` wholesale once the full surface has twins.
@@ -119,6 +116,7 @@ protocols — the loop can now compose `input.<dep>.fx.<op>()` in-fiber. `StateA
 the last twins before the Stage 3 `Effect.gen` loop rewrite.
 
 **The `.fx` mechanism decision tree (settled):**
+
 - Op is a BARE command passthrough (facade == `commandEffect`, no extra logic) → `fxProxy` sugar (knobs).
 - Op is a command but the facade adds logic (door→origin, etc.) → hand-author over `commandEffect` (tool-executor).
 - Op is NOT a command (builds its Operation inline) → hand-author over `runOperation` (executor, loop).
@@ -145,22 +143,22 @@ downstream call in `runExecutionAsync` against the `.fx` surface that actually e
 own `runPromise` root via the facade, re-severing the fiber at exactly the boundary Stage 3
 mends: span detaches, interrupt doesn't reach it) — needs these **7 more twins first**:
 
-| Twin needed | Harness | Loop call site | Why (path) |
-|---|---|---|---|
-| `project` | executor | streaming path | project → executeStream → normalize is split on the stream path |
-| `normalize` | executor | streaming path | ″ |
-| `compileForTick` | tool-executor | every tick | precedence-resolved model tool set |
-| `replaceReconcilerTools` | tool-executor | every tick | sync IR tool decls into the registry |
-| `notifyLifecycle` | reconciler | 2 awaited (tick-start/tick-end bridges) + ~4 fire-and-forget | ADR 67 settle-before-decide ordering rides the two awaited ones |
-| `applyExecutorResult` | StateApplicator | per tick | writes the timeline the next render reads |
-| `applyToolResults` | StateApplicator | per tick | ″ |
+| Twin needed              | Harness         | Loop call site                                               | Why (path)                                                      |
+| ------------------------ | --------------- | ------------------------------------------------------------ | --------------------------------------------------------------- |
+| `project`                | executor        | streaming path                                               | project → executeStream → normalize is split on the stream path |
+| `normalize`              | executor        | streaming path                                               | ″                                                               |
+| `compileForTick`         | tool-executor   | every tick                                                   | precedence-resolved model tool set                              |
+| `replaceReconcilerTools` | tool-executor   | every tick                                                   | sync IR tool decls into the registry                            |
+| `notifyLifecycle`        | reconciler      | 2 awaited (tick-start/tick-end bridges) + ~4 fire-and-forget | ADR 67 settle-before-decide ordering rides the two awaited ones |
+| `applyExecutorResult`    | StateApplicator | per tick                                                     | writes the timeline the next render reads                       |
+| `applyToolResults`       | StateApplicator | per tick                                                     | ″                                                               |
 
 `tryPromise` survives ONLY at the two genuine external-I/O boundaries — `adapter.execute`
 (inside the executor) and the user tool handler (inside tool-executor). `notifyTickEnd` is a
 **session-provided callback** (not a harness method); it stays a Promise callback wrapped in
 `tryPromise` as an interim until the session twin lands (its Effect variant is session-twin
 territory). Fire-and-forget `void notifyLifecycle` stays detached (hook throws must not fail
-the run — telemetry nesting is low-value there); only the two *awaited* lifecycle bridges twin.
+the run — telemetry nesting is low-value there); only the two _awaited_ lifecycle bridges twin.
 
 **Corrected order (twin-completion is the low-risk additive tranche; the loop rewrite is the crux):**
 
@@ -186,8 +184,7 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
 - [x] **`StateApplicator` fx** (`applyExecutorResult` + `applyToolResults`) — GENUINE: the session's
       impls ARE `runHarnessProtocol`-backed (would sever + drop the write's exit-normalization).
       `StateApplicatorFx` added to spec; the two apply facades derive via `PromiseView`; `appendEntry`
-      needs no twin (loop never calls it). Session extracts `applyExecutorResultFx`/`applyToolResultsFx`
-      + wires the loop-facing adapter's `fx` (`Effect.asVoid` drops `ApplyResult` → the loop's `void`).
+      needs no twin (loop never calls it). Session extracts `applyExecutorResultFx`/`applyToolResultsFx` + wires the loop-facing adapter's `fx` (`Effect.asVoid` drops `ApplyResult` → the loop's `void`).
       `NoopStateApplicator` + recording doubles gain `fx` recording on BOTH edges so the
       characterization diff holds byte-identical when the loop switches facade→fx in step 5. +3 proofs.
       **Twin surface now COMPLETE — every `runHarnessProtocol`-backed spine call the loop makes has a
@@ -196,7 +193,7 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
       one `Effect.gen` fiber; `runExecutionBody` composes every downstream call via its `.fx` twin
       (`yield* reconciler.fx.renderTree`, `executor.fx.{project,run,executeStream,normalize}`,
       `toolExecutor.fx.{replaceReconcilerTools,compileForTick,dispatch}`, `stateApplicator.fx
-      .apply*`). **Zero internal `tryPromise` islands.** The imperative control flow (while/break/
+    .apply*`). **Zero internal `tryPromise` islands.** The imperative control flow (while/break/
       accumulate) is UNCHANGED — `Effect.gen` preserves it; only `await facade()` → `yield* fx()`.
       The two locally-handled failures (streaming `.result` reject, hard tool throw) are caught
       in-body via `Effect.either`; everything else folds to `ExecutionError` via a boundary
@@ -204,19 +201,18 @@ the run — telemetry nesting is low-value there); only the two *awaited* lifecy
       `notifyTickEnd`, no span, bare async) awaited in-fiber via `awaitBridge` (a bare
       `Effect.tryPromise` — NOT a severing root) or fire-and-forget. **Characterization 28
       byte-identical green** on the first diff; loop-executor 50 green; workspace 145/145; full
-      packages-next suite green.
-      - **KEY FINDING (surfaced by session integration, exactly as intended):** overriding/patching
-        an executor's PUBLIC facade (`run`/`executeStream`/`project`) does NOT intercept the `.fx`
-        twin — both derive from the same private impl, but a facade override doesn't touch it. So the
-        moment internal composition moved facade→fx, two test doubles that intercepted the facade
-        (the kill-resume `SpyLanguageModelExecutor`, the steering monkey-patch) went silently inert.
-        Fixed by intercepting at the fx edge. This is the correct architecture (adopters decorate at
-        the adapter/runner layer, not by overriding executor facades — ADR 52 killed the subclass
-        tier) — but it's a real contract the fx surface now enforces.
+      packages-next suite green. - **KEY FINDING (surfaced by session integration, exactly as intended):** overriding/patching
+      an executor's PUBLIC facade (`run`/`executeStream`/`project`) does NOT intercept the `.fx`
+      twin — both derive from the same private impl, but a facade override doesn't touch it. So the
+      moment internal composition moved facade→fx, two test doubles that intercepted the facade
+      (the kill-resume `SpyLanguageModelExecutor`, the steering monkey-patch) went silently inert.
+      Fixed by intercepting at the fx edge. This is the correct architecture (adopters decorate at
+      the adapter/runner layer, not by overriding executor facades — ADR 52 killed the subclass
+      tier) — but it's a real contract the fx surface now enforces.
 - [x] **Session** — DONE. `send` runs the COMPOSED loop (`loop.fx.runExecution`, one fiber) on the
       telemetry runtime. The facade `loop.runExecution` IS `runHarnessProtocol(loop.fx
-      .runExecution(...))` on the DEFAULT runtime; the session now calls `runHarnessProtocol(loop.fx
-      .runExecution(...), this.telemetryRuntime)` — a one-line swap that routes the whole execution's
+    .runExecution(...))` on the DEFAULT runtime; the session now calls `runHarnessProtocol(loop.fx
+    .runExecution(...), this.telemetryRuntime)` — a one-line swap that routes the whole execution's
       span tree to the adopter's tracer. `undefined` runtime → default → behavior-preserving.
       `notifyTickEnd` stays a session callback (awaited in-fiber via `awaitBridge` in the loop — no
       separate Effect variant needed; the loop rewrite already handles it). NOTE: the loop runs
@@ -249,7 +245,7 @@ takes the runtime, spans already emit via `Effect.withSpan` in `runOperation`, a
       construction — and the spine harness constructors (loop/executor/tool/reconciler) don't even
       accept it, so a whole-spine whitelabel needs the namespace read from FIBER CONTEXT (ADR 78 brick
       #2) rather than per-harness fields. Orthogonal to nesting; its own small change. `TODO(stage-4:
-      fiber-context-namespace)`.
+    fiber-context-namespace)`.
 - [x] **Verify end-to-end — DONE.** `session/__tests__/telemetry.spec.ts`: a `session.send` under a
       collecting tracer produces a **nested** trace tree — `loop:command:run-execution` (root) >
       `{executor:command:project/normalize/run, reconciler:command:render-tree, tool:command:*}`,
@@ -284,7 +280,7 @@ Not required to land the spine; enabled by it. Each is its own decision:
       opens; sequential would deadlock, parallel completes) + call-order assertion + a
       `toolConcurrency: 1` sequential opt-out.
 - [x] **`Effect.timeout` (execution timeout)** — DONE, opt-in. `input.timeoutMs` / `SendInput
-      .timeoutMs`, **NO default** (mechanism not policy). A per-execution timer fires the SAME
+    .timeoutMs`, **NO default** (mechanism not policy). A per-execution timer fires the SAME
       structured-abort path (controller + aborted map) so in-flight work tears down; the terminal
       lands `canceled` with `stopReason: "timeout"` (new stop reason, threaded through
       `ExecutionRunResult` + `SendResult`). Timer cleared on every exit via `Effect.ensuring`. Proof

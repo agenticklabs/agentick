@@ -13,7 +13,7 @@ authorities**, at **two different points**:
 1. **Session `notifyLifecycle` → `TickEndForwardDecision`** — ADR-53 steering ("new input →
    continue"). Computed at loop step 3. Receives NO `TickResult`.
 2. **`LoopBridge.continueAfterTick` / `stopAfterTick`** — what gates drive (via
-   `useLoopControl`, at the *reconciler* tick-end, step 6). The interface even says
+   `useLoopControl`, at the _reconciler_ tick-end, step 6). The interface even says
    "whether the loop honors them is governed by the loop's handler chain" — and the loop's
    `wantsContinue` reads only (1) + `tool_use`, so this channel's path into the decision is
    murky.
@@ -30,7 +30,7 @@ hook, enriched with the typed `TickResult`. Every input is a predicate in one of
 - **Tier 1 — hard stop-forcers** (any → STOP): `maxTicks`, `abort`, explicit
   `stopAfterTick`. The runaway guard + a trusted-host halt. Override everything.
 - **Tier 2 — continue-forcers** (any, if no tier-1 → CONTINUE): `tool_use`, steering (new
-  input), an active gate. Same species — a gate *holds the loop open* exactly as steering
+  input), an active gate. Same species — a gate _holds the loop open_ exactly as steering
   does.
 - **Tier 3 — natural stop** (default): the model is done and nothing forces either way.
 
@@ -46,14 +46,14 @@ predicate. The loop's ad-hoc `wantsContinue` dissolves into this resolution.
 ## Who may stop (provenance — ADR 51)
 
 Stop-forcing is a **trusted** act. The **model cannot stop-force** — it only continue-forces
-(via `tool_use`); when it emits `end_turn` that is the *absence* of a continue signal
+(via `tool_use`); when it emits `end_turn` that is the _absence_ of a continue signal
 (tier-3 natural stop), not a forced stop. `stopAfterTick` is **host/tree-only** and beats an
 active gate — consistent with the host-only gate `.override()`: only trusted code halts
 past a gate's hold. A gate's read-only-to-the-model guarantee is preserved.
 
 ## The one structural change: flip the tick-end order
 
-Tier-2/tier-1 predicates read *settled* state (a tick-end effect may update a knob a gate
+Tier-2/tier-1 predicates read _settled_ state (a tick-end effect may update a knob a gate
 checks). So the tree must settle **before** the decision:
 
 **reconciler tick-end (settle tree + other `useOnTickEnd`) → session continuation decision
@@ -79,7 +79,7 @@ this is the load-bearing mechanical change. `NotifyTickEndInput.result` is enric
   `stopAfterTick`, `tool_use`, steering, gates) evaluated in the session's tick-end hook,
   structured so adding a predicate is a one-liner. Enrich `NotifyTickEndInput` with
   `TickResult`. Flip the tick-end order. `useGate` → registration-only.
-- **Future (not now):** a *dynamic* extension-registered predicate registry (adopters
+- **Future (not now):** a _dynamic_ extension-registered predicate registry (adopters
   contribute `token-budget`, `human-approval`, etc.). YAGNI until a real third-party
   predicate appears — the fixed composition already unifies the five built-ins, which is
   the value.

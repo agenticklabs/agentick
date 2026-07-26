@@ -49,9 +49,9 @@ Invoke it like a function:
 const result = await billEval(); // factory defaults
 const result2 = await billEval({ model: "bedrock/us.amazon.nova-2-lite-v1:0" });
 
-result.passed;      // every assertion held
-result.assertions;  // each one, with a message and details
-result.toolCalls;   // every observed tool call: name, input, outcome, result
+result.passed; // every assertion held
+result.assertions; // each one, with a message and details
+result.toolCalls; // every observed tool call: name, input, outcome, result
 result.elapsedMs;
 ```
 
@@ -92,7 +92,11 @@ expected output into separate axes — the cartesian product would score
 document A against document B's expectations. Make the axis value the pair:
 
 ```ts
-interface BillFixture { name: string; fileBlock: unknown; expected: Expected }
+interface BillFixture {
+  name: string;
+  fileBlock: unknown;
+  expected: Expected;
+}
 
 const sweep = await billEval.matrix({
   fixture: [acmeFixture, metroFixture], // pairs — document + expectations together
@@ -138,7 +142,8 @@ liveDescribe("bill extraction eval", () => {
   jest.setTimeout(600_000);
   it("matrix across models", async () => {
     const sweep = await billEval.matrix({ model: MODELS });
-    for (const cell of sweep.cells) console.log(cell.axes.model, cell.result.passed, cell.result.elapsedMs);
+    for (const cell of sweep.cells)
+      console.log(cell.axes.model, cell.result.passed, cell.result.elapsedMs);
     expect(sweep.passed).toBe(true);
   });
 });
@@ -175,13 +180,13 @@ Exit non-zero on `!sweep.passed` to gate CI on eval regressions.
 Assertions **record, never throw** — every failure shows up in one report,
 and a broken expectation doesn't mask the ones after it.
 
-| Assertion | Checks |
-| --- | --- |
-| `t.completed()` | the most recent `t.send` finished without an error event |
-| `t.calledTool(name, { input?, isError? })` | a matching tool call was observed (input deep-equals when given) |
-| `t.notCalledTool(name)` | the tool was never called — safety evals |
-| `t.noFailedActions()` | no observed tool call failed |
-| `t.expect(name, passed, { message?, details? })` | anything else — your own comparison, recorded with a name |
+| Assertion                                        | Checks                                                           |
+| ------------------------------------------------ | ---------------------------------------------------------------- |
+| `t.completed()`                                  | the most recent `t.send` finished without an error event         |
+| `t.calledTool(name, { input?, isError? })`       | a matching tool call was observed (input deep-equals when given) |
+| `t.notCalledTool(name)`                          | the tool was never called — safety evals                         |
+| `t.noFailedActions()`                            | no observed tool call failed                                     |
+| `t.expect(name, passed, { message?, details? })` | anything else — your own comparison, recorded with a name        |
 
 `t.lastToolCall(name)` returns the most recent observed call with that name —
 the usual way to read a submit tool's payload for expected-output scoring.

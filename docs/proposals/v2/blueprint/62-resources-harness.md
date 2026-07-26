@@ -1,7 +1,7 @@
 # ADR 62 — Resources as a read-projection seam; roots as the sandbox's projection
 
 **Status:** PROPOSED 2026-07-07, **REFRAMED 2026-07-07** (Fable + Ryan) after asking what
-resources *actually are* at the compiler level. MCP enhancement **Wave 4** (gates on this ADR).
+resources _actually are_ at the compiler level. MCP enhancement **Wave 4** (gates on this ADR).
 **Builds on:** ADR 26 (harness shape), ADR 27 (bundled built-ins), the **`ElicitationHarness` /
 `PromptsHarness`** precedent (framework primitives MCP projects onto), ADR 59 (the sandbox =
 the workspace). **Resolves the design half of** #237 / #123.
@@ -11,14 +11,14 @@ the workspace). **Resolves the design half of** #237 / #123.
 The first draft modeled resources as a new bundled **store** with a `<Resource>` JSX front door.
 Both were mistakes. Two questions corrected it:
 
-1. **What is a resource, at the compiler level?** The framework's core is *compilers → IR →
-   model input* (the React reconciler is **one** compiler; a dep-less functional compiler is
+1. **What is a resource, at the compiler level?** The framework's core is _compilers → IR →
+   model input_ (the React reconciler is **one** compiler; a dep-less functional compiler is
    another). A resource is not a store and not RAG (no retrieval/ranking — that's an app concern
-   *on top*). It is a **content-addressable read namespace** — `list`/`read`/`templates`/
+   _on top_). It is a **content-addressable read namespace** — `list`/`read`/`templates`/
    `subscribe` ≈ `readdir`/`cat`/`glob`/`watch`. It is **application-controlled context**: the MCP
-   server trio splits by control — tools = *model*-controlled, prompts = *user*-controlled,
-   **resources = *application*-controlled** readable content, pulled on demand.
-2. **Does agentick own the content?** No. `PromptsHarness` earns primitive-hood because it *owns*
+   server trio splits by control — tools = _model_-controlled, prompts = _user_-controlled,
+   **resources = _application_-controlled** readable content, pulled on demand.
+2. **Does agentick own the content?** No. `PromptsHarness` earns primitive-hood because it _owns_
    a template library (loaders + renderer). **Resources own nothing** — the content lives in the
    sandbox (files), a store (docs), or a computed view. So resources is not a store; it is a
    **thin projection seam: a registry of `URI → resolver` + the subscribe / `list_changed`
@@ -39,14 +39,20 @@ bus + declared/journaled commands come from `BaseHarness`). It does **not** hold
 interface ResourcesHarnessProtocol {
   // — registration: bind a URI (or template) to a resolver over EXISTING content —
   register(uri: string, resolver: ResourceResolver, meta?: ResourceMeta): Unsubscribe;
-  registerTemplate(uriTemplate: string, resolver: TemplateResolver, meta?: ResourceTemplateMeta): Unsubscribe;
+  registerTemplate(
+    uriTemplate: string,
+    resolver: TemplateResolver,
+    meta?: ResourceTemplateMeta,
+  ): Unsubscribe;
   // — reads (the projection / a compiler / a tool calls these) —
   list(cursor?: string): Promise<{ resources: ResourceDescriptor[]; nextCursor?: string }>;
-  listTemplates(cursor?: string): Promise<{ templates: ResourceTemplateDescriptor[]; nextCursor?: string }>;
-  read(uri: string): Promise<ResourceContents[]>;   // resolver runs; content-typed (text/blob + mimeType)
+  listTemplates(
+    cursor?: string,
+  ): Promise<{ templates: ResourceTemplateDescriptor[]; nextCursor?: string }>;
+  read(uri: string): Promise<ResourceContents[]>; // resolver runs; content-typed (text/blob + mimeType)
   // — change stream —
   subscribe(uri: string): Promise<Unsubscribe>;
-  notifyUpdated(uri: string): void;                 // a provider signals its backing content changed
+  notifyUpdated(uri: string): void; // a provider signals its backing content changed
   readonly backend: string;
 }
 type ResourceResolver = (uri: string) => ResourceContents[] | Promise<ResourceContents[]>;
@@ -64,7 +70,7 @@ type ResourceResolver = (uri: string) => ResourceContents[] | Promise<ResourceCo
 
 ## Compiler-general, front-end-agnostic (not a JSX component)
 
-The primitive is the **runtime registry + read/subscribe interface** — it must serve *any*
+The primitive is the **runtime registry + read/subscribe interface** — it must serve _any_
 compiler, because the compiler is the swappable core:
 
 - **React reconciler:** a `<Resource uri=… mimeType=…>{() => content()}</Resource>` registers a
@@ -74,13 +80,13 @@ compiler, because the compiler is the swappable core:
   `ctx.resource(uri, resolver)` registers the same binding — no JSX.
 - **Imperative / gateway:** `harness.register(uri, resolver)` directly.
 
-All three populate the *same* registry; the MCP projection and the compiler read it the same way
+All three populate the _same_ registry; the MCP projection and the compiler read it the same way
 regardless of front-end. JSX is one sugar, not the seam. (The earlier draft's `<Resource>`-first
 framing is dropped.)
 
 ## Roots = the sandbox's projection (not a new primitive)
 
-MCP **roots** ("the directories this agent may operate on") is the *filesystem-boundary* concern
+MCP **roots** ("the directories this agent may operate on") is the _filesystem-boundary_ concern
 for agents that live and work on a machine — and **agentick already has that primitive: the
 sandbox** (`workspace` + allowed `mounts`, `sandbox/contract.ts`). So:
 
@@ -88,8 +94,8 @@ sandbox** (`workspace` + allowed `mounts`, `sandbox/contract.ts`). So:
   mounts as MCP roots (+ `roots/list_changed` when mounts change). No new roots subsystem.
 - **File-type resources are sandbox-backed** — a file resolver reads the sandbox fs, confined to
   the workspace/mounts (the sandbox's existing path-confinement + ACL apply). One coherent
-  filesystem story: *sandbox = the workspace (roots); resources = the read namespace, files
-  resolved through the sandbox.*
+  filesystem story: _sandbox = the workspace (roots); resources = the read namespace, files
+  resolved through the sandbox._
 
 This is the compose-primitives answer: roots + file-resources are MCP-facing **projections of the
 sandbox**, not duplicated state.
@@ -98,14 +104,15 @@ sandbox**, not duplicated state.
 
 Elicitation is symmetric (a responder seam — agentick answers whoever asks). Resources are
 asymmetric: a **provider** exposes, a **consumer** reads. So:
+
 - **Provider (agentick-as-MCP-server):** the `ResourcesHarness` registry is projected out —
   `resources/list|templates/list|read|subscribe|unsubscribe` + `notifications/resources/{updated,
-  list_changed}`. Advertise `resources: { subscribe, listChanged }` only when a harness is wired
+list_changed}`. Advertise `resources: { subscribe, listChanged }` only when a harness is wired
   (fixes the hardcoded `resources:false`). The projection is thin — it reads the registry, never
   mutates it (exactly like `projection/prompts.ts`).
-- **Consumer (agentick-as-MCP-client):** reading an *external* server's resources is
+- **Consumer (agentick-as-MCP-client):** reading an _external_ server's resources is
   `McpClientHarness` methods (`listResources`/`readResource`/…, Wave 2). These do **not** register
-  into the local registry (that's for content agentick *provides*). Instead a resolver can *wrap*
+  into the local registry (that's for content agentick _provides_). Instead a resolver can _wrap_
   an external read — e.g. `register("proxy://…", () => client.readResource(externalUri))` — so
   the compiler consumes external content through the same read interface. Composition, not
   conflation.
@@ -115,7 +122,7 @@ asymmetric: a **provider** exposes, a **consumer** reads. So:
 Add a spec **resource content block** (`{ type: "resource"; resource: ResourceContents }`) so
 embedded resources in tool/prompt results (and `ui://` app resources) round-trip through
 agentick's content model instead of being flattened to text (today `content-mapper.ts` drops
-them). `read` results and embedded resources share it. `ui://` *rendering* is the separate
+them). `read` results and embedded resources share it. `ui://` _rendering_ is the separate
 `@agentick/mcp-apps` package's concern; the block is protocol-general.
 
 ## Package shape
@@ -128,6 +135,7 @@ cycle). Spec carries only wire/firewall types (`ResourceDescriptor`, `ResourceCo
 sandbox harness.
 
 ## Conformance
+
 `runResourcesHarnessConformance`: register/list (+ pagination), read fixed + templated URIs (via
 resolvers), subscribe → `notifyUpdated` fans, `list_changed` on mutation, text+blob typing. MCP
 projection round-trip in `mcp-next`: loopback (server harness ↔ client reads every op) + against
@@ -136,6 +144,7 @@ Roots: a sandbox-backed roots projection test (workspace/mounts → `roots/list`
 on mount change).
 
 ## Decisions (settled with Ryan 2026-07-07)
+
 1. **Resources = read-projection seam (registry of URI→resolvers + notifier), NOT a store.** ✅
 2. **Roots project from the sandbox; file-resources are sandbox-backed.** ✅
 3. **Compiler-general / front-end-agnostic** — registry is the seam; `<Resource>` and
@@ -143,6 +152,7 @@ on mount change).
 4. **Provider/consumer asymmetry** + **resource content block in spec.** ✅
 
 ## Scope / build order (Wave 4, after Wave 2 client reads)
+
 `ResourcesHarness` (registry+notifier) + conformance + the resource content block → server
 projection (#237) → sandbox-backed file resolver + roots projection → `withMCP` surfacing +
 front-ends (`<Resource>` / `ctx.resource`). Client external-resource reads land in Wave 2 and are

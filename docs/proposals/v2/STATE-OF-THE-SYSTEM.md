@@ -30,7 +30,7 @@ BaseHarness (1,715 lines; was 2,953)      — identity · inbox · channels · l
 - **Adapters**: `defineLanguageModelAdapter` factory (prepareRequest/send/openStream
   typed TRequest); openai(chat)/anthropic/google/ai-sdk; `openai.responses()` decided-
   not-built (C5).
-- **Telemetry**: three-rung span ladder (`telemetry: true` → gen_ai.* semconv + cost;
+- **Telemetry**: three-rung span ladder (`telemetry: true` → gen_ai.\* semconv + cost;
   per-send functionId; surgical spanMiddleware/annotateOperationSpan). Guide:
   runtime README §Observability.
 
@@ -43,6 +43,7 @@ Store<T,Q,M>  — the universal seam (query/mutate/watch?/backend)
 View<TCache,TStore> / LogView — the SYNC projection a harness holds IFF it has a
 sync read surface (credentials = deliberate async-only no-view)
 ```
+
 Snapshot/restore: `session:snapshot`/`restore` commands fold every `SnapshotCapable`
 bridge generically (Step 6 done); `migrateSnapshot` seam; kill/resume green.
 Deep doc: `store.md`.
@@ -65,14 +66,14 @@ Deep doc: `store.md`.
 ADR-87 registration is uniform; the handle CONTRACTS are not (four passes, no
 cross-cutting owner):
 
-| Surface | Shape today | Gap |
-|---|---|---|
-| `session.elicitations` | stream-handle + respond | live-only (no list of pending) |
-| `session.clientToolCalls` | stream-handle + respond | live-only; route/confirm are LOOSE session methods |
-| `session.knobs` | get/set/subscribe | values only (no descriptors); `key` vs server `id` |
-| `session.tasks` | collection view | closest to correct |
-| timeline | `timelineView()` FREE FACTORY (window: seed/tail/prepend/append/clientId reconcile) | not a sub-handle; no wire history read; Cursor≠seq |
-| `session.send` | handle: events() + .result (+ onBusy steer/queue, telemetry.functionId) | send handle is GOOD — the model for the rest |
+| Surface                   | Shape today                                                                         | Gap                                                |
+| ------------------------- | ----------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `session.elicitations`    | stream-handle + respond                                                             | live-only (no list of pending)                     |
+| `session.clientToolCalls` | stream-handle + respond                                                             | live-only; route/confirm are LOOSE session methods |
+| `session.knobs`           | get/set/subscribe                                                                   | values only (no descriptors); `key` vs server `id` |
+| `session.tasks`           | collection view                                                                     | closest to correct                                 |
+| timeline                  | `timelineView()` FREE FACTORY (window: seed/tail/prepend/append/clientId reconcile) | not a sub-handle; no wire history read; Cursor≠seq |
+| `session.send`            | handle: events() + .result (+ onBusy steer/queue, telemetry.functionId)             | send handle is GOOD — the model for the rest       |
 
 React bindings: none first-party (adopters hand-roll useSyncExternalStore).
 

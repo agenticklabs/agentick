@@ -10,9 +10,9 @@ Abort is triggerable everywhere but **observable nowhere as a first-class seam**
 
 - **Server:** `LoopExecutorHarness.abort({ executionId, reason })` fires a
   per-execution `AbortController` (ADR 77). It is a plain method — NOT a hookable
-  op. `tool:abort` is hooked, but that's *tool* cancellation, not the *execution*.
+  op. `tool:abort` is hooked, but that's _tool_ cancellation, not the _execution_.
   An aborted run only surfaces after the fact via `onAfterLoopRunExecution`
-  (`stopReason: "aborted"`) — you can't hook the abort *itself* (for audit,
+  (`stopReason: "aborted"`) — you can't hook the abort _itself_ (for audit,
   cleanup, metrics, or a guard that defers a shutdown-abort).
 - **Client:** `handle.abort(reason)` triggers it; there is no callback for "this
   run was aborted." Adopters infer it from `handle.status === "aborted"` or the
@@ -26,17 +26,17 @@ The UI (ADR 85) is covered via the firehose terminal event, but a first-class
 Route `LoopExecutorHarness.abort()` through `runOperation` (the same move that made
 `send`/`elicit`/etc. hookable, ADR 83). Op id `loop:abort` → the standard triad:
 
-| Hook | fires | use |
-| --- | --- | --- |
+| Hook                | fires                                                       | use                                                                                                            |
+| ------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `onBeforeLoopAbort` | when abort is requested, BEFORE the `AbortController` fires | observe / transform the reason; **guard** may `defer`/`veto` a soft abort (e.g. finish the current tick first) |
-| `onLoopAbort` | the full middleware wrap | wrap teardown |
-| `onAfterLoopAbort` | after the controller fired + in-flight work torn down | audit / metrics / cleanup |
+| `onLoopAbort`       | the full middleware wrap                                    | wrap teardown                                                                                                  |
+| `onAfterLoopAbort`  | after the controller fired + in-flight work torn down       | audit / metrics / cleanup                                                                                      |
 
 - Input = `{ executionId, reason? }`; output = `void`.
 - **Distinct from `tool:abort`** (tool-level). `loop:abort` is the execution axis.
 - The existing `onAfterLoopRunExecution` (`stopReason: "aborted"`) still fires —
-  `loop:abort` is the *cause* seam, the terminal is the *effect*. A guard on
-  `loop:abort` is the only way to make an abort *conditional*.
+  `loop:abort` is the _cause_ seam, the terminal is the _effect_. A guard on
+  `loop:abort` is the only way to make an abort _conditional_.
 - Add `loop:abort` to `CommandRegistry` (loop-executor package), the name-lock
   (`hook-lifecycle-names.spec`), and the HOOK-LIFECYCLE table.
 
@@ -47,7 +47,7 @@ Route `LoopExecutorHarness.abort()` through `runOperation` (the same move that m
   `handle.abort()` or observed over the wire). Implemented off the handle's status
   transition; idempotent (fires at most once, like a terminal).
 - **`SessionHandle.onAbort(listener: (info: { executionId; reason? }) => void): Unsubscribe`**
-  — pre-scoped session observer (the tier-1 pattern, ADR 85 §6): fires for *any*
+  — pre-scoped session observer (the tier-1 pattern, ADR 85 §6): fires for _any_
   execution aborted on the session, folded from the firehose terminal
   (`outcome: "aborted"`) events. This is what a UI's "cancelled" affordance binds.
 - Both are pure OBSERVERS (no veto — the client can't veto a server abort; it
@@ -59,18 +59,19 @@ Route `LoopExecutorHarness.abort()` through `runOperation` (the same move that m
 trigger:   handle.abort()  ─wire→  loop.abort()               (session/abort method)
 observe:   handle.onAbort / session.onAbort  ←firehose─  onBeforeLoopAbort / onAfterLoopAbort
 ```
+
 Server hooks are the authoritative seam (can guard); client hooks are the
 projection (observe). Same event, two sides — the abort twin of ADR 85's
 send/receive symmetry.
 
 ## 4. Non-goals / notes
 
-- No new wire method — `session/abort` already exists; this adds the *hook* seams
+- No new wire method — `session/abort` already exists; this adds the _hook_ seams
   around the existing trigger + the client observer.
 - Guarding an abort (`onBeforeLoopAbort` → defer) is powerful but sharp — a hung
   guard could keep a run un-abortable. The structural `AbortController` remains the
   un-hookable floor for hard aborts (signal-driven / timeout); `loop:abort` hooks
-  wrap the *cooperative* path.
+  wrap the _cooperative_ path.
 
 ## 5. Rollout
 

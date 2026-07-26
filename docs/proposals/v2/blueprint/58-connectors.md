@@ -43,9 +43,9 @@ the `GatewayPlugin` path dies.
 // @agentick/connector (base) — the composition primitive
 export function defineConnector(spec: {
   name: string;
-  platform: ConnectorPlatform;          // thin adapter: start/stop/emit-inbound/deliver-outbound
-  config?: ConnectorConfig;             // delivery strategy, content policy, rate/retry, allowlist
-}): GatewayExtension;                    // target: "gateway"
+  platform: ConnectorPlatform; // thin adapter: start/stop/emit-inbound/deliver-outbound
+  config?: ConnectorConfig; // delivery strategy, content policy, rate/retry, allowlist
+}): GatewayExtension; // target: "gateway"
 ```
 
 `defineConnector`'s `install(installer)` (the `GatewayExtension` hook, ADR 50
@@ -67,12 +67,12 @@ now-retired client-side `ConnectorSession`). Fork 4 resolved: thin platform, no 
 
 ## The four v1 behaviors — composed, not a tier
 
-| Behavior | v1 home | v2 home (resolved) |
-| --- | --- | --- |
+| Behavior                                                 | v1 home                                                  | v2 home (resolved)                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Delivery cadence** (`immediate`/`on-idle`/`debounced`) | `DeliveryBuffer` (`connector/src/delivery-buffer.ts:20`) | Port `DeliveryBuffer` into `connector-next` — a debounce over `subscribeBus` events (`poke` on content, `markIdle` on `execution_end`). No cadence primitive exists in pubsub/subscriptions (checked); a generic `utils-next` debounce is a candidate enabler, not required. |
-| **Content policy** (`full`/`text-only`/`summarized`) | `content-pipeline.ts` + `ToolSummarizer` | **`formatters-next`** — pure content→content is `createFormatter` territory. Ship `summarizedFormatter` / `textOnlyFormatter`. |
-| **Rate limit** (inbound sliding window) | `RateLimiter` (`delivery-buffer.ts:107`) | Inbound **procedure middleware** wrapping the `session.send` call; keep `RateLimiter` as a portable helper. |
-| **Retry** (outbound backoff) | `_deliverWithRetry` (`connector-session.ts:291`) | Connector-local backoff helper — it's a **platform-SDK-call** retry, not an Agentick wire (`client-extensions-next/retry` is the wrong layer). utils-next has no retry primitive today; a generic one is a candidate enabler. |
+| **Content policy** (`full`/`text-only`/`summarized`)     | `content-pipeline.ts` + `ToolSummarizer`                 | **`formatters-next`** — pure content→content is `createFormatter` territory. Ship `summarizedFormatter` / `textOnlyFormatter`.                                                                                                                                               |
+| **Rate limit** (inbound sliding window)                  | `RateLimiter` (`delivery-buffer.ts:107`)                 | Inbound **procedure middleware** wrapping the `session.send` call; keep `RateLimiter` as a portable helper.                                                                                                                                                                  |
+| **Retry** (outbound backoff)                             | `_deliverWithRetry` (`connector-session.ts:291`)         | Connector-local backoff helper — it's a **platform-SDK-call** retry, not an Agentick wire (`client-extensions-next/retry` is the wrong layer). utils-next has no retry primitive today; a generic one is a candidate enabler.                                                |
 
 `splitMessage` (Telegram 4096 cap) is already canonical in v1 `@agentick/shared`; v2 has no
 `shared`, so it ports to `utils-next` (#210, filed). Confidence: high on all homes.
@@ -85,7 +85,7 @@ packages` = zero. `MessageMetadata` (`spec-next/data/entries.ts:38`) already has
 open index (`[key:string]: unknown`), so `metadata.source` is buildable today.
 
 **Resolution (overriding the survey's "typed field on MessageMetadata" lean):** per the
-framework principle *spec does NOT hardcode foundational slots* (CLAUDE.md; the
+framework principle _spec does NOT hardcode foundational slots_ (CLAUDE.md; the
 `HookBridges`/`RenderContext`/`ProviderOptions` empty-seed pattern), `MessageSource` is an
 **empty-seed augmentable interface in `spec-next`** (`data/message-source.ts`) that platform
 packages augment (`declare module` — `connector-imessage-next` adds its `imessage` slot),
@@ -97,21 +97,21 @@ the authenticated actor; `MessageSource` is "which surface/handle this came from
 ## Identity model — service account now, per-message actor backfilled (#302)
 
 A connector holds a **construction-bound service-account principal** (ADR 48 §5
-immutability). Each inbound message *should* carry a **per-message actor** (the Telegram
+immutability). Each inbound message _should_ carry a **per-message actor** (the Telegram
 user / iMessage handle) as a `RuntimeContextUser` on the session runtime context. Token →
 principal exists at the transport edge (`transport-websocket/src/server/server.ts:87`;
 `connection-context.ts:45,98`), **but a connector is a server-side gateway-extension, not a
-token-presenting wire client** — it must *stamp* an actor onto each `session.send` on behalf
+token-presenting wire client** — it must _stamp_ an actor onto each `session.send` on behalf
 of a platform user, and that stamping seam (`interceptIngress`, `IngressIdentity →
 RuntimeContextUser`) is **deferred to #302 / ADR 34** (ADR 50 amendment §1,
 `50-gateway-extensions.md:24-40`).
 
 **Fork 1 — RESOLVED as ship-now + backfill** (cut-ASAP; confirm): connector-next +
 telegram/imessage land with the service-account principal; inbound messages attribute to
-the service account, with `MessageSource` provenance carrying the *unauthenticated* platform
+the service account, with `MessageSource` provenance carrying the _unauthenticated_ platform
 handle. A **loud `TODO(#302: per-message actor stamping)`** marks the single site where an
 authenticated `RuntimeContextUser` actor will be stamped once `interceptIngress` lands. This
-is **parity+**: v1 connectors had *zero* identity (Telegram `allowedUsers` is a whitelist
+is **parity+**: v1 connectors had _zero_ identity (Telegram `allowedUsers` is a whitelist
 gate, not identity), so the service-account model with provenance is strictly more than v1,
 not a regression. Only the **authenticated per-user actor** waits on #302 — the connectors
 themselves ship now.
@@ -155,20 +155,20 @@ slip past it — say so and I'll flip the identity section.
 ## Amendment 2026-07-06 — connectors are the ingress EDGE (reply-optional, action-pluggable)
 
 The body above frames a connector as a **chat surface** with inbound + outbound. That is
-one *instance* of a more general primitive, and the general one is what the base package
+one _instance_ of a more general primitive, and the general one is what the base package
 must model. Ryan's framing: **anything that ingresses can be a connector** — an event
 queue, a webhook, a bus subscriber, a cron trigger. There is **no reason to require a
-reply.** A connector is fundamentally *an external event source bound to an agentic
-action*; the outbound/delivery half is the **conversational specialization**, not part of
+reply.** A connector is fundamentally _an external event source bound to an agentic
+action_; the outbound/delivery half is the **conversational specialization**, not part of
 the core.
 
 ### The decomposition
 
-| Axis | Options |
-| --- | --- |
-| **Trigger** — what ingresses | chat surface · webhook · event-queue / MQ consumer · bus subscription · cron / scheduler (#159) · file-watch |
-| **Action** — what the ingress drives | `session.send` (conversational append) · `session.dispatch` (fire a procedure — a non-conversational *agentic process*) · `app.run` (one-shot workflow) · spawn |
-| **Outbound** — the reply/emit path | reply to the source (chat) · emit to a *different* sink (fan-out) · **none** (one-way) |
+| Axis                                 | Options                                                                                                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger** — what ingresses         | chat surface · webhook · event-queue / MQ consumer · bus subscription · cron / scheduler (#159) · file-watch                                                    |
+| **Action** — what the ingress drives | `session.send` (conversational append) · `session.dispatch` (fire a procedure — a non-conversational _agentic process_) · `app.run` (one-shot workflow) · spawn |
+| **Outbound** — the reply/emit path   | reply to the source (chat) · emit to a _different_ sink (fan-out) · **none** (one-way)                                                                          |
 
 **One-way is the base case; bidirectional chat is the specialization.** A webhook that
 fires a workflow and returns nothing, an MQ consumer that dispatches a procedure per
@@ -181,7 +181,7 @@ shape**: an event fires, an agent runs, maybe it writes to a sink, nobody is cha
 This collapses three things we were treating separately — **connectors, the scheduler's
 event-source extension (#159), and webhooks are the same primitive**: a `GatewayExtension`
 whose `install()` binds an external event source to a session action. "Connector" stays the
-right general name — it *connects an external system to agentick*; chat is one instance.
+right general name — it _connects an external system to agentick_; chat is one instance.
 
 ### Contract impact (broaden the framing — NOT a new tier)
 
@@ -191,7 +191,7 @@ adjustments, all additive:
 - **`ConnectorPlatform.deliver` is OPTIONAL.** Emit-inbound is required (it's the source);
   deliver-outbound is opt-in. `install()` only wires the `DeliveryBuffer` / content-policy /
   confirmation subscription when `deliver` is present. No `deliver` ⇒ clean inbound-only.
-- **The ingress action is pluggable.** Default `session.send`; the seam must not *preclude*
+- **The ingress action is pluggable.** Default `session.send`; the seam must not _preclude_
   `session.dispatch` / `app.run`. (Only the `send` default lands now; the seam stays clean.)
 - **Core names/docs are not "conversational."** The base contract is "external source →
   session action"; the chat delivery machinery is the optional layer it always was.
@@ -199,8 +199,8 @@ adjustments, all additive:
   service-account principal; a per-event actor (if any) rides the event and backfills via
   #302 — same `TODO(#302)` seam.
 
-**Steel-man (why no new subsystem):** we do *not* introduce an `IngressSource` supertype or
-a parallel tier. The existing `ConnectorPlatform` *is* the ingress source; making its egress
+**Steel-man (why no new subsystem):** we do _not_ introduce an `IngressSource` supertype or
+a parallel tier. The existing `ConnectorPlatform` _is_ the ingress source; making its egress
 optional + keeping the action seam open covers webhooks/queues/cron without a new abstraction.
 Compose, don't tier.
 
@@ -213,25 +213,25 @@ Compose, don't tier.
 
 ### Amendment 2026-07-06 (b) — delivery restraint: the base is just "a session handle + send"
 
-Further Ryan direction: *"we don't really care how the connector handles incoming
+Further Ryan direction: _"we don't really care how the connector handles incoming
 messages... it's just a session under the hood and anyone (internally at least) with access
 can send a message to a session. We should not bias hard on the delivery mechanism until we
-have a good lay of the land."*
+have a good lay of the land."_
 
 **This descopes the "four v1 behaviors" section above.** Do NOT reflexively port v1's
 delivery machinery. The base package is deliberately lean:
 
 - **Core:** `defineConnector` → GatewayExtension; inbound event → `apps().getSession()` →
-  `session.send` (with `metadata.source` + the `TODO(#302)` seam). *That is the whole
-  primitive* — an external event source that holds a session handle and sends. `send` is a
+  `session.send` (with `metadata.source` + the `TODO(#302)` seam). _That is the whole
+  primitive_ — an external event source that holds a session handle and sends. `send` is a
   verb anyone with session access can call; a connector is just an external caller of it.
 - **Outbound:** an OPTIONAL thin `deliver?(output)` callback. Nothing more.
 - **DEFERRED riders (NOT base scope — build when the landscape is clear):** `DeliveryBuffer`
   cadence strategies, content-policy pipeline wiring, `RateLimiter`, retry backoff, and
   (if it grows into machinery) confirmation-routing. The four-behaviors table above is the
-  *eventual* menu, not the base deliverable.
+  _eventual_ menu, not the base deliverable.
 
 `summarizedFormatter`/`textOnlyFormatter` (formatters-next) and `splitMessage` (utils-next,
-#210) still land as **standalone generic primitives** — they're just not *wired into* the
+#210) still land as **standalone generic primitives** — they're just not _wired into_ the
 connector base yet. Delivery sophistication is a rider that earns its way in once real
 sources (webhook, queue, chat) show what's actually needed.

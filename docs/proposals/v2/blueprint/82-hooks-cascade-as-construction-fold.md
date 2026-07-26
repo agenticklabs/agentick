@@ -14,12 +14,12 @@ mechanism here stands verbatim; ADR 83 applies it framework-wide.
 
 The construction hierarchy (gateway → app → session → sub-harness) is a **scope chain**. A harness's effective hooks = every ancestor's layer merged with its own. ADR 80 resolved that by walking `this.parent` at every op (`ownAndInheritedHooks`) — which needs correct parent pointers (ADR 81, unbuilt) and hits a construction-ordering knot.
 
-Resolve it the way tools already do: **fold the chain once, at construction.** Each scope computes `resolved = parentResolved.extend(ownHooks)` and threads the resolved value into the harnesses it builds. Every op reads the local, fully-resolved `this.hooks`. The fold *is* the walk, memoized at each node — same cascade, computed at birth instead of per-op. No parent pointers, no ordering knot, and `extend` composes per-command (hooks are middleware — both ancestor and descendant fire, outer-first).
+Resolve it the way tools already do: **fold the chain once, at construction.** Each scope computes `resolved = parentResolved.extend(ownHooks)` and threads the resolved value into the harnesses it builds. Every op reads the local, fully-resolved `this.hooks`. The fold _is_ the walk, memoized at each node — same cascade, computed at birth instead of per-op. No parent pointers, no ordering knot, and `extend` composes per-command (hooks are middleware — both ancestor and descendant fire, outer-first).
 
 ## Why revise (the parent-walk's two costs)
 
 1. **It needs the parent chain** — `ownAndInheritedMiddleware`/`ownAndInheritedHooks` walk `this.parent`, which most harnesses drop (ADR 81). Unbuilt, and a real refactor.
-2. **The ordering knot** — the per-session sub-harnesses are built *before* the `SessionHarness` that would parent them (`app/harness.ts:1192–1332` vs `:1345`), so there's nothing to point at yet.
+2. **The ordering knot** — the per-session sub-harnesses are built _before_ the `SessionHarness` that would parent them (`app/harness.ts:1192–1332` vs `:1345`), so there's nothing to point at yet.
 
 A **value** has neither problem. The resolved hooks for a scope is a plain immutable object; compute it once (before constructing anything) and hand the same value to every harness in that scope. The knot dissolves because a value needs no live parent to exist, and pointers vanish because ops read a local field.
 
@@ -37,11 +37,15 @@ export class Hooks {
   static readonly empty = new Hooks(new Map());
 
   /** Index a declarative CommandHooks object into per-command before/after lists. */
-  static from(config: CommandHooks): Hooks { /* deriveHookNames-in-reverse over the keys */ }
+  static from(config: CommandHooks): Hooks {
+    /* deriveHookNames-in-reverse over the keys */
+  }
 
   /** COMPOSE, not override: append `child`'s lists after this layer's, per command (outer-first).
    *  This is the ONE place hooks diverge from tools (which override last-wins). */
-  extend(child: Hooks): Hooks { /* concat before[]/after[] per command id */ }
+  extend(child: Hooks): Hooks {
+    /* concat before[]/after[] per command id */
+  }
 
   /** The composed middleware entries for one op — already cascade-resolved, lifted through
    *  the SAME liftMiddleware path as .use (ADR 80 §7 fiber invariant, unchanged). */
@@ -68,7 +72,7 @@ Each scope contributes its own `hooks` (`createApp({ hooks })`, `createSession({
 //                // no ordering knot and no parent pointer.
 ```
 
-`BaseHarnessOptions.hooks` becomes a resolved `Hooks` (not the flat `CommandHooks`); `this.hooks = options.hooks ?? Hooks.empty`. App-shared spine (loop/executor) fold the *app's* resolved hooks (correct — session hooks never reach them); per-session harnesses fold the *session's* (app + session).
+`BaseHarnessOptions.hooks` becomes a resolved `Hooks` (not the flat `CommandHooks`); `this.hooks = options.hooks ?? Hooks.empty`. App-shared spine (loop/executor) fold the _app's_ resolved hooks (correct — session hooks never reach them); per-session harnesses fold the _session's_ (app + session).
 
 ### 3. The compose-site read (replaces the walk)
 
@@ -76,8 +80,8 @@ Each scope contributes its own `hooks` (`createApp({ hooks })`, `createSession({
 const composed = composeMiddleware<I, R, E>(
   [
     ...callMiddleware,
-    ...this.ownAndInheritedMiddleware(),   // middleware KEEPS the parent-walk (see §5)
-    ...this.hooks.forOp(resolvedOp.name),  // hooks: local, already cascade-resolved — no walk
+    ...this.ownAndInheritedMiddleware(), // middleware KEEPS the parent-walk (see §5)
+    ...this.hooks.forOp(resolvedOp.name), // hooks: local, already cascade-resolved — no walk
   ],
   body,
 );
@@ -91,17 +95,17 @@ const composed = composeMiddleware<I, R, E>(
 
 ## What this costs (vs the parent-walk)
 
-The fold **snapshots** the parent's hooks at the child's construction — static. Mutating `app.hooks` after a session exists does **not** reach that session (its fold already ran). The 90% (policy set at boot, `session.hooks.append` at runtime) is unaffected; the 10% forfeited is *runtime-retroactive deployment policy* (flip an audit hook onto all already-live sessions). If that need materializes, the parent-walk is the tool — but it's not free (ADR 81), so we don't pay for it speculatively.
+The fold **snapshots** the parent's hooks at the child's construction — static. Mutating `app.hooks` after a session exists does **not** reach that session (its fold already ran). The 90% (policy set at boot, `session.hooks.append` at runtime) is unaffected; the 10% forfeited is _runtime-retroactive deployment policy_ (flip an audit hook onto all already-live sessions). If that need materializes, the parent-walk is the tool — but it's not free (ADR 81), so we don't pay for it speculatively.
 
 ## Relationship to ADR 80 / 81
 
-- **ADR 80:** the mechanism (types, contract, fiber invariant, naming) stands; only §6/§7's *collection method* changes (walk → fold). PR #1's `asBefore`/`asAfter`/`liftMiddleware`/`deriveHookNames` are reused verbatim; `ownAndInheritedHooks` is replaced by `Hooks.forOp` + the fold. Cheap because the cascade is dormant (nothing consumes it yet).
+- **ADR 80:** the mechanism (types, contract, fiber invariant, naming) stands; only §6/§7's _collection method_ changes (walk → fold). PR #1's `asBefore`/`asAfter`/`liftMiddleware`/`deriveHookNames` are reused verbatim; `ownAndInheritedHooks` is replaced by `Hooks.forOp` + the fold. Cheap because the cascade is dormant (nothing consumes it yet).
 - **ADR 81:** the construction-parent invariant is no longer a hook prerequisite. It remains relevant only for ADR-76 tier-3 **middleware** (`app.use`), whose dynamism the walk still serves. So ADR 81 narrows to "if/when middleware needs the deployment-wide dynamic walk," and the hook work stops waiting on it.
 
 ## Rejected
 
 - **Keep the parent-walk for hooks.** Needs ADR 81 + eats the ordering knot for a dynamism (runtime-retroactive) hooks rarely need.
-- **A general `ScopedConfig<T>` for tools + hooks + knob-defaults.** They share a *shape* (a layer + a merge, folded down the scope chain) but the **merge differs**: hooks compose, tools override. One god-object forces a lowest-common-denominator merge or a strategy param. Ship `Hooks` with compose-merge; let tools keep their override-merge. Shared shape, per-type merge.
+- **A general `ScopedConfig<T>` for tools + hooks + knob-defaults.** They share a _shape_ (a layer + a merge, folded down the scope chain) but the **merge differs**: hooks compose, tools override. One god-object forces a lowest-common-denominator merge or a strategy param. Ship `Hooks` with compose-merge; let tools keep their override-merge. Shared shape, per-type merge.
 - **A flat merged `CommandHooks` object as the resolved value.** Can't hold two layers' hooks for the same command (key collision) — compose needs lists per command, hence the `Hooks` class.
 
 ## Tests

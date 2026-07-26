@@ -784,8 +784,8 @@ handle needs `state:get`/`state:list` AUTHORED, not re-flagged.
 grammar alignment before the four client handles:
 
 1. `skills:list` (+`get`/`search`), `prompts:list`, `state:get`+`state:list`
-   + `exposure:"wire"` on state's mutations; wire-augment splits (the
-   `export {}` guard is load-bearing).
+   - `exposure:"wire"` on state's mutations; wire-augment splits (the
+     `export {}` guard is load-bearing).
 2. Grammar deviations ruled worth fixing while breaking is free:
    - `GatesHandle` gains `has()` + `subscribe(name,fn)`/`subscribeAll(fn)`
      (only collection missing the family grammar); gate handle MUTATIONS
@@ -809,7 +809,7 @@ handle must not collide with the existing `clientToolCalls` slot.
 
 Sequencing: B3 lands → **G-prep** → F + G (parallelizable per package)
 → C2 → onBusy redesign (supersedes steer-verb extraction) → §D naming
-sweep (knob_set, session_tasks_* → task_*).
+sweep (knob*set, session_tasks*_ → task\__).
 
 ---
 

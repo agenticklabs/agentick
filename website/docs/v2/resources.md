@@ -24,12 +24,12 @@ model sees only a compact **catalog** (uris, names, descriptions — never the
 content), and it reads a URI when it decides the content is relevant. Nothing is
 inlined until a read happens.
 
-| | Push (`<Section>` / `<Message>`) | Pull (`<Resource>`) |
-| ------------------ | -------------------------------------- | ----------------------------------------- |
-| Reaches the model | Inlined every tick | Only when read by URI |
-| Token cost | Every turn | Catalog entry only, until read |
-| Addressed by | Position in the tree | Stable URI |
-| Good for | Small, always-relevant context | Large / numerous / occasionally-needed |
+|                   | Push (`<Section>` / `<Message>`) | Pull (`<Resource>`)                    |
+| ----------------- | -------------------------------- | -------------------------------------- |
+| Reaches the model | Inlined every tick               | Only when read by URI                  |
+| Token cost        | Every turn                       | Catalog entry only, until read         |
+| Addressed by      | Position in the tree             | Stable URI                             |
+| Good for          | Small, always-relevant context   | Large / numerous / occasionally-needed |
 
 The one-liner again: **tools are verbs, resources are nouns.** A tool _does_
 something (and the model chooses to call it). A resource _is_ something (and the
@@ -121,11 +121,11 @@ receives the **concrete matched URI**:
 
 Template syntax is an RFC 6570-lite subset:
 
-| Expression | Matches |
+| Expression | Matches                           |
 | ---------- | --------------------------------- |
-| `{name}` | exactly one path segment (no `/`) |
-| `{+name}` | reserved expansion (includes `/`) |
-| `{/name}` | path expansion (includes `/`) |
+| `{name}`   | exactly one path segment (no `/`) |
+| `{+name}`  | reserved expansion (includes `/`) |
+| `{/name}`  | path expansion (includes `/`)     |
 
 `read(uri)` prefers an exact fixed binding, then the first matching template.
 
@@ -179,10 +179,10 @@ readable_, and spends the content budget only on what it actually reads.
 
 Installing `withResources()` auto-registers two model-facing tools:
 
-| Tool | What it does |
+| Tool            | What it does                                                     |
 | --------------- | ---------------------------------------------------------------- |
 | `resource_list` | Enumerate available resources + templates (paginated via cursor) |
-| `resource_read` | Read one URI; returns first-class `resource` content blocks |
+| `resource_read` | Read one URI; returns first-class `resource` content blocks      |
 
 `resource_read` returns the content as `{ type: "resource", resource: ... }` blocks
 (text or binary round-trip), not flattened text. A failed read surfaces the
@@ -203,11 +203,11 @@ extensions: [withResources({ registerModelTools: false })];
 The same registry is reachable three equal ways — an adopter can't tell which
 front-end registered a binding:
 
-| Front-end | Where |
-| ------------------------------- | -------------------------------- |
-| `<Resource>` (`/react` subpath) | inside a JSX agent tree |
-| `session.resources.read(uri)` | adopter / server-side code |
-| `ctx.resource.read(uri)` | inside a tool handler (like `ctx.tasks`) |
+| Front-end                       | Where                                    |
+| ------------------------------- | ---------------------------------------- |
+| `<Resource>` (`/react` subpath) | inside a JSX agent tree                  |
+| `session.resources.read(uri)`   | adopter / server-side code               |
+| `ctx.resource.read(uri)`        | inside a tool handler (like `ctx.tasks`) |
 
 ```ts
 // From adopter code — no tool ctx needed:
@@ -246,11 +246,7 @@ as a resource. (This is the "roots + resources are both projections of the sandb
 story — see [MCP: connecting to servers](/docs/v2/mcp) for roots.)
 
 ```ts
-import {
-  sandboxFileResolver,
-  fsFileResolver,
-  registerFileResolver,
-} from "@agentick/sandbox/mcp";
+import { sandboxFileResolver, fsFileResolver, registerFileResolver } from "@agentick/sandbox/mcp";
 
 // Read through a sandbox — ACL-gated, provider-backed (text, per the handle contract):
 registerFileResolver(session.resources, sandboxFileResolver(sandbox));

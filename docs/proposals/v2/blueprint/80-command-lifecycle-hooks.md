@@ -28,7 +28,7 @@ This is **not a new subsystem.** `command()` already routes through `runOperatio
 Audits across `reconciler`, `loop-executor`, `executor`, `model`, `tool-executor`, `session`, `app` found **three disjoint mechanisms** that all want to be the same thing, plus dead spec:
 
 1. **`LifecycleStore` + `useOn*`** (`reconciler/src/lifecycle-store.ts`) — the React-facing family (`useOnTickStart`, `useOnToolStart`, …). **Observer-only by construction**: handlers are `(event) => void | Promise<void>`, return discarded (`lifecycle-store.ts:173`). **Loop-fed, not layer-owned**: `useOnToolStart` is dispatched by the loop, not the tool-executor, so it does not fire when a harness runs standalone.
-2. **`runOperation` phase envelopes** (`runtime/src/substrate/base-harness.ts:814/823/877`) — `requested → before → terminal` per command. Observer bus events. Fire standalone. This is the *real* runtime lifecycle.
+2. **`runOperation` phase envelopes** (`runtime/src/substrate/base-harness.ts:814/823/877`) — `requested → before → terminal` per command. Observer bus events. Fire standalone. This is the _real_ runtime lifecycle.
 3. **Operation middleware** (`.use` / `.fx.use` / `app.use`, `base-harness.ts:607/631`) — the only **transform** primitive that exists. The tool-executor's `.fx.use` already rewrites tool input (`next(reshaped)`) and output — the proven seam.
 
 Dead/partial: `ToolLifecycleEvent` (9 kinds, `spec/src/protocol/tool-executor.ts:374`) is **designed but never emitted**; `useOnError` has a binding but **no producer**; the reconciler emits **zero** compile events (`renderTreeBody` never touches `state.lifecycle`); the `project → call` model boundary has **no** before/after transform seam (nothing sits between `loop-executor/src/harness.ts:412` and `:416`); and session `send`/`render`/`dispatch` **bypass `runOperation` entirely** (`session/src/harness.ts:552`, TODO `:1002`), so the session has no phase envelopes, no hooks, no middleware of its own — a lifecycle vacuum.
@@ -45,13 +45,13 @@ When any harness declares `command("<who>:<what>", spec)`, the base harness endo
 
 They are not two ways to do one thing — the split is coupling + timing + power, the same distinction as DOM events vs middleware, or a bus topic vs an interceptor:
 
-| | Event | Hook |
-|---|---|---|
-| binding | subscribe to the bus | register a callback |
-| timing | out-of-band, fire-and-forget | in-band, in the op's fiber, awaited |
-| power | observe only | observe **and** transform / veto |
-| reach | wire-projectable (telemetry, devtools, remote clients) | local only (policy/code — never crosses the wire) |
-| realized by | `runOperation` phase envelopes | operation middleware entries |
+|             | Event                                                  | Hook                                              |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------- |
+| binding     | subscribe to the bus                                   | register a callback                               |
+| timing      | out-of-band, fire-and-forget                           | in-band, in the op's fiber, awaited               |
+| power       | observe only                                           | observe **and** transform / veto                  |
+| reach       | wire-projectable (telemetry, devtools, remote clients) | local only (policy/code — never crosses the wire) |
+| realized by | `runOperation` phase envelopes                         | operation middleware entries                      |
 
 A telemetry sink takes the event (decoupled, over the wire). A media reconciler takes the hook (in-band, reshapes the input). Observing via a void-returning hook is possible but reserved for when you need in-band ordering; pure watching subscribes to the event.
 
@@ -65,7 +65,7 @@ The name is **derived, not chosen** — every command mints exactly four surface
 ### 4. The hook contract
 
 ```ts
-type BeforeHook<In, Ctx> = (input: In,  ctx: Ctx) => In  | void | Promise<In  | void>;
+type BeforeHook<In, Ctx> = (input: In, ctx: Ctx) => In | void | Promise<In | void>;
 type AfterHook<Out, Ctx> = (output: Out, ctx: Ctx) => Out | void | Promise<Out | void>;
 ```
 
@@ -94,25 +94,37 @@ createApp(<Agent />, {
 `CommandHooks` is **derived, never hand-written.** The augmentation target is an empty-seed `CommandRegistry` (id → its I/O); each package contributes **one line per verb**, and both typed hooks fall out via a mapped type:
 
 ```ts
-export type BeforeHook<In,  Ctx = RuntimeContext> = (input:  In,  ctx: Ctx) => In  | void | Promise<In  | void>;
-export type AfterHook<Out,  Ctx = RuntimeContext> = (output: Out, ctx: Ctx) => Out | void | Promise<Out | void>;
+export type BeforeHook<In, Ctx = RuntimeContext> = (
+  input: In,
+  ctx: Ctx,
+) => In | void | Promise<In | void>;
+export type AfterHook<Out, Ctx = RuntimeContext> = (
+  output: Out,
+  ctx: Ctx,
+) => Out | void | Promise<Out | void>;
 //                    ^^ the transform invariant: return type === input type (rule: in-type is out-type)
 
-export interface CommandRegistry {}   // empty seed — augmented per package
+export interface CommandRegistry {} // empty seed — augmented per package
 
-type Cap<S extends string>    = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
-type Pascal<S extends string> = S extends `${infer A}:${infer B}` ? `${Cap<A>}${Pascal<B>}` : Cap<S>;
+type Cap<S extends string> = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
+type Pascal<S extends string> = S extends `${infer A}:${infer B}`
+  ? `${Cap<A>}${Pascal<B>}`
+  : Cap<S>;
 
-export type CommandHooks =
-  & { [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]?:
-        BeforeHook<CommandRegistry[K] extends { input:  infer I } ? I : never> }   // before ← op INPUT
-  & { [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]?:
-        AfterHook<CommandRegistry[K]  extends { output: infer O } ? O : never> };  // after  ← op OUTPUT
+export type CommandHooks = {
+  [K in keyof CommandRegistry as `onBefore${Pascal<K & string>}`]?: BeforeHook<
+    CommandRegistry[K] extends { input: infer I } ? I : never
+  >;
+} & { // before ← op INPUT
+  [K in keyof CommandRegistry as `onAfter${Pascal<K & string>}`]?: AfterHook<
+    CommandRegistry[K] extends { output: infer O } ? O : never
+  >;
+}; // after  ← op OUTPUT
 
 // one line per command; both hooks generated + typed:
 declare module "@agentick/spec" {
   interface CommandRegistry {
-    "model:generate":  { input: LanguageModelInput;  output: LanguageModelExecutionResult };
+    "model:generate": { input: LanguageModelInput; output: LanguageModelExecutionResult };
     "timeline:append": { input: TimelineAppendInput; output: TimelineEntry };
   }
 }
@@ -127,16 +139,17 @@ The elegance is the **symmetry**: the type-level `Pascal<K>` (which names the ho
 
 ```ts
 const off = session.hooks.append("onBeforeToolExecute", fn); // run inner (later)
-session.hooks.prepend("onBeforeModelGenerate", fn);          // run outer (earlier)
-session.hooks.remove(handle); off();
-session.hooks.fx.append("onBeforeModelGenerate", effectFn);  // Effect-native (§7)
+session.hooks.prepend("onBeforeModelGenerate", fn); // run outer (earlier)
+session.hooks.remove(handle);
+off();
+session.hooks.fx.append("onBeforeModelGenerate", effectFn); // Effect-native (§7)
 ```
 
-Declarative is one-per-key-per-scope; imperative covers many/dynamic. **Rejected placements:** `model: { onBeforeGenerate }` (collides with the `model` config key *and* re-binds hooks to a construction-time model — the tree declares the model per tick, ADR 56, so a config-scoped model hook goes dark the instant the tree picks another); and hoisting `onBeforeModelGenerate` flat into options (turns the options object into a grab-bag).
+Declarative is one-per-key-per-scope; imperative covers many/dynamic. **Rejected placements:** `model: { onBeforeGenerate }` (collides with the `model` config key _and_ re-binds hooks to a construction-time model — the tree declares the model per tick, ADR 56, so a config-scoped model hook goes dark the instant the tree picks another); and hoisting `onBeforeModelGenerate` flat into options (turns the options object into a grab-bag).
 
 ### 6. Cascade & scope
 
-Gateway ⊃ App ⊃ Session ⊃ Execution ⊃ command. A `hooks` object at any scope **cascades down** to all descendants and **composes as an onion** (not override): gateway-before outermost → app → session → execution → command; afters reverse. This is the *existing* operation-middleware inheritance (`ownAndInheritedMiddleware`, `base-harness.ts:631`, ADR 76) — hooks inherit it for free because hooks are middleware. Gateway is the new top tier (already the apps' construction parent), making it the home for deployment-wide policy: audit every `tool:execute`, redact every `model:generate`, across all apps.
+Gateway ⊃ App ⊃ Session ⊃ Execution ⊃ command. A `hooks` object at any scope **cascades down** to all descendants and **composes as an onion** (not override): gateway-before outermost → app → session → execution → command; afters reverse. This is the _existing_ operation-middleware inheritance (`ownAndInheritedMiddleware`, `base-harness.ts:631`, ADR 76) — hooks inherit it for free because hooks are middleware. Gateway is the new top tier (already the apps' construction parent), making it the home for deployment-wide policy: audit every `tool:execute`, redact every `model:generate`, across all apps.
 
 Mechanically, the `hooks` object rides the **RuntimeContext** down the tree, and `command()` self-wires the match: declaring `command("<who>:<what>")` looks up `hooks.onBefore<Who><What>` / `onAfter<Who><What>` from the ambient context and installs them on that command. No per-harness filtering code — the wiring lives in `command()`.
 
@@ -144,16 +157,16 @@ Mechanically, the `hooks` object rides the **RuntimeContext** down the tree, and
 
 Because a declarative hook **desugars to a `.use` / `.fx.use` registration** on its command, hooks flow through the exact chain `liftMiddleware` governs and inherit ADR 76's fix verbatim: the continuation is `Runtime.runFork`'d on the **ambient** runtime (`Effect.runtime()`), not the default one, so RuntimeContext, span-nesting, the tier-4 `CallMiddlewareRef`, and interruption all survive the async boundary.
 
-> **Invariant:** a `hooks` entry compiles *into* the command's existing middleware chain — never a bespoke "hook runner" side-path. A parallel invocation path bypasses `liftMiddleware` and reintroduces the fiber-severing bug ADR 76 killed. If we catch ourselves writing a dedicated hook-dispatch loop, we have broken this.
+> **Invariant:** a `hooks` entry compiles _into_ the command's existing middleware chain — never a bespoke "hook runner" side-path. A parallel invocation path bypasses `liftMiddleware` and reintroduces the fiber-severing bug ADR 76 killed. If we catch ourselves writing a dedicated hook-dispatch loop, we have broken this.
 
-"Solved" means the *continuation* is fiber-preserved. A JS-form hook's own synchronous body between `await`s is inherently outside the Effect fiber — fine for reshape/observe (media included). The `.fx` form is for hooks whose *body* must be in-fiber (open a span wrapping the inner op, be interruptible mid-body) — exact `.use` vs `.fx.use` parity:
+"Solved" means the _continuation_ is fiber-preserved. A JS-form hook's own synchronous body between `await`s is inherently outside the Effect fiber — fine for reshape/observe (media included). The `.fx` form is for hooks whose _body_ must be in-fiber (open a span wrapping the inner op, be interruptible mid-body) — exact `.use` vs `.fx.use` parity:
 
 - `hooks: { onBeforeModelGenerate(input, ctx) {…} }` — JS form, continuation-preserved. The 90%.
 - `session.hooks.fx.append("onBeforeModelGenerate", …)` — Effect-native, fully in-fiber.
 
 ### 8. `Hooks` is a capability of `BaseHarness`, not a harness
 
-Tempting under "everything is a harness," but wrong, for reasons tied to what a harness *is* (snapshotable state + wire-projectable commands + inbox identity):
+Tempting under "everything is a harness," but wrong, for reasons tied to what a harness _is_ (snapshotable state + wire-projectable commands + inbox identity):
 
 1. **Its "state" is functions, not data** — unserializable, so it can't round-trip through a store (ADR 49). A harness whose state can't persist isn't one.
 2. **It must never cross the wire** — hooks run arbitrary code in the op's fiber; they're policy. The main reason to make something a harness (wire projection + remote commands) is exactly what you must deny it.
@@ -166,11 +179,11 @@ Tempting under "everything is a harness," but wrong, for reasons tied to what a 
 Wire methods (`<ext>/<method>`, e.g. `knobs/set`) are dispatched **directly** today — `dispatchRequest` calls `resolution.handler(req.params, ctx)` (`transport/src/server/dispatch.ts:61`), not through `runOperation`. So they inherit hooks at two levels:
 
 - **Command-level: free.** A wire handler that delegates to a harness command (the pattern — `knobs/set` → `knob:set`) fires that command's hooks regardless of origin. Wire or local, same `onBeforeKnobSet`.
-- **Wire-level: route the dispatch.** To hook the *wire method itself* (raw JSON-RPC `params` + identity, pre-translation), wrap the handler call in `this.runOperation("<ext>:<method>", h)` at that one choke point — the identical "straggler → `runOperation`" move as the session verbs (slice 0). Wire methods then get `onBefore/After<Ext><Method>` + `<ext>-<method>-start/end`, cascading from the **gateway** (the top tier) — the home for deployment-wide wire policy (audit, rate-limit, param-validate every remote call).
+- **Wire-level: route the dispatch.** To hook the _wire method itself_ (raw JSON-RPC `params` + identity, pre-translation), wrap the handler call in `this.runOperation("<ext>:<method>", h)` at that one choke point — the identical "straggler → `runOperation`" move as the session verbs (slice 0). Wire methods then get `onBefore/After<Ext><Method>` + `<ext>-<method>-start/end`, cascading from the **gateway** (the top tier) — the home for deployment-wide wire policy (audit, rate-limit, param-validate every remote call).
 
-**Auth is the archetypal `onBefore` veto — and it stays explicit.** `authorizeDispatch` (`dispatch.ts:249`) already runs before the handler and throws to deny (`WireRpcError.forbidden`) with `required:false`→open + an un-waivable ceiling — structurally an `onBefore` veto hook. This *validates* the model (the before-veto shape was always there for auth). But it must **not** be demoted to a userland-registered hook that a config could omit ([[wire_constraints_at_the_wire]], [[credentials_never_cross_wire]]). Composition: **auth remains the framework's explicit, un-waivable first pre-gate; the userland hook cascade runs inside `runOperation`, after auth passes** — a wire `onBeforeKnobsSet` reshapes/observes an *already-authorized* request and cannot bypass the gate.
+**Auth is the archetypal `onBefore` veto — and it stays explicit.** `authorizeDispatch` (`dispatch.ts:249`) already runs before the handler and throws to deny (`WireRpcError.forbidden`) with `required:false`→open + an un-waivable ceiling — structurally an `onBefore` veto hook. This _validates_ the model (the before-veto shape was always there for auth). But it must **not** be demoted to a userland-registered hook that a config could omit ([[wire_constraints_at_the_wire]], [[credentials_never_cross_wire]]). Composition: **auth remains the framework's explicit, un-waivable first pre-gate; the userland hook cascade runs inside `runOperation`, after auth passes** — a wire `onBeforeKnobsSet` reshapes/observes an _already-authorized_ request and cannot bypass the gate.
 
-**Delimiter + layer note.** Wire ids use `/` (`knobs/set`), commands use `:` (`knob:set`); `deriveHookNames`/`Pascal` normalize both. Note `knobs/set` (wire) and `knob:set` (command) yield *different* hook names — correctly, because they are **different interception points** (raw params + identity vs typed input). A wire method is "a command reached over the wire": both route through `runOperation`, both get the surface, both cascade from the gateway; the `CommandRegistry` typing extends to wire methods verbatim (`input`/`output` = params/result).
+**Delimiter + layer note.** Wire ids use `/` (`knobs/set`), commands use `:` (`knob:set`); `deriveHookNames`/`Pascal` normalize both. Note `knobs/set` (wire) and `knob:set` (command) yield _different_ hook names — correctly, because they are **different interception points** (raw params + identity vs typed input). A wire method is "a command reached over the wire": both route through `runOperation`, both get the surface, both cascade from the gateway; the `CommandRegistry` typing extends to wire methods verbatim (`input`/`output` = params/result).
 
 ## Worked examples
 
@@ -186,7 +199,7 @@ hooks: {
 
 The hardest-looking requirement in the originating thread lands in the plainest possible hook: read `ctx.target`, await the resolver, return reshaped `LanguageModelInput`. JS form + the §7 continuation fix cover it — no `.fx`, no in-fiber body.
 
-**`timeline:append` — ingestion.** There was never a separate "ingest layer"; ingestion of model output and tool results *is* the timeline's append verb. `onBeforeTimelineAppend` gates/reshapes what persists (dedup, redact, annotate); `onAfterTimelineAppend` observes the committed entry.
+**`timeline:append` — ingestion.** There was never a separate "ingest layer"; ingestion of model output and tool results _is_ the timeline's append verb. `onBeforeTimelineAppend` gates/reshapes what persists (dedup, redact, annotate); `onAfterTimelineAppend` observes the committed entry.
 
 ## Scope — slices (landable independently)
 

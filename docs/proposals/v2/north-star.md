@@ -152,8 +152,9 @@ your framework at setup time, then `createGateway({ transports: [transport] })` 
 short-circuits); `security: "host-managed"` opt-out; fail-closed default; pre-listen /
 post-close requests get an honest `503`. Verified by
 `packages-next/transport-http/src/__tests__/embedded-fetch-handler.spec.ts` (10 proofs)
-+ `ServerTransport` conformance in `server-transport.spec.ts` + README §"the embedded
-gateway".
+
+- `ServerTransport` conformance in `server-transport.spec.ts` + README §"the embedded
+  gateway".
 
 **The grouping rule (so this never rots):** a key earns a GROUP when it's one of ≥3
 siblings sharing an axis (lifecycle, operator-security, egress-policy); otherwise it

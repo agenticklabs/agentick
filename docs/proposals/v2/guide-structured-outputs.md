@@ -205,12 +205,12 @@ delivery_, it doesn't post-process whatever the model happened to say.
 
 ## Errors reference
 
-| Error                              | When                                                                   |
-| ---------------------------------- | ---------------------------------------------------------------------- |
-| `ResponseValidationError`          | The delivered value failed the schema (carries `issues` + `raw`).      |
-| `StructuredOutputIncomplete`       | No terminal call and no room to force a wrap-up (hit `maxTicks`).      |
-| `TerminalToolNameCollision`        | A tree tool shares the terminal tool's name (default `submit_result`). |
-| `MultipleStructuredOutputs`        | The tree declares 2+ `<Output>`s — one execution, one shape.           |
+| Error                              | When                                                                                                   |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ResponseValidationError`          | The delivered value failed the schema (carries `issues` + `raw`).                                      |
+| `StructuredOutputIncomplete`       | No terminal call and no room to force a wrap-up (hit `maxTicks`).                                      |
+| `TerminalToolNameCollision`        | A tree tool shares the terminal tool's name (default `submit_result`).                                 |
+| `MultipleStructuredOutputs`        | The tree declares 2+ `<Output>`s — one execution, one shape.                                           |
 | `SteerCannotCarryStructuredOutput` | An explicit `onBusy: "steer"` carried `output` / `responseFormat` while racing an in-flight execution. |
 
 ## What it does _not_ do (yet)

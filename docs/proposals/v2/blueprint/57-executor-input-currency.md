@@ -15,7 +15,7 @@ inconsistently named**, and it silently drops IR data three ways:
    (`model/src/canonical-projection.ts:136` `messagePartFromBlock`) folds the 22-member
    `ContentBlock` union onto it, and its `default` emits
    `text: "text" in block ? block.text : JSON.stringify(block)` — so a `document`,
-   `audio`, `video`, or `reasoning` block is annihilated *before any adapter runs*.
+   `audio`, `video`, or `reasoning` block is annihilated _before any adapter runs_.
    All four adapters starve uniformly. This is v1's document-block bug reintroduced
    **structurally** (verified in code 2026-07-06).
 2. **providerOptions orphaned.** The reconciler collects `<ProviderOptions>` into
@@ -23,7 +23,7 @@ inconsistently named**, and it silently drops IR data three ways:
    adapters read only `target.providerOptions`. Every tree-declared provider knob
    (thinking config, seed, safetySettings, cache_control) is dropped (#176).
 3. **Provider-knob field misnamed.** Parts carry `providerMetadata?: ProviderMetadataBag`
-   for the *input* direction, but `target`/`RenderedTree` use `providerOptions`, and the
+   for the _input_ direction, but `target`/`RenderedTree` use `providerOptions`, and the
    semantically-correct split (ai-sdk's, and the industry norm) is **`providerOptions` =
    what you send · `providerMetadata` = what the provider returns**.
 
@@ -32,8 +32,8 @@ currency vs. what doesn't is in §Taxonomy.
 
 ## Taxonomy — what is a wire part vs. what the formatter owns
 
-**The line:** *does the provider have a native structural representation that text cannot
-substitute for?*
+**The line:** _does the provider have a native structural representation that text cannot
+substitute for?_
 
 - **Wire-native modalities → get a `LanguageModelMessagePart` variant.** `document`
   (base64/url/file PDF), `audio` (OpenAI `input_audio` / Gemini audio), `video` (Gemini),
@@ -124,7 +124,7 @@ split on the part + `LanguageModelInput.providerOptions` (#176) + both Stage-1 m
 the four adapters' input projection + Anthropic thinking `signature`/`data` round-trip +
 conformance cells (each adapter × each new modality; providerOptions round-trip; Anthropic
 thinking replay). **Out:** `custom` (→ #174 formatter), `executable_code`/
-`code_execution_result` (Gemini-native, follow-up), ai-sdk/Google *output* multimodal
+`code_execution_result` (Gemini-native, follow-up), ai-sdk/Google _output_ multimodal
 drops (follow-up), the `image`-part MediaSource realignment (follow-up).
 
 ## Rejected

@@ -144,7 +144,7 @@ Guards + transforms inherit down the construction tree the SAME way hooks do
   inherited list is collected with it. No parent pointer survives teardown.
 
 There is **no per-op parent walk** — op-time still reads only the local merged
-list. The move from ADR 81's parent-walk was about not walking *per op*; live
+list. The move from ADR 81's parent-walk was about not walking _per op_; live
 inheritance keeps that (push-on-register, read-local-per-op) while restoring the
 late-registration propagation the frozen fold gave up. This is what closes the
 **gateway→app** gap (a gateway hook now reaches apps created afterward) without a
@@ -292,18 +292,18 @@ adopter surface grows, the substrate shrinks.
 
 The seam lives in `BaseHarness.runOperation`, so **any op routed through
 `command()`/`runOperation` is hookable** — but not every op is routed that way,
-and typed hook *names* exist only for verbs augmented into `CommandRegistry`.
+and typed hook _names_ exist only for verbs augmented into `CommandRegistry`.
 
-| Harness / verb | Hookable | Typed name | Notes |
-| --- | --- | --- | --- |
-| `tool:dispatch` (+ `tool:abort`) | ✅ | ✅ | `onBefore/AfterToolDispatch`; `guardDispatch` |
-| `session:send` / `append` / `apply-executor-result` / `apply-tool-results` | ✅ | ✅ | public door; NON-ADDRESSABLE (SendInput non-serializable); `apply-*` skip the loop's in-fiber `*Fx` path |
-| `elicitation:elicit` | ✅ | ✅ | one op for the round-trip: before=request, after=response (form+URL unified) |
-| `knobs:*`, `timeline:*`, `resources:*` | ✅ (mechanism) | — | route through `command()`; add a 1-line `CommandRegistry` entry for typed names |
-| `tasks:submit` / `tasks:settle` | ⛔ | — (naming locked) | **the async-seam boundary**: the seam is async (`asBefore`/`asAfter` await); `submit` returns `TaskHandle` synchronously, so wrapping needs `runSyncExit` which dies on the async boundary. Unblockers: async `submit` (breaking) or a sync-hook fast-path (necessary-but-insufficient). |
+| Harness / verb                                                             | Hookable       | Typed name        | Notes                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------- | -------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tool:dispatch` (+ `tool:abort`)                                           | ✅             | ✅                | `onBefore/AfterToolDispatch`; `guardDispatch`                                                                                                                                                                                                                                            |
+| `session:send` / `append` / `apply-executor-result` / `apply-tool-results` | ✅             | ✅                | public door; NON-ADDRESSABLE (SendInput non-serializable); `apply-*` skip the loop's in-fiber `*Fx` path                                                                                                                                                                                 |
+| `elicitation:elicit`                                                       | ✅             | ✅                | one op for the round-trip: before=request, after=response (form+URL unified)                                                                                                                                                                                                             |
+| `knobs:*`, `timeline:*`, `resources:*`                                     | ✅ (mechanism) | —                 | route through `command()`; add a 1-line `CommandRegistry` entry for typed names                                                                                                                                                                                                          |
+| `tasks:submit` / `tasks:settle`                                            | ⛔             | — (naming locked) | **the async-seam boundary**: the seam is async (`asBefore`/`asAfter` await); `submit` returns `TaskHandle` synchronously, so wrapping needs `runSyncExit` which dies on the async boundary. Unblockers: async `submit` (breaking) or a sync-hook fast-path (necessary-but-insufficient). |
 
 **The async-only property is deliberate.** Every hookable op crosses the async
-seam; a *synchronous* operation (a sync handle return, a sync FSM transition)
+seam; a _synchronous_ operation (a sync handle return, a sync FSM transition)
 cannot be hooked without making it async. The things worth intercepting (model
 calls, dispatch, elicits, sends) are inherently async; tasks is the one harness
 whose valuable hooks sit on sync surfaces.
@@ -322,7 +322,7 @@ delegates to.
 > Pascal collision "the symmetry." That only held because the gateway did NOT
 > propagate hooks to apps — a bug (§4, now fixed) the design was leaning on. With
 > live inheritance, a gateway `onBeforeSessionSend` folds down and fires at the
-> `session:send` op; a wire op *also* named `SessionSend` would then fire the
+> `session:send` op; a wire op _also_ named `SessionSend` would then fire the
 > same hook a SECOND time at the wire boundary (double-fire, inconsistent between
 > wire-originated and in-process sends). The fix is to stop the collision at its
 > root: **give the wire op its own name.**

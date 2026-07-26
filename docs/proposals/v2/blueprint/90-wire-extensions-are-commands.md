@@ -14,9 +14,9 @@ A wire method is not a second-class RPC bolted onto the side of the runtime. It
 IS a command — it earns every surface a domain command has. One row in
 `WireMethods` + one handler yields **four surfaces**, no per-method wiring:
 
-| From one `"<ns>/<method>"` row… | …you get                                                                                 |
-| ------------------------------- | ---------------------------------------------------------------------------------------- |
-| **client method**               | `session.<ns>.<method>(params)` — typed, `sessionId` bound (ADR 46 / the wire proxy)     |
+| From one `"<ns>/<method>"` row… | …you get                                                                                  |
+| ------------------------------- | ----------------------------------------------------------------------------------------- |
+| **client method**               | `session.<ns>.<method>(params)` — typed, `sessionId` bound (ADR 46 / the wire proxy)      |
 | **authz scope**                 | the verb name IS the scope label (`crm/deleteContact` → `crm:deleteContact`, ADR 51 §3.3) |
 | **journaled + hookable op**     | a `wire:<method>` operation through `runOperation` (requested→terminal, ADR 83 §wire)     |
 | **typed gateway hooks**         | `onBeforeWire<...>` / `onAfterWire<...>`, derived from the row (this ADR, §1)             |
@@ -82,11 +82,12 @@ defineWireExtension({
   methods: {
     "crm/deleteContact": {
       handler: async ({ contactId }, ctx) => ({ deleted: await remove(contactId) }),
-      auth: { required: true, scope: "crm:admin" },      // → merged into ext.auth
-      guard: ({ contactId }) =>                            // → guard-kind interceptor
-        locked(contactId) ? { kind: "veto" } : undefined,
-      middleware: async (p, next) => next(p),             // → transform interceptor
-      spanAttributes: { "crm.tier": "premium" },          // → annotates the op span
+      auth: { required: true, scope: "crm:admin" }, // → merged into ext.auth
+      guard: (
+        { contactId }, // → guard-kind interceptor
+      ) => (locked(contactId) ? { kind: "veto" } : undefined),
+      middleware: async (p, next) => next(p), // → transform interceptor
+      spanAttributes: { "crm.tier": "premium" }, // → annotates the op span
     },
     "crm/listContacts": async (_p, ctx) => ({ contacts: [] }), // shorthand — unchanged
   },
@@ -109,12 +110,12 @@ defineWireExtension({
 
 A define-time guard raises the ADR-83 verdict taxonomy, honored on the wire:
 
-| Verdict                | Op terminal | JSON-RPC edge                          |
-| ---------------------- | ----------- | -------------------------------------- |
-| `veto`                 | `vetoed`    | `Forbidden` (-32003)                   |
-| `defer`                | `deferred`  | `RateLimited` (-32040), retry-after    |
-| `replace`              | `replaced`  | success frame with the supplied result |
-| `proceed` / `void`     | (runs)      | the handler's result                   |
+| Verdict            | Op terminal | JSON-RPC edge                          |
+| ------------------ | ----------- | -------------------------------------- |
+| `veto`             | `vetoed`    | `Forbidden` (-32003)                   |
+| `defer`            | `deferred`  | `RateLimited` (-32040), retry-after    |
+| `replace`          | `replaced`  | success frame with the supplied result |
+| `proceed` / `void` | (runs)      | the handler's result                   |
 
 (The transport dispatcher maps `OperationOutcomeError` by its `outcome` rather
 than collapsing to an opaque `InternalError`.)

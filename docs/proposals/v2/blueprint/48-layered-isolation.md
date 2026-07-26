@@ -11,8 +11,8 @@
 A "multi-tenant distributed durable gateway" needs **no tenancy subsystem, no `Principal` class, no snapshot/migration protocol, no universal `Store` supertype.** It is the composition of primitives that already exist:
 
 - **Isolation = composition.** A per-scope harness instance (child bus / child journal / namespace-keyed store) isolates by construction. Bus/journal fan writes **up** to parents (global observability) while keeping reads **isolated** downward. Verified to hold across cluster replicas.
-- **Harness instance ≠ backing resource.** The harness is per-scope and cheap (an object + a scope key). The expensive backing resource (Pg pool, Redis client, socket) is shared/global and *injected*. A per-session harness is a scoped **view** over a shared adapter, isolated by a key — never a per-session connection.
-- **A principal is a scope key.** The identity axis (`tenant → user`) is a hierarchical scope key of the same shape as the work axis (`gateway → app → session`). It is derived by an **auth projection function** (identically shaped to `ClusterPartitioning.keyFor`), fixed in scope at construction (ADR 45), and threaded like `sessionId`. Authentication *is* producing this key.
+- **Harness instance ≠ backing resource.** The harness is per-scope and cheap (an object + a scope key). The expensive backing resource (Pg pool, Redis client, socket) is shared/global and _injected_. A per-session harness is a scoped **view** over a shared adapter, isolated by a key — never a per-session connection.
+- **A principal is a scope key.** The identity axis (`tenant → user`) is a hierarchical scope key of the same shape as the work axis (`gateway → app → session`). It is derived by an **auth projection function** (identically shaped to `ClusterPartitioning.keyFor`), fixed in scope at construction (ADR 45), and threaded like `sessionId`. Authentication _is_ producing this key.
 - **Scope is chosen by what the state IS**, not a blanket rule: work/execution → **session**; identity/auth → **principal**; physical resource → **global**.
 - **Migration = durable store adapter.** Put the source of truth in an external durable adapter and node failover is "re-point + read." Snapshot/restore is only for in-memory-source-of-truth; live mid-execution resumes via journal replay + idempotency, not fiber snapshot.
 
@@ -26,9 +26,9 @@ The stated goal is a fully-functional multi-tenant, distributed, durable gateway
 
 Two facts, both verified in-tree this session, collapse most of that work:
 
-1. **`LocalEventBus` fan-in / isolated-reads composes, and it composes across replicas.** A per-session child bus wrapping its node's (cluster-wrapped) bus: session events fan up and reach a gateway-scope observer on *another* replica, while a sibling session on the same node never observes them. Isolation is physical (separate ring buffers), not filter-based, so clustering cannot leak it. (`packages/cluster/src/__tests__/composition-across-replicas.spec.ts`, `packages/runtime/src/__tests__/local-event-bus.spec.ts`.)
+1. **`LocalEventBus` fan-in / isolated-reads composes, and it composes across replicas.** A per-session child bus wrapping its node's (cluster-wrapped) bus: session events fan up and reach a gateway-scope observer on _another_ replica, while a sibling session on the same node never observes them. Isolation is physical (separate ring buffers), not filter-based, so clustering cannot leak it. (`packages/cluster/src/__tests__/composition-across-replicas.spec.ts`, `packages/runtime/src/__tests__/local-event-bus.spec.ts`.)
 
-2. **Stores are namespace-keyed pluggable adapters.** `CredentialsStore` is `(namespace, key) → value` with a `backend` id, conformance suite, in-memory reference adapter, optional reactivity. `OperationJournal`, `SandboxRuntime`, `ClusterTransport` follow the same pattern. Namespacing *is* the isolation mechanism.
+2. **Stores are namespace-keyed pluggable adapters.** `CredentialsStore` is `(namespace, key) → value` with a `backend` id, conformance suite, in-memory reference adapter, optional reactivity. `OperationJournal`, `SandboxRuntime`, `ClusterTransport` follow the same pattern. Namespacing _is_ the isolation mechanism.
 
 So the design question is not "how do we build multi-tenancy" — it's "how do we compose what exists, and where does each thing's isolation boundary sit."
 
@@ -43,7 +43,7 @@ Work path      (execution):  gateway → app → session      (already in EventS
 Identity path  (who):        tenant  → user               (EventScope.principal, stamped by BaseHarness)
 ```
 
-Both are hierarchical keys. Both **fan in / resolve up**. The work path already exists (`EventScope.appId / sessionId / gatewayId / nodeId`). The identity path is the *same shape at a different key*.
+Both are hierarchical keys. Both **fan in / resolve up**. The work path already exists (`EventScope.appId / sessionId / gatewayId / nodeId`). The identity path is the _same shape at a different key_.
 
 **`principal` is a core `EventScope` field, not an augmentation-seam entry** (refined during implementation — see below). It graduated to core because it became **foundational on `BaseHarness`**: the base class carries it as construction identity and stamps it onto events, so `spec-next` is no longer agnostic about it — it's a first-class framework identity dimension, alongside `sessionId`/`gatewayId`.
 
@@ -62,17 +62,17 @@ class BaseHarness {
 }
 ```
 
-**Why core, not the augmentation seam:** `principal` is the *one* identity dimension `BaseHarness` can stamp uniformly — unlike `scopeId`, whose scope field is surface-specific (session→sessionId, app→appId). Centralizing it on the base class (both `this.principal` for impls and the authoritative `makeEvent` stamp) is what prevents per-command drift and makes identity structural rather than ambient. That foundational role is what promotes it from downstream augmentation to core.
+**Why core, not the augmentation seam:** `principal` is the _one_ identity dimension `BaseHarness` can stamp uniformly — unlike `scopeId`, whose scope field is surface-specific (session→sessionId, app→appId). Centralizing it on the base class (both `this.principal` for impls and the authoritative `makeEvent` stamp) is what prevents per-command drift and makes identity structural rather than ambient. That foundational role is what promotes it from downstream augmentation to core.
 
-*(`EventScopeExtensions` remains the seam for genuinely harness-package-specific dimensions — `sandboxId`, `mcpConnectionId`.)*
+_(`EventScopeExtensions` remains the seam for genuinely harness-package-specific dimensions — `sandboxId`, `mcpConnectionId`.)_
 
 ### 2. Isolation = composition, at the scope determined by the state's nature
 
-| State | Isolation unit | Mechanism |
-|---|---|---|
-| Work / execution — bus, journal, session-state, tasks (default) | **session** | child bus/journal (fan-in/isolated) or namespace = work-path |
-| Identity / auth — credentials, tokens | **principal** | namespace = identity-path; **resolve up** user → tenant → global |
-| Physical resource — Pg pool, Redis client, sockets | **global** | shared, injected; never scoped |
+| State                                                           | Isolation unit | Mechanism                                                        |
+| --------------------------------------------------------------- | -------------- | ---------------------------------------------------------------- |
+| Work / execution — bus, journal, session-state, tasks (default) | **session**    | child bus/journal (fan-in/isolated) or namespace = work-path     |
+| Identity / auth — credentials, tokens                           | **principal**  | namespace = identity-path; **resolve up** user → tenant → global |
+| Physical resource — Pg pool, Redis client, sockets              | **global**     | shared, injected; never scoped                                   |
 
 Work-scoped state fans writes up to app/gateway (global observability) while reads stay isolated. Identity-scoped stores namespace by principal and resolve up the hierarchy on read (the read-side twin of bus fan-in).
 
@@ -86,7 +86,7 @@ A per-scope harness is a scoped view over a shared adapter. The Pg example:
 
 This is dependency injection over the existing factory pattern: `LocalEventBus.factory({parent})` already constructs a per-child instance that wraps a shared parent. A `credentialsFactory` constructs a per-principal harness wrapping a shared gateway-level store. Same move.
 
-### 4. Principal is derived by an auth projection function; authentication *is* producing the key
+### 4. Principal is derived by an auth projection function; authentication _is_ producing the key
 
 The derivation is the identity analog of `ClusterPartitioning.keyFor(addr) => shardKey`: a projection from inbound context to a key.
 
@@ -120,7 +120,7 @@ boundary and collapse into one **at and below** it:
   never re-derived per operation.
 
 The session being the **largest work-scope that is principal-singular**
-is *why* the session is the unit of work, and why per-session
+is _why_ the session is the unit of work, and why per-session
 instantiation of session-lifetime harnesses is correct rather than
 wasteful.
 
@@ -160,7 +160,7 @@ key lookup — that is runtime-filter isolation wearing a different hat.
 **Multi-actor surfaces (connectors).** A group chat (Telegram, Slack
 channel) is one conversation with multiple humans. The session's
 principal is the **installation/workspace identity** — the thing that
-authorized the connector — and the per-message *actor* rides
+authorized the connector — and the per-message _actor_ rides
 `RuntimeContextUser` / message metadata as a context dimension. It is
 never the session principal; principal-per-sender would break session
 principal-immutability.
@@ -183,6 +183,7 @@ This unifies two things previously treated separately: **durable execution and H
 ## What's built vs. the gap
 
 **Built (mechanisms):**
+
 - Substrate factories with parent composition (bus + journal fan-in/isolated; inbox deliberately does not compose — addressing).
 - `EventScope` + `EventScopeExtensions` augmentation seam.
 - Namespace-keyed pluggable stores + conformance + in-memory adapters.
@@ -190,6 +191,7 @@ This unifies two things previously treated separately: **durable execution and H
 - Cluster substrate (broker/net/ws/redis, membership, partitioning, re-election) — distribution.
 
 **Gap (convention + wiring + adapters, not architecture):**
+
 - Per-scope-by-default wiring: store-backed harnesses install app-level today; the "per-scope instance over injected shared adapter, namespaced by session (work) / principal (identity)" convention is not yet blessed or defaulted.
 - The auth boundary (#302) that runs `auth.principal` and fixes it in scope.
 - Resolve-up convention in identity-scoped harnesses (~10-line hierarchy walk).
@@ -222,7 +224,7 @@ interface TaskRecord {
 }
 ```
 
-A durable `TaskStore` adapter *is* durable execution and survives node failover for free (state was never in the node).
+A durable `TaskStore` adapter _is_ durable execution and survives node failover for free (state was never in the node).
 
 ---
 
@@ -231,7 +233,7 @@ A durable `TaskStore` adapter *is* durable execution and survives node failover 
 - **`Principal` class / registry / plumbing.** Principal is an opaque scope key; auth material lives in the credential store keyed by it; roles live where the Authorizer reads them. A class holds nothing that isn't handled elsewhere.
 - **Universal `Store<T>` supertype to subclass.** Shapes diverge (namespaced KV vs append-log vs query-by-status); the framework reuses by composition + per-domain interfaces + adapter convention, not inheritance. No polymorphic consumer exists (three-consumers rule fails). Extract a narrow **capability** interface (e.g. a snapshot capability) only when a real consumer needs it — never a base class.
 - **Snapshot-based migration as the primary path.** Dissolved: externalize the source of truth and migration is re-point + read. Snapshot is the in-memory fallback only.
-- **Separate `tenantId` / `userId` / `region` fields on `EventScope`.** One `principal` key (hierarchy by convention), not N identity fields. (`principal` itself *is* a core field — it earned that by being foundational on `BaseHarness`; a proliferation of identity fields is what's rejected.)
+- **Separate `tenantId` / `userId` / `region` fields on `EventScope`.** One `principal` key (hierarchy by convention), not N identity fields. (`principal` itself _is_ a core field — it earned that by being foundational on `BaseHarness`; a proliferation of identity fields is what's rejected.)
 
 ---
 
@@ -239,7 +241,7 @@ A durable `TaskStore` adapter *is* durable execution and survives node failover 
 
 - **Flat vs structured principal key** — `"acme/user-42"` (hierarchy by splitting convention) vs `{ tenant, user }` / `string[]`. Ship `string`; let #302 + the first credential adapter decide if structure is needed. Do not model N-level hierarchy speculatively.
 - **`TaskStore` exact shape** — pin when durable execution is the active goal.
-- **A snapshot *capability* interface** (`{ backend; snapshot(); restore() }`) — only if/when the in-memory-migration fallback needs it; not now.
+- **A snapshot _capability_ interface** (`{ backend; snapshot(); restore() }`) — only if/when the in-memory-migration fallback needs it; not now.
 
 ---
 

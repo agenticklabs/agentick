@@ -9,8 +9,8 @@ unchanged, composes)
 ## Problem
 
 v1 had ALS: one ambient context, reachable anywhere — one reality by
-*transport*. v2 killed the ambient transport deliberately (causality,
-testability, concurrency bleed) but never replaced the *one reality*
+_transport_. v2 killed the ambient transport deliberately (causality,
+testability, concurrency bleed) but never replaced the _one reality_
 part. What grew instead is bespoke bags. The 2026-07-26 inventory
 (grounding for this ADR) found:
 
@@ -19,7 +19,7 @@ part. What grew instead is bespoke bags. The 2026-07-26 inventory
   `sessionId`/`executionId`/`tickId` flat and omits
   `opId`/`principal`/`origin`; `WireExtensionContext` carries
   `principal`/`identity` but no work-path coordinates; `StoreCtx`
-  *inlines the entire trunk verbatim* because spec cannot import runtime.
+  _inlines the entire trunk verbatim_ because spec cannot import runtime.
 - **6 fabrication sites** that hand-assemble contexts from scratch —
   the MCP server fabricates `toolCallId`s, fresh `AbortController`
   signals, and no-op `setState`/`emit`/`progress` closures three
@@ -63,7 +63,7 @@ and its `user: unknown` weakening disappears.
 
 The capability facets stay what they are — spec-resident
 `Observability` (`log`/`trace`/`metrics`) and `Ops` (`run`/`runner`) —
-*derived from* the data at derivation time, never serialized, never on
+_derived from_ the data at derivation time, never serialized, never on
 the trunk. The canonical boundary-ctx shape is the one that already
 exists at `middleware.ts:63`:
 
@@ -85,11 +85,11 @@ the boundary facets, and produces the extended ctx. Hand-assembled
 bags are a code smell after this ADR; the MCP fabrication trio and the
 tool-executor assembly site all route through it. Fabricated no-ops
 (`setState`, `emit`, `progress`) are replaced by either real
-derivations from the parent crossing or *typed absence* (the slot is
+derivations from the parent crossing or _typed absence_ (the slot is
 optional and absent, not silently inert).
 
 Derivation is also forward-flowing: a context established at an outer
-crossing (the MCP pre-gate's authenticated ctx) derives *into* the
+crossing (the MCP pre-gate's authenticated ctx) derives _into_ the
 inner one (the request/instructions ctx) instead of being rebuilt —
 which retires the double-authenticator wrinkle noted at next.5.
 
@@ -109,11 +109,11 @@ underneath.
 
 ## Conflict resolutions
 
-| Conflict | Resolution |
-| --- | --- |
+| Conflict                     | Resolution                                                                                                                                                                                                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `transport` string vs object | `WireExtensionContext.transport` (the capability object) renames to `wire` — it is the wire-crossing's verbs, not a discriminator. `ToolHandlerCtx.transport: "in-process" \| "mcp"` keeps the name (it discriminates the transport). Breaking; no shim (house philosophy). |
-| `user` semantics | Stated as law: authenticated identity is **`identity`/`principal` on the trunk**; `mcp.user` is the MCP-boundary *projection* of it; `ctx.user` is adopter ambient state and **never** auth. Names stay; the law is documented at all three sites. |
-| `progress` three-ways | Not unified in this ADR (three genuinely different boundary verbs); documented as boundary facets, each named by its boundary. Revisit only if a fourth appears. |
+| `user` semantics             | Stated as law: authenticated identity is **`identity`/`principal` on the trunk**; `mcp.user` is the MCP-boundary _projection_ of it; `ctx.user` is adopter ambient state and **never** auth. Names stay; the law is documented at all three sites.                          |
+| `progress` three-ways        | Not unified in this ADR (three genuinely different boundary verbs); documented as boundary facets, each named by its boundary. Revisit only if a fourth appears.                                                                                                            |
 
 ## Phases
 

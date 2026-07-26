@@ -51,6 +51,7 @@ current), usedTokens from the lifecycle bridge (async, prior);
 ## Design
 
 ### (a) mount flushes passive effects
+
 `ReconcilerHarness.mount` awaits a passive-effect flush after the initial
 render's commit, before resolving `mountReady`. This makes every
 `useEffect`-registered lifecycle listener live before the first tick.
@@ -58,10 +59,11 @@ Uses react-reconciler's passive-effect flush (or a scheduled
 setImmediate turn if the sync flush isn't exposed).
 
 ### (b) render-context for current model info
+
 - `RenderTreeInput` (and `MountInput`) gains an optional
   `contextInfo?: { contextWindow?: number; usedTokens?: number }` — the
   session resolves it per render via `effectiveModelInfo(activeModel,
-  models)` and passes it in.
+models)` and passes it in.
 - The reconciler provides it via a `ContextInfoContext` React provider
   (sibling to `LifecycleContext` / `BridgeProvider`), refreshed each
   render.
@@ -71,6 +73,7 @@ setImmediate turn if the sync flush isn't exposed).
   in-render.
 
 ### The lifecycle bridge (the async half — the producer)
+
 - The loop dispatches `tick-start` (awaited, pre-render),
   `tick-end`/`execution-end` to `reconciler.notifyLifecycle` with
   `{ usage }` metadata (session-supplied via the run input). Lights up
@@ -80,12 +83,14 @@ setImmediate turn if the sync flush isn't exposed).
   reconciler + mountId. Mirrors v1 `Session.broadcastContextInfo`.
 
 ### models injection
+
 `models?: ModelRegistry` on app/gateway/session options, merged over
 SEED_MODELS (the federated-registry decision, #206). No spec dependency
 on model-next — the resolved window rides `contextInfo` (plain numbers)
 and the lifecycle metadata bag (already open).
 
 ### force-render on model change (#169, future)
+
 Under #169 the active model is IR-derived (post-render). A model change
 then re-resolves the render-context window and the stabilization loop
 re-renders to convergence — no async coordination needed, because the
@@ -112,6 +117,7 @@ absence is why the dead bridge shipped green — every prior lifecycle
 test injected at the store/harness boundary by hand.
 
 ## Scope
+
 (a) + the render-context window + the lifecycle bridge + models injection
 = this ADR, hands-on (reconciler-render coordination). Adapter data
 fragments (#206) delegable. #169 force-render is a later wiring.

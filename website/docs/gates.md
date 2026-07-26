@@ -52,7 +52,7 @@ Tick N+1: Model tries to finish → gate forces another tick
 
 ## Verified Gates — code decides
 
-A verified gate replaces `activateWhen` with `satisfied`: a predicate over the tick result, evaluated at the end of **every** tick. The gate engages whenever the predicate fails and clears automatically the moment it passes — including re-engaging if a later tick regresses the condition. Use it when code *can* check the condition:
+A verified gate replaces `activateWhen` with `satisfied`: a predicate over the tick result, evaluated at the end of **every** tick. The gate engages whenever the predicate fails and clears automatically the moment it passes — including re-engaging if a later tick regresses the condition. Use it when code _can_ check the condition:
 
 ```tsx
 const extractionGate = gate({
@@ -132,7 +132,7 @@ Each condition of continuation can be its own gate. Several verified gates compo
 
 ## Gates vs. budget guards
 
-Gates force *continuation*; sometimes you need the opposite — a ceiling that forces *termination*. Explicit `stop()` requests win over gate continuations in tick-control arbitration, so a budget guard composes cleanly with any number of gates:
+Gates force _continuation_; sometimes you need the opposite — a ceiling that forces _termination_. Explicit `stop()` requests win over gate continuations in tick-control arbitration, so a budget guard composes cleanly with any number of gates:
 
 ```tsx
 useContinuation((result) => {
@@ -156,13 +156,13 @@ Verified gates use only `inactive`/`active`; `defer()` is a no-op on them and `c
 
 `useGate(name, descriptor)` returns:
 
-| Field      | Type                  | Description                                             |
-| ---------- | --------------------- | ------------------------------------------------------- |
-| `active`   | `boolean`             | Gate is in `"active"` state                             |
-| `deferred` | `boolean`             | Gate is in `"deferred"` state                           |
-| `engaged`  | `boolean`             | `active \|\| deferred` — gate is blocking               |
-| `clear()`  | `() => void`          | Release the gate (transient on verified gates)          |
-| `defer()`  | `() => void`          | Postpone (latch gates only; no-op on verified gates)    |
-| `element`  | `JSX.Element \| null` | Ephemeral with instructions — render it in your tree    |
+| Field      | Type                  | Description                                          |
+| ---------- | --------------------- | ---------------------------------------------------- |
+| `active`   | `boolean`             | Gate is in `"active"` state                          |
+| `deferred` | `boolean`             | Gate is in `"deferred"` state                        |
+| `engaged`  | `boolean`             | `active \|\| deferred` — gate is blocking            |
+| `clear()`  | `() => void`          | Release the gate (transient on verified gates)       |
+| `defer()`  | `() => void`          | Postpone (latch gates only; no-op on verified gates) |
+| `element`  | `JSX.Element \| null` | Ephemeral with instructions — render it in your tree |
 
 Gates render into the knobs section (group `"gates"`), so their state is visible to the model and observable from session state — useful for telemetry like "ticks until gate cleared."

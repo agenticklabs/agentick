@@ -165,11 +165,11 @@ The MVP (`defineEval` + assertions + `.matrix`) shipped, then extended:
 
 - **Run access:** `t.result` (full `SendResult` — usage/ticks/output).
 - **Scoring seam:** `t.expect(label, passed)` (gates `passed`) + `t.score(label,
-  value)` (numeric, aggregated across a matrix, does not gate).
+value)` (numeric, aggregated across a matrix, does not gate).
 - **The `t` plugin seam** — the extension mechanism, following the ADR-27
   augmentation law used everywhere else (HookBridges / SessionHandleExtensions
   / ToolHandlerCtxExtensions): empty `EvalContextExtensions` seed + `EvalContext
-  extends` it + `registerEvalPlugin` (global) / per-eval `plugins: []`. A plugin
+extends` it + `registerEvalPlugin` (global) / per-eval `plugins: []`. A plugin
   is `(rc: EvalRunContext) => methods`; the runner types the base literal as
   `Omit<EvalContext, keyof EvalContextExtensions>` so downstream augmentation
   never breaks the core compile.

@@ -19,22 +19,22 @@ Four subsystems all walk `this.parent`:
 - **ADR 76 middleware** — `ownAndInheritedMiddleware()` (`base-harness.ts:648`).
 - **ADR 80 hooks** — `ownAndInheritedHooks()` (`base-harness.ts:766`).
 - **Telemetry** — `parentOpId` linkage up the tree.
-- **ADR 45 structural-identity-for-auth** — the construction tree *is* the auth structure.
+- **ADR 45 structural-identity-for-auth** — the construction tree _is_ the auth structure.
 
 But the parent pointer is set only from `BaseHarnessOptions.parent`, and most harnesses **drop it**. Audit (2026-07-13):
 
-| harness | `super(...)` | forwards parent? |
-|---|---|---|
-| loop-executor | `super("loop", scopeId, journal, bus, inbox)` — **no options param at all** | **no** |
-| tool-executor | `super("tool", scopeId, journal, bus, inbox)` — options taken, then dropped | **no** |
-| knobs | positional | **no** |
-| resources | positional | **no** |
-| timeline / tasks / elicitation | partial | partial |
-| session | `super("session", options.session…)` | yes |
+| harness                        | `super(...)`                                                                | forwards parent? |
+| ------------------------------ | --------------------------------------------------------------------------- | ---------------- |
+| loop-executor                  | `super("loop", scopeId, journal, bus, inbox)` — **no options param at all** | **no**           |
+| tool-executor                  | `super("tool", scopeId, journal, bus, inbox)` — options taken, then dropped | **no**           |
+| knobs                          | positional                                                                  | **no**           |
+| resources                      | positional                                                                  | **no**           |
+| timeline / tasks / elicitation | partial                                                                     | partial          |
+| session                        | `super("session", options.session…)`                                        | yes              |
 
 And the app passes `parent: this` at exactly **one** construction site. So the cascade works only where `parent` happens to be threaded.
 
-**This is already a bug, independent of hooks.** With `parent === undefined` on loop/tool/knobs, **`app.use()` (ADR 76 tier-3, the "deployment-global wraps every descendant" promise) never reaches them** — they receive only tier-4 call-scoped (fiber-continuous) middleware. "Audit every tool dispatch app-wide with `app.use`" is silently broken *now*. ADR 80's `app.hooks.onBeforeToolDispatch` would be broken the same way. An invariant this load-bearing must not be implicit and drop-on-omission.
+**This is already a bug, independent of hooks.** With `parent === undefined` on loop/tool/knobs, **`app.use()` (ADR 76 tier-3, the "deployment-global wraps every descendant" promise) never reaches them** — they receive only tier-4 call-scoped (fiber-continuous) middleware. "Audit every tool dispatch app-wide with `app.use`" is silently broken _now_. ADR 80's `app.hooks.onBeforeToolDispatch` would be broken the same way. An invariant this load-bearing must not be implicit and drop-on-omission.
 
 ## Decision
 
@@ -44,7 +44,7 @@ And the app passes `parent: this` at exactly **one** construction site. So the c
 
 A harness's true parent is **the harness that owns its scope id** — this dissolves the "sibling vs child" ambiguity into a determinable rule rather than a judgment call:
 
-- **App-scoped** (constructed with `appId`, shared across sessions — e.g. `loop`/`executor` at `base-harness`/app `:714`): parent = the **app**. These are construction *siblings of the session*.
+- **App-scoped** (constructed with `appId`, shared across sessions — e.g. `loop`/`executor` at `base-harness`/app `:714`): parent = the **app**. These are construction _siblings of the session_.
 - **Session-scoped** (constructed with `sessionId`, per-session — e.g. `tool` at app `:1332`, `timeline`, `knobs`, `gates`, `elicitation`, `tasks`, `resources`): parent = the **session**.
 - **Gateway/app root**: no parent (explicit root).
 
@@ -53,14 +53,14 @@ This is load-bearing for correctness, not cosmetics: a session-scoped `tool` par
 ### 2. Enforcement — two levels
 
 - **Minimum (this ADR's fix):** every harness constructor accepts a `BaseHarnessOptions` bag and **forwards it to `super`**, and every construction site passes the true parent per §1. `LoopExecutorHarness` (and peers with no options param) gain one. Harness-specific options types (`ToolExecutorHarnessOptions`, …) extend `BaseHarnessOptions` so `parent`/`hooks` ride through.
-- **Ideal (the preferred fix):** children are *born from parents*. The per-session sub-harnesses (`elicitation`/`tasks`/`resources`/`tool`) move their construction **out of `app.createSessionBody` and into the `SessionHarness`**, via **app-provided factory injection**: the app passes `(parent) => new XHarness(…, { parent })` closures (capturing app-shared config/store — what it knows), and the session invokes `factory(this)` (when + whose child). The parent is stamped structurally by *being the caller* — an orphan is impossible, `parent` stays `readonly` (no `attachParent`/two-phase), and the session doesn't gain a dep on every harness package. This also resolves the construction-ordering knot (the sub-harnesses are consumed by the `SessionHarness` ctor at `app/harness.ts:1345` but built before it at `:1192–1332`; a factory the session calls dissolves it). NB: these are already **per-session instances**, not shared singletons (built per `createSessionBody`), so there is no cross-session race — #159's "single construction site" means single *code location per session*, not one shared object.
+- **Ideal (the preferred fix):** children are _born from parents_. The per-session sub-harnesses (`elicitation`/`tasks`/`resources`/`tool`) move their construction **out of `app.createSessionBody` and into the `SessionHarness`**, via **app-provided factory injection**: the app passes `(parent) => new XHarness(…, { parent })` closures (capturing app-shared config/store — what it knows), and the session invokes `factory(this)` (when + whose child). The parent is stamped structurally by _being the caller_ — an orphan is impossible, `parent` stays `readonly` (no `attachParent`/two-phase), and the session doesn't gain a dep on every harness package. This also resolves the construction-ordering knot (the sub-harnesses are consumed by the `SessionHarness` ctor at `app/harness.ts:1345` but built before it at `:1192–1332`; a factory the session calls dissolves it). NB: these are already **per-session instances**, not shared singletons (built per `createSessionBody`), so there is no cross-session race — #159's "single construction site" means single _code location per session_, not one shared object.
 
 **Deferred (2026-07-13):** implementation is **not urgent** — nothing consumes the cascade yet (no public `hooks:{}` option is wired to `createApp`/`createSession`; only the tool-executor augments `CommandRegistry`, as a proof), and the parent gap pre-dates ADR 80 (ADR-76 tier-3 `app.use` already fails to reach the parentless harnesses). PR #1's mechanism is correct and dormant. Trailhead: `TODO(adr-81)` at `app/harness.ts` (the per-session construction block). Pick up when the public `hooks` option lands, or when a tier-3 `app.use` needs to reach a spine/session harness.
 
 ### 3. The two-sided fix (spec)
 
 - **Child side** — each dropper (`loop`/`tool`/`knobs`/`resources`, and the partial `timeline`/`tasks`/`elicitation`) forwards `options` (incl. `parent`, `hooks`, `metadata`, `principal`, `telemetryNamespace`) to `super`. Behavior-preserving in isolation: parent stays `undefined` until a constructor passes it.
-- **Parent side** — the app and session pass `parent: this` (the true parent per §1) at each `new XHarness(...)` site. This is what *activates* the cascade.
+- **Parent side** — the app and session pass `parent: this` (the true parent per §1) at each `new XHarness(...)` site. This is what _activates_ the cascade.
 
 Both are required; the child-side is safe/mechanical, the parent-side carries the §1 determination.
 

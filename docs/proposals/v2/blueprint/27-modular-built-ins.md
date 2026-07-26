@@ -41,9 +41,9 @@ Consequences:
    **The load-bearing invariant: the wire carries verbs + serializable
    data, never executable configuration.** Strategies, predicates, and
    validators are construction-bound and server-resident. A remote
-   command *triggers* the target's configured behavior (no-arg signal
+   command _triggers_ the target's configured behavior (no-arg signal
    form — `compact` resolved by the session's `withTimeline({ compact })`
-   default) and may carry *advisory data* (e.g. compaction
+   default) and may carry _advisory data_ (e.g. compaction
    `instructions`, which the resident strategy is authoritative to
    honor or ignore); it never supplies the function. Function-arg call
    forms are in-process-only overrides (inner-scope-wins at the call
@@ -59,7 +59,7 @@ Consequences:
    the harness.
 2. **Host-injected policy vs. tree-owned policy — inner scope wins.**
    A host-level strategy slot (`withTimeline({ compact })`) is a
-   *default*; a tree-level component that claims the concern overrides
+   _default_; a tree-level component that claims the concern overrides
    it — the same outer-scope-default / inner-scope-override semantics
    as the extension cascade (ADR 50 amendment §2). Controlled vs.
    uncontrolled, with a deterministic rule.

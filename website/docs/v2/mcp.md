@@ -38,11 +38,7 @@ is identified by a **`serverId`** (an alias _you_ assign) and a **transport**.
 ```tsx
 import { createApp } from "@agentick/app/react";
 import { openai } from "@agentick/model-openai";
-import {
-  withMCP,
-  streamableHttpTransport,
-  StdioClientTransport,
-} from "@agentick/mcp";
+import { withMCP, streamableHttpTransport, StdioClientTransport } from "@agentick/mcp";
 
 const app = await createApp(<Agent />, {
   model: openai("gpt-4o"),
@@ -208,11 +204,11 @@ const unsub = bindSandboxRootsToClient(sandbox, harness);
 
 ## Transports
 
-| Transport | Factory | Notes |
-| ------------------- | ---------------------------------------------- | ------------------------------------------------------- |
-| **Streamable HTTP** | `streamableHttpTransport({ url, oauth? })` | Remote servers; OAuth-capable. Returns a per-session factory. |
-| **stdio** | `new StdioClientTransport({ command, args })` | Local subprocess servers (one connection per process). |
-| **in-memory** | `new InMemoryMcpTransport()` | Tests / loopback against a `Server` in the same process. |
+| Transport           | Factory                                       | Notes                                                         |
+| ------------------- | --------------------------------------------- | ------------------------------------------------------------- |
+| **Streamable HTTP** | `streamableHttpTransport({ url, oauth? })`    | Remote servers; OAuth-capable. Returns a per-session factory. |
+| **stdio**           | `new StdioClientTransport({ command, args })` | Local subprocess servers (one connection per process).        |
+| **in-memory**       | `new InMemoryMcpTransport()`                  | Tests / loopback against a `Server` in the same process.      |
 
 `streamableHttpTransport` returns a **transport factory** — `withMCP` constructs it
 once per session, which is what makes per-session OAuth isolation work. Pre-built

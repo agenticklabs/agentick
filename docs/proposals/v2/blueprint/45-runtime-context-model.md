@@ -127,7 +127,7 @@ The `withMCP({ credentialKey })` strategy proposed:
 
 ```ts
 credentialKey: (ctx, { serverId, field }) =>
-  `mcp:${ctx.request?.userId ?? "anon"}:${serverId}:${field}`
+  `mcp:${ctx.request?.userId ?? "anon"}:${serverId}:${field}`;
 ```
 
 `ctx` was supposed to come from `readContext()` called inside
@@ -138,7 +138,7 @@ always undefined. The multi-tenant case silently fails to discriminate.
 
 This wasn't a "documentation caveat" — it was a structural design bug
 masked by the runSync semantics. The retro committed extensive JSDoc
-explaining the limitation; this ADR commits to the *fix*.
+explaining the limitation; this ADR commits to the _fix_.
 
 ### Three architectural insights
 
@@ -328,16 +328,16 @@ visibility concerns. No ALS instrumentation. Just closures.
 
 ### Why closure-capture beats ambient propagation
 
-| Concern | Ambient (FiberRef/ALS) | Closure-capture-via-deps |
-|---|---|---|
-| Runtime-portable | Node + Bun + Deno (compat); no browser | Any JS runtime |
-| Worker-thread safe | No (ALS) / partial (FiberRef) | Yes (closure is lexical) |
-| Cross-Promise visibility | Yes (ALS) / no (FiberRef alone) | Yes (closure is async-agnostic) |
-| Resource-bloat | None | None |
-| Mental model | "Implicit, look elsewhere" | "Explicit, look at signature" |
-| Refactor-safe | Async-boundary changes can break propagation | Closure scope survives refactors |
-| Auditable | Hard — can't grep "who reads my context" | Easy — grep function signatures |
-| Discoverable | Hidden | Visible in IDE autocomplete |
+| Concern                  | Ambient (FiberRef/ALS)                       | Closure-capture-via-deps         |
+| ------------------------ | -------------------------------------------- | -------------------------------- |
+| Runtime-portable         | Node + Bun + Deno (compat); no browser       | Any JS runtime                   |
+| Worker-thread safe       | No (ALS) / partial (FiberRef)                | Yes (closure is lexical)         |
+| Cross-Promise visibility | Yes (ALS) / no (FiberRef alone)              | Yes (closure is async-agnostic)  |
+| Resource-bloat           | None                                         | None                             |
+| Mental model             | "Implicit, look elsewhere"                   | "Explicit, look at signature"    |
+| Refactor-safe            | Async-boundary changes can break propagation | Closure scope survives refactors |
+| Auditable                | Hard — can't grep "who reads my context"     | Easy — grep function signatures  |
+| Discoverable             | Hidden                                       | Visible in IDE autocomplete      |
 
 The only thing ambient buys: code that DIDN'T receive ctx as a
 parameter can still read it. That's a feature for cross-cutting
@@ -350,11 +350,7 @@ shouldn't, security bugs from propagation surprises.
 ```ts
 // @agentick/utils/effect-lift.ts
 
-export function liftToEffect<
-  Args extends readonly unknown[],
-  A,
-  E = unknown,
->(
+export function liftToEffect<Args extends readonly unknown[], A, E = unknown>(
   fn: (...args: Args) => A | Promise<A> | Effect.Effect<A, E>,
   errorMap?: (err: unknown) => E,
 ): (...args: Args) => Effect.Effect<A, E> {
@@ -393,16 +389,20 @@ import { getContext } from "@agentick/runtime";
  * the Effect-wrap implicitly. Reach for it when you need explicit
  * Effect composition.
  */
-export const liftHandler = <I, D extends { ctx?: RuntimeContext }, E = unknown>(
-  fn: (input: I, deps: D & { ctx: RuntimeContext }) =>
-    | readonly ContentBlock[]
-    | Promise<readonly ContentBlock[]>
-    | Effect.Effect<readonly ContentBlock[], E>,
-  errorMap?: (err: unknown) => E,
-): ((input: I, depsBase: Omit<D, "ctx">) => Effect.Effect<readonly ContentBlock[], E>) =>
+export const liftHandler =
+  <I, D extends { ctx?: RuntimeContext }, E = unknown>(
+    fn: (
+      input: I,
+      deps: D & { ctx: RuntimeContext },
+    ) =>
+      | readonly ContentBlock[]
+      | Promise<readonly ContentBlock[]>
+      | Effect.Effect<readonly ContentBlock[], E>,
+    errorMap?: (err: unknown) => E,
+  ): ((input: I, depsBase: Omit<D, "ctx">) => Effect.Effect<readonly ContentBlock[], E>) =>
   (input, depsBase) =>
-    Effect.gen(function*() {
-      const ctx = yield* getContext;  // read FROM the fiber's FiberRef
+    Effect.gen(function* () {
+      const ctx = yield* getContext; // read FROM the fiber's FiberRef
       const deps = { ...depsBase, ctx } as D & { ctx: RuntimeContext };
       const result = fn(input, deps);
       if (Effect.isEffect(result)) return yield* result;
@@ -435,10 +435,10 @@ state propagates natively.
 
 ```ts
 // Substrate code (e.g., inside runOperation):
-return Effect.gen(function*() {
-  const ambient = yield* getContext;  // reads current fiber's FiberRef
+return Effect.gen(function* () {
+  const ambient = yield* getContext; // reads current fiber's FiberRef
   const enriched = { ...ambient, opId: op.opId, parentOpId: ambient.opId };
-  return yield* withContext(enriched, body(op.input));  // scopes the fiber
+  return yield* withContext(enriched, body(op.input)); // scopes the fiber
 });
 ```
 
@@ -447,12 +447,12 @@ no fiber escape.
 
 ### `Effect.fork` vs. `Effect.runFork` — important distinction
 
-| Function | Where called | What it does | FiberRef inherits? |
-|---|---|---|---|
-| `Effect.fork(eff)` | Inside an active Effect | Creates a CHILD fiber that runs concurrently with parent | **Yes** — child inherits parent's FiberRef snapshot |
-| `Effect.runFork(eff)` | From raw JS (entry point) | Creates a ROOT fiber, returns a `RuntimeFiber<E, A>` handle | **No** — no parent to inherit from |
-| `Effect.runSync(eff)` | From raw JS (entry point) | Creates a ROOT fiber, runs to completion synchronously | **No** — fresh root fiber every call |
-| `Effect.runPromise(eff)` | From raw JS (entry point) | Creates a ROOT fiber, returns a Promise | **No** — fresh root fiber every call |
+| Function                 | Where called              | What it does                                                | FiberRef inherits?                                  |
+| ------------------------ | ------------------------- | ----------------------------------------------------------- | --------------------------------------------------- |
+| `Effect.fork(eff)`       | Inside an active Effect   | Creates a CHILD fiber that runs concurrently with parent    | **Yes** — child inherits parent's FiberRef snapshot |
+| `Effect.runFork(eff)`    | From raw JS (entry point) | Creates a ROOT fiber, returns a `RuntimeFiber<E, A>` handle | **No** — no parent to inherit from                  |
+| `Effect.runSync(eff)`    | From raw JS (entry point) | Creates a ROOT fiber, runs to completion synchronously      | **No** — fresh root fiber every call                |
+| `Effect.runPromise(eff)` | From raw JS (entry point) | Creates a ROOT fiber, returns a Promise                     | **No** — fresh root fiber every call                |
 
 **The discipline:**
 
@@ -530,6 +530,7 @@ const harness = new McpClientHarness(
 ```
 
 **Why structural for these:**
+
 - Concurrent multi-principal access is structurally impossible because
   each principal has a different object reference. No risk of token
   cross-contamination via context bugs.
@@ -547,15 +548,15 @@ primitives, stateless services, diagnostic concerns — should NOT be
 instantiated per-principal. Principal is a key into the resource's
 state, not a discriminator of the resource itself.
 
-| Resource | Per-principal? | Why |
-|---|---|---|
-| `McpClientHarness` | YES | Per-principal auth + connection state |
-| `SandboxRuntime` | YES | Per-principal chroot + permissions |
-| `OAuthProvider` | YES (per session, server) | Per-flow PKCE + pending auth |
-| `CredentialsHarness` | NO | Substrate primitive; principal lives in keys (`mcp:user-42:tokens`) |
-| `ToolExecutor` | NO | Per-session; sessions are typically per-principal |
-| `TasksHarness` | NO | Per-session; inherits principal from session |
-| Loggers, tracers | NO | Cross-cutting; principal is a tag |
+| Resource             | Per-principal?            | Why                                                                 |
+| -------------------- | ------------------------- | ------------------------------------------------------------------- |
+| `McpClientHarness`   | YES                       | Per-principal auth + connection state                               |
+| `SandboxRuntime`     | YES                       | Per-principal chroot + permissions                                  |
+| `OAuthProvider`      | YES (per session, server) | Per-flow PKCE + pending auth                                        |
+| `CredentialsHarness` | NO                        | Substrate primitive; principal lives in keys (`mcp:user-42:tokens`) |
+| `ToolExecutor`       | NO                        | Per-session; sessions are typically per-principal                   |
+| `TasksHarness`       | NO                        | Per-session; inherits principal from session                        |
+| Loggers, tracers     | NO                        | Cross-cutting; principal is a tag                                   |
 
 The rule applied universally would lead to N×waste with no correctness
 payoff for stateless resources. Apply where it solves a real
@@ -589,9 +590,9 @@ The executor discriminates at the call site:
 // In @agentick/tool-executor:
 const result = handler(input, deps);
 if (Effect.isEffect(result)) {
-  return yield* result;
+  return yield * result;
 }
-return yield* Effect.tryPromise(() => Promise.resolve(result));
+return yield * Effect.tryPromise(() => Promise.resolve(result));
 ```
 
 **Server-side convention** — wherever adopter code crosses into framework
@@ -644,7 +645,7 @@ writes that to the FiberRef:
 
 ```ts
 // In runOperation:
-const ambient = yield* getContext;
+const ambient = yield * getContext;
 const ctxFromOp: RuntimeContext = {
   // EventScope fields auto-inherited via the extends relationship:
   ...op.scope,
@@ -653,11 +654,12 @@ const ctxFromOp: RuntimeContext = {
   parentOpId: op.parentOpId ?? ambient.opId,
   correlationId: op.correlationId ?? ambient.correlationId,
 };
-return yield* withContext(ctxFromOp, body(op.input));
+return yield * withContext(ctxFromOp, body(op.input));
 ```
 
 EventScope is canonical. RuntimeContext is EventScope + op-level state
-+ diagnostic ephemera. `runOperation` bridges them.
+
+- diagnostic ephemera. `runOperation` bridges them.
 
 ---
 
@@ -686,7 +688,7 @@ declare module "@agentick/spec" {
 
 // Now:
 const scope = readContext();
-scope.user?.tenantId;  // typed, autocompletes in IDE
+scope.user?.tenantId; // typed, autocompletes in IDE
 ```
 
 Adopters putting `userId` in here are using it for THEIR OWN telemetry /
@@ -728,7 +730,7 @@ when the standard ships.
 Proposed in the first draft + originally scoped as #284. Rejected:
 
 - **Impossible on FiberRef alone.** `Effect.runSync(withContext(scope,
-  Effect.sync(fn)))` doesn't propagate FiberRef to nested
+Effect.sync(fn)))` doesn't propagate FiberRef to nested
   `Effect.runSync(getContext)` inside `fn`. That's the very gap that
   drove this ADR. Pretending otherwise creates silent failure.
 - **ALS would solve it but we're not shipping ALS.** See above.
@@ -853,6 +855,7 @@ Custom oxlint rules, narrow scope. Land alongside Phase A.
 The current `runtime-context.ts` documents these as "not shipped on
 FiberRef alone" — see the existing NOTE block. With this ADR, they
 stay unshipped. Existing callers either:
+
 - (a) Use `withContext(scope, effect)` inside Effect (the right pattern).
 - (b) Receive `ctx` as a parameter (closure-capture).
 - (c) Refactor to enter Effect-land at the boundary
@@ -869,6 +872,7 @@ or per-field selectors.**
 ### 3. `RuntimeContext` discoverability for new contributors
 
 `RuntimeContextUser` augmentation is loudly documented in:
+
 - `@agentick/runtime/README.md` (full section + worked example)
 - JSDoc on `RuntimeContextUser` itself (example block + warning that
   framework auth doesn't consult `ctx.user`)

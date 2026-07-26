@@ -166,15 +166,15 @@ JSON-RPC inspectors (Postman, Bruno, Insomnia) work out of the box. OpenRPC sche
 
 ### Rejected alternative — `@effect/rpc` as the wire
 
-Tempting, because the substrate is Effect end-to-end (`BaseHarness.runOperation` returns `Effect`, middleware is Effect, typed error channels flow through), and `@effect/rpc` offers schema-first method definitions, generated typed clients, `RpcMiddleware`, and streaming responses. If the agentick client and gateway were the *only* peers that ever spoke this wire, it would be a strong buy.
+Tempting, because the substrate is Effect end-to-end (`BaseHarness.runOperation` returns `Effect`, middleware is Effect, typed error channels flow through), and `@effect/rpc` offers schema-first method definitions, generated typed clients, `RpcMiddleware`, and streaming responses. If the agentick client and gateway were the _only_ peers that ever spoke this wire, it would be a strong buy.
 
 They are not, and that decides it:
 
-1. **It abandons MCP envelope-parity — the entire point of choosing JSON-RPC 2.0.** `@effect/rpc` uses its own request/response framing and serialization protocol, *not* JSON-RPC 2.0. Adopting it forfeits "wire-compatible peer of MCP — same envelope, one endpoint hosts both" (this section's thesis). The parity is the load-bearing design win; `@effect/rpc` trades it away.
-2. **A wire protocol and `@effect/rpc` optimize opposite things.** `@effect/rpc` optimizes *Effect-client-to-Effect-server* ergonomics. A wire's job is *interoperability and independence from any one runtime* — it must be speakable by MCP hosts, AG-UI frontends, plain browser JS, JSON-RPC inspectors, other languages. `@effect/rpc`'s private format leaks Effect into every consumer; JSON-RPC 2.0 stays library-agnostic and inspectable out of the box.
-3. **Its benefits are separable from the library.** Typed client → derive from the gateway's method-contract registry (the proxy is already 1:1 with harness protocols). Wire middleware → the client extension pipeline (this ADR) / substrate middleware (ADR 76). Schema validation → Standard Schema. Streaming → the two MCP-aligned patterns above. We *steal `@effect/rpc`'s patterns* (schema-first defs, typed error channels, streaming) on top of JSON-RPC 2.0, without its envelope.
+1. **It abandons MCP envelope-parity — the entire point of choosing JSON-RPC 2.0.** `@effect/rpc` uses its own request/response framing and serialization protocol, _not_ JSON-RPC 2.0. Adopting it forfeits "wire-compatible peer of MCP — same envelope, one endpoint hosts both" (this section's thesis). The parity is the load-bearing design win; `@effect/rpc` trades it away.
+2. **A wire protocol and `@effect/rpc` optimize opposite things.** `@effect/rpc` optimizes _Effect-client-to-Effect-server_ ergonomics. A wire's job is _interoperability and independence from any one runtime_ — it must be speakable by MCP hosts, AG-UI frontends, plain browser JS, JSON-RPC inspectors, other languages. `@effect/rpc`'s private format leaks Effect into every consumer; JSON-RPC 2.0 stays library-agnostic and inspectable out of the box.
+3. **Its benefits are separable from the library.** Typed client → derive from the gateway's method-contract registry (the proxy is already 1:1 with harness protocols). Wire middleware → the client extension pipeline (this ADR) / substrate middleware (ADR 76). Schema validation → Standard Schema. Streaming → the two MCP-aligned patterns above. We _steal `@effect/rpc`'s patterns_ (schema-first defs, typed error channels, streaming) on top of JSON-RPC 2.0, without its envelope.
 
-`@effect/rpc` would be **one more wire, not THE wire — and a worse one**, because it costs the MCP parity. Door left cracked: `@effect/rpc` has pluggable `RpcSerialization`, so a JSON-RPC-2.0 serializer is *conceivable* for the native client↔gateway path — but it fights its request/response model against JSON-RPC method/params/id + our streaming-envelope semantics, for a payoff (typed client) obtainable more cheaply from our own registry. Not worth it.
+`@effect/rpc` would be **one more wire, not THE wire — and a worse one**, because it costs the MCP parity. Door left cracked: `@effect/rpc` has pluggable `RpcSerialization`, so a JSON-RPC-2.0 serializer is _conceivable_ for the native client↔gateway path — but it fights its request/response model against JSON-RPC method/params/id + our streaming-envelope semantics, for a payoff (typed client) obtainable more cheaply from our own registry. Not worth it.
 
 ### Rejected alternative — tRPC as the wire
 
@@ -186,7 +186,7 @@ Same disqualifier as `@effect/rpc`, different value prop. tRPC's headline — **
 
 **We take the DX, not the library.** The gateway is already a proxy whose methods are 1:1 with typed harness protocols, so we **derive a typed proxy client from those shared protocol interfaces** (`client.session.send(input)` typed by TypeScript inference across the import boundary) — tRPC's magic, on the JSON-RPC 2.0 wire, keeping MCP parity + multi-language. tRPC gives that typing for free; we build it (a typed proxy + type-derivation from the protocol registry) — bounded work, and the piece that makes the JSON-RPC 2.0 client feel as good as tRPC.
 
-**Principle (both rejections):** steal the typed-client *pattern*; keep the interoperable wire. The wire's consumers include MCP hosts, browser JS, and other languages — none of which speak `@effect/rpc` or tRPC.
+**Principle (both rejections):** steal the typed-client _pattern_; keep the interoperable wire. The wire's consumers include MCP hosts, browser JS, and other languages — none of which speak `@effect/rpc` or tRPC.
 
 ### WebSocket subprotocol
 
@@ -194,21 +194,21 @@ WebSocket transports advertise `agentick-rpc-v1` as a subprotocol per RFC 6455. 
 
 ### Method namespaces (no MCP collisions)
 
-| Namespace                   | Owner                | Methods (illustrative)                                                    |
-| --------------------------- | -------------------- | ------------------------------------------------------------------------- |
-| `gateway/*`                 | agentick             | `listApps`, `getApp`                                                      |
-| `app/*`                     | agentick             | `createSession`, `getSession`, `listSessions`, `runOnce`, `close`         |
-| `session/*`                 | agentick             | `send`, `render`, `dispatch`, `abort`, `queue`, `snapshot`, `rebind`      |
-| `subscribe`, `unsubscribe`  | agentick             | general-purpose persistent subscriptions                                  |
-| `auth/*`                    | agentick             | `refresh`, `completeChallenge`, `signOut` (filled by ADR 34)              |
-| `ping`                      | shared with MCP      | keepalive                                                                 |
+| Namespace                   | Owner                | Methods (illustrative)                                               |
+| --------------------------- | -------------------- | -------------------------------------------------------------------- |
+| `gateway/*`                 | agentick             | `listApps`, `getApp`                                                 |
+| `app/*`                     | agentick             | `createSession`, `getSession`, `listSessions`, `runOnce`, `close`    |
+| `session/*`                 | agentick             | `send`, `render`, `dispatch`, `abort`, `queue`, `snapshot`, `rebind` |
+| `subscribe`, `unsubscribe`  | agentick             | general-purpose persistent subscriptions                             |
+| `auth/*`                    | agentick             | `refresh`, `completeChallenge`, `signOut` (filled by ADR 34)         |
+| `ping`                      | shared with MCP      | keepalive                                                            |
 | `tools/*`                   | **reserved for MCP** | agentick servers MAY implement when bundling `@agentick/mcp-surface` |
-| `resources/*`               | **reserved for MCP** | ditto                                                                     |
-| `prompts/*`                 | **reserved for MCP** | ditto                                                                     |
-| `sampling/*`                | **reserved for MCP** | ditto                                                                     |
-| `completion/*`              | **reserved for MCP** | ditto                                                                     |
-| `logging/*`                 | **reserved for MCP** | ditto                                                                     |
-| `initialize`, `initialized` | **reserved for MCP** | ditto                                                                     |
+| `resources/*`               | **reserved for MCP** | ditto                                                                |
+| `prompts/*`                 | **reserved for MCP** | ditto                                                                |
+| `sampling/*`                | **reserved for MCP** | ditto                                                                |
+| `completion/*`              | **reserved for MCP** | ditto                                                                |
+| `logging/*`                 | **reserved for MCP** | ditto                                                                |
+| `initialize`, `initialized` | **reserved for MCP** | ditto                                                                |
 
 Reserved namespaces guarantee non-collision: agentick will not define methods in MCP's namespaces. Bilingual servers (`@agentick/mcp-surface`) implement the MCP methods natively and route them through the harness substrate.
 
@@ -561,11 +561,11 @@ Spec owns the wire types; transports import; gateway-side extensions import; `@a
 
 Three planned extensions exploit the wire-compatible-peer relationship:
 
-| Package                               | Direction                      | Role                                                                                                                                                                                                                                                                       |
-| ------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Package                          | Direction                      | Role                                                                                                                                                                                                                                                                       |
+| -------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `@agentick/mcp-surface`          | server-side `GatewayExtension` | mounts MCP methods (`tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/*`) onto an agentick gateway and answers them by routing through the active session's harnesses. MCP clients (Claude Desktop, Cline, Continue.dev) see a standard MCP server. |
 | `@agentick/transport-mcp-client` | client-side `ClientTransport`  | connects to a pure MCP server; exposes `client.mcp.tools`, `client.mcp.resources`, etc. namespaces. Agentick clients gain access to the MCP server ecosystem with no extra library.                                                                                        |
-| Tool projection                       | shared                         | tools defined via `createTool({ name, description, input: zodSchema })` project automatically to MCP tool descriptors. Same code, two protocols.                                                                                                                           |
+| Tool projection                  | shared                         | tools defined via `createTool({ name, description, input: zodSchema })` project automatically to MCP tool descriptors. Same code, two protocols.                                                                                                                           |
 
 Sequenced after Phase 33.F (common middleware) to keep the critical path lean.
 
@@ -615,8 +615,8 @@ Capabilities expose differences without forcing all transports to behave identic
 
 ## The transports
 
-| Package                                    | Wire                                                                                                                                                                  | When                                                                                                | Capabilities                                                                                                               |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Package                               | Wire                                                                                                                                                                  | When                                                                                                | Capabilities                                                                                                               |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `@agentick/transport-in-process`      | direct function call                                                                                                                                                  | tests, embedded library (one-process gateway), tentickle TUI ↔ same-process daemon                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: false`, `binaryFrames: true`                              |
 | `@agentick/transport-websocket`       | WebSocket, JSON frames                                                                                                                                                | primary browser + server-to-server                                                                  | `bidirectional: true`, `streamingRequest: true`, `reconnectable: true`, `binaryFrames: false` (v1)                         |
 | `@agentick/transport-http`            | **Streamable HTTP** (MCP 2025-03-26 spec) — single endpoint, POST returns JSON or SSE based on response shape; persistent SSE via `GET` for stand-alone subscriptions | modern HTTP deploys; cooperates with edge/serverless; load-balancer-friendly                        | `bidirectional: false` (asymmetric), `streamingRequest: true` (SSE response), `reconnectable: true`, `binaryFrames: false` |
@@ -1048,8 +1048,8 @@ Everything else is ADR 34. The variant set may grow as ADR 34 lands (DPoP-bound 
 
 Shapes correspond to the three surfaces from the middleware section: **middleware** (wraps requests / subscribes), **handler** (lifecycle verdicts), **installer** (bus subscriber + namespace registration + onClose). An extension may use any combination.
 
-| Extension                                    | Shape                            | Provider  | Notes                                                                                                                                |
-| -------------------------------------------- | -------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Extension                               | Shape                            | Provider  | Notes                                                                                                                                |
+| --------------------------------------- | -------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `@agentick/transport-multiplexer`       | composite transport              | framework | cross-tab / cross-process leader-election                                                                                            |
 | `@agentick/transport-in-process`        | transport                        | framework | direct calls; test mode `{ wireParity: true }`                                                                                       |
 | `@agentick/transport-websocket`         | transport                        | framework | primary                                                                                                                              |
@@ -1062,11 +1062,11 @@ Shapes correspond to the three surfaces from the middleware section: **middlewar
 | `@agentick/client-extensions/cache`     | middleware                       | framework | read-through cache for idempotent RPCs; event-driven invalidation via bus                                                            |
 | `@agentick/client-devtools`             | installer (+ `wireMirror`)       | framework | devtools panel namespace + wire-firehose                                                                                             |
 | `@agentick/client-mock`                 | transport / middleware           | framework | record-replay for tests                                                                                                              |
-| Rate limiter                                 | middleware                       | adopter   | trivial — `(input, next) => throttle(input, next, opts)`                                                                             |
-| Compression                                  | middleware                       | adopter   | per-deploy choice of algorithm                                                                                                       |
-| E2E encryption envelope                      | middleware                       | adopter   | adopter key-management                                                                                                               |
-| Optimistic updates                           | installer                        | adopter   | domain-specific reconciliation                                                                                                       |
-| Service worker proxy                         | transport                        | adopter   | browser-specific; survives page refresh                                                                                              |
+| Rate limiter                            | middleware                       | adopter   | trivial — `(input, next) => throttle(input, next, opts)`                                                                             |
+| Compression                             | middleware                       | adopter   | per-deploy choice of algorithm                                                                                                       |
+| E2E encryption envelope                 | middleware                       | adopter   | adopter key-management                                                                                                               |
+| Optimistic updates                      | installer                        | adopter   | domain-specific reconciliation                                                                                                       |
+| Service worker proxy                    | transport                        | adopter   | browser-specific; survives page refresh                                                                                              |
 | `@agentick/mcp-surface`                 | server-side `GatewayExtension`   | framework | mounts MCP methods (`tools/list`, `tools/call`, `resources/*`, `prompts/*`) on an agentick gateway. Makes the gateway an MCP server. |
 | `@agentick/transport-mcp-client`        | transport                        | framework | connects to pure MCP servers. Exposes `client.mcp.*` namespaces.                                                                     |
 

@@ -62,15 +62,15 @@ The discussion on 2026-06-28 surfaced that neither matches the deployment shape 
 
 ADR 23 reaffirmed: MCP semantics ARE Agentick's native semantics. Concretely, the v2 substrate already has the primitives a server needs to project, with minimal translation:
 
-| MCP wire concept                         | v2 source of truth                                  | Translation needed?                      |
-| ---------------------------------------- | --------------------------------------------------- | ---------------------------------------- |
+| MCP wire concept                         | v2 source of truth                             | Translation needed?                      |
+| ---------------------------------------- | ---------------------------------------------- | ---------------------------------------- |
 | `tools/list`, `tools/call`               | `@agentick/tool` registry + `createTool`       | None — `createTool` IS the MCP shape     |
 | `prompts/list`, `prompts/get`            | `@agentick/prompts` (`PromptsHarness`)         | None — mirror is exact                   |
 | `elicitation/create` (server→client)     | `@agentick/elicitation` (`ElicitationHarness`) | None                                     |
 | `tasks/list`, `tasks/get`, taskSupport   | `@agentick/tasks` (`TasksHarness`)             | None — already cluster-aware             |
-| `sampling/createMessage` (server→client) | `SamplingHarness` (pending)                         | Bridge needed (not v1-shape direct call) |
+| `sampling/createMessage` (server→client) | `SamplingHarness` (pending)                    | Bridge needed (not v1-shape direct call) |
 | `resources/list`, `resources/read`       | `@agentick/resources` (#123, pending)          | Bridge needed when #123 lands            |
-| `roots/list`                             | Workspace bridge (#124, pending)                    | Bridge needed                            |
+| `roots/list`                             | Workspace bridge (#124, pending)               | Bridge needed                            |
 
 All but the bottom three are ready today. The MCP server harness composes the existing harnesses + bridges; it does NOT own state for things the harnesses already own.
 

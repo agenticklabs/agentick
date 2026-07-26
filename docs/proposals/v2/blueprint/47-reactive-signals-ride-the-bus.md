@@ -11,7 +11,7 @@
 
 `gateway.notify()` is the only server→client change-fan-out in the framework that (a) reinvents a fan-out mechanism instead of using the bus or `@agentick/pubsub`, and (b) isolates by **runtime filter** (`to: (meta) => boolean`) instead of **by instance**. Every other reactive signal path in the codebase uses one of the two foundational primitives, and every other isolation boundary (app, session, MCP connection, credential namespace, outbound principal) is **per-instance / structural**, per ADR 45.
 
-**Decision:** server→client reactive signals are modeled as `ProtocolEvent`s on the bus and delivered over the existing `sub/subscribe` wire extension. The gateway gets an `emitCapabilitiesChanged()` seam (bus append) now; the client's *unconditional, client-owned* self-maintenance of `client.capabilities` is deferred to #308 (the trigger event can't fire until dynamic extensions exist). `gateway.notify` / `acceptConnection` / `ClientConnection` / `ClientConnectionMetadata` / `onDeliveryError` / the per-transport sink registration / `serverNotifier` are **deleted**. Multi-tenant and principal isolation are per-instance child buses — the composition that already isolates app and session substrate — not a `notify({to})` predicate.
+**Decision:** server→client reactive signals are modeled as `ProtocolEvent`s on the bus and delivered over the existing `sub/subscribe` wire extension. The gateway gets an `emitCapabilitiesChanged()` seam (bus append) now; the client's _unconditional, client-owned_ self-maintenance of `client.capabilities` is deferred to #308 (the trigger event can't fire until dynamic extensions exist). `gateway.notify` / `acceptConnection` / `ClientConnection` / `ClientConnectionMetadata` / `onDeliveryError` / the per-transport sink registration / `serverNotifier` are **deleted**. Multi-tenant and principal isolation are per-instance child buses — the composition that already isolates app and session substrate — not a `notify({to})` predicate.
 
 This is not a shrink. It is a total removal. The residual "per-connection control frame" case that motivated keeping a slimmed `notify` **does not exist**: every application signal we can name is scope-expressible (auth notifications already carry `affectedSessions`), and the remaining per-socket concerns (WS close, heartbeat, `notifications/cancelled`) are transport-layer, never `notify`'s job.
 
@@ -71,7 +71,7 @@ Multi-tenant isolation felt like unbuilt infrastructure with significant edge ca
 
 2. **Deliver them over `sub/subscribe`.** No new wire mechanism.
 
-3. **The client self-maintains its capability snapshot — and this is deferred to #308.** Keeping `client.capabilities` fresh is the **client's own** concern (the client and framework machinery read it — `hasMethod`, feature-gating, routing), so the maintenance must be **unconditional** when connected: the client opens a gateway-scope control-plane subscription for *its own* correctness, **not** gated on whether an adopter registered an `onCapabilitiesChange` listener. `onCapabilitiesChange` is an observation layer *on top* of the fresh snapshot, never the *trigger* for freshness.
+3. **The client self-maintains its capability snapshot — and this is deferred to #308.** Keeping `client.capabilities` fresh is the **client's own** concern (the client and framework machinery read it — `hasMethod`, feature-gating, routing), so the maintenance must be **unconditional** when connected: the client opens a gateway-scope control-plane subscription for _its own_ correctness, **not** gated on whether an adopter registered an `onCapabilitiesChange` listener. `onCapabilitiesChange` is an observation layer _on top_ of the fresh snapshot, never the _trigger_ for freshness.
 
    **Timing:** the wire-extension registry is **sealed at gateway construction** (`gateway/harness.ts` — `this._wireExtensions.seal()`), so `gateway:capabilities:changed` **cannot fire until #308** (dynamic wire extensions). Building the client's unconditional self-maintenance now would be inert machinery reacting to an impossible event, and would add a `sub/subscribe` to every `connect()` (forcing every stub-server test double to model it). So: **the principle is settled here (unconditional, client-owned, not adopter-gated); the implementation lands in #308**, where the trigger event exists and a real consumer shapes it. Today the client's snapshot is refreshed on handshake / reconnect (real events), which `onCapabilitiesChange` already reflects.
 
@@ -91,7 +91,7 @@ Multi-tenant isolation felt like unbuilt infrastructure with significant edge ca
 
 ## Why this is the right move (not just the tidy one)
 
-- **It deletes net-new surface, it does not add machinery.** #311 + #311.1 added ~200 lines across gateway + 3 transports + spec for a fan-out the framework already had twice over. The bus/subscription path is *reuse of the mechanism already running for every other server event*. The simplicity argument favors removal: fewer mechanisms, all routed through the primitive already trusted and tested.
+- **It deletes net-new surface, it does not add machinery.** #311 + #311.1 added ~200 lines across gateway + 3 transports + spec for a fan-out the framework already had twice over. The bus/subscription path is _reuse of the mechanism already running for every other server event_. The simplicity argument favors removal: fewer mechanisms, all routed through the primitive already trusted and tested.
 - **Isolation becomes structural.** The multi-tenant leak stops being "checked" and becomes "impossible" — the wrong events never enter the tenant's ring. This is the ADR 45 stance applied to eventing, consistent with app/session/MCP/credential isolation.
 - **Three open problems dissolve.** #313 (HTTP replay) and #314 (cursor-tracked notify) are asking for cursor/replay/eviction the bus already implements; both close. The multi-tenant `notify({to})` landmine closes.
 - **It is maximal dogfooding**, which was the stated goal of the #311 wire-extensions arc: framework control-plane signals travel the same wire, the same way, as adopter signals.
@@ -110,7 +110,7 @@ Multi-tenant isolation felt like unbuilt infrastructure with significant edge ca
 
 ### New / changed
 
-- `gateway` gains `emitCapabilitiesChanged()` — a bus append on `surface: "gateway"`. The client's unconditional self-maintenance that *consumes* it is deferred to #308 (see Decision §3).
+- `gateway` gains `emitCapabilitiesChanged()` — a bus append on `surface: "gateway"`. The client's unconditional self-maintenance that _consumes_ it is deferred to #308 (see Decision §3).
 - A control-plane event surface + naming convention must be defined in spec (`gateway:capabilities:changed`, and the pattern for #279/#308 to follow).
 - `#302` (auth wire extension) no longer needs a `notify` auth filter; principal-private events are delivered on a per-principal-scoped subscription, isolation by instance.
 
@@ -134,7 +134,7 @@ No backwards-compat shims (per project philosophy). The wire method `notificatio
 
 - **The client's unconditional self-maintenance (deferred to #308) is the one genuinely-new behavior.** When built, it must be unconditional (client-owned), not adopter-callback-gated (see Decision §3, rejected alternative). Risk at that point: a client that fails to establish the subscription silently misses capability updates — mitigated by making it framework-managed inside `connect()` and observable via `whenReady()`. **Confidence low-risk: high** — composition of the already-proven subscription + reconnect-resume primitives.
 - **Surface/scope taxonomy for control-plane events** needs a deliberate choice (one `gateway` surface with control-plane phases, vs. a dedicated `control` surface). Minor spec work; decide in the implementing slice.
-- **`EventScope` has no tenant/principal field today** (it has app/session/execution/gateway/node + `EventScopeExtensions`). Per-tenant isolation therefore comes from **child-bus instances**, not a scope predicate. Confirmed sufficient for isolation; a tenant/principal scope *field* is only needed if we later want same-bus multiplexing, which this ADR explicitly avoids in favor of per-instance composition.
+- **`EventScope` has no tenant/principal field today** (it has app/session/execution/gateway/node + `EventScopeExtensions`). Per-tenant isolation therefore comes from **child-bus instances**, not a scope predicate. Confirmed sufficient for isolation; a tenant/principal scope _field_ is only needed if we later want same-bus multiplexing, which this ADR explicitly avoids in favor of per-instance composition.
 - **One thing to verify in the implementing slice:** that no current bus subscriber assumes a single flat gateway-global bus. The app/session factory threading says the child-bus tree is already the norm, so this is expected-clean, but it is the migration's one checkpoint.
 
 ---

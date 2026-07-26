@@ -41,15 +41,15 @@ context… can we fulfill that???" — yes; this ADR is the plan.
    `undefined` to a typed object via the discriminator.
 
 4. **Sugar surfaces converge.** Both transports populate `ctx.elicit?:
-   Elicit` (the noun-aliased sugar). The raw `ctx.elicitation?:
-   ElicitationHarnessProtocol` stays for power users who want the
+Elicit` (the noun-aliased sugar). The raw `ctx.elicitation?:
+ElicitationHarnessProtocol` stays for power users who want the
    substrate-level access. Same for `ctx.tasks?: Tasks` (sugar) +
    `ctx.tasks?: TasksHarnessProtocol` — though those share a name; we
    resolve naming below.
 
 5. **`McpRequestContext` becomes a structural TYPE ALIAS** —
    `McpRequestContext = ToolHandlerCtx & { transport: "mcp"; mcp:
-   McpRequestExtras }`. Existing code that imports `McpRequestContext`
+McpRequestExtras }`. Existing code that imports `McpRequestContext`
    keeps typechecking; new code uses the unified `ToolHandlerCtx`
    directly.
 
@@ -107,6 +107,7 @@ interface McpRequestContext {
 Common fields: `signal` only.
 
 Divergent fields:
+
 - `ToolHandlerCtx` carries `toolCallId`, `sessionId`, `setState`, `emit`,
   `task`, raw harness protocols.
 - `McpRequestContext` carries connection / wire / auth state and the
@@ -118,6 +119,7 @@ without code changes. This is the gap the ADR closes.
 ### Why two ctxs exist today
 
 Historical, not designed:
+
 - `ToolHandlerCtx` was authored for in-process tool dispatch (#138).
 - `McpRequestContext` was ported verbatim from v1's `MCPRequestContext`
   during #171b.
@@ -303,21 +305,21 @@ ideal English; pragmatic naming.
 
 ## Audit — backprop surfaces
 
-| Seam | Blast | Notes |
-| --- | --- | --- |
-| Tool handler authors | **none** (ADD-only) | optional fields only; existing handlers untouched |
-| Tool-executor in-process ctx-build | moderate | populates `transport: "in-process"` + new sugar |
-| MCP server projection ctx-build | moderate | re-anchor on unified shape; nest extras under `mcp:` |
-| Session dispatch | small | one ctx-build call site |
-| Loop executor | small | one ctx-build site, same shape |
-| MCP client tool wrapping | small | catches `UrlElicitationRequired` already; ctx shape ignored |
-| Sandbox tools | small | don't peek at MCP-specific |
-| `wrap-handler` transform | moderate | audit for ctx-shape assertions / mutations |
-| Conformance suites | small | `fakeToolHandlerCtx()` factory in spec-conformance |
-| Workspace tests | moderate | many specs hand-roll fake ctx — migrate to factory |
-| Examples + READMEs | small | ADD-only means no breakage; prefer-new-shape sweep |
-| DevTools | small | ctx visualizers may want `transport` badge |
-| Eval | small | shares in-process tool-executor path |
+| Seam                               | Blast               | Notes                                                       |
+| ---------------------------------- | ------------------- | ----------------------------------------------------------- |
+| Tool handler authors               | **none** (ADD-only) | optional fields only; existing handlers untouched           |
+| Tool-executor in-process ctx-build | moderate            | populates `transport: "in-process"` + new sugar             |
+| MCP server projection ctx-build    | moderate            | re-anchor on unified shape; nest extras under `mcp:`        |
+| Session dispatch                   | small               | one ctx-build call site                                     |
+| Loop executor                      | small               | one ctx-build site, same shape                              |
+| MCP client tool wrapping           | small               | catches `UrlElicitationRequired` already; ctx shape ignored |
+| Sandbox tools                      | small               | don't peek at MCP-specific                                  |
+| `wrap-handler` transform           | moderate            | audit for ctx-shape assertions / mutations                  |
+| Conformance suites                 | small               | `fakeToolHandlerCtx()` factory in spec-conformance          |
+| Workspace tests                    | moderate            | many specs hand-roll fake ctx — migrate to factory          |
+| Examples + READMEs                 | small               | ADD-only means no breakage; prefer-new-shape sweep          |
+| DevTools                           | small               | ctx visualizers may want `transport` badge                  |
+| Eval                               | small               | shares in-process tool-executor path                        |
 
 **Total estimate: ~3-4 days** for the ADD-ONLY landing across these
 seams.
@@ -327,12 +329,14 @@ seams.
 ## Migration plan
 
 ### Slice 1 (this ADR + minimal spec changes)
+
 Land the spec-level additions (`transport`, `mcp?`, `McpRequestExtras`,
 the `McpRequestContext` alias). Update every existing ctx-build site
 simultaneously so the `transport` field is populated. Typecheck +
 workspace tests pass. Single commit. ~1 day.
 
 ### Slice 2 (tool-executor)
+
 In-process ctx-build emits the new sugar `ctx.elicit?` by wrapping the
 local `ElicitationHarness` via a minimal `buildSessionElicit(harness)`
 factory in `@agentick/elicitation`. Test that a tool handler
@@ -340,16 +344,19 @@ running in-process can call `ctx.elicit.text(...)` identically to the
 MCP-server case. ~1 day.
 
 ### Slice 3 (`wrap-handler` audit + workspace test fixture sweep)
+
 Tour the wrap-handler transform; introduce
 `spec-conformance-next/testing/fake-tool-handler-ctx.ts`. Migrate
 in-tree tests to use the factory. ~1 day.
 
 ### Slice 4 (examples + READMEs)
+
 Sweep `example/*` + every adopter-facing README snippet to use the
 unified ctx vocabulary; remove any code that special-cases
 `McpRequestContext` vs. `ToolHandlerCtx`. ~0.5 day.
 
 ### Slice 5 (deprecation phase, future)
+
 Once all in-tree callers use the unified shape, mark the standalone
 `McpRequestContext` import path as `@deprecated` (the alias still
 works); collapse to a true type alias in a future tidy-up. Optional

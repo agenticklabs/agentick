@@ -344,21 +344,21 @@ User-level isolation works the same way — `shardKeyFor: (a) => extractUserId(a
 
 Each rung is opt-in via the choice of transport / membership / journal adapters. The protocol package is the same across all rungs.
 
-| Rung | Use case                  | Adapter packages                                                                                |
-| ---- | ------------------------- | ----------------------------------------------------------------------------------------------- |
+| Rung | Use case                  | Adapter packages                                                                           |
+| ---- | ------------------------- | ------------------------------------------------------------------------------------------ |
 | (a)  | Single-host multi-process | `@agentick/cluster-ipc` — Node.js IPC + worker_threads / cluster module                    |
-| (b)  | Multi-node ephemeral      | `@agentick/cluster-redis`, `@agentick/cluster-nats`                                   |
-| (c)  | Multi-tenant isolation    | Same transports as (b); adopter writes custom `defineClusterPartitioning`                       |
+| (b)  | Multi-node ephemeral      | `@agentick/cluster-redis`, `@agentick/cluster-nats`                                        |
+| (c)  | Multi-tenant isolation    | Same transports as (b); adopter writes custom `defineClusterPartitioning`                  |
 | (d)  | Durable execution         | `@agentick/cluster-effect` (wraps `@effect/cluster`), or a custom `DurableJournal` adapter |
 
 **Wire codec adapter packages** (cross-cutting; any rung):
 
-| Codec       | Use case                                                                   | Package                                                                  |
-| ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Codec       | Use case                                                                   | Package                                                             |
+| ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | JSON        | Default — debuggable, universal                                            | bundled in `@agentick/cluster`                                      |
 | MessagePack | Performance-sensitive deployments                                          | `@agentick/cluster-codec-msgpack`                                   |
 | Protobuf    | Strict schema enforcement; multi-language clusters                         | `@agentick/cluster-codec-protobuf` (ships .proto schemas alongside) |
-| Custom      | Adopter-defined wire (e.g., FlatBuffers, CBOR, encrypted-at-rest variants) | `defineClusterCodec` in adopter code                                     |
+| Custom      | Adopter-defined wire (e.g., FlatBuffers, CBOR, encrypted-at-rest variants) | `defineClusterCodec` in adopter code                                |
 
 Rung (d) requires reconciler-level work (continuation primitives, idempotency keys on tool dispatches, replay-safe side-effect markers) that isn't shipped in v2.0. The seam (`DurableJournal` factory slot) ships now so adapters can be built and tested incrementally; the framework consumes the slot once continuation primitives land.
 

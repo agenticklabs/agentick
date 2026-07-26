@@ -32,8 +32,8 @@ violating these is how trust gets burned):
    these rules.
 6. **No `tenantId` (or any tenancy noun) baked into the framework.**
    Multi-tenancy falls out of principal + scope-key composition (ADR 45/48).
-7. Terminology discipline: *MCP client* is server-side/gateway-internal;
-   *agentick client* is the browser/TUI wire client. `harness` is not an
+7. Terminology discipline: _MCP client_ is server-side/gateway-internal;
+   _agentick client_ is the browser/TUI wire client. `harness` is not an
    adopter-facing noun. Model-visible framework tools use the `session_*`
    namespace.
 8. Existing conventions bind: Meszaros doubles under `/testing`, conformance
@@ -91,10 +91,10 @@ a capability one pole needs is an extension package.
 Named adopters and acceptance tests:
 
 - **Knowify/ernesto** — first production adopter. Multi-tenant SaaS, Postgres
-  + Redis, stateless HTTP replicas, Socket.IO-Redis fan-out, incremental
-  event-driven persistence (`V1SessionStore`), kAuth/OAuth dual-token auth,
-  MCP server for external clients (Cursor/Claude/ChatGPT), custom timeline
-  windowing/compaction, spawn/swarm recursion, TigerFS sandbox.
+  - Redis, stateless HTTP replicas, Socket.IO-Redis fan-out, incremental
+    event-driven persistence (`V1SessionStore`), kAuth/OAuth dual-token auth,
+    MCP server for external clients (Cursor/Claude/ChatGPT), custom timeline
+    windowing/compaction, spawn/swarm recursion, TigerFS sandbox.
 - **tentickle** — the named acceptance test: "the real test will be if we can
   completely 100% migrate tentickle to v2."
 - **v2-otto / v2-otto-cluster / v2-real** — in-tree forcing-function examples.
@@ -129,8 +129,8 @@ packages-next reality before scoping.**
 ## 3. Workstream A — Durability: "Stores, not snapshots" (ADR 49)
 
 **This is the highest-leverage open decision.** Ryan's own late-session
-words: *"snapshots make sense unless the data/state is already persisted
-elsewhere (Pg/other db) and that is the source of truth."* The first
+words: _"snapshots make sense unless the data/state is already persisted
+elsewhere (Pg/other db) and that is the source of truth."_ The first
 adopter already runs the answer in production: `V1SessionStore` is an
 incremental write-behind projection (session events → Postgres rows), and
 resume = load rows + rebuild. No snapshot is ever taken. The local pole
@@ -150,8 +150,8 @@ Contents:
     enumeration (`keys`/`list`) per the enumeration-is-foundational rule.
   - **Class B — re-derivable:** sections, compiled context, tool registry,
     knob descriptors, formatter bindings. Persisted by nothing; recovered by
-    **re-render**. Name the property: *the JSX tree is the schema; render is
-    the recovery path.* (Tools are "compiled per tick," already ratified.)
+    **re-render**. Name the property: _the JSX tree is the schema; render is
+    the recovery path._ (Tools are "compiled per tick," already ratified.)
   - **Class C — ephemeral:** dataCache (re-fetches by contract), in-flight
     ops, state-harness K/V (gets a trivial KV store port for adopters who
     want it), task progress (survives via its own store port or is declared
@@ -245,7 +245,7 @@ auth handler, per-transport token extraction already normalized, producing
 session construction per ADR 45/48 structural identity (enrichment at the
 boundary — never a runtime authorization filter, which is the `notify({to})`
 pattern ADR 47 killed). Knowify's dual-token plugin (kAuth HS256 + OAuth
-RS256 + hydration + cache) is the reference adapter — port its *pattern*,
+RS256 + hydration + cache) is the reference adapter — port its _pattern_,
 not its Knowify specifics. "Full-featured for standard and modern auth
 requirements" is the bar. Framework never trusts `ctx.user` for
 authorization.
@@ -270,7 +270,7 @@ native-foundation items, and #123 gates MCP resource projection.
 
 **#152 is the template, not plumbing (ADR 48 §5):** the per-principal
 checkout/return contract (lease vs refcount; behavior when a principal's
-last session closes) must be designed as the *generic* pattern for every
+last session closes) must be designed as the _generic_ pattern for every
 principal-bound-instance resource — sandbox runtimes next, BYOK provider
 executors after. Design it once, at that altitude.
 
@@ -319,7 +319,7 @@ lessons.
 **Principal rule for multi-actor surfaces (binding — ADR 48 §5):** a
 group chat is one conversation with multiple humans. The session's
 principal is the **installation/workspace identity** (whatever
-authorized the connector); the per-message *actor* rides
+authorized the connector); the per-message _actor_ rides
 `RuntimeContextUser` / message metadata as a context dimension. Never
 principal-per-sender — that would break session principal-immutability.
 The connectors ADR must state this explicitly.
@@ -349,10 +349,11 @@ interface + docker/local providers as `sandbox-<provider>-next` packages.
 
 Parked by Ryan ("clean-sheet UI; circle back"). The v2-shaped design is now
 cheap: devtools = a wire-extension client of the gateway consuming the bus
-+ journal; the **persistence-backed production inspector** ("persist events
-to PG... build an admin ui around that") becomes a journal-store adapter
-question after Workstream A. Schedule the server/protocol slice; the UI can
-trail the cut.
+
+- journal; the **persistence-backed production inspector** ("persist events
+  to PG... build an admin ui around that") becomes a journal-store adapter
+  question after Workstream A. Schedule the server/protocol slice; the UI can
+  trail the cut.
 
 ### C6. Scheduler
 

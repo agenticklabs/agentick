@@ -8,7 +8,7 @@
 > tokens.
 >
 > **Why it exists (B1, the validation pivot).** This is the Ernesto-class
-> validation demo. Every place the prompt has to *hedge*, warn about a name, or
+> validation demo. Every place the prompt has to _hedge_, warn about a name, or
 > route around a missing capability is a discovered ergonomics defect. Those are
 > collected in the sibling [`one-shot-friction-log.md`](./one-shot-friction-log.md),
 > which becomes the B2 work list.
@@ -39,7 +39,7 @@ you have **run and verified end-to-end** before you report done.
    find yourself writing "next, you would…" — stop and actually do it.
 2. **Verify the real environment before you write a line of feature code.** You
    do not know the API from memory and you must not guess it. See
-   *§1 Verify the environment* — it is a hard gate.
+   _§1 Verify the environment_ — it is a hard gate.
 3. **Never invent an API name.** If you cannot find a symbol in the installed
    type declarations, it does not exist. Do not write it. Find the real one or
    route around the gap and log it.
@@ -87,11 +87,11 @@ Before writing feature code, prove to yourself what you're building against:
    - the elicitation, tool-executor, and knobs `/client` subpaths (the members
      they contribute to the session handle);
    - the stream event union yielded by the send handle's `events()`.
-   Write down the **exact** exported names and signatures you will call. When a
-   doc comment and the actual export disagree, **trust the export** and log the
-   drift.
+     Write down the **exact** exported names and signatures you will call. When a
+     doc comment and the actual export disagree, **trust the export** and log the
+     drift.
 3. **Stand up the smallest possible server and prove a round trip** — a gateway
-   with the fake model, one trivial send, printed result — *before* building any
+   with the fake model, one trivial send, printed result — _before_ building any
    UI. If this doesn't work, nothing downstream will.
 4. **Only then** build the dashboard.
 
@@ -108,6 +108,7 @@ Before writing feature code, prove to yourself what you're building against:
 A single Node entrypoint that:
 
 1. Constructs a gateway with an HTTP server transport bound to a port:
+
    ```ts
    import { createGateway } from "@agentick/gateway-next";
    import { httpServerTransport } from "@agentick/transport-http-next";
@@ -139,6 +140,7 @@ A single Node entrypoint that:
      options: { model: scriptedAdapter("..."), compiler: reactCompiler() },
    });
    ```
+
 2. Defines a small JSX `<Agent/>` with:
    - a `<Timeline/>` so the conversation renders into model context;
    - at least two **knobs** (`useKnob`) the model or the client can flip — a
@@ -155,7 +157,7 @@ A single Node entrypoint that:
    provider (`aisdk(openai(...))`) behind `if (process.env.OPENAI_API_KEY)`.
 
 > **Timeline history / scroll-back (known gap — build the workaround).** There is
-> no client wire method to *read* a session's timeline history. `timelineView`
+> no client wire method to _read_ a session's timeline history. `timelineView`
 > seeds from an `initial` array you must fetch **server-side** from the durable
 > log (a `TimelineStore.history(...)` read) and hand to the client at boot — the
 > AI-SDK `initialMessages` pattern. Add a tiny server endpoint (or a custom wire
@@ -178,9 +180,9 @@ import { http } from "@agentick/transport-http-next";
 
 const client = await createClient({
   transport: http({ url: "http://localhost:8787" }),
-  onStateChange: (s) => setConnState(s),   // wire the connection indicator here
+  onStateChange: (s) => setConnState(s), // wire the connection indicator here
 });
-await client.connect();                    // the client does NOT auto-connect
+await client.connect(); // the client does NOT auto-connect
 ```
 
 > The HTTP transport handles the CSRF handshake **transparently**: the persistent
@@ -207,7 +209,7 @@ state:
      `view.prepend(olderEntries)`.
    - **Optimistic send:** `view.append([optimisticEntry])` with a client temp-id
      stamped on `message.metadata.clientId`, then `session.send({ messages: [{
-     …, metadata: { clientId } }] })`. When the server echo folds back in, the
+…, metadata: { clientId } }] })`. When the server echo folds back in, the
      window holds **both** copies — the framework does **not** dedup. Collapse
      them at render time by `clientId` (keep the last occurrence). This
      app-owned reconciliation is deliberate (the "no client cache" bright line) —
@@ -226,8 +228,8 @@ state:
        `tool-confirmation-required` / `tool-confirmation-resolved`;
      - lifecycle: `tick-start` / `tick` / `execution-*`;
      - final: `result`.
-     Verify the exact member set against the installed `.d.ts` and narrow on
-     `.type` — do not hardcode a set you didn't confirm.
+       Verify the exact member set against the installed `.d.ts` and narrow on
+       `.type` — do not hardcode a set you didn't confirm.
    - **Streaming discipline (mandatory).** Do **not** re-parse the entire
      accumulated markdown on every `content-delta`. That is quadratic and will
      visibly stutter on a long answer. **Batch** delta application to an animation
@@ -240,7 +242,7 @@ state:
 4. **Composer: send / steer / queue / stop.**
    - **Send** (idle session): normal `session.send({ messages })`.
    - **Steer** (a run is in flight): `session.send({ messages, onBusy: "steer" })`
-     — injected into the *currently running* execution at the next tick boundary
+     — injected into the _currently running_ execution at the next tick boundary
      (after this tick's tool results, before the next model call). Same run, no
      settle wait.
    - **Queue:** `session.send({ messages, onBusy: "queue" })` — waits
@@ -254,7 +256,7 @@ state:
 5. **Client tools + confirmation dialogs.**
    - Declare the client's tool set with
      `session.setClientTools(declarations)` — a **whole-slice replace** (the set
-     *is* the truth; re-declare on reconnect). Each declaration is serializable
+     _is_ the truth; re-declare on reconnect). Each declaration is serializable
      (`name`, description, raw JSON-Schema `inputSchema`) — no handler crosses
      the wire.
    - Handle inbound calls with the ergonomic router:
@@ -327,7 +329,7 @@ state:
   production, serve the built client from the **same origin** and you need none
   of it.
 - **Be honest in your write-up:** confirmation dialogs, tool allow-lists, and
-  elicitation gates are **policy** seams — they shape what the agent is *allowed*
+  elicitation gates are **policy** seams — they shape what the agent is _allowed_
   to ask for. They are **not** a security boundary. The boundary is the
   OS-level sandbox (Landlock/Seatbelt-class isolation) around tool execution and
   the loopback bind. A dashboard button that says "deny" is UX, not containment.
@@ -343,7 +345,7 @@ state:
   reducer. These are pure functions — test them directly.
 - **Integration-test the whole loop with `scriptedAdapter`.** Stand up the real
   gateway with `model: scriptedAdapter("hello **world**", { chunks: ["hello ",
-  "**world**"], thinkTags: true })`, connect a real client over the HTTP (or
+"**world**"], thinkTags: true })`, connect a real client over the HTTP (or
   in-process) transport, `send`, drain `events()`, and assert you saw
   `content-delta` → `content` → `result`, that the timeline view folded the
   echo, and that a `tool_confirmation` flowed through `confirmClientTools`. **No
@@ -389,7 +391,7 @@ work around a missing capability, write glue the framework should have shipped,
 or warn a future reader about a confusing/stale name. Format each as
 **friction → severity (blocker / high / medium / low) → suggested fix**. This
 log is a required output — it is how the framework improves. Do not omit an item
-because you found a workaround; the workaround *is* the friction.
+because you found a workaround; the workaround _is_ the friction.
 
 ---
 

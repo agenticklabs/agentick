@@ -15,7 +15,7 @@ stack already assumes:
    `structuredContent`, emits MCP `Tool.outputSchema`), but **no result type carries a
    `structuredContent` field**. The schema validates something the handler has no way to return —
    a declared-but-dead seam (the same shape `input_required` was before ADR 68 wired it).
-2. **`isError`** — a *soft, model-visible domain error* ("file not found", "rate-limited") distinct
+2. **`isError`** — a _soft, model-visible domain error_ ("file not found", "rate-limited") distinct
    from a thrown/rejected dispatch (hard failure). The bare array can't flag it.
 
 **Decision:** the handler return becomes a small **message-input-style currency** —
@@ -25,12 +25,12 @@ at dispatch. `structuredContent` is `outputSchema`-validated and flows to `Dispa
 MCP wire. `isError` replaces the redundant `DispatchResult.succeeded`. String is sugar for one
 text block. **No plain-object→`JsonBlock` guessing** (rejected below).
 
-## The headline motivation: `outputSchema` unlocks *composition*, not just validation
+## The headline motivation: `outputSchema` unlocks _composition_, not just validation
 
 `outputSchema` (via `structuredContent`) is what lets the model treat tools as **composable
 building blocks**, not one-shot prose emitters:
 
-- **Chain tools** — feed one tool's *typed* structured output into another tool's *typed* input,
+- **Chain tools** — feed one tool's _typed_ structured output into another tool's _typed_ input,
   without re-parsing prose each hop.
 - **Write code that calls the tools** — a model that knows each tool's input+output shape can emit
   a program orchestrating them (the "tools as an API" / code-mode pattern), instead of a
@@ -42,24 +42,28 @@ load-bearing part of this ADR — not `isError`.
 ## Decision
 
 ### 1. `ToolHandlerResult` — the currency (data/tool-handler.ts)
+
 Accept, and normalize to one internal result:
+
 ```ts
 type ToolResultInput =
-  | string                                   // sugar → [{ type: "text", text }]
-  | readonly ContentBlock[]                  // today's shape
-  | ToolResultEnvelope;                      // the optional full form
+  | string // sugar → [{ type: "text", text }]
+  | readonly ContentBlock[] // today's shape
+  | ToolResultEnvelope; // the optional full form
 interface ToolResultEnvelope {
-  readonly content: string | readonly ContentBlock[];   // string sugar here too
-  readonly structuredContent?: unknown;                 // outputSchema-validated
-  readonly isError?: boolean;                            // soft/domain error; default false
+  readonly content: string | readonly ContentBlock[]; // string sugar here too
+  readonly structuredContent?: unknown; // outputSchema-validated
+  readonly isError?: boolean; // soft/domain error; default false
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 // ToolHandlerResult = ToolResultInput | Promise<…> | Effect<…, never> | TaskHandle<…> | Promise/Effect<TaskHandle>
 ```
+
 The three top-level shapes are **discriminable** (string / array / object-with-`content`), so TS
-inference stays sharp — a mistyped return is a *type error*, not a silent reinterpretation.
+inference stays sharp — a mistyped return is a _type error_, not a silent reinterpretation.
 
 ### 2. `structuredContent` — the closed seam
+
 - The handler returns it via the envelope. If the tool declares `outputSchema`, the executor
   **validates `structuredContent` against it** before returning (Standard-Schema, same acceptance
   as `inputSchema`); a validation failure is a typed dispatch error.
@@ -69,11 +73,13 @@ inference stays sharp — a mistyped return is a *type error*, not a silent rein
   `CallToolResult.structuredContent` (config.ts inline mapping ~L705).
 
 ### 3. `isError` replaces `succeeded` (breaking, sanctioned)
+
 `DispatchResult.succeeded` is currently set by executors (a BYO executor can resolve
 `{ succeeded: false }` without throwing — define-tool-executor). It is **redundant with `isError`**:
 MCP already collapses "couldn't run" and "ran-with-error" into a single `isError:true` from the
-model's view; the couldn't-run vs ran-with-error nuance lives in the error *content/reason*, not a
+model's view; the couldn't-run vs ran-with-error nuance lives in the error _content/reason_, not a
 second boolean. So:
+
 - **Drop `DispatchResult.succeeded`; add `DispatchResult.isError` + `structuredContent`.**
 - The handler sets `isError` via the envelope; the executor may also set it (provider-side
   failure). Default `false`.
@@ -83,6 +89,7 @@ second boolean. So:
 - Migrate `define-tool-executor` + its tests + any `succeeded` reader.
 
 ### 4. Normalization — one internal result at dispatch
+
 `string → [{type:"text", text}]`; `ContentBlock[] → { content }`; envelope → as-is (its `content`
 string-sugar normalized the same way). **Reuse the existing string→text-block content normalizer**
 (messages/sections already accept `string | ContentBlock[]` — grep `@agentick/shared` /
@@ -104,6 +111,7 @@ one in `@agentick/shared` and have messages/sections use it too — do NOT hand-
   and isn't `outputSchema`-validated. They're separate channels by design (MCP's split).
 
 ## MCP wire (round-trip)
+
 - outbound: `DispatchResult.{content, structuredContent?, isError?}` →
   `CallToolResult.{content, structuredContent?, isError?}` at the inline mapping (config.ts ~L705).
   `isError` also still set by the existing throw→isError path.
@@ -112,6 +120,7 @@ one in `@agentick/shared` and have messages/sections use it too — do NOT hand-
   (a model-adapter concern, per ADR 57's currency — content down-conversion already lives there).
 
 ## Build scope
+
 1. spec: `ToolResultEnvelope` + widen `ToolHandlerResult` (data/tool-handler.ts); `DispatchResult`
    drop `succeeded`, add `isError` + `structuredContent` (protocol/tool-executor.ts).
 2. `createTool` / the executor: normalize the three shapes → one internal result; validate
@@ -123,6 +132,7 @@ one in `@agentick/shared` and have messages/sections use it too — do NOT hand-
    `structuredContent`+`outputSchema` composition story, `isError` vs throw. Examples typecheck.
 
 ## Tests
+
 - string return → one text block; bare array unchanged (parity); envelope round-trip.
 - `structuredContent` validated against `outputSchema` (pass + a validation-failure → typed error).
 - `isError:true` from a handler surfaces on `DispatchResult.isError` + MCP `CallToolResult.isError`;

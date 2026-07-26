@@ -30,12 +30,12 @@ Anthropic. Three deltas from the original text:
    `postProcessForNormalize?` round-trip hook. All optional-with-defaults
    except `target`; sound additions for real provider quirks.
 2. **Conformance is executor-level, not standalone.** `runModelAdapterConformance`
-   + `fakeModelAdapter` were not built; each adapter is certified via
-   `runExecutorConformance` (real executor + adapter + stub provider client).
-   The adapter *contract* stays zero-Effect (write + test with `generate()`
-   alone); only the shared conformance runs through the executor. A thin
-   standalone adapter-conformance is a deferred additive if zero-dep
-   certification is ever demanded — not a regression.
+   - `fakeModelAdapter` were not built; each adapter is certified via
+     `runExecutorConformance` (real executor + adapter + stub provider client).
+     The adapter _contract_ stays zero-Effect (write + test with `generate()`
+     alone); only the shared conformance runs through the executor. A thin
+     standalone adapter-conformance is a deferred additive if zero-dep
+     certification is ever demanded — not a regression.
 3. **`FakeLanguageModelExecutor` remains a distinct class**, not collapsed
    into `LanguageModelExecutor` + a fake adapter. "One executor everywhere,
    including tests" is aspirational; the Fake stays for now.
@@ -118,9 +118,9 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown> {
   normalize(raw: TRaw): LanguageModelExecutionResult;
 
   // Optional — provider quirks (defaults provided by the executor):
-  project?(input: ProjectInput): LanguageModelInput;   // e.g. Anthropic per-section cache_control
-  adapterTransforms?(): readonly DeltaTransform[];      // e.g. think-tag extraction
-  postProcessForNormalize?(raw: TRaw): TRaw;            // mutate reconstructed raw before normalize
+  project?(input: ProjectInput): LanguageModelInput; // e.g. Anthropic per-section cache_control
+  adapterTransforms?(): readonly DeltaTransform[]; // e.g. think-tag extraction
+  postProcessForNormalize?(raw: TRaw): TRaw; // mutate reconstructed raw before normalize
   finalizeStream?(accum: StreamAccumulatorView): readonly AdapterDelta[];
   extractMetadata?(raw: TRaw): Readonly<Record<string, unknown>> | undefined;
   isAbortError?(cause: unknown): boolean;
@@ -135,7 +135,7 @@ adapter + a stubbed provider client (`StubOpenAIClient`, …). This is
 integration-level certification (executor ⇄ adapter), and it covers the
 adapter-first Anthropic. The originally-proposed **standalone, zero-Effect
 `runModelAdapterConformance(factory)` + `fakeModelAdapter({ scripted })`**
-were NOT built — the adapter *contract* is zero-Effect (an author can
+were NOT built — the adapter _contract_ is zero-Effect (an author can
 write and test an adapter with `generate()` alone), but its shared
 conformance currently runs through the executor. `FakeLanguageModelExecutor`
 also remains a distinct class (not collapsed into
@@ -146,9 +146,9 @@ not regressions; see the amendment.
 
 ```ts
 new LanguageModelExecutor(scopeId, journal, bus, inbox, {
-  adapter,            // the part
+  adapter, // the part
   // ...existing executor options (transforms, customBlocks, ...)
-})
+});
 ```
 
 `ExecutorProtocol` is unchanged — the loop executor's contract is
@@ -236,14 +236,14 @@ zero-substrate** — adapter packages and standalone consumers (the OCR
 service) depend on it alone and never drag in the executor. Effect
 begins at `executor-next` and nowhere below.
 
-| Package | Contents |
-| --- | --- |
-| `model-next` (new) | contract + view + accumulator + helpers + projection/transform machinery + doubles + conformance |
-| `model-openai-next` | `openai(modelId, opts)` → adapter |
-| `model-google-next` | `google(...)` → adapter |
+| Package                | Contents                                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- |
+| `model-next` (new)     | contract + view + accumulator + helpers + projection/transform machinery + doubles + conformance     |
+| `model-openai-next`    | `openai(modelId, opts)` → adapter                                                                    |
+| `model-google-next`    | `google(...)` → adapter                                                                              |
 | `model-anthropic-next` | `anthropic(...)` → adapter — **written adapter-first; the pending subclass body is never completed** |
-| `model-ai-sdk-next` | `aiSdkModel(languageModelV2)` → adapter (+ a later `executor-ai-sdk-next` for the engine) |
-| `executor-next` | THE harness only: `LanguageModelExecutor` (+ Fake, lifecycle); depends on `model-next` |
+| `model-ai-sdk-next`    | `aiSdkModel(languageModelV2)` → adapter (+ a later `executor-ai-sdk-next` for the engine)            |
+| `executor-next`        | THE harness only: `LanguageModelExecutor` (+ Fake, lifecycle); depends on `model-next`               |
 
 The carve-out happens in the packaging commit at the end of the ADR 52
 implementation (one commit: create `model-next`, move the model-layer
@@ -282,7 +282,7 @@ cheap Promise-shaped object holding an SDK client, not to a harness.
 - No adapter auto-registry — adapters are values, passed explicitly
   (strategy-values doctrine).
 - No third normalization currency.
-- No constraint that only one executor exists — one *reference*
+- No constraint that only one executor exists — one _reference_
   implementation; alternative engines are alternative protocol impls.
 
 ## Modalities (planned — additive capabilities)
@@ -294,11 +294,11 @@ mirroring the ai-sdk function vocabulary adopters already know:
 ```ts
 // standalone helpers in @agentick/model-executor — feature-detected,
 // substrate-free, same shape as generate/generateStream:
-embed(adapter, input)            // ernesto's EmbeddingService need
-embedMany(adapter, inputs)
-transcribe(adapter, audio)
-generateSpeech(adapter, input)
-generateImage(adapter, input)
+embed(adapter, input); // ernesto's EmbeddingService need
+embedMany(adapter, inputs);
+transcribe(adapter, audio);
+generateSpeech(adapter, input);
+generateImage(adapter, input);
 ```
 
 - Each capability is an **optional method group on the adapter**

@@ -23,7 +23,7 @@ replace all three jobs with **facts in the log**:
 1. **One append-only log.** Input appends the moment it arrives — at
    send AND mid-execution. No queue, no drain. Facts first (ADR 49).
 2. **Provenance stamps.** Entries carry `executionId`/`tickId` in
-   metadata. "Created during the current execution" is a *query*, not a
+   metadata. "Created during the current execution" is a _query_, not a
    tier.
 3. **Execution-boundary entries.** At execution completion the session
    appends a `kind: "boundary"` entry (`visibility: "log"` — never
@@ -57,7 +57,7 @@ before the loop. Consequences, all verified 2026-07-04:
 - Nothing renders pending — `<Timeline>` reads the projection only
   (the spec and session comments claiming otherwise were corrected in
   the same deep-dive's fix wave).
-- Input commits *before* the model sees it — no retry semantics.
+- Input commits _before_ the model sees it — no retry semantics.
 - Messages queued mid-execution are invisible until the next `send` —
   the living-context bet, broken for input.
 - The loop has no input-driven continuation — it stops on stopReason
@@ -82,10 +82,10 @@ Timeline entries gain typed optional provenance in `MessageMetadata`:
 
 ```ts
 interface MessageMetadata {
-  readonly executionId?: string;  // execution that created this entry
-  readonly tickId?: string;       // tick that created it (model/tool output)
-  readonly usage?: UsageStats;    // the GENERATION's usage — assistant
-                                  // entries only (see below)
+  readonly executionId?: string; // execution that created this entry
+  readonly tickId?: string; // tick that created it (model/tool output)
+  readonly usage?: UsageStats; // the GENERATION's usage — assistant
+  // entries only (see below)
   // ... existing: cache, providerMetadata, index signature
 }
 ```
@@ -150,14 +150,14 @@ At execution completion (terminal outcome, after the final
 Every existing `e.kind === "message"` filter keeps working unchanged.
 
 **The committed offset is order-derived, not seq-derived:** everything
-persisted *before* the last successful boundary entry is consumed;
+persisted _before_ the last successful boundary entry is consumed;
 everything after is not. Deriving from log ORDER (not `seq` arithmetic)
 matters because under write-behind the harness doesn't know store seqs
 at decision time — but it always knows its own ledger order, and every
 store's `load()` returns that order. `seq` (#168) stays what it is: the
 store's durable cursor identity for `history({fromSeq})` paging;
-boundary entries are seq-tagged like everything else, so *paging by
-turn* falls out.
+boundary entries are seq-tagged like everything else, so _paging by
+turn_ falls out.
 
 **Why an entry and not session state:** zero new state to persist or
 restore — hydration recomputes the offset by fold, exactly like every
@@ -167,7 +167,7 @@ the turn uncommitted, and its input is retried by the next execution.
 This is at-least-once input processing — the standard, correct default.
 
 Only `outcome: "succeeded"` boundaries advance the offset. Failed and
-aborted executions append their boundary (the *attempt* is a fact — it
+aborted executions append their boundary (the _attempt_ is a fact — it
 carries usage and segmentation) but do not commit consumption.
 
 ### 2.3b SIMPLIFICATION (ratified 2026-07-05) — non-destructive consumption
@@ -222,8 +222,7 @@ append → next execution's input. No lost window.
 A named predicate constant, not configuration:
 
 ```ts
-const isInputEntry = (e: TimelineEntry) =>
-  e.kind === "message" && e.message.role === "user";
+const isInputEntry = (e: TimelineEntry) => e.kind === "message" && e.message.role === "user";
 ```
 
 Tool results are loop-internal (already applied within the tick);
@@ -267,18 +266,18 @@ shims (house rule).
 
 ## 3. Fit with the framework as it exists
 
-| Existing piece | Interaction |
-| --- | --- |
-| ADR 49 fold-=-re-render | Extended, not amended: consumption becomes a log-derived fact; hydration recomputes the offset like everything else. |
-| #168 frozen `seq` | Untouched. Offset is order-derived; `seq` remains the store's cursor identity. Boundary entries are seq-tagged → turn paging free. |
-| `TickEndForwardDecision` | The continuation seam already exists; the predicate slots into it. No loop-protocol change. |
-| ADR 48 single-writer session | The atomic check-and-append leans on it — one writer per session makes the synchronous section sufficient. |
-| ADR 51 registry | Two verbs deleted; `timeline:append` unchanged (still the admin/import path); the wire lane (#141) never exposed queue/drain. |
-| #132 SQLite store | Zero contract change. Boundary entries are opaque entries. |
-| #186 usage spine | Boundary entries carry the turn's usage — cost-per-turn lands in the record; devtools turn view falls out. |
-| #187 `run({history})` | Seeded logs replay with their boundaries → eval gets turn segmentation verbatim. |
-| `timeline-not-rendered` diagnostic | Unchanged and MORE important — steering only works if `<Timeline>` is rendered. |
-| Compaction | Projection-only, as today. The offset derives from the persisted fold; compaction cannot move it. `prune` below a boundary is natural turn-retention. |
+| Existing piece                     | Interaction                                                                                                                                           |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR 49 fold-=-re-render            | Extended, not amended: consumption becomes a log-derived fact; hydration recomputes the offset like everything else.                                  |
+| #168 frozen `seq`                  | Untouched. Offset is order-derived; `seq` remains the store's cursor identity. Boundary entries are seq-tagged → turn paging free.                    |
+| `TickEndForwardDecision`           | The continuation seam already exists; the predicate slots into it. No loop-protocol change.                                                           |
+| ADR 48 single-writer session       | The atomic check-and-append leans on it — one writer per session makes the synchronous section sufficient.                                            |
+| ADR 51 registry                    | Two verbs deleted; `timeline:append` unchanged (still the admin/import path); the wire lane (#141) never exposed queue/drain.                         |
+| #132 SQLite store                  | Zero contract change. Boundary entries are opaque entries.                                                                                            |
+| #186 usage spine                   | Boundary entries carry the turn's usage — cost-per-turn lands in the record; devtools turn view falls out.                                            |
+| #187 `run({history})`              | Seeded logs replay with their boundaries → eval gets turn segmentation verbatim.                                                                      |
+| `timeline-not-rendered` diagnostic | Unchanged and MORE important — steering only works if `<Timeline>` is rendered.                                                                       |
+| Compaction                         | Projection-only, as today. The offset derives from the persisted fold; compaction cannot move it. `prune` below a boundary is natural turn-retention. |
 
 ## 4. Migration plan
 

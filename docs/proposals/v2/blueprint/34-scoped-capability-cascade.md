@@ -17,10 +17,10 @@ This ADR names the pattern, sketches the generic primitive, and declares it the 
 
 What we built for tools is one of three sibling cascade patterns in the framework. All three share vocabulary (precedence direction, "most-specific wins", scope-bound provenance) but diverge in machinery. Naming all three explicitly so future cascade work picks the right shape.
 
-| Pattern                    | What it cascades                                                                   | Primitive                                                                     | State                                                                                 |
-| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **A. Declarative cascade** | Adopter-written config values (`maxTicks`, `executor`, `metadata`, project config) | **`mergeLayered<T>(...layers)`** in `@agentick/shared/utils/merge-layered.ts` | Landed                                                                                |
-| **A′. Substrate cascade**  | One slot per kind, factory-aware (bus/inbox/journal)                               | `HarnessShell` slot resolver in `BaseHarness`                                 | Landed (ADR 31)                                                                       |
+| Pattern                    | What it cascades                                                                   | Primitive                                                                     | State                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| **A. Declarative cascade** | Adopter-written config values (`maxTicks`, `executor`, `metadata`, project config) | **`mergeLayered<T>(...layers)`** in `@agentick/shared/utils/merge-layered.ts` | Landed                                                                           |
+| **A′. Substrate cascade**  | One slot per kind, factory-aware (bus/inbox/journal)                               | `HarnessShell` slot resolver in `BaseHarness`                                 | Landed (ADR 31)                                                                  |
 | **B. Emitted cascade**     | Dynamic multi-entry sources (tools, skills, prompts, resources, ...)               | **`ScopedRegistry<Entry, Strategy>`** + `withScope` + `replaceSlice`          | Reference impl exists (`@agentick/tool-executor`); lifts when third domain lands |
 
 ### Pattern A — Declarative cascade (`mergeLayered`)

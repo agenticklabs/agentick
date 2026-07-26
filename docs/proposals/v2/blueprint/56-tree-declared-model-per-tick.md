@@ -9,8 +9,8 @@ ADR 27 (modular built-ins / bridge augmentation), ADR 55 (render-context; `activ
 
 The model the loop calls can be declared **in the tree, per tick**, taking precedence
 over the send override and the session/app default. The mechanism is the **tool
-pattern, verbatim**: the IR carries a *serializable* model selection (`{ modelRef,
-parameters }` — the spec firewall holds); the *live* model value registers through a
+pattern, verbatim**: the IR carries a _serializable_ model selection (`{ modelRef,
+parameters }` — the spec firewall holds); the _live_ model value registers through a
 render-scoped bridge slot (exactly like `ToolBridge` handler refs); the loop resolves
 `modelRef → resolved model` per tick. Precedence: **tick-IR > send override > session/app**
 (inner-scope-wins, matching every other layered seam).
@@ -54,15 +54,18 @@ stays adapter-agnostic; it only threads spec-typed `RegisteredModel`s.
 ## Design (the core — this ADR)
 
 ### spec
+
 - `ModelBridge` + `RegisteredModel` in `hook-bridges.ts`; seed `HookBridges.models?: ModelBridge` (optional foundational slot, exactly like `tools?: ToolBridge`).
 - `RuntimeDeclarations.model?: ModelDeclaration` where `ModelDeclaration = { modelRef: string; parameters?: Readonly<Record<string, unknown>> }`. Single (one model per tick); nearest-scope / last-wins if a tree nests several.
 
 ### reconciler-react (generic — adapter-agnostic)
+
 - A render-time registration hook `useModelRegistration(modelRef, resolved: RegisteredModel)`: registers on `bridges.models` (via the bridge context, like `useToolBridge`) and contributes `declarations.model = { modelRef }` to the IR for this render. Unregisters on unmount.
 - The reconciler collects `declarations.model` into `RenderedTree` alongside `declarations.tools`.
 - **No adapter knowledge here** — the resolved `{executor,target}` is handed in spec-typed.
 
 ### loop-executor
+
 - Per tick, after render: read `renderResult.tree.declarations.model`. If present,
   `bridges`… no — the loop already holds `input.reconciler`; the resolution needs the
   `ModelBridge`. Thread a `resolveModel?: (ref: string) => RegisteredModel | undefined`
@@ -72,9 +75,11 @@ stays adapter-agnostic; it only threads spec-typed `RegisteredModel`s.
 - **Fallback:** no IR model → `input.modelExecutor` / `input.target` (today's behavior, untouched). This is the precedence: tick-IR wins, else send/session.
 
 ### session
+
 - Build the `ModelBridge` (a small in-memory registry, reference impl in `reconciler-next` alongside `InMemoryDataBridge`) into the mount bridges; supply `resolveModel` to the loop closing over it. No default registration needed — the fallback covers the un-declared case.
 
 ### Tests
+
 - `reconciler-react` integration: `useModelRegistration` with a **fake** `RegisteredModel` (Meszaros `fakeExecutor` + a target) → a real loop run resolves the ref and runs the fake executor for the tick, not `input.modelExecutor`. Precedence test: IR model beats the send/session executor; no IR model → fallback.
 
 ## Deferred (explicit follow-up slices — filed off #169)
@@ -87,14 +92,15 @@ stays adapter-agnostic; it only threads spec-typed `RegisteredModel`s.
    decision — deferred out of the core.** Until it lands, the mechanism is exercised via
    the generic hook + `models:`-style registration.
 2. **Force-render / dynamic `activeModel`.** Making the render-context `activeModel`
-   (ADR 55) reflect the *IR-declared* model requires render → resolve → re-render to
+   (ADR 55) reflect the _IR-declared_ model requires render → resolve → re-render to
    convergence (the model isn't known until after the render that declares it). The
-   per-tick *execution* model (this ADR) has NO chicken-and-egg — it's resolved
+   per-tick _execution_ model (this ADR) has NO chicken-and-egg — it's resolved
    post-render, before the call. Dynamic render-context activeModel is a distinct,
    additive slice on the stabilization loop. → follow-up; the ADR 55
    `TODO(trail-per-tick-model)` markers point here.
 
 ## Rejected
+
 - **Adapter value in the IR.** Live object across the JSON firewall — impossible; the
   whole reason for the ref+bridge split.
 - **`ModelBridge` registers a raw adapter (`unknown`).** Then the loop must construct an
@@ -106,6 +112,7 @@ stays adapter-agnostic; it only threads spec-typed `RegisteredModel`s.
   yet — nothing to delete; the sugar lands fresh in slice 1.)
 
 ## Scope
+
 Core (spec bridge+IR, reconciler-react generic registration, loop per-tick resolution +
 precedence, session wiring, tests) = this ADR, delegable with fakes. Adapter sugar +
 force-render = the two deferred slices above.

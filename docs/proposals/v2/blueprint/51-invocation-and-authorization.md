@@ -39,11 +39,11 @@ across a boundary.
 
 Authorization has **two subjects, two gates, one vocabulary**:
 
-- **Identity authz** — *may this principal invoke this verb on this
-  target?* Enforced ONCE, at the wire projection boundary, via an
+- **Identity authz** — _may this principal invoke this verb on this
+  target?_ Enforced ONCE, at the wire projection boundary, via an
   `Authorizer` port. Harnesses are authz-unaware, permanently.
-- **Capability policy** — *may the agent (the model) perform this
-  action?* Enforced ONCE, at tool dispatch, via a `DispatchPolicy`
+- **Capability policy** — _may the agent (the model) perform this
+  action?_ Enforced ONCE, at tool dispatch, via a `DispatchPolicy`
   port (`allow | deny | ask`), generalizing the existing confirmation
   gate. The claude.json-style allow/deny/ask config is this gate's
   policy source.
@@ -75,22 +75,22 @@ the design below removes the hand-written switches, not the mechanism.
 **Verbs and serializable data cross any boundary; executable
 configuration never does.** Strategies, predicates, and validators are
 construction-bound and server-resident (ADR 27 amendment). A remote
-command *triggers* the target's configured behavior and may carry
+command _triggers_ the target's configured behavior and may carry
 **advisory data** (e.g. compaction `instructions` — the resident
 strategy is authoritative to honor or ignore); it never supplies the
 function. Same boundary as credentials-never-cross-wire; RCE-safe by
 construction.
 
-**Corollary — the signal-form rule:** an operation with a *required
-function parameter* is unaddressable. Give it a construction-bound
+**Corollary — the signal-form rule:** an operation with a _required
+function parameter_ is unaddressable. Give it a construction-bound
 default (`withTimeline({ compact: rollingSummary({...}) })`) and a
 no-arg/data-only signal form, and it joins the addressable set. The
 function-arg call form remains an in-process-only override
 (inner-scope-wins at the call site).
 
 **Footnote (wave-ratified, 2026-07-03) — optional function fields do
-NOT trigger the exclusion.** The rule is about *required* function
-parameters. A declaration whose input carries an *optional* function
+NOT trigger the exclusion.** The rule is about _required_ function
+parameters. A declaration whose input carries an _optional_ function
 field (knobs' `validate`, prompts' `render`) is declarable: the field
 rides in-process invocations and degrades to absent over the
 inbox/wire — the addressable form simply carries the data subset
@@ -101,7 +101,7 @@ registry manufactures `${verb}:${ulid()}` opIds. Pre-registry literals
 that embedded discriminators in the opId (mcp's
 `mcp:${serverId}:call-tool:*`) canonicalize on migration: the
 discriminator's provenance moves to the scope (where it belonged), the
-op *name* keeps its exact identity (the journal/bus-queryable string),
+op _name_ keeps its exact identity (the journal/bus-queryable string),
 and the opId remains what it always was — a per-call uniqueness token
 nobody may parse. Verified zero opId-prefix consumers before ratifying.
 
@@ -133,10 +133,10 @@ cases.
 
 ```ts
 // in the harness constructor — the ONLY place a verb is declared:
-this.append  = this.command({
-  name: TIMELINE_APPEND,            // "timeline:append"
-  input: timelineAppendSchema,      // Standard Schema
-  exposure: "addressable",          // default; see §2.3
+this.append = this.command({
+  name: TIMELINE_APPEND, // "timeline:append"
+  input: timelineAppendSchema, // Standard Schema
+  exposure: "addressable", // default; see §2.3
   handler: (i) => this.appendEffect(i),
 });
 ```
@@ -145,9 +145,9 @@ this.append  = this.command({
 returns the public method: it manufactures the exact Operation
 harnesses hand-write today (`opId: \`${verb}:${ulid()}\``,
 `name: \`${surface}:command:${rest}\``) and runs it through
-`runOperation` unchanged. **One canonical verb string is
+`runOperation`unchanged. **One canonical verb string is
 simultaneously:** the inbox message type, the op-name root, the authz
-scope label, the capability-policy rule target, and (via `:`→`/`) the
+scope label, the capability-policy rule target, and (via`:`→`/`) the
 wire method name. Packages export verb constants
 (`TIMELINE_COMPACT = "timeline:compact"`) — house precedent, not a
 mapping.
@@ -174,7 +174,7 @@ correlation.
 `exposure: "internal" | "addressable" | "wire"` (widening levels;
 default `"addressable"`, wire is opt-in per verb). The **harness
 author** decides exposability — that's where the knowledge lives.
-Which *principal* may invoke an exposed verb is a separate policy act
+Which _principal_ may invoke an exposed verb is a separate policy act
 (§4). "Expose" and "grant" are different decisions on purpose.
 
 ### 2.4 Enumeration — declare-and-discover, not push
@@ -198,10 +198,10 @@ Resolution order:
    `credentials/*` are untouched by this ADR.
 2. **Dynamic resolver** — `timeline/compact` → verb `timeline:compact`
    → authorize (§4) → `inbox.ask(address, { type: verb, payload,
-   origin: "wire" })`.
+origin: "wire" })`.
 
 Explicit-beats-dynamic gives the porcelain/plumbing doctrine
-mechanically: an *earned* named method (streaming semantics, bespoke
+mechanically: an _earned_ named method (streaming semantics, bespoke
 params, SDK ergonomics) shadows the auto-route by construction. New
 capabilities default to the plumbing lane; **new capability requires
 new declarations, never new plumbing.** `sub/*` can never be commands
@@ -260,8 +260,8 @@ port = protocol; policy = adopter's):
 interface Authorizer {
   authorize(input: {
     principal?: string;
-    scope: string;              // = the verb, by default
-    target?: EventScope;        // target rule input
+    scope: string; // = the verb, by default
+    target?: EventScope; // target rule input
   }): Promise<{ allowed: boolean }>;
   readonly backend: string;
 }
@@ -276,7 +276,7 @@ rule: same-principal** (ADR 48 fusion rule — the target session's
 `scope.principal` must equal the caller's), elevation via scopes;
 most deployments never write a target rule.
 
-Grant *derivation* — OAuth-style tokens carrying scope claims, or
+Grant _derivation_ — OAuth-style tokens carrying scope claims, or
 client-declared scopes verified at ingress — is ADR 34's `AuthSource`
 concern. The Authorizer consumes grants regardless of issuance; the
 questions stay decoupled.
@@ -291,12 +291,12 @@ admin-verb-to-unprivileged-client bug at framework scale.
 
 ## 5. Trust domains + the fourth subject
 
-| Origin | Trust | Gate |
-| --- | --- | --- |
-| Wire client | Untrusted | authn at ingress, authz at dispatch |
-| Host code / tree / spawns | Trusted by construction | none — the app *is* the code |
-| Cluster transport | Trusted channel between framework nodes | authorized once at its wire ingress; stamped `principal` travels in scope |
-| **The model** | **Inside the process, intentionally untrusted** | **capability policy at tool dispatch (§6)** |
+| Origin                    | Trust                                           | Gate                                                                      |
+| ------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------- |
+| Wire client               | Untrusted                                       | authn at ingress, authz at dispatch                                       |
+| Host code / tree / spawns | Trusted by construction                         | none — the app _is_ the code                                              |
+| Cluster transport         | Trusted channel between framework nodes         | authorized once at its wire ingress; stamped `principal` travels in scope |
+| **The model**             | **Inside the process, intentionally untrusted** | **capability policy at tool dispatch (§6)**                               |
 
 The model is the subject the identity-authz design cannot see:
 model-originated actions are physically inside the trust boundary while
@@ -331,20 +331,20 @@ bit-for-bit — **zero behavior change until an adopter injects policy.**
 `PolicyRule` / `PolicyDocument` (allow/deny/ask pattern lists over
 tool + args; `matchesQuery` in utils-next is the matcher) are
 serializable — storable in a JSON file (local pole), tenant rows
-(cloud), editable over the wire by an admin surface. The *evaluator*
-is resident; the *rules* travel. Config sources follow the dichotomy:
+(cloud), editable over the wire by an admin surface. The _evaluator_
+is resident; the _rules_ travel. Config sources follow the dichotomy:
 inline shorthand (`permissions: { allow, deny, ask }`) or configured
 layered sources (`[managedPolicy(fromFile(...)),
 projectPolicy(fromFile("./agentick.json")), learnedPolicy()]`).
 
 **The policy cascade is deny-wins, narrowing-only** — an outer deny is
 never widened by an inner allow; inner layers only restrict or add
-asks. This is the *opposite* of every configuration cascade in the
+asks. This is the _opposite_ of every configuration cascade in the
 framework (extension bridges, strategy overrides: inner-wins). It
 needs its own merge primitive (`mergeNarrowing`, utils-next) —
 **using `mergeLayered` here is a security bug wearing a house idiom.**
-Stated side by side: *configuration cascades override inward; policy
-cascades narrow inward.*
+Stated side by side: _configuration cascades override inward; policy
+cascades narrow inward._
 
 Effective policy is **compiled per execution** (the tools-per-tick
 rhythm), cached, re-resolved on layer change. **Spawn inheritance
@@ -399,14 +399,14 @@ stamp; the scope carries evidence; the journal keeps the receipts.**
 > Command-payload validation failures reuse the existing registered
 > `InvalidPayload` — no new error type was needed.
 
-| # | Package | Change | ~LOC |
-| --- | --- | --- | --- |
-| 1 | spec | `CommandDescriptor` (+`exposure`), `origin` on `EventScope`, `AuthError`/`PermissionDenied`, `ToolDeniedByPolicy`, `PolicyRule`/`PolicyDecision` | 60 |
-| 2 | runtime | `BaseHarness.command()` + registry dispatch step + `commands()` + meta-verb; `MessageEnvelope.origin?` | 100 |
-| 3 | gateway | dynamic resolver on `WireExtensionRegistry` (explicit-beats-dynamic) + resolver fn with Authorizer gate + `commands/list`; `staticAuthorizer`/`permissiveAuthorizer` | 90 |
-| 4 | tool-executor | `DispatchPolicy` port replacing the hardcoded gate; `confirmationAnnotationsPolicy()` default | 60 |
-| 5 | utils | `mergeNarrowing` | 20 |
-| 6 | harness packages | migrate switches → declarations; `WireMethods` augmentations | net-negative |
+| #   | Package          | Change                                                                                                                                                               | ~LOC         |
+| --- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | spec             | `CommandDescriptor` (+`exposure`), `origin` on `EventScope`, `AuthError`/`PermissionDenied`, `ToolDeniedByPolicy`, `PolicyRule`/`PolicyDecision`                     | 60           |
+| 2   | runtime          | `BaseHarness.command()` + registry dispatch step + `commands()` + meta-verb; `MessageEnvelope.origin?`                                                               | 100          |
+| 3   | gateway          | dynamic resolver on `WireExtensionRegistry` (explicit-beats-dynamic) + resolver fn with Authorizer gate + `commands/list`; `staticAuthorizer`/`permissiveAuthorizer` | 90           |
+| 4   | tool-executor    | `DispatchPolicy` port replacing the hardcoded gate; `confirmationAnnotationsPolicy()` default                                                                        | 60           |
+| 5   | utils            | `mergeNarrowing`                                                                                                                                                     | 20           |
+| 6   | harness packages | migrate switches → declarations; `WireMethods` augmentations                                                                                                         | net-negative |
 
 **Sequencing:** 1+2 first (independently valuable; timeline as
 migration proof, right after A2.2). 3 ships **with** the Authorizer

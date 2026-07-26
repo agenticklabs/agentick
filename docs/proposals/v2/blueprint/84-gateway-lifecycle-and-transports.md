@@ -30,10 +30,10 @@ creates. This ADR makes the gateway a real deployment root:
 The gateway is a server. The canonical server lifecycle is a **pair**, and
 graceful-vs-forced teardown is a **parameter**, not a second method:
 
-| Precedent | Start | Stop |
-| --- | --- | --- |
-| Node `http.Server` / `net.Server` | `listen()` | `close()` |
-| gRPC / k8s servers | `Start()` | `Stop(grace)` |
+| Precedent                             | Start       | Stop                  |
+| ------------------------------------- | ----------- | --------------------- |
+| Node `http.Server` / `net.Server`     | `listen()`  | `close()`             |
+| gRPC / k8s servers                    | `Start()`   | `Stop(grace)`         |
 | Node `net.Socket` (no graceful drain) | `connect()` | `destroy()` / `end()` |
 
 A gateway HAS a graceful drain, so it takes the `http.Server` shape:
@@ -43,7 +43,7 @@ gateway.listen(): Promise<void>            // fan out to transport.listen(this);
 gateway.close(opts?: { drain?: boolean }): Promise<void>  // terminal; drain-by-default
 ```
 
-- `listen()` names what start *does* — bind the transports so they listen — and
+- `listen()` names what start _does_ — bind the transports so they listen — and
   reads identically to each `transport.listen()`, keeping the fan-out nominally
   consistent. (`start()` is the acceptable generic if a deployment has no
   transports; `listen()` on zero transports is a no-op that just flips ready.)
@@ -92,7 +92,7 @@ the `transport-next` `DispatchHost` alias, so spec stays dep-free):
 interface ServerTransport {
   readonly id: string;
   listen(host: GatewayHarnessProtocol): Promise<void>; // bind + accept; route inbound via dispatchRequest(host, …)
-  close(): Promise<void>;                                // stop accepting, drain
+  close(): Promise<void>; // stop accepting, drain
 }
 ```
 
@@ -104,10 +104,10 @@ the transport's factory, exactly as Node splits `http.createServer(opts)` from
 fan-out stays uniform):
 
 ```ts
-webSocketServerTransport({ port: 8080, host: "0.0.0.0", tls })
-unixSocketServerTransport({ path: "/run/agentick.sock" })
-httpServerTransport({ port: 3000 })
-inProcessServerTransport()                       // nothing to bind
+webSocketServerTransport({ port: 8080, host: "0.0.0.0", tls });
+unixSocketServerTransport({ path: "/run/agentick.sock" });
+httpServerTransport({ port: 3000 });
+inProcessServerTransport(); // nothing to bind
 ```
 
 The **one** thing every transport needs at listen-time that only the gateway can
@@ -168,14 +168,14 @@ child), exactly as the app already threads to its sessions.
 Each routes through `BaseHarness.runOperation`, so each mints the full triad
 (`on<X>` / `onBefore<X>` / `onAfter<X>`) and is `guard`-able:
 
-| Op | Hooks | Purpose |
-| --- | --- | --- |
-| `gateway:start` | `onGatewayStart` triad | before = gate / feature-flag transports; after = log bound addresses |
-| `gateway:close` (was `gateway:close-gateway`) | `onGatewayClose` triad | terminal teardown; symmetric with start |
-| `authorizer:authorize` | `onBeforeAuthorize` / `onAfterAuthorize` | the **fine contextual** auth layer (see §5) |
-| `gateway:accept` | `onBeforeGatewayAccept` / `onAfter…` | **LANDED.** Per-CONNECTION admission / rate-limit / observe — fired ONCE when a **connection-oriented** transport (WebSocket / Unix socket) accepts a persistent client connection, after ingress-authn, before frames flow. `onBeforeGatewayAccept` throws to REJECT (the transport drops the connection). Request-oriented HTTP does NOT fire it — its admission is the per-request `authorize` path |
-| `gateway:create-app` | `onBeforeGatewayCreateApp` / `onAfter…` | multi-tenant gating — veto/transform an app mount |
-| `wire:<method>` | `onBeforeWire<Method>` … | the wire boundary (ADR 83 wire section) |
+| Op                                            | Hooks                                    | Purpose                                                                                                                                                                                                                                                                                                                                                                                                |
+| --------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `gateway:start`                               | `onGatewayStart` triad                   | before = gate / feature-flag transports; after = log bound addresses                                                                                                                                                                                                                                                                                                                                   |
+| `gateway:close` (was `gateway:close-gateway`) | `onGatewayClose` triad                   | terminal teardown; symmetric with start                                                                                                                                                                                                                                                                                                                                                                |
+| `authorizer:authorize`                        | `onBeforeAuthorize` / `onAfterAuthorize` | the **fine contextual** auth layer (see §5)                                                                                                                                                                                                                                                                                                                                                            |
+| `gateway:accept`                              | `onBeforeGatewayAccept` / `onAfter…`     | **LANDED.** Per-CONNECTION admission / rate-limit / observe — fired ONCE when a **connection-oriented** transport (WebSocket / Unix socket) accepts a persistent client connection, after ingress-authn, before frames flow. `onBeforeGatewayAccept` throws to REJECT (the transport drops the connection). Request-oriented HTTP does NOT fire it — its admission is the per-request `authorize` path |
+| `gateway:create-app`                          | `onBeforeGatewayCreateApp` / `onAfter…`  | multi-tenant gating — veto/transform an app mount                                                                                                                                                                                                                                                                                                                                                      |
+| `wire:<method>`                               | `onBeforeWire<Method>` …                 | the wire boundary (ADR 83 wire section)                                                                                                                                                                                                                                                                                                                                                                |
 
 `gateway:close-gateway` → `gateway:close` drops the redundant `Gateway` in the
 Pascal suffix (`onGatewayCloseGateway` → `onGatewayClose`), pairing cleanly with
@@ -190,7 +190,7 @@ the `authorize` **op** through `runOperation` adds the **fine contextual layer**
 on top of that floor:
 
 - `onBeforeAuthorize` — augment `AuthorizeInput` from request context (add
-  contextual scopes) or throw to deny. It can make auth *stricter* or grant
+  contextual scopes) or throw to deny. It can make auth _stricter_ or grant
   contextually; it can NEVER waive the ceiling (checked separately, before).
 - `onAfterAuthorize` — observe / audit the decision.
 

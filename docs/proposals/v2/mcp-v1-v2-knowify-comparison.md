@@ -66,19 +66,19 @@ built, and v2 provides the pipeline v1 never had.
 
 ## 3. `libs/mcp` port matrix (v1 `MCPServerOptions` → v2 `McpServerOptions`)
 
-| libs/mcp uses (v1) | v2 status |
-| --- | --- |
-| `tools` + `toolFilter` + `toolTransform` | ✓ registry + `filter` + `transforms` (direct mapping; live `ToolCatalog` drives `list_changed`) |
-| `prompts` (29 `MCPPromptDefinition`) | ✓ `PromptDeclaration[]` — mechanical reshape |
-| `resources` / `resourceTemplates` | ✓ `Resources` instance + filter; templates ✓ |
-| Prompt-arg completion | ✓ `completions.prompts` config |
-| **Resource-template completion** (their hand-rolled `complete.model`) | **⚠ verify** — v2 config shows prompt-arg completions only; client verb exists. Named gap if absent |
-| **Per-session `instructions: () => string`** (injects live user/company context) | **⚠ likely gap** — not in v2 options (`serverInfo` looks static). Named issue; small |
-| `contextProvider` | Replaced by authenticator stage → `ctx.mcp.user`; kernel-Context bridging becomes explicit identity threading (better) |
-| `securitySchemes` / permissive `security` | Replaced by 5-stage pipeline + `capabilities` opt-out; gateway-owns-auth mode = permissive authenticator |
-| **`apps` (`MCPAppDefinition`, `ui://`)** | **✗ absent in v2** — Knowify usage today is one env-gated hello-world; not slice-critical, but the MCP-Apps iframe relay in k-assistant-v2 depends on the concept long-term. Named issue |
-| `mcpServerPlugin({ path, server })` gateway mount | No v2 equivalent (Mode B unbuilt) — **not needed** (separate door, §2) |
-| Handler ctx `request.{user, clientInfo, authInfo, _meta}` + `sendProgress` | Reshaped: `ToolHandlerCtx & { mcp: McpRequestExtras }`; `sendProgress` → `ctx.progress` bus seam. Mechanical sweep of `libs/mcp` handlers |
+| libs/mcp uses (v1)                                                               | v2 status                                                                                                                                                                                |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools` + `toolFilter` + `toolTransform`                                         | ✓ registry + `filter` + `transforms` (direct mapping; live `ToolCatalog` drives `list_changed`)                                                                                          |
+| `prompts` (29 `MCPPromptDefinition`)                                             | ✓ `PromptDeclaration[]` — mechanical reshape                                                                                                                                             |
+| `resources` / `resourceTemplates`                                                | ✓ `Resources` instance + filter; templates ✓                                                                                                                                             |
+| Prompt-arg completion                                                            | ✓ `completions.prompts` config                                                                                                                                                           |
+| **Resource-template completion** (their hand-rolled `complete.model`)            | **⚠ verify** — v2 config shows prompt-arg completions only; client verb exists. Named gap if absent                                                                                      |
+| **Per-session `instructions: () => string`** (injects live user/company context) | **⚠ likely gap** — not in v2 options (`serverInfo` looks static). Named issue; small                                                                                                     |
+| `contextProvider`                                                                | Replaced by authenticator stage → `ctx.mcp.user`; kernel-Context bridging becomes explicit identity threading (better)                                                                   |
+| `securitySchemes` / permissive `security`                                        | Replaced by 5-stage pipeline + `capabilities` opt-out; gateway-owns-auth mode = permissive authenticator                                                                                 |
+| **`apps` (`MCPAppDefinition`, `ui://`)**                                         | **✗ absent in v2** — Knowify usage today is one env-gated hello-world; not slice-critical, but the MCP-Apps iframe relay in k-assistant-v2 depends on the concept long-term. Named issue |
+| `mcpServerPlugin({ path, server })` gateway mount                                | No v2 equivalent (Mode B unbuilt) — **not needed** (separate door, §2)                                                                                                                   |
+| Handler ctx `request.{user, clientInfo, authInfo, _meta}` + `sendProgress`       | Reshaped: `ToolHandlerCtx & { mcp: McpRequestExtras }`; `sendProgress` → `ctx.progress` bus seam. Mechanical sweep of `libs/mcp` handlers                                                |
 
 ## 4. v2 gaps → named issues (none on the slice-1 critical path)
 

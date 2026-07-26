@@ -179,12 +179,12 @@ and the documentation of all of the above.
 Every required arg has a default, EXCEPT wire-specific addressing.
 Minimum-viable adopter call by tier:
 
-| Wire  | Minimum call                                                                                 |
-| ----- | -------------------------------------------------------------------------------------------- |
-| Unix  | `defineUnixCluster({ socketPath: "..." })`                                                   |
-| TCP   | `defineTcpCluster({ port: 9876 })` _(host defaults to `"127.0.0.1"`)_                        |
-| WS    | `defineWsCluster({ url: "ws://127.0.0.1:9876/cluster" })`                                    |
-| Redis | `defineRedisCluster({ pubClient: ..., subClient: ... })`                                     |
+| Wire  | Minimum call                                                                            |
+| ----- | --------------------------------------------------------------------------------------- |
+| Unix  | `defineUnixCluster({ socketPath: "..." })`                                              |
+| TCP   | `defineTcpCluster({ port: 9876 })` _(host defaults to `"127.0.0.1"`)_                   |
+| WS    | `defineWsCluster({ url: "ws://127.0.0.1:9876/cluster" })`                               |
+| Redis | `defineRedisCluster({ pubClient: ..., subClient: ... })`                                |
 | Local | `defineLocalCluster({ nodeId: "test-node" })` _(testing — `@agentick/cluster/testing`)_ |
 
 `partitioning`, `codec`, `fanoutMode`, `journal`, `nodeId` all

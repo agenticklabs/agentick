@@ -9,14 +9,13 @@
 
 ## 1. Your own wire methods — zero client code
 
-Declare the row (types) and the handler (behavior). The client method *falls out*.
+Declare the row (types) and the handler (behavior). The client method _falls out_.
 
 ```ts
 // 1. spec row — the ONLY type definition anywhere:
 declare module "@agentick/spec-next" {
   interface WireMethods {
-    "billing/approve": { params: { sessionId: string; orderId: string };
-                         result: { ok: boolean } };
+    "billing/approve": { params: { sessionId: string; orderId: string }; result: { ok: boolean } };
   }
 }
 
@@ -32,14 +31,15 @@ const billingExt = defineWireExtension({
 const gateway = await createGateway({ wireExtensions: [billingExt] });
 
 // 3. client — NOTHING. It already exists, fully typed:
-await session.billing.approve({ orderId: "o_1" });   // ✓ typed from the row
-await session.billing.aprove({ orderId: "o_1" });    // ✗ compile error
+await session.billing.approve({ orderId: "o_1" }); // ✓ typed from the row
+await session.billing.aprove({ orderId: "o_1" }); // ✗ compile error
 ```
 
 > Verified by `packages-next/client/src/__tests__/wire-proxy-middleware-e2e.spec.ts`
 > (zero-client-code round-trip) and
 > `packages-next/spec/src/__tests__/wire-proxy.type.spec.ts` (the typed-from-the-row
-> + typo-is-a-compile-error IntelliSense contract).
+>
+> - typo-is-a-compile-error IntelliSense contract).
 
 - Method names map `session.<ns>.<method>` ⇔ `"<ns>/<method>"`.
 - `sessionId` is bound for you (the handle carries addressing).
@@ -54,9 +54,9 @@ If your namespace has live state, register a **view** (a fold over a channel
 topic). Then the handle carries the store contract:
 
 ```ts
-session.knobs.list();                 // current state incl. pre-connection truth
+session.knobs.list(); // current state incl. pre-connection truth
 session.knobs.get("depth");
-session.knobs.subscribe(cb);          // cb(), no args — read via list()
+session.knobs.subscribe(cb); // cb(), no args — read via list()
 // React (or Svelte/Vue — same two functions):
 useSyncExternalStore(session.knobs.subscribe, session.knobs.list);
 ```
@@ -77,7 +77,7 @@ modelOnly.close();
 Local view operations (not wire) live on views — and thus on the handle too:
 
 ```ts
-session.timeline.seed(await fetch("/my/api/history").then(r => r.json()));
+session.timeline.seed(await fetch("/my/api/history").then((r) => r.json()));
 session.timeline.prepend(olderPage);
 session.timeline.clear();
 ```
@@ -90,7 +90,7 @@ connected:
 
 ```ts
 const ask = session.elicitations.list()[0];
-await ask?.accept({ approved: true });     // = the derived respond method, partially applied
+await ask?.accept({ approved: true }); // = the derived respond method, partially applied
 ```
 
 ## 4. Your data everywhere (floors, not ceilings)
@@ -104,7 +104,7 @@ await ask?.accept({ approved: true });     // = the derived respond method, part
 ## 5. What falls out of this design (the compounding)
 
 1. **Devtools for free** — the wire table is introspectable: an API panel
-   (methods, params, try-it) can be *generated* from `WireMethods` + `commands()`.
+   (methods, params, try-it) can be _generated_ from `WireMethods` + `commands()`.
 2. **One mock seam** — a spy/fake client fakes every vertical uniformly (all
    methods funnel one `request`); testing your `billing` = testing our `knobs`.
 3. **Client middleware applies universally** — `client.use(...)` (slice 4)
@@ -114,7 +114,7 @@ await ask?.accept({ approved: true });     // = the derived respond method, part
    `packages-next/client/src/__tests__/wire-proxy-middleware-e2e.spec.ts` —
    one `client.use` observed on `knobs/set` AND the zero-code `testns/doThing`,
    plus namespace-scoped `session.knobs.use`.)
-4. **The table is an IDL** — a Python/Swift/Go client can be *generated* from
+4. **The table is an IDL** — a Python/Swift/Go client can be _generated_ from
    the same rows; the wire table is the protocol schema, not just TS types.
 5. **Docs generation** — the API reference renders from the table; it cannot
    drift from reality.
@@ -128,12 +128,12 @@ await ask?.accept({ approved: true });     // = the derived respond method, part
 A wire method is a first-class command, not a second-class RPC. One row + one
 handler earns **four surfaces**, no per-method wiring (ADR 90):
 
-| One `"<ns>/<method>"` row gives you… | …reached as                                                        |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| **client method**                    | `session.<ns>.<method>(params)` — typed, `sessionId` bound         |
+| One `"<ns>/<method>"` row gives you… | …reached as                                                                  |
+| ------------------------------------ | ---------------------------------------------------------------------------- |
+| **client method**                    | `session.<ns>.<method>(params)` — typed, `sessionId` bound                   |
 | **authz scope**                      | the verb name IS the scope label (`crm/deleteContact` → `crm:deleteContact`) |
-| **journaled + hookable op**          | a `wire:<method>` operation (requested→terminal on the bus/journal) |
-| **typed gateway hooks**              | `gateway.hook({ onBeforeWireCrmDeleteContact })` — typed from the row |
+| **journaled + hookable op**          | a `wire:<method>` operation (requested→terminal on the bus/journal)          |
+| **typed gateway hooks**              | `gateway.hook({ onBeforeWireCrmDeleteContact })` — typed from the row        |
 
 The hooks are derived, not hand-written — `onBeforeWire<Ns><Method>` /
 `onAfterWire<Ns><Method>`, one pair per row (framework OR your augmentation),
@@ -170,8 +170,9 @@ defineWireExtension({
 
 > Verified by `packages-next/transport/src/__tests__/wire-command-e2e.spec.ts`
 > (journaled op + typed hook transform + guard veto→Forbidden / defer→RateLimited
-> + middleware + span attrs + live ctx facets, over a real gateway) and the
-> type-level `packages-next/runtime/src/__tests__/wire-command-hooks.type.spec.ts`.
+>
+> - middleware + span attrs + live ctx facets, over a real gateway) and the
+>   type-level `packages-next/runtime/src/__tests__/wire-command-hooks.type.spec.ts`.
 
 **What full command REGISTRATION (rung 4) still adds.** The typed hooks, guard,
 middleware, span, and authz above make the wire method a command at the GATEWAY

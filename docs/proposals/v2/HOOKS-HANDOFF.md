@@ -6,14 +6,14 @@
 
 ## Where this came from (the through-line)
 
-Started as an nx-knowify question: *how does agentick v2 handle multimodal MODEL INPUT?* The audit found v2 has the currency (ADR 57 `LanguageModelInput`, canonical `MediaSource` with `url|base64|reference|s3|gcs`) but **no reconciler-agnostic seam** to transform input per-provider before the model call. The clean seam is `onBeforeModelGenerate(input, ctx) => reconcile(input, ctx.target)`. Chasing "where does that hook live and how does it cascade" produced the whole **command-lifecycle-hooks** design. **The original goal is still open** (see §Next). Everything below is the substrate that makes it possible.
+Started as an nx-knowify question: _how does agentick v2 handle multimodal MODEL INPUT?_ The audit found v2 has the currency (ADR 57 `LanguageModelInput`, canonical `MediaSource` with `url|base64|reference|s3|gcs`) but **no reconciler-agnostic seam** to transform input per-provider before the model call. The clean seam is `onBeforeModelGenerate(input, ctx) => reconcile(input, ctx.target)`. Chasing "where does that hook live and how does it cascade" produced the whole **command-lifecycle-hooks** design. **The original goal is still open** (see §Next). Everything below is the substrate that makes it possible.
 
 ## The design in one screen
 
 - **Lifecycle is intrinsic to `command()`.** Every harness verb (`<who>:<what>`, e.g. `tool:dispatch`, `model:generate`, `timeline:append`) routes through `BaseHarness.runOperation`, which already emits phase envelopes (events) + composes middleware. Hooks ride that same seam. No privileged "core" layers — every verb, every harness, uniform.
 - **Two surfaces, named for their job:**
-  - **Events** `<who>-<what>-<phase>` (kebab, `start`/`end`) — out-of-band, bus, fire-and-forget, wire-projectable. *Observe* (subscribe).
-  - **Hooks** `onBefore<Who><What>` / `onAfter<Who><What>` (camel) — in-band, awaited, ordered, transform-capable. *Participate* (register).
+  - **Events** `<who>-<what>-<phase>` (kebab, `start`/`end`) — out-of-band, bus, fire-and-forget, wire-projectable. _Observe_ (subscribe).
+  - **Hooks** `onBefore<Who><What>` / `onAfter<Who><What>` (camel) — in-band, awaited, ordered, transform-capable. _Participate_ (register).
 - **Naming is a total function of the command id.** `hook = on + Before|After + PascalCase(<who>:<what>)`. Type-level `Pascal<K>` === runtime `deriveHookNames` (lockstep-tested). Forces canonical op names (e.g. the pending `tool:dispatch → tool:execute` rename).
 - **Contract:** `(value, ctx) => value | void`. Return = transform, `void` = observe, `throw` = veto. `ctx` = RuntimeContext (scope, resolved `target`, principal, hooks, telemetryNamespace). Hooks **are middleware entries** — lifted through the SAME `liftMiddleware` path as `.use`, so ambient ctx / span-nesting / interruption survive an `await` (the §7 fiber invariant — a HARD rule, never a bespoke hook-runner).
 - **Typed via a derived mapped type:** empty-seed `CommandRegistry` (`"<who>:<what>": { input; output }`), one line per verb → `CommandHooks` mints `onBefore<Pascal>?: BeforeHook<input>` + `onAfter<Pascal>?: AfterHook<output>`. Exposure-gated (only augmented verbs are type-safe).
@@ -22,6 +22,7 @@ Started as an nx-knowify question: *how does agentick v2 handle multimodal MODEL
 ## `Hooks` primitive (`packages-next/runtime/src/substrate/base-harness.ts`)
 
 Immutable per-command layer: `ReadonlyMap<pascalSuffix, { before: BeforeHook[]; after: AfterHook[] }>`.
+
 - `Hooks.empty` — identity.
 - `Hooks.from(config: CommandHooks)` — indexes via `parseHookKey` (strips `onBefore`/`onAfter` → Pascal suffix; shared with `deriveHookNames` so from/forOp can't diverge).
 - `extend(child)` — compose: `[...thisBefore, ...childBefore]` per command (this-layer outer). Empty short-circuits (true identity).

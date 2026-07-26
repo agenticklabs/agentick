@@ -48,17 +48,17 @@ agentick already committed to the `useSyncExternalStore` contract (`channelView`
 `get/subscribe` store on the READ side; the bidirectional ones add **action
 verbs** on top (respond / accept / set / call):
 
-| Family | client seam (today) | UI hook | kind |
-| --- | --- | --- | --- |
-| **messages** | timeline channel — §4 (to build) | `useSession(id).messages` | read |
-| **elicitation** | `session.elicitations()` + `respondToElicitation` ✅ | `useElicitation(session)` | **bidirectional** (accept / decline) |
-| **progress** | `onProgress(scope)` ✅ | `useProgress(scope)` | read |
-| **logs** | `onLog(scope)` ✅ | `useLogs(scope)` | read |
-| **task status** | `session:channel:task-status` (façade to build) | `useTasks(session)` | read (+ cancel) |
-| **knobs** | `knobsStateView` ✅ | `useKnobs(session)` | **bidirectional** (set) |
-| **MCP apps / resources** | `mcp/src/client` ✅ | `useMcp…` | read (+ tool actions) |
-| **connection / capabilities** | `onStateChange` / `onCapabilitiesChange` ✅ | `useClient().status` | read |
-| **custom** | `channelView` + a colocated façade | `useChannel(view)` | read (or bidir via the channel's `request`) |
+| Family                        | client seam (today)                                  | UI hook                   | kind                                        |
+| ----------------------------- | ---------------------------------------------------- | ------------------------- | ------------------------------------------- |
+| **messages**                  | timeline channel — §4 (to build)                     | `useSession(id).messages` | read                                        |
+| **elicitation**               | `session.elicitations()` + `respondToElicitation` ✅ | `useElicitation(session)` | **bidirectional** (accept / decline)        |
+| **progress**                  | `onProgress(scope)` ✅                               | `useProgress(scope)`      | read                                        |
+| **logs**                      | `onLog(scope)` ✅                                    | `useLogs(scope)`          | read                                        |
+| **task status**               | `session:channel:task-status` (façade to build)      | `useTasks(session)`       | read (+ cancel)                             |
+| **knobs**                     | `knobsStateView` ✅                                  | `useKnobs(session)`       | **bidirectional** (set)                     |
+| **MCP apps / resources**      | `mcp/src/client` ✅                                  | `useMcp…`                 | read (+ tool actions)                       |
+| **connection / capabilities** | `onStateChange` / `onCapabilitiesChange` ✅          | `useClient().status`      | read                                        |
+| **custom**                    | `channelView` + a colocated façade                   | `useChannel(view)`        | read (or bidir via the channel's `request`) |
 
 The framework binding is a **single** adapter — "wrap a `get/subscribe` store" —
 reused across every family; the bidirectional hooks just also return the action
@@ -68,7 +68,7 @@ library stays tiny even as the surface grows** — a new family is a façade + a
 one-line hook, never a new binding.
 
 Bidirectional is not special-cased: it's the `ChannelHandle` `request`/`onRequest`
-substrate surfaced to the UI as *(pending request store, respond action)*.
+substrate surfaced to the UI as _(pending request store, respond action)_.
 Elicitation is the canonical instance; a custom channel can do the same ask/respond.
 
 ## 2a. One firehose per session, demuxed client-side (NOT N merged streams)
@@ -78,7 +78,7 @@ above is already a `ProtocolEvent` on the **one substrate bus**, and
 `client.session(id).events(query)` is a single cursor-based subscription over it.
 The gateway's subscription projection (`openScopeEvents` → `app.events(query)`
 stamped with `sessionId`) applies the query with **no per-event-type gating and
-no server-only visibility flag** — auth is on the *scope* (may you watch this
+no server-only visibility flag** — auth is on the _scope_ (may you watch this
 session?), not per event. So a broad `EventQuery` (surface/name-wildcard) is the
 **whole session firehose**.
 
@@ -102,12 +102,12 @@ is strictly simpler than per-family subscriptions and is the model this ADR adop
 all on the bus: `timeline:append` (messages), channel publishes (knobs / tasks /
 elicitation / custom), `*:signal:*` (log / progress), plus lifecycle including
 **abort** (execution terminal / `stopReason: "aborted"`). Fine token-level
-streaming (`content-delta`) is fed to the *sender's* `handle.events()` queue and
+streaming (`content-delta`) is fed to the _sender's_ `handle.events()` queue and
 is **intentionally not** put on the session bus. So:
 
 - **The sender** renders token-by-token from its own `handle.events()`.
 - **Observers** (other clients on the same session) render from the firehose —
-  message *appends* as they land, plus lifecycle (started / aborted / completed).
+  message _appends_ as they land, plus lifecycle (started / aborted / completed).
   No token-by-token for observers; that's the deliberate trade (no
   `session:stream:*` fan-out, less wire traffic).
 
@@ -126,14 +126,14 @@ union (not an AI-SDK clone):
 interface UIMessage {
   id: string;
   role: "user" | "assistant" | "system";
-  parts: UIPart[];          // ordered, incrementally built
+  parts: UIPart[]; // ordered, incrementally built
   status: "streaming" | "complete";
 }
 type UIPart =
-  | { type: "text"; text: string }                        // ← content / content-delta
-  | { type: "reasoning"; text: string }                   // ← reasoning-*
-  | { type: "tool-call"; callId; name; input; output? }   // ← tool-call-*
-  | { type: "custom"; tag: string; data: unknown };       // ← custom-block-*
+  | { type: "text"; text: string } // ← content / content-delta
+  | { type: "reasoning"; text: string } // ← reasoning-*
+  | { type: "tool-call"; callId; name; input; output? } // ← tool-call-*
+  | { type: "custom"; tag: string; data: unknown }; // ← custom-block-*
 ```
 
 The **fold** is the one piece of real logic — a pure reducer
@@ -175,7 +175,7 @@ message fold renders appends live and reserves token-by-token for the sender's
 
 **Historical note — the conversation is the timeline harness** — already an append-only event log
 (a fold), with `exportSnapshot()` (snapshot) and `timeline:append` bus events
-(deltas). For a **multiplexed / collaborative** UI you must fold the *session's*
+(deltas). For a **multiplexed / collaborative** UI you must fold the _session's_
 stream (all activity — another client or the agent itself can produce messages),
 NOT your own `send()` handle. `handle.events()` covers one execution; the UI's
 live view is the session-wide stream.
@@ -195,7 +195,7 @@ façade that mirrors `knobsStateView`. This does **not exist yet** and is ADR 85
   `SubscriptionStream`) with a timeline-name query — works today, lower-level;
   the channel is the clean end-state.
 
-This makes the message list "just another channel," which is *why* multiplexing
+This makes the message list "just another channel," which is _why_ multiplexing
 (§5) falls out for free. It also makes the client `useSession(id).messages` the
 **over-the-wire twin** of the existing in-process `useTimeline` (`timeline/src/react`,
 via `useBridges`): same conversation, one bridged into the render tree, one folded
@@ -208,30 +208,32 @@ the raw event stream into `UIMessage[]`. **Where it runs is a deliberate decisio
 and it differs from AI-SDK for a structural reason.**
 
 AI-SDK runs it **server-side**: it's a stateless route handler, so the `POST` is
-where the model call happens and its **wire *is* the UI message stream**
+where the model call happens and its **wire _is_ the UI message stream**
 (`createUIMessageStreamResponse`); the client just accumulates. agentick's topology
 is inverted — the model call runs **inside the session/harness**, events flow onto
 the **bus → firehose**, and our **wire is the raw substrate event stream**
-(UI-agnostic, serving *every* consumer: other agents, logging, tooling, N UIs). A
+(UI-agnostic, serving _every_ consumer: other agents, logging, tooling, N UIs). A
 UIMessage-shaped wire would couple the substrate to one UI model — against
 "substrate, not opinion."
 
 **DECIDED: client-side by default.**
+
 - The `UIMessage` model + `foldMessage` are a **UI concern** → they live in
   `ui-core`, folding the raw firehose on the consumer.
 - The adopter writes **no route handler** — the gateway already serves the
-  firehose; `ui-core` folds it. That's *less* server code than AI-SDK's pattern,
+  firehose; `ui-core` folds it. That's _less_ server code than AI-SDK's pattern,
   not more.
 
 **Server-side is the escape hatch, via the SAME reducer.** Because `foldMessage`
 is pure, it also runs server-side for consumers that can't fold:
+
 - **Thin / non-TS / SSR clients** (a Python client, an edge SSR endpoint): run the
   fold server-side and project a **`session:channel:messages` UIMessage channel**
   (the fold as a channel producer). A dumb client then reads pre-normalized
   `UIMessage`s — AI-SDK's shape, opt-in, without making the default wire
   UI-opinionated.
 
-So it is not client-*or*-server: **one shared reducer, client by default, server
+So it is not client-_or_-server: **one shared reducer, client by default, server
 when a consumer can't fold.** `ui-core` ships `foldMessage` + a
 `toUIMessageStream(events)` wrapper usable on either side; the optional
 `session:channel:messages` projection is the server-side deployment of it.
@@ -253,7 +255,7 @@ every family store for the session:
   arg. `useClient()` reads it.
 
 The transport already multiplexes the underlying wire subscriptions; the registry
-multiplexes the *stores* on top.
+multiplexes the _stores_ on top.
 
 ## 6. Hooks — a family per projection, hierarchy mirrors the handles
 
@@ -338,18 +340,18 @@ API reference.
   independent streamable `get/subscribe` store; a response streams several at once
   (messages + a `todos` channel + a `plan` channel). agentick has this natively —
   the UI composes N stores, all demuxed from the one firehose (§2a). No `createStreamableUI`
-  equivalent needed; channels *are* the streamables.
+  equivalent needed; channels _are_ the streamables.
 - **Generative UI — tools rendered as UI** ([ai-sdk rendering-ui](https://ai-sdk.dev/docs/advanced/rendering-ui-with-language-models)).
   A tool's output renders as a component, not text. Two agentick paths:
   1. **Tool-call parts** — the `UIMessage` `tool-call` part carries `{ name, input,
-     output }`; the binding takes a **render map** `Record<toolName, Component>` and
+output }`; the binding takes a **render map** `Record<toolName, Component>` and
      renders the part with it (the static/one-shot case).
-  2. **Tool-owned channel** — for *interactive/live* generative UI, the tool opens a
+  2. **Tool-owned channel** — for _interactive/live_ generative UI, the tool opens a
      `session.channel<T>(name)` and the component is a `useChannel(view)` over it
      (a live widget the tool keeps updating, even bidirectional via the channel's
      `request`). This is the richer path and the one custom channels (§8) unlock.
-  So generative UI isn't a separate subsystem — it's a render map for the static
-  case and a channel for the live case.
+     So generative UI isn't a separate subsystem — it's a render map for the static
+     case and a channel for the live case.
 
 ## 9. Open decisions (workshop)
 
@@ -491,4 +493,3 @@ function useChannel<T>(view: Store<T>): T {           // any channelView / famil
 Angular is the same shape over signals + DI: `acquireSession` in a service,
 `toSignal(fromStore(store.messages))`. **The only real logic is `foldMessage` and
 the `routes` table** — everything else is plumbing over primitives that exist.
-

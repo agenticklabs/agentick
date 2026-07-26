@@ -2,9 +2,9 @@
 
 **Status:** PROPOSED 2026-07-07 (Fable, for Ryan). **Cut-blocker** — the prod-readiness
 gate (cloud persona #163) ingresses over HTTP and connectors, both currently unauthenticated.
-**Builds on:** ADR 50 (gateway extensions — designed + *deferred* `interceptIngress`), ADR 51
+**Builds on:** ADR 50 (gateway extensions — designed + _deferred_ `interceptIngress`), ADR 51
 (§4 Authorizer + "authn happens ONCE at ingress"), ADR 34 (scoped-capability cascade — the
-`AuthSource` *grant-derivation* side), ADR 47 (no gateway connection registry — the seam lives
+`AuthSource` _grant-derivation_ side), ADR 47 (no gateway connection registry — the seam lives
 at transport ingress), ADR 48 (`principal` → structural identity), ADR 58 (connectors — the
 second ingress edge).
 **Touches:** `@agentick/spec` (`wire/authorizer.ts` — `AuthSource`/`IngressIdentity`
@@ -25,7 +25,7 @@ transport** (`transport-websocket/server.ts` inline). `transport-http` (the prod
 `principal: undefined` = the trusted local pole = an **open door in prod**.
 
 This ADR realizes ADR 50's deferred **`interceptIngress`** as **one uniform seam for every
-trust-boundary crossing** — client transports *and* connectors — with a **polymorphic credential**
+trust-boundary crossing** — client transports _and_ connectors — with a **polymorphic credential**
 and `AuthSource` as the normalizing **identity broker**. In-process calls (`session.send`) are the
 trusted **interior** and deliberately never touch the seam. Authenticate **once per crossing**,
 propagate the `principal` inward; **never re-authenticate internally.**
@@ -40,11 +40,11 @@ distinction (API gateways; Envoy/Istio ingress gateways):
 - **East-west** — internal / in-process; **do not re-authenticate — propagate the established
   identity.**
 
-| Edge | Trust crossing? | Authn shape |
-|---|---|---|
-| **Client transport** (ws / http / unix) | ✅ yes | verify a credential (bearer/header) → principal. **Ingress.** |
-| **Connector** (telegram / imessage, ADR 58) | ✅ yes — **federated** | the platform already authenticated the user; verify the delivery is genuinely the platform, then **map** the asserted platform identity → principal. **Ingress, federated.** |
-| **`session.send()` / `dispatch` / in-process** | ❌ **no** | trusted interior; **explicit** caller-supplied principal (or the system/service principal). Never hits the seam. |
+| Edge                                           | Trust crossing?        | Authn shape                                                                                                                                                                  |
+| ---------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Client transport** (ws / http / unix)        | ✅ yes                 | verify a credential (bearer/header) → principal. **Ingress.**                                                                                                                |
+| **Connector** (telegram / imessage, ADR 58)    | ✅ yes — **federated** | the platform already authenticated the user; verify the delivery is genuinely the platform, then **map** the asserted platform identity → principal. **Ingress, federated.** |
+| **`session.send()` / `dispatch` / in-process** | ❌ **no**              | trusted interior; **explicit** caller-supplied principal (or the system/service principal). Never hits the seam.                                                             |
 
 **Authenticate-once-propagate** is the load-bearing rule (Java `SecurityContext`, .NET
 `ClaimsPrincipal`, Spring `SecurityContextHolder`, Rails `current_user`) — and it's already ADR 51
@@ -54,7 +54,7 @@ anti-pattern**: it couples every hop to the IdP, multiplies latency, and multipl
 places a mistake becomes a hole.
 
 The **one** legitimate nuance: **stateless HTTP authenticates per-request** — not redundant
-re-auth, but because each stateless request *is its own distinct edge crossing* (no connection to
+re-auth, but because each stateless request _is its own distinct edge crossing_ (no connection to
 pin identity to). So the rule is **once per crossing**: per-connection for stateful transports
 (ws), per-request for stateless (http).
 
@@ -62,13 +62,13 @@ pin identity to). So the rule is **once per crossing**: per-connection for state
 
 - **"Keep per-transport inline authn (what websocket does today)."** It works for ws, but it
   duplicates the extract-verify-stamp logic per transport, gives no home for non-authn edge
-  concerns (rate-limit, IP-allowlist, tenant-resolution), and — the actual bug — was simply *never
-  added* to http/unix/connectors. Duplication is why coverage drifted. One seam, called at every
+  concerns (rate-limit, IP-allowlist, tenant-resolution), and — the actual bug — was simply _never
+  added_ to http/unix/connectors. Duplication is why coverage drifted. One seam, called at every
   edge, is the fix.
 - **"Run auth idempotently on every request everywhere."** The distributed re-auth anti-pattern
   above. Rejected.
 - **"A separate `PlatformIdentityResolver` for connectors."** Splits the security surface into two
-  places to audit; the connector isn't a *different mechanism*, it's a different *credential shape*
+  places to audit; the connector isn't a _different mechanism_, it's a different _credential shape_
   feeding the same broker. Rejected in favor of the polymorphic credential (below). This is the
   textbook **federated-identity / token-broker** pattern (OIDC, SAML, SPIFFE): normalize
   heterogeneous external identities into one internal principal shape.
@@ -98,8 +98,17 @@ export interface IngressContext {
 
 /** The polymorphic credential — one seam, many shapes. */
 export type IngressCredential =
-  | { readonly kind: "bearer"; readonly token?: string; readonly headers: Readonly<Record<string, string | undefined>> }
-  | { readonly kind: "platform"; readonly platform: string; readonly platformUserId: string; readonly assertion?: unknown }
+  | {
+      readonly kind: "bearer";
+      readonly token?: string;
+      readonly headers: Readonly<Record<string, string | undefined>>;
+    }
+  | {
+      readonly kind: "platform";
+      readonly platform: string;
+      readonly platformUserId: string;
+      readonly assertion?: unknown;
+    }
   | { readonly kind: "none" };
 
 /** Enrichment-only, install-order. Throws a typed error to reject the crossing. */
@@ -109,7 +118,7 @@ export type IngressInterceptor = (ctx: IngressContext) => IngressContext | Promi
 `IngressIdentity` (`{ principal?, user?, scopes? }`) and the `AuthSource` port already exist in
 `spec/wire/authorizer.ts` — unchanged as outputs. The only spec change to `AuthSource` is
 **widening its input** from `{ token }` to the `IngressCredential` union so one broker handles
-bearer *and* platform:
+bearer _and_ platform:
 
 ```ts
 export interface AuthSource {
@@ -130,7 +139,7 @@ edge builds IngressContext (native creds)
    WireExtensionContext.principal / scope principal  →  Authorizer (ADR 51) sees a REAL principal
 ```
 
-The single auth interceptor degenerates to "call `AuthSource` at the edge" — which *is* slice 1.
+The single auth interceptor degenerates to "call `AuthSource` at the edge" — which _is_ slice 1.
 The multi-interceptor value (extra enrichers) is why it's a chain, not a bare function.
 
 ### The edges
@@ -155,7 +164,7 @@ The multi-interceptor value (extra enrichers) is why it's a chain, not a bare fu
 `session.send`, `session.dispatch`, and any in-process call are **east-west**. They take an
 **explicit `principal`** from the caller (already-authenticated upstream, or the system principal);
 they **must not** run `interceptIngress`. Authenticating your own in-process call is authenticating
-yourself. If `send()` needs authentication, a wire sits in front of it — and *that wire* is the
+yourself. If `send()` needs authentication, a wire sits in front of it — and _that wire_ is the
 ingress edge.
 
 ## Enforcement relationship (authn ≠ authz)
@@ -173,7 +182,7 @@ enforcement point each; no re-auth inward.
 - **`AuthSource` configured** → **deny tokenless** (`staticTokenAuthSource` `allowAnonymous:false`
   by default; the prototype-key-bypass guard stays). Anonymous only when explicitly opted in.
 - The two together give the ADR 51 §4 matrix: local pole passes, any principal denied until the
-  Authorizer grants — now with a principal that is *actually stamped at every prod edge*.
+  Authorizer grants — now with a principal that is _actually stamped at every prod edge_.
 
 ## Security invariants (INVARIANT)
 
@@ -181,9 +190,9 @@ enforcement point each; no re-auth inward.
    the client. Per credentials-never-cross-wire — the client sees status + verbs, never credential
    material or the identity-derivation logic.
 2. **Enrichment-only, never authz.** An interceptor adds identity or throws; it does not gate verbs.
-3. **Federated ≠ blind trust.** The connector edge must verify the *delivery* is genuinely the
+3. **Federated ≠ blind trust.** The connector edge must verify the _delivery_ is genuinely the
    platform (webhook signature / platform auth) before trusting its asserted `platformUserId`. The
-   platform authenticated the *user*; the connector authenticates the *platform*.
+   platform authenticated the _user_; the connector authenticates the _platform_.
 4. **Fail closed.** A configured `AuthSource` that throws → reject the crossing (401 / drop the
    message), never fall through to the local pole.
 
@@ -205,6 +214,7 @@ rejected; (5) `once-per-crossing` (per-connection for ws — one authn per socke
 http). Connector conformance (slice 2) adds the federated `platform` credential path.
 
 ## Slice plan
+
 1. **Seam + all transports** (per Ryan): `IngressContext`/`IngressCredential` in spec; widen
    `AuthSource.authenticate`; a shared ingress-authn helper; migrate websocket onto it; wire
    `transport-http` + `transport-unix-socket`; `runIngressAuthnConformance` green against all three.
@@ -212,7 +222,7 @@ http). Connector conformance (slice 2) adds the federated `platform` credential 
 2. **Connectors** — the `credential.kind:"platform"` branch, federated map, per-message actor;
    resolves the `define-connector.ts:132` TODO; connector conformance.
 3. **`GatewayInstaller.interceptIngress` chain + `withAuth` — DEFERRED (corrected 2026-07-07).**
-   Slice 1's **per-transport `authSource` option is THE design** — a transport *is* the ingress
+   Slice 1's **per-transport `authSource` option is THE design** — a transport _is_ the ingress
    edge; configuring auth there is clean and sufficient. Relocating it to a gateway-composed chain
    was specced and then **withdrawn** as churn-without-a-consumer: it would have removed working,
    just-shipped code to chase a more-"composable" form, and per-transport-option + gateway-`withAuth`
@@ -224,9 +234,10 @@ http). Connector conformance (slice 2) adds the federated `platform` credential 
    `// TODO(#146)` trailhead.
 
 ## Deferred / open
+
 - **Peer-credential enrichment** for unix-socket (SO_PEERCRED → principal) — a later interceptor.
 - **BYOK per-principal adapter instances** (ADR 48 §5 / ADR 52) consume `principal`; out of scope
-  here (this ADR *produces* it).
+  here (this ADR _produces_ it).
 - **Grant derivation** (OAuth scope claims → grants) is ADR 34's `AuthSource.scopes` side; the
   Authorizer already consumes `tokenScopes`. This ADR stamps `scopes`; the derivation policy is
   the `claimsAuthorizer`'s.

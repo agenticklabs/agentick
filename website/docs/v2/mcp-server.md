@@ -25,10 +25,10 @@ it can't back.
 
 ## Two deployment modes
 
-| Mode | Entry point | When |
-| ----- | ------------------------------------------------ | -------------------------------------------------------- |
-| **A** | `spawnStandaloneMcpServer(...)` | CLI tools, single-purpose servers, "wrap this toolset as MCP" |
-| **B** | `createGateway({ mcpServers: [...] })` (preview) | Multi-server gateways sharing one substrate with sessions |
+| Mode  | Entry point                                      | When                                                          |
+| ----- | ------------------------------------------------ | ------------------------------------------------------------- |
+| **A** | `spawnStandaloneMcpServer(...)`                  | CLI tools, single-purpose servers, "wrap this toolset as MCP" |
+| **B** | `createGateway({ mcpServers: [...] })` (preview) | Multi-server gateways sharing one substrate with sessions     |
 
 Both use the same `McpServerHarness` and the same `McpServerOptions` shape. Mode B
 lands with the formal gateway-extension work; Mode A ships today.
@@ -44,9 +44,7 @@ const Calculator = createTool({
   name: "calculator",
   description: "Evaluate an arithmetic expression.",
   inputSchema: z.object({ expression: z.string() }),
-  handler: async ({ expression }) => [
-    { type: "text", text: String(evaluate(expression)) },
-  ],
+  handler: async ({ expression }) => [{ type: "text", text: String(evaluate(expression)) }],
 });
 
 const { close } = await spawnStandaloneMcpServer({
@@ -73,17 +71,17 @@ transports list.
 
 ```ts
 interface McpServerOptions {
-  readonly name: string;                     // unique within the gateway; appears in routing
+  readonly name: string; // unique within the gateway; appears in routing
   readonly transports: readonly ServerTransport[];
 
-  readonly tools?: McpServerToolsOptions;    // CreatedTool[] OR a projection-config object
+  readonly tools?: McpServerToolsOptions; // CreatedTool[] OR a projection-config object
   readonly prompts?: McpServerPromptsOptions;
   readonly resources?: McpServerResourcesOptions; // a Resources instance OR { use, filter }
   readonly elicit?: boolean | { enabled: boolean }; // opt-OUT (on by default)
   readonly completions?: McpServerCompletionsOptions;
 
   readonly capabilities?: McpServerCapabilitiesOptions; // opt-OUTs only
-  readonly auth?: McpServerAuthOptions;                 // five-stage security pipeline
+  readonly auth?: McpServerAuthOptions; // five-stage security pipeline
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly serverInfo?: { readonly name: string; readonly version: string };
 }
@@ -173,15 +171,15 @@ exposes the resolved source for runtime `register` / `update` / `remove`.
 
 The `initialize` response advertises **only what's wired**:
 
-| Capability | Advertised when |
-| ------------- | ------------------------------------------------------------- |
-| `tools` | `tools` is set and the resolved registry is non-empty |
-| `resources` | a resources source is wired |
-| `prompts` | the prompts source has declarations |
-| `elicitation` | `elicit` is enabled (this is a _client_ capability MCP-side) |
-| `tasks` | at least one tool declares `taskSupport: "required" \| "supported"` |
-| `completions` | the `completions` slot carries a handler |
-| `logging` | on by default (every request ctx gets a `ctx.log` sink) |
+| Capability    | Advertised when                                                     |
+| ------------- | ------------------------------------------------------------------- |
+| `tools`       | `tools` is set and the resolved registry is non-empty               |
+| `resources`   | a resources source is wired                                         |
+| `prompts`     | the prompts source has declarations                                 |
+| `elicitation` | `elicit` is enabled (this is a _client_ capability MCP-side)        |
+| `tasks`       | at least one tool declares `taskSupport: "required" \| "supported"` |
+| `completions` | the `completions` slot carries a handler                            |
+| `logging`     | on by default (every request ctx gets a `ctx.log` sink)             |
 
 You can **opt out** of advertising something that _is_ wired
 (`capabilities: { tools: false }`, useful for staged rollout) but you cannot opt
@@ -193,13 +191,13 @@ the harness won't do it.
 Five named stages, each independently overridable, defaults transport-aware. Stages
 run in order; any throw short-circuits the request with a typed `McpServerError`.
 
-| Stage | Default (stdio / HTTP) | Built-in override |
-| ----------------- | ------------------------------- | --------------------------------------- |
-| `connectionGuard` | `allowAll` / `localOnly` | `allowListGuard({ peers })` |
-| `authenticator` | `allowAll` / `rejectAll` | `bearerTokenAuth({ tokens })` |
-| `authorizer` | `allow` | `roleBasedAuthz({ rules })` |
-| `rateLimiter` | no-op | `slidingWindowLimiter({ window, max })` |
-| `inputSanitizer` | identity | adopter-supplied |
+| Stage             | Default (stdio / HTTP)   | Built-in override                       |
+| ----------------- | ------------------------ | --------------------------------------- |
+| `connectionGuard` | `allowAll` / `localOnly` | `allowListGuard({ peers })`             |
+| `authenticator`   | `allowAll` / `rejectAll` | `bearerTokenAuth({ tokens })`           |
+| `authorizer`      | `allow`                  | `roleBasedAuthz({ rules })`             |
+| `rateLimiter`     | no-op                    | `slidingWindowLimiter({ window, max })` |
+| `inputSanitizer`  | identity                 | adopter-supplied                        |
 
 ```ts
 import {
@@ -263,11 +261,11 @@ client → server. Content transfer the other direction is
 
 ## Transports
 
-| Factory | Wire | Notes |
-| --------------------------- | -------- | -------------------------------------------------------------------- |
-| `stdioTransport()` | stdio | Default for `spawnStandaloneMcpServer`; one process = one connection |
-| `httpTransport({ port })` | HTTP+SSE | Streamable HTTP listener, multi-connection; `port: 0` binds ephemeral |
-| `inMemoryServerTransport()` | in-proc | Test fixture; `.connect()` yields the client end |
+| Factory                     | Wire     | Notes                                                                 |
+| --------------------------- | -------- | --------------------------------------------------------------------- |
+| `stdioTransport()`          | stdio    | Default for `spawnStandaloneMcpServer`; one process = one connection  |
+| `httpTransport({ port })`   | HTTP+SSE | Streamable HTTP listener, multi-connection; `port: 0` binds ephemeral |
+| `inMemoryServerTransport()` | in-proc  | Test fixture; `.connect()` yields the client end                      |
 
 Each transport carries its own `kind` discriminator, which the security pipeline
 reads for its transport-aware defaults.
@@ -279,7 +277,9 @@ const server = new McpServerHarness(scopeId, journal, bus, inbox, {
   name: "my-server",
   transports: [httpTransport({ port: 8080 })],
   tools: [Calculator],
-  auth: { authenticator: bearerTokenAuth({ tokens: { "secret-1": { id: "alice", roles: ["admin"] } } }) },
+  auth: {
+    authenticator: bearerTokenAuth({ tokens: { "secret-1": { id: "alice", roles: ["admin"] } } }),
+  },
 });
 await server.ready;
 await server.start();

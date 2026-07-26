@@ -12,13 +12,13 @@ The client sub-handles were built across four separate passes with no cross-cutt
 owner, and it shows (Ryan: "like they were made at 4 different times by 4 different
 teams"). Concretely:
 
-| Handle | Shape today | Defects |
-|---|---|---|
-| `session.elicitations` | ChannelStream + `.respond` | live-only (a client connecting mid-ask sees nothing); docs drift (fixed aaccee4c) |
-| `session.clientToolCalls` | ChannelStream + `.respond` | live-only; `routeClientTools`/`confirmClientTools` are LOOSE session methods, not verbs on the handle |
-| `session.knobs` | get/set/subscribe | values only — no descriptors on the wire (friction #1); client says `key`, server says `id` (friction #13) |
-| `session.tasks` | collection view | closest to correct |
-| timeline | `timelineView(client, sessionId, …)` — a FREE FACTORY | not a sub-handle at all; no wire history path (friction #2); Cursor≠seq resume gap (friction #3) |
+| Handle                    | Shape today                                           | Defects                                                                                                    |
+| ------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `session.elicitations`    | ChannelStream + `.respond`                            | live-only (a client connecting mid-ask sees nothing); docs drift (fixed aaccee4c)                          |
+| `session.clientToolCalls` | ChannelStream + `.respond`                            | live-only; `routeClientTools`/`confirmClientTools` are LOOSE session methods, not verbs on the handle      |
+| `session.knobs`           | get/set/subscribe                                     | values only — no descriptors on the wire (friction #1); client says `key`, server says `id` (friction #13) |
+| `session.tasks`           | collection view                                       | closest to correct                                                                                         |
+| timeline                  | `timelineView(client, sessionId, …)` — a FREE FACTORY | not a sub-handle at all; no wire history path (friction #2); Cursor≠seq resume gap (friction #3)           |
 
 The registration mechanism (ADR 87) is already uniform. The incoherence is one level
 up: what each handle exposes.
@@ -106,7 +106,7 @@ instances; the callback form IS the seam. Egress stays a single callback until a
 third consumer appears (three-consumers rule), then generalizes to a chain.
 
 **Read side**: the observation core is uniform; the fold/view above it is
-legitimately domain-specific and is *designed*, not templated. Knobs = keyed
+legitimately domain-specific and is _designed_, not templated. Knobs = keyed
 replace-fold (trivial). Elicitations/tool-calls = pending-state collection that also
 streams. Timeline = the window (seed/tail/prepend/append/reconcile). No base class
 that pretends these are the same thing.
@@ -124,19 +124,20 @@ executedBy precedent). We take what we need from what the user gives.
 ```ts
 // MANDATORY CORE — every handle, no exceptions. Thin on purpose (store.md lesson).
 interface ClientHandle {
-  subscribe(cb: () => void): Unsubscribe;   // THE store contract (Ryan 2026-07-22):
-                                             // fires on change, cb takes NO args,
-                                             // read current via list(). Makes every
-                                             // framework binding zero-adapter
-                                             // (useSyncExternalStore(h.subscribe, h.list)).
-  close?(): void;                            // where the handle owns a subscription
+  subscribe(cb: () => void): Unsubscribe; // THE store contract (Ryan 2026-07-22):
+  // fires on change, cb takes NO args,
+  // read current via list(). Makes every
+  // framework binding zero-adapter
+  // (useSyncExternalStore(h.subscribe, h.list)).
+  close?(): void; // where the handle owns a subscription
 }
 // NOTE: client-core's existing ChannelView carries BOTH subscribe (state feed) AND
 // onChange (frame feed) — a 4-teams artifact; the arc consolidates onto `subscribe`
 // (the frame feed survives only as an internal/advanced tap where truly needed).
 
 // CAPABILITY PROFILES — declared (typed) + feature-detected (conformance):
-interface Enumerable<T, Id = string> {       // current STATE, not just events
+interface Enumerable<T, Id = string> {
+  // current STATE, not just events
   list(): readonly T[];
   get(id: Id): T | undefined;
 }
@@ -147,7 +148,8 @@ interface Enumerable<T, Id = string> {       // current STATE, not just events
 // PRINCIPLE: iterate BOUNDED things (run.events() — a run ends); observe
 // UNBOUNDED things (onChange). Async iteration survives ONLY on finite
 // streams; no session-lifetime handle is iterable.
-interface Respondable<In> {                  // correlated reply-by-id
+interface Respondable<In> {
+  // correlated reply-by-id
   respond(id: string, input: In): Promise<void>;
 }
 // Writable = the handle's domain mutation verbs (set, cancel, prepend, …) — FREE
@@ -162,6 +164,7 @@ connected" (this is the live-only fix); iteration is always sugar over the same 
 ## 4. Conformance — `runClientHandleConformance`
 
 The client twin of spec-conformance, structured like `runStoreConformance`:
+
 - **Core cases (mandatory):** onChange fires on change; Unsubscribe stops it; close
   tears down; handle is a PROPERTY on the session handle (the aaccee4c drift class,
   now compile/conformance-checked).
@@ -178,13 +181,13 @@ becomes a property of CI, not of review-time vigilance.
 
 ## 5. The five handles, mapped
 
-| Handle | Core | Profiles | Write verbs (derived) | Read view (designed) | Changes required |
-|---|---|---|---|---|---|
-| `session.knobs` | ✓ | Enumerable, Writable | `set` (`knobs/set`) | keyed replace-fold | `key`→`id` (#13); **descriptors on the wire** (#1: `KnobDescriptor[]` in the knobs-state snapshot → `list()` returns descriptors+values, not bare values) |
-| `session.tasks` | ✓ | Enumerable, Streamable? | `cancel`, … | collection view | minor alignment only |
-| `session.elicitations` | ✓ | Enumerable, Streamable, Respondable | `respond` | pending-request collection + stream | **server: pending enumeration** (§6); keep `e.accept/decline/cancel` per-item sugar |
-| `session.clientToolCalls` | ✓ | Enumerable, Streamable, Respondable | `respond`, `setClientTools` | same | fold `routeClientTools`/`confirmClientTools` onto the handle as verbs (`.route(handlers)`, `.confirm(policy)`); server pending enumeration |
-| `session.timeline` (NEW — was the free `timelineView`) | ✓ | Enumerable(entries), Streamable | *(none yet; history read is a READ RPC, §6)* | **the window**: seed/tail/`prepend`/`append`/clientId reconcile — unchanged semantics, re-homed | become a sub-handle; `session/timeline_history` wire read (#2); Cursor-vs-seq addressed (§6) |
+| Handle                                                 | Core | Profiles                            | Write verbs (derived)                        | Read view (designed)                                                                            | Changes required                                                                                                                                          |
+| ------------------------------------------------------ | ---- | ----------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `session.knobs`                                        | ✓    | Enumerable, Writable                | `set` (`knobs/set`)                          | keyed replace-fold                                                                              | `key`→`id` (#13); **descriptors on the wire** (#1: `KnobDescriptor[]` in the knobs-state snapshot → `list()` returns descriptors+values, not bare values) |
+| `session.tasks`                                        | ✓    | Enumerable, Streamable?             | `cancel`, …                                  | collection view                                                                                 | minor alignment only                                                                                                                                      |
+| `session.elicitations`                                 | ✓    | Enumerable, Streamable, Respondable | `respond`                                    | pending-request collection + stream                                                             | **server: pending enumeration** (§6); keep `e.accept/decline/cancel` per-item sugar                                                                       |
+| `session.clientToolCalls`                              | ✓    | Enumerable, Streamable, Respondable | `respond`, `setClientTools`                  | same                                                                                            | fold `routeClientTools`/`confirmClientTools` onto the handle as verbs (`.route(handlers)`, `.confirm(policy)`); server pending enumeration                |
+| `session.timeline` (NEW — was the free `timelineView`) | ✓    | Enumerable(entries), Streamable     | _(none yet; history read is a READ RPC, §6)_ | **the window**: seed/tail/`prepend`/`append`/clientId reconcile — unchanged semantics, re-homed | become a sub-handle; `session/timeline_history` wire read (#2); Cursor-vs-seq addressed (§6)                                                              |
 
 Free factories (`timelineView(...)`) remain exported for the headless/composition
 case — the sub-handle is the blessed path, the factory its implementation.
@@ -219,7 +222,7 @@ case — the sub-handle is the blessed path, the factory its implementation.
 4. **Cursor-vs-seq** (friction #3): NOT unified in this arc (a server change with
    ordering implications). Mitigation documented: history reads return the bus cursor
    alongside seq where the server co-locates them; full unification is its own
-   decision. — *flagged, honest.*
+   decision. — _flagged, honest._
 
 ## 7. Client-side hooks — the command EQUIVALENT (deliberately not parity)
 
@@ -230,9 +233,9 @@ ergonomic interception, not a second substrate):
 
 ```ts
 // ONE seam, on the client (registrable at client- or handle-scope, Unsubscribe-leased):
-client.use(middleware)                      // every wire verb
-session.knobs.use(middleware)               // one handle's verbs
-type ClientMiddleware = (params, next, ctx: { method, sessionId }) => Promise<Result>
+client.use(middleware); // every wire verb
+session.knobs.use(middleware); // one handle's verbs
+type ClientMiddleware = (params, next, ctx: { method; sessionId }) => Promise<Result>;
 ```
 
 - **Covers the two req-res primitives** (commands + read RPCs): auth/header
@@ -291,6 +294,6 @@ seam-vs-projection placement.
    distinguished from wire-backed verbs (I lean: no distinction; the contract cares
    about shape, not transport)?
 3. **Tasks streamability**: is `for await (const t of session.tasks)` (stream of task
-   *changes*) worth the profile, or is onChange enough there?
+   _changes_) worth the profile, or is onChange enough there?
 4. **Codegen now or convention-first** for the write-verb derivation (§2)? I lean
    convention + conformance check now, codegen when a fifth handle appears.

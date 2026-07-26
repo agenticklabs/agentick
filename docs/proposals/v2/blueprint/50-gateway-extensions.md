@@ -26,7 +26,7 @@ spec, ADR, and code do not drift:
    `registerWireExtension`, `subscribeBus`, `onClose`, and the `gateway`
    host handle. It does **not** ship `interceptIngress` / `IngressContext`
    / `IngressInterceptor`. Rationale: auth (#302/ADR 34) owns the
-   transport-token→`principal` contract *and* the transport-side wiring
+   transport-token→`principal` contract _and_ the transport-side wiring
    that fills `IngressContext`. Pinning that shape here, before its only
    consumer exists, is modeling ahead of the code — an ADR-34 concern that
    ADR 34 will add to this installer (extends `BaseInstaller`, so the
@@ -37,7 +37,7 @@ spec, ADR, and code do not drift:
    hard singleton. The asymmetry is intentional, justified by the
    cascade.** ADR 48 composes extensions outer→inner
    (`gateway.createApp` prepends gateway-cascaded app/session parts before
-   the per-call ones). On the app side that is *override semantics*: a
+   the per-call ones). On the app side that is _override semantics_: a
    gateway sets a default app extension, a specific app overrides it by
    claiming the same `extensionBridges` slot — last writer (the inner,
    more-specific scope) wins, by design. The gateway scope has **no outer
@@ -45,7 +45,7 @@ spec, ADR, and code do not drift:
    unambiguously two extensions fighting for one global slot — a bug, and
    it throws. This is why `registerNamespace` throws at the gateway and
    `extensionBridges` is LWW at the app. The `ExtensionBase.name`
-   last-writer comment is therefore the *documented rule* for the app
+   last-writer comment is therefore the _documented rule_ for the app
    side, not an accident. No app-side guard lands in this arc; §"occupied
    slot" below is amended accordingly.
 
@@ -62,7 +62,7 @@ capabilities:
 
 1. **`registerWireExtension(ext)`** — the missing programmatic install
    path into the ADR 46 registry (today only `createGateway({
-   wireExtensions })` and framework self-install exist).
+wireExtensions })` and framework self-install exist).
 2. **`interceptIngress(interceptor)`** — a chain-of-responsibility at
    the **transport ingress edge** (where a transport establishes a
    connection / builds the per-request `WireExtensionContext`), the seam
@@ -88,7 +88,7 @@ registry, app/session parts become defaults for every `gateway.createApp`
 / `createSession` beneath it. One install site, correct scope for each
 part.
 
-Shape stays ADR 32's business: an extension *installs* a harness, a
+Shape stays ADR 32's business: an extension _installs_ a harness, a
 namespace object, a bus subscriber, or nothing at all. This ADR adds no
 shape taxonomy — it defines when gateway extensions run and what they
 may touch.
@@ -107,7 +107,7 @@ blocker:
   that want to bring wire methods along with their harness (MCP control
   plane #298, tasks/elicitation projections) have no sanctioned hook.
 - ADR 40's MCP server **mode B** ("gateway-extension mode") has no
-  contract to be an extension *of*.
+  contract to be an extension _of_.
 - Auth (#302/ADR 34) needs a place to turn a transport token into
   `principal` at the ingress edge, before the runtime context is built.
   (Historically a gateway `acceptConnection` carried
@@ -150,10 +150,7 @@ export interface GatewayInstaller extends BaseInstaller {
   readonly gateway: GatewayInstallerHost;
 
   /** Install a namespace into GatewayBridges. Occupied slot ⇒ throw. */
-  registerNamespace<K extends keyof GatewayBridges>(
-    name: K,
-    value: GatewayBridges[K],
-  ): Unsubscribe;
+  registerNamespace<K extends keyof GatewayBridges>(name: K, value: GatewayBridges[K]): Unsubscribe;
 
   /** Programmatic path into the ADR 46 wire-extension registry.
    *  Valid only before seal; throws after ready. */
@@ -197,14 +194,14 @@ export type IngressInterceptor = (
 Notes:
 
 - **`interceptIngress` is the whole auth seam this ADR provides, and it
-  is ENRICHMENT-ONLY.** ADR 34 ships *as a gateway extension*: extract
+  is ENRICHMENT-ONLY.** ADR 34 ships _as a gateway extension_: extract
   token per transport, verify, produce `principal` + `RuntimeContextUser`
   onto the runtime context. `principal` then feeds ADR 48's **structural
   identity** — per-principal child buses/instances at construction. The
   interceptor **must not** become a runtime authorization filter: gating
   requests by re-reading identity per call is exactly the `notify({to})`
-  runtime-filter pattern ADR 47 killed. Its only job is to *stamp
-  identity at the boundary*; isolation is structural downstream, never a
+  runtime-filter pattern ADR 47 killed. Its only job is to _stamp
+  identity at the boundary_; isolation is structural downstream, never a
   predicate here. The framework never interprets `user` for authorization
   (ADR 45). Rejection is a typed error the transport maps to its wire
   (constraints live at the wire).
@@ -220,7 +217,7 @@ Notes:
   installer capability — revisit only with a concrete consumer.)
 - `registerWireExtension` after seal throws — same sealed-registry rule
   ADR 46 already established; no dynamic post-ready install in v2.0
-  (#308 reactivity is about *capability signaling*, not late install).
+  (#308 reactivity is about _capability signaling_, not late install).
 
 ### `GatewayBridges` (empty seed)
 
@@ -244,9 +241,9 @@ Adopter access: `gateway.bridges.credentials`. Runtime registration via
 the type-level seam (prices the augmentation version-skew risk). The
 app-side `extensionBridges` map stays **last-writer-wins**, and that
 asymmetry is deliberate — see amendment §2 (2026-07-01): the app scope
-sits under a cascade, so a duplicate slot there is an *override* (inner
+sits under a cascade, so a duplicate slot there is an _override_ (inner
 scope wins); the gateway scope has no outer scope, so a duplicate is a
-*collision* and throws. No app-side guard lands in this arc.
+_collision_ and throws. No app-side guard lands in this arc.
 
 ### `ExtensionBundle` — the #297 composite
 
@@ -258,21 +255,20 @@ export interface ExtensionBundle {
   readonly session?: SessionExtension;
   readonly wire?: readonly WireExtension[];
 }
-export type AnyExtension =
-  | GatewayExtension | AppExtension | SessionExtension | ExtensionBundle;
+export type AnyExtension = GatewayExtension | AppExtension | SessionExtension | ExtensionBundle;
 ```
 
 Distribution rules (`createGateway({ extensions: AnyExtension[] })`):
 
-| Part       | When it runs                                                        |
-| ---------- | ------------------------------------------------------------------- |
-| `gateway`  | Now, during gateway construction                                     |
-| `wire`     | Registered into the registry now (sugar for `registerWireExtension`) |
-| `app`      | Cascaded default for every `gateway.createApp`                       |
-| `session`  | Cascaded default for every session under those apps                  |
+| Part      | When it runs                                                         |
+| --------- | -------------------------------------------------------------------- |
+| `gateway` | Now, during gateway construction                                     |
+| `wire`    | Registered into the registry now (sugar for `registerWireExtension`) |
+| `app`     | Cascaded default for every `gateway.createApp`                       |
+| `session` | Cascaded default for every session under those apps                  |
 
 `createApp` / `createSession` continue to accept their own extension
-arrays; cascaded defaults compose *before* per-call extensions
+arrays; cascaded defaults compose _before_ per-call extensions
 (mergeLayered semantics — outer scope first, inner scope may extend, no
 silent replacement). A bare `GatewayExtension` in the array is treated
 as `{ gateway }`. Packages keep self-installing their wire extensions
@@ -289,21 +285,21 @@ Apps without a gateway keep taking `AppExtension`/`SessionExtension`
 directly — `createApp({ extensions })` accepts the same `AnyExtension`
 union minus `gateway` parts (a bundle with only a `gateway` part throws
 a descriptive error naming the missing scope). Local-pole adopters who
-*do* run a gateway (the expected default) get the identical mental
+_do_ run a gateway (the expected default) get the identical mental
 model at both poles.
 
 ## Consumers and their shapes (ADR 32 applied)
 
-| Consumer                         | Extension part(s)            | Installed shape                                                   |
-| -------------------------------- | ---------------------------- | ------------------------------------------------------------------ |
-| Credentials at gateway (#283)    | `gateway`                    | Shape 1 harness → `GatewayBridges.credentials`                     |
-| Auth (ADR 34 / #302)             | `gateway`                    | `interceptIngress` chain + optional wire methods (reauth)          |
-| MCP server mode B (ADR 40 #171)  | `gateway` (+ `wire`)         | Shape 1 harness; serves MCP over gateway transports                |
-| MCP control plane (#298)         | `wire` (via bundle)          | Wire extension only                                                |
-| Connectors (CUT-PLAN §C1)        | `gateway` (+ `session`?)     | Shape 1 harness (platform ingress ↔ session routing); own ADR      |
-| Logging / devtools tunnel        | `gateway`                    | Shape 3 bus subscriber (10-line extension)                         |
-| openai-compat shim (v1 parity)   | `gateway` (+ `wire`)         | Shape 1 harness per ADR 32's reshape table                         |
-| Transport servers (optional)     | `gateway`                    | Listener bind in `install`, unbind in `onClose` — lifecycle sugar; the transport protocol itself stays independent of this contract |
+| Consumer                        | Extension part(s)        | Installed shape                                                                                                                     |
+| ------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Credentials at gateway (#283)   | `gateway`                | Shape 1 harness → `GatewayBridges.credentials`                                                                                      |
+| Auth (ADR 34 / #302)            | `gateway`                | `interceptIngress` chain + optional wire methods (reauth)                                                                           |
+| MCP server mode B (ADR 40 #171) | `gateway` (+ `wire`)     | Shape 1 harness; serves MCP over gateway transports                                                                                 |
+| MCP control plane (#298)        | `wire` (via bundle)      | Wire extension only                                                                                                                 |
+| Connectors (CUT-PLAN §C1)       | `gateway` (+ `session`?) | Shape 1 harness (platform ingress ↔ session routing); own ADR                                                                       |
+| Logging / devtools tunnel       | `gateway`                | Shape 3 bus subscriber (10-line extension)                                                                                          |
+| openai-compat shim (v1 parity)  | `gateway` (+ `wire`)     | Shape 1 harness per ADR 32's reshape table                                                                                          |
+| Transport servers (optional)    | `gateway`                | Listener bind in `install`, unbind in `onClose` — lifecycle sugar; the transport protocol itself stays independent of this contract |
 
 ## Cluster note
 

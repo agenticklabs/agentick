@@ -8,10 +8,10 @@ the existing client subscription/progress infra. **Reworks:** Wave 3a's MCP-only
 ## The gap
 
 Wave 3a shipped `ctx.log` that emits **only to the MCP wire** (`sdkServer.sendLoggingMessage`).
-So a tool's log goes *nowhere* unless it's running as an MCP server, and non-MCP components
+So a tool's log goes _nowhere_ unless it's running as an MCP server, and non-MCP components
 (harnesses, the loop) have no structured logging at all. Same for progress: MCP has
 `notifications/progress`, but there's no framework way for a long-running tool/component to emit
-progress that reaches *either* a connected MCP client *or* the agentick app.
+progress that reaches _either_ a connected MCP client _or_ the agentick app.
 
 These are **out-of-band signals** (diagnostics + liveness), orthogonal to model-IR content. They
 should be **framework runtime primitives** — exactly the elicitation pattern: emitted through the
@@ -31,7 +31,7 @@ Each emit produces **one structured event on the bus** (scoped to the session/co
 
 1. **MCP projection** (agentick-as-MCP-server): subscribes to the connection's scope →
    `notifications/message` (log, filtered by the client's `logging/setLevel`) + `notifications/
-   progress` (correlated by `progressToken`). **Wave 3a's `logging.ts` becomes this subscriber** —
+progress` (correlated by `progressToken`). **Wave 3a's `logging.ts` becomes this subscriber** —
    `ctx.log` no longer calls `sdkServer.sendLoggingMessage` directly; it emits a bus event the
    projection forwards. Decouples the sink from MCP.
 2. **agentick-client projection**: the events ride the **existing** client-receive infra — no new
@@ -49,7 +49,7 @@ So: **emit once (framework), receive everywhere (MCP + app), via primitives that
 
 Could each consumer just wire its own? That's what Wave 3a did (MCP-only) and it's the gap: a
 tool can't log to the app, a harness can't log at all, progress has no framework path. The signal
-*originates* at the component regardless of who's listening — so it belongs at the runtime, with
+_originates_ at the component regardless of who's listening — so it belongs at the runtime, with
 projections subscribing. Same reasoning as elicitation (one seam, many edges). Three consumers
 already (MCP server, agentick client, dev/observability) — clears the bar.
 
@@ -59,20 +59,21 @@ already (MCP server, agentick client, dev/observability) — clears the bar.
   `ctx.elicit` already lives). Non-tool components emit via the runtime `Context` (the same bus).
   One event shape, two entry points.
 - **Event shapes** (`spec-next` wire types): a structured `LogEvent { level, data, logger?, ts,
-  scope }` and `ProgressEvent { token, progress, total?, message?, scope }`. Firewall types (they
+scope }` and `ProgressEvent { token, progress, total?, message?, scope }`. Firewall types (they
   cross the wire to the client).
 - **Level filtering** stays where 3a put it for MCP (per-connection `setLevel`); the app-side
   subscription filters client-side (or via the query). Below-level logs still emit as bus events
-  (the app may want debug); each *projection* applies its own threshold.
+  (the app may want debug); each _projection_ applies its own threshold.
 - **Fire-and-forget.** Signals are never a control path — a dropped/failed projection never blocks
   the emitter (3a's rule, kept).
 - **Compiler-general.** The emit is a runtime-ctx capability, not React/JSX — the functional
   compiler's `ctx` exposes the same `log`/`progress`.
-- **Status.** Execution status (running/completed/error/aborted) is *already* tracked on the client
+- **Status.** Execution status (running/completed/error/aborted) is _already_ tracked on the client
   exec handle + bus lifecycle events — so "status" is largely existing, not a new member. This ADR
   is **log + progress**; a thin `ctx.status` can layer on the same bus later if a need appears.
 
 ## Consequences / scope
+
 - Wave 3a's MCP logging is reworked to a bus subscriber (no behavior change to the wire; the
   source moves to the framework seam).
 - Wave 5's progress-sink item is subsumed here.
@@ -80,6 +81,7 @@ already (MCP server, agentick client, dev/observability) — clears the bar.
 - No new transport machinery — the client-receive is existing `subscribe`/`progress` + typed hooks.
 
 ## Open (build-time)
+
 1. Exact `ctx` entry-point unification (one `ctx.log` shared by tool + component ctx vs a runtime
    `Context.log` the tool ctx re-exposes).
 2. Whether `LogEvent`/`ProgressEvent` reuse existing bus event kinds or are new ones.

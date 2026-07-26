@@ -19,13 +19,13 @@ is that **the upgrade retires hand-rolled host wiring into designed seams.**
 
 ## 1. The five server seams (hand-rolled v1 → designed v2)
 
-| Their v1 host wiring | agentick v2 replacement |
-| --- | --- |
-| Monkey-patched `gateway.handleRequest(req,res)` + Nest middleware forwarding `v2/*` | `fetchServerTransport({ identity })` — registered in `createGateway({ transports })`, lifecycle-correct (C4.5) |
-| `plugins/auth.ts` (531 lines: kAuth HS256 + OAuth JWKS → `UserContext`, caching) | The `identity` callback: their verification returns `{ principal, user, scopes }` or their own `Response`; token material never crosses. Their `?token=` SSE quirk lives in their callback — policy on their side, as designed |
-| `v1-session-store.ts` (1,076 lines of session-event → TypeORM row mapping) | Store-seam adapters (`TimelineStore` / `SessionStore` / `TaskStore` over the SAME legacy tables) + conformance suites as the correctness gate. Their schema is friendly: UUIDv7 PKs (time-sortable → seq/cursor), blocks table ≈ `ContentBlock` 1:1, and their own `ThreadRepository.getThreadInfo` comment says it is "shaped for the agentick v2 bridge" |
-| `tracking/` (custom provider + `Agentick.use("*")` middleware + shapers) | The span ladder: `telemetry: true`, `spanMiddleware`, `telemetryNamespace` (nothing says "agentick" in their track-API) |
-| Scope derivation (`tenant-admin`, `advisor`, …) enforced ad hoc | Scopes flow into the v2 authorizer; `authorizeDispatch` is the one choke point |
+| Their v1 host wiring                                                                | agentick v2 replacement                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Monkey-patched `gateway.handleRequest(req,res)` + Nest middleware forwarding `v2/*` | `fetchServerTransport({ identity })` — registered in `createGateway({ transports })`, lifecycle-correct (C4.5)                                                                                                                                                                                                                                             |
+| `plugins/auth.ts` (531 lines: kAuth HS256 + OAuth JWKS → `UserContext`, caching)    | The `identity` callback: their verification returns `{ principal, user, scopes }` or their own `Response`; token material never crosses. Their `?token=` SSE quirk lives in their callback — policy on their side, as designed                                                                                                                             |
+| `v1-session-store.ts` (1,076 lines of session-event → TypeORM row mapping)          | Store-seam adapters (`TimelineStore` / `SessionStore` / `TaskStore` over the SAME legacy tables) + conformance suites as the correctness gate. Their schema is friendly: UUIDv7 PKs (time-sortable → seq/cursor), blocks table ≈ `ContentBlock` 1:1, and their own `ThreadRepository.getThreadInfo` comment says it is "shaped for the agentick v2 bridge" |
+| `tracking/` (custom provider + `Agentick.use("*")` middleware + shapers)            | The span ladder: `telemetry: true`, `spanMiddleware`, `telemetryNamespace` (nothing says "agentick" in their track-API)                                                                                                                                                                                                                                    |
+| Scope derivation (`tenant-admin`, `advisor`, …) enforced ad hoc                     | Scopes flow into the v2 authorizer; `authorizeDispatch` is the one choke point                                                                                                                                                                                                                                                                             |
 
 ## 2. The client swap surface (measured, not guessed)
 
@@ -88,17 +88,17 @@ v2 mapping:
 
 - **Slice 0 — gap audit (~a day, gates everything).** Two checklists against
   v2's actual exports:
-  - *Server (from libs/ernesto):* `<Timeline>` render-prop + sliding-window,
+  - _Server (from libs/ernesto):_ `<Timeline>` render-prop + sliding-window,
     `<MCP>` in-process pair, `<Sandbox>` + file tools, `ctx.spawn`,
     `useData`, `useTickState`, `useComState`, `useContextInfo`,
     `useOnTickStart`, `createTool`, custom `<done/>` blocks, `UserContext`
     augmentation.
-  - *Wire/client:* streaming event parity for the reducer-replacement,
+  - _Wire/client:_ streaming event parity for the reducer-replacement,
     `onToolConfirmation` ≙ elicitations, channel pub/sub ≙ wire
     subscriptions + commands, `openaiCompatPlugin` parity (they alias
     `ernesto` as an OpenAI-compatible endpoint), MCP **server** mounting over
     the gateway (`/mcp` + OAuth metadata) against mcp-next.
-  Every miss becomes a named v2 issue before any porting starts.
+    Every miss becomes a named v2 issue before any porting starts.
 - **Slice 1 — the thin vertical.** Minimal Ernesto on v2 at `/api/v3` via
   `fetchServerTransport`, identity callback wrapping their existing kAuth
   verification, in-memory stores, two real MCP tools (`query`,

@@ -1,11 +1,11 @@
 # ADR 76 — Operation middleware scoping: per-harness, structural inheritance, and the call-scoped seam
 
 **Status:** AMENDED 2026-07-13 by [ADR 83](./83-one-interceptor-primitive.md) — the
-tier-3 structural inheritance no longer *walks* the construction tree per op; it
+tier-3 structural inheritance no longer _walks_ the construction tree per op; it
 **folds** at construction (a value snapshotted into `inheritedInterceptors`),
 deleting `ownAndInheritedMiddleware` and the `parent` pointer. The tier model
 (2 = own, 3 = inherited, 4 = call-scoped FiberRef) and the `use`/`fx.use` split
-stand; only the tier-3 *collection mechanism* changed (walk → fold). Middleware
+stand; only the tier-3 _collection mechanism_ changed (walk → fold). Middleware
 is now the `transform`/`guard`/`observe` interceptor of ADR 83.
 
 **Status (original):** DRAFT 2026-07-10 (Fable, for Ryan). **Builds on:** ADR 19
@@ -14,13 +14,13 @@ is now the `transform`/`guard`/`observe` interceptor of ADR 83.
 parent-provided substrate, the `parent` reference every `BaseHarness` carries),
 ADR 26/27 (everything-is-a-harness; built-ins are bundled, not privileged).
 **Governing principle:** [[feedback_capability_not_opinion]] — ship the
-*mechanism* (a place to register cross-cutting behavior) firmly; carry no policy
+_mechanism_ (a place to register cross-cutting behavior) firmly; carry no policy
 about what that behavior is.
 
 ## TL;DR
 
 Middleware in v2 is registered per-harness-instance (`harness.use(mw)`) and wraps
-only the operations *that* harness routes through `runOperation`. A deeply nested
+only the operations _that_ harness routes through `runOperation`. A deeply nested
 call — `session.send` → tool-executor op → state op → knobs op — crosses four
 harnesses, four independent `MiddlewareChain`s, and **no single registration wraps
 the whole tree.** This ADR defines the scoping model as **three tiers**, mapped to
@@ -51,32 +51,32 @@ operation body:
 const composed = this.middleware.compose<I, R, E>(body);
 ```
 
-That is correct for *instance-local* concerns ("every write through this state
+That is correct for _instance-local_ concerns ("every write through this state
 harness gets validated") but leaves a gap the moment a concern is **cross-cutting**:
 
 - "Trace every operation everywhere" (one OTel span per op, app-wide).
 - "Journal every operation with adopter tenant tags."
 - "Enforce authorization uniformly across all harnesses."
 
-Today each of those forces the adopter to `.use()` on *every* harness by hand —
-and to *keep* doing so as new harnesses (sub-harnesses, spawned children) come
+Today each of those forces the adopter to `.use()` on _every_ harness by hand —
+and to _keep_ doing so as new harnesses (sub-harnesses, spawned children) come
 into existence. There is no register-once-applies-everywhere seam. The nesting is
 real (`runOperation` already builds a causality tree via `parentOpId` inherited
 from the FiberRef), but the middleware layer does not participate in it.
 
 ## Why the null hypothesis doesn't suffice
 
-*Steel-man first (per [[feedback_steelman_the_null_hypothesis]]): why can't the
-adopter just register on each harness?*
+_Steel-man first (per [[feedback_steelman_the_null_hypothesis]]): why can't the
+adopter just register on each harness?_
 
 Because harness instances are created **by the framework, dynamically, below the
 adopter's reach.** A `SessionHarness` constructs its own tool-executor, state,
 knobs, gates sub-harnesses during two-phase construction (ADR 31); a `session.spawn`
 creates a child session with its own sub-tree. The adopter never holds references
 to most of these at the time they'd need to call `.use()`. "Register on each
-harness" is not a workaround — it is *impossible* for the harnesses that don't
+harness" is not a workaround — it is _impossible_ for the harnesses that don't
 exist yet at registration time. A cross-cutting concern must attach to a **place in
-the tree** (an ancestor) and be *inherited* by descendants created later. That is
+the tree** (an ancestor) and be _inherited_ by descendants created later. That is
 exactly what parent-provided substrate (ADR 31) already does for the bus, inbox,
 and journal. Middleware is the one cross-cutting substrate that was left
 per-instance. Concrete failing case: an adopter calls `app.use(tracing)` before any
@@ -89,7 +89,7 @@ object to `.use()` on when `tracing` was registered.
 ### Tier 1 — Per-call: no API
 
 If you own the call site, you own the body — wrap it there. Middleware earns its
-keep only for operations you *don't* directly invoke. We ship nothing here.
+keep only for operations you _don't_ directly invoke. We ship nothing here.
 
 ### Tier 2 — Per-harness instance: `harness.use()` (unchanged)
 
@@ -126,9 +126,9 @@ registered composes identically to today (ancestors contribute empty lists). The
 change is strictly additive — it only does something once an ancestor is `.use()`d.
 
 **Limitation (correct by design):** structural inheritance reaches middleware
-registered on a *true construction ancestor* only. A harness constructed with
+registered on a _true construction ancestor_ only. A harness constructed with
 `parent === undefined` inherits nothing. This is the right semantics for a
-*structural* scope — "everything under this node in the tree" — and it is why the
+_structural_ scope — "everything under this node in the tree" — and it is why the
 call-scoped tier below exists for the cases structural scope can't express.
 
 ### Tier 4 — Call-scoped / dynamic (BUILT — the ADR 77 spine payoff)
@@ -145,19 +145,19 @@ call-scoped tier below exists for the cases structural scope can't express.
 originally assumed a nested construction tree (`gateway → app → session → sub`) where
 structural inheritance (tier 3) reaches most concerns. The real topology is FLAT: the
 app constructs the loop / executor / tool / reconciler ONCE as **shared singletons**
-and hands the same instances to every session — so they are construction-*siblings* of
+and hands the same instances to every session — so they are construction-_siblings_ of
 the session, not its children. Consequences: (a) `app.use()` (tier 3) reaches
 everything — deployment-global; but (b) a **session/request-scoped** concern around the
 model call CANNOT be expressed structurally — the executor is shared across all
 sessions, so a session structurally wrapping it would leak into other sessions. That
-concern is exactly tier 4's *dynamic call scope*, and the ADR 77 spine (the call
+concern is exactly tier 4's _dynamic call scope_, and the ADR 77 spine (the call
 `session.send → loop → executor → tool` is now ONE fiber) is what makes the FiberRef
 propagate across those siblings. **The spine did not merely unblock tier 4; it made
 tier 4 the primary mechanism for the single most common middleware need.**
 
-Structural scope walks the *construction* tree. Some concerns are scoped to a
-*dynamic call tree* instead: "run *this* `send` with a budget cap" or "trace *this
-one* request," where the middleware should wrap every nested operation across every
+Structural scope walks the _construction_ tree. Some concerns are scoped to a
+_dynamic call tree_ instead: "run _this_ `send` with a budget cap" or "trace _this
+one_ request," where the middleware should wrap every nested operation across every
 harness the call touches, then evaporate — regardless of where those harnesses sit
 in the construction tree.
 
@@ -172,7 +172,7 @@ fork inheritance, and teardown are Effect's job, not ours:
 
 ```ts
 // SKETCH — not built. Effect provides the propagation.
-Effect.provideService(session.send(input), OperationMiddleware, [budgetCap])
+Effect.provideService(session.send(input), OperationMiddleware, [budgetCap]);
 // → budgetCap wraps every op transitively reached by this send,
 //   in every harness, then is gone when the send completes.
 ```
@@ -183,16 +183,16 @@ described.** The `CallMiddlewareRef` FiberRef holds the ambient list; `runOperat
 reads it (`yield* getCallMiddleware`) and composes it outermost; `withCallMiddleware`
 scopes it via `Effect.locally` (nested calls accumulate). No `Layer` wiring at call
 sites. The original "defer to first consumer" reasoning was overtaken by the
-construction-topology finding above: call-scoped is not a *per-deployment-vs-per-request*
+construction-topology finding above: call-scoped is not a _per-deployment-vs-per-request_
 nicety — it is the ONLY correct scope for session/request middleware around a
-*shared* harness, which is the common case, not the rare one.
+_shared_ harness, which is the common case, not the rare one.
 
 > **Aside — why not `@effect/rpc`'s `RpcMiddleware` for any of this?** It exists,
 > and it's the closest named prior art, but it's bound to `@effect/rpc`'s handler
 > model and wire envelope. The v2 wire is **JSON-RPC 2.0** (chosen for MCP
 > envelope-parity, ADR 33), not `@effect/rpc`'s format — so `RpcMiddleware` is not
-> reachable at our wire, and operation middleware here is a *substrate* concern
-> (around `runOperation`), not a *wire* concern regardless. See ADR 33 §rejected
+> reachable at our wire, and operation middleware here is a _substrate_ concern
+> (around `runOperation`), not a _wire_ concern regardless. See ADR 33 §rejected
 > alternatives.
 
 ### Composition order (all tiers together)
@@ -214,7 +214,7 @@ Within any one chain, first-registered is outermost.
 `BaseHarness` has **two** intercept seams, not one: freeform `Middleware`
 (around-style, this ADR) and the `HandlerRegistry` verdict system
 (`before`/… handlers returning `veto | replace | defer | proceed`). They are
-different *powers* (freeform wrap vs. structured decision) and that distinction is
+different _powers_ (freeform wrap vs. structured decision) and that distinction is
 deliberate. But the **scoping model must be the same for both**, or adopters will
 be surprised that `app.use()` reaches a descendant while an app-level `before`
 handler does not. Handler inheritance is **not** in the tier-3 change below (kept
@@ -226,11 +226,11 @@ walk the same construction-ancestor path. See open question Q2.
 - **Not a new hook subsystem.** Tier 3 reuses the `parent` pointer ADR 31 already
   threads. Tier 4 reuses the FiberRef `runOperation` already reads. No new
   registry, no new lifecycle.
-- **Not policy.** The framework ships the *place to register* and the *composition
-  order*. What any middleware does — trace, journal, authorize, cap — is the
+- **Not policy.** The framework ships the _place to register_ and the _composition
+  order_. What any middleware does — trace, journal, authorize, cap — is the
   adopter's. Capability, not opinion.
-- **Not the `onChange` notify seam (ADR 75).** Middleware is *intercept* (can
-  transform / short-circuit). `onChange` is *notify* (read-only, after-the-fact).
+- **Not the `onChange` notify seam (ADR 75).** Middleware is _intercept_ (can
+  transform / short-circuit). `onChange` is _notify_ (read-only, after-the-fact).
   Different power levels, different ADRs. This ADR is the intercept side's scoping;
   ADR 75 is the notify side's primitive.
 
@@ -252,8 +252,8 @@ walk the same construction-ancestor path. See open question Q2.
    until refactored onto `runOperation` (noted in the `use()` docstring). Inherited
    middleware has the same precondition. Tracked separately; not this ADR.
 4. **Ordering: `before` handlers vs. inherited middleware.** Today `before`
-   handlers run *outside* `this.middleware`. Under tier 3 they still run inside the
-   inherited stack — an app-level span would *not* enclose a descendant's veto
+   handlers run _outside_ `this.middleware`. Under tier 3 they still run inside the
+   inherited stack — an app-level span would _not_ enclose a descendant's veto
    decision. Is that the wanted semantics, or should inherited middleware wrap the
    handler phase too? Deferred; the surgical change preserves today's relative
    order (handlers before middleware).
@@ -286,7 +286,7 @@ In `packages/runtime/src/substrate/base-harness.ts` (DRAFT markers removed):
 
   Splitting the forms across the two surfaces is what lets EACH be a single type, so an
   inline arrow infers its params cleanly — one overloaded `use` (union `Middleware |
-  AsyncMiddleware`) killed inline inference for both forms and was removed along with the
+AsyncMiddleware`) killed inline inference for both forms and was removed along with the
   `async`-auto-detect path. `withCallMiddleware` (tier 4) is Effect-native (`Middleware[]`),
   since it lives in the fiber by construction.
 
@@ -301,7 +301,7 @@ In `packages/runtime/src/substrate/base-harness.ts` (DRAFT markers removed):
   fiber-interrupted mid-statement and can't read `getContext` (hence explicit `ctx`). For a
   middleware whose own logic must be in-fiber, use `fx.use`. Each property is test-pinned
   (`base-harness.spec` → "async middleware fiber propagation"). The definitive
-  analysis (why a "lazy in-fiber `next`" can make the *continuation* in-fiber but never the
+  analysis (why a "lazy in-fiber `next`" can make the _continuation_ in-fiber but never the
   middleware's own body — a JS async fn's suspension points aren't externally steppable,
   only a generator's are, and Effect IS that generator protocol) is recorded in the STATUS
   log. Matches the framework's "adopters write JS, Effect is the engine" stance (tool-handler

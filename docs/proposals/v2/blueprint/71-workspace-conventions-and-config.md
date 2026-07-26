@@ -23,8 +23,9 @@ payoff) and a defaults layer the framework + its tooling read. This ADR fixes:
 ## Decisions
 
 ### 1. Workspace-default (not single-app-default)
+
 `create-agentick-app my-bot` scaffolds a workspace with `apps/my-bot/` already in it (nesting hidden
-by the bootstrapper). **Why, beyond preference:** workspace-always is the *migration-free* choice.
+by the bootstrapper). **Why, beyond preference:** workspace-always is the _migration-free_ choice.
 Single-app-default forces a restructure — move the app into `apps/`, add turbo/pnpm plumbing,
 re-path imports — exactly when the second app arrives. Workspace-always never restructures: you add
 `apps/second/`. **Growth must never cost a restructure.**
@@ -38,10 +39,12 @@ acme-agents/
 ├─ agentick.config.ts                   # workspace defaults + model registry
 ├─ pnpm-workspace.yaml  turbo.json
 ```
+
 Per app: `src/{agent.tsx, agents/, tools/, skills/, prompts/, resources/, knobs.ts, gates.ts,
 app.ts, serve.ts}` + a local `agentick.config.ts` that `extends` the workspace.
 
 ### 2. Five convention folders — explicit loading, NOT runtime magic
+
 `agents/ tools/ skills/ prompts/ resources/` are known by name so files land in the right place and
 tooling can find them. But **loading is explicit** — an index barrel (`tools/index.ts` re-exports
 each) imported in `app.ts`, exactly as the v1 example already did. Runtime magic-scan (glob at boot,
@@ -52,27 +55,40 @@ inspect — the "typed routes" pattern), which is explicit-and-inspectable, not 
 `discovery` in the config = "where the **tooling/codegen** looks," never "what the runtime loads."
 
 ### 3. `agentick.config.ts` — the defaults + registry layer
+
 It earns a file for exactly three kinds of thing: what **tooling** needs before running the app
 (discovery, the CLI), workspace-wide **defaults**, and **registries** apps resolve by name. Runtime
 wiring (the specific model instance, this app's extensions) stays in `app.ts`, which resolves names
-*from* the config. It is **not** a mirror of `createApp`.
+_from_ the config. It is **not** a mirror of `createApp`.
 
 ```ts
 export default defineAgentickConfig({
-  framework: "react",                              // §4 binding
-  discovery: { agents: "src/agents", tools: "src/tools", skills: "src/skills",
-               prompts: "src/prompts", resources: "src/resources" },
+  framework: "react", // §4 binding
+  discovery: {
+    agents: "src/agents",
+    tools: "src/tools",
+    skills: "src/skills",
+    prompts: "src/prompts",
+    resources: "src/resources",
+  },
   models: () => ({ default: aisdk(openai("gpt-4o-mini")), smart: aisdk(anthropic("...")) }),
-  tasks:       () => ({ store: postgresTaskStore({ executor: pool }) }),   // ADR 68 seam
-  timeline:    () => ({ store: postgresTimelineStore({ executor: pool }) }), // session persistence
+  tasks: () => ({ store: postgresTaskStore({ executor: pool }) }), // ADR 68 seam
+  timeline: () => ({ store: postgresTimelineStore({ executor: pool }) }), // session persistence
   elicitation: { defaultTimeoutMs: 120_000 },
   defaults: { maxTicks: 50, devTools: true },
-  serve:    { transport: "ws", port: 4000 },
+  serve: { transport: "ws", port: 4000 },
   env: { OPENAI_API_KEY: "openai", ANTHROPIC_API_KEY: "anthropic" }, // binding, NOT the secret
-  extends: "../..",                                // (app) inherit the workspace config
-  profiles: { dev: {/*…*/}, prod: {/*…*/} },
-  apps: "apps/*",                                  // (workspace shape only)
-})
+  extends: "../..", // (app) inherit the workspace config
+  profiles: {
+    dev: {
+      /*…*/
+    },
+    prod: {
+      /*…*/
+    },
+  },
+  apps: "apps/*", // (workspace shape only)
+});
 ```
 
 **Lazy by rule:** the config is executable TS, but `models`/`tasks`/`timeline` are **thunks** — so
@@ -93,20 +109,23 @@ precedence** (highest wins): `--config <path>` > `AGENTICK_CONFIG`/`AGENTICK_PRO
 the default file. (`Loader`/`mergeLoaders` in `utils/loaders` composes the sources.)
 
 ### 4. `--framework` = the agent-authoring reconciler binding
+
 `create-agentick-app --framework react|angular|solid` selects which **reconciler binding** you
 author agents in (`reconciler-react-next` today; Angular/Solid are sibling bindings over one core
-IR — the framework-agnostic-reconciler direction). The **client UI** is a *separate axis* (a
+IR — the framework-agnostic-reconciler direction). The **client UI** is a _separate axis_ (a
 distinct `--client` flag / the `clients/` dir), so a React-authored agent can be served to an
 Angular UI over the wire. Everything below the reconciler — harnesses, model adapters, gateway,
 transports, tools — is framework-neutral; only the agent surface changes.
 
 ## `create-agentick-app`
+
 Scaffolds the workspace (+ first app), wires `package.json` to the metapackage + the chosen model
 adapter + the chosen reconciler binding, writes `agentick.config.ts`, and drops a working agent +
 tool + `.env.example`. Flags (all promptable): `--framework` · `--template` · `--model` ·
 `--extensions` (withX to pre-wire) · `--serve local|gateway`.
 
 ## Rejected
+
 - **Runtime folder magic-scan** — footgun at scale (see §2). Explicit barrels / codegen instead.
 - **Single-app default** — forces a restructure at app #2 (see §1).
 - **Config as a `createApp` mirror** — two sources of truth. Config is defaults + registry;
@@ -115,6 +134,7 @@ tool + `.env.example`. Flags (all promptable): `--framework` · `--template` · 
   lazy-thunk rule gives tooling cheap static reads without going data-only.
 
 ## Open (implementation — a future build)
+
 - `defineAgentickConfig` types + the `mergeLayered`-based loader (profiles / `extends` / selector).
 - The index-barrel codegen + the `agentick` CLI (`dev` / `build` / `add app`).
 - Does the **store + executor dual-slot** pattern (ADR 68 tasks) generalize enough that the config
