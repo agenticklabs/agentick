@@ -1,5 +1,13 @@
 # @agentick/transport-http
 
+## 1.0.0-next.6
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/spec@1.0.0-next.6
+  - @agentick/transport@1.0.0-next.6
+
 ## 1.0.0-next.5
 
 ### Patch Changes

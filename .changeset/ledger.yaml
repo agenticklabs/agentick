@@ -2,6 +2,10 @@
   dir: packages/mcp
   intents:
     - mcp-parity-slice
+"@agentick/mcp@1.0.0-next.6":
+  dir: packages/mcp
+  intents:
+    - mcp-wire-extensions
 "@agentick/spec@1.0.0-next.0":
   dir: packages/spec
   intents:

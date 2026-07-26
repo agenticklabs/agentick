@@ -1,6 +1,6 @@
 {
   "name": "@agentick/tasks",
-  "version": "1.0.0-next.5",
+  "version": "1.0.0-next.6",
   "description": "TasksHarness — substrate-level long-running tool primitive. Backs MCP Tasks (2025-11-25 core / draft extension), local long-running tool handlers, and any future managed-execution path. Same FSM as MCP's task model (`working/input_required/completed/failed/cancelled`); cluster-friendly via inbox-routed cancel + status notifications. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",

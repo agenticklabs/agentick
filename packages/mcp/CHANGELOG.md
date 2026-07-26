@@ -1,5 +1,33 @@
 # @agentick/mcp
 
+## 1.0.0-next.6
+
+### Minor Changes
+
+- MCP tool wire extensions via a namespaced `metadata.mcp` block, projected
+  at the wire (no spec changes): result-side `_meta` (envelope
+  `metadata.mcp.meta` → wire `CallToolResult._meta` — makes
+  `wwwAuthenticateMeta` step-up challenges actually reach clients),
+  declaration-side `_meta` (→ wire `Tool._meta`, the MCP Apps `ui://`
+  template-linkage carrier), and advisory annotation hints
+  (readOnly/destructive/idempotent/openWorld → wire `Tool.annotations`).
+  Typed helpers `mcpToolExtensions` / `mcpResultExtensions` exported from
+  `@agentick/mcp/server`. Wire output is byte-identical when no extensions
+  are carried.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/elicitation@1.0.0-next.6
+  - @agentick/prompts@1.0.0-next.6
+  - @agentick/pubsub@1.0.0-next.6
+  - @agentick/runtime@1.0.0-next.6
+  - @agentick/spec@1.0.0-next.6
+  - @agentick/tasks@1.0.0-next.6
+  - @agentick/tool@1.0.0-next.6
+  - @agentick/tool-executor@1.0.0-next.6
+  - @agentick/utils@1.0.0-next.6
+
 ## 1.0.0-next.5
 
 ### Minor Changes

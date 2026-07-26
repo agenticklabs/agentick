@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client-react",
-  "version": "1.0.0-next.5",
+  "version": "1.0.0-next.6",
   "description": "React binding for the agentick wire client. `useHandle(handle)` + `useView(handle, opts)` — thin `useSyncExternalStore` veneers over the framework-agnostic ClientHandle / FilteredView store contract. The BROWSER binding for the wire client (not the server-side JSX surface — that is @agentick/compiler-react).",
   "keywords": [
     "agent",
