@@ -1,5 +1,14 @@
 # @agentick/model-ai-sdk
 
+## 1.0.0-next.7
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/model@1.0.0-next.7
+  - @agentick/spec@1.0.0-next.7
+  - @agentick/utils@1.0.0-next.7
+
 ## 1.0.0-next.6
 
 ### Patch Changes

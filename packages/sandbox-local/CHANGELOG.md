@@ -1,5 +1,13 @@
 # @agentick/sandbox-local
 
+## 1.0.0-next.7
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/sandbox@1.0.0-next.7
+  - @agentick/utils@1.0.0-next.7
+
 ## 1.0.0-next.6
 
 ### Patch Changes

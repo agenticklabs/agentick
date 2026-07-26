@@ -1,5 +1,20 @@
 # @agentick/mcp
 
+## 1.0.0-next.7
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/elicitation@1.0.0-next.7
+  - @agentick/prompts@1.0.0-next.7
+  - @agentick/pubsub@1.0.0-next.7
+  - @agentick/runtime@1.0.0-next.7
+  - @agentick/spec@1.0.0-next.7
+  - @agentick/tasks@1.0.0-next.7
+  - @agentick/tool@1.0.0-next.7
+  - @agentick/tool-executor@1.0.0-next.7
+  - @agentick/utils@1.0.0-next.7
+
 ## 1.0.0-next.6
 
 ### Minor Changes
