@@ -75,6 +75,15 @@ export const appWireExtension: WireExtension = defineWireExtension({
       const session = await app.createSession({
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(metadata !== undefined ? { metadata } : {}),
+        // ADR 48 — stamp the OWNING principal from the authenticated caller's
+        // identity (resolved once at ingress, ADR 51 §4.1). This is the
+        // framework's own concept feeding the framework's own dispatch gate
+        // (the same-principal target rule) — completing it is a capability, not
+        // an opinion. The wire params type carries NO `principal` field, so a
+        // value smuggled in the request body is never read: ownership is the
+        // edge's to assert, not the caller's to claim. Unauthenticated (local
+        // pole) → `ctx.principal` undefined → the session is left unstamped.
+        ...(ctx.principal !== undefined ? { principal: ctx.principal } : {}),
       });
       return { sessionId: session.id };
     },

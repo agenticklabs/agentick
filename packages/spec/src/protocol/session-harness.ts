@@ -1122,6 +1122,14 @@ export interface SpawnContextChildInput<P = unknown> {
   readonly agent: unknown;
   readonly sessionId?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * The child's owning principal (ADR 48) — the parent's own `principal`,
+   * threaded by `session.spawn()` so ownership descends the session tree.
+   * Stamped onto the child's harness + `SessionRecord`. Ownership is not
+   * caller-choosable: `SpawnInput` / `ForkInput` offer no principal override;
+   * a child always inherits its parent's. Absent for a principal-less parent.
+   */
+  readonly principal?: string;
   readonly initialProps?: P;
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   readonly maxTicks?: number;

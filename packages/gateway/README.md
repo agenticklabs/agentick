@@ -401,8 +401,9 @@ the handler receives. See ADR 90 for the one-row → four-surfaces story.
 
 > **Verified by** `../transport/src/__tests__/wire-command-e2e.spec.ts`
 > (journaled op + typed hook transform + guard veto→Forbidden / defer→RateLimited
-> + middleware + span attrs + live ctx facets) and the type-level
-> `../runtime/src/__tests__/wire-command-hooks.type.spec.ts`.
+>
+> - middleware + span attrs + live ctx facets) and the type-level
+>   `../runtime/src/__tests__/wire-command-hooks.type.spec.ts`.
 
 ### Discovery
 
@@ -514,6 +515,22 @@ the structured twin of the `ctx.principal` string, carrying the adopter-shaped
 unauthenticated local pole, and rides ONLY the `wire:*` op: an inner non-wire op
 the handler triggers (`app:create-session`) sees no identity, so request identity
 never leaks into ordinary command ctx.
+
+The hook above stamps identity into the adopter's own `metadata` bag. Distinctly,
+the framework's `app/create_session` method ALSO stamps the session's
+construction-bound **owning principal** (ADR 48) from `ctx.principal` onto the
+new session's `SessionHarness.principal` + durable `SessionRecord.principal` —
+the framework's own field feeding the framework's own dispatch gate (the
+same-principal target rule). The wire params type carries no `principal` field,
+so a value smuggled in the request body is never read (ownership is the edge's to
+assert, not the caller's to claim); an unauthenticated create leaves the session
+unstamped. Children inherit it (`session.spawn` / `fork`), and the same-principal
+rule then Forbids a caller reaching a session owned by a different principal.
+
+> **Verified by** `@agentick/transport` — `session-principal.spec.ts` (the method
+> stamps `ctx.principal` onto the harness + record; a body-smuggled principal is
+> ignored; unauthenticated → unstamped; the same-principal gate engages on the
+> stamped value).
 
 > **Verified by** `@agentick/transport` — `wire-identity-hook.spec.ts` (the hook
 > stamps identity over a client-smuggled principal; unauthenticated → `ctx.identity`
@@ -845,8 +862,7 @@ await createGateway({ truncateToolResults: { maxBytes: 256 * 1024 } });
 // ON, domain override — keep the first rows of a CSV, delegate everything else.
 await createGateway({
   truncateToolResults: {
-    truncate: (block, ctx) =>
-      block.type === "csv" ? headOnly(block) : ctx.bound(block), // ctx.bound = the default
+    truncate: (block, ctx) => (block.type === "csv" ? headOnly(block) : ctx.bound(block)), // ctx.bound = the default
   },
 });
 ```
@@ -1047,11 +1063,11 @@ See `docs/proposals/v2/STATUS.md`.
 
 ## Development plan
 
-| Phase             | What lands                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Phase 4 (done)    | This package — gateway scaffold                                                                                          |
-| Phase 5 (done)    | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id`                                                                    |
-| Phase 33.C–E      | Transports mount on `GatewayHarness` (no changes to this package)                                                        |
+| Phase             | What lands                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Phase 4 (done)    | This package — gateway scaffold                                                                                     |
+| Phase 5 (done)    | `AppHarnessProtocol.id` / `SessionHarnessProtocol.id`                                                               |
+| Phase 33.C–E      | Transports mount on `GatewayHarness` (no changes to this package)                                                   |
 | Phase 33.D (done) | Shared dispatcher `dispatchRequest` landed in `@agentick/transport` — every transport routes wire frames through it |
 | ADR 34            | `@agentick/auth` adds a `GatewayExtension` for auth                                                                 |
 | Phase 33.I        | `@agentick/mcp-surface` adds a `GatewayExtension` that mounts MCP method namespaces                                 |

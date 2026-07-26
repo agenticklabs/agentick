@@ -91,6 +91,21 @@ export interface SessionRecord {
    * stable id exists, never fabricated by the framework.
    */
   readonly agentId?: string;
+  /**
+   * Construction-bound owning principal (ADR 48) — the durable projection of
+   * the session harness's `principal`. Stamped at construction (from
+   * {@link CreateSessionInput.principal}, itself set host-door or from the wire
+   * caller's authenticated identity) and inherited by spawned / forked
+   * children. The resume index carries ownership so a rehydrated / historical
+   * record still attributes the session to its owner. Absent for
+   * principal-less deployments (local single-user agent).
+   *
+   * NOTE (downstream store adapters): a durable `SessionStore` adapter
+   * (`@agentick/session-store-postgres`, etc.) must persist + round-trip this
+   * field alongside the other identity slots — it is part of the record's
+   * durable identity, not a transient runtime accounting value.
+   */
+  readonly principal?: string;
 
   // ─── runtime accounting (framework-owned), hierarchy-aware ───
   /** The in-flight execution's id (`exec:${ulid()}`), or absent when idle. */

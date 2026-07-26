@@ -120,6 +120,8 @@ export interface SessionRuntimeInit {
   readonly appId?: string;
   readonly agentId?: string;
   readonly parentSessionId?: string;
+  /** Owning principal (ADR 48) — construction-bound; folded into every record write. */
+  readonly principal?: string;
   /** Spawn lineage (SP5) — ancestor session ids, root-first. Folded into the record. */
   readonly spawnPath?: readonly string[];
   readonly title?: string;
@@ -135,6 +137,8 @@ export class SessionRuntime {
   private readonly appId: string | undefined;
   private readonly agentId: string | undefined;
   private readonly parentSessionId: string | undefined;
+  /** Owning principal (ADR 48) — folded into every record write; absent when principal-less. */
+  private readonly principal: string | undefined;
   /** Spawn lineage (SP5) — folded into every record write; absent for a root. */
   private readonly spawnPath: readonly string[] | undefined;
   private readonly storeCtx: () => StoreCtx;
@@ -175,6 +179,7 @@ export class SessionRuntime {
     this.appId = init.appId;
     this.agentId = init.agentId;
     this.parentSessionId = init.parentSessionId;
+    this.principal = init.principal;
     this.spawnPath = init.spawnPath;
     this.storeCtx = init.storeCtx;
     this._meta = omitUndefined({
@@ -204,6 +209,7 @@ export class SessionRuntime {
       usage: { ...ZERO_USAGE },
       ...omitUndefined({
         parentSessionId: this.parentSessionId,
+        principal: this.principal,
         spawnPath: this.spawnPath,
         appId: this.appId,
         agentId: this.agentId,
@@ -261,6 +267,7 @@ export class SessionRuntime {
       usage: patch.usage ?? cur.usage,
       ...omitUndefined({
         parentSessionId: this.parentSessionId,
+        principal: this.principal,
         spawnPath: this.spawnPath,
         appId: this.appId,
         agentId: this.agentId,

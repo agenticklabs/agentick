@@ -249,6 +249,15 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
+   * Construction-bound owning principal (ADR 48) — the identity axis of the
+   * session's structural identity. Forwarded to {@link BaseHarness} (so the
+   * wire dispatch gate reads `session.principal` for the same-principal rule)
+   * and folded into the durable `SessionRecord`. Threaded by the App from
+   * `CreateSessionInput.principal`; inherited by spawned / forked children.
+   * `undefined` for a principal-less session.
+   */
+  readonly principal?: string;
+  /**
    * Compiler that owns the agent's element tree. Typed as the
    * protocol — any conformant impl (React compiler, future Angular
    * compiler, etc.) drops in.
@@ -728,6 +737,10 @@ export class SessionHarness<P = unknown>
     super("session", options.sessionId, journal, bus, inbox, {
       metadata: options.metadata,
       ...omitUndefined({
+        // ADR 48 — the construction-bound owning principal. Stamped onto every
+        // emitted event scope by BaseHarness.makeEvent AND read by the wire
+        // dispatch gate (`session.principal`) for the same-principal rule.
+        principal: options.principal,
         journal: options.journal,
         bus: options.bus,
         inbox: options.inbox,
@@ -767,6 +780,8 @@ export class SessionHarness<P = unknown>
         appId: options.appId,
         agentId: options.agentId,
         parentSessionId: options.parentSessionId,
+        // ADR 48 — persist ownership on the durable record (resume index).
+        principal: options.principal,
         // SP5 — persist the full lineage on the record (omit for a root).
         spawnPath:
           options.spawnPath && options.spawnPath.length > 0 ? options.spawnPath : undefined,
@@ -1457,6 +1472,9 @@ export class SessionHarness<P = unknown>
       ...omitUndefined({
         sessionId: input.sessionId,
         metadata: input.metadata,
+        // ADR 48 — ownership descends the session tree: the child inherits
+        // OUR principal. Not caller-choosable (no SpawnInput override).
+        principal: this.principal,
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
@@ -1483,10 +1501,21 @@ export class SessionHarness<P = unknown>
     // restore fans this session's bridge snapshots into the child's matching
     // bridges + copies the tick/usage accounting, then the child diverges.
     const snap = await this.snapshot();
+    // C2 — a fork is a same-image copy: the snapshot already fans every
+    // bridge's state into the child, but the record's adopter `metadata` bag is
+    // the arbitrary exception the snapshot does not carry. So when the caller
+    // does NOT override `metadata`, the fork inherits the PARENT's bag (this
+    // session knows its own metadata). An explicit `ForkInput.metadata` wins.
+    // (Spawn does NOT auto-inherit metadata — a spawned child is a NEW session;
+    // adopter-selective inheritance rides the `onSessionCreate` reshape arm.)
+    const parentMeta =
+      Object.keys(this.metadata).length > 0
+        ? (this.metadata as Readonly<Record<string, unknown>>)
+        : undefined;
     const child = (await this.spawn({
       ...omitUndefined({
         sessionId: input.sessionId,
-        metadata: input.metadata,
+        metadata: input.metadata ?? parentMeta,
         maxTicks: input.maxTicks,
       }),
     })) as SessionHarnessProtocol<P>;

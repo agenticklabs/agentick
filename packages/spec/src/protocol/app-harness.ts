@@ -53,6 +53,22 @@ export interface CreateSessionInput<P = unknown> {
   /** Scope ceiling for the session (#199) — construction-bound. */
   readonly requiredScopes?: readonly string[];
   /**
+   * Construction-bound owning principal (ADR 48) — the identity axis of the
+   * session's structural identity, stamped onto the {@link SessionHarnessProtocol}
+   * and the durable {@link SessionRecord}, and read by the wire dispatch gate for
+   * the same-principal target rule (ADR 51 §4.2).
+   *
+   * HOST-door settable only — server-declared, deliberately NOT settable over
+   * the wire (exactly like {@link requiredScopes}). The framework's
+   * `app/create_session` wire method stamps this from the authenticated
+   * caller's identity (`ctx.principal`); the wire params type carries NO
+   * `principal` field, so a value smuggled in the request body is ignored.
+   * A spawned / forked child inherits its parent's principal (the spawn flow
+   * threads it through `SpawnContextChildInput.principal`); ownership is not
+   * caller-choosable.
+   */
+  readonly principal?: string;
+  /**
    * Adopter-defined metadata bag carried on the session and surfaced
    * to session-level substrate factories via `parent.metadata`.
    * Framework defines no keys.
@@ -477,15 +493,27 @@ export interface AppHarnessProtocol<P = unknown> {
   readonly services: ServiceRegistry;
 
   /**
-   * Register a handler that fires before a new session is created.
-   * Handler can return a `HandlerVerdict` to veto (refuse the session)
-   * or replace (substitute a pre-built session). Multiple handlers
-   * compose per `mergeVerdict`.
+   * Register a handler that fires before a new session is created. The
+   * house before-hook grammar, three arms:
+   *   - **veto** — return `{ kind: "veto", reason? }` to refuse the session
+   *     (the call throws). First veto wins.
+   *   - **reshape** — return a `CreateSessionInput` to REPLACE the input the
+   *     rest of construction sees (fold-forward: later handlers and the
+   *     session build both observe the reshaped value). This is the adopter
+   *     seam for selective spawn inheritance — read `parentSessionId`, look up
+   *     the parent record, inject chosen `metadata` keys into the child.
+   *   - **pass** — return `void` to leave the input untouched.
+   *
+   * Handlers run in registration order; a reshape from one is visible to the
+   * next. A `{ kind: "veto" }` return is recognized as a veto BEFORE the
+   * reshape arm, so it is never mistaken for an input value.
    */
   onSessionCreate(
     handler: (
       input: CreateSessionInput<P>,
-    ) => Promise<{ readonly kind: "veto"; readonly reason?: string } | void>,
+    ) => Promise<
+      { readonly kind: "veto"; readonly reason?: string } | CreateSessionInput<P> | void
+    >,
   ): () => void;
 
   /**

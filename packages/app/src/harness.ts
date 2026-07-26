@@ -887,7 +887,7 @@ export class AppHarness<P = unknown>
   private readonly sessionCreateHandlers: Array<
     (
       input: CreateSessionInput<P>,
-    ) => Promise<{ readonly kind: "veto"; readonly reason?: string } | void>
+    ) => Promise<{ readonly kind: "veto"; readonly reason?: string } | CreateSessionInput<P> | void>
   > = [];
   private readonly sessionCloseHandlers: Array<
     (info: {
@@ -1351,6 +1351,10 @@ export class AppHarness<P = unknown>
     closeHandlers: Array<() => void | Promise<void>>,
     toolHandlerUnregs: Array<() => void>,
     busUnregs: Array<() => void>,
+    /** ADR 48 — the session's owning principal, exposed to extensions at install. */
+    principal?: string,
+    /** The session's adopter metadata bag, exposed to extensions at install. */
+    metadata?: Readonly<Record<string, unknown>>,
   ): SessionInstaller {
     const self = this;
     const installerHost: AppInstallerHost = {
@@ -1362,6 +1366,11 @@ export class AppHarness<P = unknown>
       kind: "session",
       hostId: sessionId,
       sessionId,
+      // ADR 48 — the session's identity at install time, so an extension can
+      // construct per-session, tier-scoped backing stores keyed by principal /
+      // adopter routing metadata. Omitted keys stay absent (principal-less /
+      // no-metadata session).
+      ...omitUndefined({ principal, metadata }),
       elicitation,
       tasks,
       resources,
@@ -1638,7 +1647,9 @@ export class AppHarness<P = unknown>
   onSessionCreate(
     handler: (
       input: CreateSessionInput<P>,
-    ) => Promise<{ readonly kind: "veto"; readonly reason?: string } | void>,
+    ) => Promise<
+      { readonly kind: "veto"; readonly reason?: string } | CreateSessionInput<P> | void
+    >,
   ): () => void {
     this.sessionCreateHandlers.push(handler);
     return () => {
@@ -1694,18 +1705,39 @@ export class AppHarness<P = unknown>
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
 
-    // Run `onSessionCreate` handlers — first veto wins. Replace and
-    // defer verdicts aren't supported for session creation (no
-    // meaningful semantics here yet); we recognize only veto/proceed.
+    // Fold the spawn-supplied `parentSessionId` (which the spawn flow threads
+    // via `overrides`, not `input`) INTO the input the hooks see, so the
+    // `onSessionCreate` reshape arm can read it — the selective-inheritance
+    // seam is "read `input.parentSessionId` → look up the parent record →
+    // inject chosen metadata keys." The later parentSessionId cascade
+    // (overrides-wins) is unaffected.
+    if (overrides.parentSessionId !== undefined && input.parentSessionId === undefined) {
+      input = { ...input, parentSessionId: overrides.parentSessionId };
+    }
+
+    // Run `onSessionCreate` handlers — the house before-hook grammar, three
+    // arms: veto (`{ kind: "veto" }`, first wins → throw), reshape (a returned
+    // `CreateSessionInput` REPLACES the input the rest of construction + later
+    // handlers observe — the adopter seam for selective spawn inheritance), or
+    // pass (`void`). Veto is recognized BEFORE the reshape arm so a verdict is
+    // never mistaken for an input value.
     for (const h of this.sessionCreateHandlers) {
       const verdict = await h(input);
-      if (verdict && verdict.kind === "veto") {
-        throw new AppExecutionFailed({
-          cause: new Error(
-            verdict.reason ? `session create vetoed: ${verdict.reason}` : "session create vetoed",
-          ),
-        });
+      if (verdict === undefined) continue;
+      if ("kind" in verdict) {
+        // Verdict arm — only `veto` is defined here (first veto wins → throw).
+        if (verdict.kind === "veto") {
+          throw new AppExecutionFailed({
+            cause: new Error(
+              verdict.reason ? `session create vetoed: ${verdict.reason}` : "session create vetoed",
+            ),
+          });
+        }
+        continue;
       }
+      // Reshape arm — fold the returned input forward (later handlers + the
+      // session build both observe the reshaped value).
+      input = verdict;
     }
 
     const sessionId = input.sessionId ?? `session:${ulid()}`;
@@ -1837,6 +1869,9 @@ export class AppHarness<P = unknown>
         sessionCloseHandlers,
         sessionToolHandlerUnregs,
         sessionBusUnregs,
+        // ADR 48 — the session's identity, resolved for install-time reads.
+        input.principal,
+        input.metadata,
       );
       for (const ext of this.sessionExtensions) {
         // Type guarantee: `sessionExtensions` was filtered to
@@ -2026,6 +2061,12 @@ export class AppHarness<P = unknown>
       // app-uniformly on every session so the SP4 guard reads a consistent cap.
       ...omitUndefined({ spawnPath: overrides.spawnPath }),
       maxSpawnDepth: this.maxSpawnDepth,
+      // ADR 48 — the construction-bound owning principal. Set host-door via
+      // `createSession({ principal })`, from the wire caller's identity by the
+      // `app/create_session` method, or inherited from a parent by the spawn
+      // flow. Stamped onto the harness (read by the wire dispatch gate) + the
+      // durable `SessionRecord`.
+      ...omitUndefined({ principal: input.principal }),
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
       // Streaming cascade: per-session input.streaming > app-level
@@ -2207,6 +2248,9 @@ export class AppHarness<P = unknown>
       ...omitUndefined({
         sessionId: input.sessionId,
         metadata: input.metadata,
+        // ADR 48 — thread the inherited principal (the parent's own, set by
+        // `session.spawn()`) so the child's harness + record carry ownership.
+        principal: input.principal,
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,

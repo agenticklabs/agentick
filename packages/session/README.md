@@ -400,6 +400,22 @@ Forbidden regardless of grants. Server-declared only (via
 requires claim-carrying identities — under a pure grant-table deployment
 a non-empty ceiling makes the session wire-inaccessible, by design.
 
+### `principal` — the owning principal (ADR 48)
+
+The construction-bound identity axis of the session (`SessionHarness.principal`),
+the twin of `requiredScopes` on the work axis. Set from `CreateSessionInput.principal`
+(host-door, or stamped from the authenticated wire caller by `app/create_session`)
+and folded into the durable `SessionRecord.principal`. Inherited by spawned /
+forked children (`spawn()` / `fork()` thread `this.principal` onto the child —
+not caller-choosable). Read by the wire dispatch gate for the same-principal
+target rule (a caller reaching a session owned by another principal is Forbidden)
+and stamped authoritatively onto every emitted event scope by `BaseHarness`.
+`undefined` for a principal-less (local single-user) deployment.
+
+> **Verified by** `../transport/src/__tests__/session-principal.spec.ts` (the
+> gate engages on the stamped principal) and
+> `../app/src/__tests__/session-principal-lifecycle.spec.tsx` (spawn/fork inherit it).
+
 ## The render ↔ runtime feedback loop
 
 The session is the **per-render fact producer** and the **model

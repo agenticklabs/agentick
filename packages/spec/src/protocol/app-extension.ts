@@ -278,6 +278,25 @@ export interface SessionInstaller extends BaseInstaller {
   readonly sessionId: string;
 
   /**
+   * The session's owning principal (ADR 48) at install time — the same value
+   * carried on the session harness + its durable `SessionRecord`. Exposed here
+   * so a session extension can construct per-session, tier-scoped backing
+   * stores keyed by identity at install (e.g.
+   * `new SkillStore({ dataSource, context: fromPrincipal(installer) })`).
+   * `undefined` for a principal-less session.
+   */
+  readonly principal?: string;
+
+  /**
+   * The session's adopter metadata bag at install time — the same
+   * `CreateSessionInput.metadata` carried on the session harness + record's
+   * open over-fetch bag. Read by extensions that key backing resources off
+   * adopter routing data (tenant id, region, …) supplied at session creation.
+   * Frozen; framework defines no keys.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
+
+  /**
    * The session's elicitation harness — constructed by the host
    * BEFORE session-extension installs run, so extensions that need
    * cluster-friendly inbox routing to the session's user (MCP,
