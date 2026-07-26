@@ -1,5 +1,14 @@
 # @agentick/connector
 
+## 1.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/formatters@1.0.0-next.5
+  - @agentick/spec@1.0.0-next.5
+  - @agentick/utils@1.0.0-next.5
+
 ## 1.0.0-next.4
 
 ### Patch Changes
