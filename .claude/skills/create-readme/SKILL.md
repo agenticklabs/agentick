@@ -58,6 +58,10 @@ are appealing, informative, and easy to read.
 - **Every claim needs a test.** A capability stated in the README must
   be exercised by the package's tests; claims that aren't verified
   belong under "Roadmap & known gaps", never in the main prose.
+- **Incremental edits conform too.** Any slice that touches a README
+  brings the touched sections up to this treatment (voice rule,
+  example-led, no internal references) — the treatment is the standing
+  bar, not a one-time overhaul.
 - **Examples must typecheck against the CURRENT exports.** Build them
   from the real barrel (`src/index.ts`) — never from memory of an older
   API. If an example needs an import from another package, that package
