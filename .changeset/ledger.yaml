@@ -6,3 +6,7 @@
   dir: packages/spec
   intents:
     - conformance-off-main-barrel
+"@agentick/spec@1.0.0-next.2":
+  dir: packages/spec
+  intents:
+    - transport-shared-server-citizenship
