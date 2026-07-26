@@ -7,8 +7,11 @@
  *
  * Pins:
  *  - completion: `completion/complete` (ref/prompt) routes to the
- *    configured sugar handler; unknown ref → empty; ref/resource →
- *    empty (Wave 4 not wired); `context.arguments` reaches the handler.
+ *    configured sugar handler; unknown ref → empty; `context.arguments`
+ *    reaches the handler.
+ *  - resource-template completion: `ref/resource` routes to the handler
+ *    keyed by template uri → argument name; unknown template/arg → empty;
+ *    the `completions` capability is advertised on resource handlers alone.
  *  - completions capability advertised iff a handler is wired; opt-out
  *    suppresses it.
  *  - logging: advertised by default; `setLoggingLevel` reaches the
@@ -235,9 +238,9 @@ describe("completion projection — round-trip", () => {
     await cleanup();
   });
 
-  it("ref/resource resolves to empty (resource-template completion is Wave 4)", async () => {
+  it("ref/resource with no configured template resolves to empty", async () => {
     const { client, cleanup } = await makeConnectedClient({
-      name: "cmp-resource",
+      name: "cmp-resource-none",
       completions: { prompts: { greet: { name: completeFromList(["Ada"]) } } },
     });
     const res = await client.complete({
@@ -245,6 +248,115 @@ describe("completion projection — round-trip", () => {
       argument: { name: "path", value: "" },
     });
     expect(res.completion.values).toEqual([]);
+    await cleanup();
+  });
+});
+
+// ═══════════════════ resource-template completion ═══════════════════
+
+describe("resource-template completion — capability", () => {
+  it("advertises completions when only a resource-template handler is wired", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-res-cap",
+      completions: {
+        resources: { "file:///{path}": { path: completeFromList(["a.txt", "b.txt"]) } },
+      },
+    });
+    expect(client.getServerCapabilities()?.completions).toBeDefined();
+    await cleanup();
+  });
+
+  it("does NOT advertise completions when the resources slot has empty arg maps", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-res-empty",
+      completions: { resources: { "file:///{path}": {} } },
+    });
+    expect(client.getServerCapabilities()?.completions).toBeUndefined();
+    await cleanup();
+  });
+});
+
+describe("resource-template completion — round-trip", () => {
+  it("routes ref/resource to the handler keyed by template uri + arg, with prefix filter", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-res-rt",
+      completions: {
+        resources: {
+          "file:///{path}": { path: completeFromList(["alpha", "algae", "beta"]) },
+        },
+      },
+    });
+    const res = await client.complete({
+      ref: { type: "ref/resource", uri: "file:///{path}" },
+      argument: { name: "path", value: "al" },
+    });
+    expect(res.completion.values).toEqual(["alpha", "algae"]);
+    await cleanup();
+  });
+
+  it("passes context.arguments through to a resource-template handler", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-res-ctx",
+      completions: {
+        resources: {
+          "db://{table}/{row}": {
+            row: (typed, ctx) => {
+              seen.push({ ...ctx.resolvedArguments });
+              return [`${typed}-in-${ctx.resolvedArguments["table"] ?? "?"}`];
+            },
+          },
+        },
+      },
+    });
+    const res = await client.complete({
+      ref: { type: "ref/resource", uri: "db://{table}/{row}" },
+      argument: { name: "row", value: "42" },
+      context: { arguments: { table: "invoices" } },
+    });
+    expect(res.completion.values).toEqual(["42-in-invoices"]);
+    expect(seen).toEqual([{ table: "invoices" }]);
+    await cleanup();
+  });
+
+  it("unknown template / argument resolves to an empty value list", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-res-unknown",
+      completions: {
+        resources: { "file:///{path}": { path: completeFromList(["a.txt"]) } },
+      },
+    });
+    const unknownTemplate = await client.complete({
+      ref: { type: "ref/resource", uri: "http://{host}" },
+      argument: { name: "host", value: "" },
+    });
+    expect(unknownTemplate.completion.values).toEqual([]);
+    const unknownArg = await client.complete({
+      ref: { type: "ref/resource", uri: "file:///{path}" },
+      argument: { name: "nope", value: "" },
+    });
+    expect(unknownArg.completion.values).toEqual([]);
+    await cleanup();
+  });
+
+  it("prompt + resource handlers coexist on one server", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-both",
+      completions: {
+        prompts: { greet: { name: completeFromList(["Ada", "Alan"]) } },
+        resources: { "file:///{path}": { path: completeFromList(["x.md", "y.md"]) } },
+      },
+    });
+    const prompt = await client.complete({
+      ref: { type: "ref/prompt", name: "greet" },
+      argument: { name: "name", value: "A" },
+    });
+    expect(prompt.completion.values).toEqual(["Ada", "Alan"]);
+    const resource = await client.complete({
+      ref: { type: "ref/resource", uri: "file:///{path}" },
+      argument: { name: "path", value: "x" },
+    });
+    expect(resource.completion.values).toEqual(["x.md"]);
     await cleanup();
   });
 });

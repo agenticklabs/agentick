@@ -9,9 +9,10 @@
  * SDK Server and routes the request to the matching {@link CompletionHandler}.
  *
  *   - `ref/prompt` → looks up `options.prompts[promptName][argName]`.
- *   - `ref/resource` → resource-template completion; NO source yet
- *     (resources land in Wave 4), so it resolves to an empty value
- *     list. Clients probe freely without a protocol error.
+ *   - `ref/resource` → looks up `options.resources[uriTemplate][argName]`
+ *     (the `ref.uri` carries the template uri). An unknown template or
+ *     argument resolves to an empty value list — clients probe freely
+ *     without a protocol error.
  *
  * Unknown refs / arguments also resolve to `{ values: [] }` rather than
  * a protocol error — matches v1 + the MCP guidance that completion is a
@@ -36,6 +37,12 @@ import type { ResolvedSecurity } from "../security/stages.js";
 export interface CompletionsProjectionOptions {
   /** Prompt-argument handlers, keyed by prompt name then argument name. */
   readonly prompts: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
+  /**
+   * Resource-template argument handlers, keyed by template uri (the
+   * `ref.uri` a `ref/resource` request carries) then argument name.
+   * Defaults to empty — a server with prompt completions only omits it.
+   */
+  readonly resources?: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
   /** Security pipeline resolved for this server. */
   readonly security: ResolvedSecurity;
   /** Connection-scoped context base (cloned + augmented per-request). */
@@ -100,6 +107,7 @@ function resolveHandler(
   if (ref.type === "ref/prompt") {
     return options.prompts[ref.name]?.[argumentName];
   }
-  // ref/resource — resource-template completion lands with Wave 4.
-  return undefined;
+  // ref/resource — the `ref.uri` is the template uri; look the argument
+  // handler up under it. Unknown template / arg → undefined (empty result).
+  return options.resources?.[ref.uri]?.[argumentName];
 }

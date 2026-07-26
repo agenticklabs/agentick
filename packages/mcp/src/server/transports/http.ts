@@ -65,6 +65,7 @@ import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/s
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
 import type { McpConnectionInfo } from "../security/stages.js";
+import { buildWwwAuthenticate } from "../security/www-authenticate.js";
 import type { AcceptHandler, AuthPreGate, ServerTransport } from "./types.js";
 
 const DEFAULT_PATH = "/mcp";
@@ -279,10 +280,11 @@ function deriveResourceMetadataUrl(resource: string): string | undefined {
 function writeUnauthorized(res: ServerResponse, resourceMetadataUrl: string | undefined): void {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "WWW-Authenticate":
-      resourceMetadataUrl !== undefined
-        ? `Bearer resource_metadata="${resourceMetadataUrl}"`
-        : "Bearer",
+    // Single source of truth: the same RFC 6750 builder the tool-result
+    // `_meta` helper uses. A bare `Bearer` when there's no metadata url.
+    "WWW-Authenticate": buildWwwAuthenticate(
+      resourceMetadataUrl !== undefined ? { resourceMetadataUrl } : {},
+    ),
   };
   res.writeHead(401, headers);
   res.end(
@@ -306,13 +308,23 @@ function writeJsonRpcError(res: ServerResponse, status: number, message: string)
   );
 }
 
-export function httpTransport(options: HttpTransportOptions = {}): HttpServerTransportHandle {
-  const path = options.path ?? DEFAULT_PATH;
-  const ownsServer = options.server === undefined;
-
-  // OAuth resource-server discovery (RFC 9728). When a metadata
-  // document is configured, resolve the well-known path(s) it is served
-  // at, keyed off its `resource` identifier.
+/**
+ * Shared request-routing core for BOTH HTTP transport shapes — the
+ * listening {@link httpTransport} and the mount-door
+ * {@link httpMiddlewareTransport}. Owns the per-session SDK-transport map,
+ * the RFC 9728 metadata serving, the auth pre-gate, and the MCP session
+ * routing. The two factories differ only in how a request REACHES the
+ * core (a Node listener vs. a host-called `handler`) and in lifecycle
+ * (port ownership vs. none) — never in how a crossing is handled.
+ */
+function createHttpCore(options: {
+  readonly oauth?: OAuthTransportOptions;
+  readonly sessionIdGenerator?: () => string;
+  readonly enableJsonResponse?: boolean;
+}) {
+  // OAuth resource-server discovery (RFC 9728). When a metadata document
+  // is configured, resolve the well-known path(s) it is served at, keyed
+  // off its `resource` identifier.
   const oauthMetadata = options.oauth?.metadata;
   const oauthPaths =
     oauthMetadata !== undefined
@@ -332,71 +344,82 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
 
   /** Live SDK transports keyed by `Mcp-Session-Id`. */
   const sessions = new Map<string, StreamableHTTPServerTransport>();
-
-  let server: HttpServer | null = null;
-  let requestListener: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
   let closed = false;
 
-  const handle = async (
-    accept: AcceptHandler,
+  /** True iff `pathname` is a well-known metadata path this core serves. */
+  function isMetadataPath(pathname: string): boolean {
+    return oauthMetadata !== undefined && oauthPaths.has(pathname);
+  }
+
+  /**
+   * Serve the RFC 9728 protected-resource metadata document. Caller must
+   * have confirmed the path via {@link isMetadataPath}. Unauthenticated
+   * by design (discovery must work without a credential).
+   */
+  function writeMetadata(req: IncomingMessage, res: ServerResponse): void {
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "GET, HEAD" });
+      res.end(JSON.stringify({ error: "method_not_allowed" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(req.method === "HEAD" ? undefined : JSON.stringify(oauthMetadata));
+  }
+
+  /**
+   * Run the RFC 9728 auth pre-gate. Returns `true` when the crossing may
+   * proceed (authenticated, or the gate is dormant); `false` when a `401`
+   * challenge was written and the caller must stop. Fires only under the
+   * enforcement split: oauth configured here AND the harness marked the
+   * authenticator real. On failure the crossing is rejected BEFORE the SDK
+   * transport is touched, so the `WWW-Authenticate` challenge can actually
+   * reach the wire (the per-operation pipeline still runs downstream —
+   * defense in depth).
+   */
+  async function runPreGate(
     gate: AuthPreGate | undefined,
     req: IncomingMessage,
     res: ServerResponse,
-  ): Promise<void> => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-
-    // OAuth Protected Resource Metadata (RFC 9728). Served at the
-    // well-known path(s) when `oauth.metadata` is configured — a plain
-    // GET of the JSON document, no MCP session involved.
-    if (oauthMetadata !== undefined && oauthPaths.has(url.pathname)) {
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        res.writeHead(405, { "Content-Type": "application/json", Allow: "GET, HEAD" });
-        res.end(JSON.stringify({ error: "method_not_allowed" }));
-        return;
-      }
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(req.method === "HEAD" ? undefined : JSON.stringify(oauthMetadata));
-      return;
-    }
-
-    if (url.pathname !== path) {
-      // Shared-server citizenship: only an owned server answers foreign
-      // paths (with 404). When attached to a caller-supplied server we
-      // claim ONLY our own paths and leave everything else untouched so
-      // the caller's other request listeners can handle it.
-      if (ownsServer) {
-        writeJsonRpcError(res, 404, `Not found: ${url.pathname}`);
-      }
-      return;
-    }
-
-    // HTTP auth pre-gate (RFC 9728 discovery challenge). Runs on the MCP
-    // path only — the well-known discovery endpoint and foreign paths
-    // already returned above. Fires only under the enforcement split:
-    // oauth configured here AND the harness marked the authenticator
-    // real. On failure the crossing is rejected with a `401` BEFORE the
-    // SDK transport is touched, so the `WWW-Authenticate` challenge can
-    // actually reach the wire. The per-operation pipeline still runs
-    // downstream (defense in depth — the pre-gate authenticates the
-    // crossing; the pipeline authorizes each operation).
+  ): Promise<boolean> {
     if (oauthConfigured && gate?.enforce) {
       const authenticated = await gate.verify(buildConnectionInfo(req));
       if (!authenticated) {
         writeUnauthorized(res, challengeUrl);
-        return;
+        return false;
       }
     }
+    return true;
+  }
 
+  /**
+   * MCP session routing — the shared closure. Existing sessions route to
+   * their SDK transport; a sessionless `initialize` POST opens a new one.
+   *
+   * `parsedBody` threads a pre-read body through to the SDK: a host body
+   * parser (e.g. `express.json()`) may already have consumed the request
+   * stream, and the SDK's `handleRequest` accepts the parsed value so the
+   * stream isn't read twice. `undefined` (the listening-transport case,
+   * or a middleware host without a body parser) lets the SDK / this core
+   * read the stream itself.
+   */
+  async function routeMcp(
+    accept: AcceptHandler,
+    req: IncomingMessage,
+    res: ServerResponse,
+    parsedBody: unknown,
+  ): Promise<void> {
     const sessionId = headerString(req.headers["mcp-session-id"]);
 
-    // Existing session → route straight to its SDK transport.
+    // Existing session → route straight to its SDK transport. Passing
+    // `parsedBody` (undefined when no host parser ran) is equivalent to
+    // omitting it — the SDK reads the stream itself in that case.
     if (sessionId !== undefined) {
       const existing = sessions.get(sessionId);
       if (existing === undefined) {
         writeJsonRpcError(res, 404, `Unknown session: ${sessionId}`);
         return;
       }
-      await existing.handleRequest(req, res);
+      await existing.handleRequest(req, res, parsedBody);
       return;
     }
 
@@ -406,12 +429,15 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
       return;
     }
 
-    let body: unknown;
-    try {
-      body = await readJsonBody(req);
-    } catch (err) {
-      writeJsonRpcError(res, 400, `Invalid request body: ${String(err)}`);
-      return;
+    // Use the host-parsed body when present; otherwise read the stream.
+    let body = parsedBody;
+    if (body === undefined) {
+      try {
+        body = await readJsonBody(req);
+      } catch (err) {
+        writeJsonRpcError(res, 400, `Invalid request body: ${String(err)}`);
+        return;
+      }
     }
     if (!isInitializeRequest(body)) {
       writeJsonRpcError(res, 400, "Missing Mcp-Session-Id header (non-initialize request)");
@@ -442,6 +468,76 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
 
     await accept(sdkTransport, buildConnectionInfo(req));
     await sdkTransport.handleRequest(req, res, body);
+  }
+
+  /** Tear down every live SDK session (closes their SSE streams). */
+  async function closeSessions(): Promise<void> {
+    for (const sdkTransport of sessions.values()) {
+      try {
+        await sdkTransport.close();
+      } catch {
+        // Best-effort: a failing close shouldn't block teardown.
+      }
+    }
+    sessions.clear();
+  }
+
+  return {
+    isMetadataPath,
+    writeMetadata,
+    runPreGate,
+    routeMcp,
+    closeSessions,
+    markClosed: (): void => {
+      closed = true;
+    },
+  };
+}
+
+export function httpTransport(options: HttpTransportOptions = {}): HttpServerTransportHandle {
+  const path = options.path ?? DEFAULT_PATH;
+  const ownsServer = options.server === undefined;
+  const core = createHttpCore(options);
+
+  let server: HttpServer | null = null;
+  let requestListener: ((req: IncomingMessage, res: ServerResponse) => void) | null = null;
+  let closed = false;
+
+  const handle = async (
+    accept: AcceptHandler,
+    gate: AuthPreGate | undefined,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+
+    // OAuth Protected Resource Metadata (RFC 9728). Served at the
+    // well-known path(s) when `oauth.metadata` is configured — a plain
+    // GET of the JSON document, no MCP session involved.
+    if (core.isMetadataPath(url.pathname)) {
+      core.writeMetadata(req, res);
+      return;
+    }
+
+    if (url.pathname !== path) {
+      // Shared-server citizenship: only an owned server answers foreign
+      // paths (with 404). When attached to a caller-supplied server we
+      // claim ONLY our own paths and leave everything else untouched so
+      // the caller's other request listeners can handle it.
+      if (ownsServer) {
+        writeJsonRpcError(res, 404, `Not found: ${url.pathname}`);
+      }
+      return;
+    }
+
+    // HTTP auth pre-gate (RFC 9728 discovery challenge). Runs on the MCP
+    // path only — the well-known discovery endpoint and foreign paths
+    // already returned above.
+    if (!(await core.runPreGate(gate, req, res))) return;
+
+    // The listening transport owns the stream — no host body parser ran,
+    // so pass `undefined` (the SDK / core reads it).
+    await core.routeMcp(accept, req, res, undefined);
   };
 
   return {
@@ -485,6 +581,7 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
     async close(): Promise<void> {
       if (closed) return;
       closed = true;
+      core.markClosed();
 
       // Stop accepting new connections (detach our listener).
       if (server !== null && requestListener !== null) {
@@ -494,14 +591,7 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
       // Tear down live sessions FIRST — this closes their SSE streams.
       // Must precede `server.close()`, which otherwise blocks waiting
       // for those very streams to drain.
-      for (const sdkTransport of sessions.values()) {
-        try {
-          await sdkTransport.close();
-        } catch {
-          // Best-effort: a failing close shouldn't block teardown.
-        }
-      }
-      sessions.clear();
+      await core.closeSessions();
 
       // Close the owned server (caller-supplied servers stay up — the
       // caller owns their lifecycle; we only detached our listener).
@@ -523,6 +613,170 @@ export function httpTransport(options: HttpTransportOptions = {}): HttpServerTra
       const addr = server?.address();
       if (addr === null || addr === undefined || typeof addr === "string") return null;
       return addr;
+    },
+  };
+}
+
+/**
+ * Options for {@link httpMiddlewareTransport}. A subset of
+ * {@link HttpTransportOptions}: `port` / `host` / `server` / `path` are
+ * absent because the middleware door never binds a socket, owns a server,
+ * or routes by path — the HOST owns all of that. What remains is the SDK
+ * session config and OAuth discovery, identical to the listening shape.
+ */
+export interface HttpMiddlewareTransportOptions {
+  /**
+   * Session id generator. Defaults to `randomUUID`. Override to mint
+   * JWTs / hashes per the MCP spec's uniqueness + secrecy requirement.
+   */
+  readonly sessionIdGenerator?: () => string;
+
+  /**
+   * When `true`, the SDK transport returns JSON responses instead of
+   * opening SSE streams. Defaults to `false` (SSE preferred).
+   */
+  readonly enableJsonResponse?: boolean;
+
+  /**
+   * OAuth resource-server discovery (MCP authorization spec / RFC 9728).
+   * When `oauth.metadata` is provided, {@link HttpMiddlewareTransportHandle.metadataHandler}
+   * (and {@link HttpMiddlewareTransportHandle.handler}, when the host
+   * forwards the well-known path) serves the metadata document, and the
+   * pre-gate challenges unauthenticated MCP crossings with a `401`.
+   * @see {@link OAuthTransportOptions}
+   */
+  readonly oauth?: OAuthTransportOptions;
+}
+
+/**
+ * A {@link ServerTransport} that never binds a socket. Instead of a
+ * listener, the host drives it from inside its OWN middleware chain by
+ * calling {@link handler} (and, at the server root, {@link metadataHandler}).
+ * Use this when the process already owns an HTTP server — express, Nest,
+ * Fastify (via its Node `raw` req/res) — and appending a bare
+ * `server.on("request")` listener would be SHADOWED by the framework's
+ * own catch-all 404 (express is listener #1 and answers first).
+ */
+export interface HttpMiddlewareTransportHandle extends ServerTransport {
+  /**
+   * Handle one MCP request from inside the host's middleware chain. Mount
+   * this at the MCP endpoint path (e.g. `app.use("/mcp", …)`); path
+   * routing is the host's job, so this does NOT match on `req.url`.
+   *
+   * `parsedBody` threads a body a host parser already consumed (e.g.
+   * `express.json()` → `req.body`) through to the SDK. Omit it (or pass
+   * `undefined`) when no parser ran and the request stream is intact —
+   * the transport reads it itself. Both paths are supported.
+   *
+   * As a convenience it also serves the RFC 9728 metadata document when
+   * the host forwards a well-known path here (so a single mount can cover
+   * both), but the pre-gate NEVER challenges that path.
+   */
+  handler(req: IncomingMessage, res: ServerResponse, parsedBody?: unknown): Promise<void>;
+
+  /**
+   * Serve the RFC 9728 protected-resource metadata document, which lives
+   * at the SERVER ROOT (`/.well-known/oauth-protected-resource[/…]`),
+   * OUTSIDE the MCP mount path. Wire it as a top-level middleware so
+   * `req.url` retains the full path:
+   *
+   * ```ts
+   * app.use((req, res, next) => {
+   *   if (mcp.metadataHandler(req, res)) return; // served
+   *   next();
+   * });
+   * ```
+   *
+   * Returns `true` when it served the metadata response (host must stop),
+   * `false` when the request is not a metadata request (host continues).
+   * Always unauthenticated — discovery must work without a credential.
+   */
+  metadataHandler(req: IncomingMessage, res: ServerResponse): boolean;
+}
+
+/**
+ * Middleware-door HTTP transport — the shared-server shape for hosts whose
+ * framework owns request routing (express / Nest / Fastify). No listening
+ * socket, no server ownership, no port: `listen()` merely captures the
+ * harness's accept + pre-gate closures; the host drives requests through
+ * {@link HttpMiddlewareTransportHandle.handler}.
+ *
+ * Session lifecycle (`Mcp-Session-Id` map, SSE streaming, DELETE teardown),
+ * the `401` pre-gate, and RFC 9728 discovery are IDENTICAL to
+ * {@link httpTransport} — both share {@link createHttpCore}'s routing
+ * closure. The only differences are the entry point (a host call, not a
+ * Node listener) and lifecycle (nothing to unbind on close).
+ *
+ * @example express
+ *   const mcp = httpMiddlewareTransport({ oauth: { metadata } });
+ *   // ...pass `mcp` in `transports`; `harness.start()` captures accept + gate.
+ *   app.use((req, res, next) => {
+ *     if (mcp.metadataHandler(req, res)) return;   // RFC 9728 discovery (root)
+ *     next();
+ *   });
+ *   app.use("/mcp", express.json(), (req, res) => {
+ *     void mcp.handler(req, res, req.body);         // MCP endpoint (mounted)
+ *   });
+ */
+export function httpMiddlewareTransport(
+  options: HttpMiddlewareTransportOptions = {},
+): HttpMiddlewareTransportHandle {
+  const core = createHttpCore(options);
+
+  let accept: AcceptHandler | null = null;
+  let gate: AuthPreGate | undefined;
+  let closed = false;
+
+  return {
+    kind: "http",
+
+    async listen(a: AcceptHandler, g?: AuthPreGate): Promise<void> {
+      if (closed) {
+        throw new Error("httpMiddlewareTransport: cannot listen after close()");
+      }
+      // No socket, no server: capture the harness closures the host's
+      // `handler` calls will need. Resolves immediately — nothing to bind.
+      accept = a;
+      gate = g;
+    },
+
+    async close(): Promise<void> {
+      if (closed) return;
+      closed = true;
+      core.markClosed();
+      await core.closeSessions();
+      accept = null;
+    },
+
+    metadataHandler(req: IncomingMessage, res: ServerResponse): boolean {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (!core.isMetadataPath(url.pathname)) return false;
+      core.writeMetadata(req, res);
+      return true;
+    },
+
+    async handler(req: IncomingMessage, res: ServerResponse, parsedBody?: unknown): Promise<void> {
+      if (accept === null) {
+        writeJsonRpcError(res, 503, "MCP transport not started (call harness.start() first)");
+        return;
+      }
+      try {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        // Convenience: if the host forwarded the well-known metadata path
+        // here, serve it (unauthenticated) rather than pre-gating it.
+        if (core.isMetadataPath(url.pathname)) {
+          core.writeMetadata(req, res);
+          return;
+        }
+        if (!(await core.runPreGate(gate, req, res))) return;
+        await core.routeMcp(accept, req, res, parsedBody);
+      } catch (err) {
+        if (!res.headersSent) {
+          writeJsonRpcError(res, 500, `Internal transport error: ${String(err)}`);
+        } else {
+          res.end();
+        }
+      }
     },
   };
 }

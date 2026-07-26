@@ -494,7 +494,14 @@ export class McpServerHarness
       },
       this.options.capabilities,
     );
-    const sdkServer = new SdkServer(this.serverInfo, { capabilities });
+    // Per-connection instructions (projected into InitializeResult.instructions).
+    // Resolved BEFORE SDK Server construction: the SDK reads `instructions`
+    // from its options synchronously when answering `initialize`, and the
+    // function form may be async — so we await it here and hand the SDK a
+    // plain string. `omitUndefined` keeps `instructions` off the wire when
+    // unconfigured (the SDK omits a falsy value regardless).
+    const instructions = await this.resolveInstructions(info);
+    const sdkServer = new SdkServer(this.serverInfo, omitUndefined({ capabilities, instructions }));
 
     // 3. Track + register the connection.
     const connectionId = `conn:${ulid()}`;
@@ -711,6 +718,7 @@ export class McpServerHarness
     if (this.completionsAdvertised && this.resolvedCompletions !== null) {
       const unsubscribe = installCompletionsHandlers(sdkServer, {
         prompts: this.resolvedCompletions.prompts,
+        resources: this.resolvedCompletions.resources,
         security: this.security,
         buildContext: buildRequestContext,
       });
@@ -765,21 +773,36 @@ export class McpServerHarness
    * Minimal `McpRequestContext` for the HTTP auth pre-gate. Built
    * OFF-connection (no SDK Server / session exists yet — the pre-gate
    * runs before the crossing is handed to the SDK), carrying only the
-   * identity material an `Authenticator` reads: the transport-supplied
-   * headers / origin / remoteAddress plus the `mcp` discriminator block.
-   * Observability + ops facets mirror {@link acceptConnection}'s ctx so a
-   * custom authenticator that logs / runs ops behaves identically.
+   * identity material an `Authenticator` reads.
    */
   private buildPreGateContext(info: McpConnectionInfo): McpRequestContext {
+    return this.buildOffConnectionContext(info, "pregate");
+  }
+
+  /**
+   * Build a minimal `McpRequestContext` for a crossing that has no SDK
+   * Server / session yet — the auth pre-gate and per-`initialize`
+   * instructions resolution both run before the SDK sees the request.
+   * Carries only what an `Authenticator` / instructions function reads:
+   * the transport-supplied headers / origin / remoteAddress plus the
+   * `mcp` discriminator block. Observability + ops facets mirror
+   * {@link acceptConnection}'s ctx so a custom authenticator that logs /
+   * runs ops behaves identically. `label` distinguishes the synthetic id
+   * prefix (`pregate` vs. `init`) for telemetry only.
+   */
+  private buildOffConnectionContext(
+    info: McpConnectionInfo,
+    label: "pregate" | "init",
+  ): McpRequestContext {
     const connectionScope: Partial<EventScope> = { mcpServerId: this.scopeId };
     return {
-      toolCallId: `mcp:pregate:${ulid()}`,
+      toolCallId: `mcp:${label}:${ulid()}`,
       signal: new AbortController().signal,
       setState: () => {
-        /* no-op — no session behind a pre-gate crossing */
+        /* no-op — no session behind an off-connection crossing */
       },
       emit: () => {
-        /* no-op — no channel behind a pre-gate crossing */
+        /* no-op — no channel behind an off-connection crossing */
       },
       ...deriveObservability({
         log: (level, data, logger, trace) => {
@@ -800,7 +823,7 @@ export class McpServerHarness
       tasks: this.serverTasks,
       mcp: {
         serverId: this.scopeId,
-        connectionId: `conn:pregate:${ulid()}`,
+        connectionId: `conn:${label}:${ulid()}`,
         transportKind: info.transportKind,
         connectedAt: Date.now(),
         user: null,
@@ -813,6 +836,45 @@ export class McpServerHarness
         remoteAddress: info.remoteAddress,
       }),
     };
+  }
+
+  /**
+   * Resolve the `instructions` slot for one connection, projected into the
+   * MCP `InitializeResult.instructions` field. A fixed `string` passes
+   * through; a `(ctx) => string` is evaluated against a request context
+   * carrying the authenticated identity (so instructions can vary per
+   * user). Returns `undefined` when no instructions slot was configured.
+   * Called once per `acceptConnection` (≈ per `initialize`) — never
+   * cached across connections.
+   */
+  private async resolveInstructions(info: McpConnectionInfo): Promise<string | undefined> {
+    const instructions = this.options.instructions;
+    if (instructions === undefined) return undefined;
+    if (typeof instructions === "string") return instructions;
+    const ctx = await this.buildInstructionsContext(info);
+    return instructions(ctx);
+  }
+
+  /**
+   * Build the request context an `instructions` function sees. Resolves
+   * identity by running the configured `Authenticator` (mirroring the
+   * per-request pipeline's authenticate stage) so `ctx.mcp.user` is
+   * populated. Best-effort: an unauthenticated crossing — or an
+   * authenticator that throws — still yields a context with
+   * `mcp.user: null`, and the instructions function decides how to handle
+   * anonymity.
+   */
+  private async buildInstructionsContext(info: McpConnectionInfo): Promise<McpRequestContext> {
+    const base = this.buildOffConnectionContext(info, "init");
+    try {
+      const authn = await this.security.authenticator(base);
+      if (authn.authenticated) {
+        return { ...base, mcp: { ...base.mcp, user: authn.user } };
+      }
+    } catch {
+      /* fall through with mcp.user: null */
+    }
+    return base;
   }
 
   // ─────────── Internal — used by transport + projection layers (#171c+) ───────────

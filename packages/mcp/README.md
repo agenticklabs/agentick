@@ -313,6 +313,164 @@ prompts: {
 resolved source for register / update / remove / reload regardless of
 how it was constructed.
 
+### The `instructions` slot — per-connection server guidance
+
+`instructions` projects into the MCP `InitializeResult.instructions`
+field — free-form guidance a client surfaces to its model on how to use
+the server. A fixed `string`, or a `(ctx) => string | Promise<string>`
+computed per `initialize` from the same request/auth context tool
+handlers see (so the text can vary by the authenticated identity). The
+function form is evaluated **once per connection** — never cached across
+connections.
+
+```ts
+new McpServerHarness(scopeId, journal, bus, inbox, {
+  name: "my-server",
+  transports: [httpTransport({ port: 3000 })],
+  auth: { authenticator: bearerTokenAuth({ tokens: { "tok-alice": { id: "alice" } } }) },
+
+  // Static form:
+  instructions: "Prefer the `search` tool before `fetch`. Cite sources.",
+
+  // Or per-connection, identity-aware (v1 injects live user/company context here).
+  // The authenticator resolves `ctx.mcp.user` before the fn runs, so a
+  // function can greet the caller / scope guidance to their role:
+  instructions: async (ctx) => {
+    const who = ctx.mcp.user?.id ?? "guest";
+    return `You are connected as ${who}. Use company-scoped tools only.`;
+  },
+});
+```
+
+Reads client-side as `client.getInstructions()`. Absent slot → no
+`instructions` on the wire.
+
+### Argument completion — prompts AND resource templates
+
+The `completions` slot carries per-argument completion handlers, built
+with the `complete*` sugar (`completeFromList`, `completeFromEnum`,
+`completeDependent`, `completeFromAsync`, `completePrefixMatch`). Two
+maps, same handler type:
+
+- `prompts` — keyed by prompt name → argument name. Routed from a
+  `completion/complete` request with `ref.type === "ref/prompt"`.
+- `resources` — keyed by resource-template `uriTemplate` → variable
+  name. Routed from `ref.type === "ref/resource"` (the request's
+  `ref.uri` is the template uri).
+
+```ts
+import { completeFromList, completeDependent } from "@agentick/mcp/server";
+
+completions: {
+  prompts: {
+    greet: { name: completeFromList(["Ada", "Alan", "Grace"]) },
+  },
+  resources: {
+    "db://{table}/{row}": {
+      table: completeFromList(["invoices", "projects", "contacts"]),
+      // Dependent completion: needs a resolved sibling variable.
+      row: completeDependent({ requires: ["table"] }, async (typed, { table }) => {
+        const rows = await db.rows(table, typed);
+        return rows.map((r) => r.id);
+      }),
+    },
+  },
+}
+```
+
+The `completions` capability is advertised when **either** map carries a
+handler. An unknown prompt / template / argument resolves to an empty
+value list (clients probe freely — no protocol error). Output is capped
+at 100 values (spec-mandated); the sugar enforces it.
+
+### Signalling step-up auth from a tool — `wwwAuthenticateMeta`
+
+When a tool needs the caller to (re)authenticate mid-session, it can
+attach an RFC 6750 `Bearer` challenge to its `CallToolResult._meta`
+under the `mcp/www_authenticate` key. A host that understands the signal
+triggers step-up auth without tearing the connection down.
+
+```ts
+import { wwwAuthenticateMeta } from "@agentick/mcp/server";
+
+createTool({
+  name: "post_invoice",
+  handler: async (input, { ctx }) => {
+    if (!ctx.mcp.user?.roles?.includes("billing")) {
+      return {
+        content: [{ type: "text", text: "Re-authentication required for billing." }],
+        isError: true,
+        _meta: wwwAuthenticateMeta({
+          resourceMetadataUrl: "https://api.example.com/.well-known/oauth-protected-resource",
+          scope: "invoices:write",
+          error: "insufficient_scope",
+        }),
+      };
+    }
+    /* ... */
+  },
+});
+```
+
+`wwwAuthenticateMeta({ resourceMetadataUrl?, scope?, error? })` produces
+`{ "mcp/www_authenticate": "Bearer …" }`; a bare `wwwAuthenticateMeta()`
+yields `{ "mcp/www_authenticate": "Bearer" }`. It is **opt-in** — nothing
+auto-invokes it. The underlying `buildWwwAuthenticate(...)` is the SAME
+challenge builder the HTTP transport's `401` pre-gate uses, so the two
+never drift.
+
+### HTTP transports — listener vs. middleware door
+
+Two server-side Streamable-HTTP shapes, both wrapping the SDK
+`StreamableHTTPServerTransport` and sharing one session-routing core
+(per-`Mcp-Session-Id` dispatch, SSE, DELETE teardown, RFC 9728 discovery
++ `401` pre-gate are identical between them):
+
+- **`httpTransport({ port })`** — owns a listening socket (or attaches to
+  a caller-supplied `http.Server` via `{ server }`). Use it when Agentick
+  owns the HTTP endpoint.
+- **`httpMiddlewareTransport()`** — owns NO socket. `listen()` merely
+  captures the harness closures; the **host** drives requests through
+  `handler(req, res, parsedBody?)` from inside its own middleware chain.
+  Use it when the process already owns an express / Nest / Fastify server
+  — appending a bare `server.on("request")` listener would be **shadowed**
+  by the framework's catch-all 404 (express is listener #1 and answers
+  first). A middleware door runs _inside_ the chain, so it is reached.
+
+```ts
+import { httpMiddlewareTransport } from "@agentick/mcp/server";
+
+const mcp = httpMiddlewareTransport({ oauth: { metadata } });
+const server = new McpServerHarness(scopeId, journal, bus, inbox, {
+  name: "my-server",
+  transports: [mcp],
+  tools: [/* ... */],
+  auth: { authenticator: bearerTokenAuth({ tokens }) },
+});
+await server.ready;
+await server.start(); // captures the accept + pre-gate closures
+
+// RFC 9728 discovery lives at the SERVER ROOT, outside the MCP mount.
+// Wire it as a top-level middleware so `req.url` keeps the full path:
+app.use((req, res, next) => {
+  if (mcp.metadataHandler(req, res)) return; // served the metadata doc
+  next();
+});
+
+// The MCP endpoint, mounted anywhere. `express.json()` may consume the
+// body first — pass `req.body` so the SDK doesn't try to read the stream
+// twice. Works with OR without a prior body parser.
+app.use("/mcp", express.json(), (req, res) => {
+  void mcp.handler(req, res, req.body);
+});
+```
+
+Nest is the same shape — resolve the underlying Node `req`/`res` (e.g.
+`@Req()` / `@Res()` with `express` under the hood, or Fastify's `.raw`)
+and call `mcp.handler(req, res, body)` from the route handler. The `401`
+pre-gate (RFC 6750 `WWW-Authenticate`) and session lifecycle behave
+exactly as in the listening transport.
+
 ### Eliciting input from the user (`ctx.elicit.*`)
 
 **Elicitation is ON by default.** Tool handlers receive `ctx.elicit`
@@ -730,10 +888,30 @@ reference-server round-trip (until the package is a dev dep).
   BOTH list AND get, `system → user` role flattening on the wire,
   unsubscribe-on-close prevents notification leak.
 - `src/server/__tests__/projection-completions-logging.spec.ts` —
-  argument completion + logging projection: `ctx.log` → bus →
-  `installLogProjection` → `notifications/message`, level filter via
-  `logging/setLevel`, default-level emits everything, opt-out installs
-  no projection (ADR 64 re-sourcing of Wave 3a through the bus).
+  argument completion (prompt AND resource-template: `ref/resource`
+  routes by template uri → variable, unknown template/arg → empty,
+  `context.arguments` reaches the handler, `completions` advertised on
+  resource handlers alone, prompt + resource coexist) + logging
+  projection: `ctx.log` → bus → `installLogProjection` →
+  `notifications/message`, level filter via `logging/setLevel`,
+  default-level emits everything, opt-out installs no projection (ADR 64
+  re-sourcing of Wave 3a through the bus).
+- `src/server/__tests__/instructions.spec.ts` — `instructions` projected
+  into `InitializeResult.instructions` (read via `client.getInstructions()`):
+  static string verbatim, function form evaluated per connection (not
+  cached), async form, ctx-visible, and identity-visible over an
+  authenticated HTTP crossing (`ctx.mcp.user` resolved before the fn).
+- `src/server/transports/__tests__/http-middleware.spec.ts` —
+  `httpMiddlewareTransport` mount door driven by a REAL host `http.Server`:
+  full round-trip through `handler` with and without a prior body parser
+  (`parsedBody` passthrough), the RFC 9728 `401` pre-gate firing through
+  the door, `metadataHandler` serving discovery unauthenticated (+ `handler`
+  serving it when forwarded), `Mcp-Session-Id` routing + DELETE teardown
+  (stale-id → 404), foreign paths left to the host.
+- `src/server/security/__tests__/www-authenticate.spec.ts` —
+  `buildWwwAuthenticate` / `wwwAuthenticateMeta` challenge-string format:
+  bare `Bearer`, `resource_metadata` parity with the pre-gate, `error` +
+  `scope` params, ordering, and the `mcp/www_authenticate` `_meta` key.
 - `src/server/__tests__/progress.spec.ts` — `ctx.progress` → bus →
   `installProgressProjection` → `notifications/progress` correlated to
   the client's `_meta.progressToken` (via `ctx.mcp.progressToken`):
@@ -856,6 +1034,19 @@ Defer until production load demands it; design space documented in
   `resources/list` / `resources/templates/list` / `resources/read`
   (text + blob), with `subscribe` / `updated` / `list_changed`;
   `resources` advertised when a source is wired.
+- **Per-connection `instructions`** — **landed.** `instructions: string |
+  ((ctx) => string | Promise<string>)` projects into
+  `InitializeResult.instructions`; the function form is evaluated per
+  `initialize` against the identity-resolved request context (never cached
+  across connections).
+- **Resource-template argument completion** — **landed.** `completions.resources`
+  keyed by template uri → variable → `CompletionHandler` (same `complete*`
+  sugar as prompts); `ref/resource` routes to it, unknown template/arg →
+  empty. (Closes the former `TODO(phase-#123)` `ref/resource` no-op.)
+- **`wwwAuthenticateMeta` step-up helper** — **landed.** Opt-in builder for
+  the RFC 6750 `Bearer` challenge inside a `CallToolResult._meta`
+  (`mcp/www_authenticate`), sharing the pre-gate's challenge-string
+  construction (`buildWwwAuthenticate`). Never auto-invoked.
 - **Streamable HTTP transport (server)** — **landed** (Wave 1).
   `httpTransport({ port })` (from `@agentick/mcp/server`) is a
   multi-connection Streamable-HTTP listener wrapping the SDK
@@ -864,6 +1055,14 @@ Defer until production load demands it; design space documented in
   existing security pipeline runs for HTTP connections (`McpConnectionInfo`
   built from the request). **OAuth Resource Server** (protected-resource
   metadata, token introspection at the server edge) is still future.
+- **HTTP middleware door (`httpMiddlewareTransport`)** — **landed.** A
+  socket-less Streamable-HTTP shape for hosts that own their own server
+  (express / Nest / Fastify): `listen()` captures the harness closures, the
+  host drives requests through `handler(req, res, parsedBody?)` from inside
+  its middleware chain (avoiding the shadowed-`server.on("request")` 404
+  problem). Shares the listener's session-routing core, `401` pre-gate, and
+  RFC 9728 discovery (`metadataHandler`); `parsedBody` threads a
+  host-parsed body (e.g. `express.json()`) through to the SDK.
 - **WebSocket transport** — #171f.
 - **Direct projection** — `mcp://gateway/<name>` URL form lets
   in-process clients call the projection layer without serialization.

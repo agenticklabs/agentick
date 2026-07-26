@@ -38,6 +38,7 @@ export {
   type McpServerCompletionsConfig,
   type McpServerCompletionsOptions,
   type McpServerElicitOptions,
+  type McpServerInstructions,
   type McpServerOptions,
   type McpServerPromptsConfig,
   type McpServerPromptsOptions,
@@ -65,6 +66,12 @@ export {
   type StandaloneServerHandle,
 } from "./spawn.js";
 export * from "./security/index.js";
+export {
+  buildWwwAuthenticate,
+  wwwAuthenticateMeta,
+  WWW_AUTHENTICATE_META_KEY,
+  type WwwAuthenticateParams,
+} from "./security/www-authenticate.js";
 export * from "./transports/index.js";
 export { buildCapabilities, type WiredCapabilities } from "./protocol/lifecycle.js";
 export {

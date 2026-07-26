@@ -242,15 +242,20 @@ export interface McpServerCompletionsConfig {
    * argument name.
    */
   readonly prompts?: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
-  // TODO(phase-#123): `resourceTemplates` keyed by uriTemplate → variable
-  // → handler, once the resource substrate (Wave 4) exists. The
-  // CompleteRequestSchema handler already routes `ref/resource` to a
-  // no-op empty result until then.
+  /**
+   * Resource-template argument completion handlers, keyed by the
+   * template's `uriTemplate` (the `ref.uri` a `ref/resource` completion
+   * request carries), then by template-variable name. Built from the
+   * same `complete*` sugar as {@link prompts}. A `completion/complete`
+   * with `ref.type === "ref/resource"` routes here; an unknown template
+   * or variable resolves to an empty completion (clients probe freely).
+   */
+  readonly resources?: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
 }
 
 /**
- * The completions slot. Currently a single config-object shape (prompt
- * argument handlers); resource-template completion joins it with Wave 4.
+ * The completions slot — a config-object carrying prompt-argument and/or
+ * resource-template-argument completion handlers.
  */
 export type McpServerCompletionsOptions = McpServerCompletionsConfig;
 
@@ -281,6 +286,21 @@ export type McpServerCompletionsOptions = McpServerCompletionsConfig;
 export interface McpServerElicitOptions {
   readonly enabled: boolean;
 }
+
+/**
+ * Per-connection server instructions, projected into the MCP
+ * `InitializeResult.instructions` field — free-form guidance a client
+ * surfaces to its model on how to use this server.
+ *
+ * Two forms:
+ *   - `string` — a fixed instruction block, identical for every client.
+ *   - `(ctx) => string | Promise<string>` — computed per connection from
+ *     the same {@link McpRequestContext} tool handlers see, so the text
+ *     can vary by the authenticated identity (`ctx.mcp.user`), client
+ *     info, transport, etc. Evaluated once per `initialize` (per
+ *     connection); never cached across connections.
+ */
+export type McpServerInstructions = string | ((ctx: McpRequestContext) => string | Promise<string>);
 
 /**
  * Pluggable security stages. Defaults are transport-aware (stdio +
@@ -341,6 +361,15 @@ export interface McpServerOptions {
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Server identification advertised in `initialize`. Default: `{ name, version: "0.0.0" }`. */
   readonly serverInfo?: { readonly name: string; readonly version: string };
+  /**
+   * Per-connection server instructions projected into the MCP
+   * `InitializeResult.instructions` field. A fixed `string`, or a
+   * `(ctx) => string | Promise<string>` computed per `initialize` from
+   * the request/auth context (so instructions can carry identity-specific
+   * guidance). Absent = no `instructions` on the wire. See
+   * {@link McpServerInstructions}.
+   */
+  readonly instructions?: McpServerInstructions;
 }
 
 /**
@@ -408,6 +437,13 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
   }
   if (options.auth !== undefined && options.auth !== null && typeof options.auth !== "object") {
     throw invalid("auth must be an object", ["auth"]);
+  }
+  if (
+    options.instructions !== undefined &&
+    typeof options.instructions !== "string" &&
+    typeof options.instructions !== "function"
+  ) {
+    throw invalid("instructions must be a string or a (ctx) => string function", ["instructions"]);
   }
   return options;
 }
@@ -525,54 +561,76 @@ export function resolveElicitOption(option: boolean | McpServerElicitOptions | u
  */
 export interface ResolvedCompletionsOptions {
   readonly prompts: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
+  readonly resources: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
   readonly hasHandlers: boolean;
 }
 
 /**
  * Normalize the completions option into its internal resolved shape.
  * Throws {@link McpServerConfigInvalid} on shape violations. `hasHandlers`
- * is `true` iff at least one prompt carries at least one argument
- * handler — the gate for advertising the `completions` capability.
+ * is `true` iff at least one prompt OR resource template carries at least
+ * one argument handler — the gate for advertising the `completions`
+ * capability.
  */
 export function resolveCompletionsOption(
   option: McpServerCompletionsOptions,
 ): ResolvedCompletionsOptions {
   const prompts = option.prompts ?? {};
-  let hasHandlers = false;
-  for (const argMap of Object.values(prompts)) {
-    if (Object.keys(argMap).length > 0) {
-      hasHandlers = true;
-      break;
-    }
+  const resources = option.resources ?? {};
+  const hasHandlers = hasAnyHandler(prompts) || hasAnyHandler(resources);
+  return { prompts, resources, hasHandlers };
+}
+
+/** True iff any inner arg-map in a two-level handler record is non-empty. */
+function hasAnyHandler(
+  byKey: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>,
+): boolean {
+  for (const argMap of Object.values(byKey)) {
+    if (Object.keys(argMap).length > 0) return true;
   }
-  return { prompts, hasHandlers };
+  return false;
 }
 
 function validateCompletionsOption(option: McpServerCompletionsOptions): void {
   if (typeof option !== "object" || option === null) {
     throw invalid("completions must be an object", ["completions"]);
   }
-  if (option.prompts !== undefined) {
-    if (typeof option.prompts !== "object" || option.prompts === null) {
-      throw invalid("completions.prompts must be an object keyed by prompt name", [
+  validateHandlerRecord(option.prompts, "prompts");
+  validateHandlerRecord(option.resources, "resources");
+}
+
+/**
+ * Validate a two-level `{ [key]: { [arg]: CompletionHandler } }` record.
+ * `slot` is `prompts` (keyed by prompt name) or `resources` (keyed by
+ * template uri) — used only for the error path.
+ */
+function validateHandlerRecord(
+  record: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>> | undefined,
+  slot: "prompts" | "resources",
+): void {
+  if (record === undefined) return;
+  if (typeof record !== "object" || record === null) {
+    throw invalid(
+      `completions.${slot} must be an object keyed by ${
+        slot === "prompts" ? "prompt name" : "resource template uri"
+      }`,
+      ["completions", slot],
+    );
+  }
+  for (const [key, argMap] of Object.entries(record)) {
+    if (typeof argMap !== "object" || argMap === null) {
+      throw invalid(`completions.${slot}.${key} must be an object keyed by argument name`, [
         "completions",
-        "prompts",
+        slot,
+        key,
       ]);
     }
-    for (const [promptName, argMap] of Object.entries(option.prompts)) {
-      if (typeof argMap !== "object" || argMap === null) {
+    for (const [argName, handler] of Object.entries(argMap)) {
+      if (typeof handler !== "function") {
         throw invalid(
-          `completions.prompts.${promptName} must be an object keyed by argument name`,
-          ["completions", "prompts", promptName],
+          `completions.${slot}.${key}.${argName} must be a CompletionHandler function`,
+          ["completions", slot, key, argName],
         );
-      }
-      for (const [argName, handler] of Object.entries(argMap)) {
-        if (typeof handler !== "function") {
-          throw invalid(
-            `completions.prompts.${promptName}.${argName} must be a CompletionHandler function`,
-            ["completions", "prompts", promptName, argName],
-          );
-        }
       }
     }
   }
