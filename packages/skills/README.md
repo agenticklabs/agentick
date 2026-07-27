@@ -10,25 +10,27 @@ Skills are **guidance, not capability**. A skill is inert content; the model is 
 npm install @agentick/skills
 ```
 
-Subpaths: `/loaders` (portable sources), `/loaders/node` (filesystem), `/client` (browser-side handle), `/testing` (stub + conformance suites).
+Subpaths: `/hydrators` (portable sources), `/hydrators/node` (filesystem), `/client` (browser-side handle), `/testing` (stub + conformance suites).
 
 ## Quick start
 
 ```tsx
 import { createApp } from "@agentick/app/react";
-import { withSkills } from "@agentick/skills";
+import { hydrateFrom, withSkills } from "@agentick/skills";
 
 const app = await createApp(<Agent />, {
   model,
   extensions: [
-    withSkills([
-      {
-        name: "weekly_status_report",
-        description: "Template for the Monday morning status update.",
-        content: "## Last week\n…\n## This week\n…\n## Blockers\n…",
-        tags: ["reporting", "weekly"],
-      },
-    ]),
+    withSkills({
+      hydrate: hydrateFrom([
+        {
+          name: "weekly_status_report",
+          description: "Template for the Monday morning status update.",
+          content: "## Last week\n…\n## This week\n…\n## Blockers\n…",
+          tags: ["reporting", "weekly"],
+        },
+      ]),
+    }),
   ],
 });
 ```
@@ -110,7 +112,7 @@ The mechanics, in full: resolve the skill, compose a `SendInput` — by default 
 
 ### Tool restriction
 
-A skill carrying `allowedTools` restricts what the model can reach _for that run_: only those tools are offered to the model, the host dispatch door is unaffected, and the structured-output terminal tool is exempt. Absent means no restriction. The Node loaders populate it from Agent Skills `allowed-tools` frontmatter, so a `SKILL.md` on disk closes the loop end to end.
+A skill carrying `allowedTools` restricts what the model can reach _for that run_: only those tools are offered to the model, the host dispatch door is unaffected, and the structured-output terminal tool is exempt. Absent means no restriction. The filesystem hydrators populate it from Agent Skills `allowed-tools` frontmatter, so a `SKILL.md` on disk closes the loop end to end.
 
 ### Isolated runs
 
@@ -142,38 +144,63 @@ withSkills({
 > [!IMPORTANT]
 > `output` is a mechanism, not a behavioral promise. The chain is: the model calls the terminal tool on its own, a forced wrap-up tick if it doesn't, then executor validation, then a typed error in the residual sliver. Whether a given model reaches for it unprompted is an eval question, never a CI assertion.
 
-## Loading skills from disk
+## Where skills come from
+
+One option decides it: `hydrate`. A source is a function of the session's context returning the records the session opens with, and the package names the useful ones.
 
 ```ts
-import { withSkills } from "@agentick/skills";
-import { fromArray, fromUrl } from "@agentick/skills/loaders";
-import { agentSkillsDirectory, fromDirectory, fromFile } from "@agentick/skills/loaders/node";
+import { composeHydrators, hydrateFromUrl, withSkills } from "@agentick/skills";
+import { hydrateFromDirectory, hydrateFromFile } from "@agentick/skills/hydrators/node";
 
 withSkills({
-  initial: literalRecords, // registered first
-  loaders: [
-    fromArray(bundled),
-    agentSkillsDirectory({ root: "./.agents/skills/" }),
-    fromDirectory({ path: "./skills/" }),
-    fromFile({ path: "./extra.md" }),
-    fromUrl({ url: "https://registry.internal/skills.json" }),
-  ],
+  hydrate: composeHydrators(
+    hydrateFromDirectory({ root: "./.agents/skills/" }),
+    hydrateFromFile({ path: "./extra.md" }),
+    hydrateFromUrl({ url: "https://registry.internal/skills.json" }),
+  ),
 });
 ```
 
-| Factory                                              | Subpath         | Source                                                                                       |
-| ---------------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------- |
-| `fromArray(skills)`                                  | `/loaders`      | In-memory records                                                                            |
-| `fromUrl({ url, arrayField?, … })`                   | `/loaders`      | JSON manifest — `{ "skills": [...] }` by default, or the whole body with `arrayField: null`  |
-| `fromManifest(...)`                                  | `/loaders`      | Alias for `fromUrl`                                                                          |
-| `fromFile({ path, parseFrontmatter? })`              | `/loaders/node` | One `.md` file with frontmatter                                                              |
-| `fromDirectory({ path, match?, parseFrontmatter? })` | `/loaders/node` | Recursive walk of `.md` files; malformed records are skipped                                 |
-| `agentSkillsDirectory({ root?, parseFrontmatter? })` | `/loaders/node` | [Agent Skills](https://agentskills.io/specification) layout — one skill per `<dir>/SKILL.md` |
+| Hydrator                                             | Subpath           | Source                                                                                       |
+| ---------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------- |
+| `hydrateFrom(skills)`                                | root              | In-memory records                                                                            |
+| `hydrateFromStore()`                                 | root              | The configured durable store, read in full                                                   |
+| `hydrateFromUrl({ url, arrayField?, … })`            | root              | JSON manifest — `{ "skills": [...] }` by default, or the whole body with `arrayField: null`  |
+| `hydrateFromManifest(...)`                           | root              | Alias for `hydrateFromUrl`                                                                   |
+| `composeHydrators(...hydrators)`                     | root              | Several sources at once; on a duplicate name the LAST one wins                               |
+| `hydrateFromFile({ path, parseFrontmatter? })`       | `/hydrators/node` | One `.md` file with frontmatter                                                              |
+| `hydrateFromMarkdownFiles({ path, match?, … })`      | `/hydrators/node` | Recursive walk of `.md` files, one per skill; malformed records are skipped                  |
+| `hydrateFromDirectory({ root?, parseFrontmatter? })` | `/hydrators/node` | [Agent Skills](https://agentskills.io/specification) layout — one skill per `<dir>/SKILL.md` |
+
+Anything with that shape works, which is the point. A per-tenant catalog is a function reading the caller's identity:
+
+```ts
+withSkills({ hydrate: (ctx) => catalogForTier(tierOf(ctx.principal)) });
+```
+
+`composeHydrators` is an override ladder, not a merge: later sources shadow earlier ones by name, so the working tree can win over the durable catalog.
+
+```ts
+withSkills({
+  store: myDurableStore,
+  hydrate: composeHydrators(
+    hydrateFromStore(),
+    hydrateFromDirectory({ root: "./.agents/skills/" }),
+  ),
+});
+```
+
+> [!IMPORTANT]
+> What a hydrator returns is a **seed**, not a batch of registrations. It lands in the read surface directly: no `register` operation, no store write. A hydrator reads what is already durable, or files the adopter deliberately treats as the source of truth — writing it back would duplicate the catalog on every resume. Timestamps a record carries are preserved.
+
+A hydrator that throws fails session creation with `SkillsHydrateFailed`. That's deliberate: a session that renders against half a catalog is worse than one that doesn't start. If a degraded start is what you want, catch inside your own hydrator and return what you have.
+
+There is no default. Configuring a `store` on its own loads nothing — which slice of a catalog a session should open with is a policy question, so ask for it (`hydrate: hydrateFromStore()`).
 
 Frontmatter parsing defaults to a minimal `key: value` reader that handles quoted strings and inline arrays. For real YAML or TOML, pass your own:
 
 ```ts
-fromDirectory({ path: "./skills/", parseFrontmatter: parseYaml });
+hydrateFromDirectory({ root: "./.agents/skills/", parseFrontmatter: parseYaml });
 ```
 
 Nothing is added to the dependency tree at the framework level.
@@ -190,13 +217,13 @@ Each immediate subdirectory of `root` (default `<cwd>/.agents/skills/`) containi
       checklist.md        ← skill://code-review/references/checklist.md
 ```
 
-Frontmatter maps to the record: `name` defaults to the directory name when omitted; `description` is required and a directory lacking one is skipped; `allowed-tools` accepts both an inline array (`[Bash, Read]`) and a comma-separated string (`"Bash, Read"`); every other key lands on `metadata`. A missing root loads empty — a preset pointed at a default path must not explode on absence. Hidden and symlinked skill directories are rejected at load.
+Frontmatter maps to the record: `name` defaults to the directory name when omitted; `description` is required and a directory lacking one is skipped; `allowed-tools` accepts both an inline array (`[Bash, Read]`) and a comma-separated string (`"Bash, Read"`); every other key lands on `metadata`. A missing root loads empty — a source pointed at a default path must not explode on absence. Hidden and symlinked skill directories are rejected at load.
 
 **Supporting files ride the resource registry.** Files under `references/` register as transient resources at `skill://<name>/references/<relpath>`, resolved lazily from disk. The model pulls them with the ordinary resource-read tool; there is no bespoke "skill file API". If no resource registry is mounted the skills still load — the references simply aren't addressable.
 
 ### Growing the library after startup
 
-Loaders stay attached, so the library isn't frozen at boot:
+The source stays attached, so the library isn't frozen at boot:
 
 ```ts
 const { added, updated, removed } = await session.skills.reload();
@@ -205,34 +232,70 @@ const skill = await session.skills.resolve("late_arriving"); // null if no sourc
 const must = await session.skills.require("must_exist"); // throws SkillNotFound
 ```
 
-`resolve` is lookup-on-miss: it walks the loaders, registers the hit, and caches it. `reload({ pruneMissing: true })` drops entries that vanished from the loader snapshot — off by default so a runtime `register` isn't clobbered by the next reload. Loaders may implement an optional `lookup(name)` for fast-path resolution without a full enumeration; every built-in factory does.
+Unlike the seed at session-open, a reload goes through the ordinary operations — journaled, guard-vetoable, written through to the store. `resolve` is lookup-on-miss: it re-runs the source, registers the hit, and caches it. `reload({ pruneMissing: true })` drops entries that vanished from the source — off by default so a runtime `register` isn't clobbered by the next reload.
+
+A library with no source reloads to nothing touched, `pruneMissing` included: the absence of a source isn't a claim that the library should be empty.
+
+A miss costs a full source read, because a source produces its whole set. For a catalog large enough to care, put it behind a `store`: the store's query is the targeted read port, and `hydrateFromStore()` opens on it.
+
+Swap the source at runtime with `setHydrator(hydrate)`, or pass `undefined` to detach it. Detaching doesn't un-register what the source already produced.
 
 ## Configuring the slot
 
-`withSkills` takes three shapes, all collapsing to the same extension:
+`withSkills` takes a plan or a live library — two shapes, one type:
 
 ```ts
-// An array — sugar for { initial }.
-withSkills([{ name: "x", description: "x", content: "…" }]);
+// A plan. Constructed per session, closed at session teardown.
+withSkills({
+  store: myDurableStore,
+  hydrate: hydrateFromDirectory({ root: "./.agents/skills/" }),
+});
 
-// An instance — one long-lived library backing every session
+// A live library — one long-lived instance backing every session
 // (a shared on-disk DB, a remote registry, a cluster-wide replica).
 withSkills(mySharedSkills);
-
-// A config object.
-withSkills({
-  initial: literalRecords,
-  loaders: [fromArray(bundled), fromDirectory({ path: "./skills/" })],
-  store: myDurableStore,
-});
-withSkills({ use: mySharedSkills }); // instance, spelled out
 ```
 
-**Lifecycle follows ownership.** Given `initial` / `loaders` / `store`, the extension builds one library per session and closes it at session teardown. Given an instance — bare or under `use:` — you own the lifecycle; the extension publishes it under the session's `skills` namespace and never closes it. `use` is mutually exclusive with `initial`, `loaders`, and `store`: if you bring the instance, you bring its backing too.
+Name the plan with `defineSkills` when you want to hand it around — a config module exports one, a test imports it and overrides a single slot:
+
+```ts
+import { defineSkills, hydrateFrom, hydrateFromDirectory } from "@agentick/skills";
+
+// skills.ts
+export default defineSkills({
+  store: myDurableStore,
+  hydrate: hydrateFromDirectory({ root: "./.agents/skills/" }),
+  guards: { register: (input) => (input.name.startsWith("_") ? { kind: "veto" } : undefined) },
+});
+
+// skills.test.ts — same policy, a fixture source
+import production from "./skills.js";
+const underTest = defineSkills({ ...production, hydrate: hydrateFrom(fixtures) });
+```
+
+`defineSkills` is identity plus a brand: it returns what you gave it. Nothing is constructed, no store is opened, and no hydrator runs until a session installs it.
+
+**Lifecycle follows ownership.** Given a plan, the extension builds one library per session, runs genesis, and closes it at session teardown. Given a live instance, you own the lifecycle: the extension publishes it under the session's `skills` namespace, never runs genesis on it, and never closes it.
+
+### Policy on the plan
+
+`hooks:` observes and transforms; `guards:` decides. Both name this library's own verbs, with the layer prefix dropped:
+
+```ts
+defineSkills({
+  hooks: { onBeforeRegister: (input) => ({ ...input, name: input.name.toLowerCase() }) },
+  guards: {
+    register: (input) =>
+      isReserved(input.name) ? { kind: "veto", reason: "reserved" } : undefined,
+  },
+});
+```
+
+App-level policy wraps these: an app guard decides before a plan-level guard is consulted, and an app before-hook runs before a plan-level one. Governance outranks local policy. Guards never gate the genesis seed — the seed isn't a `register`, so admission policy over the _source_ belongs in the hydrator.
 
 ## Store backing
 
-Skills are the pure floor of the definition-library shape: a serializable record keyed by name in a store, fed by loaders, with no runtime augmentation to lose in transit.
+Skills are the pure floor of the definition-library shape: a serializable record keyed by name in a store, fed by a hydrator, with no runtime augmentation to lose in transit.
 
 ```ts
 import { InMemorySkillStore } from "@agentick/skills";
@@ -241,7 +304,7 @@ withSkills({ store: new InMemorySkillStore() }); // the implicit default
 ```
 
 - `register` / `update` / `remove` write through to the store.
-- **Loaders feed the store; they aren't dissolved into it.** `reload()` runs each loader and puts the results; `resolve(name)` asks each loader's `lookup` and puts the hit.
+- **The source feeds the store; it isn't dissolved into it.** `reload()` re-runs the hydrator and puts the results; `resolve(name)` does the same for one name. The session-open seed is the exception — it reads, it never writes.
 - `get` / `has` / `list` / `search` stay synchronous, served from a view the library keeps in lockstep with the store — write-through on mutation, rehydrated on resume. The sync read surface and the synchronous snapshot export are both load-bearing, so the materialized view is required, not incidental.
 - Snapshot export and import coexist with the store, so a session round-trips through hibernate and resume with no adopter code.
 
@@ -254,6 +317,7 @@ type SkillsError =
   | { _tag: "SkillNotFound"; skillName: string }
   | { _tag: "SkillAlreadyExists"; skillName: string }
   | { _tag: "SkillsBackendError"; cause: unknown }
+  | { _tag: "SkillsHydrateFailed"; cause: unknown } // genesis threw; session creation fails
   | { _tag: "SkillIsolationUnavailable"; skillName: string } // isolate: true, nothing bound
   | { _tag: "SkillRunnerUnbound"; skillName: string }; // run on a library with no session
 ```
@@ -286,7 +350,7 @@ await s.refresh(); // force a re-poll
 
 This handle is RPC-backed, not channel-backed — a deliberate divergence from knobs and tasks. There is no delta channel for skills, so the read side keeps a local snapshot seeded by an eager `skills/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop straight into `useSyncExternalStore`.
 
-`run`, `reload`, `resolve`, and `require` are not on the client. The first needs a serializable output form that doesn't exist yet; the rest are loader and lookup concerns that don't cross the wire.
+`run`, `reload`, `resolve`, and `require` are not on the client. The first needs a serializable output form that doesn't exist yet; the rest are source and lookup concerns that don't cross the wire.
 
 ## Testing
 
@@ -312,23 +376,25 @@ The stub brings its own in-memory substrate, so unit tests need no session machi
 | `update(input)`                                  | async | Patch fields. Throws `SkillNotFound`                                  |
 | `remove({ name })`                               | async | Delete. Throws `SkillNotFound`                                        |
 | `subscribe(name, fn)` / `subscribeAll(fn)`       | sync  | Per-skill or any-mutation change notifications                        |
-| `reload({ pruneMissing? })`                      | async | Re-run loaders; returns `{ added, updated, removed }`                 |
+| `reload({ pruneMissing? })`                      | async | Re-run the source; returns `{ added, updated, removed }`              |
 | `resolve(name)` / `require(name)`                | async | Lookup-on-miss; `null` vs. throw                                      |
 | `run(name, opts?)`                               | async | A send primed with the skill; returns the execution handle            |
 
 ### Package exports
 
-| Export                                     | Purpose                                                   |
-| ------------------------------------------ | --------------------------------------------------------- |
-| `withSkills(slot)`                         | The session extension — array, instance, or config        |
-| `SkillsHarness`                            | The implementation, for direct construction               |
-| `InMemorySkillStore` / `matchesSkillQuery` | Bundled store and its search predicate                    |
-| `defaultComposeRun`                        | The shipped composition, to wrap rather than replace      |
-| `skillBodyUri(name)`                       | Build the `skill://<name>` resource uri                   |
-| `buildSkillsTools(sessionId)`              | The `skill_list` + `skill_read` bundle, for custom wiring |
-| `SKILL_LIST` / `SKILL_READ`                | Tool-name constants                                       |
+| Export                                                                     | Purpose                                                   |
+| -------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `withSkills(config)`                                                       | The session extension — a plan or a live library          |
+| `defineSkills(options)`                                                    | Name a plan: identity + brand, inert until install        |
+| `hydrateFrom` / `hydrateFromStore` / `hydrateFromUrl` / `composeHydrators` | The portable sources                                      |
+| `SkillsHarness`                                                            | The implementation, for direct construction               |
+| `InMemorySkillStore` / `matchesSkillQuery`                                 | Bundled store and its search predicate                    |
+| `defaultComposeRun`                                                        | The shipped composition, to wrap rather than replace      |
+| `skillBodyUri(name)`                                                       | Build the `skill://<name>` resource uri                   |
+| `buildSkillsTools(sessionId)`                                              | The `skill_list` + `skill_read` bundle, for custom wiring |
+| `SKILL_LIST` / `SKILL_READ`                                                | Tool-name constants                                       |
 
-`withSkills` options: `initial`, `loaders`, `store`, `composeRun`, `use`, `registerModelTools`, `exposeAsResources`.
+`withSkills` / `defineSkills` options: `store`, `hydrate`, `composeRun`, `registerModelTools`, `exposeAsResources`, `hooks`, `guards`.
 
 ## Patterns
 
@@ -347,7 +413,8 @@ The stub brings its own in-memory substrate, so unit tests need no session machi
 - **`skills:run` isn't a wire command.** It needs a declarative output form that's serializable by construction.
 - **Reference re-sync.** Supporting files are wired once at install. A later `reload()` or a snapshot restore doesn't re-sync them, because the lazy resolver closures don't serialize.
 - **npm-packaged skills** (`fromPackage`) aren't implemented.
-- **Multi-source collisions raise `SkillAlreadyExists`.** Several source directories work today, but the intended direction is layered precedence — user over project over bundled, like a settings cascade — so a local skill shadows a shipped one. That decision is coupled to the `skill://` uri shape: layering keeps it single-winner, while namespacing by source would force `skill://<source>/<name>/…`.
+- **`createApp({ skills })` isn't wired yet.** The slot is declared and typed, and `withSkills(...)` in `extensions: []` is the path that works today.
+- **Layered precedence across sources is manual.** `composeHydrators` resolves a duplicate name last-wins, which gives you a cascade if you order the sources yourself. A first-class user-over-project-over-bundled ladder isn't built; it's coupled to the `skill://` uri shape, since layering keeps it single-winner while namespacing by source would force `skill://<source>/<name>/…`.
 - **No transactions and no per-skill ACL.** Each mutation is its own operation, and all session participants share one library.
 
 ### A recorded design stance
@@ -357,10 +424,13 @@ Markdown files are the primary authoring form on purpose. Portability is the for
 ## Verified by
 
 - `src/__tests__/harness.spec.ts` — the protocol conformance suite, sync and async surfaces, mutation envelopes on the bus, snapshot round-trip, inbox routing.
-- `src/__tests__/store-backing.spec.ts` — write-through on register/update/remove, loaders feeding the store through `reload` and `resolve`, search through the sync view, snapshot-to-hydrate round-trip, plus the store conformance suite against `InMemorySkillStore`.
+- `src/__tests__/store-backing.spec.ts` — write-through on register/update/remove, the source feeding the store through `reload` and `resolve`, search through the sync view, store-to-seed round-trip, plus the store conformance suite against `InMemorySkillStore`.
+- `src/__tests__/definition.spec.ts` — `defineSkills` identity, the non-enumerable brand, inertness (no store touch, no hydrator run), the plan-or-instance shapes, and plan portability.
+- `src/__tests__/genesis.spec.ts` — the seed law (no store write, no `register` operation), timestamp preservation, typed `SkillsHydrateFailed` including through the extension install, the `ctx.store` / `ctx.principal` / journal-reader facets, no-genesis-on-fork, and the app-wraps-plan ordering for hooks and guards.
+- `src/__tests__/hydrators.spec.ts` + `hydrators-node.spec.ts` — each named source, `composeHydrators` ordering and last-wins, directory discovery, the `name` default, missing-description skips, missing-root-loads-empty, symlink rejection, `allowed-tools` in both array and comma-string form, and reference files registering and reading back.
+- `src/__tests__/source-surface.spec.ts` — `reload` adds/updates/prunes, `resolve` and `require` on hit and miss, a source-less harness touching nothing, and reload-writes-while-genesis-does-not.
 - `src/__tests__/run.spec.ts` — default composition, the `composeRun` override, handle pass-through with and without `output`, failures riding `handle.result`, `allowedTools` round-trip and threading, isolated runs routing through the bound runner, and the typed unbound/missing-skill errors.
 - `src/__tests__/tools.spec.ts` — `skill_list` enumeration, `skill_read` content, honest degradation on an unknown name and with no library mounted, and the `registerModelTools: false` opt-out.
 - `src/__tests__/projection.spec.ts` — `skill://<name>` register-then-read, live update reflection, registration after install, unregister on removal, the `exposeAsResources: false` opt-out, degradation with no resource registry, and coexistence with reference uris.
-- `src/__tests__/agent-skills-directory.spec.ts` + `loaders.spec.ts` — directory discovery, the `name` default, missing-description skips, missing-root-loads-empty, symlink rejection, `allowed-tools` in both array and comma-string form, and reference files registering and reading back.
 - `src/client/__tests__/skills-handle.spec.ts` + `session-skills.spec.ts` — the eager poll, each write verb followed by a re-poll, `search` leaving the snapshot alone, and the zero-argument subscribe contract.
 - End-to-end coverage lives with the packages that assemble the pieces: [@agentick/app](../app) for `run` through a real session including the isolation invariant, [@agentick/session](../session) for the loop-level tool restriction, and the in-process transport suite for the `skills/list` and `skills/get` wire round-trip.

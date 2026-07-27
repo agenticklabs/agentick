@@ -40,7 +40,8 @@ export function defaultComposeRun(skill: Skill, opts: SkillRunOptions): SendInpu
   // canonical tool names reach the MODEL for this run; dispatch-door tools are
   // unaffected. The skill record is the ONLY source in C2 (no `opts`-level
   // override). Populated from Agent Skills `allowed-tools` frontmatter by the
-  // Node loaders (E1 — `agentSkillsDirectory` / `fromFile` / `fromDirectory`).
+  // filesystem hydrators (`hydrateFromDirectory` / `hydrateFromFile` /
+  // `hydrateFromMarkdownFiles`).
   return {
     messages,
     ...(skill.allowedTools !== undefined ? { allowedTools: skill.allowedTools } : {}),

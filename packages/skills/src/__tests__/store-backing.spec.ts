@@ -2,8 +2,8 @@
  * Store-backing spec for {@link SkillsHarness} (data-layer plan §6-C, Phase 5).
  *
  * Proves the harness is store-DERIVED and store-PERSISTED: mutations land in the
- * injected {@link SkillStore}; loaders (`reload` / `resolve`) FEED the store;
- * `search` filters correctly through the sync projection; and the sync
+ * injected {@link SkillStore}; the source surface (`reload` / `resolve`) FEEDS the
+ * store; `search` filters correctly through the sync projection; and the sync
  * `exportSnapshot` COEXISTS with the store (Phase-4 sweep deletes it later).
  *
  * Also runs {@link runSkillStoreConformance} against {@link InMemorySkillStore}.
@@ -16,7 +16,7 @@ import { stubStoreCtx } from "@agentick/store";
 import { SkillsHarness } from "../harness.js";
 import { InMemorySkillStore } from "../store.js";
 import { runSkillStoreConformance } from "../store-conformance.js";
-import { fromArray } from "../loaders.js";
+import { hydrateFrom, hydrateFromStore } from "../hydrators.js";
 
 // ── store conformance: the bundled default passes the shared suite ──
 runSkillStoreConformance({
@@ -65,19 +65,20 @@ describe("SkillsHarness — store backing", () => {
     await h.close();
   });
 
-  it("reload() feeds the store from loaders", async () => {
+  it("reload() feeds the store from the source hydrator", async () => {
     const store = new InMemorySkillStore();
     const h = makeHarness(store);
     await h.ready;
-    h.setLoaders([
-      fromArray([
+    h.setHydrator(
+      hydrateFrom([
         { name: "alpha", description: "A", content: "a" },
         { name: "beta", description: "B", content: "b" },
       ]),
-    ]);
+    );
     const summary = await h.reload();
     expect([...summary.added].sort()).toEqual(["alpha", "beta"]);
-    // Loader output landed in the durable store, not just the projection.
+    // Source output landed in the durable store, not just the projection —
+    // a reload is an OP, unlike genesis.
     expect((await store.list(undefined, stubStoreCtx())).map((s) => s.name).sort()).toEqual([
       "alpha",
       "beta",
@@ -89,7 +90,7 @@ describe("SkillsHarness — store backing", () => {
     const store = new InMemorySkillStore();
     const h = makeHarness(store);
     await h.ready;
-    h.setLoaders([fromArray([{ name: "lazy", description: "L", content: "l" }])]);
+    h.setHydrator(hydrateFrom([{ name: "lazy", description: "L", content: "l" }]));
     expect(await store.get("lazy", stubStoreCtx())).toBeUndefined();
     const resolved = await h.resolve("lazy");
     expect(resolved?.name).toBe("lazy");
@@ -144,9 +145,17 @@ describe("SkillsHarness — store backing", () => {
     expect(snap.a?.content).toBe("aa");
     await h1.close();
 
-    const h2 = makeHarness(store);
+    // A resumed harness asks for the store read explicitly — skills names no
+    // default hydrator, so `hydrateFromStore()` is the opt-in (ADR 93).
+    const h2 = new SkillsHarness(
+      `store-backing:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { store, hydrate: hydrateFromStore() },
+    );
     await h2.ready;
-    // Fresh projection is empty until hydrate pulls the durable store in.
+    // Fresh projection is empty until genesis pulls the durable store in.
     expect(h2.has("a")).toBe(false);
     await h2.hydrate();
     expect(h2.get("a")?.content).toBe("aa");

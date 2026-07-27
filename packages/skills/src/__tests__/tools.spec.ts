@@ -123,6 +123,14 @@ describe("withSkills — tool registration", () => {
     const namespaces: string[] = [];
     const installer = {
       sessionId: "sess",
+      hostId: "sess",
+      substrate: {
+        journal: new MemoryJournal(),
+        bus: new LocalEventBus(),
+        inbox: new LocalInbox(),
+      },
+      interceptors: {},
+      getNamespace: () => undefined,
       registerNamespace: (name: string) => {
         namespaces.push(name);
         return () => {};
@@ -140,7 +148,7 @@ describe("withSkills — tool registration", () => {
     return { installer, tools, handlerRefs, namespaces };
   }
 
-  it("registers skill_list + skill_read by default (instance form)", async () => {
+  it("registers skill_list + skill_read by default (live-instance arm)", async () => {
     const inst = new SkillsHarness(
       "i1",
       new MemoryJournal(),
@@ -149,23 +157,24 @@ describe("withSkills — tool registration", () => {
     );
     await inst.ready;
     const { installer, tools, handlerRefs } = fakeInstaller();
-    const ext = withSkills({ use: inst });
+    // The dichotomy's second arm: the instance is passed DIRECTLY, not nested
+    // under a `use:` key (ADR 93 §Composition ruling).
+    const ext = withSkills(inst);
     await ext.install(installer);
     expect(tools.map((t) => t.declaration.name).sort()).toEqual([SKILL_LIST, SKILL_READ]);
     expect(handlerRefs).toHaveLength(2);
   });
 
+  it("registers skill_list + skill_read by default (definition arm)", async () => {
+    const { installer, tools, handlerRefs } = fakeInstaller();
+    await withSkills({}).install(installer);
+    expect(tools.map((t) => t.declaration.name).sort()).toEqual([SKILL_LIST, SKILL_READ]);
+    expect(handlerRefs).toHaveLength(2);
+  });
+
   it("registerModelTools:false suppresses the model tools", async () => {
-    const inst = new SkillsHarness(
-      "i2",
-      new MemoryJournal(),
-      new LocalEventBus(),
-      new LocalInbox(),
-    );
-    await inst.ready;
     const { installer, tools, handlerRefs, namespaces } = fakeInstaller();
-    const ext = withSkills({ use: inst, registerModelTools: false });
-    await ext.install(installer);
+    await withSkills({ registerModelTools: false }).install(installer);
     expect(tools).toHaveLength(0);
     expect(handlerRefs).toHaveLength(0);
     // The namespace is still published — the substrate exists, only the

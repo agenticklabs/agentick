@@ -29,7 +29,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
-import { withSkills } from "@agentick/skills";
+import { hydrateFrom, withSkills } from "@agentick/skills";
 import {
   FakeLanguageModelExecutor,
   type FakeLanguageModelExecutorOptions,
@@ -122,7 +122,7 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
       modelExecutor: executor,
       tools: [echoTool],
       toolHandlers: new Map([["h.echo", echoHandler]]),
-      extensions: [withSkills({ initial: [reviewSkill] })],
+      extensions: [withSkills({ hydrate: hydrateFrom([reviewSkill]) })],
     });
     const session = await app.createSession({ sessionId: "s-run-1" });
 
@@ -148,7 +148,7 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
     const executor = fakeExecutor({ result: textResult("a plain answer") });
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
-      extensions: [withSkills({ initial: [reviewSkill] })],
+      extensions: [withSkills({ hydrate: hydrateFrom([reviewSkill]) })],
     });
     const session = await app.createSession({ sessionId: "s-run-2" });
 
@@ -164,7 +164,7 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
     const executor = fakeExecutor({ result: textResult("noop") });
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
-      extensions: [withSkills({ initial: [reviewSkill] })],
+      extensions: [withSkills({ hydrate: hydrateFrom([reviewSkill]) })],
     });
     const session = await app.createSession({ sessionId: "s-run-3" });
 
@@ -192,7 +192,7 @@ describe("session.skills!.run — e2e through createApp (C-core injection + §B2
       modelExecutor: executor,
       tools: [echoTool],
       toolHandlers: new Map([["h.echo", echoHandler]]),
-      extensions: [withSkills({ initial: [reviewSkill] })],
+      extensions: [withSkills({ hydrate: hydrateFrom([reviewSkill]) })],
     });
     const session = await app.createSession({ sessionId: "s-run-4" });
 
@@ -235,7 +235,7 @@ describe("session.skills!.run — isolation (C2: routes through session.fork())"
     ]);
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
-      extensions: [withSkills({ initial: [reviewSkill] })],
+      extensions: [withSkills({ hydrate: hydrateFrom([reviewSkill]) })],
     });
     const session = await app.createSession({ sessionId: "s-iso" });
 
@@ -275,7 +275,7 @@ describe("session.skills!.run — isolation (C2: routes through session.fork())"
     ]);
     const app = await createApp(React.createElement(Agent), {
       modelExecutor: executor,
-      extensions: [withSkills({ initial: [reviewSkill] })],
+      extensions: [withSkills({ hydrate: hydrateFrom([reviewSkill]) })],
     });
     const session = await app.createSession({ sessionId: "s-iso-2" });
 

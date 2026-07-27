@@ -15,6 +15,7 @@ import type { Prompts, Resources, SessionInstaller, StandardSchemaV1 } from "@ag
 import { ResourcesHarness } from "@agentick/resources";
 
 import { withPrompts } from "../extension.js";
+import { hydrateFrom } from "../hydrators.js";
 
 /** Minimal `SessionInstaller` carrying a real resources harness (or none). */
 function fakeInstaller(resources: Resources | undefined): {
@@ -65,7 +66,7 @@ describe("prompt:// projection", () => {
     const { installer } = fakeInstaller(resources);
 
     await withPrompts({
-      initial: [
+      hydrate: hydrateFrom([
         {
           declaration: {
             name: "summarize",
@@ -74,10 +75,10 @@ describe("prompt:// projection", () => {
               { name: "text", description: "input", required: true, schema: passthroughSchema },
               { name: "tone" },
             ],
-            render: (args) => `Summarize: ${String(args.text)}`,
+            render: (args: Record<string, unknown>) => `Summarize: ${String(args.text)}`,
           },
         },
-      ],
+      ]),
     }).install(installer);
 
     expect(resources.has("prompt://summarize")).toBe(true);
@@ -110,7 +111,7 @@ describe("prompt:// projection", () => {
     const { installer } = fakeInstaller(resources);
 
     await withPrompts({
-      initial: [
+      hydrate: hydrateFrom([
         {
           declaration: {
             name: "boilerplate",
@@ -118,7 +119,7 @@ describe("prompt:// projection", () => {
             template: "# Boilerplate\nHello.",
           },
         },
-      ],
+      ]),
     }).install(installer);
 
     const contents = await resources.read("prompt://boilerplate");
@@ -158,7 +159,9 @@ describe("prompt:// projection", () => {
     const { installer, namespaces } = fakeInstaller(resources);
 
     await withPrompts({
-      initial: [{ declaration: { name: "hidden", description: "no resource", template: "x" } }],
+      hydrate: hydrateFrom([
+        { declaration: { name: "hidden", description: "no resource", template: "x" } },
+      ]),
       exposeAsResources: false,
     }).install(installer);
 
@@ -170,7 +173,9 @@ describe("prompt:// projection", () => {
   it("does not throw when the installer has no resources harness", async () => {
     const { installer, namespaces } = fakeInstaller(undefined);
     await withPrompts({
-      initial: [{ declaration: { name: "solo", description: "no sink", template: "x" } }],
+      hydrate: hydrateFrom([
+        { declaration: { name: "solo", description: "no sink", template: "x" } },
+      ]),
     }).install(installer);
 
     const prompts = namespaces.get("prompts") as Prompts;

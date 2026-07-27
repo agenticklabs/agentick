@@ -17,8 +17,11 @@
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
  */
 
+import { registerNamespaceSlot } from "@agentick/runtime";
 import type { Skills } from "@agentick/spec";
 import type { SkillsHandle } from "./handle.js";
+import type { SkillsConfig } from "./definition.js";
+import { withSkills } from "./extension.js";
 
 // The `skills/*` WireMethods rows live in the type-only `./wire-augment.ts`
 // (split so the `/client` subpath can type the wire without loading this
@@ -37,6 +40,19 @@ declare module "@agentick/spec" {
      * structurally assignable to `SessionHarnessProtocol`.
      */
     readonly skills?: Skills;
+  }
+
+  /**
+   * ADR 93 — the top-level `skills` config slot: `createApp({ skills })`.
+   * Accepts the ADR-42 dichotomy, no third form: a `defineSkills(...)`
+   * DEFINITION (or the identical inline bag) or a LIVE harness instance.
+   *
+   * Registered here, not in `@agentick/app` — the app package names no namespace
+   * (ADR 27: built-ins are bundled, never privileged). The runtime half is the
+   * `registerNamespaceSlot("skills", { toExtension })` side effect below.
+   */
+  interface NamespaceSlots {
+    readonly skills?: SkillsConfig;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -66,3 +82,16 @@ declare module "@agentick/spec" {
     readonly skills?: Skills;
   }
 }
+
+// ADR 93 — the RUNTIME half of the slot registration (the `NamespaceSlots`
+// augmentation above is the type half). Tells the app that `skills` is a
+// namespace-config key it should forward, without the app importing this package.
+// A side effect on import, exactly like the `HookBridges` slot.
+//
+// Skills is EXTENSION-INSTALLED (there is no construction site until an extension
+// runs), so unlike the host-constructed timeline it also supplies the
+// `toExtension` arm: `withSkills` already takes the definition | inline |
+// live-instance dichotomy, so the slot value passes straight through.
+registerNamespaceSlot("skills", {
+  toExtension: (value) => withSkills(value as SkillsConfig),
+});

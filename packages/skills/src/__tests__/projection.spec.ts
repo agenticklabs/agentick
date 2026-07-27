@@ -24,7 +24,8 @@ import type { Resources, SessionInstaller, Skills } from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 
 import { withSkills } from "../extension.js";
-import { agentSkillsDirectory } from "../loaders-node.js";
+import { hydrateFrom } from "../hydrators.js";
+import { hydrateFromDirectory } from "../hydrators-node.js";
 
 /** Minimal `SessionInstaller` carrying a real resources harness (or none). */
 function fakeInstaller(resources: Resources | undefined): {
@@ -75,7 +76,7 @@ describe("skill:// body projection", () => {
     const { installer } = fakeInstaller(resources);
 
     await withSkills({
-      initial: [{ name: "greet", description: "Say hi", content: "# Greet\nSay hi." }],
+      hydrate: hydrateFrom([{ name: "greet", description: "Say hi", content: "# Greet\nSay hi." }]),
     }).install(installer);
 
     expect(resources.has("skill://greet")).toBe(true);
@@ -101,7 +102,7 @@ describe("skill:// body projection", () => {
     const { installer, namespaces } = fakeInstaller(resources);
 
     await withSkills({
-      initial: [{ name: "recipe", description: "v1", content: "step one" }],
+      hydrate: hydrateFrom([{ name: "recipe", description: "v1", content: "step one" }]),
     }).install(installer);
 
     const skills = namespaces.get("skills") as Skills;
@@ -133,7 +134,7 @@ describe("skill:// body projection", () => {
     const { installer, namespaces } = fakeInstaller(resources);
 
     await withSkills({
-      initial: [{ name: "temp", description: "ephemeral", content: "gone soon" }],
+      hydrate: hydrateFrom([{ name: "temp", description: "ephemeral", content: "gone soon" }]),
     }).install(installer);
     expect(resources.has("skill://temp")).toBe(true);
 
@@ -153,7 +154,7 @@ describe("skill:// body projection", () => {
     const { installer, namespaces } = fakeInstaller(resources);
 
     await withSkills({
-      initial: [{ name: "hidden", description: "no resource", content: "x" }],
+      hydrate: hydrateFrom([{ name: "hidden", description: "no resource", content: "x" }]),
       exposeAsResources: false,
     }).install(installer);
 
@@ -166,7 +167,7 @@ describe("skill:// body projection", () => {
   it("does not throw when the installer has no resources harness", async () => {
     const { installer, namespaces } = fakeInstaller(undefined);
     await withSkills({
-      initial: [{ name: "solo", description: "no sink", content: "x" }],
+      hydrate: hydrateFrom([{ name: "solo", description: "no sink", content: "x" }]),
     }).install(installer);
 
     const skills = namespaces.get("skills") as Skills;
@@ -202,7 +203,7 @@ describe("skill:// body projection — coexistence with E2 references", () => {
     await resources.ready;
     const { installer } = fakeInstaller(resources);
 
-    await withSkills({ loaders: [agentSkillsDirectory({ root })] }).install(installer);
+    await withSkills({ hydrate: hydrateFromDirectory({ root }) }).install(installer);
 
     // Body — the new projection.
     expect(resources.has("skill://guide")).toBe(true);

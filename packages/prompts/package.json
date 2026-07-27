@@ -38,10 +38,10 @@
       "import": "./src/client/index.ts",
       "default": "./src/client/index.ts"
     },
-    "./loaders": {
-      "types": "./src/loaders.ts",
-      "import": "./src/loaders.ts",
-      "default": "./src/loaders.ts"
+    "./hydrators": {
+      "types": "./src/hydrators.ts",
+      "import": "./src/hydrators.ts",
+      "default": "./src/hydrators.ts"
     },
     "./testing": {
       "types": "./src/testing/index.ts",
@@ -62,10 +62,10 @@
         "import": "./dist/client/index.js",
         "default": "./dist/client/index.js"
       },
-      "./loaders": {
-        "types": "./dist/loaders.d.ts",
-        "import": "./dist/loaders.js",
-        "default": "./dist/loaders.js"
+      "./hydrators": {
+        "types": "./dist/hydrators.d.ts",
+        "import": "./dist/hydrators.js",
+        "default": "./dist/hydrators.js"
       },
       "./testing": {
         "types": "./dist/testing/index.d.ts",

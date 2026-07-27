@@ -43,15 +43,15 @@
       "import": "./src/testing/index.ts",
       "default": "./src/testing/index.ts"
     },
-    "./loaders": {
-      "types": "./src/loaders.ts",
-      "import": "./src/loaders.ts",
-      "default": "./src/loaders.ts"
+    "./hydrators": {
+      "types": "./src/hydrators.ts",
+      "import": "./src/hydrators.ts",
+      "default": "./src/hydrators.ts"
     },
-    "./loaders/node": {
-      "types": "./src/loaders-node.ts",
-      "import": "./src/loaders-node.ts",
-      "default": "./src/loaders-node.ts"
+    "./hydrators/node": {
+      "types": "./src/hydrators-node.ts",
+      "import": "./src/hydrators-node.ts",
+      "default": "./src/hydrators-node.ts"
     }
   },
   "publishConfig": {
@@ -72,15 +72,15 @@
         "import": "./dist/testing/index.js",
         "default": "./dist/testing/index.js"
       },
-      "./loaders": {
-        "types": "./dist/loaders.d.ts",
-        "import": "./dist/loaders.js",
-        "default": "./dist/loaders.js"
+      "./hydrators": {
+        "types": "./dist/hydrators.d.ts",
+        "import": "./dist/hydrators.js",
+        "default": "./dist/hydrators.js"
       },
-      "./loaders/node": {
-        "types": "./dist/loaders-node.d.ts",
-        "import": "./dist/loaders-node.js",
-        "default": "./dist/loaders-node.js"
+      "./hydrators/node": {
+        "types": "./dist/hydrators-node.d.ts",
+        "import": "./dist/hydrators-node.js",
+        "default": "./dist/hydrators-node.js"
       }
     },
     "main": "./dist/index.js",

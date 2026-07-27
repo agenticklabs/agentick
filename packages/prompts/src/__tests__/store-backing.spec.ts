@@ -20,7 +20,7 @@ import { stubStoreCtx } from "@agentick/store";
 import { PromptsHarness } from "../harness.js";
 import { InMemoryPromptStore } from "../store.js";
 import { runPromptStoreConformance } from "../store-conformance.js";
-import { fromArray } from "../loaders.js";
+import { hydrateFrom, hydrateFromStore } from "../hydrators.js";
 
 // ── store conformance: the bundled default passes the shared suite ──
 runPromptStoreConformance({
@@ -99,16 +99,16 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     await h.close();
   });
 
-  it("reload() feeds the store + sidecar from loaders", async () => {
+  it("reload() feeds the store + sidecar from the source hydrator", async () => {
     const store = new InMemoryPromptStore();
     const h = makeHarness(store);
     await h.ready;
-    h.setLoaders([
-      fromArray([
+    h.setHydrator(
+      hydrateFrom([
         { declaration: { name: "alpha", description: "A", render: () => "a" } },
         { declaration: { name: "beta", description: "B", template: "b" } },
       ]),
-    ]);
+    );
     const summary = await h.reload();
     expect([...summary.added].sort()).toEqual(["alpha", "beta"]);
     // Records landed in the durable store (fns stripped).
@@ -127,9 +127,9 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     const store = new InMemoryPromptStore();
     const h = makeHarness(store);
     await h.ready;
-    h.setLoaders([
-      fromArray([{ declaration: { name: "lazy", description: "L", render: () => "l" } }]),
-    ]);
+    h.setHydrator(
+      hydrateFrom([{ declaration: { name: "lazy", description: "L", render: () => "l" } }]),
+    );
     expect(await store.get("lazy", stubStoreCtx())).toBeUndefined();
     const resolved = await h.resolve("lazy");
     expect(resolved?.name).toBe("lazy");
@@ -163,7 +163,15 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     expect(snap.p).not.toHaveProperty("template");
     await h1.close();
 
-    const h2 = makeHarness(store);
+    // A resumed harness asks for the store read explicitly — prompts names no
+    // default hydrator, so `hydrateFromStore()` is the opt-in (ADR 93).
+    const h2 = new PromptsHarness(
+      `store-backing:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { store, hydrate: hydrateFromStore() },
+    );
     await h2.ready;
     expect(h2.has("p")).toBe(false);
     await h2.hydrate();

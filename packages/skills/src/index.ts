@@ -16,6 +16,31 @@ export { SkillsHarness, type SkillsHarnessOptions } from "./harness.js";
 export type { SkillsHandle, SkillRunCompose, SkillRunOptions } from "./handle.js";
 export { defaultComposeRun } from "./compose-run.js";
 export { withSkills, type WithSkillsOptions } from "./extension.js";
+// ADR 93 — the namespace definition: the store, the genesis seam, this
+// namespace's shaping seams, and the `hooks:` / `guards:` bags. One object for
+// both `createApp({ skills })` and `withSkills(...)`.
+export {
+  defineSkills,
+  isSkillsDefinition,
+  type BrandedSkillsDefinition,
+  type SkillSeed,
+  type SkillsConfig,
+  type SkillsDefinition,
+  type SkillsHydrateCtx,
+  type SkillsHydrator,
+  type SkillsStore,
+} from "./definition.js";
+// The named hydrators — the genesis-seam library, and the ONE source vocabulary
+// (a literal array, a manifest, the durable store, or several composed). The
+// filesystem sources need `node:fs` and ship from `@agentick/skills/hydrators/node`.
+export {
+  composeHydrators,
+  hydrateFrom,
+  hydrateFromManifest,
+  hydrateFromStore,
+  hydrateFromUrl,
+  type HydrateFromUrlOptions,
+} from "./hydrators.js";
 // E2 — reference-file wiring. `SkillReference` (`{ uri, path }`) is the
 // pure-data descriptor persisted on `skill.metadata.references`; the transient
 // resolver wiring + reader stay internal to the install path.

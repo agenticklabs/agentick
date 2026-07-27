@@ -26,13 +26,14 @@ your prompt library; invoke a prompt by name.
 ```tsx
 import { createApp } from "@agentick/app/react";
 import { Section, System, User } from "@agentick/compiler-react";
+import { hydrateFrom } from "@agentick/prompts";
 import { withReactPrompts } from "@agentick/prompts-react";
 
 const app = await createApp(<Agent />, {
   model,
   extensions: [
     withReactPrompts({
-      initial: [
+      hydrate: hydrateFrom([
         {
           declaration: {
             name: "weekly_status",
@@ -56,7 +57,7 @@ const app = await createApp(<Agent />, {
             ),
           },
         },
-      ],
+      ]),
     }),
   ],
 });
@@ -95,7 +96,6 @@ import { reactPromptRenderer } from "@agentick/prompts-react";
 
 const extension = withPrompts({
   renderers: [reactPromptRenderer /*, someOtherFrameworkRenderer */],
-  initial: [],
 });
 ```
 
@@ -215,7 +215,7 @@ The render happens server-side, so a JSX body works over the wire — a function
 is never serialized, and only the resulting messages travel.
 
 That requires the server to project a source that **has** the React renderer,
-which means the `use:` form:
+which means building the source yourself and handing over the live instance:
 
 ```ts
 import { PromptsHarness } from "@agentick/prompts";
@@ -235,15 +235,14 @@ const prompts = new PromptsHarness(
 await prompts.ready;
 await prompts.register({ declaration });
 
-// … then hand it to the MCP server's prompts slot as `use:`:
-//   { name: "status-prompts", transports: [stdioTransport()], prompts: { use: prompts } }
+// … then hand the live instance to the MCP server's prompts slot:
+//   { name: "status-prompts", transports: [stdioTransport()], prompts }
 ```
 
 > [!WARNING]
-> The `prompts: [declaration, …]` and `prompts: { declarations: [...] }` forms let
-> the MCP server build the source itself, and that source has **no renderers**. A
-> JSX-bodied prompt registered that way fails to render. Build the source, wire
-> `reactPromptRenderer`, pass it as `use:`.
+> A form that lets the MCP server build the source itself gives you a source with
+> **no renderers**, and a JSX-bodied prompt registered that way fails to render.
+> Build the source, wire `reactPromptRenderer`, and pass the live instance.
 
 `withPrompts` also projects each prompt as a read-only `prompt://<name>`
 resource by default. Content is served honestly: a string `template` becomes
@@ -262,8 +261,8 @@ faked into a rendered result on that surface. Pass
 | `ReactPromptRendererOptions` (type)   | `compile?: CompileTemplateOptions` · `handles?: (content) => boolean` |
 | `WithReactPromptsOptions` (type)      | `WithPromptsOptions` minus `renderers`, plus `extraRenderers`         |
 
-`withReactPrompts` forwards every other `withPrompts` slot: `initial` ·
-`loaders` · `use` · `exposeAsResources`.
+`withReactPrompts` forwards every other `withPrompts` option: `store` ·
+`hydrate` · `exposeAsResources` · `hooks` · `guards`.
 
 There are no components or hooks in this package. The JSX vocabulary is
 [@agentick/compiler-react](../compiler-react)'s; this package only teaches
@@ -273,7 +272,7 @@ Prompts how to compile it.
 
 **The catalog and its verbs.** [@agentick/prompts](../prompts) owns
 `session.prompts` — `register` / `update` / `remove` / `list` / `get` /
-`resolve` / `require` / `invoke` / `render` / `reload` — plus loaders and the
+`resolve` / `require` / `invoke` / `render` / `reload` — plus the sources and the
 `prompt://` projection. Everything here is content-shape plumbing beneath it.
 
 **The JSX vocabulary.** [@agentick/compiler-react](../compiler-react) owns
@@ -285,13 +284,13 @@ form for anything static.
 
 ## Roadmap & known gaps
 
-- **No top-level `createApp({ prompts })` slot.** Prompts install through
-  `extensions: []`; a first-class namespace slot with a `definePrompts(...)`
-  definition is not registered yet, so there is no `hooks:` / `guards:` /
-  `hydrate` bag for prompts either.
-- **No filesystem loaders for React prompts.** The core ships `fromArray` /
-  `fromModule` / `fromStaticUrl`; React-specific `fromReactModule` /
-  `fromReactDirectory` for a directory of `.tsx` prompt files are not built.
+- **`createApp({ prompts })` isn't wired yet.** The slot is declared and typed,
+  and `definePrompts(...)` gives you the `store` / `hydrate` / `hooks` / `guards`
+  bag today; installing still goes through `extensions: []`.
+- **No filesystem source for React prompts.** The core ships `hydrateFrom` /
+  `hydrateFromModule` / `hydrateFromStaticUrl`; a React-specific directory source
+  over `.tsx` prompt files is not built, because it needs a bundler or transform
+  pipeline.
 - **Structure inside a section flattens to text.** A `<Section>`'s children
   become the buffered system message's content blocks, and the block-level
   wrappers (`<H2>`, `<Paragraph>`) currently render intrinsics no contributor

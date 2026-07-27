@@ -781,6 +781,22 @@ export class PromptsBackendError extends PromptsError {
 }
 registerAgentickError("PromptsBackendError", PromptsBackendError);
 
+/**
+ * The prompts GENESIS seam threw (ADR 93 landmine 2). A hydrator failing is not
+ * recoverable at session-open: a half-genesis catalog would leave the session
+ * rendering against a partial prompt library, so session CREATION fails with
+ * this instead. Carries the hydrator's own error as `cause`.
+ */
+export class PromptsHydrateFailed extends PromptsError {
+  readonly _tag = "PromptsHydrateFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`prompts hydrate (genesis) failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("PromptsHydrateFailed", PromptsHydrateFailed);
+
 export type PromptsErrorChannel =
   | PromptNotFound
   | PromptAlreadyExists
@@ -788,7 +804,8 @@ export type PromptsErrorChannel =
   | PromptArgumentInvalid
   | PromptMissingContent
   | PromptRenderFailed
-  | PromptsBackendError;
+  | PromptsBackendError
+  | PromptsHydrateFailed;
 
 // ============================================================================
 // ResourcesError — resource registry (URI → resolver) failures (ADR 62)
@@ -948,12 +965,30 @@ export class SkillRunnerUnbound extends SkillsError {
 }
 registerAgentickError("SkillRunnerUnbound", SkillRunnerUnbound);
 
+/**
+ * The skills GENESIS seam threw (ADR 93 landmine 2). A hydrator failing is not
+ * recoverable at session-open: a half-genesis library would leave the model
+ * discovering a partial skill set, so session CREATION fails with this instead.
+ * Carries the hydrator's own error as `cause` — an unreachable tier catalog, an
+ * unreadable skills directory, a rejected manifest fetch.
+ */
+export class SkillsHydrateFailed extends SkillsError {
+  readonly _tag = "SkillsHydrateFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`skills hydrate (genesis) failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("SkillsHydrateFailed", SkillsHydrateFailed);
+
 export type SkillsErrorChannel =
   | SkillNotFound
   | SkillAlreadyExists
   | SkillsBackendError
   | SkillIsolationUnavailable
-  | SkillRunnerUnbound;
+  | SkillRunnerUnbound
+  | SkillsHydrateFailed;
 
 // ============================================================================
 // KnobsError — knob registry + dispatch failures

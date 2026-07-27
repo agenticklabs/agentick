@@ -305,7 +305,7 @@ export interface PromptsHarnessProtocol {
    * Export every prompt for hibernate / cross-session transfer.
    * `template` and `render` fields are NOT serializable — the
    * snapshot carries declarations sans-content. Restoring requires
-   * re-registering the content via `withPrompts({ initial })` or
+   * re-registering the content via a genesis hydrator (`withPrompts({ hydrate })`) or
    * direct `register` calls; the harness preserves names + arguments
    * + description + metadata so the agent's "available prompts" list
    * survives.

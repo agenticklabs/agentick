@@ -1,6 +1,6 @@
 /**
  * Skill reference wiring — the UNIVERSAL seam between the Node loader
- * (`agentSkillsDirectory`, which discovers `<skill>/references/*` files) and
+ * (`hydrateFromDirectory`, which discovers `<skill>/references/*` files) and
  * the resources harness (which serves them to the model via `resource_read`).
  *
  * This module is **universal** (no `node:*` imports) so `extension.ts` — the
@@ -55,8 +55,8 @@ export interface SkillReferenceWiring {
 
 /**
  * Read the transient reference wiring off a loaded skill record. Returns `[]`
- * when the record carries none (every non-`agentSkillsDirectory` source, and
- * `agentSkillsDirectory` skills that have no `references/` directory).
+ * when the record carries none (every source other than `hydrateFromDirectory`, and
+ * `hydrateFromDirectory` skills that have no `references/` directory).
  * Universal — no `node:*` dependency.
  */
 export function readSkillReferenceWiring(

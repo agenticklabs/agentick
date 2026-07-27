@@ -21,6 +21,33 @@ import "./augment.js";
 export { PromptsHarness, type PromptsHarnessOptions } from "./harness.js";
 export type { PromptsHandle } from "./handle.js";
 export { withPrompts, type WithPromptsOptions } from "./extension.js";
+// ADR 93 — the namespace definition: the store (the asymmetry with skills is
+// over), the genesis seam, this namespace's shaping seams, and the `hooks:` /
+// `guards:` bags. One object for both `createApp({ prompts })` and
+// `withPrompts(...)`.
+export {
+  definePrompts,
+  isPromptsDefinition,
+  type BrandedPromptsDefinition,
+  type PromptSeed,
+  type PromptsConfig,
+  type PromptsDefinition,
+  type PromptsHydrateCtx,
+  type PromptsHydrator,
+  type PromptsStore,
+} from "./definition.js";
+// The named hydrators — the genesis-seam library, and the ONE source vocabulary.
+// Narrower than skills' by design: only a module import carries a prompt's
+// `render` function across a load boundary.
+export {
+  composeHydrators,
+  hydrateFrom,
+  hydrateFromModule,
+  hydrateFromStaticUrl,
+  hydrateFromStore,
+  type HydrateFromModuleOptions,
+  type HydrateFromStaticUrlOptions,
+} from "./hydrators.js";
 // `prompt://<name>` projection (three-audiences-plan §0) — the uniform-addressing
 // door onto the prompt catalog. Wired by `withPrompts`. Content served honestly:
 // string template as text, else a declaration document (never a serialized fn).

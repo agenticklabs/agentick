@@ -1,131 +1,87 @@
 /**
- * `withPrompts()` — `SessionExtension` factory.
+ * `withPrompts()` — the DYNAMIC install form for the PromptsHarness.
  *
- * Constructs a {@link PromptsHarness} per-session at session install
- * time, wired to the session's substrate. Adopters pass renderers for
- * framework-specific content (e.g., `reactPromptRenderer` from
- * `@agentick/prompts-react`); `string` and `MessageEntry[]`
- * content shapes work natively in core without any renderer.
+ * Two ways to configure a session's prompts, one type:
  *
- * Per ADR 42 §"slot trichotomy" the slot accepts three shapes:
+ *   - `createApp({ prompts: definePrompts({...}) })` — the top-level SLOT
+ *     (ADR 93), lit by this package's `augment.ts`. The normal path.
+ *   - `extensions: [withPrompts({...})]` — the fully-dynamic escape hatch
+ *     (runtime-built arrays, conditional composition). Installs the same
+ *     harness; an explicit entry here OVERRIDES the slot, because extensions run
+ *     after the slot-minted install and namespace registration is
+ *     last-writer-wins.
  *
- *   1. `readonly PromptsRegisterInput[]` — array shorthand. Same as
- *      `{ initial: [...] }`.
- *   2. `Prompts` (= `PromptsHarnessProtocol`) — instance shorthand.
- *      The extension uses the adopter-supplied harness as-is across
- *      every session; adopter owns the lifecycle.
- *   3. {@link WithPromptsOptions} — config object: `initial` /
- *      `loaders` / `renderers` (built-in path) OR `use` (adopter-
- *      supplied instance).
+ * Both take the SAME {@link PromptsDefinition} — "the definition IS the options"
+ * (ADR 93 §Composition ruling). A live `Prompts` instance is also accepted: the
+ * BYO / single-session escape hatch, whose lifecycle the adopter owns (so it is
+ * NOT closed on session close, and genesis is NOT run).
  *
- * For single-framework adopters, prefer the framework binding's
- * convenience extension (e.g., `withReactPrompts`) which pre-bakes
- * the renderer.
+ * For single-framework adopters, prefer the framework binding's convenience
+ * extension (`withReactPrompts`), which pre-bakes the renderer.
  *
- * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
- * @see docs/proposals/v2/blueprint/42-harness-slot-trichotomy.md
+ * @see docs/proposals/v2/blueprint/93-namespace-definitions.md
+ * @see ./augment.ts — the top-level slot registration
  */
 
-import {
-  isPromptsInstance,
-  type Prompts,
-  type PromptsRegisterInput,
-  type SessionExtension,
-  type SessionInstaller,
-} from "@agentick/spec";
+import { isPromptsInstance, type SessionExtension, type SessionInstaller } from "@agentick/spec";
+import { inheritedFrom } from "@agentick/runtime";
 
 import { PromptsHarness } from "./harness.js";
-import type { PromptLoader } from "./loaders.js";
+import type { PromptsConfig, PromptsDefinition } from "./definition.js";
 import { wirePromptProjection } from "./projection.js";
-import type { PromptRenderer } from "./renderer.js";
-
-export interface WithPromptsOptions {
-  /**
-   * Initial prompts seeded at session construction. Each entry is a
-   * full `PromptDeclaration` wrapped in the register input. Useful for
-   * shipping bundled prompts or restore-from-snapshot at startup.
-   */
-  readonly initial?: readonly PromptsRegisterInput[];
-  /**
-   * Prompt loaders evaluated at install time. All loaders run
-   * concurrently; their outputs concatenate (input order) and are
-   * registered after `initial`. Use `@agentick/prompts/loaders`
-   * for `fromArray` / `fromModule` / `fromStaticUrl`; framework
-   * bindings ship their own (`@agentick/prompts-react/loaders`).
-   */
-  readonly loaders?: readonly PromptLoader[];
-  /**
-   * Renderers handling non-native content shapes. First-match-wins on
-   * `renderer.handles(content)`. Framework bindings ship their own.
-   */
-  readonly renderers?: readonly PromptRenderer[];
-  /**
-   * Adopter-supplied `Prompts` instance. The extension uses this
-   * as-is across every session — NO per-session construction, NO
-   * close on session teardown. Use this when one source-of-truth
-   * should back many sessions (a shared on-disk DB, a remote
-   * registry, a cluster-wide replica).
-   *
-   * Mutually exclusive with `initial` / `loaders` / `renderers` — if
-   * you bring your own instance, you also own seeding, reload, and
-   * renderer configuration. The extension still publishes the
-   * instance under the session's `prompts` namespace so tools,
-   * getters, and bridges resolve to it.
-   */
-  readonly use?: Prompts;
-  /**
-   * Project each registered prompt as a read-only `prompt://<name>` resource on
-   * the session's resources harness. Defaults to `true` — the prompt catalog
-   * becomes browsable through the standard resources surface (and the MCP
-   * projection) with zero bespoke wire work. The projection is LIVE (prompts
-   * registered / removed after install project / unregister via the harness
-   * change-subscription). Content is served HONESTLY: a static string `template`
-   * is served as `text/markdown`; a function `render` (or a non-string
-   * `template`) yields a `{ name, description, arguments }` declaration document
-   * (`application/json`) — a function is never serialized, a render result never
-   * faked. Set `false` to keep prompts off the resources surface.
-   */
-  readonly exposeAsResources?: boolean;
-}
 
 /**
- * Top-level slot shape accepted by `withPrompts`. Per ADR 42 — array,
- * instance, OR config object. See file-level comment for semantics.
+ * Options `withPrompts` accepts. An alias of {@link PromptsDefinition} — kept as a
+ * name because `withX` options types are part of the adopter vocabulary, but
+ * structurally identical: there is one shape, not a parallel one.
+ *
+ * GONE (ADR 93): `initial` and `loaders`, the parallel source-config vocabulary.
+ * Sources are named hydrators now — `withPrompts({ initial: prompts })` becomes
+ * `withPrompts({ hydrate: hydrateFrom(prompts) })`, and
+ * `withPrompts({ loaders: [a, b] })` becomes
+ * `withPrompts({ hydrate: composeHydrators(a, b) })`. Also gone: `use:` — the
+ * live-instance escape hatch is the DICHOTOMY's second arm
+ * (`withPrompts(myHarness)`), not a nested slot.
+ *
+ * NEW (ADR 93 rendered-moot #4): `store`. The withPrompts-lacks-a-store asymmetry
+ * against `withSkills` is over.
  */
-export type WithPromptsSlot = readonly PromptsRegisterInput[] | Prompts | WithPromptsOptions;
+export type WithPromptsOptions = PromptsDefinition;
 
 // TODO(tools-sweep / three-audiences-plan §D): a `src/tools.ts` shipping
-// model-facing `prompt_*` tools (e.g. `prompt_list` / `prompt_get`) would
-// slot in here behind a `registerModelTools` option, same shape as
+// model-facing `prompt_*` tools (e.g. `prompt_list` / `prompt_get`) would slot in
+// here behind a `registerModelTools` option, same shape as
 // `resources/src/tools.ts` + `skills/src/tools.ts`. DEFERRED: prompts are
-// USER-controlled (invoked by the human, not model-discovered), so a
-// model-facing surface needs its audience story told first — the
-// convention does not launch it as filler. When added: reach the harness
+// USER-controlled (invoked by the human, not model-discovered), so a model-facing
+// surface needs its audience story told first. When added: reach the harness
 // through a `ctx.prompts` slot (NOT `ctx.session`) + augment
 // `ToolHandlerCtxExtensions`.
-export function withPrompts(slot: WithPromptsSlot = {}): SessionExtension {
-  const options = resolveSlot(slot);
+export function withPrompts(config: PromptsConfig = {}): SessionExtension {
   return {
     name: "@agentick/prompts",
     target: "session",
     install: async (installer: SessionInstaller) => {
-      // ──────── Form B (instance) — adopter owns lifecycle ────────
-      if (options.use !== undefined) {
-        installer.registerNamespace("prompts", options.use);
-        // `prompt://<name>` projection (default-on). Reads the live instance;
-        // our resource registrations + subscription unwind on close WITHOUT
-        // closing the adopter-owned harness.
-        if (options.exposeAsResources !== false) {
-          wirePromptProjection(installer, options.use);
-        }
-        // Adopter brought the instance — adopter closes it.
+      // ── Live-instance arm: register and get out of the way. The adopter owns
+      // construction, genesis, and teardown.
+      if (isPromptsInstance(config)) {
+        installer.registerNamespace("prompts", config);
+        // `prompt://<name>` projection (default-on). Reads the live instance; our
+        // resource registrations + subscription unwind on close WITHOUT closing
+        // the adopter-owned harness.
+        //
+        // TODO(D-phase): the live-instance arm carries no `exposeAsResources`
+        // toggle, because the dichotomy's second arm is an INSTANCE, not a config
+        // bag — and nesting install options beside it is the config-wrapper
+        // ADR 93 kills. The door is therefore default-on for a BYO harness.
+        wirePromptProjection(installer, config);
         return;
       }
 
-      // ──────── Forms A / C (built-in path) ────────
-      // Read the session's timeline harness if available — `invoke()`
-      // uses it to queue messages into the durable timeline. When
-      // absent (e.g., test setup), `invoke()` skips queueing.
+      // ── Definition arm: construct THIS session's harness from the plan.
+      //
+      // Read the session's timeline harness if available — `invoke()` uses it to
+      // append rendered messages to the durable timeline. When absent (e.g. a test
+      // setup), `invoke()` renders and returns without appending.
       const timeline = (installer.getNamespace?.("timeline") ?? undefined) as
         | import("@agentick/spec").TimelineHarnessProtocol
         | undefined;
@@ -136,38 +92,28 @@ export function withPrompts(slot: WithPromptsSlot = {}): SessionExtension {
         installer.substrate.bus,
         installer.substrate.inbox,
         {
-          ...(options.renderers ? { renderers: options.renderers } : {}),
+          ...config,
           ...(timeline ? { timeline } : {}),
+          // ADR 93 landmine 11 — the cascade must be TOTAL. An extension-installed
+          // namespace inherits the app/session interceptor cascade through the
+          // installer's handle, exactly like a session-constructed bridge does;
+          // without this an app `guard`/`hook` silently skips it.
+          ...inheritedFrom(installer),
         },
       );
       await harness.ready;
 
-      // Retain loaders for post-startup reload() + lookup-on-miss in
-      // invoke() / get().
-      if (options.loaders && options.loaders.length > 0) {
-        harness.setLoaders(options.loaders);
-      }
-
-      if (options.initial && options.initial.length > 0) {
-        for (const decl of options.initial) {
-          await harness.register(decl);
-        }
-      }
-
-      if (options.loaders && options.loaders.length > 0) {
-        const batches = await Promise.all(options.loaders.map((l) => l.load()));
-        for (const batch of batches) {
-          for (const decl of batch) {
-            await harness.register(decl);
-          }
-        }
-      }
+      // GENESIS (ADR 93) — before the harness is visible to any renderer. A no-op
+      // when the definition names no hydrator, so the zero-config path stays
+      // zero-cost. A throw fails the install, which fails session creation with
+      // `PromptsHydrateFailed` — no half-genesis catalog.
+      await harness.hydrate();
 
       // `prompt://<name>` projection (default-on) — the prompt catalog becomes
       // addressable through the standard resources surface. LIVE via the harness
       // change-subscription; content served honestly (string template as text,
       // else a declaration document — never a serialized function).
-      if (options.exposeAsResources !== false) {
+      if (config.exposeAsResources !== false) {
         wirePromptProjection(installer, harness);
       }
 
@@ -175,30 +121,4 @@ export function withPrompts(slot: WithPromptsSlot = {}): SessionExtension {
       installer.onClose(() => harness.close());
     },
   };
-}
-
-/**
- * Normalize the trichotomic slot into a {@link WithPromptsOptions}
- * shape the install path consumes uniformly. Exported for tests +
- * adopters who want to inspect the resolved shape; the slot itself
- * is the public surface.
- */
-export function resolveSlot(slot: WithPromptsSlot): WithPromptsOptions {
-  if (Array.isArray(slot)) {
-    return { initial: slot };
-  }
-  if (isPromptsInstance(slot)) {
-    return { use: slot };
-  }
-  const cfg = slot as WithPromptsOptions;
-  if (
-    cfg.use !== undefined &&
-    (cfg.initial !== undefined || cfg.loaders !== undefined || cfg.renderers !== undefined)
-  ) {
-    throw new Error(
-      "withPrompts: `use:` is mutually exclusive with `initial` / `loaders` / `renderers` — " +
-        "adopter-supplied instances own their seeding, reload, and renderer configuration.",
-    );
-  }
-  return cfg;
 }

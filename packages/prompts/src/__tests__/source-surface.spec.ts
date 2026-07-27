@@ -1,11 +1,13 @@
 /**
- * Prompts harness — dynamic loader surface.
+ * Prompts harness — the dynamic SOURCE surface, now driven by the ONE genesis seam
+ * (ADR 93 rendered-moot #3: sources are hydrators).
  *
  * Pins:
  *  - `reload()` adds + updates + (opt-in) removes
- *  - `resolve(name)` returns cached or lazy-loads
+ *  - `resolve(name)` returns the cached declaration or re-runs the hydrator
  *  - `invoke({ name })` triggers lookup-on-miss before throwing PromptNotFound
- *  - `get({ name })` same lookup-on-miss path
+ *  - `render({ name })` takes the same lookup-on-miss path
+ *  - a source-less harness never re-runs anything
  */
 
 import { describe, expect, it } from "vitest";
@@ -14,7 +16,7 @@ import type { PromptsRegisterInput } from "@agentick/spec";
 import { PromptNotFound } from "@agentick/spec";
 
 import { PromptsHarness } from "../harness.js";
-import { fromArray } from "../loaders.js";
+import { hydrateFrom } from "../hydrators.js";
 
 async function makeHarness(): Promise<PromptsHarness> {
   const harness = new PromptsHarness(
@@ -29,10 +31,10 @@ async function makeHarness(): Promise<PromptsHarness> {
 }
 
 describe("PromptsHarness.reload", () => {
-  it("adds new declarations from loaders", async () => {
+  it("adds new declarations from the source hydrator", async () => {
     const h = await makeHarness();
     const records: PromptsRegisterInput[] = [];
-    h.setLoaders([fromArray(records)]);
+    h.setHydrator(hydrateFrom(records));
 
     records.push({ declaration: { name: "first", description: "f", template: "t" } });
     const summary = await h.reload();
@@ -45,7 +47,7 @@ describe("PromptsHarness.reload", () => {
     const records: PromptsRegisterInput[] = [
       { declaration: { name: "x", description: "old", template: "t" } },
     ];
-    h.setLoaders([fromArray(records)]);
+    h.setHydrator(hydrateFrom(records));
 
     await h.reload();
     records.length = 0;
@@ -65,7 +67,7 @@ describe("PromptsHarness.reload", () => {
       { declaration: { name: "alpha", description: "a", template: "a" } },
       { declaration: { name: "beta", description: "b", template: "b" } },
     ];
-    h.setLoaders([fromArray(records)]);
+    h.setHydrator(hydrateFrom(records));
 
     await h.reload();
     records.length = 0;
@@ -80,7 +82,7 @@ describe("PromptsHarness.reload", () => {
 describe("PromptsHarness.resolve", () => {
   it("lazy-loads from configured loaders on cache miss", async () => {
     const h = await makeHarness();
-    h.setLoaders([fromArray([{ declaration: { name: "p", description: "p", template: "hi" } }])]);
+    h.setHydrator(hydrateFrom([{ declaration: { name: "p", description: "p", template: "hi" } }]));
 
     expect(h.has("p")).toBe(false);
     const result = await h.resolve("p");
@@ -90,9 +92,9 @@ describe("PromptsHarness.resolve", () => {
 
   it("returns null when no loader has the name", async () => {
     const h = await makeHarness();
-    h.setLoaders([
-      fromArray([{ declaration: { name: "other", description: "o", template: "x" } }]),
-    ]);
+    h.setHydrator(
+      hydrateFrom([{ declaration: { name: "other", description: "o", template: "x" } }]),
+    );
     const result = await h.resolve("missing");
     expect(result).toBeNull();
   });
@@ -101,8 +103,8 @@ describe("PromptsHarness.resolve", () => {
 describe("PromptsHarness lookup-on-miss in invoke / get", () => {
   it("invoke() transparently resolves an unregistered name", async () => {
     const h = await makeHarness();
-    h.setLoaders([
-      fromArray([
+    h.setHydrator(
+      hydrateFrom([
         {
           declaration: {
             name: "summarize",
@@ -111,7 +113,7 @@ describe("PromptsHarness lookup-on-miss in invoke / get", () => {
           },
         },
       ]),
-    ]);
+    );
 
     // No initial register — invoke should still succeed.
     const result = await h.invoke({ name: "summarize" });
@@ -121,47 +123,43 @@ describe("PromptsHarness lookup-on-miss in invoke / get", () => {
 
   it("get() transparently resolves an unregistered name", async () => {
     const h = await makeHarness();
-    h.setLoaders([
-      fromArray([{ declaration: { name: "greet", description: "g", template: "Hello." } }]),
-    ]);
+    h.setHydrator(
+      hydrateFrom([{ declaration: { name: "greet", description: "g", template: "Hello." } }]),
+    );
 
     const result = await h.render({ name: "greet" });
     expect(result.description).toBe("g");
   });
 
-  it("invoke() still throws PromptNotFound when no loader has the name", async () => {
+  it("invoke() still throws PromptNotFound when the source lacks the name", async () => {
     const h = await makeHarness();
-    h.setLoaders([
-      fromArray([{ declaration: { name: "alpha", description: "a", template: "a" } }]),
-    ]);
+    h.setHydrator(
+      hydrateFrom([{ declaration: { name: "alpha", description: "a", template: "a" } }]),
+    );
 
     await expect(h.invoke({ name: "unknown" })).rejects.toBeInstanceOf(PromptNotFound);
   });
 
-  it("invoke() bypasses loader fallback when name is already registered", async () => {
+  it("invoke() skips the source re-run when the name is already registered", async () => {
     const h = await makeHarness();
     // Pre-register
     await h.register({
       declaration: { name: "cached", description: "c", template: "cached body" },
     });
-    let loaderCalled = false;
-    h.setLoaders([
-      {
-        load: async () => {
-          loaderCalled = true;
-          return [];
-        },
-      },
-    ]);
+    let hydratorCalled = false;
+    h.setHydrator(async () => {
+      hydratorCalled = true;
+      return [];
+    });
     await h.invoke({ name: "cached" });
-    expect(loaderCalled).toBe(false);
+    expect(hydratorCalled).toBe(false);
   });
 });
 
 describe("PromptsHarness.require", () => {
   it("returns the declaration on hit (no render)", async () => {
     const h = await makeHarness();
-    h.setLoaders([fromArray([{ declaration: { name: "p", description: "p", template: "hi" } }])]);
+    h.setHydrator(hydrateFrom([{ declaration: { name: "p", description: "p", template: "hi" } }]));
     const decl = await h.require("p");
     expect(decl.name).toBe("p");
     expect(decl.description).toBe("p");
@@ -169,27 +167,56 @@ describe("PromptsHarness.require", () => {
 
   it("throws PromptNotFound when no source has the name", async () => {
     const h = await makeHarness();
-    h.setLoaders([
-      fromArray([{ declaration: { name: "other", description: "o", template: "x" } }]),
-    ]);
+    h.setHydrator(
+      hydrateFrom([{ declaration: { name: "other", description: "o", template: "x" } }]),
+    );
     await expect(h.require("missing")).rejects.toBeInstanceOf(PromptNotFound);
   });
 
-  it("returns from cache without consulting loaders when already registered", async () => {
+  it("returns from cache without re-running the hydrator when already registered", async () => {
     const h = await makeHarness();
     await h.register({
       declaration: { name: "cached", description: "c", template: "x" },
     });
-    let loaderCalled = false;
-    h.setLoaders([
-      {
-        load: async () => {
-          loaderCalled = true;
-          return [];
-        },
-      },
-    ]);
+    let hydratorCalled = false;
+    h.setHydrator(async () => {
+      hydratorCalled = true;
+      return [];
+    });
     await h.require("cached");
-    expect(loaderCalled).toBe(false);
+    expect(hydratorCalled).toBe(false);
+  });
+});
+
+describe("setHydrator — detaching the source", () => {
+  it("detaches the source when handed `undefined`", async () => {
+    const h = await makeHarness();
+    h.setHydrator(
+      hydrateFrom([{ declaration: { name: "sourced", description: "s", template: "s" } }]),
+    );
+    expect((await h.reload()).added).toEqual(["sourced"]);
+
+    h.setHydrator(undefined);
+    expect(await h.resolve("also-sourced")).toBeNull();
+    expect(await h.reload({ pruneMissing: true })).toEqual({
+      added: [],
+      updated: [],
+      removed: [],
+    });
+    // Detaching the source does not un-register what it already produced.
+    expect(h.has("sourced")).toBe(true);
+  });
+});
+
+describe("a source-less harness", () => {
+  it("reloads to nothing touched and resolves to null", async () => {
+    const h = await makeHarness();
+    expect(await h.reload({ pruneMissing: true })).toEqual({
+      added: [],
+      updated: [],
+      removed: [],
+    });
+    expect(await h.resolve("anything")).toBeNull();
+    await expect(h.invoke({ name: "anything" })).rejects.toBeInstanceOf(PromptNotFound);
   });
 });

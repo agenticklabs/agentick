@@ -1,25 +1,36 @@
 /**
- * `@agentick/skills/loaders/node` — Node filesystem-backed
- * `SkillLoader` factories.
+ * `@agentick/skills/hydrators/node` — filesystem sources for the skills genesis
+ * seam (ADR 93 D3).
  *
- *  - `fromFile(path, opts?)` — one `.md` file with frontmatter
- *  - `fromDirectory(path, opts?)` — recursive walk of `.md` files
+ *  - `hydrateFromDirectory({ root })` — the Agent Skills layout: each immediate
+ *    subdirectory holding a `SKILL.md` is one skill, and its `references/**`
+ *    files ride along as resources. The flagship source, and what the file
+ *    grammar reads.
+ *  - `hydrateFromMarkdownFiles({ path })` — a flat recursive walk where each
+ *    matching `.md` file is one skill.
+ *  - `hydrateFromFile({ path })` — one `.md` file.
  *
- * Frontmatter is parsed by a deliberately-minimal `key: value` parser
- * (one entry per line, optional quoted values, no nested structures).
- * This covers the Claude-Skills default shape (`name`, `description`,
- * optional `tags: [a, b, c]`). Adopters with TOML / nested YAML pass a
- * custom `parseFrontmatter` callback — for full YAML, wire the `yaml`
- * package yourself.
+ * A separate subpath because `node:fs` is Node-only; the universal hydrators
+ * (`hydrateFrom`, `hydrateFromUrl`, `hydrateFromStore`, `composeHydrators`) ship
+ * from the package root.
+ *
+ * Frontmatter is parsed by a deliberately-minimal `key: value` parser (one entry
+ * per line, optional quoted values, no nested structures). This covers the Agent
+ * Skills default shape (`name`, `description`, optional `tags: [a, b, c]`,
+ * `allowed-tools`). Adopters with TOML / nested YAML pass a custom
+ * `parseFrontmatter` callback — for full YAML, wire the `yaml` package yourself.
  *
  * Body of the file becomes `Skill.content` verbatim.
+ *
+ * @see ./hydrators.ts — the universal named hydrators
+ * @verifiedBy packages/skills/src/__tests__/hydrators-node.spec.ts
  */
 
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, relative, sep } from "node:path";
 import process from "node:process";
 
-import type { ResourceContents, SkillsRegisterInput } from "@agentick/spec";
+import type { ResourceContents } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 import { extractFrontmatter, mapLoader } from "@agentick/utils/loaders";
 import {
@@ -28,7 +39,7 @@ import {
   sourceFromFile,
 } from "@agentick/utils/loaders/node";
 
-import type { SkillLoader } from "./loaders.js";
+import type { SkillSeed, SkillsHydrator, SkillsStore } from "./definition.js";
 import {
   SKILL_REFERENCE_WIRING,
   type SkillReference,
@@ -42,14 +53,14 @@ import {
  */
 export type FrontmatterRecord = Record<string, unknown>;
 
-export interface FromFileOptions {
+export interface HydrateFromFileOptions {
   readonly path: string;
   readonly encoding?: BufferEncoding;
   /** Override the default frontmatter parser. */
   readonly parseFrontmatter?: (text: string) => FrontmatterRecord;
 }
 
-export interface FromDirectoryOptionsForSkills extends Omit<FromDirectoryOptions, "match"> {
+export interface HydrateFromMarkdownFilesOptions extends Omit<FromDirectoryOptions, "match"> {
   /**
    * RegExp / predicate for which files to load. Default `/\.md$/` —
    * adopters using `.skill.md` or `.mdx` extensions override.
@@ -60,11 +71,14 @@ export interface FromDirectoryOptionsForSkills extends Omit<FromDirectoryOptions
 }
 
 /**
- * Load a single skill file. The file MUST start with a `---`
- * frontmatter block carrying at minimum `name` and `description`.
- * Missing either → load error.
+ * Open on a single skill file. The file MUST start with a `---` frontmatter block
+ * carrying at minimum `name` and `description`; missing either rejects, so a
+ * malformed file FAILS session creation with `SkillsHydrateFailed` rather than
+ * silently opening an empty library.
  */
-export function fromFile(options: FromFileOptions): SkillLoader {
+export function hydrateFromFile<TStore extends SkillsStore = SkillsStore>(
+  options: HydrateFromFileOptions,
+): SkillsHydrator<TStore> {
   const inner = mapLoader(
     sourceFromFile({
       path: options.path,
@@ -72,26 +86,21 @@ export function fromFile(options: FromFileOptions): SkillLoader {
     }),
     (record) => fileRecordToSkill(record, options.parseFrontmatter ?? parseSimpleFrontmatter),
   );
-  return {
-    load: inner.load,
-    lookup: async (name) => {
-      try {
-        const all = await inner.load();
-        return all.find((s) => s.name === name) ?? null;
-      } catch {
-        // A bad file → lookup returns null rather than poisoning the chain.
-        return null;
-      }
-    },
-  };
+  return () => inner.load();
 }
 
 /**
- * Recursively load every matching file under `path`. Files without
- * frontmatter or missing required fields are skipped silently — pass
- * `parseFrontmatter` if you need stricter behavior.
+ * Open on every matching file under `path`, recursively — the FLAT layout, one
+ * `.md` file per skill.
+ *
+ * Files without frontmatter or missing required fields are skipped silently; pass
+ * `parseFrontmatter` if you need stricter behavior. For the Agent Skills layout
+ * (a directory per skill, `SKILL.md`, `references/`) use
+ * {@link hydrateFromDirectory} instead.
  */
-export function fromDirectory(options: FromDirectoryOptionsForSkills): SkillLoader {
+export function hydrateFromMarkdownFiles<TStore extends SkillsStore = SkillsStore>(
+  options: HydrateFromMarkdownFilesOptions,
+): SkillsHydrator<TStore> {
   const match = options.match ?? /\.md$/;
   const parser = options.parseFrontmatter ?? parseSimpleFrontmatter;
   const dirOpts: FromDirectoryOptions = {
@@ -109,20 +118,14 @@ export function fromDirectory(options: FromDirectoryOptionsForSkills): SkillLoad
       return null;
     }
   });
-  return {
-    load: inner.load,
-    lookup: async (name) => {
-      const all = await inner.load();
-      return all.find((s) => s.name === name) ?? null;
-    },
-  };
+  return () => inner.load();
 }
 
 // ---------------------------------------------------------------------
-// agentSkillsDirectory — Agent Skills (agentskills.io) layout preset
+// hydrateFromDirectory — the Agent Skills (agentskills.io) layout
 // ---------------------------------------------------------------------
 
-export interface AgentSkillsDirectoryOptions {
+export interface HydrateFromDirectoryOptions {
   /**
    * Root under which each IMMEDIATE subdirectory containing a `SKILL.md` is one
    * skill. Defaults to `<cwd>/.agents/skills/`. A MISSING root loads as empty —
@@ -135,13 +138,15 @@ export interface AgentSkillsDirectoryOptions {
 }
 
 /**
- * `SkillLoader` for the [Agent Skills](https://agentskills.io/specification)
- * directory layout: each immediate subdirectory of `root` that contains a
- * `SKILL.md` becomes ONE skill record. Non-`SKILL.md` files in a skill
- * directory are NOT skills — files under `references/` are surfaced as
- * resources instead (see `references.ts` + `withSkills`).
+ * Open on the [Agent Skills](https://agentskills.io/specification) directory
+ * layout: each immediate subdirectory of `root` that contains a `SKILL.md`
+ * becomes ONE skill record. Non-`SKILL.md` files in a skill directory are NOT
+ * skills — files under `references/` are surfaced as resources instead (see
+ * `references.ts` + `withSkills`).
  *
- * Frontmatter → `SkillsRegisterInput`:
+ * The flagship skills source, and the one the file grammar reads.
+ *
+ * Frontmatter → the seeded skill record:
  *  - `name` — defaults to the directory name when the frontmatter omits it (the
  *    Agent Skills convention).
  *  - `description` — REQUIRED; a skill directory with no description is skipped.
@@ -153,25 +158,27 @@ export interface AgentSkillsDirectoryOptions {
  * directories are rejected at load; the recursive `references/` walk applies
  * the same rejection (via {@link walkReferenceFiles}). An unreadable `SKILL.md`
  * or one whose frontmatter yields no description is SKIPPED — matching
- * `fromDirectory`'s skip semantics.
+ * `hydrateFromMarkdownFiles`' skip semantics.
  */
-export function agentSkillsDirectory(options: AgentSkillsDirectoryOptions = {}): SkillLoader {
+export function hydrateFromDirectory<TStore extends SkillsStore = SkillsStore>(
+  options: HydrateFromDirectoryOptions = {},
+): SkillsHydrator<TStore> {
   const root = options.root ?? join(process.cwd(), ".agents", "skills");
   const parser = options.parseFrontmatter ?? parseSimpleFrontmatter;
   const encoding = options.encoding ?? "utf-8";
 
-  const load = async (): Promise<readonly SkillsRegisterInput[]> => {
+  const load = async (): Promise<readonly SkillSeed[]> => {
     let entries;
     try {
       entries = await readdir(root, { withFileTypes: true });
     } catch (cause) {
       if (isENOENT(cause)) return []; // missing root → empty load
-      throw new Error(`agentSkillsDirectory: readdir failed on ${root}: ${String(cause)}`, {
+      throw new Error(`hydrateFromDirectory: readdir failed on ${root}: ${String(cause)}`, {
         cause,
       });
     }
 
-    const out: SkillsRegisterInput[] = [];
+    const out: SkillSeed[] = [];
     for (const entry of entries) {
       // Reject hidden + symlinked skill directories at load (Flue rule).
       if (entry.name.startsWith(".")) continue;
@@ -201,19 +208,13 @@ export function agentSkillsDirectory(options: AgentSkillsDirectoryOptions = {}):
     return out.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   };
 
-  return {
-    load,
-    lookup: async (name) => {
-      const all = await load();
-      return all.find((s) => s.name === name) ?? null;
-    },
-  };
+  return () => load();
 }
 
-// TODO(E3): `fromPackage("@acme/review-skills/review")` — resolve the npm
+// TODO(E3): `hydrateFromPackage("@acme/review-skills/review")` — resolve the npm
 // subpath via the host's module resolver (e.g. `import.meta.resolve` /
 // `createRequire(...).resolve`) to the on-disk skill directory, then delegate
-// to `agentSkillsDirectory({ root })`'s directory semantics. CAVEAT: the target
+// to `hydrateFromDirectory({ root })`'s directory semantics. CAVEAT: the target
 // package MUST export its `SKILL.md` / skill-directory subpaths in its
 // `exports` map — an unexported subpath is unresolvable, so `fromPackage` reads
 // only what the package author chose to publish. Distribution is npm's problem;
@@ -229,12 +230,12 @@ async function agentSkillRecord(
   raw: string,
   parser: (text: string) => FrontmatterRecord,
   encoding: BufferEncoding,
-): Promise<SkillsRegisterInput | null> {
+): Promise<SkillSeed | null> {
   const { frontmatter, body } = extractFrontmatter(raw);
   const meta = frontmatter != null ? parser(frontmatter) : {};
   const name = stringField(meta, "name") ?? dirName; // Agent Skills: default to dir name
   const description = stringField(meta, "description");
-  if (!description) return null; // no description → skip (matches fromDirectory)
+  if (!description) return null; // no description → skip (matches hydrateFromMarkdownFiles)
 
   const tags = arrayField(meta, "tags");
   const allowedTools = allowedToolsField(meta);
@@ -345,28 +346,28 @@ function isENOENT(cause: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------
-// Internal: frontmatter → SkillsRegisterInput
+// Internal: frontmatter → SkillSeed
 // ---------------------------------------------------------------------
 
 function fileRecordToSkill(
   record: { path: string; content: string },
   parser: (text: string) => FrontmatterRecord,
-): SkillsRegisterInput {
+): SkillSeed {
   const { frontmatter, body } = extractFrontmatter(record.content);
   if (frontmatter == null) {
-    throw new Error(`skills.fromFile: ${record.path} has no frontmatter block`);
+    throw new Error(`hydrateFromFile: ${record.path} has no frontmatter block`);
   }
   const meta = parser(frontmatter);
   const name = stringField(meta, "name");
   const description = stringField(meta, "description");
   if (!name || !description) {
     throw new Error(
-      `skills.fromFile: ${record.path} frontmatter missing required name/description`,
+      `hydrateFromFile: ${record.path} frontmatter missing required name/description`,
     );
   }
   const tags = arrayField(meta, "tags");
   const allowedTools = allowedToolsField(meta);
-  const out: SkillsRegisterInput = {
+  const out: SkillSeed = {
     name,
     description,
     content: body,

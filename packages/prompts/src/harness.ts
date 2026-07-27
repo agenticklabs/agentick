@@ -36,7 +36,13 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Unsubscribe } from "@agentick/runtime";
+import {
+  BaseHarness,
+  qualifyNamespaceGuards,
+  qualifyNamespaceHooks,
+  type BaseHarnessOptions,
+  type Unsubscribe,
+} from "@agentick/runtime";
 import type {
   CollectionMutation,
   EventBus,
@@ -60,7 +66,6 @@ import type {
   PromptsSnapshotEntry,
   PromptsUpdateInput,
   OperationCtx,
-  Store,
   StandardSchemaIssue,
   StandardSchemaV1,
   TimelineHarnessProtocol,
@@ -74,11 +79,18 @@ import {
   PromptNotFound,
   PromptRenderFailed,
   PromptsBackendError,
+  PromptsHydrateFailed,
 } from "@agentick/spec";
 import { View } from "@agentick/store";
 import { omitUndefined, ulid } from "@agentick/utils";
 
-import type { PromptLoader } from "./loaders.js";
+import type {
+  PromptSeed,
+  PromptsDefinition,
+  PromptsHydrateCtx,
+  PromptsHydrator,
+  PromptsStore,
+} from "./definition.js";
 import { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from "./renderer.js";
 import { InMemoryPromptStore } from "./store.js";
 
@@ -96,44 +108,41 @@ type PromptAugmentation = Pick<PromptDeclaration, "template" | "render">;
 const SURFACE = "prompts" as const;
 type PromptsSurface = typeof SURFACE;
 
-export interface PromptsHarnessOptions {
+// ADR 80/83 — type the prompts verbs on the command registry. This is what mints
+// `onBeforePromptsRegister` / `onAfterPromptsInvoke` (and the `guards:
+// { promptsInvoke }` key) on the app-level derived surfaces, and — via the
+// drop-layer projections — `NamespaceHooks<"prompts">` /
+// `NamespaceGuards<"prompts">` for the definition's own bags. Without these rows
+// both bags are the empty object and the sugar advertises nothing.
+declare module "@agentick/runtime" {
+  interface CommandRegistry {
+    "prompts:register": { input: PromptsRegisterInput; output: PromptDeclaration };
+    "prompts:update": { input: PromptsUpdateInput; output: PromptDeclaration };
+    "prompts:remove": { input: PromptsRemoveInput; output: void };
+    "prompts:invoke": { input: PromptsInvokeInput; output: PromptsGetResult };
+    "prompts:render": { input: PromptsGetInput; output: PromptsGetResult };
+    "prompts:get": { input: { readonly name: string }; output: PromptDeclaration | null };
+    "prompts:list": { input: undefined; output: readonly PromptDeclaration[] };
+  }
+}
+
+/**
+ * Construction options for {@link PromptsHarness} — the {@link PromptsDefinition}
+ * (store · genesis · shaping seams · `hooks:` / `guards:`) plus the
+ * {@link BaseHarnessOptions} the substrate needs (journaling policy, the
+ * interceptor-inheritance handle) and the host-injected `timeline`.
+ *
+ * There is ONE options shape: `withPrompts(...)`, `createApp({ prompts })`, and
+ * this constructor all take the same definition.
+ */
+export interface PromptsHarnessOptions extends BaseHarnessOptions, PromptsDefinition {
   /**
-   * Renderers for non-native content shapes (anything other than
-   * `string` and `MessageEntry[]`). Framework bindings (e.g.
-   * `@agentick/prompts-react`) ship their own. First-match-wins
-   * on `renderer.handles(content)`.
-   */
-  readonly renderers?: readonly PromptRenderer[];
-  /**
-   * Source of the session's `bridges.timeline` for `invoke()` queue
-   * injection. Injected at construction by the extension installer.
-   * When absent, `invoke()` skips queueing (renders + returns the
-   * messages exactly like `get()` does).
+   * Source of the session's `bridges.timeline` for `invoke()` append. Injected at
+   * construction by the extension installer, NOT part of the adopter-facing
+   * definition — when absent, `invoke()` renders and returns without appending
+   * (exactly what `render()` does).
    */
   readonly timeline?: TimelineHarnessProtocol;
-  /**
-   * Durable backing for the prompt RECORD slice (data-layer plan §6-C, Phase 5).
-   * Defaults to a fresh per-harness in-memory {@link InMemoryPromptStore}. The
-   * store holds ONLY the serializable {@link PromptDeclarationRecord} — the
-   * `template`/`render` augmentation stays in the harness's sidecar and never
-   * reaches the store. It is the durable truth; the synchronous
-   * {@link View} is its sync read cache (reads never touch the store).
-   * Injecting a durable adapter is how prompt declarations survive process
-   * restart; `hydrate()` loads them back into the view. Typed against the
-   * `Store` SEAM — a durable adapter need only implement `query`/`mutate`.
-   * The sidecar does NOT survive — the adopter re-registers `render`/`template`
-   * alongside restore (fns aren't serializable).
-   *
-   * A view (not async-through-the-store): prompts carries a SYNC
-   * `exportSnapshot()` (the generic `captureBridgeSnapshots` calls it un-awaited,
-   * SnapshotCapable) AND a sync `get`/`has`/`list` surface — both are
-   * load-bearing sync callers, so a synchronous materialized view is required.
-   */
-  readonly store?: Store<
-    PromptDeclarationRecord,
-    PromptStoreQuery,
-    CollectionMutation<PromptDeclarationRecord>
-  >;
 }
 
 export class PromptsHarness extends BaseHarness<PromptsSurface> implements PromptsHarnessProtocol {
@@ -175,10 +184,21 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   private readonly timeline?: TimelineHarnessProtocol;
 
   /**
-   * Loaders retained from `withPrompts({ loaders })`. Drive
-   * post-startup `reload()` + lookup-on-miss in `invoke()` / `get()`.
+   * The definition's own store — held so the genesis ctx can hand it to a
+   * hydrator as the typed `ctx.store` facet.
    */
-  private loaders: readonly PromptLoader[] = [];
+  private readonly store: PromptsStore;
+
+  /**
+   * The GENESIS seam (ADR 93), resolved at construction from the definition's
+   * `hydrate` slot. **No default** — a configured `store` does not imply a store
+   * read. `undefined` means the catalog opens empty.
+   *
+   * It is also THE source `reload()` and the `invoke()` / `render()`
+   * lookup-on-miss re-run — the source unification (ADR 93 rendered-moot #3)
+   * collapsed the old `loaders: []` array and `initial: []` bag into this seam.
+   */
+  private hydrator?: PromptsHydrator;
 
   /** Cached snapshot for `list()`. Invalidated on every mutation. */
   private listCache: readonly PromptDeclaration[] | null = null;
@@ -212,10 +232,20 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     inbox: MessageInbox,
     options: PromptsHarnessOptions = {},
   ) {
-    super(SURFACE, scopeId, journal, bus, inbox);
+    // Thread the substrate options through — journaling policy AND the
+    // interceptor-inheritance handle (ADR 93 landmine 11). Without the latter an
+    // extension-installed prompts harness is INVISIBLE to `app.guard()` /
+    // `createApp({ hooks, guards })`, which becomes a correctness bug the moment
+    // the definition advertises its own `hooks:` / `guards:` bags.
+    super(SURFACE, scopeId, journal, bus, inbox, options);
     this.renderers = options.renderers ?? [];
     this.timeline = options.timeline;
-    this.view = View.collection(options.store ?? new InMemoryPromptStore(), (r) => r.name);
+    this.store = options.store ?? new InMemoryPromptStore();
+    this.view = View.collection(this.store, (r) => r.name);
+    // Genesis (ADR 93): the definition's hydrator, resolved — not RUN — here.
+    // Definitions are inert until install; genesis runs at session-open via
+    // `hydrate()`. No default: a `store` alone loads nothing.
+    this.hydrator = options.hydrate as PromptsHydrator | undefined;
 
     // ─── Declared commands (ADR 51) — the single declaration site per
     // verb. Inbox message types, canonical op naming, and enumeration
@@ -296,6 +326,21 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
             .sort((a, b) => a.name.localeCompare(b.name)),
         ),
     });
+
+    // ─── The definition's `hooks:` / `guards:` bags (ADR 93) ───
+    //
+    // DROP-LAYER keys (`onBeforeInvoke`, `guards: { invoke }`) requalify onto the
+    // discriminated commands (`onBeforePromptsInvoke`, `PromptsInvoke`) and
+    // register on this harness's OWN chain — deliberately NARROWER than the
+    // `inheritedInterceptors` an app/session hands down. That is the cascade law:
+    // broader scope wraps narrower, so app before-hooks run first and app guards
+    // veto before a definition guard is consulted.
+    if (options.hooks !== undefined) {
+      this.hook(qualifyNamespaceHooks("prompts", options.hooks as Record<string, unknown>));
+    }
+    if (options.guards !== undefined) {
+      this.guard(qualifyNamespaceGuards("prompts", options.guards as Record<string, unknown>));
+    }
   }
 
   /**
@@ -318,31 +363,44 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * fallback in `invoke()` / `get()`. Called by `withPrompts` at
    * install time; adopters can also swap the loader set at runtime.
    */
-  setLoaders(loaders: readonly PromptLoader[]): void {
-    this.loaders = loaders;
+  setHydrator(hydrate: PromptsHydrator | undefined): void {
+    this.hydrator = hydrate;
   }
 
   // ─────────── Dynamic surface ───────────
 
   /**
-   * Re-run every configured loader, diff against current state, apply
-   * adds + updates (and removes when `pruneMissing: true`). Returns
-   * a summary of names touched.
+   * Re-run the source hydrator, diff against current state, and apply adds +
+   * updates (and removes when `pruneMissing: true`). Returns a summary of names
+   * touched.
    *
-   * **Caveat:** the diff only looks at registered prompts; loaded
-   * prompts that lack `template` and `render` are still passed through
-   * to `register` (the harness will reject at `register` time if the
-   * declaration is malformed).
+   * Unlike GENESIS, a reload goes through the OPS (`prompts:register` /
+   * `prompts:update` / `prompts:remove`), so the diff is journaled,
+   * guard-vetoable, and durable. The seed exemption is a session-open concession,
+   * not a licence for every later read of the source.
+   *
+   * A harness with NO hydrator reloads to nothing touched — including under
+   * `pruneMissing`, because the absence of a source is not a claim that the
+   * catalog should be empty.
+   *
+   * **Caveat:** the diff only looks at registered prompts; loaded prompts that
+   * lack `template` and `render` are still passed through to `register` (the
+   * harness rejects at `register` time if the declaration is malformed).
    */
   async reload(opts: { pruneMissing?: boolean } = {}): Promise<{
     readonly added: readonly string[];
     readonly updated: readonly string[];
     readonly removed: readonly string[];
   }> {
-    const batches = await Promise.all(this.loaders.map((l) => l.load()));
+    // NO SOURCE is not the same statement as AN EMPTY SOURCE. A detached (or
+    // never-attached) hydrator has nothing to say about what the catalog should
+    // hold, so a reload is a total no-op — in particular `pruneMissing` must not
+    // read the absence of a source as "the source has nothing" and wipe the
+    // catalog.
+    if (this.hydrator === undefined) return { added: [], updated: [], removed: [] };
     const fresh = new Map<string, PromptDeclaration>();
-    for (const batch of batches) {
-      for (const input of batch) fresh.set(input.declaration.name, input.declaration);
+    for (const input of await this.runHydrator()) {
+      fresh.set(input.declaration.name, input.declaration);
     }
     const added: string[] = [];
     const updated: string[] = [];
@@ -377,25 +435,25 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   }
 
   /**
-   * Lookup-on-miss internal helper used by `invoke()` / `get()` and
-   * by the public `resolve()`. Returns the registered prompt if
-   * present; otherwise asks each loader (via `lookup` or `load()` +
-   * filter). On hit, registers + returns the declaration. `null` if
-   * no loader has the name.
+   * Lookup-on-miss, used by `invoke()` / `render()` and available publicly.
+   * Returns the registered prompt if present; otherwise re-runs the source
+   * hydrator and registers the first record with that name. `null` when the
+   * source does not have it.
+   *
+   * The hydrator produces the WHOLE source set, so a miss costs a full source
+   * read. That is the honest price of one source seam, and it matches what the
+   * loader vocabulary actually did (every non-array source's `lookup` was already
+   * `load()` + find). For a catalog large enough to care, put it behind a `store`
+   * — the store's `query` IS the targeted read port.
    */
   async resolve(name: string): Promise<PromptDeclaration | null> {
     const existing = this.declarationOf(name);
     if (existing) return existing;
-    for (const loader of this.loaders) {
-      const found = loader.lookup
-        ? await loader.lookup(name)
-        : ((await loader.load()).find((p) => p.declaration.name === name) ?? null);
-      if (found) {
-        await this.register(found);
-        return this.declarationOf(name) ?? null;
-      }
-    }
-    return null;
+    if (this.hydrator === undefined) return null;
+    const found = (await this.runHydrator()).find((p) => p.declaration.name === name);
+    if (found === undefined) return null;
+    await this.register(found);
+    return this.declarationOf(name) ?? null;
   }
 
   /**
@@ -479,33 +537,98 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // re-registers it (invoke/render then throw `PromptMissingContent` until they do).
     // The `View` is agnostic to the sidecar; the clear is harness-owned.
     //
-    // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
-    // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
-    // store is the authority. Do NOT wire `hydrate()` into resume while this
-    // method still owns it.
+    // TODO(store-phase-4): `importSnapshot` is still the snapshot-based resume
+    // path for a session restored from an IMAGE. Genesis (`hydrate()`) is the
+    // store-authority path; the Phase-4 manifest sweep retires this one.
     this.listCache = null;
     this.view.replace(Object.values(snapshot), this.storeCtx());
     this.augmentations.clear();
   }
 
+  // ─────────── Genesis (ADR 93) ───────────
+
   /**
-   * Load the durable store into the sync view — the future manifest resume
-   * path (data-layer plan Phase 4). A MERGE (store records overlay the view),
-   * not a clear-first replace — a fresh session's store is empty ⇒ a no-op. The
-   * augmentation sidecar is NOT touched: records survive the store,
-   * `template`/`render` do not, so a hydrated prompt has record-only content
-   * until re-registered. Invalidates `list()`; the view pings each hydrated key.
+   * GENESIS (ADR 93) — run the definition's `hydrate(ctx)` and SEED the catalog
+   * with what it returns.
    *
-   * NOT wired into session resume in this run: `importSnapshot` remains the
-   * active resume path. `hydrate()` is the seam the Phase-4 manifest sweep flips
-   * to once the store is authority.
+   * Called once at session-open: after identity stamping, before first render,
+   * before any register. A no-op when the definition names no `hydrate` — prompts
+   * names no default hydrator, so a `store` alone opens empty.
+   *
+   * **The seed law.** The returned records are ADOPTED into the read view: no
+   * `prompts:register` op, no store write. The `{ template, render }` sidecar IS
+   * populated from the seed, because that is where a hydrator's function-carrying
+   * content has to land (the store slice cannot hold it) — a hydrator is
+   * in-process code, so its functions are as real as a register's.
+   *
+   * **Fork/spawn.** Genesis must not run for a child that inherits its parent's
+   * image; that decision belongs to the session, which simply does not call this.
+   *
+   * @throws {PromptsError._tag === "PromptsHydrateFailed"} the hydrator threw;
+   *   session creation fails rather than half-genesising the catalog.
    */
   async hydrate(): Promise<void> {
-    // The view merges the store projection into the cache and pings each loaded
-    // key. Invalidate `listCache` BEFORE the merge+ping so a subscriber re-reads
-    // the hydrated list. The sidecar is left untouched (parity).
+    if (this.hydrator === undefined) return;
+    const records = await this.runHydrator();
+    // Invalidate `listCache` BEFORE the seed+ping so a subscriber that reads
+    // during a ping sees the complete post-genesis list.
     this.listCache = null;
-    await this.view.hydrate(undefined, this.storeCtx());
+    for (const { declaration } of records) {
+      // Same record/sidecar SPLIT `applyRegister` performs — the serializable
+      // slice into the view, the `{ template, render }` code into the sidecar.
+      // Populate the sidecar BEFORE the seed's ping so a subscriber reading
+      // during the ping sees the combined declaration.
+      this.setAugmentation(declaration.name, declaration);
+      this.view.seedSync(
+        {
+          name: declaration.name,
+          description: declaration.description,
+          ...omitUndefined({
+            arguments: declaration.arguments,
+            metadata: declaration.metadata,
+          }),
+        },
+        { ping: true },
+      );
+    }
+  }
+
+  /**
+   * Run the source hydrator with the derived genesis ctx, wrapping any throw in
+   * the typed {@link PromptsHydrateFailed}. Shared by genesis, `reload()`, and
+   * `resolve()` — one source, one failure shape.
+   */
+  private async runHydrator(): Promise<readonly PromptSeed[]> {
+    const hydrate = this.hydrator;
+    if (hydrate === undefined) return [];
+    try {
+      return await hydrate(this.hydrateCtx());
+    } catch (cause) {
+      throw cause instanceof PromptsHydrateFailed ? cause : new PromptsHydrateFailed({ cause });
+    }
+  }
+
+  /**
+   * Derive the ctx handed to the genesis hydrator (ADR 91/93).
+   *
+   * Minted through `deriveOperationCtx` — the branded boundary constructor — so
+   * the hydrator sees the session's identity (`sessionId`, `principal`) and
+   * diagnostics (`log`/`trace`/`metrics`/`run`), plus two boundary facets composed
+   * INTO the same branded mint: the definition's `store` (the typed `ctx.store`
+   * facet) and the journal's READ slice (`journalReader`).
+   *
+   * The result is also a valid `StoreCtx`, so `hydrateFromStore` hands `ctx`
+   * straight to `store.query(undefined, ctx)` with no repacking.
+   */
+  private hydrateCtx(): PromptsHydrateCtx {
+    return this.deriveOperationCtx(
+      { sessionId: this.scopeId },
+      {
+        store: this.store,
+        journalReader: this.journal,
+        ...(this.principal !== undefined ? { principal: this.principal } : {}),
+      },
+    ) as PromptsHydrateCtx;
   }
 
   // ─────────── Inbox routing ───────────
@@ -619,11 +742,11 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       const ctx = yield* this.currentOperationCtx();
       return yield* Effect.tryPromise({
         try: async () => {
-          // Lookup-on-miss: if the name isn't yet registered, ask
-          // configured loaders. On hit, the prompt is registered (a
-          // nested `prompts:register` command) + invoke proceeds; on
-          // miss, `renderToMessages` throws `PromptNotFound`.
-          if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
+          // Lookup-on-miss: if the name isn't yet registered, re-run the source
+          // hydrator. On hit, the prompt is registered (a nested
+          // `prompts:register` command) + invoke proceeds; on miss,
+          // `renderToMessages` throws `PromptNotFound`.
+          if (!this.view.hasSync(input.name) && this.hydrator !== undefined) {
             await this.resolve(input.name);
           }
           const result = await this.renderToMessages(input.name, input.args, ctx);
@@ -661,8 +784,8 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       const ctx = yield* this.currentOperationCtx();
       return yield* Effect.tryPromise({
         try: async () => {
-          // Same lookup-on-miss path as `applyInvoke`.
-          if (!this.view.hasSync(input.name) && this.loaders.length > 0) {
+          // Same lookup-on-miss path as `applyInvoke` — one source seam.
+          if (!this.view.hasSync(input.name) && this.hydrator !== undefined) {
             await this.resolve(input.name);
           }
           return this.renderToMessages(input.name, input.args, ctx);
