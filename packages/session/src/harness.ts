@@ -722,6 +722,23 @@ export class SessionHarness<P = unknown>
    * scoped to the current execution: populated only while one runs, and
    * drained / flushed at every tick boundary + at settle.
    */
+  // TODO(client-queue-read): NO CLIENT READ SURFACE. This queue and the
+  // `onBusy: "queue"` deferral are both server-private, so a UI cannot show a
+  // user what their racing sends are waiting behind, or let them cancel one.
+  // The first real consumer hit it immediately: knowify's assistant had a
+  // "queued messages" bar over its own client-side queue, and porting to
+  // `onBusy` correctly DELETED that queue — which left the bar with nothing to
+  // read (nx-knowify k-assistant-v3, documented as a deliberate degrade rather
+  // than rebuilt client-side).
+  //
+  // The shape this wants is the one `timeline:history` established: a declared
+  // wire-exposed READ command (`session:queued`), grant-gated, bus-only
+  // journaling, plus `added`/`removed` notifications per the
+  // enumeration-is-foundational rule so a client can hold a live list rather
+  // than poll. A cancel verb pairs with it (`session:dequeue`). Deferred rather
+  // than guessed: whether the queue is per-execution (steer) or session-wide
+  // (onBusy) in the client's view is a product question, and the two queues
+  // above are different things.
   private _steerQueue: SendMessageInput[] = [];
   /**
    * FULL-quiesce signal (queue-item 4b — the "settled ≠ agent_end" fix).

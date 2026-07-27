@@ -647,6 +647,7 @@ const session = factory({
 - **Inbox dispatch is narrow.** A session handles escalation and task-wake messages. Every other message type rejects.
 - **The per-store cursor manifest is not built.** A `SessionRecord` has a slot reserved for per-store cursors, but nothing populates it, so a cross-store restore manifest is still a separate step from in-process `snapshot()`/`restore()`.
 - **`setSessionMeta` targets live sessions only.** Editing a closed session's record needs a read-modify-write path against the store.
+- **A queued send is invisible to clients.** `onBusy: "queue"` defers a racing send server-side and `"steer"` enqueues onto a per-execution queue, but neither is readable, so a UI cannot show what a send is waiting behind or cancel it. The first consumer to port onto `onBusy` had to drop its queued-messages bar. Closing it wants the `timeline:history` shape — a grant-gated declared read plus `added`/`removed` notifications — and a `dequeue` verb beside it.
 - **`defineSession` has no inbox dispatch.** A callback-built session stores an escalation interceptor for protocol conformance but never consults it, and every inbox message rejects. Escalation and task-wake work on `SessionHarness` only.
 
 ## Verified by
