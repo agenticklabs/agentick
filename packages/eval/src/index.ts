@@ -1,14 +1,44 @@
 /**
  * `@agentick/eval` — testing-shaped eval framework for Agentick v2.
  *
- * Iteration 1 (MVP): `defineEval({ description, app, test })` returns
- * a callable. `app` is a thunk that builds a fresh AppHarness per
- * invocation, receiving per-call overrides. Assertions record into
- * a result ledger instead of throwing.
+ * `defineEval({ description, app, test })` returns a CALLABLE: `await myEval()`
+ * runs once, `await myEval(overrides)` runs with a different model or fixture,
+ * and `await myEval.matrix(axes, opts)` runs the cartesian product of the axes
+ * (`trials` runs per cell, `concurrency` in parallel) and returns one cell per
+ * combination.
+ * `app` is a thunk, so every invocation gets a FRESH app harness built from that
+ * run's overrides — cells never share state.
  *
- * Future iterations: matrix sweeps, t.judge LLM-as-judge,
- * fixture injection, tool stubs, cost accounting, cassette replay.
- * See [ADR 37](../../docs/proposals/v2/blueprint/37-eval-package-sketch.md).
+ * Assertions RECORD instead of throwing: `t.expect` / `t.calledTool` /
+ * `t.completed` append to a ledger, so one run reports everything that went
+ * wrong rather than the first thing. `t.score` records numeric signal alongside
+ * them WITHOUT gating `passed` — the graded half of an eval (quality, tokens,
+ * latency), aggregated across matrix cells by `aggregate` / `cellStats` /
+ * `passAtK`.
+ *
+ * What this barrel exports:
+ *   - `defineEval`                        the definition → callable
+ *   - `registerEvalPlugin` /
+ *     `registeredEvalPlugins`             the global plugin list applied to
+ *                                         every eval
+ *   - `formatResult` / `formatMatrix`      terminal reports
+ *   - `renderHtmlReport`                   standalone HTML report (score
+ *                                          columns, cost-vs-quality scatter)
+ *   - `passAtK` / `aggregate` / `cellStats` matrix statistics
+ *   - the types behind all of it
+ *
+ * The `t` surface is EXTENSIBLE, not fixed: a plugin is a factory over the run's
+ * {@link EvalRunContext} whose returned members merge onto `t`, typed by
+ * augmenting `EvalContextExtensions`. Two ship as separate subpaths so their
+ * dependencies stay opt-in — `@agentick/eval/plugins/judge` (`t.judge`,
+ * LLM-as-judge over a rubric) and `@agentick/eval/plugins/workspace` (`t.sh` /
+ * `t.file` against a scratch directory).
+ *
+ * Not built yet: cassette record/replay, cost accounting beyond whatever a
+ * score records, and fixture/tool-stub injection (an eval stubs tools by
+ * building a different app in its `app` thunk).
+ *
+ * @see [ADR 37](../../docs/proposals/v2/blueprint/37-eval-package-sketch.md)
  */
 
 export { defineEval } from "./define-eval.js";

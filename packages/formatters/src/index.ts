@@ -43,6 +43,17 @@ export {
 export { formatTree } from "./format-tree.js";
 export type { FormatTreeOptions } from "./format-tree.js";
 
+// The single `FormatterRef → DefinedFormatter` lookup, shared by `formatTree`
+// and by the compiler harness's per-entry formatter pass. Reports HOW it
+// matched so callers with a diagnostics channel can surface an unresolvable
+// ref instead of silently rendering in the wrong format.
+export {
+  describeUnresolvedFormatter,
+  resolveFormatterRef,
+  type FormatterMatch,
+  type FormatterResolution,
+} from "./resolve-formatter.js";
+
 import { markdownFormatter as md } from "./markdown.js";
 import { xmlFormatter as xml } from "./xml.js";
 import { textFormatter as txt } from "./text.js";

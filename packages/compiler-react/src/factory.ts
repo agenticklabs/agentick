@@ -1,7 +1,8 @@
 /**
- * `reactCompiler` — `CompilerFactory` factory for the React reference
- * compiler. The canonical way to wire React's compiler into an
- * `AppHarness` so its events flow through the shared substrate.
+ * `reactCompiler` — the `CompilerFactory` for the React reference compiler. The
+ * canonical way to wire the JSX → IR pipeline into an `AppHarness` so its
+ * operations ride the app's substrate (journal / bus / inbox) instead of a
+ * private one.
  *
  * ```ts
  * import { createApp } from "@agentick/app";
@@ -9,16 +10,38 @@
  *
  * const app = await createApp(<Agent />, {
  *   model: openai("gpt-4o"),
- *   compiler: reactCompiler({ contributors: [...customContributors] }),
+ *   compiler: reactCompiler(),
  * });
  * ```
  *
- * Or use the ergonomic `@agentick/app/react` subpath which defaults
- * `compiler` to `reactCompiler()` automatically:
+ * Or use the `@agentick/app/react` subpath, which defaults `compiler` to
+ * `reactCompiler()`:
  *
  * ```ts
  * import { createApp } from "@agentick/app/react";
  * const app = await createApp(<Agent />, { model: openai("gpt-4o") });
+ * ```
+ *
+ * The argument is the harness's own {@link CompilerHarnessOptions} — passed
+ * through verbatim. Custom intrinsics go in through a `registry` (there is no
+ * `contributors` array; the registry IS the collection, and registering after
+ * the built-ins is what makes last-writer-wins overriding possible):
+ *
+ * ```ts
+ * import { createBuiltInRegistry } from "@agentick/compiler";
+ *
+ * const registry = createBuiltInRegistry();
+ * registry.register(myChartContributor); // claims <chart> in the walker
+ *
+ * const app = await createApp(<Agent />, {
+ *   model: openai("gpt-4o"),
+ *   compiler: reactCompiler({
+ *     registry,
+ *     // Formatter registry + the id used when an entry pins none.
+ *     formatters: builtInFormatters(),
+ *     defaultFormatterId: "formatter.markdown",
+ *   }),
+ * });
  * ```
  */
 

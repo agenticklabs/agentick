@@ -309,23 +309,25 @@ Wrapping this way returns a bare `Formatter`, not a `DefinedFormatter` — to re
 
 ## API
 
-| Export                             | Kind     | Purpose                                                                 |
-| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
-| `createFormatter(input)`           | function | Decorate a render function with identity + optional framing callbacks   |
-| `refOf(formatter)`                 | function | The formatter's `FormatterRef`, for a scope provider or a registry key  |
-| `formatTree(tree, default, opts?)` | function | `RenderedTree` → string; `opts.formatters` enables per-entry resolution |
-| `builtInFormatters()`              | function | `ReadonlyMap` of the three reference formatters, keyed by id            |
-| `markdownFormatter`                | value    | The default — markdown blocks and markdown framing                      |
-| `xmlFormatter`                     | value    | XML tags, escaped text, `<section>` / `<message>` framing               |
-| `textFormatter`                    | value    | Semantic markup stripped; bare `title` / `role:` framing                |
-| `textOnlyFormatter`                | value    | Content policy: keep text + media, drop tool blocks                     |
-| `summarizedFormatter`              | value    | Content policy: `tool_use` → one line, `tool_result` dropped            |
-| `createSummarizedFormatter(fn?)`   | function | The same policy with a custom `ToolSummarizer`                          |
-| `createToolSummarizer(overrides?)` | function | Build a summarizer: overrides → built-in defaults → `[Used <name>]`     |
-| `CreateFormatterInput`             | type     | `id` · `format` · `version?` · `render` · the three framing callbacks   |
-| `DefinedFormatter`                 | type     | A callable `Formatter` carrying `__identity` and its framing callbacks  |
-| `FormatTreeOptions`                | type     | `{ formatters?: ReadonlyMap<string, DefinedFormatter> }`                |
-| `ToolSummarizer`                   | type     | `(name, input) => string`                                               |
+| Export                                     | Kind     | Purpose                                                                       |
+| ------------------------------------------ | -------- | ----------------------------------------------------------------------------- |
+| `createFormatter(input)`                   | function | Decorate a render function with identity + optional framing callbacks         |
+| `refOf(formatter)`                         | function | The formatter's `FormatterRef`, for a scope provider or a registry key        |
+| `formatTree(tree, default, opts?)`         | function | `RenderedTree` → string; `opts.formatters` enables per-entry resolution       |
+| `resolveFormatterRef(fmts, ref, fallback)` | function | The one shared lookup: `{ formatter, match: "id" \| "format" \| "fallback" }` |
+| `describeUnresolvedFormatter(ref, used)`   | function | Human-readable line for a ref that resolved by fallback — diagnostics text    |
+| `builtInFormatters()`                      | function | `ReadonlyMap` of the three reference formatters, keyed by id                  |
+| `markdownFormatter`                        | value    | The default — markdown blocks and markdown framing                            |
+| `xmlFormatter`                             | value    | XML tags, escaped text, `<section>` / `<message>` framing                     |
+| `textFormatter`                            | value    | Semantic markup stripped; bare `title` / `role:` framing                      |
+| `textOnlyFormatter`                        | value    | Content policy: keep text + media, drop tool blocks                           |
+| `summarizedFormatter`                      | value    | Content policy: `tool_use` → one line, `tool_result` dropped                  |
+| `createSummarizedFormatter(fn?)`           | function | The same policy with a custom `ToolSummarizer`                                |
+| `createToolSummarizer(overrides?)`         | function | Build a summarizer: overrides → built-in defaults → `[Used <name>]`           |
+| `CreateFormatterInput`                     | type     | `id` · `format` · `version?` · `render` · the three framing callbacks         |
+| `DefinedFormatter`                         | type     | A callable `Formatter` carrying `__identity` and its framing callbacks        |
+| `FormatTreeOptions`                        | type     | `{ formatters?: ReadonlyMap<string, DefinedFormatter> }`                      |
+| `ToolSummarizer`                           | type     | `(name, input) => string`                                                     |
 
 `Formatter`, `FormatterRef`, `FormatterIdentity`, `FormatPurpose`, `SemanticContentBlock`, `SemanticNode`, `SectionEntry`, `MessageEntry`, and `RenderedTree` are owned by [@agentick/spec](../spec).
 
@@ -340,7 +342,7 @@ Wrapping this way returns a bare `Formatter`, not a `DefinedFormatter` — to re
 ## Roadmap & known gaps
 
 - **No streaming formatter.** The model streams; the formatter does not. A partial-block contract waits on a use case that needs it.
-- **The scope sugar's refs don't match the bundled ids.** `<Markdown>` emits `{ id: "markdown" }` while `markdownFormatter.__identity.id` is `formatter.markdown`, so those bindings resolve through the `format` hint rather than by id. It works, and the fallback is tested, but a custom registry that omits a matching `format` will silently land on the default instead.
+- **The scope sugar's refs resolve by format hint, not id.** `<Markdown>` emits `{ id: "markdown" }` while `markdownFormatter.__identity.id` is `formatter.markdown`, so those bindings resolve through the `format` hint — intended, tested, and silent. A registry that can serve NEITHER the id nor the format no longer silently lands on the default: the compiler harness reports a `formatter-unresolved` warning naming the requested id/format and the formatter that actually ran. `formatTree` itself still degrades quietly — it is a pure serializer with no diagnostics channel.
 - **A formatter cannot vary its output by purpose.** `purpose` selects _which_ formatter a slot resolves to, but the `Formatter` signature takes only blocks — nothing reaches the formatter to tell it whether it is framing a section, a message, or a resource. A formatter that wants both behaviors ships as two registered formatters.
 - **`FormatterCapabilities` is unused.** The spec declares a capability shape for formatters; nothing advertises or reads it, so there is no negotiation.
 - **`version` is carried, never checked.** `FormatterRef.version` rides through resolution untouched — id, then format, and that is the whole chain.

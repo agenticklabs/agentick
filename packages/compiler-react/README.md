@@ -115,8 +115,8 @@ Under the default markdown formatter that produces `# Q3 review`, `[the spec](�
 
 Supported out of the box: `h1`–`h6`, `p`, `ul` / `ol` / `li`, `table` / `thead` / `tbody` / `tr` / `td` / `th`, `a`, `img`, `blockquote`, `pre`, `br`, `hr`, `strong` / `b`, `em` / `i`, `mark`, `u`, `s` / `del`, `sub`, `sup`, `small`, `kbd`, `var`, `q`, `cite`, and the block/inline containers `div`, `span`, `article`, `aside`, `main`, `header`, `footer`, `nav`, `figure`, `figcaption`, `address`.
 
-> [!IMPORTANT]
-> The markup surface is lowercase HTML. The exported `<Paragraph>`, `<H1>`, `<H2>`, and `<H3>` wrappers currently render intrinsics that no contributor claims — their text survives but the formatting is dropped, silently. Use `<p>` and `<h1>` until that's fixed (see [Roadmap & known gaps](#roadmap--known-gaps)).
+> [!NOTE]
+> The markup surface is lowercase HTML. The exported `<Paragraph>`, `<H1>`, `<H2>`, and `<H3>` wrappers are thin sugar over `<p>` / `<h1>`–`<h3>` — byte-identical output, pinned by tests.
 
 ### Choosing the formatter per subtree
 
@@ -547,7 +547,6 @@ import { flush, waitFor } from "@agentick/compiler-react/testing";
 
 ## Roadmap & known gaps
 
-- **`<Paragraph>` / `<H1>` / `<H2>` / `<H3>` don't render.** They emit `paragraph` and `heading` intrinsics, which no contributor claims. Children survive as bare text; the formatting is dropped with no diagnostic. Use the lowercase HTML elements, which are covered by tests.
 - **No uppercase content-block wrappers.** `<Code>`, `<Text>`, `<Image>`, `<Audio>`, `<Video>` are referenced in source comments but not exported. Blocks whose names collide with HTML need `React.createElement` today.
 - **`<Model model={adapter}>` sugar.** `useModelRegistration` ships and takes a spec-typed registration. The component that derives it from a live adapter is deferred.
 - **`useActiveModel` is construction-bound.** It reads the session's target, so it's stable across ticks rather than reflecting a per-tick model swap.
@@ -573,3 +572,5 @@ import { flush, waitFor } from "@agentick/compiler-react/testing";
 - `src/__tests__/boundary-diagnostics.spec.tsx` — the once-per-mount `<Suspense>` warning (including nested inside an intrinsic), the error-boundary info diagnostic and its at-most-once rule, and a clean render emitting nothing.
 - `src/__tests__/compiler-harness.spec.tsx` + `conformance.spec.tsx` — the phase contract and protocol conformance.
 - `src/__tests__/factory.spec.tsx` — the `reactCompiler()` factory: the compiler marker, shared-substrate envelopes landing on the parent bus, dep-less construction mounting end to end on a local substrate, and distinct scopes across dep-less calls.
+- `src/__tests__/semantic-wrappers.spec.tsx` — `<H1>`–`<H3>` / `<Paragraph>` reaching markdown heading and paragraph output, byte-identity with the lowercase intrinsics they wrap, document order inside `<Section>`, and inline emphasis nesting.
+- `src/__tests__/formatter-registry.spec.tsx` — the `formatter-unresolved` warning diagnostic: emitted once per distinct unresolvable ref (unknown id, unknown format, caller-pinned `renderToString` miss), never for an id miss a format hint rescues, and the tree still renders through the default rather than throwing.

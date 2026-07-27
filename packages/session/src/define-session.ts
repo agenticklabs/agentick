@@ -148,10 +148,11 @@ export interface DefineSessionInput<P = unknown> {
   readonly state?: StateHandle;
   /**
    * Model selection / swap facade for the augmented
-   * `SessionHarnessProtocol.model` slot (ADR 89 §2). Omit to get a no-op
-   * stub whose `setModel` / `setTarget` reject and whose `current` throws
-   * "not configured" — a callback session owns no model default. Supply a
-   * real {@link ModelSelectionHandle} to expose model swap/interception.
+   * `SessionHarnessProtocol.model` slot (ADR 89 §2). Omit to get a no-op stub
+   * whose `current` reads `undefined` (a callback session owns no model
+   * default, which the handle's contract calls legal) and whose `setModel` /
+   * `setTarget` reject with "not configured". Supply a real
+   * {@link ModelSelectionHandle} to expose model swap/interception.
    */
   readonly model?: ModelSelectionHandle;
   /**
@@ -428,13 +429,24 @@ function noopGatesHandle(): GatesHandle {
   };
 }
 
+/**
+ * The `model` slot for a session built without one. Reads DEGRADE, writes
+ * COMPLAIN — the split the sibling no-op handles in this module follow.
+ *
+ * `current` answers `undefined` rather than throwing: `ModelSelectionHandle`
+ * types it `RegisteredModel | undefined` precisely because a model-less session
+ * is legal (the model is enforced at execution time), so
+ * `if (session.model.current)` is the documented read and must not blow up.
+ * `setModel` / `setTarget` have nowhere to write, which IS a configuration
+ * error, so they keep rejecting.
+ */
 function noopModelHandle(): ModelSelectionHandle {
   const message =
     "defineSession: `model` not configured — supply a ModelSelectionHandle via `model`.";
   const unsubscribe = () => {};
   return {
-    get current(): RegisteredModel {
-      throw new Error(message);
+    get current(): RegisteredModel | undefined {
+      return undefined;
     },
     setModel: () => Promise.reject(new Error(message)),
     setTarget: () => Promise.reject(new Error(message)),

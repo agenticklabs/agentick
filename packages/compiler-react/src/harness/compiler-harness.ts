@@ -92,9 +92,13 @@ import { InterceptorContext } from "../react/interceptor-context.js";
 import { RenderContextContext } from "../react/render-context-context.js";
 import {
   builtInFormatters,
+  describeUnresolvedFormatter,
   formatTree,
   markdownFormatter,
+  refOf,
+  resolveFormatterRef,
   type DefinedFormatter,
+  type FormatterResolution,
 } from "@agentick/formatters";
 
 // ADR 80/83 — light up the compile verb. `compiler:render-tree` (op
@@ -202,6 +206,8 @@ export class CompilerHarness
   private readonly registry: ContributorRegistry;
   private readonly formatters: ReadonlyMap<string, DefinedFormatter>;
   private readonly defaultFormatterId: string;
+  /** `defaultFormatterId` as a ref — the root scope's binding when a mount pins none. */
+  private readonly defaultFormatterRef: import("@agentick/spec").FormatterRef;
   /**
    * Mount IDs that have already produced a Suspense heuristic warning.
    * One warning per mount — rerendering with the same Suspense tree
@@ -220,6 +226,9 @@ export class CompilerHarness
     this.registry = options.registry ?? createBuiltInRegistry();
     this.formatters = options.formatters ?? builtInFormatters();
     this.defaultFormatterId = options.defaultFormatterId ?? markdownFormatter.__identity.id;
+    const registeredDefault = this.formatters.get(this.defaultFormatterId);
+    this.defaultFormatterRef =
+      registeredDefault !== undefined ? refOf(registeredDefault) : { id: this.defaultFormatterId };
   }
 
   // ──────────────────────── Contributor registration ────────────────────────
@@ -516,7 +525,11 @@ export class CompilerHarness
       throw new AlreadyMounted({ mountId: input.mountId });
     }
     const rootScope = createHostScope({
-      formatter: input.defaultFormatter ?? { id: "default" },
+      // No caller ref → the harness's OWN default, named honestly. The
+      // library-level sentinel (`{ id: "default" }`) would resolve to the same
+      // formatter, but it names a formatter that isn't registered, so every
+      // entry inheriting it would look like an unresolved request.
+      formatter: input.defaultFormatter ?? this.defaultFormatterRef,
       path: [`mount:${input.mountId}`],
     });
     const container = createContainer({ mountId: input.mountId, rootScope });
@@ -744,7 +757,11 @@ export class CompilerHarness
     // optional `semanticNode` sidecars on TextBlocks); dispatch them
     // through the active formatter so the returned tree carries
     // wire-shape ContentBlocks only. See ADR 22 §D2 + §D5.
-    const tree = this.applyFormatters(collected.tree, state.rootScope.formatters.default);
+    const tree = this.applyFormatters(
+      collected.tree,
+      state.rootScope.formatters.default,
+      diagnostics,
+    );
 
     return {
       tree,
@@ -758,14 +775,33 @@ export class CompilerHarness
    * content with the formatter-flattened version. The formatter for an
    * entry is resolved via the same `id → format` fallback chain used by
    * `renderToString`'s dispatch.
+   *
+   * A ref that resolves to NEITHER an id nor a format match renders in a
+   * format the adopter did not ask for, so it earns a `formatter-unresolved`
+   * warning on `diagnostics` — once per distinct ref, not once per entry (the
+   * same "at most one of each kind per renderTree" rule the boundary
+   * diagnostics follow).
    */
   private applyFormatters(
     tree: import("@agentick/spec").RenderedTree,
     fallback: import("@agentick/spec").FormatterRef,
+    diagnostics: ReconcileDiagnostic[],
   ): import("@agentick/spec").RenderedTree {
+    const reported = new Set<string>();
+    const resolve = (ref: import("@agentick/spec").FormatterRef): DefinedFormatter => {
+      const resolution = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
+      if (resolution.match === "fallback") {
+        const key = `${ref.id} ${ref.format ?? ""}`;
+        if (!reported.has(key)) {
+          reported.add(key);
+          diagnostics.push(unresolvedFormatterDiagnostic(ref, resolution.formatter));
+        }
+      }
+      return resolution.formatter;
+    };
+
     const entries = tree.context.entries.map((entry) => {
-      const ref = entry.renderedWith ?? fallback;
-      const fmt = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
+      const fmt = resolve(entry.renderedWith ?? fallback);
       const formatted = fmt(
         entry.content as readonly import("@agentick/spec").SemanticContentBlock[],
       );
@@ -773,11 +809,9 @@ export class CompilerHarness
     });
     const rootContent =
       tree.content && tree.content.length > 0
-        ? (() => {
-            const ref = tree.renderedWith ?? fallback;
-            const fmt = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
-            return fmt(tree.content as readonly import("@agentick/spec").SemanticContentBlock[]);
-          })()
+        ? resolve(tree.renderedWith ?? fallback)(
+            tree.content as readonly import("@agentick/spec").SemanticContentBlock[],
+          )
         : tree.content;
     return {
       ...tree,
@@ -825,24 +859,32 @@ export class CompilerHarness
     //    scope's default when an entry doesn't pin one.
     const fallback = state.rootScope.formatters.default;
     const requestedRef = input.formatter ?? fallback;
-    const effectiveDefault = resolveFormatterFromMap(
+    const resolved = resolveFormatterFromMap(
       this.formatters,
       requestedRef,
       this.defaultFormatterId,
     );
+    // A caller-pinned formatter is resolved HERE, not in `applyFormatters`, so
+    // its unresolvable case needs its own report — otherwise
+    // `renderToString({ formatter: { id: "typo" } })` silently serializes in
+    // the default format.
+    const diagnostics =
+      resolved.match === "fallback"
+        ? [...tree.diagnostics, unresolvedFormatterDiagnostic(requestedRef, resolved.formatter)]
+        : tree.diagnostics;
     const text = formatTree(
       tree.tree,
-      effectiveDefault,
+      resolved.formatter,
       // respect per-entry renderedWith only when caller did NOT pin a
       // formatter — `opts.formatters` enables per-entry lookup;
-      // omitting it forces `effectiveDefault` for every entry.
+      // omitting it forces the resolved formatter for every entry.
       input.formatter === undefined ? { formatters: this.formatters } : {},
     );
     const mimeType = mimeForFormatter(requestedRef);
 
     return {
       payload: { text, mimeType },
-      diagnostics: tree.diagnostics,
+      diagnostics,
       iterations: tree.iterations,
     };
   }
@@ -1063,25 +1105,56 @@ function elementTreeContainsSuspense(node: unknown): boolean {
 //    need it.
 // ============================================================================
 
+/**
+ * Resolve a ref against the harness's registry, reporting HOW it matched.
+ *
+ * The id → format → fallback chain itself lives in `@agentick/formatters`
+ * (`resolveFormatterRef`) — the same lookup `formatTree` runs, so the per-entry
+ * pass here and the string serialization there can never disagree. What this
+ * wrapper adds is the harness's fallback: the formatter registered under
+ * `defaultId`, or a no-op standing in for markdown when even that is absent.
+ *
+ * A `"fallback"` match means the adopter asked for a formatter the registry
+ * cannot serve and got a DIFFERENT output format. Callers surface it as a
+ * `formatter-unresolved` diagnostic — see `applyFormatters`.
+ */
 function resolveFormatterFromMap(
   formatters: ReadonlyMap<string, DefinedFormatter>,
   ref: import("@agentick/spec").FormatterRef,
   defaultId: string,
-): DefinedFormatter {
-  const byId = formatters.get(ref.id);
-  if (byId) return byId;
-  if (ref.format) {
-    for (const fmt of formatters.values()) {
-      if (fmt.__identity.format === ref.format) return fmt;
-    }
-  }
-  return (
+): FormatterResolution {
+  const fallback =
     formatters.get(defaultId) ??
     // Last-resort: a no-op formatter pretending to be markdown.
     (Object.assign((b: readonly import("@agentick/spec").SemanticContentBlock[]) => b, {
       __identity: { id: "formatter.markdown", format: "markdown" as const },
-    }) as DefinedFormatter)
-  );
+    }) as DefinedFormatter);
+  return resolveFormatterRef(formatters, ref, fallback);
+}
+
+/**
+ * The `formatter-unresolved` warning. `ReconcileDiagnosticCode` is an OPEN list
+ * — implementations MAY surface additional codes — and this one is the formatter
+ * twin of the collect walker's `MISSING_*` contributor diagnostics: the tree is
+ * still produced, but it carries a known defect (content rendered in a format
+ * nobody asked for). `metadata` carries the machine-readable halves so devtools
+ * can link the ref back to its `<FormatScope>`.
+ */
+function unresolvedFormatterDiagnostic(
+  ref: import("@agentick/spec").FormatterRef,
+  used: DefinedFormatter,
+): ReconcileDiagnostic {
+  return {
+    severity: "warning",
+    code: "formatter-unresolved",
+    message: describeUnresolvedFormatter(ref, used),
+    metadata: {
+      requestedId: ref.id,
+      ...(ref.format !== undefined ? { requestedFormat: ref.format } : {}),
+      usedId: used.__identity.id,
+      usedFormat: used.__identity.format,
+    },
+  };
 }
 
 function mimeForFormatter(formatter: import("@agentick/spec").FormatterRef): string {

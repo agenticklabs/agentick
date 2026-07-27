@@ -521,7 +521,7 @@ const session = new SessionHarness(journal, bus, inbox, {
 });
 ```
 
-For a session whose orchestration is fundamentally different — a test double, an alternative topology — `defineSession` builds a conforming session from callbacks. `send`, `snapshot` and the state-applicator triple the loop calls are required; every other verb defaults to throwing "not configured", and `timeline` / `knobs` / `state` default to no-op handles.
+For a session whose orchestration is fundamentally different — a test double, an alternative topology — `defineSession` builds a conforming session from callbacks. `send`, `snapshot` and the state-applicator triple the loop calls are required; every other verb defaults to throwing "not configured", and `timeline` / `knobs` / `state` default to no-op handles. One deliberate exception: `model.current` READS as `undefined` on a model-less callback session — a model-less session is legal, so the documented `if (session.model.current)` guard runs instead of crashing; only `setModel` / `setTarget` reject.
 
 ```ts
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";

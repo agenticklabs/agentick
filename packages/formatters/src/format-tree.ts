@@ -28,6 +28,7 @@
  */
 
 import type {
+  FormatterRef,
   MessageEntry,
   RenderedTree,
   SectionEntry,
@@ -35,6 +36,7 @@ import type {
 } from "@agentick/spec";
 
 import type { DefinedFormatter } from "./create-formatter.js";
+import { resolveFormatterRef } from "./resolve-formatter.js";
 
 export interface FormatTreeOptions {
   /**
@@ -74,21 +76,20 @@ export function formatTree(
 }
 
 // ────────── Formatter resolution ──────────
+//
+// Per-entry resolution defers to the shared `resolveFormatterRef`. `formatTree`
+// returns a string and owns no diagnostics channel, so an unresolvable ref
+// degrades to `defaultFormatter` quietly here; the compiler harness's formatter
+// pass runs the same lookup over the same map and REPORTS the `"fallback"`
+// match, so the adopter still hears about it exactly once.
 
 function resolveFormatter(
-  entryRef: { readonly id: string; readonly format?: string } | undefined,
+  entryRef: FormatterRef | undefined,
   fallback: DefinedFormatter,
   opts: FormatTreeOptions,
 ): DefinedFormatter {
-  if (!opts.formatters || !entryRef) return fallback;
-  const byId = opts.formatters.get(entryRef.id);
-  if (byId) return byId;
-  if (entryRef.format) {
-    for (const fmt of opts.formatters.values()) {
-      if (fmt.__identity.format === entryRef.format) return fmt;
-    }
-  }
-  return fallback;
+  if (!opts.formatters) return fallback;
+  return resolveFormatterRef(opts.formatters, entryRef, fallback).formatter;
 }
 
 // ────────── Last-resort defaults ──────────

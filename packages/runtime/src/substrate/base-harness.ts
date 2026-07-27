@@ -692,21 +692,26 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    *   ? { kind: "veto", reason: "batch too large" }
    *   : undefined) });
    * ```
+   *
+   * The two forms are ONE signature over a UNION, deliberately not two
+   * overloads: with overloads, an inline bag whose deciders take no parameters
+   * (`{ timelineAppend: () => ({ kind: "veto" }) }`) is type-checked against the
+   * decider overload FIRST, and because such an arrow is not context-sensitive
+   * TypeScript widens its return to `{ kind: string }` and caches that — the bag
+   * overload then rejects it, forcing adopters to write `as const` on every
+   * verdict. A union parameter gives the object literal its contextual type
+   * directly from the {@link CommandGuards} arm, so verdict literals narrow with
+   * no `as const`.
+   *
+   * @verifiedBy packages/runtime/src/__tests__/guard-bag.type.spec.ts
    */
   guard<I = unknown, R = unknown>(
-    decide: (
-      input: I,
-      ctx: RuntimeContext,
-    ) => HandlerVerdict<R> | void | Promise<HandlerVerdict<R> | void>,
-  ): Unsubscribe;
-  guard(config: CommandGuards): Unsubscribe;
-  guard<I = unknown, R = unknown>(
     decideOrConfig:
+      | CommandGuards
       | ((
           input: I,
           ctx: RuntimeContext,
-        ) => HandlerVerdict<R> | void | Promise<HandlerVerdict<R> | void>)
-      | CommandGuards,
+        ) => HandlerVerdict<R> | void | Promise<HandlerVerdict<R> | void>),
   ): Unsubscribe {
     if (typeof decideOrConfig !== "function") {
       // Declarative bag (ADR 93) — one op-scoped `guard`-kind interceptor per
