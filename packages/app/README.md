@@ -312,6 +312,14 @@ The app-level `onSessionClose` handler does **not** fire on eviction (paging is
 not a lifecycle end); the session's own bridge/extension close handlers do.
 Ephemeral `runOnce` sessions are never LRU/idle-evicted — they self-dispose.
 
+**Eviction routes through the close op.** Both the LRU page-out and the idle
+sweep call `session.close({ reason: "evicted" })` — the same
+`session:command:close` operation an explicit teardown runs (ADR 92 Family 2
+§5), not a path around it. So a `session.hooks.onBeforeSessionClose` observer
+sees page-outs, and the audit trail tells a page-out from a hangup by the
+record's `reason`, not by which code path ran. The close op is bus-only, so
+these envelopes reach `app.events(...)` without filling the journal.
+
 ### App-wide `signal` (PA1)
 
 `createApp({ signal })` fans a single `AbortSignal` into every session. It is
@@ -367,6 +375,22 @@ const app = await createApp(<Agent />, {
   (the same merge-into-execution plumbing as the app signal). A **parent close
   or abort disposes its children** — removed from the live registry and closed —
   so no sub-session leaks; children dispose their own children transitively.
+- **The spawn envelope (ADR 92 Family 2).** A spawn is two linked operations:
+  `session:command:spawn` (this session's layer — the depth ceiling, lineage,
+  principal descent above) parents `app:command:create-child-session` (this
+  app's layer — construction and registry admission), with the child-create
+  op's scope carrying `{ sessionId, parentSessionId, spawnPath }`. A spawn does
+  **not** emit `app:create-session`: the two verbs share a body, not an
+  envelope, so a guard on host session creation does not silently police spawns
+  and vice-versa. `onSessionCreate` (ADR 48) still fires for spawns unchanged —
+  the promotion added the envelope, not a second hook.
+
+  ```ts
+  // Adopter-expressible policy the hardcoded `maxSpawnDepth` could not say:
+  app.guard((_input, ctx) =>
+    ctx.op === "SessionSpawn" ? { kind: "veto", reason: "no-subagents" } : undefined,
+  );
+  ```
 
 ### Owning principal — stamped → inherited → readable (ADR 48)
 
@@ -563,6 +587,17 @@ counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle
   `SessionRecord`, its loop `EventScope`, and its handle stream, and a
   parent close / abort disposes its spawned children (no registry leak;
   abort mid-child-execution tears the child down without a compiler race).
+- `src/__tests__/lifecycle-operations.spec.tsx` (ADR 92 Slice B) — the spawn
+  and close envelopes end-to-end. Spawn emits `session:command:spawn` +
+  `app:command:create-child-session`, the child-create carries
+  `{ sessionId, parentSessionId, spawnPath }` as scope and names the spawn op as
+  its `parentOpId`, both records journal, a spawn adds no
+  `app:create-session` record, a fork adds the snapshot + restore records, and
+  `onSessionCreate` still fires. A guard veto at either layer creates no child
+  and no registry entry, while a spawn-only guard leaves host `createSession`
+  alone. Close emits `session:command:close` with `reason: "closed"`, stays out
+  of the journal (bus-only policy), and a veto leaves the session usable; the
+  idle sweep and the LRU page-out both emit it with `reason: "evicted"`.
 
 ## Known gaps
 

@@ -52,4 +52,26 @@ declare module "@agentick/spec" {
      */
     readonly credentials?: CredentialsHarnessProtocol;
   }
+
+  interface EventScopeExtensions {
+    /**
+     * Credential namespace — the coarse routing dimension of the credentials
+     * surface, stamped on every `credentials:command:{set,delete}` envelope
+     * (ADR 92 Family 2 §7) so an auditor can filter one namespace's mutation
+     * history:
+     *
+     *     app.events({ scope: { credentialNamespace: "oauth" } })
+     */
+    readonly credentialNamespace?: string;
+    /**
+     * Credential key — the fine routing dimension, twin of
+     * {@link EventScopeExtensions.credentialNamespace}.
+     *
+     * The key is an ADDRESS, never material: "journal the fact and the key,
+     * never the secret." The value has no representation anywhere in the
+     * operation envelope — it is not an operation input, so no scope,
+     * payload, or hook argument can carry it.
+     */
+    readonly credentialKey?: string;
+  }
 }

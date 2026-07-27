@@ -69,6 +69,7 @@ import type {
   SendMessageInput,
   SendResult,
   SendTelemetry,
+  SessionCloseInput,
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
@@ -160,6 +161,20 @@ declare module "@agentick/runtime" {
     // `onAfterSessionRestore`. Both journal.
     "session:snapshot": { input: CaptureSnapshotInput; output: SessionSnapshot };
     "session:restore": { input: RestoreSnapshotInput; output: void };
+    // ADR 92 Family 2 §5 — teardown is an op, symmetric with `app:close-app` /
+    // `gateway:close`. Mints `onBeforeSessionClose` (the hold-for-drain seam)
+    // + `onAfterSessionClose`. BUS-ONLY by policy: the body reaches substrate
+    // teardown, so a journal write after it could target a closed journal.
+    "session:close": { input: SessionCloseInput; output: void };
+    // ADR 92 Family 2 §4 — spawning a child session is a state-mutating verb
+    // an adopter wants to guard ("this agent may not spawn"). Mints
+    // `onBeforeSessionSpawn` / `onAfterSessionSpawn`. Non-addressable like its
+    // siblings: `SpawnInput` carries a JSX agent root and the output is a live
+    // session, neither of which has a wire form.
+    "session:spawn": {
+      input: SpawnInput<unknown>;
+      output: SessionExecutionHandle | SessionHarnessProtocol<unknown>;
+    };
   }
 }
 
@@ -1292,7 +1307,34 @@ export class SessionHarness<P = unknown>
     this.runtime.setUsage(snap.usage);
   }
 
-  async close(): Promise<void> {
+  /**
+   * Shut down — the `session:command:close` OPERATION (ADR 92 Family 2 §5).
+   *
+   * The asymmetry this closes: `App.closeApp` and `Gateway.close` have been
+   * operations since ADR 84, while the session — the thing an adopter most
+   * wants a teardown seam on — tore down as a plain method. Now the whole
+   * lifecycle is one grammar: create is an op, close is an op, and
+   * `onBeforeSessionClose` is the hold-for-drain seam that had no home.
+   *
+   * BUS-ONLY by policy (set in the constructor, and long anticipated by the
+   * `"session:command:close"` override key there): the body reaches
+   * `super.close()`, which fires `onClose` handlers that may tear down the very
+   * journal a terminal append would target.
+   *
+   * The eviction sweep routes through HERE with `reason: "evicted"` rather than
+   * around it — page-out and hangup are the same teardown, told apart in the
+   * record by their provenance, not by taking different code paths.
+   */
+  async close(opts?: SessionCloseInput): Promise<void> {
+    await runHarnessProtocol(
+      this.sessionOp("close", { reason: opts?.reason ?? "closed" }, () =>
+        Effect.promise(() => this.closeBody()),
+      ),
+    );
+  }
+
+  /** The `session:command:close` BODY — the pre-promotion `close` verbatim. */
+  private async closeBody(): Promise<void> {
     if (this._closed) return;
     this._closed = true;
     this.runtime.setStatus("closed" as never);
@@ -1441,7 +1483,51 @@ export class SessionHarness<P = unknown>
 
   // ──────── Extended interaction surface (block 5) ────────
 
+  /**
+   * Spawn a child session — the `session:command:spawn` OPERATION (ADR 92
+   * Family 2 §4).
+   *
+   * Spawning is a state-mutating verb that creates a whole new session, so it
+   * qualifies under the operation law on its own merits. Before the promotion
+   * the only policy an adopter could express over it was the framework's own
+   * hardcoded `maxSpawnDepth` ceiling; `onBeforeSessionSpawn` / a guard now
+   * makes "this agent may not spawn", "not more than N children", and "not this
+   * agent image" adopter-expressible, and the fan-out leaves an audit record.
+   *
+   * The pairing with `app:command:create-child-session` is deliberate and is
+   * the ADR's layering principle in miniature — two REAL layers, two linked
+   * records. This layer owns the parent-side concerns (depth ceiling, lineage
+   * extension, principal descent, child tracking for teardown cascade); the app
+   * layer owns construction and registry admission. The link between them is
+   * the `parentOpId` this body reads off its own fiber and threads as data (see
+   * {@link SpawnContextChildInput.parentOpId} for why it cannot ride the
+   * FiberRef).
+   *
+   * `fork()` inherits the envelope transitively — a fork IS a spawn plus a
+   * restore, and each of the three is its own record.
+   */
   async spawn(input: SpawnInput<P>): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
+    return runHarnessProtocol(
+      this.sessionOp("spawn", input, (i) =>
+        Effect.gen(this, function* () {
+          // Read the trunk INSIDE the op fiber — this is the one place the
+          // spawn's own opId is reachable — and hand it to the app layer as
+          // data so the child-create record nests under this one.
+          const { opId } = yield* getContext;
+          return yield* Effect.tryPromise({
+            try: () => this.spawnBody(i, opId),
+            catch: (cause): SessionError => coerceSessionError(cause),
+          });
+        }),
+      ),
+    );
+  }
+
+  /** The `session:command:spawn` BODY — the pre-promotion `spawn` verbatim. */
+  private async spawnBody(
+    input: SpawnInput<P>,
+    parentOpId: string | undefined,
+  ): Promise<SessionExecutionHandle | SessionHarnessProtocol<P>> {
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "spawn" }) satisfies SessionError;
     }
@@ -1481,6 +1567,8 @@ export class SessionHarness<P = unknown>
         // SP6 — fan our construction signal into the child so a parent abort
         // tears down the child's in-flight work (PA1 merge-into-execution).
         signal: this.constructionSignal,
+        // ADR 92 — the causal link to THIS spawn op (see `spawn`'s docblock).
+        parentOpId,
       }),
     };
     const child = await this.spawnContext.createChildSession(childInput);

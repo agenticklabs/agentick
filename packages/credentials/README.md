@@ -271,9 +271,12 @@ await harness.close();
 
 Surface (matches `CredentialsHarnessProtocol`):
 
-- `get<T>(namespace, key)` / `set<T>(namespace, key, value)` /
-  `delete(namespace, key)` / `has(namespace, key)` /
-  `keys(namespace)` — proxies to the underlying store.
+- `set<T>(namespace, key, value)` / `delete(namespace, key)` — the WRITE verbs.
+  Operations (`credentials:command:{set,delete}`), so they are guardable,
+  hookable, and journaled. See [the redaction law](#the-redaction-law-writes-are-operations-secrets-are-not-inputs).
+- `get<T>(namespace, key)` / `has(namespace, key)` / `keys(namespace)` — the
+  READ verbs. Data-plane, not operations (ADR 92's exclusion list); they proxy
+  straight to the store, and a blanket write-freezing guard does not block them.
 - `subscribe(listener)` — fan-out of `CredentialsChangeEvent`
   (`{ namespace, key }`) for internal writes AND external rotations
   (when the adapter implements `onChange`).
@@ -287,6 +290,62 @@ slice 281b.2 ships `withCredentials({ store })` which wires
 construction + bridge registration through the app extension
 lifecycle. Direct construction is for tests, custom adapter
 integrations, and `fakeCredentialsHarness()`.
+
+### The redaction law — writes are operations, secrets are not inputs
+
+`set` and `delete` are operations (ADR 92 Family 2 §7). Before the promotion
+they were plain async CRUD while the sibling `state:set` had been an op all
+along — the sharpest inconsistency the 2026-07-26 crossing audit found. A
+credential write is a security state-mutation; it belongs in the audit trail and
+under a guard.
+
+| Op                           | Scope                                    | Input                | Journal              |
+| ---------------------------- | ---------------------------------------- | -------------------- | -------------------- |
+| `credentials:command:set`    | `{ credentialNamespace, credentialKey }` | `{ namespace, key }` | requested + terminal |
+| `credentials:command:delete` | `{ credentialNamespace, credentialKey }` | `{ namespace, key }` | requested + terminal |
+
+**The value is not an operation input.** That single fact IS the redaction law,
+and it is why the law is structural rather than a scrubbing pass:
+
+```ts
+export interface CredentialsMutationInput {
+  readonly namespace: string;
+  readonly key: string;
+  // there is no `value` field, and there never will be
+}
+```
+
+The journal record, the bus envelope, every middleware, and every guard observe
+the operation's **input**. A secret that was never in the input cannot be
+journaled, broadcast, or handed to adopter code. There is no post-hoc redaction
+step to misconfigure, forget to run, or leave behind when a new field is added —
+adding one would mean editing that interface. The value travels as a closure
+argument on the operation body instead. This is the
+`credentials-never-cross-the-wire` invariant extended to the audit trail:
+**journal the fact and the key, never the secret.**
+
+The corollary: `set` is deliberately **not** inbox-addressable. A credential has
+no serializable command form, so the verbs are declared via `runOperation` plus
+the `CommandRegistry` hook surface rather than `BaseHarness.command()` — which
+would make the input a wire payload by construction. A remote caller drives
+credential lifecycle through wire-extension **verbs** that resolve server-side.
+
+```ts
+// A guard sees the ADDRESS, never the material:
+harness.guard<{ namespace: string }>((input) =>
+  input.namespace === "production" && !operatorApproved()
+    ? { kind: "veto", reason: "production-credentials-require-approval" }
+    : undefined,
+);
+
+// An auditor filters one namespace's mutation history:
+app.events({ scope: { credentialNamespace: "oauth" } });
+```
+
+Running under an operation also enriches the store ctx: the body threads
+`storeCtxEffect()`, so an adapter sees the write's own `opId`, `parentOpId`,
+`correlationId`, and `traceparent`. Reads, having no op fiber, keep the base
+construction-slot ctx.
 
 ### Errors
 
@@ -314,6 +373,21 @@ convenience.
   delete suppresses events, listener-error isolation, `Unsubscribe`
   stops future events, `close()` idempotency, `close()` drops
   subscribers, `id` + `address` follow BaseHarness convention.
+- `src/__tests__/mutation-operations.spec.ts` — the ADR 92 promotion and the
+  redaction law. `set` / `delete` emit `credentials:command:{set,delete}` with
+  the `{ credentialNamespace, credentialKey }` scope and journal both
+  `requested` and `terminal`; the op input is exactly `{ namespace, key }`; the
+  body threads the enriched store ctx (the adapter sees the write's `opId`).
+  **The redaction assertion**: after writing a distinctive secret as a bare
+  string AND nested inside an object, the fully serialized journal — every
+  record, not just the credentials ops — and the fully serialized bus stream
+  contain neither the value nor any fragment of it, while still containing the
+  op name and the key (so the assertion is not vacuous); a guard's observed
+  input carries the address only. Guard vetoes: a vetoed `set` never reaches the
+  store and publishes no change notification, a vetoed `delete` leaves the entry
+  in place, and an input-reading guard vetoes one namespace while a sibling
+  proceeds. Reads stay data-plane: `get` / `has` / `keys` emit nothing on the
+  bus and are unaffected by a blanket write-freezing guard.
 - `src/__tests__/with-credentials.spec.ts` — `withCredentials({ store })`
   registers a `CredentialsHarness` under the `"credentials"` slot,
   scopes the harness id under the host id (`<appId>:credentials`),

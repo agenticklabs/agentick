@@ -127,6 +127,42 @@ await live.stop(); // graceful end
   signal carrying the played-audio offset; the app composes barge-in on
   `onInterrupt` from `execution.abort()` + steering.
 
+## Teardown is an operation (ADR 92 Family 2 §6)
+
+`stop` and `close` run as operations, so an in-process hangup — a turn arbiter
+deciding the call is over, a tool handler ending a stream — is guardable,
+hookable, and audited exactly like the remote one the wire path already
+enveloped. Before the promotion a guard could veto `live/stop` over the wire but
+not `session.live.stop(...)` next to it.
+
+| Op                   | Scope                     | Input                          | Journal              | Hooks                                    |
+| -------------------- | ------------------------- | ------------------------------ | -------------------- | ---------------------------------------- |
+| `live:command:stop`  | `{ sessionId, streamId }` | `{ streamId, hard?, reason? }` | requested + terminal | `onBeforeLiveStop` / `onAfterLiveStop`   |
+| `live:command:close` | `{ sessionId }`           | `{}`                           | **bus-only**         | `onBeforeLiveClose` / `onAfterLiveClose` |
+
+`close` is bus-only by policy override — the house close-op rule it shares with
+`app:command:close-app` and `gateway:command:close`: the body reaches
+`super.close()`, so a terminal appended afterwards could target a journal an
+`onClose` handler already tore down. Its nested per-stream `stop` records DO
+journal; the override is per-op-name, not a blanket suppression of everything
+close does. That is the ADR's layering principle — a close over two live streams
+is three records, one per real layer.
+
+```typescript
+// "Don't hang up while we're recording."
+session.live.guard<{ streamId: string }>((input) =>
+  isRecording(input.streamId) ? { kind: "veto", reason: "recording-in-progress" } : undefined,
+);
+```
+
+**`start` is deliberately NOT an operation.** It returns a `MediaSessionRef`
+synchronously, and a sync return cannot host the async interceptor fold — the
+same blocker documented for `tasks.submit`. ADR 92 files it under Family 3 (the
+sync-return seam), whose two candidate shapes — async-ify the verb, or a
+provably-sync interceptor fast-path in the runtime lift — are not yet decided.
+Until then stream birth is guardable at the wire (`live/start`), not in process.
+See the `TODO(ADR-92 family-3)` marker at `start` in `src/harness.ts`.
+
 ## Verified by
 
 - `src/__tests__/wire.spec.ts` — `live/start` / `live/stop` / `live/interrupt`
@@ -136,6 +172,15 @@ await live.stop(); // graceful end
   `onStream` context; `sendFrame`/`onFrame` ↔ `uplink`/`downlink` projection
   equivalence; interrupt → `onInterrupt`; lifecycle cleanup on `stop`/`close`;
   the `session` resolver.
+- `src/__tests__/teardown-operations.spec.ts` — the ADR 92 promotion. `stop`
+  emits `live:command:stop` with the `{ sessionId, streamId }` scope, journals
+  `requested` + `terminal` carrying the teardown reason, and stays idempotent
+  (two ops, one `closed` state frame). A guard veto leaves the stream live —
+  nothing announces `closed` and uplink still routes to its listeners — and an
+  input-reading guard vetoes one stream while a sibling proceeds. `close` emits
+  its own op plus a nested `stop` record per live stream, and is absent from the
+  journal (bus-only) while those `stop` records are present. `start` emits no
+  op and is unaffected by a blanket veto (Family 3).
 - `src/client/__tests__/live-session-handle.spec.ts` — `sendFrame` issues the
   uplink `send`; `onFrame` fires; projection equivalence; control commands issue
   the right `live/*` calls; `start()` auto-binds ids; media-capability guard.
@@ -158,9 +203,11 @@ await live.stop(); // graceful end
   one surface (OpenAI Realtime / Gemini Live).
 - **Driven execution source (full-duplex)** — a loop triggered by its input
   source rather than by external `send`.
-- **Per-op lifecycle hooks** (`onBeforeLiveStart`, …) — v0 declares none (ADR 88):
-  the right grain is lifecycle, never per-frame, and `withLive({ onStream })` is
-  the extension point. Adding one later is a two-line augmentation.
+- **`onBeforeLiveStart`** — the one lifecycle hook still missing. `stop` and
+  `close` gained theirs in ADR 92 Slice B (see _Teardown is an operation_
+  above); `start` cannot until Family 3 resolves the sync-return seam. The grain
+  remains lifecycle, never per-frame — there is no per-frame hook by design, and
+  `withLive({ onStream })` stays the stream-birth extension point.
 
 ## Status
 

@@ -48,7 +48,11 @@ import "./augment.js";
 
 export type { CredentialsStore } from "./store.js";
 
-export { CredentialsHarness, type CredentialsHarnessOptions } from "./harness.js";
+export {
+  CredentialsHarness,
+  type CredentialsHarnessOptions,
+  type CredentialsMutationInput,
+} from "./harness.js";
 
 export { withCredentials, type WithCredentialsOptions } from "./extension.js";
 

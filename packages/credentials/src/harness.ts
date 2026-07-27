@@ -49,7 +49,7 @@
 
 import { Effect } from "effect";
 
-import { BaseHarness } from "@agentick/runtime";
+import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentick/runtime";
 import { createNotifier, type Notifier } from "@agentick/pubsub";
 import { HandlerError } from "@agentick/spec";
 import type {
@@ -59,18 +59,66 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  Operation,
   OperationJournal,
   Unsubscribe,
 } from "@agentick/spec";
 
+// The `EventScopeExtensions` augmentation this file's operation scopes depend on
+// (`credentialNamespace` / `credentialKey`). Imported HERE, not only from the
+// barrel, so a consumer that reaches this module directly still compiles.
+import "./augment.js";
 import type { CredentialsStore } from "./store.js";
 
-// `CredentialsHarnessOptions` is intentionally empty in 281b.1. Future
-// slots (e.g. `parentScope` for projecting `{ appId, gatewayId }` onto
-// audit-log bus envelopes) land alongside the consumer that needs
-// them — no preemptive dead fields.
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface CredentialsHarnessOptions {}
+// ============================================================================
+// Command lifecycle hooks (ADR 80/83) — typed CommandRegistry augmentation.
+// ============================================================================
+//
+// The two WRITE verbs are operations (ADR 92 Family 2 §7); reads stay
+// data-plane. The registry key is the canonical `credentials:<verb>` form (the
+// `:command:` infix `deriveHookNames` strips), so `credentials:set` mints
+// `onBeforeCredentialsSet` / `onAfterCredentialsSet` and a guard sees
+// `ctx.op === "CredentialsSet"`.
+//
+// The registered INPUT is {@link CredentialsMutationInput} — `{ namespace, key }`
+// and nothing else. See the redaction law on {@link CredentialsHarness.set}.
+declare module "@agentick/runtime" {
+  interface CommandRegistry {
+    "credentials:set": { input: CredentialsMutationInput; output: void };
+    "credentials:delete": { input: CredentialsMutationInput; output: boolean };
+  }
+}
+
+/**
+ * The operation input for `credentials:command:{set,delete}` — the ADDRESS of a
+ * credential, never its value.
+ *
+ * This type IS the redaction law (ADR 92 Family 2 §7). Because the secret is
+ * not a field here, it cannot reach the journal, the bus, a guard, a middleware,
+ * or an `onBefore…` hook: there is no post-hoc scrubbing pass to forget to run,
+ * and no way for a future field to leak one in without editing this interface.
+ * The value travels as a closure argument on the operation BODY instead — see
+ * {@link CredentialsHarness.set}.
+ */
+export interface CredentialsMutationInput {
+  readonly namespace: string;
+  readonly key: string;
+}
+
+export interface CredentialsHarnessOptions {
+  /**
+   * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83) — the installing
+   * host's interceptors, folded in at construction so app-scope guards wrap
+   * credential writes. Defaults to `[]`.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * LIVE interceptor parent (ADR 83 §4). Keeps inheritance live so a LATER
+   * `app.guard()` reaches this harness's ops, not just the construction
+   * snapshot.
+   */
+  readonly interceptorParent?: BaseHarness;
+}
 
 export class CredentialsHarness
   extends BaseHarness<"credentials">
@@ -91,10 +139,12 @@ export class CredentialsHarness
     journal: OperationJournal,
     bus: EventBus,
     inbox: MessageInbox,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _options: CredentialsHarnessOptions = {},
+    options: CredentialsHarnessOptions = {},
   ) {
-    super("credentials", scopeId, journal, bus, inbox);
+    super("credentials", scopeId, journal, bus, inbox, {
+      inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
+    });
     this.store = store;
     this.changes = createNotifier<CredentialsChangeEvent>();
 
@@ -114,30 +164,85 @@ export class CredentialsHarness
 
   // ── Public surface — protocol-typed CRUD ────────────────────────
 
-  // The harness surface is plain-async Promise CRUD consumed off the render /
-  // fiber path (a tool handler, a gateway verb resolver), so it threads the BASE
-  // `storeCtx()` (construction-slot scope: sessionId + principal) — there is no
-  // live op-fiber to enrich `opId` from at these callsites. An identity-aware
-  // adapter reads `ctx.principal` to resolve the right secret.
+  // READS are data-plane (ADR 92's exclusion list) and stay plain async: they
+  // are consumed off the render / fiber path (a tool handler, a gateway verb
+  // resolver), so they thread the BASE `storeCtx()` — construction-slot scope
+  // (sessionId + principal), no live op-fiber to enrich `opId` from. An
+  // identity-aware adapter reads `ctx.principal` to resolve the right secret.
   async get<T>(namespace: string, key: string): Promise<T | undefined> {
     return this.store.get<T>(namespace, key, this.storeCtx());
   }
 
+  /**
+   * Write a credential — the `credentials:command:set` OPERATION (ADR 92
+   * Family 2 §7). Security state-mutation, so it carries the same envelope its
+   * sibling `state:set` has always had: guards, `onBeforeCredentialsSet` /
+   * `onAfterCredentialsSet`, a journal record, a span.
+   *
+   * ## The redaction law — structural, not post-hoc
+   *
+   * The operation's input is `{ namespace, key }` ({@link
+   * CredentialsMutationInput}). `value` is NOT an operation input; it is a
+   * closure argument on the body below. That is deliberate and is the whole
+   * mechanism: the journal record, the bus envelope, every middleware, and
+   * every guard observe the operation's input, so a secret that was never IN
+   * the input cannot be journaled, broadcast, or handed to adopter code — there
+   * is no scrubbing pass that could be skipped, misconfigured, or outrun by a
+   * new field. "Journal the fact and the key, never the secret"
+   * (`credentials-never-cross-the-wire`, extended to the audit trail).
+   *
+   * The corollary is that `set` is deliberately NOT inbox-addressable: a
+   * credential has no serializable command form, so the verb is declared via
+   * `runOperation` + the `CommandRegistry` hook surface rather than
+   * `BaseHarness.command()` (which would make the input a wire payload). A
+   * remote caller drives credential lifecycle through wire-extension VERBS that
+   * resolve server-side, never by shipping the material.
+   *
+   * The body runs inside a live operation fiber, so it threads the ENRICHED
+   * {@link BaseHarness.storeCtxEffect} — the store sees this write's `opId`,
+   * `parentOpId`, `correlationId`, and `traceparent`, which reads cannot offer.
+   */
   async set<T>(namespace: string, key: string, value: T): Promise<void> {
-    await this.store.set(namespace, key, value, this.storeCtx());
-    // If the store natively notifies, the forwarder fires; avoid
-    // double-publishing. Otherwise publish ourselves.
-    if (!this.store.onChange) {
-      this.changes.notify({ namespace, key });
-    }
+    await runHarnessProtocol(
+      this.mutationOp("set", { namespace, key }, () =>
+        Effect.gen(this, function* () {
+          const ctx = yield* this.storeCtxEffect();
+          yield* Effect.tryPromise({
+            try: () => this.store.set(namespace, key, value, ctx),
+            catch: (cause: unknown) => cause,
+          });
+          // If the store natively notifies, the forwarder fires; avoid
+          // double-publishing. Otherwise publish ourselves.
+          if (!this.store.onChange) {
+            this.changes.notify({ namespace, key });
+          }
+        }),
+      ),
+    );
   }
 
+  /**
+   * Remove a credential — the `credentials:command:delete` OPERATION (ADR 92
+   * Family 2 §7). Same envelope and the same `{ namespace, key }` input as
+   * {@link set}; the output (`true` when a real key was removed) is the fact
+   * worth auditing.
+   */
   async delete(namespace: string, key: string): Promise<boolean> {
-    const removed = await this.store.delete(namespace, key, this.storeCtx());
-    if (removed && !this.store.onChange) {
-      this.changes.notify({ namespace, key });
-    }
-    return removed;
+    return runHarnessProtocol(
+      this.mutationOp("delete", { namespace, key }, () =>
+        Effect.gen(this, function* () {
+          const ctx = yield* this.storeCtxEffect();
+          const removed = yield* Effect.tryPromise({
+            try: () => this.store.delete(namespace, key, ctx),
+            catch: (cause: unknown) => cause,
+          });
+          if (removed && !this.store.onChange) {
+            this.changes.notify({ namespace, key });
+          }
+          return removed;
+        }),
+      ),
+    );
   }
 
   async has(namespace: string, key: string): Promise<boolean> {
@@ -162,6 +267,35 @@ export class CredentialsHarness
   }
 
   // ── Substrate plumbing ──────────────────────────────────────────
+
+  /**
+   * Route a credential WRITE through {@link BaseHarness.runOperation} — the
+   * `sessionOp` pattern (`session/src/harness.ts`), chosen over
+   * {@link BaseHarness.command} for one reason: `command()` binds the handler
+   * at construction and feeds it only the declared input, which would force the
+   * secret to become a command field. Here the op input stays the redacted
+   * address and the body closes over the material.
+   *
+   * The scope carries the credential ADDRESS (`credentialNamespace` /
+   * `credentialKey`, augmented onto `EventScopeExtensions` in `augment.ts`) so
+   * an auditor can filter one key's mutation history out of the stream:
+   *
+   *     app.events({ scope: { credentialNamespace: "oauth" } })
+   */
+  private mutationOp<R>(
+    verb: "set" | "delete",
+    input: CredentialsMutationInput,
+    body: () => Effect.Effect<R, unknown, never>,
+  ): Effect.Effect<R, unknown, never> {
+    const op: Operation<CredentialsMutationInput, R, unknown> = {
+      opId: `credentials:${verb}:${ulid()}`,
+      surface: "credentials",
+      name: `credentials:command:${verb}`,
+      scope: { credentialNamespace: input.namespace, credentialKey: input.key },
+      input,
+    };
+    return this.runOperation(op, body);
+  }
 
   // CredentialsHarness ships no inbox protocol in 281b.1. The
   // surface is local CRUD against a server-resident store; remote

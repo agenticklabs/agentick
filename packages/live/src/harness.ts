@@ -19,9 +19,11 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, ulid, type Middleware } from "@agentick/runtime";
+import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentick/runtime";
+import { mergeLayered, omitUndefined } from "@agentick/utils";
 import type {
   EventBus,
+  JournalingPolicy,
   LiveHarnessProtocol,
   LiveState,
   LiveStream,
@@ -30,19 +32,65 @@ import type {
   MediaFrame,
   MediaSessionRef,
   MessageInbox,
+  Operation,
   OperationJournal,
   SessionHarnessProtocol,
   TranscriptDelta,
   Unsubscribe,
 } from "@agentick/spec";
-import { HandlerError } from "@agentick/spec";
+import { DEFAULT_JOURNALING_POLICY, HandlerError } from "@agentick/spec";
 
+// The `EventScopeExtensions.streamId` augmentation this file's operation
+// scopes depend on. Imported HERE, not only from the barrel, so a consumer that
+// reaches this module directly still compiles.
+import "./augment.js";
 import {
   LIVE_STATE_CHANNEL,
   LIVE_TRANSCRIPT_CHANNEL,
   type LiveStateFrame,
   type LiveTranscriptFrame,
 } from "./channel.js";
+
+// ============================================================================
+// Command lifecycle hooks (ADR 80/83) — typed CommandRegistry augmentation.
+// ============================================================================
+//
+// ADR 92 Family 2 §6 — the in-process teardown verbs are operations. The wire
+// ingress path (`live/*` JSON-RPC) was already enveloped by ADR 90; a direct
+// `session.live.stop(...)` from a tool handler or a turn-arbiter was not, so a
+// guard could veto a remote hangup but not a local one. That asymmetry is what
+// these two declarations close.
+//
+// The registry key is the canonical `live:<verb>` form (the `:command:` infix
+// `deriveHookNames` strips), so `live:stop` mints `onBeforeLiveStop` /
+// `onAfterLiveStop`.
+//
+// `start` is ABSENT on purpose — it returns a `MediaSessionRef` SYNCHRONOUSLY,
+// and a sync return cannot host the async interceptor fold. See the
+// `TODO(ADR-92 family-3)` at `start` below.
+declare module "@agentick/runtime" {
+  interface CommandRegistry {
+    "live:stop": { input: LiveStopInput; output: void };
+    "live:close": { input: LiveCloseInput; output: void };
+  }
+}
+
+/** Operation input for `live:command:stop` — the wire `live/stop` params shape. */
+export interface LiveStopInput {
+  readonly streamId: string;
+  /** Forced teardown (skip the graceful drain at the transport half). */
+  readonly hard?: boolean;
+  /** Adopter-supplied teardown reason, carried into the audit record. */
+  readonly reason?: string;
+}
+
+/**
+ * Operation input for `live:command:close` — harness-wide teardown. Empty
+ * today; the streams it tears down are journaled by the nested
+ * `live:command:stop` records it produces (layered execution = layered
+ * journal records).
+ */
+export type LiveCloseInput = Record<string, never>;
 
 // ============================================================================
 // Options
@@ -113,6 +161,15 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
     super("live", scopeId, journal, bus, inbox, {
       inheritedInterceptors: options.inheritedInterceptors,
       interceptorParent: options.interceptorParent,
+      // `live:command:close` envelopes are bus-only — the house close-op rule
+      // (`BaseHarness.close`'s contract note, matching `app:command:close-app`
+      // and `gateway:command:close`): the body runs `super.close()`, so a
+      // terminal appended afterwards could hit a journal an `onClose` handler
+      // already tore down. `live:command:stop` keeps the default policy — a
+      // stream teardown IS an audit-worthy event.
+      policy: mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, {
+        override: { "live:command:close": "bus-only" },
+      }),
     });
     this.onStreamCb = options.onStream;
     this.resolveSession = options.session;
@@ -121,6 +178,13 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
 
   // ─────────── start ───────────
 
+  // TODO(ADR-92 family-3): `start` is the sync-return seam — it hands back a
+  // `MediaSessionRef` synchronously, and a sync return cannot host the async
+  // interceptor fold (same blocker as `tasks.submit`, documented at
+  // `tasks/src/harness.ts`). Until Family 3 picks a shape — (a) async-ify the
+  // verb, or (b) a provably-sync interceptor fast-path in the runtime lift —
+  // stream birth is guardable only at the wire (`live/start`), not in process.
+  // Do NOT wrap this in `runOperation` without resolving that first.
   start(streamId?: string): MediaSessionRef {
     const sid = streamId ?? `live:${ulid()}`;
     const ref: MediaSessionRef = { sessionId: this.scopeId, streamId: sid };
@@ -161,26 +225,94 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
     for (const cb of state.interruptListeners) cb(playedMs);
   }
 
+  /**
+   * Tear down one stream — the `live:command:stop` OPERATION (ADR 92 Family 2
+   * §6). Behavior is unchanged (idempotent, emits `closed`, fires close
+   * listeners); what is new is the envelope: a guard can veto a hangup, an
+   * `onBeforeLiveStop` hook can observe the reason, and the teardown leaves an
+   * audit record scoped to `{ sessionId, streamId }`.
+   *
+   * The wire ingress (`live/stop`) already ran under ADR 90's dispatch op and
+   * lands here, so a remote hangup now produces the wire record AND this one —
+   * two real layers, two linked records, per the ADR's layering principle.
+   */
   async stop(
     streamId: string,
     opts?: { readonly hard?: boolean; readonly reason?: string },
   ): Promise<void> {
-    const state = this.streams.get(streamId);
+    await runHarnessProtocol(
+      this.liveOp<LiveStopInput, void>(
+        "stop",
+        { streamId, ...omitUndefined({ hard: opts?.hard, reason: opts?.reason }) },
+        { streamId },
+        (input) => Effect.sync(() => this.stopBody(input)),
+      ),
+    );
+  }
+
+  /** The `live:command:stop` BODY — the pre-promotion `stop` verbatim. */
+  private stopBody(input: LiveStopInput): void {
+    const state = this.streams.get(input.streamId);
     if (!state || state.closed) return; // idempotent
     state.closed = true;
-    this.streams.delete(streamId);
-    this.emitState(streamId, "closed");
+    this.streams.delete(input.streamId);
+    this.emitState(input.streamId, "closed");
     for (const cb of state.closeListeners) cb();
     // Close the downlink half (deferred transport half is a no-op in v0 core).
-    void opts; // `hard` vs graceful only differs at the transport half (deferred).
+    // `hard` vs graceful only differs at the transport half (deferred); it
+    // rides the op input so the audit record carries it either way.
   }
 
   // ─────────── close ───────────
 
+  /**
+   * Harness-wide teardown — the `live:command:close` OPERATION (ADR 92 Family
+   * 2 §6). Stops every live stream, then unwinds the substrate.
+   *
+   * Bus-only by policy (see the constructor): the body reaches `super.close()`,
+   * which fires `onClose` handlers that may tear down the very journal a
+   * terminal append would target.
+   */
   override async close(): Promise<void> {
+    await runHarnessProtocol(
+      this.liveOp<LiveCloseInput, void>("close", {}, {}, () =>
+        Effect.promise(() => this.closeBody()),
+      ),
+    );
+  }
+
+  /** The `live:command:close` BODY — the pre-promotion `close` verbatim. */
+  private async closeBody(): Promise<void> {
     const ids = [...this.streams.keys()];
     for (const id of ids) await this.stop(id, { hard: true, reason: "harness_closed" });
     await super.close();
+  }
+
+  /**
+   * Route a live verb's body through {@link BaseHarness.runOperation} — the
+   * `sessionOp` pattern. Op name follows the house convention
+   * (`<surface>:command:<verb>`), which `deriveHookNames` strips to the
+   * `live:<verb>` CommandRegistry key.
+   *
+   * Declared here rather than via {@link BaseHarness.command} because the live
+   * verbs are already reachable from the wire through the ADR 46 wire
+   * extension (`live/stop`, see `wire.ts`) — a second inbox-addressable face
+   * would be a parallel ingress path for the same verb, which ADR 51 forbids.
+   */
+  private liveOp<I, R>(
+    verb: string,
+    input: I,
+    scope: { readonly streamId?: string },
+    body: (input: I) => Effect.Effect<R, unknown, never>,
+  ): Effect.Effect<R, unknown, never> {
+    const op: Operation<I, R, unknown> = {
+      opId: `live:${verb}:${ulid()}`,
+      surface: "live",
+      name: `live:command:${verb}`,
+      scope: { sessionId: this.scopeId, ...scope },
+      input,
+    };
+    return this.runOperation(op, body);
   }
 
   // ─────────── inbox (no live message types in v0) ───────────

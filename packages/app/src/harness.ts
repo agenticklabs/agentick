@@ -164,6 +164,18 @@ declare module "@agentick/runtime" {
       output: SessionHarnessProtocol<unknown>;
     };
     "app:run-once": { input: RunOnceInput<unknown>; output: RunOnceResult };
+    // ADR 92 Family 2 §4 — a spawned child is created through its OWN verb,
+    // not by reaching past `app:create-session` into the shared body. Mints
+    // `onBefore/AfterAppCreateChildSession`, so a guard can say "this agent
+    // may not spawn" without also blocking every host-created session — the
+    // distinction the shared body made inexpressible.
+    //
+    // The host/wire `app:create-session` op is unchanged: the two verbs share
+    // a BODY, not an envelope.
+    "app:create-child-session": {
+      input: CreateSessionInput<unknown>;
+      output: SessionHarnessProtocol<unknown>;
+    };
     // `close-app` (ADR 80/83) — a nullary lifecycle op routed through
     // `runOperation` (see `closeApp`). Input/output are both `void` (the
     // Operation's generics). Mints `onBefore/AfterAppCloseApp`.
@@ -2244,9 +2256,14 @@ export class AppHarness<P = unknown>
    * parent in the registry.
    */
   async createChildSession(input: SpawnContextChildInput<P>): Promise<SessionHarnessProtocol<P>> {
+    // The child's id is minted HERE rather than inside `createSessionBody`, so
+    // the operation scope below can name the session it is about. Same shape
+    // and same fallback the body would have applied — it sees a concrete id and
+    // takes its normal path.
+    const sessionId = input.sessionId ?? `session:${ulid()}`;
     const createInput: CreateSessionInput<P> = {
+      sessionId,
       ...omitUndefined({
-        sessionId: input.sessionId,
         metadata: input.metadata,
         // ADR 48 — thread the inherited principal (the parent's own, set by
         // `session.spawn()`) so the child's harness + record carry ownership.
@@ -2256,13 +2273,44 @@ export class AppHarness<P = unknown>
         maxTicks: input.maxTicks,
       }),
     };
-    return this.createSessionBody(createInput, /* ephemeral */ false, {
-      agent: input.agent,
-      parentSessionId: input.parentSessionId,
-      // SP5/SP6 — forward the child's lineage + the parent's construction
-      // signal so the session stamps envelopes and cascades teardown.
-      ...omitUndefined({ spawnPath: input.spawnPath, signal: input.signal }),
-    });
+    const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
+      opId: `app:create-child-session:${ulid()}`,
+      surface: "app",
+      name: "app:command:create-child-session",
+      // The lineage IS the scope: the child (`sessionId`), its parent
+      // (`parentSessionId`), and the whole ancestry (`spawnPath`). An auditor
+      // reconstructs the spawn tree from these records alone.
+      scope: {
+        sessionId,
+        parentSessionId: input.parentSessionId,
+        ...omitUndefined({ spawnPath: input.spawnPath }),
+      },
+      // ADR 92 Slice B — the causal link to the invoking `session:command:spawn`,
+      // threaded as DATA by `session.spawn()`. The runtime's ambient
+      // `parentOpId` auto-derivation cannot reach across the Promise boundary
+      // between the parent's op fiber and this call (see `runtime-context.ts`
+      // — a Promise continuation is outside the fiber, FiberRef is invisible
+      // there), so the parent's opId travels explicitly. Ambient derivation
+      // still applies when this IS invoked in-fiber; the explicit value wins.
+      ...omitUndefined({ parentOpId: input.parentOpId }),
+      input: createInput,
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () =>
+            this.createSessionBody(i, /* ephemeral */ false, {
+              agent: input.agent,
+              parentSessionId: input.parentSessionId,
+              // SP5/SP6 — forward the child's lineage + the parent's
+              // construction signal so the session stamps envelopes and
+              // cascades teardown.
+              ...omitUndefined({ spawnPath: input.spawnPath, signal: input.signal }),
+            }),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
+    );
   }
 
   /**
@@ -2400,7 +2448,10 @@ export class AppHarness<P = unknown>
     if (reason === "evict" && !this.isEvictable(entry)) return;
     this.registry.delete(sessionId);
     try {
-      await entry.session.close();
+      // ADR 92 Family 2 §5 — eviction routes THROUGH `session:command:close`,
+      // not around it. Page-out and hangup are the same teardown; the audit
+      // record tells them apart by provenance, not by code path.
+      await entry.session.close({ reason: reason === "evict" ? "evicted" : "closed" });
     } catch {
       // best effort — already-closed sessions throw; ignore
     }

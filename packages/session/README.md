@@ -629,7 +629,7 @@ for the full tier model and the `use` vs `fx.use` split.
 
 ## Command hooks — the session verbs are hookable (ADR 80 / 83)
 
-The four public session verbs route through `runOperation` (via the private
+Every public session verb routes through `runOperation` (via the private
 `sessionOp` wrapper), so each fires the ADR-83 interceptor seam — guards,
 `.use()` middleware, and the derived **command lifecycle hooks** — plus the
 full phase contract (`requested` → `before` → terminal). The verbs and their
@@ -644,6 +644,8 @@ minted hook names:
 | `model.setModel/setTarget` | `session:set-model`             | `onBeforeSessionSetModel` / `onAfterSessionSetModel` |
 | `snapshot`                 | `session:snapshot`              | `onBeforeSessionSnapshot` / `onAfterSessionSnapshot` |
 | `restore`                  | `session:restore`               | `onBeforeSessionRestore` / `onAfterSessionRestore`   |
+| `spawn` (and `fork`)       | `session:spawn`                 | `onBeforeSessionSpawn` / `onAfterSessionSpawn`       |
+| `close`                    | `session:close`                 | `onBeforeSessionClose` / `onAfterSessionClose`       |
 
 Kebab `-what` segments PascalCase into the hook name (`apply-executor-result` →
 `ApplyExecutorResult`), so every verb yields a clean, dot-accessible hook.
@@ -662,12 +664,69 @@ A before-hook returning a value **transforms** the input; `void` passes through;
 `throw` vetoes (the op aborts on the `E` channel). After-hooks are symmetric over
 the output.
 
+### Lifecycle verbs — `spawn` and `close` (ADR 92 Family 2)
+
+`spawn` / `fork` and `close` joined the table above in ADR 92's Slice B; before
+it they were plain methods, which made two policies inexpressible.
+
+**Spawn is two linked records.** A spawn traverses two real layers, so it
+produces two records, and the second names the first as its `parentOpId`:
+
+| Op                                 | Layer   | Owns                                                                     |
+| ---------------------------------- | ------- | ------------------------------------------------------------------------ |
+| `session:command:spawn`            | session | depth ceiling (SP4), lineage extension (SP5), principal descent (ADR 48) |
+| `app:command:create-child-session` | app     | construction, registry admission, LRU accounting                         |
+
+The child-create op's scope carries the whole lineage — `sessionId` (the child),
+`parentSessionId`, and `spawnPath` — so the spawn tree reconstructs from the
+journal alone. A `fork` adds two more records around them (`session:snapshot`
+on the parent, `session:restore` on the child), one per real layer.
+
+```typescript
+// "This agent may not spawn sub-agents" — previously inexpressible; the only
+// bound was the framework's own `maxSpawnDepth` ceiling.
+app.guard((_input, ctx) =>
+  ctx.op === "SessionSpawn" ? { kind: "veto", reason: "no-subagents" } : undefined,
+);
+```
+
+The child-create verb is deliberately distinct from `app:create-session`: the two
+share a **body**, not an envelope, so a guard on host session creation does not
+silently police spawns, and vice-versa. The ADR-48 `onSessionCreate` hook still
+fires for spawns exactly as before — the promotion added the envelope, not a
+second hook.
+
+**Close is bus-only, and eviction routes through it.** `session:command:close`
+is marked `"bus-only"` in the harness's `JournalingPolicy.override`: the body
+reaches substrate teardown, so a terminal appended afterwards could target a
+journal an `onClose` handler already closed (the same rule `app:close-app` and
+`gateway:close` follow). The input carries provenance:
+
+```typescript
+await session.close(); // { reason: "closed" } — a genuine session end
+await session.close({ reason: "evicted" }); // what the app's LRU / idle sweep passes
+```
+
+`"evicted"` is transparent **paging**, not a lifecycle end: the durable
+`SessionRecord` and timeline store survive, the session reconstructs on its next
+open, and the app-level `onSessionClose` handlers do not fire. Page-out and
+hangup take the **same** code path — the record tells them apart, not the
+control flow.
+
+```typescript
+// Hold teardown open for a drain:
+session.hooks.onBeforeSessionClose((input) =>
+  input.reason === "closed" ? waitForDrain() : undefined,
+);
+```
+
 ### Wire limitation — hookable, NOT addressable (ADR 51)
 
 These ops are the **in-process door only**. `SendInput` carries non-serializable
 per-call overrides (`executor`, `target`, `signal`, and tool registrations with
 _live_ handlers) that, by ADR 51 §1.2, cannot cross the wire — so **no wire
-`CommandDescriptor` is declared** for the session verbs. Wire addressability
+`CommandDescriptor` is declared** for the session verbs. `spawn` is in the same
+position for the same reason (a JSX agent root in, a live session out). Wire addressability
 would require a designed serializable input subset (`messages` + `maxTicks` +
 `stream` — the porcelain the wire's `session/send` already carries), which
 remains future work. `session:dispatch` (name + JSON input) is fully
@@ -1031,6 +1090,17 @@ their backing.
   `onBeforeSessionAppend` on `appendEntry`, `onAfterSessionSend` sees the
   `SessionExecutionHandle`; plus the `deriveHookNames` ↔ `Pascal` agreement
   for `session:command:send` / `:append`.
+- `@agentick/app`'s `src/__tests__/lifecycle-operations.spec.tsx` — the ADR 92
+  Slice B lifecycle verbs, against a real app substrate (the test lives where
+  both layers do). Spawn: both ops emit, the child-create carries
+  `{ sessionId, parentSessionId, spawnPath }` as scope and names the spawn op as
+  its `parentOpId`; a spawn does NOT emit `app:create-session`; both records
+  journal; a fork adds the snapshot + restore records; `onSessionCreate` still
+  fires. Guards: a veto at either layer creates no child and adds no registry
+  entry, and a spawn-only guard does not block a host `createSession`. Close:
+  the op carries `reason: "closed"`, is absent from the journal (bus-only
+  policy), and a veto leaves the session usable; both the idle sweep and the LRU
+  page-out emit it with `reason: "evicted"`.
 - `src/__tests__/model-facade.spec.ts` — the `session.model` facade (ADR 89
   §2): `setModel` swaps the session default (the next send uses the new
   executor); `setTarget` swaps only the target; `onBeforeSessionSetModel`

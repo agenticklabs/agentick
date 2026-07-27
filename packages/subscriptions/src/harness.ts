@@ -28,6 +28,12 @@
 
 import { Effect } from "effect";
 import { BaseHarness, type Middleware } from "@agentick/runtime";
+// Load this package's own EventScope augmentation (`subscriptionId`) —
+// this file uses the augmented dim in op scopes, and a consumer that
+// reaches this module DEEPLY (bypassing the barrel that imports
+// augment.ts) would otherwise fail to typecheck. Same fix as the
+// credentials/live harnesses (ADR 92 Slice B latent-hazard finding).
+import "./augment.js";
 import type {
   EventBus,
   MessageEnvelope,

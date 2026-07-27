@@ -76,6 +76,30 @@ mechanism):
   outranks local policy — an app guard must veto before layer-local
   logic runs.
 
+## Composition ruling — withX(definition) (amendment, Ryan 2026-07-26)
+
+**The definition IS the options**: for store-bearing namespaces,
+`withX(definition | inlineOptions | liveInstance)` — the inline bag is
+the SAME TYPE as `defineX`'s parameter (`defineX` = identity + brand,
+valued for portability: grammar files default-export it, tests import
+prod definitions and override slots). `createApp({ x })` is the
+metapackage's sugar over the same extension (ADR 27 — built-ins are
+bundled, not privileged). **Timing law: definitions are INERT until install.** `defineX(...)`
+evaluates to pure branded data — no harness constructed, no store
+opened, no hydrator run. Construction is PER-SESSION at install
+(`withX(definition)` captures the plan; each session's install builds
+its own harness from it), and genesis (`hydrate(ctx)`) runs at
+session-open with that session's reality. `defineX` = plan;
+`createX`/`new XHarness` = live thing. The live-instance form is the
+BYO/single-session escape hatch precisely because its timing differs —
+the adopter owns its lifecycle. REJECTED: `provideX` (foreign DI semantics;
+withX is house vocabulary); `withX({ x: defineX() })` nesting (the
+config-wrapper the flat-options rule kills — the escape hatch is the
+dichotomy's LIVE-INSTANCE form, not a nested slot). Scope: this
+one-size rule holds exactly where the definition surface is closed;
+third-party extensions whose config is not a namespace definition take
+whatever their domain needs (defineX becomes guidance, not law).
+
 ## Guards on configs + the completeness matrix (amendment, Ryan 2026-07-26)
 
 **`guards:` is a sibling bag of `hooks:`** at both sites — guards are a

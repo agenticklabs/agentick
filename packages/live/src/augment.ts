@@ -43,4 +43,16 @@ declare module "@agentick/spec" {
      */
     readonly live?: Live;
   }
+
+  interface EventScopeExtensions {
+    /**
+     * Media stream identifier — the per-stream routing dimension of the live
+     * surface, stamped on every `live:command:stop` envelope (ADR 92 Family 2
+     * §6) so an observer can follow one call's teardown out of a session that
+     * multiplexes several:
+     *
+     *     app.events({ scope: { streamId: "live:01J…" } })
+     */
+    readonly streamId?: string;
+  }
 }

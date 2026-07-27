@@ -635,6 +635,31 @@ export interface RestoreSnapshotInput {
   readonly snapshot: SessionSnapshot;
 }
 
+/**
+ * Why a session is being torn down — the provenance dimension of the
+ * `session:close` operation (ADR 92 Family 2 §5).
+ *
+ *   `"closed"`  — a genuine session END: explicit teardown, app shutdown, a
+ *                 `runOnce` auto-dispose, a parent disposing a spawned child.
+ *                 The app-level `onSessionClose` handlers fire.
+ *   `"evicted"` — transparent PAGING: the app's soft LRU cap or idle sweep is
+ *                 releasing memory. The durable `SessionRecord` + timeline
+ *                 store survive and the session reconstructs on its next open,
+ *                 so this is not a lifecycle end and `onSessionClose` does NOT
+ *                 fire.
+ *
+ * Facts, never decisions — nothing branches on it inside the close body; it
+ * exists so an operator reading the journal can tell a real hangup from a
+ * memory-pressure page-out.
+ */
+export type SessionCloseReason = "closed" | "evicted";
+
+/** Input to the `session:close` command. */
+export interface SessionCloseInput {
+  /** Provenance of the teardown. Defaults to `"closed"`. */
+  readonly reason?: SessionCloseReason;
+}
+
 // ============================================================================
 // Errors
 // ============================================================================
@@ -765,10 +790,22 @@ export interface SessionHarnessProtocol<P = unknown> {
   restore(input: RestoreSnapshotInput): Promise<void>;
 
   /**
-   * Shut down. Future commands fail with `SessionClosedError`.
-   * Idempotent.
+   * Shut down. Future commands fail with `SessionClosedError`. Idempotent.
+   *
+   * Runs as the `session:close` command (ADR 92 Family 2 §5), symmetric with
+   * `app:close-app` and `gateway:close` — so `onBeforeSessionClose` can hold
+   * teardown open for a drain and the audit trail records the end of a session
+   * the way it records the beginning. Close-op envelopes are BUS-ONLY per the
+   * Operation framework's `JournalingPolicy.override`: the body reaches
+   * substrate teardown, so a terminal appended afterwards could target a
+   * journal an `onClose` handler already closed.
+   *
+   * `opts.reason` distinguishes a genuine session END from transparent PAGING
+   * (`"evicted"` — the app's LRU / idle sweep releasing memory while the
+   * durable record survives). It is provenance for the audit record only;
+   * teardown is identical either way.
    */
-  close(): Promise<void>;
+  close(opts?: SessionCloseInput): Promise<void>;
 
   /**
    * `StateApplicator` surface — consumed by the loop executor's
@@ -1146,6 +1183,20 @@ export interface SpawnContextChildInput<P = unknown> {
    * work through the same merge-into-execution-signal plumbing (PA1).
    */
   readonly signal?: AbortSignal;
+  /**
+   * The invoking `session:command:spawn` operation's id (ADR 92 Family 2 §4) —
+   * the causal link stamped as `parentOpId` on the `app:command:create-child-
+   * session` operation, so the audit trail nests the child's creation under the
+   * spawn that asked for it.
+   *
+   * Threaded as DATA rather than inherited from the fiber because the runtime's
+   * ambient `parentOpId` derivation cannot cross the Promise boundary between
+   * the parent's operation fiber and this call — a Promise continuation runs
+   * outside the fiber and the `RuntimeContextRef` FiberRef is invisible there
+   * (`runtime/src/substrate/runtime-context.ts`). Absent when the spawn did not
+   * run under an operation.
+   */
+  readonly parentOpId?: string;
 }
 
 // Convenience re-exports for ergonomic imports.
