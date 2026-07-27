@@ -134,7 +134,6 @@ export interface LoopToolResult {
 export interface RunExecutionInput {
   readonly executionId: string;
   readonly sessionId: string;
-  readonly parentExecutionId?: string;
   /**
    * Spawn lineage of the session running this execution (SP5) — ancestor
    * session ids, root-first, empty/absent for a root session. Stamped onto
@@ -390,6 +389,7 @@ export type LoopExecutionEvent =
       readonly name: string;
       readonly outcome: "succeeded" | "failed" | "vetoed" | "aborted";
       readonly durationMs: number;
+      readonly presentation?: import("../data/declarations.js").ToolPresentation;
     }
   | {
       readonly kind: "tool-dispatch";
@@ -401,6 +401,8 @@ export type LoopExecutionEvent =
       readonly durationMs: number;
       readonly executedBy?: string;
       readonly isError?: boolean;
+      readonly presentation?: import("../data/declarations.js").ToolPresentation;
+      readonly metadata?: Readonly<Record<string, unknown>>;
     };
 
 export interface ExecutionRunResult {

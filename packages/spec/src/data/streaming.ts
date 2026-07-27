@@ -36,6 +36,7 @@
 
 import type { ContentBlock } from "./content-blocks.js";
 import type { BlockType } from "./content-blocks.js";
+import type { ToolPresentation } from "./declarations.js";
 import type { LanguageModelStopReason, UsageStats } from "./execution-result.js";
 
 // ============================================================================
@@ -251,9 +252,15 @@ export interface StreamEventBase {
   readonly sessionId: string;
   /** Execution this event belongs to. */
   readonly executionId: string;
-  /** Parent execution id when this event is from a spawned child. */
-  readonly parentExecutionId?: string;
-  /** Spawn ancestry chain — present on events bubbled from child sessions. */
+  /**
+   * Spawn ancestry chain (root-first) of the session that EMITTED this
+   * event. Stamped by a spawned child onto its OWN handle stream — it
+   * describes the emitter's lineage; it is not a routing header, and no
+   * event is ever bubbled from one handle onto another (a child's interior
+   * events stay on the child's handle; the parent sees only
+   * {@link SpawnStartEvent} / {@link SpawnEndEvent}). Absent for a root
+   * session.
+   */
   readonly spawnPath?: readonly string[];
   /** Original provider event / chunk for pass-through (debugging, provider-specific). */
   readonly raw?: unknown;
@@ -291,6 +298,17 @@ export type ToolDispatchEndEvent = {
   readonly name: string;
   readonly outcome: "succeeded" | "failed" | "vetoed" | "aborted";
   readonly durationMs: number;
+  /**
+   * The call's resolved {@link ToolPresentation} — the four un-collapsed
+   * label materials (`name` / `title` / `summary` / `narration`) the client
+   * composes into "what is this call doing?". Deliberately NOT on
+   * `tool-dispatch-start`: the summary is resolved against the VALIDATED
+   * input inside the dispatch, strictly after the start event, and the
+   * alternative (re-resolving off the raw declaration) would be a second
+   * divergent resolution path. Absent when the dispatch short-circuited
+   * before the resolution point, or on a hard failure.
+   */
+  readonly presentation?: ToolPresentation;
 } & StreamEventBase;
 
 export type ToolDispatchEvent = {
@@ -302,6 +320,17 @@ export type ToolDispatchEvent = {
   readonly durationMs: number;
   readonly executedBy?: string;
   readonly isError?: boolean;
+  /** See {@link ToolDispatchEndEvent.presentation}. */
+  readonly presentation?: ToolPresentation;
+  /**
+   * The result's own metadata bag, forwarded verbatim from
+   * `DispatchResult.metadata`. Result-scoped presentation payloads ride
+   * here under their namespaced key — an MCP tool's `CallToolResult._meta`
+   * arrives as `metadata.mcp.meta` (the same namespace the server-side
+   * result extensions project from), which is where an MCP-Apps `ui`
+   * descriptor lives. The framework forwards; it never interprets.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 } & StreamEventBase;
 
 /** Tool confirmation request — fired when the model requests a tool that requires host approval. */
@@ -320,6 +349,38 @@ export type ToolConfirmationResolvedEvent = {
   readonly approved: boolean;
   readonly reason?: string;
   readonly always?: boolean;
+} & StreamEventBase;
+
+/**
+ * Child-execution boundary, emitted on the PARENT's stream (never the
+ * child's). The pair brackets one `session.spawn({ send })` — the
+ * spawn-and-run form, the only form whose child execution the parent
+ * observes; an unbound `spawn()` has no execution to bound and emits
+ * nothing.
+ *
+ * `originCallId` is the parent tool call whose handler asked for the
+ * spawn. It travels as DATA (`SpawnInput.originCallId`, read off the
+ * dispatch ctx's `toolCallId`) because the parent's spawn operation runs
+ * on a fresh fiber that cannot see the dispatch's ambient context.
+ *
+ * The child's INTERIOR events stay on the child's own handle — see
+ * `spawnPath` on {@link StreamEventBase}.
+ */
+export type SpawnStartEvent = {
+  readonly type: "spawn-start";
+  /** The spawned child session's id. */
+  readonly spawnSessionId: string;
+  /** The child execution this spawn started. */
+  readonly spawnExecutionId: string;
+  /** Parent tool call that caused the spawn. Absent for a host-driven spawn. */
+  readonly originCallId?: string;
+} & StreamEventBase;
+
+export type SpawnEndEvent = {
+  readonly type: "spawn-end";
+  readonly spawnSessionId: string;
+  /** Whether the child execution settled by rejecting. */
+  readonly isError: boolean;
 } & StreamEventBase;
 
 /** Tick lifecycle. Symmetric. */
@@ -372,6 +433,8 @@ export type OrchestrationStreamEvent =
   | ToolDispatchEvent
   | ToolConfirmationRequiredEvent
   | ToolConfirmationResolvedEvent
+  | SpawnStartEvent
+  | SpawnEndEvent
   | TickStartEvent
   | TickEndEvent
   | TickEvent
@@ -388,6 +451,8 @@ export const ORCHESTRATION_EVENT_TYPES = [
   "tool-dispatch",
   "tool-confirmation-required",
   "tool-confirmation-resolved",
+  "spawn-start",
+  "spawn-end",
   "tick-start",
   "tick-end",
   "tick",

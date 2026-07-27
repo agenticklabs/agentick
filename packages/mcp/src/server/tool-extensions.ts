@@ -20,6 +20,13 @@
  *     (`config.ts`) reads it off the normalized result and the tools
  *     projection spreads it onto the wire `CallToolResult._meta`.
  *
+ * The convention runs BOTH directions on the same key: when agentick
+ * CONSUMES an MCP server, `mapCallToolResult` (`integration/content-
+ * mapper.ts`) folds the incoming `CallToolResult._meta` into
+ * `metadata.mcp.meta` via {@link mcpResultExtensions}, so a result-scoped
+ * payload — an MCP-Apps `ui` descriptor, a step-up challenge — reads the
+ * same whether agentick produced it or received it.
+ *
  * Adopters never hand-write the `mcp` key — {@link mcpToolExtensions}
  * (declaration) and {@link mcpResultExtensions} (result) build the
  * `metadata` fragment. Absent extensions ⇒ wire output byte-identical

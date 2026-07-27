@@ -25,6 +25,7 @@ import type {
   SessionHarnessProtocol,
   SpawnContext,
   SpawnContextChildInput,
+  ToolHandler,
   ToolRegistration,
 } from "@agentick/spec";
 import { ExecutionFailed, jsonSchema } from "@agentick/spec";
@@ -79,6 +80,10 @@ async function mkSession(
     parentSessionId?: string;
     tools?: readonly ToolRegistration[];
     agent?: unknown;
+    /** Extra handlerRef → handler entries registered on the resolver. */
+    handlers?: Readonly<Record<string, ToolHandler>>;
+    /** Override the single-reply scripted executor (multi-tick scripts). */
+    executor?: FakeLanguageModelExecutor;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -88,13 +93,16 @@ async function mkSession(
   const loop = new LoopExecutorHarness("test-l", journal, bus, inbox);
   const resolver = new InMemoryHandlerResolver();
   resolver.register("h.calc", async () => [{ type: "text", text: "42" }]);
+  for (const [ref, handler] of Object.entries(opts.handlers ?? {})) {
+    resolver.register(ref, handler);
+  }
   const elicitation = new ElicitationHarness("test-t:elicitation", journal, bus, inbox);
   const tools = new ToolExecutorHarness("test-t", journal, bus, inbox, {
     handlerResolver: resolver,
     elicitation,
     ...(opts.tools ? { initialTools: opts.tools } : {}),
   });
-  const executor = replyExec("ok");
+  const executor = opts.executor ?? replyExec("ok");
   await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
@@ -401,6 +409,266 @@ describe("SessionHarness — spawn", () => {
     await session.spawn({ sessionId: "child-default" });
 
     expect(receivedInput?.agent).toBe(parentRoot);
+    await session.close();
+  });
+});
+
+describe("SessionHarness — tool-dispatch StreamEvent projection", () => {
+  it("carries the resolved presentation and the result's metadata bag onto tool-dispatch", async () => {
+    const uiMeta = {
+      mcp: { meta: { ui: { resourceUri: "ui://widget/invoice-list", prefersBorder: true } } },
+    };
+    const labelled: ToolRegistration = {
+      declaration: {
+        id: "t.report",
+        name: "report",
+        description: "builds a report",
+        inputSchema: jsonSchema({ type: "object" }),
+        exposure: ["model", "dispatch"],
+        annotations: { title: "Build report", displaySummary: () => "Building the Q3 report" },
+      },
+      handlerRef: "h.report",
+      binding: { scope: "runtime" },
+    };
+    const { session } = await mkSession({
+      tools: [labelled],
+      executor: new FakeLanguageModelExecutor(
+        `exec-report-${Math.random()}`,
+        new MemoryJournal(),
+        new LocalEventBus(),
+        new LocalInbox(),
+        {
+          scripted: [
+            {
+              result: {
+                specVersion: "2026-05-08",
+                output: [
+                  { type: "tool_use", toolUseId: "call-9", name: "report", input: {} },
+                ] as ContentBlock[],
+                stopReason: "tool_use",
+                toolCalls: [{ id: "call-9", name: "report", input: {} }],
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              },
+            },
+            {
+              result: {
+                specVersion: "2026-05-08",
+                output: [{ type: "text", text: "reported" }] as ContentBlock[],
+                stopReason: "end",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              },
+            },
+          ],
+        },
+      ),
+      handlers: {
+        // A result-level metadata bag — the carriage an MCP-App `ui`
+        // descriptor rides on.
+        "h.report": async () => ({
+          content: [{ type: "text", text: "done" }] as ContentBlock[],
+          metadata: uiMeta,
+        }),
+      },
+    });
+
+    const handle = await session.send({ messages: [{ role: "user", content: "report" }] });
+    const events: Array<Record<string, unknown>> = [];
+    const drain = (async () => {
+      for await (const e of handle.events()) events.push(e as unknown as Record<string, unknown>);
+    })();
+    await handle.result;
+    await drain;
+
+    const dispatched = events.find((e) => e.type === "tool-dispatch");
+    expect(dispatched).toBeDefined();
+    // Resolved by the tool executor against the validated input, forwarded by
+    // the loop, projected by the session — the whole chain in one assertion.
+    expect(dispatched!.presentation).toMatchObject({
+      name: "report",
+      title: "Build report",
+      summary: "Building the Q3 report",
+    });
+    expect(dispatched!.metadata).toEqual(uiMeta);
+    expect(events.find((e) => e.type === "tool-dispatch-end")!.presentation).toMatchObject({
+      summary: "Building the Q3 report",
+    });
+
+    await session.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Spawn boundary events on the PARENT's stream
+// ---------------------------------------------------------------------------
+
+/**
+ * A stub `SpawnContext` whose child `send()` resolves a handle the parent
+ * can read `executionId` off and whose `result` settles when the test says
+ * so. Records the `SpawnContextChildInput` it received.
+ */
+function stubSpawnContext(childExecutionId: string, settle: Promise<unknown>) {
+  const seen: { input?: SpawnContextChildInput } = {};
+  const ctx: SpawnContext = {
+    disposeChildSession: async () => undefined,
+    createChildSession: async (input) => {
+      seen.input = input;
+      return {
+        id: input.sessionId ?? "child-stub",
+        send: async () => ({
+          executionId: childExecutionId,
+          status: "running",
+          result: settle,
+          events: () => ({
+            [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true }) }),
+          }),
+          abort: async () => undefined,
+        }),
+        close: async () => undefined,
+      } as unknown as SessionHarnessProtocol;
+    },
+  };
+  return { ctx, seen };
+}
+
+/** Two-tick script: tick 1 calls `spawn_child`, tick 2 answers with text. */
+function spawnToolScriptExec() {
+  return new FakeLanguageModelExecutor(
+    `exec-spawn-${Math.random()}`,
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    {
+      scripted: [
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [
+              { type: "tool_use", toolUseId: "call-77", name: "spawn_child", input: {} },
+            ] as ContentBlock[],
+            stopReason: "tool_use",
+            toolCalls: [{ id: "call-77", name: "spawn_child", input: {} }],
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          },
+        },
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [{ type: "text", text: "child done" }] as ContentBlock[],
+            stopReason: "end",
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          },
+        },
+      ],
+    },
+  );
+}
+
+const spawnTool: ToolRegistration = {
+  declaration: {
+    id: "t.spawn_child",
+    name: "spawn_child",
+    description: "spawns a sub-agent",
+    inputSchema: jsonSchema({ type: "object" }),
+    exposure: ["model", "dispatch"],
+  },
+  handlerRef: "h.spawn_child",
+  binding: { scope: "runtime" },
+};
+
+describe("SessionHarness — spawn boundary events (parent stream)", () => {
+  it("emits spawn-start/spawn-end on the parent handle, carrying the origin tool callId", async () => {
+    let settleChild: (v: unknown) => void = () => {};
+    const childSettled = new Promise<unknown>((r) => {
+      settleChild = r;
+    });
+    const { ctx, seen } = stubSpawnContext("child-exec-1", childSettled);
+
+    let sessionRef: SessionHarnessProtocol | undefined;
+    const { session } = await mkSession({
+      spawnContext: ctx,
+      tools: [spawnTool],
+      executor: spawnToolScriptExec(),
+      handlers: {
+        "h.spawn_child": async (_input, { ctx: handlerCtx }) => {
+          // The origin linkage travels as DATA off the dispatch ctx — the
+          // parent's spawn op fiber cannot see it ambiently.
+          await sessionRef!.spawn({
+            agent: null,
+            sessionId: "child-1",
+            send: { messages: [{ role: "user", content: "go" }] },
+            originCallId: handlerCtx.toolCallId,
+          });
+          settleChild(undefined);
+          return [{ type: "text", text: "spawned" }];
+        },
+      },
+    });
+    sessionRef = session;
+
+    const handle = await session.send({ messages: [{ role: "user", content: "spawn one" }] });
+    const events: Array<{ type: string }> = [];
+    const drain = (async () => {
+      for await (const e of handle.events()) events.push(e as { type: string });
+    })();
+    await handle.result;
+    await drain;
+
+    expect(seen.input?.sessionId).toBe("child-1");
+
+    const start = events.find((e) => e.type === "spawn-start") as
+      | {
+          type: string;
+          spawnSessionId: string;
+          spawnExecutionId: string;
+          originCallId?: string;
+          executionId: string;
+        }
+      | undefined;
+    expect(start).toBeDefined();
+    expect(start).toMatchObject({
+      spawnSessionId: "child-1",
+      spawnExecutionId: "child-exec-1",
+      originCallId: "call-77",
+    });
+    // Attribution: the event belongs to the PARENT's execution.
+    expect(start!.executionId).toBe(handle.executionId);
+
+    const end = events.find((e) => e.type === "spawn-end") as
+      | { type: string; spawnSessionId: string; isError: boolean }
+      | undefined;
+    expect(end).toBeDefined();
+    expect(end).toMatchObject({ spawnSessionId: "child-1", isError: false });
+
+    await session.close();
+  });
+
+  it("emits nothing for the UNBOUND spawn form — no child execution to bound", async () => {
+    const { ctx } = stubSpawnContext("unused", Promise.resolve(undefined));
+    let sessionRef: SessionHarnessProtocol | undefined;
+    const { session } = await mkSession({
+      spawnContext: ctx,
+      tools: [spawnTool],
+      executor: spawnToolScriptExec(),
+      handlers: {
+        "h.spawn_child": async () => {
+          await sessionRef!.spawn({ agent: null, sessionId: "child-unbound" });
+          return [{ type: "text", text: "spawned" }];
+        },
+      },
+    });
+    sessionRef = session;
+
+    const handle = await session.send({ messages: [{ role: "user", content: "spawn one" }] });
+    const events: Array<{ type: string }> = [];
+    const drain = (async () => {
+      for await (const e of handle.events()) events.push(e as { type: string });
+    })();
+    await handle.result;
+    await drain;
+
+    expect(events.some((e) => e.type === "spawn-start")).toBe(false);
+    expect(events.some((e) => e.type === "spawn-end")).toBe(false);
+
     await session.close();
   });
 });

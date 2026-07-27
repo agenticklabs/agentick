@@ -17,23 +17,35 @@ import type { CallToolResult, ResourceContents } from "@modelcontextprotocol/sdk
 import type { ContentBlock, ResourceContents as SpecResourceContents } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
+import { mcpResultExtensions } from "../server/tool-extensions.js";
+
 /**
  * A `CallToolResult` mapped into agentick's content model, preserving
- * the two sidecar fields the bare {@link mcpContentToBlocks} drops:
+ * the three sidecars the bare {@link mcpContentToBlocks} drops:
  *
  *   - `structuredContent` — the tool's typed JSON payload (MCP
  *     2025-11-25+). Distinct from the `content[]` display blocks.
  *   - `isError` — whether the tool signalled a domain-level error
  *     (as opposed to a protocol error, which throws).
+ *   - `metadata` — the wire `_meta`, folded into the ONE namespaced
+ *     result key (`metadata.mcp.meta`) that agentick's shared substrate
+ *     carries MCP payloads under. This is the carriage an MCP-Apps `ui`
+ *     descriptor rides, and it is the same key the SERVER-side
+ *     projection reads — one convention, both directions.
+ *
+ * The shape is `ToolResultEnvelope`-compatible on purpose: a tool
+ * handler proxying an MCP call returns it directly and the executor
+ * carries every field onto the `DispatchResult`.
  *
  * Downstream consumers that only need the display blocks keep using
  * {@link mcpContentToBlocks}; consumers that must round-trip the full
- * result (structured output, error signalling) use this.
+ * result use this.
  */
 export interface MappedCallToolResult {
   readonly content: readonly ContentBlock[];
   readonly structuredContent?: Record<string, unknown>;
   readonly isError?: boolean;
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -52,9 +64,10 @@ export function mcpContentToBlocks(content: CallToolResult["content"]): readonly
 
 /**
  * Map a full `CallToolResult` — content blocks PLUS the
- * `structuredContent` / `isError` sidecar fields that
+ * `structuredContent` / `isError` / `_meta` sidecars that
  * {@link mcpContentToBlocks} alone drops. `undefined` sidecars are
- * omitted so the shape stays clean (and journals compactly).
+ * omitted so the shape stays clean (and journals compactly) — a result
+ * that carried none maps to a bare `{ content }`.
  */
 export function mapCallToolResult(result: CallToolResult): MappedCallToolResult {
   return {
@@ -62,6 +75,10 @@ export function mapCallToolResult(result: CallToolResult): MappedCallToolResult 
     ...omitUndefined({
       structuredContent: result.structuredContent as Record<string, unknown> | undefined,
       isError: result.isError,
+      metadata:
+        result._meta !== undefined
+          ? mcpResultExtensions({ meta: result._meta as Readonly<Record<string, unknown>> })
+          : undefined,
     }),
   };
 }

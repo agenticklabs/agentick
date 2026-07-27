@@ -725,6 +725,64 @@ describe("LoopExecutorHarness [characterization] — event sequence", () => {
     expect(kinds).toContain("tool-dispatch-end");
     expect(kinds.indexOf("tool-dispatch-start")).toBeLessThan(kinds.indexOf("tool-dispatch-end"));
   });
+
+  it("projects DispatchResult.metadata onto tool-dispatch verbatim", async () => {
+    // The MCP-App frame payload rides the SAME `metadata.mcp` namespace the
+    // server-side result extensions use — the loop forwards the bag, it does
+    // not interpret or reshape it.
+    const resultMetadata = {
+      mcp: { meta: { ui: { resourceUri: "ui://widget/invoice-list", prefersBorder: true } } },
+    };
+    const trace = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      dispatch: async (call) => ({ ...dispatchOk(call), metadata: resultMetadata }),
+    });
+    const dispatched = trace.events.find((e) => e.kind === "tool-dispatch");
+    expect(dispatched?.metadata).toEqual(resultMetadata);
+  });
+
+  it("omits metadata on tool-dispatch when the result carried none", async () => {
+    const trace = await runChar({ ticks: [toolUse("c1"), ended()], maxTicks: 5 });
+    const dispatched = trace.events.find((e) => e.kind === "tool-dispatch");
+    expect(dispatched).toBeDefined();
+    expect("metadata" in dispatched!).toBe(false);
+  });
+
+  it("projects DispatchResult.presentation onto tool-dispatch-end and tool-dispatch", async () => {
+    const presentation = {
+      name: "search_invoices",
+      title: "Search invoices",
+      summary: "Searching invoices for ACME",
+    };
+    const trace = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      dispatch: async (call) => ({ ...dispatchOk(call), presentation }),
+    });
+    expect(trace.events.find((e) => e.kind === "tool-dispatch-end")?.presentation).toEqual(
+      presentation,
+    );
+    expect(trace.events.find((e) => e.kind === "tool-dispatch")?.presentation).toEqual(
+      presentation,
+    );
+  });
+
+  it("tool-dispatch-start carries NO presentation — it is resolved inside the dispatch", async () => {
+    // The resolution site is the tool executor, mid-dispatch (it needs the
+    // validated input + the stripped model narration). `tool-dispatch-start`
+    // is emitted strictly BEFORE that, so a slot there would be structurally
+    // always-undefined — and filling it would mean a second, divergent
+    // resolution path off the raw declaration.
+    const trace = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      dispatch: async (call) => ({ ...dispatchOk(call), presentation: { name: call.name } }),
+    });
+    const start = trace.events.find((e) => e.kind === "tool-dispatch-start");
+    expect(start).toBeDefined();
+    expect("presentation" in start!).toBe(false);
+  });
 });
 
 // ============================================================================

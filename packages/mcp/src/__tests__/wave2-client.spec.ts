@@ -369,10 +369,23 @@ describe("wave2 content-mapper", () => {
     expect(mapped.isError).toBe(true);
   });
 
-  it("omits absent structuredContent / isError", () => {
+  it("folds result _meta into the namespaced metadata.mcp.meta key", () => {
+    const mapped = mapCallToolResult({
+      content: [{ type: "text", text: "ok" }],
+      _meta: { ui: { resourceUri: "ui://widget/x", prefersBorder: false } },
+    });
+    // ONE key, both directions — the same convention the server-side
+    // projection reads off a result envelope.
+    expect(mapped.metadata).toEqual({
+      mcp: { meta: { ui: { resourceUri: "ui://widget/x", prefersBorder: false } } },
+    });
+  });
+
+  it("omits absent structuredContent / isError / metadata", () => {
     const mapped = mapCallToolResult({ content: [{ type: "text", text: "x" }] });
     expect("structuredContent" in mapped).toBe(false);
     expect("isError" in mapped).toBe(false);
+    expect("metadata" in mapped).toBe(false);
   });
 
   it("maps an embedded resource to a resource block (not text JSON)", () => {

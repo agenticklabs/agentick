@@ -83,7 +83,12 @@ import type {
   SessionInstaller,
   Unsubscribe,
 } from "@agentick/spec";
-import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec";
+import type {
+  ContentBlock,
+  ToolDeclaration,
+  ToolHandler,
+  ToolResultEnvelope,
+} from "@agentick/spec";
 import { jsonSchema, toRegistration } from "@agentick/spec";
 import { readContext, type RuntimeContext } from "@agentick/runtime";
 
@@ -102,7 +107,7 @@ import { NoneAuth } from "../client/auth.js";
 import type { McpToolDescriptor, ReconnectPolicy } from "../client/types.js";
 import type { EraCodec } from "../client/era-codec.js";
 
-import { mcpContentToBlocks } from "./content-mapper.js";
+import { mapCallToolResult } from "./content-mapper.js";
 import { mcpTaskEffect } from "./task-bridge.js";
 import { surfaceRemoteResources } from "./resource-surface.js";
 import {
@@ -544,12 +549,16 @@ async function discoverAndRegisterTools(
             )
         : localTaskSupport === "supported"
           ? makeSupportedHandler(harness, tool, config)
-          : async (input): Promise<readonly ContentBlock[]> => {
+          : async (input): Promise<ToolResultEnvelope> => {
               const result = await harness.callTool(
                 tool.name,
                 input as Readonly<Record<string, unknown>>,
               );
-              return mcpContentToBlocks(result.content);
+              // The FULL result, not just its blocks: `_meta` (the MCP-Apps
+              // `ui` descriptor's carriage), `structuredContent`, and the
+              // domain-error flag all belong on the DispatchResult. The
+              // mapped shape IS a `ToolResultEnvelope`.
+              return mapCallToolResult(result);
             };
     unsubscribes.push(installer.registerToolHandler(handlerRef, handler));
     unsubscribes.push(
@@ -597,9 +606,14 @@ function makeSupportedHandler(
         ),
       );
     }
-    const inline: Promise<readonly ContentBlock[]> = harness
+    // Same full-result mapping as the always-inline branch above. The
+    // annotation is load-bearing for the same reason the old one was: without
+    // it the contextual `ToolHandlerResult` lets the Promise's type parameter
+    // absorb the whole union (TaskHandle included), and
+    // `Promise<blocks | TaskHandle>` matches no member.
+    const inline: Promise<ToolResultEnvelope> = harness
       .callTool(tool.name, input as Readonly<Record<string, unknown>>)
-      .then((result) => mcpContentToBlocks(result.content));
+      .then((result): ToolResultEnvelope => mapCallToolResult(result));
     return inline;
   };
   return handler;

@@ -532,6 +532,16 @@ function buildTransportSlot(reqId: JsonRpcId, sink: DispatchSink): WireExtension
             },
           });
         },
+        // End-of-stream marker. Carries the token and nothing else: a
+        // bounded stream reaching its end is not a failure and has no
+        // reason (contrast `notifications/subscription/closed`, which
+        // reports server-initiated teardown of an open-ended stream).
+        close() {
+          sink.sendNotification({
+            method: "notifications/progress/complete",
+            params: { progressToken },
+          });
+        },
       };
     },
     registerCancel(abort: () => void) {

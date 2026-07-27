@@ -345,6 +345,19 @@ function createSessionExecutionHandle<P>(
     // stream. The handle is not itself iterable; `events()` is the one
     // way to consume the stream — matching the server-side
     // `SessionExecutionHandle`.
+    // The iterator now COMPLETES on its own: the gateway sends
+    // `notifications/progress/complete` once both progress fan-outs drain,
+    // and the transport ends this stream on it (which also reaps the token).
+    //
+    // TODO(mixed-stream): this yields EVERY frame on the token as a
+    // `StreamEvent`, but the gateway multiplexes two producers onto it — the
+    // execution-event fan-out (`envelope.name === "session:execution:event"`)
+    // AND ADR 64 progress SIGNALS (`<surface>:signal:progress`, payload
+    // `ProgressEventPayload`). A tool calling `ctx.progress(...)` therefore
+    // hands a consumer a non-StreamEvent wearing a StreamEvent type. The fix
+    // is to discriminate on `envelope.name` here (or expose the envelope);
+    // until then a consumer MUST ignore unknown `type` values rather than
+    // `switch` with a throwing default.
     async *events(): AsyncGenerator<StreamEvent> {
       for await (const frame of progressStream) {
         // The envelope's payload IS the StreamEvent — server already

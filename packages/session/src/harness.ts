@@ -683,6 +683,13 @@ export class SessionHarness<P = unknown>
   /** In-flight handle — join target for steering sends (ADR 53 §5). */
   private _currentHandle: import("@agentick/spec").SessionExecutionHandle | null = null;
   /**
+   * The in-flight handle's emit sink. Held beside {@link _currentHandle} so
+   * work that happens DURING an execution but outside the loop's event
+   * channel — a `spawn()` from inside a tool handler — can put its boundary
+   * events on the caller's stream. Null between executions.
+   */
+  private _currentEmit: ((event: SessionEmitInput) => void) | null = null;
+  /**
    * SYNCHRONOUS send reservation (review finding: two un-awaited fresh
    * sends both passed the null-guard across its awaits). Set before the
    * first await in sendBody; a concurrent send awaits it and JOINS.
@@ -1629,10 +1636,33 @@ export class SessionHarness<P = unknown>
     // SP6 — track the child so parent close / abort disposes it (see the
     // teardown wired in the constructor). Idempotent on the child id.
     this._children.add(child.id);
-    if (input.send !== undefined) {
-      return child.send(input.send);
+    if (input.send === undefined) return child;
+    const childHandle = await child.send(input.send);
+    // Spawn boundary events (parent stream). ONLY the spawn-and-run form is
+    // bracketed: it is the only form with a child execution the parent can
+    // name. An unbound spawn hands the child back and the caller drives it —
+    // its executions are not this execution's business.
+    //
+    // `emit` is captured, not re-read at the end: the pair belongs to the
+    // execution that ASKED for the spawn, and the child may outlive it (a
+    // closed handle drops the late `spawn-end`, which is the honest outcome —
+    // the parent's stream is over).
+    const emit = this._currentEmit;
+    if (emit !== null) {
+      const tick = this.runtime.currentTick();
+      emit({
+        type: "spawn-start",
+        tick,
+        spawnSessionId: child.id,
+        spawnExecutionId: childHandle.executionId,
+        ...omitUndefined({ originCallId: input.originCallId }),
+      });
+      void childHandle.result.then(
+        () => emit({ type: "spawn-end", tick, spawnSessionId: child.id, isError: false }),
+        () => emit({ type: "spawn-end", tick, spawnSessionId: child.id, isError: true }),
+      );
     }
-    return child;
+    return childHandle;
   }
 
   async fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
@@ -2364,6 +2394,7 @@ export class SessionHarness<P = unknown>
     }).finally(() => {
       this._currentExecution = null;
       this._currentHandle = null;
+      this._currentEmit = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
       this.runtime.setStatus(durabilityFailed ? "failed" : "idle");
@@ -2570,6 +2601,7 @@ export class SessionHarness<P = unknown>
 
     this._currentExecution = runPromise;
     this._currentHandle = handle;
+    this._currentEmit = emit;
     this._handleReservation?.resolve(handle);
     // Latch loop completion SYNCHRONOUSLY on settle — joins during the
     // terminal window (endTurn/flush/resolve) must be refused. Safe to leave
@@ -2809,6 +2841,7 @@ export class SessionHarness<P = unknown>
             name: loopEvent.name,
             outcome: loopEvent.outcome,
             durationMs: loopEvent.durationMs,
+            ...omitUndefined({ presentation: loopEvent.presentation }),
           });
           return;
         case "tool-dispatch":
@@ -2820,7 +2853,12 @@ export class SessionHarness<P = unknown>
             content: loopEvent.content,
             succeeded: loopEvent.succeeded,
             durationMs: loopEvent.durationMs,
-            ...omitUndefined({ executedBy: loopEvent.executedBy, isError: loopEvent.isError }),
+            ...omitUndefined({
+              executedBy: loopEvent.executedBy,
+              isError: loopEvent.isError,
+              presentation: loopEvent.presentation,
+              metadata: loopEvent.metadata,
+            }),
           });
           return;
       }

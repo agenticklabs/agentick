@@ -18,7 +18,7 @@ export function fakeWireCtx(gateway: GatewayHarnessProtocol): WireExtensionConte
     bridges: () => ({}),
     publish: () => {},
     wire: {
-      progress: () => ({ push: () => {} }),
+      progress: () => ({ push: () => {}, close: () => {} }),
       registerCancel: () => {},
       registerSubscription: () => ({ id: "sub", publish: () => {}, close: () => {} }),
       closeSubscription: () => {},

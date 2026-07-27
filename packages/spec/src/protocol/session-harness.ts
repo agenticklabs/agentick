@@ -1034,6 +1034,19 @@ export interface SpawnInput<P = unknown> {
   readonly initialKnobs?: Readonly<Record<string, unknown>>;
   /** Override the parent's max tick bound for this child. */
   readonly maxTicks?: number;
+  /**
+   * The parent tool call this spawn is being made on behalf of — the
+   * `ctx.toolCallId` of the handler that called `spawn()`. Surfaced as
+   * `originCallId` on the parent stream's {@link SpawnStartEvent} so a
+   * spawn-tree UI can attach the child to the SPECIFIC call that produced
+   * it (the lineage `spawnPath` names sessions, not calls).
+   *
+   * Passed as DATA rather than derived ambiently: `spawn()` runs its
+   * operation on a fresh fiber that cannot observe the dispatch's context
+   * (the same Promise-boundary reason {@link SpawnContextChildInput.parentOpId}
+   * is threaded explicitly). Omit for a host-driven spawn.
+   */
+  readonly originCallId?: string;
 }
 
 /**

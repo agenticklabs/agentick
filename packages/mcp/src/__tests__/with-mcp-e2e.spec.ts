@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "@agentick/app/react";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import type { ToolExecutorProtocol } from "@agentick/spec";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -80,6 +81,16 @@ async function mkMcpServer(): Promise<{
         },
       },
       {
+        name: "render_widget",
+        description: "returns a result carrying an MCP-Apps ui descriptor",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "fail_soft",
+        description: "returns a domain error",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         name: "add",
         description: "adds two numbers",
         inputSchema: {
@@ -106,6 +117,20 @@ async function mkMcpServer(): Promise<{
       const b = (args?.b as number | undefined) ?? 0;
       return {
         content: [{ type: "text", text: String(a + b) }],
+      };
+    }
+    if (req.params.name === "fail_soft") {
+      return {
+        content: [{ type: "text", text: "the ledger is closed" }],
+        isError: true,
+      };
+    }
+    if (req.params.name === "render_widget") {
+      // An MCP-Apps style result: the frame descriptor rides result `_meta`.
+      return {
+        content: [{ type: "text", text: "widget ready" }],
+        structuredContent: { rows: 2 },
+        _meta: { ui: { resourceUri: "ui://widget/invoice-list", prefersBorder: true } },
       };
     }
     return {
@@ -146,6 +171,77 @@ describe("withMCP — end-to-end", () => {
 
     expect(content).toHaveLength(1);
     expect(content[0]).toEqual({ type: "text", text: "echo: hi" });
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+
+  it("preserves a consumed tool's result _meta / structuredContent / isError onto the DispatchResult", async () => {
+    const { server, clientTransport } = await mkMcpServer();
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "apps", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = (await app.createSession()) as unknown as {
+      readonly id: string;
+      readonly toolExecutor: ToolExecutorProtocol;
+      close(): Promise<void>;
+    };
+
+    // Dispatch through the executor door (not `tools.dispatch`, which
+    // projects content only) so the whole DispatchResult is observable.
+    const result = await session.toolExecutor.dispatch({
+      toolCallId: "call-ui-1",
+      name: "apps__render_widget",
+      input: {},
+      context: { via: "dispatch", sessionId: session.id },
+    });
+
+    // `_meta` lands under the ONE namespaced result key — `metadata.mcp.meta`
+    // — the same carriage the server-side projection reads. No new channel.
+    expect(result.metadata).toEqual({
+      mcp: { meta: { ui: { resourceUri: "ui://widget/invoice-list", prefersBorder: true } } },
+    });
+    // The two sidecars the bare content mapping also dropped.
+    expect(result.structuredContent).toEqual({ rows: 2 });
+    expect(result.isError).toBeUndefined();
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+
+  it("surfaces a consumed tool's domain error as isError rather than a silent success", async () => {
+    const { server, clientTransport } = await mkMcpServer();
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "err", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = (await app.createSession()) as unknown as {
+      readonly id: string;
+      readonly toolExecutor: ToolExecutorProtocol;
+      close(): Promise<void>;
+    };
+
+    const result = await session.toolExecutor.dispatch({
+      toolCallId: "call-err-1",
+      name: "err__fail_soft",
+      input: {},
+      context: { via: "dispatch", sessionId: session.id },
+    });
+    // A DOMAIN error, not a protocol failure: the dispatch resolves and the
+    // model gets to reason about it — but it must not read as a success.
+    expect(result.isError).toBe(true);
+    expect(result.content[0]).toMatchObject({ type: "text", text: "the ledger is closed" });
 
     await session.close();
     await app.closeApp();

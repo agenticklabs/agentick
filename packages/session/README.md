@@ -258,8 +258,38 @@ await branch.close(); // the parent never saw it
 Three things are enforced on the parent side:
 
 - **Depth.** Every session carries a `spawnPath` (ancestor ids, root-first) and a ceiling (`createApp({ sessions: { maxSpawnDepth } })`, default 10). A session already at the ceiling throws `SpawnDepthExceededError` — fail-closed against runaway self-spawn. Depth _is_ `spawnPath.length`; there is no second counter.
-- **Attribution.** `spawnPath` is stamped on the child's durable record, on the loop's execution and tick event scopes, and on every event the child's handle emits. With `parentSessionId`, the spawn tree reconstructs from records alone.
+- **Attribution.** `spawnPath` is stamped on the child's durable record, on the loop's execution and tick event scopes, and on every event the child's handle emits — it describes the **emitter's** lineage, not a routing header. With `parentSessionId`, the spawn tree reconstructs from records alone.
 - **Teardown.** The parent's construction signal fans into each child, and the parent disposes its children on close and on abort. Disposal waits for quiescence first, so closing never unmounts a compiler mid-tick. Sub-trees collapse transitively.
+
+### Watching a spawn from the parent's stream
+
+A spawn-and-run puts a bracketing pair on the **parent's** event stream: `spawn-start` (`spawnSessionId`, `spawnExecutionId`, `originCallId?`) when the child execution begins, `spawn-end` (`spawnSessionId`, `isError`) when it settles. That is enough to draw a live spawn tree — a node appears, gets a status, and attaches to the tool call that asked for it:
+
+```tsx
+const SpawnTool = createTool({
+  name: "delegate",
+  description: "Hand the task to a sub-agent",
+  input: z.object({ task: z.string() }),
+  handler: async ({ task }, { ctx }) => {
+    const handle = await session.spawn({
+      agent: <Auditor />,
+      send: { messages: [{ role: "user", content: task }] },
+      originCallId: ctx.toolCallId, // ← the edge the spawn tree draws
+    });
+    return (await handle.result).output;
+  },
+});
+```
+
+`originCallId` is passed, not inferred. `spawn()` runs its operation on a fresh fiber that cannot see the dispatch's ambient context, so the call id travels as data — the same reason `parentOpId` is threaded explicitly.
+
+**A child's interior events stay on the child's handle.** Nothing is bubbled from one handle onto another, and the parent's stream carries the two boundary events only. Three reasons, in order of weight:
+
+1. `sequence` is a **per-handle** monotonic counter, and it is what durable replay and gap detection key on. Merging a second session's events into a handle either breaks that monotonicity or re-numbers foreign events, at which point the same event carries two different sequence numbers on two streams.
+2. The wire fan-out is scoped to **one execution's** progress token. Bubbling would put a second session's events on another session's token, behind whatever authorization admitted the first — the gateway's per-session grant checks would no longer describe what the client receives.
+3. The boundary pair already answers the question a spawn tree asks (which child, started by which call, ended how). Interior child deltas are a separate, opt-in subscription — deliberately not paid for by every parent.
+
+To watch a child's interior, hold its handle: `const handle = await session.spawn({ send })` returns the child execution's handle and `handle.events()` is its full stream, with `spawnPath` stamped on every event for attribution.
 
 Ownership descends: a child inherits its parent's `principal` (not caller-choosable), which is what the wire dispatch gate reads for its same-principal rule. `createSession({ requiredScopes })` sets the complementary ceiling on the work axis — a construction-bound, server-declared scope requirement checked structurally at the wire gate before any policy runs.
 
@@ -622,7 +652,7 @@ const session = factory({
 ## Verified by
 
 - `src/__tests__/conformance.spec.ts` — the protocol conformance suite against a real journal, bus and inbox.
-- `src/__tests__/extended-surface.spec.ts` — host-door `dispatch` including `ToolPermissionError`, the tool registry read surface, timeline append and `trailingInput`, channel publish/subscribe plus correlated request/response and its timeout, the knob handle, `spawn` routing through a spawn context and defaulting to the parent's own agent, **steering** (the join returns the in-flight handle and the loop answers the new input), two un-awaited sends collapsing to one execution, a send after settle running fresh rather than joining a dead handle, provenance and per-generation usage stamps, and `onBusy` steer-vs-queue including an aborted execution dropping an undrained steer; cancellation parity — `abort()` on an in-flight execution and a pre-aborted send `signal` both RESOLVE with `stopReason: "aborted"` rather than rejecting.
+- `src/__tests__/extended-surface.spec.ts` — host-door `dispatch` including `ToolPermissionError`, the tool registry read surface, timeline append and `trailingInput`, channel publish/subscribe plus correlated request/response and its timeout, the knob handle, `spawn` routing through a spawn context and defaulting to the parent's own agent, the **spawn boundary pair** on the parent's stream (`spawn-start` carrying the child's session and execution ids plus the origin tool `callId` off the dispatch ctx, `spawn-end` carrying `isError`, both attributed to the parent's `executionId`; the unbound spawn form emits neither), **steering** (the join returns the in-flight handle and the loop answers the new input), two un-awaited sends collapsing to one execution, a send after settle running fresh rather than joining a dead handle, provenance and per-generation usage stamps, and `onBusy` steer-vs-queue including an aborted execution dropping an undrained steer; cancellation parity — `abort()` on an in-flight execution and a pre-aborted send `signal` both RESOLVE with `stopReason: "aborted"` rather than rejecting.
 - `src/__tests__/streaming-handle.spec.tsx` — event order, dense monotonic sequence from 1, id/session/execution stamping, the streaming and non-streaming paths, and `.events()` yielding while `.result` resolves independently.
 - `src/__tests__/structured-output.spec.ts` — terminal-tool injection and tail ordering, capability-aware strategy resolution (no native `json_schema` → the tool; neither tools nor `json_schema` → `responseFormat`), detection/stop/validated `data`, prose and a typed result in one tick, sibling tools dispatching first, timeline pairing letting the next send succeed, a tree-only `<Output>` producing validated `data` and `output_delivered`, the forced wrap-up tick, steer-proof stop, and the typed failures — `StructuredOutputIncomplete`, `ResponseValidationError`, `TerminalToolNameCollision` — plus send-beats-tree precedence and the explicit-steer conflict.
 - `src/__tests__/structured-send.spec.ts` — `responseFormat` threaded to the executor over a tree declaration, retained when no send-level directive is given, applied on every tick of a multi-tick run, and the explicit-steer rejection whose `onBusy: "queue"` twin runs.

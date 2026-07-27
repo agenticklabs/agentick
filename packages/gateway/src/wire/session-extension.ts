@@ -91,6 +91,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       //       stream (no new transport plumbing — ADR 64 §"progress
       //       reuses the existing stream").
       let stopSignalDrain: (() => void) | undefined;
+      let completeProgress: (() => void) | undefined;
       if (progressToken !== undefined) {
         const reporter = ctx.wire.progress(progressToken);
 
@@ -100,7 +101,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // downstream consumers keying on `envelope.id` (devtools
         // inspectors, MCP wire codec) don't regress.
         let n = 0;
-        (async () => {
+        const eventDrain = (async () => {
           try {
             for await (const event of handle.events()) {
               n++;
@@ -137,7 +138,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         stopSignalDrain = () => {
           void signalIter.return?.(undefined);
         };
-        (async () => {
+        const signalDrain = (async () => {
           try {
             for (
               let step = await signalIter.next();
@@ -150,6 +151,18 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
             /* best-effort — progress is never a control path (ADR 64) */
           }
         })();
+
+        // End-of-stream marker for this token. It must follow the LAST
+        // pushed frame, so it waits on both fan-outs draining — but the RPC
+        // response must NOT: the caller's `result` and the caller's event
+        // iterator are independent channels, and blocking the response on a
+        // detached loop is how a slow tail frame becomes a hung RPC. Hence a
+        // detached continuation, armed here and triggered in the `finally`
+        // once the signal subscription has been told to stop (which is what
+        // lets `signalDrain` resolve at all).
+        completeProgress = () => {
+          void Promise.all([eventDrain, signalDrain]).then(() => reporter.close());
+        };
       }
 
       try {
@@ -163,6 +176,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // Stop the signal drain regardless of success/failure so the
         // background subscription doesn't outlive the RPC.
         stopSignalDrain?.();
+        completeProgress?.();
       }
     },
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {

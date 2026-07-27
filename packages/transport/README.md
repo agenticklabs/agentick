@@ -101,21 +101,29 @@ That is the whole surface. `close()` on the context iterates both registries and
 
 ## What the client base class already did for you
 
-| Concern                  | Behavior                                                                       |
-| ------------------------ | ------------------------------------------------------------------------------ |
-| **State machine**        | `connecting` → `open` → `closed`, observable via `onStateChange`.              |
-| **RPC correlation**      | Request ids allocated, responses matched, errors rejected as typed failures.   |
-| **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.       |
-| **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`.              |
-| **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.     |
-| **Reconnect backoff**    | Full-jitter, capped. `DEFAULT_RECONNECT_POLICY` is the shared shape.           |
-| **Resubscribe**          | After a reconnect, re-issues each live subscription from its last-seen cursor. |
+| Concern                  | Behavior                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| **State machine**        | `connecting` → `open` → `closed`, observable via `onStateChange`.                                             |
+| **RPC correlation**      | Request ids allocated, responses matched, errors rejected as typed failures.                                  |
+| **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.                                      |
+| **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`, ended by `notifications/progress/complete`. |
+| **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.                                    |
+| **Reconnect backoff**    | Full-jitter, capped. `DEFAULT_RECONNECT_POLICY` is the shared shape.                                          |
+| **Resubscribe**          | After a reconnect, re-issues each live subscription from its last-seen cursor.                                |
 
 ### The subscription id re-key
 
 Subscribing is asynchronous but the caller wants a stream immediately, so the base class hands out a stream keyed by a tentative client-side id, issues the `subscribe` RPC, and re-keys the stream to the server-allocated `subscriptionId` when the response lands. Frames route by the server id from then on, and a stream closed early sends its unsubscribe under the real id.
 
 You get this for free. It matters only if you are debugging why a frame arrived before the id you expected existed.
+
+### Progress tokens are bounded, and say so
+
+A progress token lives for exactly one RPC, so its stream has an end. The server-side reporter's `close()` sends `notifications/progress/complete` — token only, no reason: a bounded stream reaching its end is not a failure, which is why it is a different frame from `notifications/subscription/closed` (server-initiated teardown of an open-ended stream).
+
+On receipt the base class closes the stream, which ends the consumer's iterator and reaps the token's registration. Two things follow, and both are the point: a client `for await` over the stream terminates on its own rather than hanging on a `next()` that will never resolve, and a completed request leaves nothing behind in the registry.
+
+Ordering is the caller's obligation, not the transport's: send the marker after every producer feeding the token has drained, and never before the last `push`. The already-buffered tail is safe — `MultiplexedStream` empties its buffer before signalling done, so a slow consumer still receives every frame pushed before the marker.
 
 ### Backpressure is per stream
 

@@ -197,6 +197,19 @@ export interface ProgressReporter {
    * `{ progressToken, cursor, envelope }` structure on the wire.
    */
   push<Envelope>(envelope: Envelope): void;
+  /**
+   * End of stream for this token — the framework's
+   * `notifications/progress/complete` frame. A progress token is BOUNDED
+   * (it lives for one RPC), and without a terminal frame the client cannot
+   * distinguish "no more frames" from "nothing yet": its iterator hangs on
+   * the last `next()` and the token's registration is never reaped.
+   *
+   * Call it AFTER every producer feeding this token has drained, and never
+   * before the last `push` — the marker terminates the client's stream (the
+   * already-buffered tail still drains). Idempotent on the client side; a
+   * second call is a redundant frame, not a fault.
+   */
+  close(): void;
 }
 
 /**

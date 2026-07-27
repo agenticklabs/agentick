@@ -114,7 +114,7 @@ import {
   toJsonSchema,
   toRegistration,
 } from "@agentick/spec";
-import { mergeAbortSignals } from "@agentick/utils";
+import { mergeAbortSignals, omitUndefined } from "@agentick/utils";
 
 // ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
 // is a STREAMING command (`this.commandStream`, see the constructor): its
@@ -1212,6 +1212,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // eager model self-narration read) rides the tool executor's
           // OWN `tool:dispatch` command hooks (ADR 89 §4) — the
           // session's forwarder, not a loop feed.
+          // TODO(label-at-start): a UI wants the call's label HERE, not at
+          // the end. It is not available: `ToolPresentation` is resolved
+          // inside the dispatch against the VALIDATED input (tool-executor
+          // `dispatchBody`), so it rides `tool-dispatch-end` / `tool-dispatch`
+          // instead. Supplying it here would need the loop to read the
+          // registry declaration and resolve `displaySummary` itself — a
+          // second, divergent resolution path for the same fact. If this is
+          // worth solving, the shape is the EXECUTOR emitting its own
+          // start-side event once the input validates, not the loop guessing.
           yield* input.emit({
             kind: "tool-dispatch-start",
             tick: tickIndex,
@@ -1243,6 +1252,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             // (soft/domain error). A resolved dispatch is a success unless
             // it flags a soft error; HARD failures reject (caught below).
             const dispatchSucceeded = ok.isError !== true;
+            // Presentation + result metadata are resolved INSIDE the dispatch
+            // (the executor holds the validated input and the model's
+            // narration), so they ride the two post-dispatch events only —
+            // `tool-dispatch-start` fires before either exists.
             yield* input.emit({
               kind: "tool-dispatch-end",
               tick: tickIndex,
@@ -1250,6 +1263,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               name: tc.name,
               outcome: dispatchSucceeded ? "succeeded" : "failed",
               durationMs,
+              ...omitUndefined({ presentation: ok.presentation }),
             });
             yield* input.emit({
               kind: "tool-dispatch",
@@ -1259,6 +1273,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               content: ok.content,
               succeeded: dispatchSucceeded,
               durationMs,
+              ...omitUndefined({ presentation: ok.presentation, metadata: ok.metadata }),
             });
             return {
               toolCallId: tc.id,

@@ -404,6 +404,17 @@ export abstract class BaseClientTransport implements ClientTransport {
         });
         return;
       }
+      case "notifications/progress/complete": {
+        // End of stream for this token. `close()` ends the iterator (the
+        // buffered tail still drains — `MultiplexedStream.next` empties the
+        // buffer before signalling done) and its onClose reaps the
+        // registration, so a completed send leaves nothing in the map.
+        const token = params.progressToken as string;
+        const stream = this.progressStreams.get(token);
+        if (!stream) return;
+        void stream.close();
+        return;
+      }
       case "notifications/subscription/event": {
         const subId = params.subscriptionId as string;
         const stream = this.subscriptionStreams.get(subId);
