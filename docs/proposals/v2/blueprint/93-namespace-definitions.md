@@ -84,6 +84,27 @@ mechanism):
   outranks local policy — an app guard must veto before layer-local
   logic runs.
 
+## Top-level slots for every namespace (amendment, Ryan 2026-07-27)
+
+**Every namespace — built-in or optional — gets a top-level config
+slot** (`createApp({ sandbox, timeline, skills, ... })`;
+gateway/session configs likewise for their appropriate concerns), via
+the HookBridges mechanism: **module augmentation + side-effect slot
+registration**, never hardcoded into the app package. This preserves
+ADR 27 exactly — no code-level privilege: the metapackage bundles the
+built-ins so their slots are always lit; an optional package's slot
+lights up on install+import. `extensions: []` survives as the
+fully-dynamic escape hatch (runtime-built arrays, conditional
+composition, slot-less third parties). Placement judgment: app config
+= session-template namespaces (timeline/skills/prompts/tasks/sandbox/
+state/knobs/credentials/sessions); gateway config = wire-life concerns
+(transports/auth/mcpServers); per-session overrides at createSession =
+deliberately deferred. Every slot obeys the same laws: definition |
+live instance; hooks:/guards: bags; the two genesis verbs. Rollout:
+each namespace's slot lands WITH its defineX conversion (D1 proves
+timeline's; D3/D4 sweep the rest); slot-registration mechanics are a
+D1 deliverable.
+
 ## Composition ruling — withX(definition) (amendment, Ryan 2026-07-26)
 
 **The definition IS the options**: for store-bearing namespaces,
