@@ -1,5 +1,12 @@
 # @agentick/timeline-fs
 
+## 1.0.0-next.16
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/timeline@1.0.0-next.16
+
 ## 1.0.0-next.15
 
 ### Patch Changes

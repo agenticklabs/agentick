@@ -1,6 +1,6 @@
 /**
  * Built-in {@link CompactStrategy} factories — the timeline `/strategies`
- * subpath, parallel to `@agentick/skills/loaders`.
+ * subpath, parallel to `@agentick/skills/hydrators`.
  *
  * **Naming: these are strategy-value factories, NOT `withX`
  * session-extension factories.** `withX` is reserved house vocabulary for
