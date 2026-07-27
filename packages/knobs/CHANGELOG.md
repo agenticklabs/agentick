@@ -1,5 +1,20 @@
 # @agentick/knobs
 
+## 1.0.0-next.17
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.17
+  - @agentick/compiler@1.0.0-next.17
+  - @agentick/compiler-react@1.0.0-next.17
+  - @agentick/pubsub@1.0.0-next.17
+  - @agentick/runtime@1.0.0-next.17
+  - @agentick/spec@1.0.0-next.17
+  - @agentick/store@1.0.0-next.17
+  - @agentick/tool@1.0.0-next.17
+  - @agentick/utils@1.0.0-next.17
+
 ## 1.0.0-next.16
 
 ### Patch Changes

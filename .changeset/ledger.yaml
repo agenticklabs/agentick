@@ -26,6 +26,10 @@
   dir: packages/mcp
   intents:
     - mcp-capability-extensions
+"@agentick/mcp@1.0.0-next.17":
+  dir: packages/mcp
+  intents:
+    - mcp-identity-redaction
 "@agentick/mcp@1.0.0-next.5":
   dir: packages/mcp
   intents:
@@ -47,6 +51,10 @@
   intents:
     - definitions-d3
     - hygiene-2-defect-slice
+"@agentick/runtime@1.0.0-next.17":
+  dir: packages/runtime
+  intents:
+    - mcp-identity-redaction
 "@agentick/session@1.0.0-next.12":
   dir: packages/session
   intents:

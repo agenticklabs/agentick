@@ -1,5 +1,7 @@
 # @agentick/spec
 
+## 1.0.0-next.17
+
 ## 1.0.0-next.16
 
 ## 1.0.0-next.15
