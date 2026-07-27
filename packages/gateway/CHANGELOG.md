@@ -1,5 +1,16 @@
 # @agentick/gateway
 
+## 1.0.0-next.14
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/app@1.0.0-next.14
+  - @agentick/cluster@1.0.0-next.14
+  - @agentick/runtime@1.0.0-next.14
+  - @agentick/spec@1.0.0-next.14
+  - @agentick/utils@1.0.0-next.14
+
 ## 1.0.0-next.13
 
 ### Patch Changes

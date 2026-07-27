@@ -1,6 +1,6 @@
 {
   "name": "@agentick/runtime",
-  "version": "1.0.0-next.13",
+  "version": "1.0.0-next.14",
   "description": "In-process substrate (MemoryJournal, LocalEventBus, LocalInbox, BaseHarness) for Agentick v2. The default implementation of the @agentick/spec protocol interfaces.",
   "keywords": [
     "agent",
