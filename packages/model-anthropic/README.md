@@ -7,8 +7,12 @@ It is also the adapter to read when Anthropic's dialect diverges most from the c
 ## Install
 
 ```bash
-npm install @agentick/model-anthropic @agentick/model
+npm install @agentick/model-anthropic
 ```
+
+`@agentick/model` arrives with it (a dependency). Add it to your own
+manifest only when you import from it directly — combinators, the model
+registry, `defineLanguageModelAdapter`.
 
 ## Quick start
 

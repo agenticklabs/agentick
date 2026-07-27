@@ -7,8 +7,12 @@ It is also the adapter that reaches beyond OpenAI itself. Chat Completions is th
 ## Install
 
 ```bash
-npm install @agentick/model-openai @agentick/model
+npm install @agentick/model-openai
 ```
+
+`@agentick/model` arrives with it (a dependency). Add it to your own
+manifest only when you import from it directly — combinators, the model
+registry, `defineLanguageModelAdapter`.
 
 ## Quick start
 

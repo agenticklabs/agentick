@@ -7,8 +7,12 @@ It is also the adapter that has to invent the most. Gemini's stream carries no b
 ## Install
 
 ```bash
-npm install @agentick/model-google @agentick/model
+npm install @agentick/model-google
 ```
+
+`@agentick/model` arrives with it (a dependency). Add it to your own
+manifest only when you import from it directly — combinators, the model
+registry, `defineLanguageModelAdapter`.
 
 ## Quick start
 

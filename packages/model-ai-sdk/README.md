@@ -7,7 +7,7 @@ The AI SDK is used here as a **provider library**, not an execution engine: one 
 ## Install
 
 ```bash
-npm install @agentick/model-ai-sdk @agentick/model ai @ai-sdk/openai
+npm install @agentick/model-ai-sdk ai @ai-sdk/openai
 ```
 
 `ai` and your `@ai-sdk/*` providers are yours to install — this package brings no provider with it.
