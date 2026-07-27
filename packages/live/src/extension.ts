@@ -12,7 +12,7 @@
  * The CONTROL-plane wire methods (`live/*`) are a SEPARATE concern: the adopter
  * registers the exported {@link import("./wire.js").liveWireExtension} at the
  * gateway (`createGateway({ wireExtensions: [liveWireExtension] })`). It is NOT
- * a bundled wire-extension (`app-next`'s `builtinWireExtensions`) because live
+ * a bundled wire-extension (`@agentick/app`'s `builtinWireExtensions`) because live
  * is optional — the same split every optional package follows.
  *
  * Flat options (no `config` wrapper), per the v2 `withX` convention.

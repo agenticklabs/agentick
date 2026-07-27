@@ -4,7 +4,7 @@
  * per-test temp-dir socket path so parallel test execution doesn't
  * collide.
  *
- * Same suite cluster-next/testing/local-cluster-transport.spec.ts +
+ * Same suite @agentick/cluster/testing/local-cluster-transport.spec.ts +
  * cluster-net/conformance-against-tcp.spec.ts pass. Proves the
  * Unix-socket wire honors the same protocol contract end-to-end
  * through real filesystem-addressed sockets.

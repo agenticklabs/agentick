@@ -17,7 +17,7 @@
  *
  * **Why context is generic.** The MCP server projection passes its
  * `McpRequestContext` (auth principal, session, clientInfo, custom
- * metadata). The tool-executor passes its `ToolHandlerCtx`. Eval-next
+ * metadata). The tool-executor passes its `ToolHandlerCtx`. `@agentick/eval`
  * passes whatever its ablation harness wants. The transform doesn't
  * care; the consumer parameterizes `C` at the call site.
  *

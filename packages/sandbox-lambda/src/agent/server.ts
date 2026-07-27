@@ -1,7 +1,7 @@
 /**
  * The in-VM sandbox-agent HTTP + WebSocket server (ADR 60).
  *
- * This is the far-side "sandbox-agent" the `*-remote-next` convention
+ * This is the far-side "sandbox-agent" the `*-remote` convention
  * anticipates: AWS provides no in-guest agent, so we bake OURS into the
  * microVM image (Dockerfile `CMD`, default port 8080). It serves the
  * {@link SandboxHandle} contract ops against the local workspace filesystem:

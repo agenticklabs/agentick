@@ -6,7 +6,7 @@
  * `onOutput`), file I/O via exec, atomic `editFile` via the base's shared
  * `applyEdits`, coarse egress via `NetworkMode`. Deps ONLY the base package
  * `@agentick/sandbox` and implements its `SandboxProvider` — mirroring
- * `model-openai-next → model-next`. The base re-exports the spec wire types,
+ * `@agentick/model-openai → @agentick/model`. The base re-exports the spec wire types,
  * the `applyEdits` transform, and the error classes, so this provider has
  * ONE import source.
  *

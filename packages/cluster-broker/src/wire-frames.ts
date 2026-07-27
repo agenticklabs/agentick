@@ -230,7 +230,7 @@ export type AnyFrame = ClientFrame | BrokerFrame;
  * Tag enumeration enforced against the frame union at compile time.
  * If a new frame is added without updating this list, the initializer
  * fails to compile until the case is added — same pattern as
- * `cluster-next`'s `MESSAGE_HANDLER_ERROR_TAGS`.
+ * `@agentick/cluster`'s `MESSAGE_HANDLER_ERROR_TAGS`.
  */
 const KNOWN_FRAME_TYPES: { readonly [K in AnyFrame["type"]]: true } = {
   [FRAME_HELLO]: true,
@@ -253,7 +253,7 @@ const KNOWN_FRAME_TYPES: { readonly [K in AnyFrame["type"]]: true } = {
 /**
  * Minimal shape check at the wire boundary. Validates ONLY the
  * discriminator + top-level field types — full inner-envelope
- * validation belongs to the `cluster-next` wrappers (which also
+ * validation belongs to the `@agentick/cluster` wrappers (which also
  * shape-check before re-appending or dispatching, per Phase 3.2).
  *
  * Defense in depth: bad bytes from a misbehaving wire impl can't

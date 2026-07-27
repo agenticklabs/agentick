@@ -260,7 +260,7 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    * convention — no `config: {}` nest).
    *
    * The concrete transport wrappers (webSocket / http / unixSocket /
-   * inProcess) ship from the `@agentick/transport-*-next` packages; this
+   * inProcess) ship from the `@agentick/transport-<edge>` packages; this
    * slot accepts any of them (or a test double). Omitted → the fan-out is
    * a no-op and `listen()` just flips ready.
    */
@@ -495,7 +495,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     }
     // Built-in wire-extensions (knobs/set, …) — the always-present harnesses'
     // client commands. Registered in the bundled tier (not framework-privileged)
-    // so an adopter may still gate or override them. `app-next` names them so
+    // so an adopter may still gate or override them. `@agentick/app` names them so
     // the gateway stays harness-agnostic (never imports a built-in directly).
     for (const ext of [
       ...(options.wireExtensions ?? []),

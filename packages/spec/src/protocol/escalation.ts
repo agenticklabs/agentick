@@ -18,7 +18,7 @@
  * convention + the ask bound — and stay in `@agentick/runtime`. The
  * *contract types* below, however, are referenced by
  * `SessionHarnessProtocol.interceptEscalation` (this file's sibling in
- * the spec protocol barrel). `runtime-next` depends on `spec-next`, so a
+ * the spec protocol barrel). `@agentick/runtime` depends on `@agentick/spec`, so a
  * contract in runtime that the spec protocol referenced would be a
  * dependency cycle. The envelope + interception seam ARE the API
  * contract an adopter session impl implements — that is precisely what

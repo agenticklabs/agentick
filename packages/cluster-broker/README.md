@@ -1,100 +1,74 @@
 # @agentick/cluster-broker
 
-**Broker-pattern base** for cluster transport adapters that run their
-own broker process. Ships abstract `BaseBroker` + `BaseClusterClient`,
-a wire-agnostic `Connection` interface, a length-prefix framing
-helper, and the broker ↔ client wire frame schema.
+Broker-pattern base for cluster wires that run their own broker process. If
+you're writing a wire adapter, this is the package that saves you from
+reimplementing handshake, heartbeat, reconnect, subscription restore, routing,
+and backpressure.
 
-Concrete wire packages subclass these to plug in their listener /
-connector:
+It ships two concrete classes — `BaseBroker` (server side) and
+`BaseClusterClient` (client side, which _is_ a `ClusterTransport`) — plus the
+frame schema they speak, a wire-agnostic `Connection` / `Listener` /
+`Connector` triple, and a length-prefix framing helper for byte-stream wires.
+Your job as a wire author is to supply a `Listener` and a `Connector`.
 
-- [`@agentick/cluster-net`](../cluster-net) (Phase 4b/4d) — TCP +
-  Unix socket
-- [`@agentick/cluster-ws`](../cluster-ws) (Phase 4e) — WebSocket
+Two wires are built on it:
+[@agentick/cluster-net](../cluster-net) (TCP and Unix socket) and
+[@agentick/cluster-ws](../cluster-ws) (WebSocket).
+[@agentick/cluster-redis](../cluster-redis) is a **peer**, not a child — Redis
+is already the broker, so none of this plumbing applies.
 
-**External-broker adapters** (`@agentick/cluster-redis`,
-`@agentick/cluster-nats`) are **peers** of this package, not
-children — Redis IS the broker, so it doesn't reuse this plumbing.
+## Install
 
-**Status:** Phase 4a.2 (foundation + correctness pass). The abstract
-base classes, wire frame schema, length-prefix framing helper, and
-in-memory test fixture are shipped. Phase 4a.1/4a.2 closed
-load-bearing gaps surfaced by the Phase 4a retrospective:
-heartbeat off-by-one, broker `dispatchFrame` error swallowing,
-reconnect attempt-counter reset bug, length-prefix decoder
-allocation O(n²), single-handler `Connection.onMessage` enforcement,
-and consolidated filter-matching with `@agentick/utils`'s
-canonical helpers. Every claimed diagnostic event is now
-test-pinned (`diagnostics-and-lifecycle.spec.ts`). First concrete
-wire impl (`cluster-net-next`, TCP) lands in Phase 4b.
-
-**Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
-[ADR 11 — cluster vision](../../docs/proposals/v2/blueprint/11-cluster.md)
-
-## Architecture
-
-```
-        @agentick/cluster  ← protocol + defineCluster
-                  │
-        ClusterTransport seam
-                  │
-   ┌──────────────┴────────────────┬──────────────────┐
-   ▼                               ▼                  ▼
-@agentick/cluster-broker   @agentick/         @agentick/
-   (THIS PACKAGE)                cluster-redis-     cluster-gossip-
-   BaseBroker + Client            next (Phase 6)     next (future)
-   Frame schema                   Talks RESP to      P2P; no broker
-   Length-prefix framing          Redis pub/sub
-                  │
-        Listener / Connector abstractions
-                  │
-   ┌──────────────┼──────────────┐
-   ▼              ▼              ▼
-cluster-net    cluster-net   cluster-ws
-  -next         -next          -next
- (TCP)        (Unix sock)    (WebSocket)
+```bash
+npm install @agentick/cluster-broker
 ```
 
-## Wire protocol
+## Quick start
 
-Every frame between broker and client is serialized via the configured
-`ClusterCodec` (default JSON; swap for MessagePack / protobuf via a
-`cluster-codec-*-next` package).
+Standing up a broker and two clients over any wire is three constructions. The
+in-memory fixture from `/testing` stands in for a real wire here, so this runs
+with no sockets:
 
-Byte-stream wires (TCP, Unix socket) wrap codec bytes with a 4-byte
-little-endian length prefix per frame, recovering message boundaries
-from the stream. Message-oriented wires (WebSocket) use native message
-boundaries directly.
+```typescript
+import { BaseBroker, BaseClusterClient } from "@agentick/cluster-broker";
+import { createInMemoryClusterPair } from "@agentick/cluster-broker/testing";
+import { createJsonCodec } from "@agentick/cluster";
 
-### Frame types
+const codec = createJsonCodec();
+const pair = createInMemoryClusterPair();
 
-| Direction       | Frame                           | Purpose                                              |
-| --------------- | ------------------------------- | ---------------------------------------------------- |
-| Client → Broker | `cluster:hello`                 | Identify node on connect                             |
-| Client → Broker | `cluster:send`                  | Point-to-point message to a specific node            |
-| Client → Broker | `cluster:broadcast`             | Fan out an event to all other nodes                  |
-| Client → Broker | `cluster:subscribe-inbox`       | Register an inbox-filter subscription                |
-| Client → Broker | `cluster:subscribe-bus`         | Register a bus-filter subscription                   |
-| Client → Broker | `cluster:unsubscribe`           | Cancel a subscription                                |
-| Broker → Client | `cluster:welcome`               | Handshake-complete ack + initial membership snapshot |
-| Broker → Client | `cluster:inbox-deliver`         | Deliver a routed inbox message                       |
-| Broker → Client | `cluster:bus-deliver`           | Deliver a fan-out bus event                          |
-| Broker → Client | `cluster:membership`            | Topology delta (join / lost / snapshot)              |
-| Bidirectional   | `cluster:ping` / `cluster:pong` | Custom heartbeat (default 30s; miss-3 = dead)        |
-| Bidirectional   | `cluster:error`                 | Report a non-fatal error                             |
-| Bidirectional   | `cluster:goodbye`               | Cooperative disconnect                               |
+const broker = new BaseBroker({ listener: pair.listener, codec });
+await broker.start();
 
-All frame `type` values use the reserved `cluster:` namespace.
-Adopter content (envelope `type` fields) cannot collide.
+const a = new BaseClusterClient({ nodeId: "node-a", connector: pair.createConnector(), codec });
+const b = new BaseClusterClient({ nodeId: "node-b", connector: pair.createConnector(), codec });
+await Promise.all([a.ready, b.ready]);
 
-## API
+// BaseClusterClient implements ClusterTransport, so this is the real seam.
+const unsub = b.subscribeInbox({ surface: "tasks" }, (env) => console.log(env.type));
+await b.flush(); // let the SUBSCRIBE land before racing a send at it
+await a.send("node-b", envelope);
 
-### Wire-agnostic abstractions
+await unsub();
+await a.close();
+await b.close();
+await broker.close();
+```
+
+Swap `pair` for a real `Listener` / `Connector` and nothing above changes.
+
+## Writing a wire
+
+Three interfaces stand between the base classes and your wire. `Connection` is
+deliberately **message-oriented**, not byte-stream-oriented: each `send`
+carries one logical message and `onMessage` fires once per message. Delimiting
+is your problem, which is why the base classes work uniformly over a TCP stream
+and a WebSocket without branching.
 
 ```typescript
 interface Connection {
   readonly id: string;
-  readonly remote?: string;
+  readonly remote?: string; // peer descriptor, diagnostics only
   send(message: Uint8Array): Promise<void>;
   onMessage(handler: (message: Uint8Array) => void): () => void;
   onClose(handler: (reason: ConnectionCloseReason) => void): () => void;
@@ -114,149 +88,246 @@ interface Connector {
 }
 ```
 
-### `BaseBroker`
+`ConnectionCloseReason` is `"remote-graceful" | "remote-abort" | "local-close" | "transport-error"`.
 
-```typescript
-const broker = new BaseBroker({
-  listener: myWireListener,
-  codec: createJsonCodec(),
-  onDiagnostic: (name, payload) => bus.append({ surface: "cluster", name, ... }),
-});
-await broker.start();
-// ...
-await broker.close();
-```
+> [!IMPORTANT]
+> `onMessage` accepts **exactly one** handler at a time. Registering a second
+> before the first detaches throws. The base classes attach exactly one each
+> (`BaseBroker` one per accepted connection, `BaseClusterClient` one per
+> connection), and silent fan-out was never wanted.
+>
+> `onClose` is the opposite — multiple handlers are fine, each fires once, and
+> a registration made _after_ close fires immediately with the recorded reason.
 
-### `BaseClusterClient` — implements `ClusterTransport`
+### Length-prefix framing (byte-stream wires only)
 
-```typescript
-const client = new BaseClusterClient({
-  nodeId: "node-A",
-  connector: myWireConnector,
-  codec: createJsonCodec(),
-  heartbeatMs: 30_000,
-  missedPongLimit: 3,
-  reconnect: { initialMs: 500, maxMs: 30_000 },
-  onDiagnostic: (name, payload) => bus.append({ surface: "cluster", name, ... }),
-});
-
-// ClusterTransport contract — drop-in for `cluster-next`'s defineCluster:
-await client.send("node-B", envelope);
-await client.broadcast(eventEnvelope);
-const unsub = client.subscribeInbox({ surface: "tasks" }, onMessage);
-await client.close();
-```
-
-### Length-prefix framing helper
+TCP and Unix sockets deliver bytes, not messages. Wrap each codec payload with
+a 4-byte little-endian length prefix and feed inbound chunks to a streaming
+decoder. WebSocket wires skip this entirely.
 
 ```typescript
 import { encodeLengthPrefixed, createLengthPrefixedDecoder } from "@agentick/cluster-broker";
 
-// Encode: prepend 4-byte LE length to a codec-encoded payload.
 const wire = encodeLengthPrefixed(codec.encode(frame));
 
-// Decode (streaming): feed inbound bytes; receive complete frames.
 const decoder = createLengthPrefixedDecoder({ maxFrameBytes: 16 * 1024 * 1024 });
 const { frames, error } = decoder.feed(inboundChunk);
 if (error?._tag === "frame-too-large") {
-  // Close connection — decoder is poisoned past this point.
+  // The decoder is poisoned past this point — close the connection.
 }
 for (const frameBytes of frames) {
   const frame = codec.decode(frameBytes);
-  // ...
 }
 ```
 
-## Testing
+`feed` accepts arbitrary chunk boundaries: a frame split across a hundred
+single-byte chunks reassembles without a merge-and-copy per chunk, and a chunk
+containing several frames yields all of them. `DEFAULT_MAX_FRAME_BYTES` is the
+cap when you don't pass one.
 
-`@agentick/cluster-broker/testing` ships:
+### Shortcuts every wire wants
 
-- `createInMemoryConnectionPair()` — bidirectional `Connection` pair
-  for low-level base-class tests.
-- `createInMemoryClusterPair()` — `Listener` + `Connector` factory
-  pair for full-stack `BaseBroker` + `BaseClusterClient` tests
-  without any real wire.
+Rather than hand-rolling the `xBroker` / `xClusterNode` / `defineXCluster`
+triple, compose the three helpers. This is exactly how the shipped wires are
+built.
 
 ```typescript
-const pair = createInMemoryClusterPair();
-const broker = new BaseBroker({ listener: pair.listener, codec });
-await broker.start();
-const clientA = new BaseClusterClient({
-  nodeId: "node-A",
-  connector: pair.createConnector(),
-  codec,
-});
-const clientB = new BaseClusterClient({
-  nodeId: "node-B",
-  connector: pair.createConnector(),
-  codec,
-});
-// Both clients now connected to the same broker.
+import { startBroker, createClusterNode, defineWireCluster } from "@agentick/cluster-broker";
+
+// 1. Broker: wrap a Listener, start serving, get an ordered close().
+const running = await startBroker({ listener: myListener, onDiagnostic });
+// running.broker · running.listener · running.close()
+
+// 2. Node: one transport + one membership over ONE shared client connection.
+const node = createClusterNode({ nodeId: "node-a", connector: myConnector, onDiagnostic });
+
+// 3. Cluster factory for createGateway / createApp.
+const cluster = defineWireCluster({ nodeId: "node-a", node });
 ```
+
+`createClusterNode` is the reason a wire's `xClusterNode` is worth having as a
+unit: both seams share a single lazily-created `BaseClusterClient`, so a node
+costs one connection rather than two. The client is constructed on first
+factory invocation and closed via `parent.onClose`.
+
+## Wire protocol
+
+Every frame is serialized by the configured `ClusterCodec` (JSON by default).
+All frame `type` values live in the reserved `cluster:` namespace, so they can
+never collide with adopter envelope types.
+
+| Direction       | Frame                           | Purpose                                          |
+| --------------- | ------------------------------- | ------------------------------------------------ |
+| Client → Broker | `cluster:hello`                 | Identify this node on connect                    |
+| Client → Broker | `cluster:send`                  | Point-to-point message to a named node           |
+| Client → Broker | `cluster:broadcast`             | Fan an event out to every other node             |
+| Client → Broker | `cluster:subscribe-inbox`       | Register an address-filter subscription          |
+| Client → Broker | `cluster:subscribe-bus`         | Register an event-filter subscription            |
+| Client → Broker | `cluster:unsubscribe`           | Cancel a subscription                            |
+| Broker → Client | `cluster:welcome`               | Handshake ack + initial membership snapshot      |
+| Broker → Client | `cluster:subscribe-ack`         | Subscription is recorded (what `flush()` awaits) |
+| Broker → Client | `cluster:inbox-deliver`         | Deliver a routed message                         |
+| Broker → Client | `cluster:bus-deliver`           | Deliver a fanned-out event                       |
+| Broker → Client | `cluster:membership`            | Topology delta (joined / lost / snapshot)        |
+| Bidirectional   | `cluster:ping` / `cluster:pong` | Heartbeat                                        |
+| Bidirectional   | `cluster:error`                 | Non-fatal error report                           |
+| Bidirectional   | `cluster:goodbye`               | Cooperative disconnect                           |
+
+`isFrameShape(value)` is the wire-boundary validator — it accepts every known
+frame type and rejects anything else, so a well-formed-JSON-but-unknown payload
+becomes a diagnostic rather than an exception deep in a handler.
+
+## `BaseBroker`
+
+```typescript
+const broker = new BaseBroker({
+  listener, // required
+  codec, // required
+  onDiagnostic: (name, payload) => bus.append({ surface: "cluster", name /* ... */ }),
+  maxQueueSize: 1024, // per-connection outbound depth
+});
+await broker.start();
+await broker.close();
+```
+
+The broker holds routing state (nodeId → connection, plus each client's inbox
+and bus filters), rejects a second client claiming an already-connected
+`nodeId`, and fans membership deltas to everyone on connect and disconnect.
+
+Every broker → client frame goes through a per-connection `BoundedWriteQueue`.
+On overflow the **oldest** frame is dropped and
+`cluster:broker:server:backpressure-drop` fires, so one slow client can neither
+stall fan-out to the others nor grow the broker heap without bound. Surviving
+frames keep their relative order.
+
+## `BaseClusterClient`
+
+```typescript
+const client = new BaseClusterClient({
+  nodeId: "node-a", // required
+  connector, // required
+  codec, // required
+  heartbeatMs: 30_000, // ping interval
+  missedPongLimit: 3, // consecutive misses before declaring the connection dead
+  reconnect: { initialMs: 500, maxMs: 30_000, maxAttempts: 0 }, // 0 / omitted = unlimited
+  onDiagnostic,
+});
+
+await client.ready; // resolves on the first Welcome
+client.connectionState; // "disconnected" | "connecting" | "handshaking" | "connected" | "closed"
+client.nodes(); // membership snapshot, synchronous
+client.onMembershipChange((change) => {});
+```
+
+It satisfies `ClusterTransport` in full — `send`, `broadcast`,
+`subscribeInbox`, `subscribeBus`, `flush`, `close` — so it drops straight into
+`defineCluster` from [@agentick/cluster](../cluster).
+
+Reconnect is exponential backoff with full jitter (random 0..delay), and
+subscriptions are **restored** after reconnect: the client re-sends its
+subscribe frames so a broker restart doesn't silently deafen a node.
+`flush()` awaits outstanding subscribe acks and snapshots the pending set —
+subscriptions added _during_ a flush don't extend the wait, and a flush racing
+a close resolves rather than hanging.
+
+## Codecs
+
+The broker frames and the adopter's `ClusterCodec` speak different type
+languages: the codec is declared over `MessageEnvelope | EventEnvelope`, and
+frames are their own schema. `adaptClusterCodec` centralizes that cast so it
+lives in one place instead of at every call site. Advanced codec authors can
+implement `BrokerCodec` directly and skip the adapter.
+
+## API reference
+
+| Export                                                                               | Role                                       |
+| ------------------------------------------------------------------------------------ | ------------------------------------------ |
+| `BaseBroker`, `BaseBrokerOptions`                                                    | Server side                                |
+| `BaseClusterClient`, `BaseClusterClientOptions`                                      | Client side; implements `ClusterTransport` |
+| `Connection`, `ConnectionCloseReason`, `Listener`, `Connector`                       | The three interfaces a wire implements     |
+| `encodeLengthPrefixed`, `createLengthPrefixedDecoder`                                | Byte-stream framing                        |
+| `DEFAULT_MAX_FRAME_BYTES`                                                            | Default frame cap                          |
+| `LengthPrefixedDecoder`, `LengthPrefixedDecoderOptions`, `LengthPrefixedDecodeError` | Framing types                              |
+| `FRAME_*` constants, `isFrameShape`                                                  | Frame schema + wire-boundary validation    |
+| `AnyFrame`, `ClientFrame`, `BrokerFrame`, per-frame types                            | Frame typing                               |
+| `startBroker`, `RunningBroker`, `StartBrokerOptions`                                 | Broker bring-up shortcut                   |
+| `createClusterNode`, `ClusterNodeFactories`, `CreateClusterNodeOptions`              | Multiplexed transport + membership pair    |
+| `defineWireCluster`, `DefineWireClusterOptions`                                      | `ClusterFactory` shortcut                  |
+| `adaptClusterCodec`, `BrokerCodec`                                                   | Codec adapter for frame types              |
+| `BoundedWriteQueue`, `BoundedWriteQueueOptions`                                      | Per-connection backpressure queue          |
+
+### `/testing`
+
+| Export                           | Role                                                         |
+| -------------------------------- | ------------------------------------------------------------ |
+| `createInMemoryConnectionPair()` | Bidirectional `Connection` pair for low-level tests          |
+| `createInMemoryClusterPair()`    | `Listener` + connector factory for full-stack tests, no wire |
+
+## Diagnostics
+
+All diagnostics arrive on the optional `onDiagnostic` callback. Wire packages
+bridge it onto the parent's local bus with `surface: "cluster"`, so adopters
+see the whole operational picture through one subscription. Omit the callback
+and diagnostics are discarded.
+
+**Broker side** — `cluster:broker:server:` +
+`started` · `closing` · `closed` · `client-connected` · `client-welcomed` ·
+`client-disconnected` · `pre-handshake-disconnected` · `routing-failed`
+(unknown target node) · `routing-inconsistent` (defensive; should not occur) ·
+`no-matching-subscription` · `frame-malformed` · `frame-decode-failed` ·
+`unexpected-frame` · `client-error` · `dispatch-failed` · `write-failed` ·
+`membership-fanout-failed` · `backpressure-drop`.
+
+**Client side** — `cluster:broker:client:` +
+`connecting` · `connected` · `disconnected` · `closed` · `connect-failed` ·
+`handshake-failed` · `reconnect-scheduled` · `reconnect-gave-up` ·
+`heartbeat-missed` · `write-while-disconnected` · `frame-decode-failed` ·
+`frame-malformed` · `unexpected-frame` · `broker-error` · `handler-threw` ·
+`membership-handler-threw`.
 
 ## Verified by
 
-- `src/__tests__/base-broker-and-client.spec.ts` — 16 tests:
-  - Handshake (client → broker → welcome; duplicate-nodeId rejection)
-  - Membership (welcome snapshot; disconnect drops routing)
-  - Send + inbox subscription (filter narrows delivery;
-    unknown-node-id routing-failed diagnostic)
-  - Broadcast (fan-out; no self-echo; filter narrows)
-  - Subscription lifecycle (unsubscribe drops in-flight)
-  - Wire frame validation (`isFrameShape` accepts known, rejects garbage)
-  - Length-prefix framing (single frame; split-chunk reassembly;
-    multi-frame chunk; poison-on-oversize)
+- `src/__tests__/base-broker-and-client.spec.ts` — handshake and
+  duplicate-`nodeId` rejection; Welcome carries the initial snapshot and a
+  disconnect propagates a `lost` delta; `send` reaches a matching inbox
+  subscriber while filters narrow delivery and an unknown node produces a
+  routing-failed diagnostic; broadcast fans out without self-echo; `flush()`
+  resolves for subscribes issued before the handshake completed; unsubscribe
+  stops callbacks; `isFrameShape` accepts every defined frame and rejects
+  garbage; length-prefix framing handles a single frame, a split frame, a
+  multi-frame chunk, and poisons on an oversized declared length.
+- `src/__tests__/diagnostics-and-lifecycle.spec.ts` — single-handler
+  `onMessage` enforcement; `ready` and `connectionState` transitions; the
+  reconnect diagnostic sequence through `reconnect-gave-up`; heartbeat
+  force-close after `missedPongLimit`; pre-handshake disconnect; malformed and
+  undecodable frames on both sides; subscription restore after reconnect;
+  100-single-byte-chunk and interleaved-frame decoding; broker lifecycle
+  diagnostics.
+- `src/__tests__/backpressure.spec.ts` — `BoundedWriteQueue` drops the oldest
+  frame on overflow and invokes `onOverflow`, stops draining after close, and
+  preserves order among survivors.
 
-Real-wire conformance (`@agentick/cluster/conformance`) is
-exercised by each wire package (`cluster-net-next`, `cluster-ws-next`)
-in subsequent phases.
-
-## Diagnostics emitted
-
-All via the optional `onDiagnostic` callback passed at construction.
-Wire impls bridge this into `cluster-next`'s `DiagnosticEmitter` over
-the parent harness's local bus, so adopters subscribing to
-`surface: "cluster"` see the full operational picture.
-
-### Broker-side
-
-- `cluster:broker:server:started` / `closed`
-- `cluster:broker:server:client-connected` / `client-welcomed` / `client-disconnected` / `pre-handshake-disconnected`
-- `cluster:broker:server:routing-failed` (unknown target node)
-- `cluster:broker:server:routing-inconsistent` (defensive — should not occur)
-- `cluster:broker:server:no-matching-subscription`
-- `cluster:broker:server:frame-malformed` / `frame-decode-failed`
-- `cluster:broker:server:unexpected-frame`
-- `cluster:broker:server:client-error`
-- `cluster:broker:server:membership-fanout-failed`
-
-### Client-side
-
-- `cluster:broker:client:connecting` / `connected` / `disconnected` / `closed`
-- `cluster:broker:client:connect-failed` / `handshake-failed`
-- `cluster:broker:client:reconnect-scheduled` / `reconnect-gave-up`
-- `cluster:broker:client:heartbeat-missed`
-- `cluster:broker:client:write-while-disconnected`
-- `cluster:broker:client:frame-decode-failed` / `frame-malformed`
-- `cluster:broker:client:unexpected-frame`
-- `cluster:broker:client:broker-error`
-- `cluster:broker:client:handler-threw`
+Real-wire conformance (`runClusterTransportConformance` from
+[@agentick/cluster](../cluster)) is run by each wire package against its own
+transport, not here — this package has no wire.
 
 ## Roadmap & known gaps
 
-- **No concrete wire impl yet.** Phase 4b lands `cluster-net-next`
-  (TCP + Unix socket); Phase 4e lands `cluster-ws-next` (WebSocket).
-- **Adopter-supplied backpressure not yet configurable.** Phase 4
-  bounds per-connection buffer in the wire impl, not the base.
-- **Auto-elect first-to-bind** is per-wire-impl logic (cluster-net's
-  TCP bind race, cluster-ws's http.Server detection). Not part of
-  the base.
-- **UDP intentionally NOT supported.** Per-(source, destination) FIFO
-  and per-source broadcast ordering are part of the `ClusterTransport`
-  contract; UDP violates both. A reliable-UDP layer would re-invent
-  TCP. UDP multicast for membership discovery is a different
-  topology (gossip) and would ship as `@agentick/cluster-gossip`
-  with its own ADR — not as a broker-pattern impl.
-- **Cluster transport conformance** (`@agentick/cluster/conformance`)
-  is exercised once a wire impl is paired with the base. Phase 4b
-  is the first end-to-end conformance pass.
+- **`FRAME_SUBSCRIBE_ACK` and `SubscribeAckFrame` are not exported from the
+  barrel** even though `SubscribeAckFrame` is a member of the exported
+  `BrokerFrame` union. Code switching exhaustively over `BrokerFrame` can see
+  the member but cannot name its constant.
+- **`Connection.id` allocation is per-wire.** Each wire picks its own scheme,
+  so two listeners in one process could in principle mint colliding ids. A
+  single convention across wires is not settled.
+- **Adopter-facing backpressure knobs stop at `maxQueueSize`.** Per-frame
+  priorities, drop-newest, and a caller-visible pressure signal are not built;
+  `BoundedWriteQueue` is exported so a wire can extend the semantics itself.
+- **Broker election is not part of the base.** First-to-bind races, stale
+  socket cleanup, and re-election live in the wire packages, because the race
+  is wire-specific — a TCP port bind and a Unix socket file behave differently.
+- **UDP is deliberately unsupported.** `ClusterTransport` requires
+  per-(source, destination) FIFO for `send` and per-source FIFO for
+  `broadcast`; UDP violates both, and a reliable-UDP layer would reinvent TCP.
+  UDP multicast for membership discovery is a gossip topology, which would be a
+  separate package rather than a broker-pattern wire.

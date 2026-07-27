@@ -4,7 +4,7 @@
  * the wire-agnostic semantics — handshake, routing, fan-out,
  * subscriptions, membership deltas, heartbeat, frame validation.
  *
- * Concrete wire packages (cluster-net-next, cluster-ws-next) run the
+ * Concrete wire packages (@agentick/cluster-net, @agentick/cluster-ws) run the
  * full `runClusterTransportConformance` suite against real wires in
  * later phases. This file covers the base classes' own contract.
  */

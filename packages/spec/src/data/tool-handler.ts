@@ -240,7 +240,7 @@ export interface ToolHandlerCtx
  * within these directories"), NOT enforced containment and NOT content
  * transfer (that is resources, ADR 62).
  *
- * Canonical home is spec-next so both directions type against ONE shape:
+ * Canonical home is @agentick/spec so both directions type against ONE shape:
  * the outbound client config (`McpRootsSource` in `@agentick/mcp`)
  * and the inbound per-connection read ({@link McpRequestExtras.clientRoots}).
  *

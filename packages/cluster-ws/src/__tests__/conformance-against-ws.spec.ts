@@ -2,7 +2,7 @@
  * Phase 4e acceptance bar — `runClusterTransportConformance` against
  * the WebSocket wire. A `wsBroker` runs standalone on a freshly
  * allocated port per test; two `BaseClusterClient`s connect via
- * `createWsConnector`; the cluster-next conformance suite drives
+ * `createWsConnector`; the @agentick/cluster conformance suite drives
  * full send / broadcast / subscription / lifecycle coverage
  * through real WebSocket upgrade + framed message delivery.
  *

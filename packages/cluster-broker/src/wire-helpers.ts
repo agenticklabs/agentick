@@ -1,6 +1,6 @@
 /**
  * Wire-agnostic convenience helpers for concrete wire packages
- * (cluster-net-next, cluster-ws-next, future wires). Every wire's
+ * (@agentick/cluster-net, @agentick/cluster-ws, future wires). Every wire's
  * `{ xBroker, xClusterNode, defineXCluster }` triple followed the
  * same shape; this module is the single source of truth for that
  * shape. Each wire's *-cluster.ts now does only the wire-specific
@@ -14,7 +14,7 @@
  *                             /membership factories. Shared across
  *                             every wire.
  *   - `defineWireCluster(opts)` — top-level convenience: delegates to
- *                             `defineCluster` from `cluster-next` with
+ *                             `defineCluster` from `@agentick/cluster` with
  *                             a pre-built node + optional partitioning
  *                             /journal/codec/fanoutMode.
  *
@@ -193,7 +193,7 @@ function clientToMembership(client: BaseClusterClient, currentNode: NodeId): Clu
  * Options for the top-level `defineXCluster(...)` convenience. The
  * caller has already built the `{transport, membership}` pair via
  * `xClusterNode(...)`; this wrapper just plumbs it into
- * `defineCluster` from `cluster-next` along with optional
+ * `defineCluster` from `@agentick/cluster` along with optional
  * partitioning/journal/codec/fanoutMode.
  */
 export interface DefineWireClusterOptions {

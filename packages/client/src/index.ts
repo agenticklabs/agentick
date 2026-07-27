@@ -19,7 +19,7 @@
  * ```
  *
  * This is the client twin of how the public `agentick` metapackage bundles the
- * server built-ins — `client-next` is the default (everything works), while
+ * server built-ins — `@agentick/client` is the default (everything works), while
  * `@agentick/client-core` is the opt-in lean core for adopters who want
  * minimal imports and add only the `/client` subpaths they need. At the v2 cut
  * these become `@agentick/client` (this bundle) + `@agentick/client-core`.

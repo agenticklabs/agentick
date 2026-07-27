@@ -4,7 +4,7 @@
  * discriminator.
  *
  * Spec owns these types. `@agentick/client-core` and every
- * `@agentick/transport-*-next` package imports from here. Zero runtime
+ * `@agentick/transport-<edge>` package imports from here. Zero runtime
  * deps; browser-safe.
  *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md

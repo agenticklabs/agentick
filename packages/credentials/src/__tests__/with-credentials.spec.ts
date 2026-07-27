@@ -4,13 +4,13 @@
  *
  * Why not a full app integration test: the cross-session-sharing
  * behavior we'd want to verify is a property of `AppHarness`'s
- * `extensionBridges` map (covered by app-next's own test suite),
+ * `extensionBridges` map (covered by @agentick/app's own test suite),
  * NOT of `withCredentials` itself. The extension's job is exactly
  * three things — construct a harness from the substrate, register
  * it under `"credentials"`, schedule `harness.close()` on host close.
  * That's what this spec verifies.
  *
- * Pulling in `@agentick/app` + react + executor-next as dev
+ * Pulling in `@agentick/app` + react + `@agentick/*-executor` as dev
  * deps just to walk through `createApp` would couple the test to
  * the React compiler (the only fleshed-out one today) and would
  * actually be exercising AppHarness, not withCredentials.

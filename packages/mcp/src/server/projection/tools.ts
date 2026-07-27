@@ -385,7 +385,7 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
   // #171d.3 — translate framework `annotations.taskSupport` to the
   // MCP wire `execution.taskSupport` enum so clients know to wrap
   // the tool in `ctx.tasks.submit(...)` (Pattern B). Mapping mirrors
-  // mcp-next's `mapMcpTaskSupport` on the inbound client side:
+  // @agentick/mcp's `mapMcpTaskSupport` on the inbound client side:
   //   "required"    → "required"   (every call returns CreateTaskResult)
   //   "supported"   → "optional"   (caller picks per call)
   //   "unsupported" → "forbidden"

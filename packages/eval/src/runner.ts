@@ -55,7 +55,7 @@ export async function runEval<O, P>(
 
   // Construct the app for this invocation. The factory owns all
   // option resolution — the runner just passes overrides straight
-  // through. Each invocation gets its OWN app; eval-next owns the
+  // through. Each invocation gets its OWN app; @agentick/eval owns the
   // close, but NOT the construction.
   const app: AppHarnessProtocol<P> = await definition.app(overrides);
 

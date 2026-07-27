@@ -60,7 +60,7 @@ export {
 export { joinUnixCluster, type JoinUnixClusterOptions } from "./join-unix-cluster.js";
 export { joinTcpCluster, type JoinTcpClusterOptions } from "./join-tcp-cluster.js";
 
-// Re-export the wire-agnostic facade types from cluster-next so
+// Re-export the wire-agnostic facade types from @agentick/cluster so
 // adopters don't need to reach across two packages just to type a
 // returned `ClusterNode`.
 export type { BusFacade, ClusterNode, MembershipFacade } from "@agentick/cluster";

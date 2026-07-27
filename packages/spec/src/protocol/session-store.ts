@@ -29,8 +29,8 @@
  * by the client / app asynchronously — like credentials, not like the knobs
  * synchronous read-model. There is deliberately no `CollectionProjection` here.
  *
- * Port home is spec-next (data-layer plan §6-D): the cross-package contract —
- * the app populates it, adapter packages implement it, only spec-next is a
+ * Port home is @agentick/spec (data-layer plan §6-D): the cross-package contract —
+ * the app populates it, adapter packages implement it, only @agentick/spec is a
  * shared dep. The bundled `InMemorySessionStore` (composing `MemoryCollection`)
  * and the `runSessionStoreConformance` suite live in `@agentick/session`,
  * mirroring `TaskStore` / `InMemoryTaskStore`.

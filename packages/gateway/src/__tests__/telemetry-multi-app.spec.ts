@@ -4,7 +4,7 @@
  * `telemetry` setting, TWO hosted apps inheriting it. Both apps' metric export
  * shares the SAME OTel `MetricReader` instances — and a reader binds to exactly
  * ONE `MeterProvider` ("MetricReader can not be bound to a MeterProvider
- * again"). The app-next wiring MATERIALIZES the `MeterProvider` once per reader
+ * again"). The @agentick/app wiring MATERIALIZES the `MeterProvider` once per reader
  * set and shares the `MetricSink`, so the second app does NOT re-bind and
  * crash. Both apps' `ctx.metrics` reach the sink, kept distinguishable by the
  * low-cardinality `app` ambient label.

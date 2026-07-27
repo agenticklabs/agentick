@@ -4,7 +4,7 @@
  * These are the provider↔harness INTERNAL contracts — NOT wire types.
  * The split test is "is it serialized across the inbox/wire?":
  *
- *   - `spec-next` keeps ONLY the serialized command shapes
+ *   - `@agentick/spec` keeps ONLY the serialized command shapes
  *     (`SandboxExec*`/`SandboxEdit*`/mount inputs/results), `NetworkRule`,
  *     `ProxiedRequest`, and the sandbox error tags.
  *   - THIS module (the base) holds the construction contracts + live-object
@@ -19,9 +19,9 @@
  * workspace) consumed only server-side by the harness that wraps it 1:1;
  * `compiler-react` never touches it (it registers HARNESSES, not handles).
  *
- * Providers (`@agentick/sandbox-local`, `sandbox-docker-next`, …) dep
+ * Providers (`@agentick/sandbox-local`, `@agentick/sandbox-docker`, …) dep
  * THIS base, implement {@link SandboxProvider}, and return a
- * {@link SandboxHandle} — mirroring `model-openai-next → model-next`.
+ * {@link SandboxHandle} — mirroring `@agentick/model-openai → @agentick/model`.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  */

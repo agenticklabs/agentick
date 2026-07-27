@@ -19,8 +19,8 @@
  * and every method returns a `Promise`. Adopter code targets `LogStore`; Effect
  * stays confined to the substrate.
  *
- * Port home is spec-next (data-layer plan §6-D): the cross-package contract —
- * the harness consumes it, adapter packages implement it, only spec-next is a
+ * Port home is @agentick/spec (data-layer plan §6-D): the cross-package contract —
+ * the harness consumes it, adapter packages implement it, only @agentick/spec is a
  * shared dep. Defaults + conformance live in the substrate / harness packages
  * (`MemoryLog` + `runStoreConformance` in `@agentick/store`;
  * `runTimelineStoreConformance` in `@agentick/timeline`).

@@ -9,8 +9,8 @@
  * This module ships the PURE transform only (`applyEdits`) — no I/O,
  * OS-free. It lives in the BASE package `@agentick/sandbox`
  * (re-exported from the index) so BOTH the harness and every provider
- * (`sandbox-local-next`, `sandbox-docker-next`) — which dep the base —
- * share one implementation, mirroring `model-openai-next → model-next`
+ * (`@agentick/sandbox-local`, `@agentick/sandbox-docker`) — which dep the base —
+ * share one implementation, mirroring `@agentick/model-openai → @agentick/model`
  * (ADR 59).
  *
  * The `editFile` file-wrapper (read → transform → atomic temp+rename)
@@ -19,7 +19,7 @@
  * pure text transform, nothing more.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
- * @verifiedBy packages/sandbox-next/src/__tests__/edit.spec.ts
+ * @verifiedBy packages/sandbox/src/__tests__/edit.spec.ts
  */
 
 import type { SandboxEdit, SandboxEditChange, SandboxEditResult } from "@agentick/spec";

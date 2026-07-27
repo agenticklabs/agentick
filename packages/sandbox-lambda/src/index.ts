@@ -8,7 +8,7 @@
  * HTTP, exec streamed over WS (no exec ceiling), atomic `editFile` via the
  * base's shared `applyEdits` run IN-VM. Deps ONLY the base package
  * `@agentick/sandbox` (+ AWS SDK v3 + a WS client) — mirroring
- * `model-openai-next → model-next`.
+ * `@agentick/model-openai → @agentick/model`.
  *
  * Capability tier (honest, per ADR 60 — never fake): runtime host mounts throw
  * `SandboxUnsupportedError` (no shared host); DOMAIN-level network rules ARE

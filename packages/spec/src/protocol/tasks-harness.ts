@@ -410,7 +410,7 @@ export interface TaskHandle<T = readonly ContentBlock[]> {
  * any TasksHarness implementation, including remote MCP proxies).
  *
  * Used by the tool-executor's task-mode resolver and by the
- * mcp-next/server tasks projection (#171d.3) to detect Pattern B
+ * @agentick/mcp/server tasks projection (#171d.3) to detect Pattern B
  * handler returns and route them to the MCP task wire.
  */
 export function isTaskHandle(value: unknown): value is TaskHandle<readonly ContentBlock[]> {

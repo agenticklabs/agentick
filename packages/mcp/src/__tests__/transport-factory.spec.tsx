@@ -200,7 +200,7 @@ describe("withMCP — transport factory (#154)", () => {
       const session = await app.createSession();
       try {
         expect(elicitBinding).not.toBeNull();
-        const handle = session.elicit; // exposed by elicitation-next augment
+        const handle = session.elicit; // exposed by @agentick/elicitation augment
         expect(handle).toBeDefined();
         // Fire-and-forget an elicit through the factory's binding;
         // the session's elicit harness publishes on the same channel

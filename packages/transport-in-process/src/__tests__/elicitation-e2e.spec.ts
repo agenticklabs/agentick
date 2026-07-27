@@ -86,7 +86,7 @@ async function makeStack(replyText = "ok") {
     options: { modelExecutor: executor, compiler: fakeCompiler() },
   });
   // AppHarness.createSession returns a real SessionHarnessProtocol<P>
-  // — its `elicitation` slot is added by the elicitation-next module
+  // — its `elicitation` slot is added by the @agentick/elicitation module
   // augmentation (loaded above).
   const session = await app.createSession({ sessionId: "elic-session" });
 

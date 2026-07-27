@@ -61,7 +61,7 @@ export function encodeLengthPrefixed(payload: Uint8Array): Uint8Array {
  * TODO(phase-4b): default may be too generous for production. A
  * single misconfigured client could request 16MiB allocations
  * across many connections. Real adopters will want 256KB–1MB caps.
- * Decide once cluster-net-next ships with real adopter feedback;
+ * Decide once @agentick/cluster-net ships with real adopter feedback;
  * may also want a per-listener default override.
  */
 export const DEFAULT_MAX_FRAME_BYTES = 16 * 1024 * 1024;

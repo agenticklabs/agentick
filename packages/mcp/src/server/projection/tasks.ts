@@ -1,7 +1,7 @@
 /**
  * Tasks projection — server-side Pattern B over the MCP wire (#171d.3).
  *
- * Symmetric inbound counterpart to `mcp-next` (client) Pattern B
+ * Symmetric inbound counterpart to `@agentick/mcp` (client) Pattern B
  * handling (#158 / #174). When a v2 server-side tool handler returns
  * a {@link TaskHandle} (Pattern B), this projection layer:
  *

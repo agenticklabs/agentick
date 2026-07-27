@@ -16,7 +16,7 @@
  * single import site. Prefer subpaths for explicit dependency boundaries
  * and minimal bundle impact.
  *
- * Naming convention: `{layer}-extensions-next` for first-party
+ * Naming convention: `@agentick/{layer}-extensions` for first-party
  * middleware bundles per layer (client, gateway, harness, ...).
  * Third-party extensions name themselves freely.
  *

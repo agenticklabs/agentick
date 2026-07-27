@@ -65,7 +65,7 @@ async function makeStack() {
     rootElement: null,
     options: { modelExecutor: executor, compiler: fakeCompiler() },
   });
-  // `session.tasks` is added by the tasks-next module augmentation (loaded above)
+  // `session.tasks` is added by the @agentick/tasks module augmentation (loaded above)
   // and constructed unconditionally per session (ADR 26 built-in bridge).
   const session = await app.createSession({ sessionId: "tasks-session" });
 

@@ -68,7 +68,7 @@ export type EventPhase = "requested" | "before" | "delta" | "terminal";
  *       }
  *     }
  *
- * Mirrors the `HookBridges` empty-seed pattern. Spec-next stays
+ * Mirrors the `HookBridges` empty-seed pattern. `@agentick/spec` stays
  * harness-agnostic — only framework-core identity dimensions live in
  * the canonical {@link EventScope}; harness-specific dimensions live
  * in the augmenting packages.

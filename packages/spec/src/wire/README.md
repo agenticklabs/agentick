@@ -1,7 +1,7 @@
 # `@agentick/spec/wire`
 
 Wire protocol types for the **Agentick client↔gateway** JSON-RPC
-surface. Owned by spec-next; consumed by `@agentick/client`,
+surface. Owned by @agentick/spec; consumed by `@agentick/client`,
 `@agentick/gateway`, every transport package, and every wire
 extension package.
 

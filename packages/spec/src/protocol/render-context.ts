@@ -44,7 +44,7 @@ export interface RenderContext {
   /**
    * The active model's window facts for THIS render (ADR 54/55).
    * Framework-produced by the loop/session; plain numbers, no
-   * model-next dep. `contextWindow` is a synchronous render input;
+   * @agentick/model dep. `contextWindow` is a synchronous render input;
    * `usedTokens` is the prior turn's consumed tokens when the session
    * supplies it at render.
    */
@@ -57,7 +57,7 @@ export interface RenderContext {
    * The model the loop is about to call THIS render (ADR 55) — a
    * projection of the active {@link ExecutionTarget}. A seeded
    * framework-core slot (identity + capabilities are spec-resident, no
-   * model-next dep), so `compiler-react`'s `useActiveModel` reads it
+   * @agentick/model dep), so `compiler-react`'s `useActiveModel` reads it
    * with zero model-layer coupling — the same choice `contextInfo` made
    * for the window. Enables *rendering for the model you'll call*
    * (per-model tool descriptions / formatting / reasoning scaffolds).

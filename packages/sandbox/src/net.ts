@@ -10,10 +10,10 @@
  * wrong-direction dependency on any one provider.
  *
  * Ported faithfully from v1 `@agentick/sandbox-local/network/rules.ts`,
- * retyped against the shared `spec-next` wire vocabulary.
+ * retyped against the shared `@agentick/spec` wire vocabulary.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
- * @verifiedBy packages/sandbox-next/src/__tests__/net.spec.ts
+ * @verifiedBy packages/sandbox/src/__tests__/net.spec.ts
  */
 
 import type { NetworkRule, ProxiedRequest } from "@agentick/spec";

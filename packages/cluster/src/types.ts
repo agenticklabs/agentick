@@ -115,7 +115,7 @@ export type JournalOffset = string | null;
  * One entry produced by a {@link DurableJournal} replay. Carries the
  * underlying journal record + the offset BEFORE this entry, so
  * adopters can resume mid-replay. Schema of `record` matches the
- * journal's append shape (`OperationJournal.append` from spec-next).
+ * journal's append shape (`OperationJournal.append` from @agentick/spec).
  */
 export interface JournalEntry {
   readonly offset: JournalOffset;

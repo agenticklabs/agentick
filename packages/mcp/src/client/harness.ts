@@ -303,7 +303,7 @@ type McpSetLoggingLevelInput = { readonly level: McpLoggingLevel };
 // Errors
 // ============================================================================
 
-/** Migrated to class hierarchy (ADR 41). Re-exports from spec-next. */
+/** Migrated to class hierarchy (ADR 41). Re-exports from @agentick/spec. */
 export {
   McpClientError,
   type McpClientErrorChannel,

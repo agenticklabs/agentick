@@ -64,8 +64,8 @@ export {
   type EnvCredentialsStoreOptions,
 } from "./stores/index.js";
 
-// Error types re-exported from spec-next for convenience — adopters
-// who only depend on credentials-next get them without a second import.
+// Error types re-exported from @agentick/spec for convenience — adopters
+// who only depend on @agentick/credentials get them without a second import.
 export {
   CredentialsError,
   type CredentialsErrorChannel,

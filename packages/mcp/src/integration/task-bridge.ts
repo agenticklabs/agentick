@@ -59,7 +59,7 @@ import { omitUndefined } from "@agentick/utils";
  * terminal. We surface a typed error so the `TasksHarness` failure
  * path emits a symmetric local `TaskRejection`.
  */
-/** Migrated to class hierarchy (ADR 41). Re-exports from spec-next. */
+/** Migrated to class hierarchy (ADR 41). Re-exports from @agentick/spec. */
 export { McpRemoteTaskNonCompletedError } from "@agentick/spec";
 import { McpRemoteTaskNonCompletedError } from "@agentick/spec";
 

@@ -48,7 +48,7 @@ export async function destroyWorkspace(path: string, autoCreated: boolean): Prom
   try {
     await rm(path, { recursive: true, force: true });
   } catch (err) {
-    console.warn(`[sandbox-local-next] failed to destroy workspace ${path}:`, err);
+    console.warn(`[@agentick/sandbox-local] failed to destroy workspace ${path}:`, err);
   }
 }
 

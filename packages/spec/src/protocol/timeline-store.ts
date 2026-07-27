@@ -2,7 +2,7 @@
  * `TimelineStore` — the durable backing for the timeline **persisted tier**
  * (ADR 49, "stores, not snapshots"). The flagship instance of the LOG
  * archetype: `TimelineStore extends LogStore<TimelineEntry>` (data-layer plan
- * §6-D — the port home is spec-next, unifying it with `TaskStore`).
+ * §6-D — the port home is @agentick/spec, unifying it with `TaskStore`).
  *
  * **Its `logKey` IS the `sessionId`.** One store instance serves every session
  * the harness hosts; entries are keyed by `sessionId` and ordered by the
@@ -13,8 +13,8 @@
  * erasure, **never called by compaction**.
  *
  * Reference adapters ship as separate packages (ADR 49 §"reference adapters"):
- * `@agentick/timeline-fs` (JSONL, local pole), `-sqlite-next` (recommended
- * first durable), `-postgres-next` (cloud pole). The bundled default is
+ * `@agentick/timeline-fs` (JSONL, local pole), `-sqlite` (recommended
+ * first durable), `-postgres` (cloud pole). The bundled default is
  * `MemoryTimelineStore` (`@agentick/timeline`), a thin binding of the
  * generic `MemoryLog<T>` (`@agentick/store`).
  *

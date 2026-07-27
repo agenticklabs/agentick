@@ -13,7 +13,7 @@
  *      root, and return a {@link LambdaSandbox}.
  *
  * ## Network tier — richer than docker (flagged: intentional divergence)
- * Unlike `sandbox-docker-next` (which throws `SandboxUnsupportedError` for a
+ * Unlike `@agentick/sandbox-docker` (which throws `SandboxUnsupportedError` for a
  * `NetworkRule[]` because `NetworkMode` can't express per-domain rules),
  * Lambda MicroVMs CAN do domain rules — via the IN-VM egress proxy. So:
  *   - `network === true`  → the `INTERNET_EGRESS` egress connector (public).

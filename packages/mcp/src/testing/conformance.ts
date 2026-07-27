@@ -89,7 +89,7 @@ import {
  * concrete classes — that would force `@agentick/resources` (which
  * no `@agentick/mcp` SOURCE constructs — the server PROJECTS the
  * `Resources` spec interface via config, it never owns one) into
- * mcp-next's runtime dependency graph. Instead the caller injects
+ * @agentick/mcp's runtime dependency graph. Instead the caller injects
  * factories, exactly like `runTimelineStoreConformance` /
  * `runSandboxProviderConformance` take a `factory`. The caller's
  * `*.spec.ts` (a test, so a devDependency edge) imports the concrete

@@ -10,7 +10,7 @@
  *
  * The emitter is live-only (no replay buffer), so every test starts
  * iterating and lets the subscription attach (a short settle, mirroring
- * `pubsub-next`'s own `local-pubsub.spec.ts`) BEFORE driving the
+ * `@agentick/pubsub`'s own `local-pubsub.spec.ts`) BEFORE driving the
  * transport transition that publishes.
  */
 

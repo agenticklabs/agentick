@@ -27,7 +27,7 @@ export function jsonCodec(): ClusterCodecFactory {
 
 /**
  * Sync constructor for the JSON codec. Useful when wire impls
- * (cluster-net-next, cluster-ws-next) need a `ClusterCodec`
+ * (@agentick/cluster-net, @agentick/cluster-ws) need a `ClusterCodec`
  * directly rather than through factory plumbing — e.g. internal
  * defaults when adopters didn't pass `opts.codec`.
  */

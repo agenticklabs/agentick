@@ -10,7 +10,7 @@
  *      assertions work against a real impl.
  *
  * This file is the framework's own canonical pass of the suite.
- * Adapter packages (cluster-ipc-next, cluster-redis-next) will mirror
+ * Adapter packages (@agentick/cluster-ipc, @agentick/cluster-redis) will mirror
  * the same structure with their own transport factories.
  */
 

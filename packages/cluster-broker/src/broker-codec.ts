@@ -4,7 +4,7 @@
  * to broker-internal frames (`BrokerFrame` instead of
  * `MessageEnvelope | EventEnvelope`).
  *
- * The story: at the cluster-next layer, `ClusterCodec` advertises
+ * The story: at the @agentick/cluster layer, `ClusterCodec` advertises
  * envelope-only encode/decode. That's correct for adopters
  * constructing envelopes — the narrow type catches misuse at
  * construction sites. But the broker piggybacks the SAME codec to

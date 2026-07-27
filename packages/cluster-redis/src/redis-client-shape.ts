@@ -3,7 +3,7 @@
  * surface we use. Declared here (not imported from `ioredis`) so
  * adopters can pass any RESP-protocol-compatible client (real ioredis,
  * mock for tests, ioredis-against-Valkey/KeyDB/Dragonfly) without
- * cluster-redis-next forcing a specific implementation type.
+ * @agentick/cluster-redis forcing a specific implementation type.
  *
  * The shape is intentionally narrow — only the methods this package
  * actually calls. Widening here is a public-API change.

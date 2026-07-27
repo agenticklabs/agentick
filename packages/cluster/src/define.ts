@@ -217,7 +217,7 @@ export function defineCluster(spec: DefineClusterConfig): ClusterFactory {
     // Codec: explicit > default (JSON). Realized here so adapters
     // that swap codecs (msgpack/protobuf) are visible at construction.
     // TODO(phase-4b): the codec is constructed but not yet routed
-    // through this layer. cluster-net-next / cluster-redis-next will
+    // through this layer. @agentick/cluster-net / @agentick/cluster-redis will
     // consume `spec.codec` directly from their factories at the wire
     // boundary. Until then, configuring `codec: msgpackCodec()` is
     // observable-at-construction only — no actual serialization
@@ -362,7 +362,7 @@ async function resolveFactoryAsync<R, P>(
   const result = factory(parent);
   if (isEffectLike(result)) {
     throw new Error(
-      "cluster-next Phase 2: Effect-returning factories are not yet supported. " +
+      "@agentick/cluster Phase 2: Effect-returning factories are not yet supported. " +
         "Use Promise/sync returns; Effect support lands in Phase 3.",
     );
   }

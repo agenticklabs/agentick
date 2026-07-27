@@ -14,11 +14,11 @@
  * dual-key uri/uriTemplate query — those are resources-specific extensions of
  * THIS shape).
  *
- * Port home is spec-next (§6-D): the cross-package contract — the harness
- * consumes it, adapter packages implement it, only spec-next is a shared dep.
+ * Port home is @agentick/spec (§6-D): the cross-package contract — the harness
+ * consumes it, adapter packages implement it, only @agentick/spec is a shared dep.
  * The bundled in-memory default ({@link import("@agentick/prompts").InMemoryPromptStore})
  * and the `runPromptStoreConformance` suite live in `@agentick/prompts`
- * (mirrors `SkillStore`; spec-next stays vitest-free). A durable adapter conforms
+ * (mirrors `SkillStore`; @agentick/spec stays vitest-free). A durable adapter conforms
  * to this SAME port.
  *
  * @see docs/proposals/v2/data-layer-plan.md §6-C

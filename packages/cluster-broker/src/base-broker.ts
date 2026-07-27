@@ -19,7 +19,7 @@
  *
  * Multi-tenant note: a single broker process serves all clients
  * uniformly. Multi-tenant isolation is achieved by adopters wiring
- * a custom `ClusterPartitioning` at the `cluster-next` layer (per
+ * a custom `ClusterPartitioning` at the `@agentick/cluster` layer (per
  * ADR 35 §7) — not by spinning up multiple brokers.
  */
 
@@ -66,7 +66,7 @@ export interface BaseBrokerOptions {
   readonly codec: ClusterCodec;
   /**
    * Diagnostic emitter. Concrete wire impls bridge this into
-   * `cluster-next`'s `DiagnosticEmitter`. Omitted → diagnostics are
+   * `@agentick/cluster`'s `DiagnosticEmitter`. Omitted → diagnostics are
    * silently discarded.
    */
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
@@ -406,7 +406,7 @@ export class BaseBroker {
     // Filter check — deliver only to subscriptions whose address
     // filter matches. If no inbox subs registered (rare), deliver
     // unconditionally so the client can use a no-subscription mode
-    // for ergonomic fallbacks. Conformance from `cluster-next` treats
+    // for ergonomic fallbacks. Conformance from `@agentick/cluster` treats
     // empty-filter subscribes as match-all; we keep parity here.
     if (target.inboxSubs.size === 0) {
       this.writeFrame(target, { type: FRAME_INBOX_DELIVER, envelope });

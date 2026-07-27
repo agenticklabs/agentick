@@ -6,13 +6,13 @@
  * The provider construction + live-object contracts are NOT wire types —
  * they live in the base package `@agentick/sandbox` (`contract.ts`)
  * alongside the harness/bridge impl, mirroring `LanguageModelAdapter` in
- * `model-next`. The split test is "is it serialized across the
+ * `@agentick/model`. The split test is "is it serialized across the
  * inbox/wire?" (ADR 59).
  *
  * These shapes let any compiler (React, Angular, Vue) integrate
  * sandboxes via the `SandboxBridge` without depending on v1's component
  * runtime. Provider adapters (`@agentick/sandbox-local`,
- * `sandbox-docker-next`, …) dep the base and implement its provider
+ * `@agentick/sandbox-docker`, …) dep the base and implement its provider
  * contract.
  *
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
@@ -74,7 +74,7 @@ export interface SandboxPermissions {
    *
    * The rule matcher + egress proxy are provider-side (ADR 59: the pure
    * matcher ships from `@agentick/sandbox` (base), the local HTTP
-   * proxy from `sandbox-local-next`, docker enforces via `NetworkMode`).
+   * proxy from `@agentick/sandbox-local`, docker enforces via `NetworkMode`).
    * These are the shared wire types only.
    */
   readonly network?: boolean | readonly NetworkRule[];

@@ -4,9 +4,9 @@
  * Holds the harness + bridge impl + ACL, the `SandboxProvider`
  * construction contract + `SandboxHandle` live-object interface, the
  * crown-jewel `applyEdits` transform, and the pure network matcher.
- * Providers (`sandbox-local-next`, `sandbox-docker-next`) dep THIS
+ * Providers (`@agentick/sandbox-local`, `@agentick/sandbox-docker`) dep THIS
  * package and implement `SandboxProvider` — mirroring
- * `model-openai-next → model-next`.
+ * `@agentick/model-openai → @agentick/model`.
  *
  * This entry is REACT-FREE. React bindings (`<Sandbox>`, `useSandbox`,
  * the pre-built tool components) ship from `@agentick/sandbox/react`.

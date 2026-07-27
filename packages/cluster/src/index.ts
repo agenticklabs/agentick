@@ -85,7 +85,7 @@ export { consistentHashPartitioning } from "./builtins/consistent-hash-partition
 
 // ────────── Canonical filter-matchers (re-exported from @agentick/utils) ──────────
 // Adopters writing custom cluster adapters can import these from
-// either package; they live in utils-next because they're shape-only
+// either package; they live in @agentick/utils because they're shape-only
 // predicates with no cluster-protocol dependency.
 export { matchesAddressFilter, matchesEventFilter } from "@agentick/utils";
 

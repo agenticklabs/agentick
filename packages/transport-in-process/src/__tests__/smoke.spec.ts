@@ -21,7 +21,7 @@ describe("inProcessTransport option validation", () => {
   });
 });
 
-describe("client-next + in-process transport smoke", () => {
+describe("client + in-process transport smoke", () => {
   function makeStubHandler(): {
     handler: InProcessGatewayHandler;
     lastSeen: { method?: string; params?: unknown };

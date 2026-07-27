@@ -3,7 +3,7 @@
  * `SandboxProvider` contract (ADR 59).
  *
  * The double + the executable contract live WITH the contract they pin:
- * every provider (`sandbox-local-next`, `sandbox-docker-next`, …) deps
+ * every provider (`@agentick/sandbox-local`, `@agentick/sandbox-docker`, …) deps
  * the base and imports both from here.
  *
  *   - `runSandboxProviderConformance` — the #218 conformance suite; a

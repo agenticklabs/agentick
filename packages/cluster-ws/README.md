@@ -1,68 +1,74 @@
 # @agentick/cluster-ws
 
-**WebSocket cluster transport** for Agentick v2. Concrete wire impl
-built on [`@agentick/cluster-broker`](../cluster-broker) + the
-`ws` library. Mounts on an adopter's existing `http.Server`
-(gateway-level deployment) or owns its own port (app-level
-fallback).
+WebSocket cluster wire for Agentick, built on
+[@agentick/cluster-broker](../cluster-broker) and the `ws` library.
 
-**Status:** Phase 4e (WebSocket shipped).
-`runClusterTransportConformance` passes 10/10 against WS. Subprotocol-
-negotiated handshake (`agentick-cluster-v1`); native WebSocket
-message boundaries (no length-prefix framing needed); origin policy.
+Its distinguishing feature is that it can share a port. Mount the broker on an
+`http.Server` you already run — the one serving your HTTP API — and cluster
+traffic travels over the same port, through the same ingress, terminated by the
+same TLS. That makes it the wire to pick when your deployment target only
+forwards HTTP: managed platforms, reverse proxies, anything where opening a
+second raw TCP port is a fight. If you control the network,
+[@agentick/cluster-net](../cluster-net) is a shorter path; for multi-host HA,
+[@agentick/cluster-redis](../cluster-redis) is.
 
-**Design:** [ADR 35 — cluster protocol](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
-[`@agentick/cluster-broker`](../cluster-broker/README.md)
+## Install
+
+```bash
+npm install @agentick/cluster-ws @agentick/cluster
+```
+
+`ws` is a direct dependency — nothing extra to install.
 
 ## Quick start
 
-### Mount on adopter's existing http.Server (gateway-level)
+One process runs the broker. Every process — including that one — joins as a
+node.
 
 ```typescript
 import { createServer } from "node:http";
+import { createGateway } from "@agentick/gateway";
 import { defineWsCluster, wsBroker } from "@agentick/cluster-ws";
 
-const httpServer = createServer(/* your normal HTTP routes */);
+// On the broker process only: mount on the HTTP server you already have.
+const httpServer = createServer(/* your normal routes */);
 httpServer.listen(8080);
-
-// The broker process — runs ONCE per cluster, mounted on the
-// gateway's existing HTTP server.
 await wsBroker({ httpServer, path: "/cluster" });
 
-// On every cluster member (including the broker process if it's
-// also a node):
-const cluster = defineWsCluster({
-  // nodeId defaults to `${hostname}:${pid}` — set explicitly for tests
-  url: "ws://broker-host:8080/cluster",
+// On every process, including the broker's:
+const gateway = await createGateway({
+  cluster: defineWsCluster({ url: "ws://broker-host:8080/cluster" }),
 });
+
+await gateway.close();
 ```
 
-### Standalone (app-level)
+`path` defaults to `/cluster`. Upgrade requests on any other path are left
+alone, so your other WebSocket endpoints keep working.
+
+If you'd rather the broker own a port:
 
 ```typescript
-import { wsBroker, defineWsCluster } from "@agentick/cluster-ws";
-
-// Broker owns its own port.
 await wsBroker({ host: "127.0.0.1", port: 9876 });
-
-const cluster = defineWsCluster({
-  // nodeId defaults to `${hostname}:${pid}`
-  url: "ws://127.0.0.1:9876/cluster",
-});
+const cluster = defineWsCluster({ url: "ws://127.0.0.1:9876/cluster" });
 ```
 
-### Side-channel cluster (`joinWsCluster`)
+`nodeId` defaults to `${hostname}:${pid}`; `partitioning`, `codec`, `journal`,
+and `fanoutMode` fall through to [@agentick/cluster](../cluster)'s defaults.
 
-For cross-process coordination outside the agent loop. Returns a
-`ClusterNode` with name-based `bus.subscribe` / `bus.broadcast` /
-`membership.waitForPeers` plus `await using` lifecycle.
+## Side-channel clusters
+
+For cross-process coordination alongside the agent loop rather than inside it,
+`joinWsCluster` returns a `ClusterNode` — a direct handle with a name-based bus,
+`waitForPeers`, and `await using` lifecycle. In `mode: "broker"` it starts the
+broker itself and joins as a client in one call.
 
 ```typescript
 import { joinWsCluster } from "@agentick/cluster-ws";
 
 await using node = await joinWsCluster({
   url: "ws://127.0.0.1:9876/cluster",
-  mode: "client", // or "broker" — broker spins up its own ws.Server
+  mode: "broker", // default is "client"
 });
 
 node.bus.subscribe("hello", (env) => console.log(env.scope.nodeId));
@@ -70,107 +76,136 @@ await node.membership.waitForPeers(2);
 await node.bus.broadcast("hello");
 ```
 
-See [ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)
-for the substrate-fusion vs side-channel split.
+Its single `onDiagnostic` receives listener, broker, and client events with a
+`layer` tag, so there are no separate callbacks to plumb.
 
-## API
+## How it differs from the byte-stream wires
 
-| Export                         | Role                                                   |
-| ------------------------------ | ------------------------------------------------------ |
-| `defineWsCluster(opts)`        | Returns a `ClusterFactory` for createApp/createGateway |
-| `joinWsCluster(opts)`          | Returns a `ClusterNode` for side-channel use           |
-| `wsClusterNode(opts)`          | `{transport, membership}` over one connection          |
-| `wsBroker(opts)`               | Spins up + starts a `BaseBroker` on a WS listener      |
-| `wsTransport(opts)`            | Standalone transport factory                           |
-| `wsMembership(opts)`           | Standalone membership factory                          |
-| `createWsListener(opts)`       | Low-level — `WebSocketServer` as `Listener`            |
-| `createWsConnector(opts)`      | Low-level — `WebSocket(url)` as `Connector`            |
-| `wsToConnection(ws, opts)`     | Wrap a raw `ws.WebSocket` as `Connection`              |
-| `AGENTICK_CLUSTER_SUBPROTOCOL` | The negotiated subprotocol name                        |
+**No length-prefix framing.** WebSocket preserves message boundaries natively,
+so one `ws.send(bytes)` is one frame and one `'message'` event is one frame. The
+`Connection` wrapper passes binary frames straight through. Text frames are
+rejected outright (`cluster:broker:ws:text-frame-rejected`) — the protocol is
+binary.
 
-## How it differs from TCP/Unix
+**Subprotocol negotiation.** Clients send
+`Sec-WebSocket-Protocol: agentick-cluster-v1` (exported as
+`AGENTICK_CLUSTER_SUBPROTOCOL`) and the broker rejects mismatches at the
+handshake. That's the forward-compatibility hinge: when the wire protocol
+changes incompatibly, the suffix moves and old clients get a clean rejection
+instead of a confusing decode error.
 
-- **No length-prefix framing.** WebSocket preserves message
-  boundaries natively. Each `ws.send(bytes)` ships one frame; each
-  inbound `'message'` event is one frame. The `Connection` wrapper
-  passes binary frames straight through.
-- **HTTP upgrade handshake.** Adopters mount on an existing
-  `http.Server` so cluster traffic shares a port with their HTTP
-  API / static assets / other WebSocket endpoints. Path-prefix
-  routing (`/cluster` by default) keeps cluster upgrades from
-  conflicting with other handlers.
-- **Subprotocol negotiation.** Clients send
-  `Sec-WebSocket-Protocol: agentick-cluster-v1` on connect; the
-  broker rejects mismatches. Forward-compatible — when the wire
-  protocol evolves incompatibly, the suffix moves to `v2` and old
-  clients get a clean rejection.
-- **Origin policy.** `allowedOrigins: ["https://my-app.com"]`
-  rejects browser-origin upgrades from disallowed hosts (HTTP 403).
-  Default: no origin check (loopback/server-to-server is the
-  expected deployment).
+**Origin policy.** Because the upgrade rides HTTP, browsers attach an `Origin`
+header. `allowedOrigins` rejects upgrades from anything not listed with HTTP
+403:
+
+```typescript
+await wsBroker({
+  httpServer,
+  allowedOrigins: ["https://my-app.example"],
+});
+```
+
+The default is no origin check, since the expected deployment is
+server-to-server on a private network.
+
+## API reference
+
+| Export                                     | Role                                                         |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| `defineWsCluster(opts)`                    | `ClusterFactory` for `createGateway` / `createApp`           |
+| `joinWsCluster(opts)`                      | `Promise<ClusterNode>` for side-channel use                  |
+| `wsClusterNode(opts)`                      | `{ transport, membership }` over one multiplexed connection  |
+| `wsBroker(opts)`                           | `Promise<RunningWsBroker>` — started broker on a WS listener |
+| `wsTransport(opts)` / `wsMembership(opts)` | Standalone single-seam factories                             |
+| `createWsListener(opts)`                   | `WebSocketServer` as a `Listener`                            |
+| `createWsConnector(opts)`                  | `WebSocket(url)` as a `Connector`                            |
+| `wsToConnection(ws, opts?)`                | Wrap a raw `ws.WebSocket` as a `Connection`                  |
+| `AGENTICK_CLUSTER_SUBPROTOCOL`             | `"agentick-cluster-v1"`                                      |
+
+`BusFacade`, `ClusterNode`, and `MembershipFacade` are re-exported from
+[@agentick/cluster](../cluster) so typing a returned node needs one import.
+
+### Options
+
+`WsBrokerOptions` is a union: supply **either** `httpServer` **or** `port`
+(with optional `host`), never both. Plus `path`, `allowedOrigins`, `codec`, and
+`onDiagnostic`.
+
+```typescript
+interface WsClusterNodeOptions {
+  nodeId: NodeId; // required
+  url: string; // e.g. "ws://127.0.0.1:9876/cluster"
+  codec?: ClusterCodec; // default: bundled JSON
+  heartbeatMs?: number; // default 30_000
+  missedPongLimit?: number; // default 3
+  reconnect?: { initialMs?: number; maxMs?: number; maxAttempts?: number };
+  connectTimeoutMs?: number;
+  onDiagnostic?: (name: string, payload?: unknown) => void;
+}
+```
+
+`DefineWsClusterOptions` is that shape with `nodeId` optional, plus
+`partitioning`, `journal`, and `fanoutMode`. `JoinWsClusterOptions` adds
+`mode: "broker" | "client"`, `httpServer`, `allowedOrigins`, and `brokerCodec`
+for when the broker should use a different codec than the client.
+
+## Diagnostics
+
+WebSocket-layer events, alongside the `cluster:broker:server:*` and
+`cluster:broker:client:*` families from
+[@agentick/cluster-broker](../cluster-broker):
+
+| Event                                                                                      | Meaning                                              |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| `cluster:broker:ws:listener-mounted`                                                       | Attached to an existing `http.Server`                |
+| `cluster:broker:ws:listener-bound`                                                         | Standalone server bound its own port                 |
+| `cluster:broker:ws:listener-closed`                                                        | Listener shut down                                   |
+| `cluster:broker:ws:origin-rejected`                                                        | `Origin` not in `allowedOrigins`                     |
+| `cluster:broker:ws:subprotocol-mismatch`                                                   | Broker refused the offered subprotocol (client side) |
+| `cluster:broker:ws:connected`                                                              | Client connected                                     |
+| `cluster:broker:ws:connect-failed`                                                         | Connect attempt failed                               |
+| `cluster:broker:ws:connect-timeout`                                                        | `connectTimeoutMs` elapsed                           |
+| `cluster:broker:ws:socket-error`                                                           | Socket-level error                                   |
+| `cluster:broker:ws:text-frame-rejected`                                                    | Non-binary frame received                            |
+| `cluster:broker:ws:unrecognized-payload`                                                   | Binary frame in an unknown shape                     |
+| `cluster:broker:ws:accept-handler-threw` / `close-handler-threw` / `message-handler-threw` | A handler threw; contained and reported              |
 
 ## Verified by
 
 - `src/__tests__/conformance-against-ws.spec.ts` —
-  `runClusterTransportConformance` passes 10/10 (send / broadcast
-  / subscription lifecycle / close). Same suite that validates
-  `LocalClusterTransport`, TCP, and Unix.
-- `src/__tests__/verification.spec.ts` — 6 WS-specific tests:
-  - Subprotocol rejection of mismatched clients (×1) + acceptance of
-    canonical subprotocol (×1)
-  - Mount-on-httpServer coexists with other route handlers (×1)
-  - Upgrade requests on a different path pass through to other
-    handlers (×1)
-  - `allowedOrigins` rejects disallowed Origin headers (×1)
-  - `connectTimeoutMs` fires on unreachable URL (×1)
-
-## Diagnostics emitted (`surface: "cluster"`)
-
-WS-layer specifics (alongside the
-[`cluster-broker-next`](../cluster-broker) diagnostics):
-
-- `cluster:broker:ws:listener-mounted` (mount mode start) /
-  `listener-bound` (standalone) / `listener-closed`
-- `cluster:broker:ws:origin-rejected` — Origin not in `allowedOrigins`
-- `cluster:broker:ws:connect-timeout`
-- `cluster:broker:ws:connect-failed`
-- `cluster:broker:ws:connected`
-- `cluster:broker:ws:subprotocol-mismatch` (client side)
-- `cluster:broker:ws:socket-error`
-- `cluster:broker:ws:text-frame-rejected` — non-binary frame received
-- `cluster:broker:ws:unrecognized-payload` — binary frame in unknown shape
-- `cluster:broker:ws:close-handler-threw`
-- `cluster:broker:ws:message-handler-threw`
-- `cluster:broker:ws:accept-handler-threw`
+  `runClusterTransportConformance` from [@agentick/cluster](../cluster) against
+  the WebSocket wire. The same suite that validates the in-memory reference
+  transport, TCP, and Unix sockets.
+- `src/__tests__/verification.spec.ts` — the broker rejects clients that don't
+  request `agentick-cluster-v1` and accepts those that do; a mounted listener
+  coexists with another route handler on the same server, and upgrade requests
+  on a different path are passed through unclaimed; `allowedOrigins` rejects a
+  disallowed `Origin`; `connectTimeoutMs` rejects when the broker never accepts.
+- `src/__tests__/join-ws-cluster.spec.ts` — `mode: "broker"` starts the broker
+  while `mode: "client"` joins an existing one, with `bus` round-trip and
+  `waitForPeers` end to end; the diagnostic sink is layer-tagged across broker
+  and client; `close()` is idempotent and `Symbol.asyncDispose` mirrors it.
 
 ## Roadmap & known gaps
 
-- **TLS / `wss://`** — supported by `ws` library natively. Adopters
-  using `wsBroker({ httpServer })` where `httpServer` is HTTPS get
-  `wss://` automatically; the cluster wire is encrypted by the
-  underlying TLS context. Direct `wsBroker({ port, tls: { ... } })`
-  shorthand is not yet wired — adopters wanting TLS use the mounted
-  pattern with their own HTTPS server.
-- **`Sec-WebSocket-Key` validation** — Phase 4f hardening if real
-  adopter feedback surfaces a need for stricter rejection of
-  malformed upgrade requests.
-- **Compression** (`permessage-deflate`) — `ws` supports this natively
-  but it's off by default. Worth enabling for verbose adopter
-  payloads; tracked as a future tuning option.
-- **Cross-package wire consolidation** — the listener/connector/cluster
-  modules in this package + cluster-net follow nearly the same shape.
-  After Phase 4e ships, a shared `cluster-wire-base-next` package
-  could host the patterns. Tracked via TODO at the top of
-  `ws-listener.ts`. Don't refactor pre-Otto-demo (Phase 4f) — real
-  adopter signal first.
-
-## Adopter platform notes
-
-- **Browser clients**: `new WebSocket("ws://broker/cluster", "agentick-cluster-v1")`
-  speaks the same protocol as Node clients. The browser's
-  `WebSocket` constructor is the canonical client; bundle bytes
-  via a binary-safe codec (msgpack/CBOR), and broker traffic
-  flows through any HTTP-aware proxy/ingress that normally
-  forwards WS upgrades.
-- **Cross-origin browser clients** need `allowedOrigins` on the
-  broker to include their origin.
+- **No TLS shorthand.** `wsBroker({ httpServer })` inherits whatever the server
+  is: pass an HTTPS server and the wire is `wss://` with no extra work. There is
+  no `wsBroker({ port, tls })` form, so standalone TLS means constructing the
+  HTTPS server yourself and mounting on it.
+- **Browser clients are untested.** The protocol is plain binary WebSocket with
+  a subprotocol, so a browser `WebSocket` should be able to speak it given a
+  binary-safe codec and an `allowedOrigins` entry — but nothing here exercises
+  a browser client, and the frame schema is not a published contract.
+- **No compression.** `permessage-deflate` is available in `ws` but off; it is
+  not wired to an option here. Verbose payloads pay full size on the wire.
+- **`Sec-WebSocket-Key` validity isn't checked** beyond what `ws` does. A
+  malformed upgrade is rejected by the library, not by an explicit policy here.
+- **Broker re-election is not implemented for this wire.** If the broker
+  process dies, clients reconnect with backoff but nothing promotes a survivor;
+  recovery depends on a supervisor restarting the broker.
+  [@agentick/cluster-net](../cluster-net) has internal re-election for Unix
+  sockets only.
+- **The listener / connector / cluster trio duplicates
+  [@agentick/cluster-net](../cluster-net)'s** almost shape for shape. A shared
+  layer between the two is plausible but unbuilt — two implementations is thin
+  evidence for the right abstraction.

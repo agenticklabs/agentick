@@ -27,8 +27,8 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { createGateway } from "@agentick/gateway";
 import { fakeCompiler } from "@agentick/compiler/testing";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { withSkills } from "@agentick/skills";
-import { withPrompts } from "@agentick/prompts";
+import { hydrateFrom as hydrateSkillsFrom, withSkills } from "@agentick/skills";
+import { hydrateFrom as hydratePromptsFrom, withPrompts } from "@agentick/prompts";
 import { ErrorCode, type ContentBlock, type Skill, type WireMethod } from "@agentick/spec";
 
 import { inProcessTransport } from "../index.js";
@@ -62,16 +62,16 @@ async function makeStack() {
       // surfaces mount at the dynamic-lane inbox address. state is built-in.
       extensions: [
         withSkills({
-          initial: [
+          hydrate: hydrateSkillsFrom([
             { name: "review", description: "Review changes", content: "# Review\nCheck it." },
-          ],
+          ]),
         }),
         withPrompts({
-          initial: [
+          hydrate: hydratePromptsFrom([
             {
               declaration: { name: "greet", description: "Greet the user", template: "Hi {name}" },
             },
-          ],
+          ]),
         }),
       ],
     },

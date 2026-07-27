@@ -257,7 +257,7 @@ carrying `.issues` + `.schema`.
 **URL mode + deferred auth.** `ctx.elicit.requireUrls([...])` throws
 `UrlElicitationRequired` — the MCP wire codec maps it to JSON-RPC error
 `-32042` so the client can walk the URLs (OAuth-style) and retry the
-originating tool call. See ADR 43 + the elicitation-next README.
+originating tool call. See ADR 43 + the @agentick/elicitation README.
 
 ---
 

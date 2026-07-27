@@ -42,7 +42,7 @@ export {
 // WS-specific compose-and-go entry point.
 export { joinWsCluster, type JoinWsClusterOptions } from "./join-ws-cluster.js";
 
-// Re-export wire-agnostic facade types from cluster-next so adopters
+// Re-export wire-agnostic facade types from @agentick/cluster so adopters
 // don't need to reach across two packages just to type a returned
 // `ClusterNode`.
 export type { BusFacade, ClusterNode, MembershipFacade } from "@agentick/cluster";

@@ -2,7 +2,7 @@
  * Conformance suite for {@link SandboxProvider} implementations (#218).
  *
  * The executable form of the ADR 59 provider contract. Any provider —
- * `sandbox-local-next` (reference), `sandbox-docker-next`, a future
+ * `@agentick/sandbox-local` (reference), `@agentick/sandbox-docker`, a future
  * remote/secure-exec — runs this suite against a REAL instance (real
  * processes, real temp dirs) to claim conformance. It pins:
  *
@@ -36,7 +36,7 @@ export interface SandboxProviderConformanceOptions {
   /**
    * Skip the whole suite (registers it as skipped, never constructs a
    * provider). For providers whose backend may be absent in the test env
-   * — e.g. `sandbox-docker-next` gating on a `docker info` probe — compute
+   * — e.g. `@agentick/sandbox-docker` gating on a `docker info` probe — compute
    * the availability boolean at the call site and pass `skip: !available`.
    * Threading it as an option (rather than wrapping the call in an `if`)
    * keeps the gate out of the test-body conditionals the linter forbids.

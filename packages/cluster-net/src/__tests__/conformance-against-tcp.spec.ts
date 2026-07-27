@@ -2,7 +2,7 @@
  * Phase 4b acceptance bar — `runClusterTransportConformance` against
  * the real TCP wire. A broker spins up in-process on a freshly-
  * allocated loopback port per test; two `BaseClusterClient`s
- * connect to it via `createTcpConnector`; the cluster-next
+ * connect to it via `createTcpConnector`; the @agentick/cluster
  * conformance suite drives full send / broadcast / subscription /
  * lifecycle coverage end-to-end through real `net.Socket` byte
  * streams.

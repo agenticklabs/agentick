@@ -8,12 +8,12 @@
  * behavior is faithful. `exec` is programmable via `execHandler` (default:
  * empty stdout, exit 0) — a fake shell, not a real one, so this double does
  * NOT claim `runSandboxProviderConformance` (that pins a REAL provider —
- * e.g. `sandbox-local-next` — against real temp dirs + a real shell).
+ * e.g. `@agentick/sandbox-local` — against real temp dirs + a real shell).
  *
  * Ships from `@agentick/sandbox/testing` — the double lives WITH the
  * `SandboxProvider` contract it implements (ADR 59).
  *
- * @see packages/sandbox-next/README.md
+ * @see packages/sandbox/README.md
  */
 
 import type {

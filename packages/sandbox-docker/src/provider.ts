@@ -178,6 +178,6 @@ function resolveNetworkMode(network: SandboxPermissions["network"], defaultMode:
   throw new SandboxUnsupportedError({
     capability:
       "network:rules — the docker tier enforces coarse NetworkMode (allow-all / deny-all) only; " +
-      "per-domain egress filtering needs an egress proxy (sandbox-local-next) or firewall sidecar",
+      "per-domain egress filtering needs an egress proxy (@agentick/sandbox-local) or firewall sidecar",
   });
 }

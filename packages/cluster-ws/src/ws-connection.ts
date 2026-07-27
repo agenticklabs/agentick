@@ -7,7 +7,7 @@
  * the protocol level. Each `ws.send(bytes)` ships one frame; each
  * `'message'` event delivers one frame. Length-prefix wrapping is
  * REDUNDANT — base broker / base client speak in messages already,
- * and WS preserves boundaries natively. cluster-broker-next's
+ * and WS preserves boundaries natively. @agentick/cluster-broker's
  * length-prefix helper is bypassed entirely on the WS wire.
  *
  * Inbound binary frames are passed through as `Uint8Array`. WS can

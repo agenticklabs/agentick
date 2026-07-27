@@ -10,11 +10,11 @@
  * round-trips it whole. Prompts and resources extend THIS shape by turning on
  * more axes (augmentation, an eager catalog projection); skills turns on none.
  *
- * Port home is spec-next (§6-D): the cross-package contract — the harness
- * consumes it, adapter packages implement it, only spec-next is a shared dep.
+ * Port home is @agentick/spec (§6-D): the cross-package contract — the harness
+ * consumes it, adapter packages implement it, only @agentick/spec is a shared dep.
  * The bundled in-memory default ({@link import("@agentick/skills").InMemorySkillStore})
  * and the `runSkillStoreConformance` suite live in `@agentick/skills`
- * (mirrors `TaskStore` / `TimelineStore`; spec-next stays vitest-free). A durable
+ * (mirrors `TaskStore` / `TimelineStore`; @agentick/spec stays vitest-free). A durable
  * adapter (`@agentick/skills-store-postgres`, a filesystem source) conforms
  * to this SAME port.
  *

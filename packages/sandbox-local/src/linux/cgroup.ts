@@ -68,7 +68,7 @@ export class CgroupManager {
         await writeFile(join(this.cgroupPath, "cpu.max"), `${quota} ${CPU_PERIOD_US}`);
       }
     } catch (err) {
-      console.warn(`[sandbox-local-next] failed to create cgroup ${this.cgroupPath}:`, err);
+      console.warn(`[@agentick/sandbox-local] failed to create cgroup ${this.cgroupPath}:`, err);
       this.created = false;
     }
   }

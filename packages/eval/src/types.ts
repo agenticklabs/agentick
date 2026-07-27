@@ -8,7 +8,7 @@
  * `await myEval()` gets its own app, so session state doesn't leak
  * between runs or matrix-axis cells. The thunk receives the
  * per-invocation overrides (`O`) and decides how to fold them in;
- * eval-next does no option merging itself.
+ * @agentick/eval does no option merging itself.
  *
  * @see docs/proposals/v2/blueprint/37-eval-package-sketch.md
  */
@@ -34,7 +34,7 @@ export type DefaultAppOverrides = Partial<CreateAppOptions> & {
  * Thunk that constructs a fresh `AppHarness` for one eval invocation.
  * Receives the per-invocation overrides; the thunk decides how to
  * compose them with its own defaults. Returning a fresh harness on
- * each call is required — eval-next closes the app after the body
+ * each call is required — @agentick/eval closes the app after the body
  * finishes.
  */
 export type AppFactory<O = DefaultAppOverrides, P = unknown> = (
@@ -87,7 +87,7 @@ export interface EvalDefinition<O = DefaultAppOverrides, P = unknown> {
  * plugin package augments this via `declare module "@agentick/eval"` to
  * TYPE its additions, and registers a factory (globally via
  * {@link registerEvalPlugin} or per-eval via {@link EvalDefinition.plugins})
- * to WIRE them. eval-next core declares NO members here.
+ * to WIRE them. @agentick/eval core declares NO members here.
  *
  * @example
  * // in @agentick/eval/plugins/judge:

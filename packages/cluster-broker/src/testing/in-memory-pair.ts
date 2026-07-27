@@ -1,6 +1,6 @@
 /**
  * In-memory paired `Connection` — bidirectional message channel
- * that doesn't touch any real wire. Used by `cluster-broker-next`'s
+ * that doesn't touch any real wire. Used by `@agentick/cluster-broker`'s
  * own unit tests and by adopters writing focused broker / client
  * tests where TCP/WS setup is overkill.
  *
@@ -9,7 +9,7 @@
  *   await b.send(bytes);  // → a.onMessage handler fires
  *
  * Delivery is microtask-scheduled (matches the convention from
- * `cluster-next`'s `LocalClusterTransport`) so ordering is
+ * `@agentick/cluster`'s `LocalClusterTransport`) so ordering is
  * deterministic and tests can `await flushMicrotasks()`.
  *
  * Single-handler `onMessage` semantics per the Connection contract

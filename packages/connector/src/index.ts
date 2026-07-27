@@ -16,7 +16,7 @@
  * });
  * ```
  *
- * Platform ports (`connector-telegram-next`, `connector-imessage-next`)
+ * Platform ports (`@agentick/connector-telegram`, `@agentick/connector-imessage`)
  * implement the {@link ConnectorPlatform} adapter; they are deferred
  * follow-ups gated on their platform SDKs.
  *

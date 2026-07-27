@@ -588,7 +588,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     // buffered write failed, LEFT LATCHED — the harness has diverged from its
     // store and cannot silently "recover." The session's execution-end barrier
     // catchTags this and lands the session on "failed" status (A2.2 — see
-    // session-next sendBody).
+    // @agentick/session sendBody).
     return this.log.flush();
   }
 

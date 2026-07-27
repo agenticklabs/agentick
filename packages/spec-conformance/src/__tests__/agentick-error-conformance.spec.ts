@@ -7,7 +7,7 @@
  * a stub row to `EXPECTED` below; the suite then exercises it
  * automatically (registry membership, instance shape, codec round-trip).
  *
- * Lives here (rather than in `spec-next`) to avoid a circular dep
+ * Lives here (rather than in `@agentick/spec`) to avoid a circular dep
  * between spec and its conformance fixtures.
  */
 

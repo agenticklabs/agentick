@@ -225,7 +225,7 @@ export interface CreatedTool {
  * other plain objects, or arbitrary runtime values.
  *
  * Used by registries that accept BOTH `CreatedTool[]` shorthand AND
- * raw declarations (e.g., the `mcp-next/server` tools slot). Living
+ * raw declarations (e.g., the `@agentick/mcp/server` tools slot). Living
  * in this package keeps the guard next to the type it discriminates
  * — no duplicated structural checks scattered across consumers.
  *

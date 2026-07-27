@@ -29,11 +29,11 @@
  * ResourceStoreQuery} enumerates one class (`list({ kind: "template" })`); exact
  * lookup is `get(uri)`.
  *
- * Port home is spec-next (§6-D): the cross-package contract — the harness consumes
- * it, adapter packages implement it, only spec-next is a shared dep. The bundled
+ * Port home is @agentick/spec (§6-D): the cross-package contract — the harness consumes
+ * it, adapter packages implement it, only @agentick/spec is a shared dep. The bundled
  * in-memory default ({@link import("@agentick/resources").InMemoryResourceStore})
  * and the `runResourceStoreConformance` suite live in `@agentick/resources`
- * (mirrors `PromptStore` / `SkillStore`; spec-next stays vitest-free).
+ * (mirrors `PromptStore` / `SkillStore`; @agentick/spec stays vitest-free).
  *
  * @see docs/proposals/v2/data-layer-plan.md §6-C
  * @see ./prompts-store.ts

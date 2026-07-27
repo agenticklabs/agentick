@@ -5,8 +5,9 @@
  * honest passthrough where none exists), path-confines the file API, writes
  * atomically, mounts host dirs dynamically, and routes egress through a
  * 127.0.0.1 proxy. Deps the base package `@agentick/sandbox` and
- * implements its `SandboxProvider` — mirroring `model-openai-next →
- * model-next` (ADR 59). The base re-exports the spec wire types, the
+ * implements its `SandboxProvider` — mirroring
+ * `@agentick/model-openai → @agentick/model` (ADR 59). The base re-exports the
+ * spec wire types, the
  * `applyEdits` transform, and the `matchRequest` matcher, so this
  * provider has ONE import source.
  *

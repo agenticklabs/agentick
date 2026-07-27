@@ -88,7 +88,7 @@ export interface ClusterTransportConformanceConfig {
  *   - "ClusterTransport conformance — close"
  *
  * Wrap the call in your own describe (e.g.
- * `describe("cluster-redis-next", () => { runCluster...(...); })`)
+ * `describe("@agentick/cluster-redis", () => { runCluster...(...); })`)
  * for adapter-specific grouping.
  */
 export function runClusterTransportConformance(config: ClusterTransportConformanceConfig): void {
@@ -105,7 +105,7 @@ export function runClusterTransportConformance(config: ClusterTransportConforman
     txA = (await resolveFactory(ctx.factoryA, parentA)) as ClusterTransport;
     txB = (await resolveFactory(ctx.factoryB, parentB)) as ClusterTransport;
     // Defensive: if the transport exposes a `ready` Promise (the
-    // convention from cluster-broker-next's BaseClusterClient),
+    // convention from @agentick/cluster-broker's BaseClusterClient),
     // await it. Adopter setups SHOULD have awaited ready inside
     // their factory; this catches the case where they forgot and
     // produces an early, descriptive failure rather than a flaky
@@ -358,7 +358,7 @@ async function resolveFactory<R, P>(factory: (parent: P) => unknown, parent: P):
 
 /**
  * Defensive ready-state check. If the transport-under-test exposes
- * a `ready` Promise (the convention from cluster-broker-next's
+ * a `ready` Promise (the convention from @agentick/cluster-broker's
  * `BaseClusterClient`), await it. Adopter setups should have done
  * this in their factory, but the contract is non-obvious enough
  * that it's worth catching here too.

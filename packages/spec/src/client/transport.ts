@@ -4,7 +4,7 @@
  * (`@agentick/transport-in-process`, `@agentick/transport-websocket`,
  * `@agentick/transport-http`, `@agentick/transport-unix-socket`,
  * `@agentick/transport-multiplexer`, `@agentick/transport-mcp-client`)
- * implement it; the client-next package consumes it.
+ * implement it; the @agentick/client package consumes it.
  *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md §"The `ClientTransport` interface"
  */

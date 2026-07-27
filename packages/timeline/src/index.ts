@@ -54,7 +54,7 @@ export { hydrateFromStore, hydrateTail } from "./hydrators.js";
 // §6-D).
 export { MemoryTimelineStore } from "./store.js";
 // Re-exported so store adapters (`@agentick/timeline-fs`,
-// `-postgres-next`, adopter-written) get the port + entry + seq-tag types from
+// `-postgres`, adopter-written) get the port + entry + seq-tag types from
 // the same package as the harness they back — one dep, not two.
 export type {
   LogMutation,

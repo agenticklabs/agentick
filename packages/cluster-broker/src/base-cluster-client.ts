@@ -1,7 +1,7 @@
 /**
  * `BaseClusterClient` — wire-agnostic `ClusterTransport` impl.
  *
- * Concrete wire packages (cluster-net-next for TCP/Unix, cluster-ws-next
+ * Concrete wire packages (@agentick/cluster-net for TCP/Unix, @agentick/cluster-ws
  * for WebSocket) construct one of these per node, plugging in a
  * `Connector` that knows how to open a `Connection` over the chosen
  * wire. This class owns everything wire-agnostic:
@@ -14,7 +14,7 @@
  *   - Frame parsing + dispatch
  *
  * Diagnostics: emitted via the optional `onDiagnostic` callback
- * (wire impls bridge this into `cluster-next`'s `DiagnosticEmitter`
+ * (wire impls bridge this into `@agentick/cluster`'s `DiagnosticEmitter`
  * over the parent's local bus). The base never imports `EventBus`
  * directly — keeps it framework-substrate-agnostic.
  *
@@ -68,7 +68,7 @@ export interface BaseClusterClientOptions {
   /**
    * Codec for serializing frames to bytes. Concrete wire impls pass
    * either the bundled JSON codec (`jsonCodec()`) or a swap-in
-   * MessagePack/protobuf codec from a `cluster-codec-*-next` package.
+   * MessagePack/protobuf codec from a `@agentick/cluster-codec-*` package.
    */
   readonly codec: ClusterCodec;
   /**
@@ -94,7 +94,7 @@ export interface BaseClusterClientOptions {
   };
   /**
    * Diagnostic emitter. Concrete wire impls bridge this into
-   * `cluster-next`'s `DiagnosticEmitter` over the parent's local bus.
+   * `@agentick/cluster`'s `DiagnosticEmitter` over the parent's local bus.
    * Omitted → diagnostics are silently discarded (testable mode).
    */
   readonly onDiagnostic?: (name: string, payload?: unknown) => void;
@@ -163,7 +163,7 @@ export class BaseClusterClient implements ClusterTransport {
    * Cluster membership as last reported by the broker. Updated by
    * the initial Welcome snapshot and subsequent Membership delta
    * frames. Membership consumers (e.g., the membership seam from
-   * cluster-net-next) subscribe via {@link onMembershipChange} +
+   * @agentick/cluster-net) subscribe via {@link onMembershipChange} +
    * read the snapshot via {@link nodes}.
    */
   private memberNodes = new Set<NodeId>();

@@ -4,7 +4,7 @@
  * Generic, framework-internal-agnostic library of `ToolTransform<C>`
  * primitives that map / filter / rewrite `ToolDeclaration` lists per
  * arbitrary context. The MCP server projection uses these for
- * per-connection tool views; eval-next uses them for ablation; in-app
+ * per-connection tool views; @agentick/eval uses them for ablation; in-app
  * rebranding uses them for audience-specific descriptions.
  *
  * Two scope rules:

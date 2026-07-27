@@ -21,12 +21,12 @@
  * (in-process) ship now; `@agentick/tasks-store-postgres` and the
  * child-process executor conform to the SAME ports later.
  *
- * Port homes: the store/executor **types** live in spec-next (the
+ * Port homes: the store/executor **types** live in @agentick/spec (the
  * cross-package contract — the harness consumes it, adapter packages
- * implement it, only spec-next is a shared dep). The bundled in-memory
+ * implement it, only @agentick/spec is a shared dep). The bundled in-memory
  * store and the `runTaskStoreConformance` suite live in
  * `@agentick/tasks` (mirrors `TimelineStore` / the timeline
- * store-conformance home; spec-next stays vitest-free).
+ * store-conformance home; @agentick/spec stays vitest-free).
  *
  * @see docs/proposals/v2/blueprint/68-persistent-tasks.md
  */

@@ -15,8 +15,8 @@
  * type, a conformance suite). Every store implements `query`/`mutate`; the
  * profile methods are sugar over that seam.
  *
- * Port home is spec-next (data-layer plan §6-D): the cross-package contract —
- * the harness consumes it, adapter packages implement it, only spec-next is a
+ * Port home is @agentick/spec (data-layer plan §6-D): the cross-package contract —
+ * the harness consumes it, adapter packages implement it, only @agentick/spec is a
  * shared dep. Defaults + conformance live in the harness / substrate packages
  * (`MemoryCollection` + `runStoreConformance` in `@agentick/store`).
  *
@@ -77,7 +77,7 @@ export type CollectionMutation<T> = { readonly put: T } | { readonly delete: str
  * this lets `MemoryCollection.query` delegate straight to `list` and the
  * harness-side `View.hydrate` pass `undefined` for a return-all hydrate.
  *
- * Firewall: spec-next has ZERO runtime deps — this file is structural types
+ * Firewall: @agentick/spec has ZERO runtime deps — this file is structural types
  * only. The internal push-delta primitive a harness holds (`ChangeEvent` from
  * `@agentick/pubsub`) is a DIFFERENT type living in the pubsub layer;
  * `Change<T>` here is the spec-level `watch` payload, carried across no runtime.

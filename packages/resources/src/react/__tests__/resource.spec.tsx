@@ -2,7 +2,7 @@
  * `<Resource>` + the `resources` catalog default projection —
  * integration against the REAL `CompilerHarness` + a REAL
  * `ResourcesHarness` bridge (per the modularity rule: cross-harness
- * tests live where their deps live; resources-next/react depends on
+ * tests live where their deps live; @agentick/resources/react depends on
  * compiler-react).
  *
  * Verifies:

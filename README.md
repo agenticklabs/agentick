@@ -158,7 +158,7 @@ import { createApp } from "@agentick/app/react";
 import { anthropic } from "@agentick/model-anthropic";
 import { withSandbox } from "@agentick/sandbox";
 import { withSkills } from "@agentick/skills";
-import { fromDirectory } from "@agentick/skills/loaders/node";
+import { hydrateFromDirectory } from "@agentick/skills/hydrators/node";
 import { defineTimeline, hydrateTail } from "@agentick/timeline";
 import { fsTimelineStore } from "@agentick/timeline-fs";
 
@@ -171,10 +171,11 @@ const app = await createApp(<CodingAgent />, {
   }),
 
   extensions: [
-    // Markdown files with frontmatter become model-discoverable skills:
-    // `skill_list` and `skill_read` land automatically, so the model pulls
-    // instructions in on demand instead of carrying them every tick.
-    withSkills({ loaders: [fromDirectory({ path: "./skills" })] }),
+    // A directory of skills (one folder per skill, each with a `SKILL.md`)
+    // becomes model-discoverable: `skill_list` and `skill_read` land
+    // automatically, so the model pulls instructions in on demand instead of
+    // carrying them every tick.
+    withSkills({ hydrate: hydrateFromDirectory({ root: "./.agents/skills" }) }),
     withSandbox(),
   ],
 

@@ -2,7 +2,7 @@
  * Conformance suite for {@link TimelineStore} implementations (ADR 49).
  *
  * Every adapter — the bundled {@link import("./store.js").MemoryTimelineStore},
- * the reference `@agentick/timeline-fs` / `-sqlite-next` / `-postgres-next`,
+ * the reference `@agentick/timeline-fs` / `-sqlite` / `-postgres`,
  * and any adopter-written store — MUST pass this suite. The behaviors pinned
  * here are the substrate contract the {@link
  * import("./harness.js").TimelineHarness} depends on: append-only ordering,

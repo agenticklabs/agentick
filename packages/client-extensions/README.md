@@ -11,11 +11,11 @@ peer-deps dragged in unless a subpath is imported).
 This package establishes the layer-extension naming convention for the
 v2 ecosystem:
 
-| Pattern                              | Use                                                                                |
-| ------------------------------------ | ---------------------------------------------------------------------------------- |
-| `@agentick/{layer}-next`             | The layer impl (e.g., `client-next`, `gateway-next`)                               |
-| `@agentick/{layer}-extensions-next`  | First-party extensions for that layer                                              |
-| `@agentick/{layer}-{framework}-next` | Framework binding for that layer (`client-react-next`, `client-angular-next`, ...) |
+| Pattern                         | Use                                                                                          |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `@agentick/{layer}`             | The layer impl (e.g., `@agentick/client`, `@agentick/gateway`)                               |
+| `@agentick/{layer}-extensions`  | First-party extensions for that layer                                                        |
+| `@agentick/{layer}-{framework}` | Framework binding for that layer (`@agentick/client-react`, `@agentick/client-angular`, ...) |
 
 Third-party extensions name themselves freely (`@some-org/my-cool-extension`).
 The first-party naming is a convention, not a requirement on adopters.

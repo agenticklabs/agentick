@@ -1,72 +1,53 @@
 # @agentick/cluster-redis
 
-**Redis cluster transport** for Agentick v2 — the production multi-host
-story. Adopters reach for Redis (or Valkey / KeyDB / Dragonfly — same
-RESP protocol, same client) for clustering instead of deploying our
-own broker process.
+Redis cluster wire for Agentick — the multi-host option.
 
-**Status:** Phase 4g closed. Transport / membership / cluster factories
-shipped (4g.1–4g.3), `joinRedisCluster` facade shipped (4f.7c), 5
-integration tests pass against an in-memory fake-Redis hub. Conformance
-against a real Redis (via docker-compose) is deferred to a Phase 6+
-infra task.
+Unlike the broker-pattern wires, this one is brokerless and fully symmetric.
+Redis _is_ the broker: there's no bind race, no role election, no broker process
+to keep alive, and no deploy unit to add. Every node runs identical code.
 
-**Design:** [ADR 35 — cluster protocol §10](../../docs/proposals/v2/blueprint/35-cluster-protocol.md) ·
-[ADR 38 — cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md) ·
-[`@agentick/cluster`](../cluster/README.md)
+That matters mostly because it moves the hard part onto software that already
+solved it. Redis Sentinel gives you active-standby with automatic failover;
+Redis Cluster gives you sharded multi-master. Every cloud has a managed
+offering, every observability vendor ships a Redis dashboard, and
+`redis-cli MONITOR` shows you exactly what's on the wire when something is
+wrong. None of that is true of a broker we wrote.
 
-## Why Redis
+Use [@agentick/cluster-net](../cluster-net) instead when you're on a single host
+with several workers (Unix socket, zero infrastructure), or when adding a Redis
+dependency isn't acceptable.
 
-For multi-host production, Redis is the right answer **because adopters
-already have it**. Every shop running a Node.js production stack at
-non-trivial scale either has Redis or can stand it up in 5 minutes:
+## Install
 
-- **HA is solved.** Sentinel = active-standby with auto-failover.
-  Redis Cluster = sharded multi-master. We don't write any of this.
-- **Ops know it.** Every observability vendor has Redis dashboards.
-  Every cloud has a managed Redis offering (Elasticache, MemoryStore,
-  Azure Cache). Every adopter's SRE has a runbook.
-- **Failures are debuggable.** `redis-cli MONITOR` shows exactly what's
-  on the wire. No proprietary protocol.
-- **It scales.** Pub/sub handles tens of thousands of messages per
-  second on a single node; clusters scale to millions.
+```bash
+npm install @agentick/cluster-redis @agentick/cluster ioredis
+```
 
-Our own TCP / Unix / WS broker (in [`@agentick/cluster-net`](../cluster-net) /
-[`@agentick/cluster-ws`](../cluster-ws)) is appropriate for:
-
-- **Single-host multi-worker** scenarios (PM2 fork, Node cluster module).
-  Unix socket auto-elect; zero infra.
-- **Edge / Redis-allergic** scenarios where adding a dependency isn't
-  acceptable.
-
-For **multi-host production**, use this package.
+`ioredis` is a peer dependency — you construct and own the clients.
 
 ## Compatible servers
 
-The `ioredis` client speaks RESP, which means:
+`ioredis` speaks RESP, so any RESP-compatible server works: **Redis** ≥ 6.0,
+**Valkey**, **KeyDB**, **Dragonfly**, and the managed offerings (**AWS
+ElastiCache**, **GCP MemoryStore**, **Azure Cache for Redis**). Nothing in this
+package is Redis-specific beyond the command set — `PUBLISH`, `SUBSCRIBE`,
+`SADD` / `SREM` / `SMEMBERS`, `SET … EX`, `EXPIRE`, `DEL`, `EXISTS`.
 
-| Server                                | Status                      |
-| ------------------------------------- | --------------------------- |
-| **Redis** ≥ 6.0                       | Primary target              |
-| **Valkey** (BSD-licensed Redis fork)  | Identical protocol; drop-in |
-| **KeyDB**                             | RESP-compatible; drop-in    |
-| **Dragonfly**                         | RESP-compatible; drop-in    |
-| **AWS ElastiCache** (Redis or Valkey) | Drop-in                     |
-| **GCP MemoryStore**                   | Drop-in                     |
-| **Azure Cache for Redis**             | Drop-in                     |
-
-Pick whichever your ops team prefers. The cluster wire doesn't care.
+In fact the clients are typed structurally against `RedisLikeClient`, not
+against `ioredis`, so any object with those methods works — which is how the
+tests run against an in-memory fake.
 
 ## Quick start
 
-```typescript
-import Redis from "ioredis";
-import { defineRedisCluster } from "@agentick/cluster-redis";
-import { createGateway } from "@agentick/gateway";
+Redis pub/sub requires a dedicated connection for subscriber mode, so pass two
+clients: one for `PUBLISH` and regular commands, one held in `SUBSCRIBE` mode.
 
-// Adopter owns the ioredis clients. We need two: one for pub/regular
-// commands, one for subscribe-mode (Redis pub/sub requires this).
-const url = "redis://redis.svc.cluster.local:6379";
+```typescript
+import { Redis } from "ioredis";
+import { createGateway } from "@agentick/gateway";
+import { defineRedisCluster } from "@agentick/cluster-redis";
+
+const url = "redis://redis.internal:6379";
 const pubClient = new Redis(url);
 const subClient = new Redis(url);
 
@@ -74,86 +55,201 @@ const gateway = await createGateway({
   cluster: defineRedisCluster({
     pubClient,
     subClient,
-    // nodeId defaults to `${hostname}:${pid}`; thunk form supported
-    keyPrefix: "agentick:prod:", // optional — share one Redis across envs
+    // nodeId defaults to `${hostname}:${pid}`; a thunk defers env reads.
+    keyPrefix: "agentick:prod:", // isolate envs sharing one Redis
   }),
 });
 
-// ... use the gateway ...
-
-await gateway.close();
-// Adopter still calls pubClient.quit() / subClient.quit() —
-// the cluster doesn't own them.
+await gateway.close(); // also quits both clients — see below
 ```
 
-### Side-channel — `joinRedisCluster`
+Every replica runs exactly that. There is no broker branch.
+
+> [!WARNING]
+> Under TypeScript, that snippet does not currently typecheck: an `ioredis`
+> `Redis` instance is not structurally assignable to the client shape these
+> options declare, because `subscribe` and `unsubscribe` are typed here as
+> returning `Promise<number>` while `ioredis` types them as overload sets
+> returning `Promise<unknown>`. It is correct at runtime — those return values
+> are never read. Until the shape is widened, cast at the boundary:
+>
+> ```typescript
+> type RedisClient = Parameters<typeof defineRedisCluster>[0]["pubClient"];
+> const pubClient = new Redis(url) as unknown as RedisClient;
+> ```
+>
+> Both this and the missing export of the client-shape type are tracked in the
+> gaps below.
+
+## Client ownership
+
+> [!WARNING]
+> Closing the cluster **quits both clients**. The transport's `close()` calls
+> `pubClient.quit()` and `subClient.quit()`, and that close is registered on the
+> gateway's teardown chain. If you share `pubClient` with your application's
+> cache or rate limiter, `gateway.close()` will take that down too — give the
+> cluster its own pair.
+
+Two connections per node is the cost, and it's small: a few kilobytes of client
+state each.
+
+## Side-channel clusters
+
+For cross-process coordination alongside the agent loop rather than inside it,
+`joinRedisCluster` returns a `ClusterNode` with a name-based bus,
+`waitForPeers`, and `await using` lifecycle. Every node reports
+`role: "client"` and `localBrokerRunning()` is always `false` — there is no
+broker to be.
 
 ```typescript
+import { Redis } from "ioredis";
 import { joinRedisCluster } from "@agentick/cluster-redis";
 
+type RedisClient = Parameters<typeof joinRedisCluster>[0]["pubClient"];
+const pubClient = new Redis(url) as unknown as RedisClient;
+const subClient = new Redis(url) as unknown as RedisClient;
+
 await using node = await joinRedisCluster({ pubClient, subClient });
+
 node.bus.subscribe("hello", (env) => console.log(env.scope.nodeId));
 await node.membership.waitForPeers(2);
-await node.bus.broadcast("hello");
+await node.bus.broadcast("hello", { greeting: "hi" });
+// Scope exit closes the node — which quits both clients.
 ```
 
-See [ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)
-for the substrate-fusion vs side-channel split.
+Its single `onDiagnostic` receives every transport and membership event, always
+tagged `layer: "client"`.
 
-## API
+## How it works
 
-| Export                     | Role                                                       |
-| -------------------------- | ---------------------------------------------------------- |
-| `defineRedisCluster(opts)` | Returns a `ClusterFactory` for createApp/createGateway     |
-| `joinRedisCluster(opts)`   | Returns a `ClusterNode` for side-channel use (Phase 4f.7c) |
-| `redisClusterNode(opts)`   | `{transport, membership}` over shared ioredis sockets      |
-| `redisTransport(opts)`     | Standalone transport factory                               |
-| `redisMembership(opts)`    | Standalone membership factory                              |
+**Channels.** One shared broadcast channel `{prefix}bus` that every node
+subscribes to, plus a per-node inbox channel `{prefix}inbox:<nodeId>` for
+point-to-point delivery. Routing is by channel name on receipt.
 
-## How it differs from broker-based wires
+**Subscription filters are client-side.** Nodes subscribe to those broad
+channels and apply `matchesEventFilter` / `matchesAddressFilter` locally — the
+same predicates the broker-pattern wires use. Server-side topic subscriptions
+would mean a Redis channel per filter, which buys little and costs a lot of
+subscription churn.
 
-- **No broker to deploy.** Redis IS the broker. Every node connects
-  directly to Redis. There's no `wsBroker(...)` equivalent — every
-  call site is symmetric.
-- **Two ioredis sockets per node.** Standard Redis pub/sub pattern:
-  one connection for SUBSCRIBE (subscriber mode), one for PUBLISH +
-  regular commands. Cheap; ~2KB per connection.
-- **Subscription filters are client-side.** We PSUBSCRIBE to broad
-  channels (`agentick:bus`, `agentick:inbox:<node>`) and filter via
-  the same `matchesEventFilter` / `matchesAddressFilter` utils as
-  cluster-broker. Server-side topic-based subscriptions weren't worth
-  the complexity gain.
-- **Membership = soft state in a Redis SET + TTL keys.** Heartbeats
-  refresh TTL; dead nodes age out automatically. Failure detection
-  latency tunable via heartbeat / TTL ratio.
+**Membership is soft state.** Each node adds itself to a `{prefix}members` set
+and writes a `{prefix}member:<nodeId>:alive` key with a TTL, refreshed on a
+heartbeat. Live membership is the set members whose alive key still exists, so
+a node that dies without a graceful leave simply ages out. Changes are detected
+by polling.
 
-## Adopter platform notes
+The three tunables trade failure-detection latency against Redis load:
 
-- **Requires `ioredis` as a peer dep.** Adopters install it
-  themselves: `pnpm add ioredis`. We don't bundle it.
-- **TLS / `rediss://`** — `ioredis` supports it natively. Pass a
-  `rediss://` URL and the wire is encrypted.
-- **Sentinel** — pass `{ sentinels, name }` instead of `url`;
-  `ioredis` handles failover.
-- **Redis Cluster mode** — pass `{ cluster: true, nodes: [...] }`;
-  the adapter uses `Redis.Cluster` under the hood. Note: pub/sub in
-  Redis Cluster requires `CLUSTER_NODES_PUBSUB_SHARDED` for predictable
-  routing — sharded pub/sub since Redis 7.0.
+| Option                | Default  | Effect                                                                 |
+| --------------------- | -------- | ---------------------------------------------------------------------- |
+| `heartbeatTtlSec`     | `30`     | How long after its last heartbeat a dead node lingers                  |
+| `heartbeatIntervalMs` | `10_000` | Renewal cadence. Must stay well under the TTL or nodes drop spuriously |
+| `pollIntervalMs`      | `5_000`  | Membership-change detection interval                                   |
+
+`keyPrefix` defaults to `"agentick:"` and covers both keys and channels, so
+several clusters can share one Redis instance without colliding.
+
+## API reference
+
+| Export                                           | Role                                                      |
+| ------------------------------------------------ | --------------------------------------------------------- |
+| `defineRedisCluster(opts)`                       | `ClusterFactory` for `createGateway` / `createApp`        |
+| `joinRedisCluster(opts)`                         | `Promise<ClusterNode>` for side-channel use               |
+| `redisClusterNode(opts)`                         | `{ transport, membership }` over the two shared clients   |
+| `redisTransport(opts)` / `redisMembership(opts)` | Standalone single-seam factories                          |
+| `createRedisTransport(opts)`                     | The raw `ClusterTransport` (requires an explicit `codec`) |
+| `createRedisMembership(opts)`                    | The raw `ClusterMembership` (takes one `client`)          |
+
+`BusFacade`, `ClusterNode`, and `MembershipFacade` are re-exported from
+[@agentick/cluster](../cluster) so typing a returned node needs one import.
+
+```typescript
+interface RedisClusterNodeOptions {
+  nodeId: NodeId; // required here; the define/join facades default it
+  pubClient: RedisLikeClient; // structural: the ~13 commands this package calls
+  subClient: RedisLikeClient; // held in SUBSCRIBE mode
+  codec?: ClusterCodec; // default: bundled JSON
+  keyPrefix?: string; // default "agentick:"
+  heartbeatTtlSec?: number; // default 30
+  heartbeatIntervalMs?: number; // default 10_000
+  pollIntervalMs?: number; // default 5_000
+  onDiagnostic?: (name: string, payload?: unknown) => void;
+}
+```
+
+`DefineRedisClusterOptions` is that shape with `nodeId` optional, plus
+`partitioning`, `journal`, and `fanoutMode`.
+
+## Deployment notes
+
+- **TLS** — pass a `rediss://` URL to `ioredis`. Encryption is entirely the
+  client's concern; this package never sees the connection settings.
+- **Sentinel and Redis Cluster** — configure them on the `ioredis` constructor
+  (`new Redis({ sentinels, name })`, or `new Redis.Cluster(nodes)`) and hand the
+  resulting clients over. This package accepts any `RedisLikeClient` and does
+  not construct or inspect clients, so failover topology is transparent to it.
+- **Sharded pub/sub** — in Redis Cluster mode, plain pub/sub is broadcast across
+  all shards. Redis 7.0's sharded pub/sub (`SSUBSCRIBE`) is the predictable
+  alternative, but this package issues `SUBSCRIBE`, not `SSUBSCRIBE`, so it uses
+  the broadcast form.
+
+## Diagnostics
+
+Emitted with `surface: "cluster"` when bridged onto the bus, or straight to your
+`onDiagnostic` callback.
+
+| Event                                                     | Meaning                                |
+| --------------------------------------------------------- | -------------------------------------- |
+| `cluster:redis:publish-failed`                            | `PUBLISH` rejected                     |
+| `cluster:redis:subscribe-failed`                          | `SUBSCRIBE` rejected                   |
+| `cluster:redis:decode-failed`                             | Inbound payload didn't decode          |
+| `cluster:redis:inbox-handler-threw` / `bus-handler-threw` | A subscriber callback threw; contained |
+| `cluster:redis:pub-error` / `sub-error`                   | Client-level `error` event             |
+| `cluster:redis:membership:join-failed`                    | Couldn't register in the member set    |
+| `cluster:redis:membership:heartbeat-failed`               | TTL renewal failed                     |
+| `cluster:redis:membership:poll-failed`                    | Membership poll failed                 |
+| `cluster:redis:membership:leave-failed`                   | Graceful leave failed                  |
+| `cluster:redis:membership:handler-threw`                  | A membership-change handler threw      |
 
 ## Verified by
 
-_Phase 4f.5 — pending. Will run `runClusterTransportConformance`
-against an ephemeral Redis (docker-compose in CI, `REDIS_URL` env
-for local dev). Same 10/10 bar as TCP/Unix/WS. Plus Redis-specific
-verification (reconnect, graceful close cleanup, TTL expiry,
-keyPrefix isolation)._
+- `src/__tests__/integration.spec.ts` — against an in-memory RESP-shaped fake:
+  `send` from node A lands on B's inbox subscription; `broadcast` from A fans
+  out to B's bus subscription without echoing to A; `subscribeInbox` filters
+  narrow delivery; two nodes joining appear in each other's snapshot; a graceful
+  close removes a node from the cluster's view.
+- `src/__tests__/join-redis-cluster.spec.ts` — every node reports
+  `role: "client"`; `bus.subscribe` / `bus.broadcast` round-trip through
+  pub/sub; `waitForPeers` resolves when peers join; the diagnostic sink tags
+  every event `layer: "client"`; `close()` is idempotent and
+  `Symbol.asyncDispose` mirrors it.
 
 ## Roadmap & known gaps
 
-- **Phase 4f.2** — `ClusterTransport` (publish + subscribe + filter matching)
-- **Phase 4f.3** — `ClusterMembership` (SET + TTL heartbeats + onChange polling)
-- **Phase 4f.4** — `defineRedisCluster` / `redisClusterNode` factories
-- **Phase 4f.5** — Conformance + verification tests
-- **Phase 4f.6** — Otto demo (3-replica gateway + Redis end-to-end)
-- **Phase 7+** — `DurableJournal` adapter via Redis Streams (separate package?
-  probably `@agentick/journal-redis`)
+- **A real `ioredis` client isn't assignable to the declared client shape.**
+  `subscribe` / `unsubscribe` are declared as `Promise<number>` but `ioredis`
+  types them as overload sets returning `Promise<unknown>`. The returns are
+  never read, so widening them fixes the headline use case; until then adopters
+  cast.
+- **`RedisLikeClient` is not exported from the package barrel** even though it
+  is the declared type of the required `pubClient` / `subClient` on every public
+  factory. Reaching it means going through
+  `Parameters<typeof defineRedisCluster>[0]["pubClient"]`.
+- **The transport quits adopter-supplied clients on close**, which contradicts
+  the ownership model the option names imply — you construct the clients, so you
+  would expect to close them. Until that's settled, don't share a client between
+  the cluster and anything else in your process.
+- **No conformance run against a real Redis.** The tests use an in-memory fake
+  that implements `RedisLikeClient`, so command shapes are exercised but real
+  server semantics — reconnect behavior, TTL precision under load, `keyPrefix`
+  isolation on a live instance, Cluster-mode routing — are not. The
+  `runClusterTransportConformance` suite from [@agentick/cluster](../cluster)
+  has not been run against this wire.
+- **Membership polls rather than subscribes.** Detection latency is bounded by
+  `pollIntervalMs`, and a shorter interval costs Redis round trips on every
+  node. Keyspace notifications would make it event-driven; they aren't used.
+- **Sharded pub/sub is not supported.** See the deployment notes above; on Redis
+  Cluster, bus traffic is broadcast to all shards.
+- **No durable journal.** Redis Streams would be a natural backing for the
+  `DurableJournal` seam, but that seam has no framework consumer yet, so nothing
+  here implements it.

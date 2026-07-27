@@ -1,6 +1,6 @@
 /**
  * `Connection` / `Listener` / `Connector` — wire-agnostic primitives
- * that concrete wire packages (cluster-net-next, cluster-ws-next)
+ * that concrete wire packages (@agentick/cluster-net, @agentick/cluster-ws)
  * implement.
  *
  * Critical design point: `Connection` is **message-oriented**, not
