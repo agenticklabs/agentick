@@ -14,6 +14,10 @@
   dir: packages/mcp
   intents:
     - op-grammar-slice-a
+"@agentick/session@1.0.0-next.12":
+  dir: packages/session
+  intents:
+    - op-grammar-slice-b
 "@agentick/spec@1.0.0-next.0":
   dir: packages/spec
   intents:

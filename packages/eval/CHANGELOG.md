@@ -1,5 +1,14 @@
 # @agentick/eval
 
+## 1.0.0-next.12
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/app@1.0.0-next.12
+  - @agentick/spec@1.0.0-next.12
+  - @agentick/utils@1.0.0-next.12
+
 ## 1.0.0-next.11
 
 ### Patch Changes

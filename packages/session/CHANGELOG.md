@@ -1,5 +1,45 @@
 # @agentick/session
 
+## 1.0.0-next.12
+
+### Minor Changes
+
+- ADR 92 Slice B — lifecycle & security mutations join the operation
+  grammar. `session:command:spawn` + `app:command:create-child-session`
+  (spawn/fork enveloped with parent linkage — `app.guard` can now veto a
+  spawn; the ADR 48 `onSessionCreate` behavior unchanged);
+  `session:command:close` (bus-only) with idle eviction routed through it
+  (`reason: "evicted" | "closed"` — `close()` gains an optional
+  `SessionCloseInput`); `live:command:{stop,close}` (in-process teardown
+  enveloped; `start` deferred to the sync-return design pass);
+  `credentials:command:{set,delete}` under the structural redaction law —
+  the secret is never an op input, so no journal record, bus envelope,
+  guard, or middleware can observe it (asserted over the full journal +
+  bus with fragment checks). New scope dims: `streamId`,
+  `credentialNamespace`/`credentialKey`.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.12
+  - @agentick/compiler-react@1.0.0-next.12
+  - @agentick/elicitation@1.0.0-next.12
+  - @agentick/gates@1.0.0-next.12
+  - @agentick/knobs@1.0.0-next.12
+  - @agentick/loop-executor@1.0.0-next.12
+  - @agentick/model@1.0.0-next.12
+  - @agentick/model-executor@1.0.0-next.12
+  - @agentick/pubsub@1.0.0-next.12
+  - @agentick/resources@1.0.0-next.12
+  - @agentick/runtime@1.0.0-next.12
+  - @agentick/spec@1.0.0-next.12
+  - @agentick/state@1.0.0-next.12
+  - @agentick/store@1.0.0-next.12
+  - @agentick/tasks@1.0.0-next.12
+  - @agentick/timeline@1.0.0-next.12
+  - @agentick/tool-executor@1.0.0-next.12
+  - @agentick/utils@1.0.0-next.12
+
 ## 1.0.0-next.11
 
 ### Patch Changes
