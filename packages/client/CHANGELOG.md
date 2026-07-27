@@ -1,5 +1,22 @@
 # @agentick/client
 
+## 1.0.0-next.18
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.18
+  - @agentick/elicitation@1.0.0-next.18
+  - @agentick/gates@1.0.0-next.18
+  - @agentick/knobs@1.0.0-next.18
+  - @agentick/prompts@1.0.0-next.18
+  - @agentick/resources@1.0.0-next.18
+  - @agentick/skills@1.0.0-next.18
+  - @agentick/state@1.0.0-next.18
+  - @agentick/tasks@1.0.0-next.18
+  - @agentick/timeline@1.0.0-next.18
+  - @agentick/tool-executor@1.0.0-next.18
+
 ## 1.0.0-next.17
 
 ### Patch Changes

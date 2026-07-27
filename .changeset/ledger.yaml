@@ -14,6 +14,10 @@
   dir: packages/gateway
   intents:
     - execution-summary-and-read-door-cutover
+"@agentick/gateway@1.0.0-next.18":
+  dir: packages/gateway
+  intents:
+    - progress-completion-marker
 "@agentick/loop-executor@1.0.0-next.14":
   dir: packages/loop-executor
   intents:
@@ -22,6 +26,11 @@
   dir: packages/loop-executor
   intents:
     - execution-summary-and-read-door-cutover
+"@agentick/loop-executor@1.0.0-next.18":
+  dir: packages/loop-executor
+  intents:
+    - tool-presentation-on-the-wire
+    - tool-result-ui-metadata
 "@agentick/mcp@1.0.0-next.11":
   dir: packages/mcp
   intents:
@@ -30,6 +39,10 @@
   dir: packages/mcp
   intents:
     - mcp-identity-redaction
+"@agentick/mcp@1.0.0-next.18":
+  dir: packages/mcp
+  intents:
+    - tool-result-ui-metadata
 "@agentick/mcp@1.0.0-next.5":
   dir: packages/mcp
   intents:
@@ -68,6 +81,12 @@
   intents:
     - execution-summary-and-read-door-cutover
     - hygiene-2-defect-slice
+"@agentick/session@1.0.0-next.18":
+  dir: packages/session
+  intents:
+    - spawn-boundary-events
+    - tool-presentation-on-the-wire
+    - tool-result-ui-metadata
 "@agentick/skills@1.0.0-next.15":
   dir: packages/skills
   intents:
@@ -89,6 +108,13 @@
   intents:
     - definitions-d3
     - execution-summary-and-read-door-cutover
+"@agentick/spec@1.0.0-next.18":
+  dir: packages/spec
+  intents:
+    - progress-completion-marker
+    - spawn-boundary-events
+    - tool-presentation-on-the-wire
+    - tool-result-ui-metadata
 "@agentick/spec@1.0.0-next.2":
   dir: packages/spec
   intents:
@@ -125,3 +151,7 @@
   dir: packages/transport
   intents:
     - transport-hardening
+"@agentick/transport@1.0.0-next.18":
+  dir: packages/transport
+  intents:
+    - progress-completion-marker

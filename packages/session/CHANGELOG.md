@@ -1,5 +1,92 @@
 # @agentick/session
 
+## 1.0.0-next.18
+
+### Minor Changes
+
+- Spawn boundary events on the PARENT's stream. `spawn-start`
+  (`spawnSessionId`, `spawnExecutionId`, `originCallId?`) and `spawn-end`
+  (`spawnSessionId`, `isError`) bracket one `session.spawn({ send })`, so a
+  spawn-tree UI can draw a live child node and attach it to the SPECIFIC
+  tool call that asked for it. `originCallId` is the new
+  `SpawnInput.originCallId` — passed as data off the dispatch ctx's
+  `toolCallId`, because `spawn()` runs its operation on a fresh fiber that
+  cannot observe the dispatch's ambient context (the same Promise-boundary
+  reason `parentOpId` is threaded explicitly). The unbound spawn form emits
+  neither event: it has no child execution the parent can name.
+
+  RULED, and documented in the session README: a child's INTERIOR events
+  stay on the child's own handle — nothing is bubbled from one handle onto
+  another. `sequence` is a per-handle monotonic counter that durable replay
+  keys on, and the wire fan-out is scoped to one execution's progress
+  token; bubbling would either re-number foreign events or put a second
+  session's events on another session's authorized token. To watch a
+  child's interior, hold its handle. `StreamEventBase.spawnPath`'s
+  docstring is corrected to say what it is (the emitter's lineage) rather
+  than implying a bubbling channel.
+
+  `StreamEventBase.parentExecutionId` and `RunExecutionInput.parentExecutionId`
+  are DELETED. Both were declared and set by nothing, and with the boundary
+  pair the edge they described is expressed once, from the parent side,
+  alongside the origin call id — keeping them would be a second source of
+  truth for the same fact. No consumer breaks: nothing populated or read
+  either field.
+
+- `ToolPresentation` crosses to the client. The four un-collapsed label
+  materials (`name` / `title` / `summary` / `narration`) the tool executor
+  already resolves at dispatch — `summary` being the author's
+  `displaySummary` annotation resolved against the VALIDATED input — were
+  computed and then thrown away on the wire path; `presentation` is now an
+  optional field on `tool-dispatch-end` and `tool-dispatch`, threaded
+  through `LoopExecutionEvent` and `buildOnEvent`. No new types, no second
+  resolution site, and the framework still presumes no precedence — the
+  client composes.
+
+  Deliberately NOT on `tool-dispatch-start`, contrary to where the label is
+  wanted first: resolution happens INSIDE the dispatch (it needs the
+  validated input and the model's stripped narration), strictly after the
+  start event is emitted. A slot there would be structurally
+  always-undefined, and filling it would mean re-resolving off the raw
+  declaration — a second, divergent path for the same fact. Pinned by a
+  test asserting `tool-dispatch-start` carries no `presentation`.
+
+- Result-level metadata now reaches the client on the tool-dispatch stream
+  event. `ToolDispatchEvent.metadata` forwards `DispatchResult.metadata`
+  verbatim — the loop projects the bag it is handed and never interprets
+  it — which is what an MCP-Apps frame descriptor needs to reach a UI.
+
+  The consuming side stopped dropping it. `mapCallToolResult` now folds an
+  incoming `CallToolResult._meta` into `metadata.mcp.meta` — the SAME
+  namespaced key the server-side result extensions project FROM, so a
+  result-scoped payload reads identically whether agentick produced it or
+  received it — and `withMCP`'s proxy handlers return the full mapped
+  result instead of bare content blocks. Two fields the bare content
+  mapping also silently dropped now survive with it: `structuredContent`,
+  and `isError`, which means a consumed MCP tool's DOMAIN error no longer
+  reaches the model wearing a success.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.18
+  - @agentick/compiler-react@1.0.0-next.18
+  - @agentick/elicitation@1.0.0-next.18
+  - @agentick/gates@1.0.0-next.18
+  - @agentick/knobs@1.0.0-next.18
+  - @agentick/loop-executor@1.0.0-next.18
+  - @agentick/model@1.0.0-next.18
+  - @agentick/model-executor@1.0.0-next.18
+  - @agentick/pubsub@1.0.0-next.18
+  - @agentick/resources@1.0.0-next.18
+  - @agentick/runtime@1.0.0-next.18
+  - @agentick/spec@1.0.0-next.18
+  - @agentick/state@1.0.0-next.18
+  - @agentick/store@1.0.0-next.18
+  - @agentick/tasks@1.0.0-next.18
+  - @agentick/timeline@1.0.0-next.18
+  - @agentick/tool-executor@1.0.0-next.18
+  - @agentick/utils@1.0.0-next.18
+
 ## 1.0.0-next.17
 
 ### Patch Changes

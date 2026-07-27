@@ -1,5 +1,49 @@
 # @agentick/loop-executor
 
+## 1.0.0-next.18
+
+### Minor Changes
+
+- `ToolPresentation` crosses to the client. The four un-collapsed label
+  materials (`name` / `title` / `summary` / `narration`) the tool executor
+  already resolves at dispatch — `summary` being the author's
+  `displaySummary` annotation resolved against the VALIDATED input — were
+  computed and then thrown away on the wire path; `presentation` is now an
+  optional field on `tool-dispatch-end` and `tool-dispatch`, threaded
+  through `LoopExecutionEvent` and `buildOnEvent`. No new types, no second
+  resolution site, and the framework still presumes no precedence — the
+  client composes.
+
+  Deliberately NOT on `tool-dispatch-start`, contrary to where the label is
+  wanted first: resolution happens INSIDE the dispatch (it needs the
+  validated input and the model's stripped narration), strictly after the
+  start event is emitted. A slot there would be structurally
+  always-undefined, and filling it would mean re-resolving off the raw
+  declaration — a second, divergent path for the same fact. Pinned by a
+  test asserting `tool-dispatch-start` carries no `presentation`.
+
+- Result-level metadata now reaches the client on the tool-dispatch stream
+  event. `ToolDispatchEvent.metadata` forwards `DispatchResult.metadata`
+  verbatim — the loop projects the bag it is handed and never interprets
+  it — which is what an MCP-Apps frame descriptor needs to reach a UI.
+
+  The consuming side stopped dropping it. `mapCallToolResult` now folds an
+  incoming `CallToolResult._meta` into `metadata.mcp.meta` — the SAME
+  namespaced key the server-side result extensions project FROM, so a
+  result-scoped payload reads identically whether agentick produced it or
+  received it — and `withMCP`'s proxy handlers return the full mapped
+  result instead of bare content blocks. Two fields the bare content
+  mapping also silently dropped now survive with it: `structuredContent`,
+  and `isError`, which means a consumed MCP tool's DOMAIN error no longer
+  reaches the model wearing a success.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/runtime@1.0.0-next.18
+  - @agentick/spec@1.0.0-next.18
+  - @agentick/utils@1.0.0-next.18
+
 ## 1.0.0-next.17
 
 ### Patch Changes

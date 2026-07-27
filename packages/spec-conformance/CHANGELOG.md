@@ -5,6 +5,14 @@
 ### Patch Changes
 
 - Updated dependencies:
+  - @agentick/spec@1.0.0-next.18
+  - @agentick/utils@1.0.0-next.18
+
+## 0.0.0
+
+### Patch Changes
+
+- Updated dependencies:
   - @agentick/spec@1.0.0-next.17
   - @agentick/utils@1.0.0-next.17
 
