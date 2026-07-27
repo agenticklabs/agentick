@@ -63,7 +63,7 @@
     "zod": "^4.1.13"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm run format:check && pnpm run lint",
+    "pre-commit": "node scripts/pre-commit-staged.mjs",
     "commit-msg": "npx --no -- commitlint --config commitlint.config.cjs --edit ${1}"
   },
   "packageManager": "pnpm@11.17.0"
