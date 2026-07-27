@@ -1,5 +1,12 @@
 # @agentick/sandbox-lambda
 
+## 1.0.0-next.13
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/sandbox@1.0.0-next.13
+
 ## 1.0.0-next.12
 
 ### Patch Changes

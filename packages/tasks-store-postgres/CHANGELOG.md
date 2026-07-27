@@ -1,5 +1,12 @@
 # @agentick/tasks-store-postgres
 
+## 1.0.0-next.13
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/spec@1.0.0-next.13
+
 ## 1.0.0-next.12
 
 ### Patch Changes

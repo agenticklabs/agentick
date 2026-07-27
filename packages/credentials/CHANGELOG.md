@@ -1,5 +1,16 @@
 # @agentick/credentials
 
+## 1.0.0-next.13
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/pubsub@1.0.0-next.13
+  - @agentick/runtime@1.0.0-next.13
+  - @agentick/spec@1.0.0-next.13
+  - @agentick/store@1.0.0-next.13
+  - @agentick/utils@1.0.0-next.13
+
 ## 1.0.0-next.12
 
 ### Patch Changes

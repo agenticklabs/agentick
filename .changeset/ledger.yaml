@@ -50,3 +50,11 @@
   dir: packages/spec
   intents:
     - ctx-spine-phase2
+"@agentick/timeline@1.0.0-next.13":
+  dir: packages/timeline
+  intents:
+    - definitions-d1
+"@agentick/transport@1.0.0-next.13":
+  dir: packages/transport
+  intents:
+    - transport-hardening

@@ -1,5 +1,15 @@
 # @agentick/cluster-ws
 
+## 1.0.0-next.13
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/cluster@1.0.0-next.13
+  - @agentick/cluster-broker@1.0.0-next.13
+  - @agentick/spec@1.0.0-next.13
+  - @agentick/utils@1.0.0-next.13
+
 ## 1.0.0-next.12
 
 ### Patch Changes

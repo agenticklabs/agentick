@@ -1,5 +1,26 @@
 # @agentick/app
 
+## 1.0.0-next.13
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/cluster@1.0.0-next.13
+  - @agentick/compiler-react@1.0.0-next.13
+  - @agentick/elicitation@1.0.0-next.13
+  - @agentick/knobs@1.0.0-next.13
+  - @agentick/loop-executor@1.0.0-next.13
+  - @agentick/model@1.0.0-next.13
+  - @agentick/model-executor@1.0.0-next.13
+  - @agentick/resources@1.0.0-next.13
+  - @agentick/runtime@1.0.0-next.13
+  - @agentick/session@1.0.0-next.13
+  - @agentick/spec@1.0.0-next.13
+  - @agentick/tasks@1.0.0-next.13
+  - @agentick/timeline@1.0.0-next.13
+  - @agentick/tool-executor@1.0.0-next.13
+  - @agentick/utils@1.0.0-next.13
+
 ## 1.0.0-next.12
 
 ### Patch Changes
