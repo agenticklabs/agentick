@@ -329,6 +329,9 @@ importers:
       '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
+      '@agentick/prompts':
+        specifier: workspace:*
+        version: link:../prompts
       '@agentick/skills':
         specifier: workspace:*
         version: link:../skills

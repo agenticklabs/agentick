@@ -418,7 +418,6 @@ RPC-backed, not channel-backed: there is no delta channel for prompts, so the re
 
 ## Roadmap & known gaps
 
-- **`createApp({ prompts })` isn't wired yet.** The slot is declared and typed; `withPrompts(...)` in `extensions: []` is the path that works today.
 - **No durable backend ships.** SQLite and a remote registry are planned; today, bring your own store adapter.
 - **Content doesn't survive the store.** `hydrateFromStore()` returns declarations without `template` / `render`. Compose it under `hydrateFromModule` to put the code back, or re-register the content yourself.
 - **No filesystem source.** `.tsx` prompts need a bundler; a framework binding is the right home for one.

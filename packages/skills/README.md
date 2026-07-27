@@ -413,7 +413,6 @@ The stub brings its own in-memory substrate, so unit tests need no session machi
 - **`skills:run` isn't a wire command.** It needs a declarative output form that's serializable by construction.
 - **Reference re-sync.** Supporting files are wired once at install. A later `reload()` or a snapshot restore doesn't re-sync them, because the lazy resolver closures don't serialize.
 - **npm-packaged skills** (`fromPackage`) aren't implemented.
-- **`createApp({ skills })` isn't wired yet.** The slot is declared and typed, and `withSkills(...)` in `extensions: []` is the path that works today.
 - **Layered precedence across sources is manual.** `composeHydrators` resolves a duplicate name last-wins, which gives you a cascade if you order the sources yourself. A first-class user-over-project-over-bundled ladder isn't built; it's coupled to the `skill://` uri shape, since layering keeps it single-winner while namespacing by source would force `skill://<source>/<name>/…`.
 - **No transactions and no per-skill ACL.** Each mutation is its own operation, and all session participants share one library.
 

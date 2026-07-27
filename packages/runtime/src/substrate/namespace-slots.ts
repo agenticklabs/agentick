@@ -130,32 +130,19 @@ export function collectNamespaceSlots(
  * `toExtension` are host-constructed and are skipped — the owning layer reads
  * them out of {@link collectNamespaceSlots} instead.
  *
- * Returned in registration order, and the app must install them BEFORE the
- * adopter's own `extensions: []` array so an explicit `withX(…)` there still
- * overrides the slot (last-writer-wins on the namespace registration — the
- * escape hatch outranks the sugar).
+ * Returned in registration order. The app SUPPRESSES a minted install when an
+ * adopter extension in `extensions: []` carries the same extension name — the
+ * escape hatch outranks the sugar. Suppression is the mechanism (not install
+ * ordering): a namespace install registers an inbox address, and a second
+ * install for the same namespace is a loud address collision by design.
  *
  * Typed `unknown[]` because spec's `Extension` union is not visible from this
  * file's dependency direction; the caller narrows.
  */
-// TODO(adr-93 D3): NO CALLER YET. `@agentick/skills` and `@agentick/prompts`
-// register their `toExtension` arms, so `createApp({ skills })` /
-// `createApp({ prompts })` are typed and this function resolves them — but the
-// app never invokes it, so a slot value is currently forwarded into
-// `SessionDefaults` (via `collectNamespaceSlots`) and dropped on the floor.
-// Closing it is one edit at the app's extension partition
-// (`packages/app/src/harness.ts`, `const allExtensions = options.extensions ?? []`):
-//
-//   const allExtensions = [
-//     ...(namespaceSlotExtensions(options as never) as readonly Extension[]),
-//     ...(options.extensions ?? []),
-//   ];
-//
-// Slot-minted installs go FIRST so an explicit `withX(...)` in `extensions: []`
-// still overrides the slot (namespace registration is last-writer-wins — the
-// escape hatch outranks the sugar). Until then the documented path for skills and
-// prompts is `extensions: [withSkills(...)]`, and both READMEs say so under
-// "Roadmap & known gaps".
+// Called by the app's extension partition (`packages/app/src/harness.ts`),
+// which spreads the minted installs BEFORE the adopter's `extensions: []` so
+// an explicit `withX(...)` there still overrides the slot (namespace
+// registration is last-writer-wins — the escape hatch outranks the sugar).
 export function namespaceSlotExtensions(
   options: Readonly<Record<string, unknown>>,
 ): readonly unknown[] {

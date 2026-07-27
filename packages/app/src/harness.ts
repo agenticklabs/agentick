@@ -24,6 +24,7 @@ import {
   BaseHarness,
   busAsyncIterator,
   collectNamespaceSlots,
+  namespaceSlotExtensions,
   type CommandGuards,
   type CommandHooks,
   forkBusSubscription,
@@ -1222,7 +1223,24 @@ export class AppHarness<P = unknown>
     // App filters for `target === "app"` and installs immediately;
     // session-targeted ones are cached for forwarding at session
     // creation.
-    const allExtensions = options.extensions ?? [];
+    //
+    // ADR 93: extension-installed namespace slots
+    // (`createApp({ skills, prompts })`) mint their own installs via the
+    // registry's `toExtension` arms. An adopter extension carrying the SAME
+    // NAME suppresses the slot's mint — the escape hatch outranks the sugar.
+    // Suppression (not ordering) is the mechanism: a namespace install
+    // registers an inbox address, and a second install for the same namespace
+    // is a LOUD address collision by design, so "install both, last wins"
+    // cannot exist. The arm mints through the package's own `withX`, so the
+    // two carry the same extension name whenever they mean the same
+    // namespace. Host-constructed slots (timeline) have no arm and ride
+    // `collectNamespaceSlots` instead.
+    const adopterExtensions = options.extensions ?? [];
+    const adopterExtensionNames = new Set(adopterExtensions.map((e) => e.name));
+    const slotExtensions = (
+      namespaceSlotExtensions(options as never) as readonly Extension[]
+    ).filter((e) => !adopterExtensionNames.has(e.name));
+    const allExtensions = [...slotExtensions, ...adopterExtensions];
     const appExtensions: AppExtension[] = [];
     const sessionExtensions: Extension[] = [];
     for (const ext of allExtensions) {
