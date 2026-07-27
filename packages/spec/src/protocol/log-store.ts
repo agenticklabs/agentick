@@ -82,6 +82,28 @@ export interface LogQuery {
   readonly fromSeq?: number;
   /** Cap on the number of entries projected. Omit → no cap. */
   readonly limit?: number;
+  // TODO(tail-read): THE LAST N ENTRIES OF A LOG ARE NOT EXPRESSIBLE. This
+  // query is forward-from-a-lower-bound only — no `toSeq`, no
+  // `direction: "backward"` — and the same shape is mirrored at every layer
+  // above (`TimelineHistoryInput`, the `timeline/history` command, the client
+  // handle's `loadOlder`). So "open this thread on its most recent 20
+  // messages", which is what every chat UI wants first, has no expression
+  // anywhere in the framework.
+  //
+  // What it costs downstream, measured on the first real consumer (knowify's
+  // assistant, nx-knowify libs/ernesto-client + k-assistant-v3): the client
+  // pages FORWARD from the head accumulating up to 25 pages to find the tail,
+  // holds its own mirrored copy of the window to do it, re-seeds the handle's
+  // window from that copy (so live appends are clobbered), and its scroll-UP
+  // affordance loads NEWER entries. Every one of those is a bandaid over this
+  // one absence, and no client can do better while it stands.
+  //
+  // The seam: `toSeq` (an upper bound, symmetric with `fromSeq`) or an
+  // explicit `direction`. `toSeq` is the smaller change and composes with the
+  // existing cursor. Brownfield `Store` adapters must then implement a reverse
+  // slice, which is exactly why this belongs here rather than being re-solved
+  // per adapter. Pairs with the client handle becoming a true tail-anchored
+  // pager.
 }
 
 /**

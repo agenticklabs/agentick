@@ -508,6 +508,7 @@ Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timel
 
 ## Roadmap & known gaps
 
+- **The last N entries are not readable.** `history` (and the `LogQuery` under it) takes a lower bound only — no `toSeq`, no direction — so "open on the most recent 20 messages" cannot be expressed, and `loadOlder()` pages FORWARD from the log's head, prepending each page. Multi-page scroll-back therefore lands pages in the wrong order, and a client that wants a tail has to page the whole log to find it and hold its own copy. The first consumer hit all of it. The fix is a `toSeq` upper bound at the store seam mirrored up through the wire read, turning `loadOlder` into a true tail-anchored pager.
 - **SQLite adapter** — the recommended first durable store isn't shipped. Filesystem and Postgres are.
 - **Richer entry kinds** — non-message records beyond turn boundaries are still coarse; `role: "event"` conflation is deferred.
 - **`<Timeline>` turn affordances** — trailing-input styling and boundary turn-separators aren't built.
