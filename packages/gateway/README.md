@@ -259,6 +259,55 @@ const crmExt = defineWireExtension({
 - `scope: "role"` → **additive**, never a replacement. A role can only tighten, so a method is never reachable under a label different from its verb. `crm/deleteContact` needs **both** `crm:deleteContact` and `crm:admin`.
 - absent → verb scope, gated. The common case.
 
+### Granting a client read
+
+Reads are commands too, so exposing one to a browser is a grant — never a code change. The framework's worked example is timeline scroll-back: `@agentick/timeline` declares `timeline:history` with `exposure: "wire"`, the dynamic lane projects it as `timeline/history`, and the choke point derives the scope label `timeline:history`. Nothing else is needed server-side; what varies is who you grant it to:
+
+```ts
+const gateway = await createGateway({
+  authorizer: staticAuthorizer({
+    grants: {
+      // A chat UI: read the conversation back, nothing else on the surface.
+      "acme/viewer": ["timeline:history"],
+      // An operator console: the whole surface — reads AND compaction.
+      "acme/operator": ["timeline:*"],
+    },
+  }),
+});
+```
+
+Then the client pages its own session's log — `client.session(id).timeline.history({ fromSeq, limit })` or the cursor-tracking `loadOlder()`:
+
+- **`"acme/viewer"`** reads. `timeline:history` covers exactly the read.
+- **A principal granted `timeline:compact`** does not. A sibling-verb grant never leaks the read.
+- **An ungranted principal** gets `Forbidden`; an unauthenticated one gets nothing (no `anonymous` grants by default).
+- **Any principal, calling `timeline/append`** gets `MethodNotFound`. The write verbs aren't wire-exposed, so no grant can reach them — exposure is the harness author's curation, and it comes first.
+
+**Tenancy needs no work: it is already structural.** A read names a session, so the choke point resolves that session's owning principal and the same-principal target rule denies a caller who is not it — even one holding `*`. Two callers with identical `*` grants cannot read each other's history. You do not write a per-read tenancy guard, and there is no timeline-specific check to forget.
+
+Write a guard only when your rule is **narrower** than "same principal" — a row-level policy, a page-size cap, a read window that closes after the tenant's retention period. That is the definition's `guards:` bag on the read verb, and it fires for in-process reads as well as wire ones:
+
+```ts
+// The definition, not the gateway: local policy lives with the namespace.
+// App and gateway guards still wrap it — governance outranks local policy.
+defineTimeline({
+  store,
+  guards: {
+    history: (input, ctx) =>
+      withinRetention(ctx.sessionId, input.fromSeq)
+        ? undefined // proceed
+        : { kind: "veto", reason: "outside the retention window" },
+    // Cap the page a client can demand, whatever it asks for.
+    // history: (input) => ((input.limit ?? Infinity) > 500 ? { kind: "veto" } : undefined),
+  },
+});
+```
+
+A veto surfaces to the client as `Forbidden`, a `defer` as a rate-limit with `retryAfter`. And because the read is an operation like any other, `onBeforeTimelineHistory` / `onAfterTimelineHistory` fold down from the gateway for audit — while the read itself is journaled bus-only, so paging a long log does not grow the durable spine.
+
+> [!NOTE]
+> A namespace guard's `ctx` identifies the resource (`ctx.sessionId`), not the caller: bridge harnesses are not principal-stamped, so `ctx.principal` is undefined there. Key local rules on the resource and leave cross-principal admission to the choke point, which is the layer that has the caller's identity.
+
 ### The structural ceiling
 
 A session may carry `requiredScopes`. The choke point checks it **first**, and **no authorizer can waive it** — not an absent one, not `permissiveAuthorizer()`, not a `required: false` method, not a hook. Hold the ceiling scopes or you never reach the session.
@@ -630,4 +679,5 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - `src/__tests__/telemetry-inheritance.spec.ts`, `telemetry-multi-app.spec.ts`, `telemetry-wire-ctx.spec.ts` — gateway-operation span export, app inheritance and app override precedence, two apps sharing one `MeterProvider` with metrics distinguished by the `app` label, and a handler's `ctx.trace` parenting under `wire:<method>` with `ctx.metrics` carrying `{ method }`. All against real OTel `SpanProcessor` and `MetricReader`s.
 - `src/__tests__/create-gateway-cluster.spec.ts` — the substrate genuinely cluster-wrapped (membership shows the gateway, close removes it), and the factory-plus-cluster combination rejected.
 - `src/wire/__tests__/session-timeline-history.spec.ts` + `subscriptions-channel-snapshot.spec.ts` — the cursored history read paging forward and the tail page carrying no cursor, and a channel subscription opening with a snapshot as its first frame.
+- `src/__tests__/timeline-history-grant.spec.ts` — the granted-read recipe above: the declared read resolving and dispatching with `origin: "wire"`, an unexposed timeline write staying `MethodNotFound` even for a `*` holder, `commands/list` advertising the read, the exact-verb grant working while a sibling-verb grant does not leak it, the read grant conferring no writes, and a `*` grant still losing to the same-principal target rule. The full client-to-store path (25-entry log, two pages, `Forbidden` without a grant, cross-principal denial) is [@agentick/transport-in-process](../transport-in-process)'s `timeline-history-e2e.spec.ts`.
 - Authentication and authorization end-to-end live in [@agentick/transport](../transport): `wire-declarative-auth.spec.ts` (verb-scope default, open methods, additive roles, the un-waivable ceiling), `session-principal.spec.ts` (the owning principal stamped from the edge, a body-smuggled value ignored), `wire-identity-hook.spec.ts` (`ctx.identity` overriding a smuggled principal, absent when unauthenticated, invisible to inner operations), `authorize-seam.spec.ts` (a contextual scope flipping deny to allow, the ceiling denying regardless and the hook never firing), `wire-command-e2e.spec.ts` (journaled operation, typed hook transform, guard verdicts at the JSON-RPC edge, middleware and span attributes), and `client-projection.spec.ts` (bounding at the wire funnel across results and notifications). `runIngressAuthnConformance`, which every server transport runs against a real server, pins the admission-failure event and that its payload carries no credential.

@@ -13,8 +13,10 @@
  *     verbs, Q2 RESOLVED): `seed` (replace the window — the hydration line),
  *     `prepend` (older history at the HEAD), `append` (optimistic/manual at the
  *     TAIL), `clear` (reset to empty).
- *   - READ RPC — `loadOlder(limit?)` over `session/timeline_history` (§6.3): a
- *     lazy, cursored page of durable history, spliced at the HEAD.
+ *   - READ RPC — `history({ fromSeq, limit })` over the grant-gated
+ *     `timeline/history` command (ADR 93): one cursored page of durable history,
+ *     seq-tagged, no view mutation. `loadOlder(limit?)` is its stateful sugar —
+ *     it tracks the cursor and splices each page at the HEAD.
  *
  * ## Two postures (both first-class — §5b)
  *
@@ -27,8 +29,8 @@
  *
  * ## Cursor-vs-seq (friction #3 — honest, NOT unified)
  *
- * `loadOlder` reads `session/timeline_history` FORWARD-cursored by `seq` (the
- * `LogStore` ordering identity), while the live tail folds bus-`Cursor`-ordered
+ * The read is FORWARD-cursored by `seq` (the `LogStore` ordering identity), while
+ * the live tail folds bus-`Cursor`-ordered
  * append events — two numbering systems this arc deliberately does not merge. So
  * `loadOlder` pages forward from the log's start and prepends each page; an app
  * doing true infinite-scroll-up reconciles final ordering itself (it holds the
@@ -37,6 +39,7 @@
  *
  * @verifiedBy packages/timeline/src/client/__tests__/timeline-handle.spec.ts
  * @verifiedBy packages/timeline/src/client/__tests__/timeline-handle.conformance.spec.ts
+ * @verifiedBy packages/transport-in-process/src/__tests__/timeline-history-e2e.spec.ts
  */
 
 import {
@@ -45,18 +48,16 @@ import {
   type Enumerable,
   type FilteredView,
 } from "@agentick/client-core";
-import type {
-  ClientTransport,
-  SessionTimelineHistoryResult,
-  TimelineEntry,
-  Unsubscribe,
-} from "@agentick/spec";
+import type { ClientTransport, TimelineEntry, Unsubscribe } from "@agentick/spec";
 
+// Types the `timeline/history` wire row for `transport.request` — type-only, so
+// the client bundle pulls no harness runtime.
+import type { TimelineHistoryInput, TimelineHistoryPage } from "../wire-augment.js";
 import { timelineView, type TimelineViewOptions } from "./timeline-view.js";
 
 /**
  * Command client for the timeline handle: the read (`subscribe`) surface the
- * window folds PLUS `request` for the `loadOlder` history read. A superset of
+ * window folds PLUS `request` for the `timeline/history` read. A superset of
  * {@link import("./timeline-view.js").TimelineClient}.
  */
 export interface TimelineCommandClient {
@@ -99,8 +100,19 @@ export interface TimelineHandle extends ClientHandle, Enumerable<TimelineEntry> 
   /** Reset the window to empty (local view reset; the live fold keeps tailing). */
   clear(): void;
   /**
-   * Read the next cursored page of durable history over `session/timeline_history`
-   * and splice it at the HEAD. Tracks its own `nextFromSeq` cursor across calls;
+   * Read ONE cursored page of durable history over the grant-gated
+   * `timeline/history` command — seq-tagged rows plus the `nextFromSeq` cursor to
+   * continue with (absent at the log's tail). Stateless and view-neutral: it
+   * splices nothing, so an app whose message model is the truth (Posture B) pages
+   * straight into its own store.
+   *
+   * Requires a grant on the `timeline:history` scope, and reads only the session
+   * this handle is bound to (the same-principal target rule).
+   */
+  history(options?: TimelineHistoryInput): Promise<TimelineHistoryPage>;
+  /**
+   * Scroll-back sugar over {@link history}: read the next page and splice it at
+   * the HEAD of the window. Tracks its own `nextFromSeq` cursor across calls;
    * resolves `{ entries, done }`. A no-op once `done`.
    */
   loadOlder(limit?: number): Promise<LoadOlderResult>;
@@ -175,15 +187,22 @@ export function timelineHandle(
     prepend: (entries) => view.prepend(entries),
     append: (entries) => view.append(entries),
     clear: () => view.clear(),
+    history: async (options) =>
+      (await client.transport.request("timeline/history", {
+        sessionId,
+        ...(options?.fromSeq !== undefined ? { fromSeq: options.fromSeq } : {}),
+        ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+      })) ?? { entries: [] },
     loadOlder: async (limit) => {
       if (done) return { entries: [], done: true };
-      const res = (await client.transport.request("session/timeline_history", {
+      const res = await client.transport.request("timeline/history", {
         sessionId,
         ...(fromSeq !== undefined ? { fromSeq } : {}),
         ...(limit !== undefined ? { limit } : {}),
-      })) as SessionTimelineHistoryResult | null;
+      });
       const page = res?.entries?.map((e) => e.entry) ?? [];
       fromSeq = res?.nextFromSeq;
+      // The tail latch: no next cursor means the page reached the log's end.
       done = res?.nextFromSeq === undefined;
       if (page.length > 0) view.prepend(page);
       return { entries: page, done };

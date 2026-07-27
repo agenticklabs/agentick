@@ -1,4 +1,3 @@
-import type { CommandInfo } from "@agentick/spec";
 /**
  * Module augmentation — adds the timeline slot to two spec interfaces:
  *
@@ -22,6 +21,12 @@ import { registerNamespaceSlot } from "@agentick/runtime";
 import type { TimelineHarnessProtocol } from "@agentick/spec";
 import type { TimelineHandle } from "./handle.js";
 import type { TimelineConfig } from "./extension.js";
+
+// ADR 51 slice 5 (#141) — the wire projection of the ratified VERB-MATRIX rows
+// (`timeline/history`, `timeline/compact`, `timeline/commands`). They live in
+// their own file so the CLIENT subpath can type them without loading these
+// server-bridge augmentations.
+import "./wire-augment.js";
 
 declare module "@agentick/spec" {
   interface HookBridges {
@@ -49,23 +54,6 @@ declare module "@agentick/spec" {
      * owns lifecycle (`close`, `id`, `ready`) and snapshot import/export.
      */
     readonly timeline: TimelineHandle;
-  }
-}
-
-// ADR 51 slice 5 (#141) — wire projection of the ratified VERB-MATRIX
-// rows. Types derive from the same declarations the command registry
-// validates at dispatch; `sessionId` addresses the dynamic lane.
-declare module "@agentick/spec" {
-  interface WireMethods {
-    /** The flagship signal form: bare verb + optional advisory instructions. */
-    "timeline/compact": {
-      params: { sessionId: string; instructions?: string };
-      result: unknown;
-    };
-    "timeline/commands": {
-      params: { sessionId: string };
-      result: { commands: readonly CommandInfo[] };
-    };
   }
 }
 

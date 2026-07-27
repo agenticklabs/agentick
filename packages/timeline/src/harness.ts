@@ -16,10 +16,11 @@
  *
  * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
  * (constructor, `this.command()`): `timeline:append`, `timeline:replaceProjection`,
- * `timeline:resetProjection`, and `timeline:compact` (the **signal
- * form**). One canonical string per verb is simultaneously the inbox
- * message type over `timeline:{scopeId}`, the op-name root, the authz
- * scope label, and the (matrix-gated) wire method name.
+ * `timeline:resetProjection`, `timeline:compact` (the **signal form**), and
+ * `timeline:history` (the cursored READ — ADR 93's client scroll-back door). One
+ * canonical string per verb is simultaneously the inbox message type over
+ * `timeline:{scopeId}`, the op-name root, the authz scope label, and the
+ * (matrix-gated) wire method name.
  *
  * `compact` crosses boundaries as a bare verb + optional advisory
  * `instructions` (serializable data) resolved against the
@@ -33,7 +34,7 @@
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
  */
 
-import { omitUndefined } from "@agentick/utils";
+import { mergeLayered, omitUndefined } from "@agentick/utils";
 
 import { Effect } from "effect";
 import {
@@ -61,6 +62,7 @@ import type {
   CompactStrategy,
   ContentBlock,
   EventBus,
+  JournalingPolicy,
   MessageEnvelope,
   EventScope,
   MessageHandlerError,
@@ -85,10 +87,13 @@ import type {
 import {
   CompactHandlerFailed,
   CompactStrategyMissing,
+  DEFAULT_JOURNALING_POLICY,
   HandlerError,
   TimelineHydrateFailed,
   TimelineWriteFailed,
 } from "@agentick/spec";
+
+import type { TimelineHistoryInput, TimelineHistoryPage } from "./wire-augment.js";
 
 // ADR 80/83 — light up the compaction verb. `timeline:compact` is a DECLARED
 // command (`compactCmd`, the signal form) routed through `runOperation`, so
@@ -107,8 +112,41 @@ declare module "@agentick/runtime" {
       input: { readonly instructions?: string | readonly unknown[] };
       output: CompactResult;
     };
+    "timeline:history": { input: TimelineHistoryInput; output: TimelineHistoryPage };
   }
 }
+
+/**
+ * Journaling for the timeline surface: the substrate default, plus the READ
+ * class.
+ *
+ * `timeline:history` is a READ — it changes nothing, so there is nothing to
+ * recover or audit-replay from a durable record of it. Journaling reads would
+ * grow the recovery spine without ever being read back, and a client paging
+ * scroll-back does it a page at a time. So the read is **bus-only**: still
+ * observable live (metrics, tracing, an audit subscriber that wants to see who
+ * read what), never durable. Writes (`append` / `compact` /
+ * `replaceProjection`) keep the default `requested` + `terminal` journaling.
+ *
+ * An adopter-supplied `policy` layers ON TOP (per-key), so this is a default and
+ * not a mandate.
+ */
+const TIMELINE_JOURNALING: Readonly<Record<string, "always" | "bus-only" | "drop">> = {
+  "timeline:command:history": "bus-only",
+};
+
+// TODO(D-phase): a read's terminal envelope carries its RESULT, so a large
+// scroll-back page is published to the session bus (journaling is already off).
+// It is scope-confined — only that session's subscribers see it — but it is pure
+// noise. The fix is a per-op result projection at the terminal (publish a size
+// summary for reads), which belongs in the operation runner, not here.
+//
+// TODO(D-phase): `ctx.principal` is undefined inside this namespace's guards —
+// `buildSessionBridges` (@agentick/session) does not thread the session's
+// principal into any bridge harness, so `deriveOperationCtx`/`makeEvent` have
+// nothing to stamp (see `hydrateCtx`, which already reads `this.principal` for
+// the genesis seam). Cross-principal admission is the wire choke point's and is
+// unaffected; this only bounds how narrow a namespace-local guard can be.
 
 /** A declared command's public invoker (ADR 51). */
 type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
@@ -158,6 +196,43 @@ const compactSignalSchema: StandardSchemaV1<{
   },
 };
 
+/**
+ * Payload schema for `timeline:history` — the cursored page request.
+ *
+ * NORMALIZING as well as validating: it returns ONLY `fromSeq` / `limit`, so the
+ * addressing key the dynamic wire lane passes through (`sessionId`) and any other
+ * extra never reach the body. The harness reads its OWN scopeId; a caller-supplied
+ * session id must not be able to steer the read (the address already selected the
+ * session, and the target rule already gated it).
+ */
+const historyRequestSchema: StandardSchemaV1<TimelineHistoryInput> = {
+  "~standard": {
+    version: 1,
+    vendor: "@agentick/timeline",
+    validate: (value) => {
+      if (value === undefined || value === null) return { value: {} };
+      if (typeof value !== "object") {
+        return { issues: [{ message: "history payload must be an object" }] };
+      }
+      const { fromSeq, limit } = value as { fromSeq?: unknown; limit?: unknown };
+      const issues: Array<{ message: string }> = [];
+      if (fromSeq !== undefined && !(Number.isSafeInteger(fromSeq) && (fromSeq as number) >= 0)) {
+        issues.push({ message: "fromSeq must be a non-negative integer" });
+      }
+      if (limit !== undefined && !(Number.isSafeInteger(limit) && (limit as number) >= 0)) {
+        issues.push({ message: "limit must be a non-negative integer" });
+      }
+      if (issues.length > 0) return { issues };
+      return {
+        value: omitUndefined({
+          fromSeq: fromSeq as number | undefined,
+          limit: limit as number | undefined,
+        }),
+      };
+    },
+  },
+};
+
 export class TimelineHarness extends BaseHarness<"timeline"> implements TimelineHarnessProtocol {
   // ─── Storage (the LOG-archetype projection: two tiers + versions +
   // snapshot cache + render pings + the write-behind pump — ADR 49) ───
@@ -200,6 +275,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     { readonly instructions?: string | readonly unknown[] },
     CompactResult
   >;
+  private readonly historyCmd: Cmd<TimelineHistoryInput, TimelineHistoryPage>;
 
   get id(): string {
     return this.scopeId;
@@ -212,7 +288,16 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     inbox: MessageInbox,
     options: TimelineHarnessOptions = {},
   ) {
-    super("timeline", scopeId, journal, bus, inbox, options);
+    super("timeline", scopeId, journal, bus, inbox, {
+      ...options,
+      // The read class (bus-only history) is a DEFAULT: an adopter `policy`
+      // layers over it per-key rather than being replaced by it.
+      policy: mergeLayered<JournalingPolicy>(
+        DEFAULT_JOURNALING_POLICY,
+        { override: TIMELINE_JOURNALING },
+        options.policy,
+      ),
+    });
     this.store = options.store ?? new MemoryTimelineStore();
     this.turnBoundaries = options?.turnBoundaries ?? true;
     this.writePolicy = options.writePolicy ?? "behind";
@@ -288,6 +373,29 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
               ? { ...base, instructions: signal.instructions as CompactStrategy["instructions"] }
               : base;
           return yield* this.compactBody(effective);
+        }),
+    });
+    // The client READ door (ADR 93 §"The client read doors"): a standard read is
+    // a wire-exposable command, not a bespoke gateway method. Payload is two
+    // scalars, result is a seq-cursored page — fully serializable, so the verb is
+    // addressable from the inbox, another node, or (grant-gated) a wire client.
+    // Deny-by-default is the existing mechanism, unchanged: the dynamic lane
+    // treats a non-`wire` verb as an absent method, an exposed verb still needs a
+    // grant on `timeline:history`, and the same-principal target rule scopes it
+    // to the addressed session's owner.
+    this.historyCmd = this.command({
+      name: "timeline:history",
+      exposure: "wire",
+      input: historyRequestSchema,
+      description: "Read a cursored page of the durable timeline log",
+      scope,
+      handler: (input) =>
+        Effect.tryPromise({
+          try: () => this.historyPage(input),
+          // The store-lacks-`history` failure is a configuration fact, not a
+          // defect: surface it as a clean operation failure so the caller (and
+          // the wire edge) sees the message rather than a fiber death.
+          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
         }),
     });
 
@@ -390,23 +498,48 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   // ─────────── Sync surface — log (tooling / custom compactors) ───────────
 
   /**
-   * Cursored, seq-tagged read of the durable log (#187). Flushes the
-   * write-behind buffer first so the read reflects every completed
-   * append, then delegates to the store's optional `history`.
+   * Cursored, seq-tagged read of the durable log (#187) — the in-process face of
+   * the `timeline:history` command. Runs the SAME body a wire client reaches, so
+   * the read's hooks and guards fire on both paths; it just hands back the rows
+   * and drops the paging cursor (an in-process caller holds the last `seq`).
+   *
+   * @throws {Error} the configured store implements no cursored read — use
+   *   `readPersisted()` for the seq-less full read.
    */
-  async history(options?: {
-    readonly fromSeq?: number;
-    readonly limit?: number;
-  }): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>> {
+  async history(options?: TimelineHistoryInput): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>> {
+    const page = await this.historyCmd(options ?? {});
+    return page.entries;
+  }
+
+  /**
+   * The history command body: flush, page, and derive the next cursor.
+   *
+   * Flushes the write-behind buffer FIRST so a page reflects every completed
+   * append (a client that just sent a message and immediately scrolls back must
+   * not read a log missing it), then delegates to the store's optional `history`.
+   *
+   * `nextFromSeq` is present IFF the page filled its `limit` — a full page MAY
+   * have more behind it, a short or uncapped one reached the tail. It is
+   * `lastSeq + 1`: a valid lower bound in a sparse `seq` space, never a claim
+   * that an entry sits at that seq.
+   */
+  private async historyPage(input: TimelineHistoryInput): Promise<TimelineHistoryPage> {
     await this.flush();
     if (this.store.history === undefined) {
+      // Loud, not degraded: `fromSeq` is a store-assigned cursor, so answering
+      // from a positional `read()` slice would return the WRONG window the
+      // moment a prune breaks the correspondence (the `defineTimelineStore.query`
+      // precedent).
       throw new Error(
         `TimelineStore "${this.store.backend}" does not implement the optional ` +
           "cursored read (history). Implement it (see runTimelineStoreConformance) " +
           "or use readPersisted() for the seq-less full read.",
       );
     }
-    return this.store.history(this.scopeId, options, this.storeCtx());
+    const entries = await this.store.history(this.scopeId, input, this.storeCtx());
+    const lastSeq = entries.length > 0 ? entries[entries.length - 1]!.seq : undefined;
+    const capped = input.limit !== undefined && entries.length >= input.limit && input.limit > 0;
+    return capped && lastSeq !== undefined ? { entries, nextFromSeq: lastSeq + 1 } : { entries };
   }
 
   readPersisted(): readonly TimelineEntry[] {

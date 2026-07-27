@@ -274,6 +274,13 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       });
       return null;
     },
+    // TODO(D-phase): SUPERSEDED by `timeline:history` (ADR 93 D2) — the harness's
+    // own declared read, projected by the dynamic lane as `timeline/history` and
+    // gated on the `timeline:history` scope. That is the door the client SDK now
+    // uses; this porcelain is a second wire door for one capability, under a
+    // second grant label (`session:timeline_history`). Delete it — and its
+    // `WireMethods` row + params types in @agentick/spec — in the slice that owns
+    // the spec deletion (out of D2's fence: additive spec changes only).
     "session/timeline_history": async (params, ctx) => {
       const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTimeline;
       // Cursored, bounded read over `TimelineStore.history` (§6.3). The harness

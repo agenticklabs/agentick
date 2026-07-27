@@ -66,6 +66,7 @@
     "@agentick/spec-conformance": "workspace:*",
     "@agentick/state": "workspace:*",
     "@agentick/tasks": "workspace:*",
+    "@agentick/timeline": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
     "@agentick/utils": "workspace:*",
     "effect": "^3.22.0",

@@ -1852,6 +1852,9 @@ importers:
       '@agentick/tasks':
         specifier: workspace:*
         version: link:../tasks
+      '@agentick/timeline':
+        specifier: workspace:*
+        version: link:../timeline
       '@agentick/tool-executor':
         specifier: workspace:*
         version: link:../tool-executor

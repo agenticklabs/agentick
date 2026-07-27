@@ -63,6 +63,10 @@ export interface TimelineHandle {
    * to the store's optional `history`. Throws when the configured store
    * does not implement cursored reads — use `readPersisted()` for the
    * seq-less full read.
+   *
+   * The in-process face of the `timeline:history` command — the same body a
+   * grant-gated wire client reaches for scroll-back (ADR 93). Page forward with
+   * `fromSeq: lastSeq + 1`; the wire face additionally returns that cursor.
    */
   history(options?: {
     readonly fromSeq?: number;

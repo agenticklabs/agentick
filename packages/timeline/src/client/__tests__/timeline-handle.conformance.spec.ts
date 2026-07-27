@@ -1,6 +1,6 @@
 /**
  * `timelineHandle` — the B2 `ClientHandle` conformance suite (core + Enumerable +
- * the `loadOlder` read verb). The timeline handle is the window exemplar: `list()`
+ * the durable read verbs). The timeline handle is the window exemplar: `list()`
  * is the folded conversation window, seeded from server-hydrated history (the
  * pre-connection state), grown by local splices and the live tail.
  *
@@ -42,8 +42,20 @@ runClientHandleConformance<TimelineHandle, TimelineEntry, string>({
   },
   writeVerbs: [
     {
+      verb: "history",
+      method: "timeline/history",
+      run: async () => {
+        const spy = spyClientTransport();
+        const handle = timelineHandle(spy, "sess_1");
+        await handle.history({ limit: 50 });
+        const r = spy.lastRequest()!;
+        return { method: r.method, params: r.params };
+      },
+      boundAddress: { sessionId: "sess_1" },
+    },
+    {
       verb: "loadOlder",
-      method: "session/timeline_history",
+      method: "timeline/history",
       run: async () => {
         const spy = spyClientTransport();
         const handle = timelineHandle(spy, "sess_1");

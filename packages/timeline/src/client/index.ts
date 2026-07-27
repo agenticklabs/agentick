@@ -11,8 +11,9 @@
  *
  * The client timeline is `fold(session event stream)`, seeded with
  * server-hydrated `initial` (LogStore.history) and tailing live via
- * `fromCursor`. `session.timeline` (the sub-handle) adds a cursored durable
- * read over `session/timeline_history` for lazy scroll-back.
+ * `fromCursor`. `session.timeline` (the sub-handle) adds a cursored durable read
+ * over the grant-gated `timeline/history` command — `history()` for one page,
+ * `loadOlder()` for cursor-tracking scroll-back.
  *
  * Importing this subpath contributes the `client.session(id).timeline` property
  * (a `TimelineHandle`) to the client `SessionHandle` (ADR 87). The free
@@ -20,6 +21,12 @@
  * the headless/composition case.
  */
 
+// Type-only side effect: makes `timeline/history` a valid `WireMethods` row for
+// the handle's `transport.request` call, WITHOUT loading the server-bridge
+// augmentations (`../augment.js` pulls the runtime slot registration).
+import "../wire-augment.js";
+
+export type { TimelineHistoryInput, TimelineHistoryPage } from "../wire-augment.js";
 export {
   timelineView,
   type TimelineClient,

@@ -124,7 +124,7 @@ describe("TimelineHarness — compact as an addressable verb (ADR 51 slice 4)", 
     await timeline.close();
   });
 
-  it("enumerates all four declared verbs via commands() (queue/drain deleted, ADR 53)", async () => {
+  it("enumerates every declared verb via commands() (queue/drain deleted, ADR 53)", async () => {
     const timeline = mkTimeline();
     await timeline.ready;
     expect(timeline.commands().map((c) => c.name)).toEqual([
@@ -132,6 +132,8 @@ describe("TimelineHarness — compact as an addressable verb (ADR 51 slice 4)", 
       "timeline:replaceProjection",
       "timeline:resetProjection",
       "timeline:compact",
+      // The READ joined the grammar in ADR 93 — see history-command.spec.ts.
+      "timeline:history",
     ]);
     await timeline.close();
   });

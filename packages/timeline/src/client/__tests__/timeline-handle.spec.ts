@@ -1,13 +1,13 @@
 /**
- * `timelineHandle` — the window verbs (`seed`/`clear`) and the lazy `loadOlder`
- * cursored read, on top of the re-homed `timelineView` window. Focused unit
+ * `timelineHandle` — the window verbs (`seed`/`clear`), the `history()` page read
+ * over the grant-gated `timeline/history` command, and the `loadOlder` scroll-back
+ * sugar built on it, on top of the re-homed `timelineView` window. Focused unit
  * coverage complementing the conformance suite.
  */
 
 import { describe, expect, it } from "vitest";
 import type {
   EventQuery,
-  SessionTimelineHistoryResult,
   SubscriptionScope,
   SubscriptionStream,
   TimelineEntry,
@@ -16,6 +16,7 @@ import type {
 } from "@agentick/spec";
 import { spyClientTransport } from "@agentick/client-core/testing";
 
+import type { TimelineHistoryPage } from "../../wire-augment.js";
 import { timelineHandle } from "../timeline-handle.js";
 
 const entry = (id: string): TimelineEntry => ({
@@ -35,15 +36,16 @@ function neverStream(): SubscriptionStream {
   };
 }
 
-/** Client with a canned `session/timeline_history` response + a request recorder. */
+/** Client with a canned `timeline/history` response + a request recorder. */
 function fakeClient(
-  page: SessionTimelineHistoryResult | null,
-  captured: { params?: unknown[] } = { params: [] },
+  page: TimelineHistoryPage | null,
+  captured: { params?: unknown[]; methods?: string[] } = { params: [], methods: [] },
 ) {
   return {
     transport: {
       subscribe: (_s: SubscriptionScope, _q?: EventQuery): SubscriptionStream => neverStream(),
-      async request<M extends WireMethod>(_m: M, params: WireParams<M>): Promise<unknown> {
+      async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+        captured.methods?.push(method);
         captured.params!.push(params);
         return page;
       },
@@ -72,8 +74,28 @@ describe("timelineHandle", () => {
     spy.endStream();
   });
 
-  it("loadOlder() reads session/timeline_history, prepends the page, tracks the cursor", async () => {
-    const captured: { params?: unknown[] } = { params: [] };
+  it("history() reads one seq-tagged page over timeline/history and mutates NO view", async () => {
+    const captured: { params?: unknown[]; methods?: string[] } = { params: [], methods: [] };
+    const handle = timelineHandle(
+      fakeClient({ entries: [{ seq: 7, entry: entry("older") }], nextFromSeq: 8 }, captured),
+      "s1",
+      { initial: [entry("live")] },
+    );
+
+    const page = await handle.history({ fromSeq: 4, limit: 25 });
+    // The rows keep their `seq` — the cursor identity the caller pages by — and
+    // the reply carries its own next action.
+    expect(page.entries.map((t) => t.seq)).toEqual([7]);
+    expect(page.nextFromSeq).toBe(8);
+    // The granted COMMAND, not a bespoke gateway method.
+    expect(captured.methods).toEqual(["timeline/history"]);
+    expect(captured.params![0]).toEqual({ sessionId: "s1", fromSeq: 4, limit: 25 });
+    // Stateless + view-neutral: Posture B pages into its own store.
+    expect(ids(handle.list())).toEqual(["live"]);
+  });
+
+  it("loadOlder() reads timeline/history, prepends the page, tracks the cursor", async () => {
+    const captured: { params?: unknown[]; methods?: string[] } = { params: [], methods: [] };
     const handle = timelineHandle(
       fakeClient({ entries: [{ seq: 1, entry: entry("older") }], nextFromSeq: 2 }, captured),
       "s1",
@@ -86,6 +108,7 @@ describe("timelineHandle", () => {
     // Prepended at the HEAD, before the live window.
     expect(ids(handle.list())).toEqual(["older", "live"]);
     // First page reads from the log start (no fromSeq), capped by limit.
+    expect(captured.methods).toEqual(["timeline/history"]);
     expect(captured.params![0]).toEqual({ sessionId: "s1", limit: 10 });
   });
 
@@ -104,8 +127,8 @@ describe("timelineHandle", () => {
             ? ({
                 entries: [{ seq: 5, entry: entry("p1") }],
                 nextFromSeq: 6,
-              } as SessionTimelineHistoryResult)
-            : ({ entries: [{ seq: 6, entry: entry("p2") }] } as SessionTimelineHistoryResult);
+              } satisfies TimelineHistoryPage)
+            : ({ entries: [{ seq: 6, entry: entry("p2") }] } satisfies TimelineHistoryPage);
         },
       },
     };

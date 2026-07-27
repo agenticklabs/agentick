@@ -17,8 +17,9 @@ declare module "@agentick/spec" {
      * The timeline resource handle for this session — the `ClientHandle`
      * contract: `list()`/`get(id)` over the conversation window (Enumerable),
      * the zero-arg `subscribe(cb)` store contract, the window verbs
-     * (`seed`/`prepend`/`append`/`clear`), and the lazy `loadOlder()` read over
-     * `session/timeline_history` (`== timelineHandle(client, id)`).
+     * (`seed`/`prepend`/`append`/`clear`), and the grant-gated durable read —
+     * `history({ fromSeq, limit })` for one page, `loadOlder()` for
+     * cursor-tracking scroll-back (`== timelineHandle(client, id)`).
      */
     readonly timeline: TimelineHandle;
   }

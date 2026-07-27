@@ -16,6 +16,10 @@ import "./augment.js";
 
 export { TimelineHarness, type TimelineHarnessOptions } from "./harness.js";
 export type { TimelineHandle } from "./handle.js";
+// The `timeline:history` read contract — the shapes the command and its wire
+// projection (`timeline/history`) carry. Exported so an adopter typing a guard,
+// a hook, or a bespoke consumer of the read names the same shapes it does.
+export type { TimelineHistoryInput, TimelineHistoryPage } from "./wire-augment.js";
 export { withTimeline, type TimelineConfig, type WithTimelineOptions } from "./extension.js";
 
 // ADR 93 — the namespace definition: `defineTimeline` (identity + brand) and
