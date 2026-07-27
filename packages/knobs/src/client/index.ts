@@ -21,5 +21,10 @@ export {
 } from "./knobs-state-view.js";
 export { knobsHandle, type KnobsHandle } from "./knobs-handle.js";
 
+// The item type `KnobsHandle.list()` yields. Nameable from the `/client` subpath so
+// a UI can annotate a component prop without importing the harness package (which
+// would drag the knobs runtime into a browser bundle).
+export type { WireKnobDescriptor } from "../channel.js";
+
 // Side-effect: contribute `session.knobs` to the client SessionHandle (ADR 87).
 import "./register.js";
