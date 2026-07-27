@@ -41,6 +41,21 @@ export type { AppHarnessOptions };
  * Options for {@link createApp}. Extends {@link AppHarnessOptions}
  * with a `cluster` slot that wraps the local substrate before the
  * app constructs its sub-harnesses.
+ *
+ * TODO(define-app): this bag will likely want a `defineApp(...)` twin — the
+ * app-level member of the ADR 93 definition family (`defineTimeline`,
+ * `defineSkills`, `definePrompts`, `defineCompiler`, …). The pull is the
+ * FILE-GRAMMAR use case: an adopter whose directory tree mirrors its config
+ * exports one app composition per directory (`apps/<name>/index.ts` default-
+ * exporting the options bag) and imports them to build a gateway. A plain
+ * object already satisfies that today — the dichotomy says inline options ARE
+ * the declarative form — so `defineApp` earns its keep only for what a plain
+ * object cannot do: carry a brand (so a mistyped composition fails at the
+ * import site rather than at construction), be recognized by `isAppDefinition`
+ * when a gateway sorts a heterogeneous list, and give the composition a stable
+ * identity to name in diagnostics. Deliberately NOT built yet: no consumer has
+ * hit those three walls. Revisit with the metapackage / D4, and with the first
+ * real multi-app file-grammar tree as the evidence.
  */
 export interface CreateAppOptions<P = unknown> extends Omit<AppHarnessOptions<P>, "rootElement"> {
   /**
