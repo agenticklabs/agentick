@@ -1,42 +1,35 @@
 # @agentick/sandbox-lambda
 
-The **prod remote sandbox provider**, backed by **AWS Lambda MicroVMs** —
-long-lived, individually-addressable Firecracker microVMs with a full OS, a
-dedicated HTTPS endpoint, native WebSocket/SSE/gRPC, and (as a fast-follow)
-`suspend`/`resume` checkpointing. Local and docker providers are dev/staging;
-**this is the production runtime** (ADR 60).
+**A `SandboxProvider` where the sandbox is somebody else's machine.** One Firecracker microVM per sandbox on AWS Lambda MicroVMs, each with a full OS, its own HTTPS endpoint, and an in-VM agent that serves the sandbox contract over HTTP and WebSocket. `exec` streams frame by frame with no execution ceiling, `editFile` runs the shared transform inside the VM, and egress is filtered per domain by a proxy that also lives in the VM.
 
-It implements `@agentick/sandbox`'s `SandboxProvider` — one microVM per
-sandbox, an **in-VM sandbox-agent** (baked into the image) serving the contract
-ops over an HTTP+WebSocket endpoint, `exec` streamed frame-by-frame with **no
-exec ceiling**, atomic `editFile` via the base's shared `applyEdits` run IN-VM,
-and **domain-level egress** via an in-VM proxy. Deps ONLY the base package
-(mirroring `model-openai-next → model-next`) + AWS SDK v3 + a WS client.
+The interesting consequence of a remote sandbox is that host paths stop meaning anything, so runtime mounts are unsupported and say so. The interesting compensation is that per-domain egress — which a container can't express — works here.
 
-## Architecture — the seam split
+## Install
 
-```
- ┌── provider (server-side) ──────────────┐        ┌── microVM (far side) ────────┐
- │ lambdaProvider(config)                 │        │  in-VM sandbox-agent          │
- │   → controlPlane.runMicrovm            │        │   HTTP:  /info /readFile      │
- │   → waitRunning (poll RUNNING)         │  wire  │         /writeFile /editFile  │
- │   → createAuthToken (JWE, server-only) │◀──────▶│   WS:    /exec (bash -c)      │
- │   → EndpointClient → /info             │ endpoint│   proxy: domain egress rules │
- │   → LambdaSandbox (SandboxHandle stub) │        │   fs:    the workspace        │
- └────────────────────────────────────────┘        └──────────────────────────────┘
-                        ▲
-        control plane = an INJECTABLE seam
-   (AWS SDK v3 in prod; a loopback fake in tests)
+```bash
+npm install @agentick/sandbox @agentick/sandbox-lambda
 ```
 
-The **control plane** (`run/get/create-auth-token/terminate-microvm`) is the
-only piece that needs AWS. It is an injectable interface, so the entire
-data-plane surface — agent, endpoint client, exec/fs/proxy — is **real-testable
-over a loopback wire** (see [Verified by](#verified-by)).
+Subpaths: `.` (the provider, server-side), `./agent` (the in-VM bundle, baked into your image), `./testing` (a loopback control plane). Ships the `agentick-sandbox-agent` bin as the image's `CMD`.
+
+## How the pieces sit
+
+```
+ ┌── your server ─────────────────────────┐          ┌── the microVM ───────────────┐
+ │ lambdaProvider(config)                 │          │  in-VM sandbox agent          │
+ │   runMicrovm                           │          │   HTTP  /info /readFile        │
+ │   waitRunning        (poll RUNNING)    │  HTTPS   │         /writeFile /editFile   │
+ │   createAuthToken    (JWE, never sent) │◀────────▶│   WS    /exec (bash -c)        │
+ │   EndpointClient  →  /info             │ endpoint │   proxy domain egress rules    │
+ │   LambdaSandbox   =  SandboxHandle     │          │   fs    the workspace          │
+ └────────────────────────────────────────┘          └───────────────────────────────┘
+                     ▲
+     the control plane is an injectable seam
+```
+
+Only the control plane — `runMicrovm`, `waitRunning`, `createAuthToken`, `terminateMicrovm` — needs AWS. Because it's an interface you can swap, the whole data plane (agent, endpoint client, exec streaming, filesystem, proxy) is testable over a real loopback wire with no cloud account. That's how the conformance suite runs.
 
 ## Quick start
-
-### Minimal (production)
 
 ```ts
 import { lambdaProvider } from "@agentick/sandbox-lambda";
@@ -47,11 +40,15 @@ const provider = lambdaProvider({
 });
 
 const sandbox = await provider.create({ workspace: true });
-const { stdout } = await sandbox.exec("node -e 'console.log(1+1)'"); // "2"
-await sandbox.destroy(); // terminate-microvm
+const { stdout } = await sandbox.exec("node -e 'console.log(1 + 1)'"); // "2\n"
+await sandbox.destroy(); // terminateMicrovm
 ```
 
-### With network policy
+Under an agent you mount the provider with `<Sandbox provider={provider}>` and let the four built-in tools drive it — see [@agentick/sandbox](../sandbox).
+
+## Network policy
+
+Two tiers, and unlike a container the second one is real:
 
 ```ts
 const provider = lambdaProvider({
@@ -61,140 +58,125 @@ const provider = lambdaProvider({
   vpcEgressConnector: "arn:aws:lambda:us-east-1:123:network-connector/vpc",
 });
 
-// Coarse public egress (INTERNET_EGRESS connector).
+// Coarse public egress — attaches the internet egress connector.
 await provider.create({ allow: { network: true } });
 
-// Domain-level rules — enforced by the IN-VM egress proxy (see below).
+// Domain rules — enforced by the in-VM proxy running the base's matchRequest.
 await provider.create({
-  allow: { network: [{ action: "allow", domain: "*.github.com" }] },
+  allow: {
+    network: [
+      { action: "allow", domain: "*.github.com" },
+      { action: "deny", domain: "*" },
+    ],
+  },
 });
 ```
 
-### Advanced — inject a control plane (tests / custom credentials)
+A rule list starts the in-VM egress proxy and injects `HTTP_PROXY` and `HTTPS_PROXY` into every `exec` environment. Lambda's own egress connectors govern IP, port, and CIDR only, so domain-level enforcement has to live inside the VM — the same place [@agentick/sandbox-local](../sandbox-local) puts it.
+
+> [!WARNING]
+> Proxy enforcement is soft. A process that ignores `HTTP(S)_PROXY` and opens a socket directly is not filtered. Domain rules shape well-behaved traffic; they are not a containment boundary.
+
+## Testing without AWS
+
+`fakeLambdaMicrovmsControlPlane()` is a working control plane that starts a **real** agent per microVM on loopback. Nothing is mocked below it — real HTTP, real WebSocket, real filesystem, real `bash`. Only the AWS calls are replaced:
 
 ```ts
 import { lambdaProvider } from "@agentick/sandbox-lambda";
 import { fakeLambdaMicrovmsControlPlane } from "@agentick/sandbox-lambda/testing";
 
-// A working loopback control plane: a real in-VM agent per microVM, no AWS.
 const controlPlane = fakeLambdaMicrovmsControlPlane();
 const provider = lambdaProvider({ imageIdentifier: "loopback", controlPlane });
+
+const sandbox = await provider.create({ workspace: true });
+// ... the full create/exec/fs/destroy path, over a real wire
+await sandbox.destroy();
 ```
 
-## API
+That's also the seam for custom credential resolution: implement `LambdaMicrovmsControlPlane` yourself and pass it as `controlPlane`, and the `aws` config is ignored.
 
-| Export                                          | Kind  | Purpose                                                        |
-| ----------------------------------------------- | ----- | -------------------------------------------------------------- |
-| `lambdaProvider(config)`                        | fn    | The `SandboxProvider`.                                         |
-| `LambdaProviderConfig`                          | type  | Image ARN, control plane, connectors, idle policy, agent port. |
-| `LambdaSandbox`                                 | class | The `SandboxHandle` client stub (one microVM).                 |
-| `EndpointClient`                                | class | Near-side HTTP+WS client to the in-VM agent.                   |
-| `awsLambdaMicrovmsControlPlane(config)`         | fn    | The AWS SDK v3 control plane.                                  |
-| `LambdaMicrovmsControlPlane`                    | type  | The injectable control-plane seam.                             |
-| `startSandboxAgent(opts)` (`/agent`)            | fn    | The in-VM server (baked into the image).                       |
-| `AgentEgressProxy` (`/agent`)                   | class | The in-VM domain-egress proxy.                                 |
-| `fakeLambdaMicrovmsControlPlane()` (`/testing`) | fn    | Loopback control plane (Meszaros fake).                        |
+## Capability tiers
 
-Subpaths: `.` (provider), `./agent` (in-VM bundle), `./testing` (doubles).
-Bin: `agentick-sandbox-agent` (the image `CMD`).
-
-## Capability tiers (honest — never fake)
-
-| Capability                            | Lambda tier                                                                                                        |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `exec` (streaming, no ceiling)        | ✅ WebSocket frames → `onOutput` + terminal exit frame                                                             |
-| `readFile` / `writeFile` / `editFile` | ✅ HTTP; `editFile` runs `applyEdits` IN-VM, atomic write-back                                                     |
-| `network: true`                       | ✅ attaches the `internetEgressConnector` ARN (public) when configured                                             |
-| `network: false` / undefined          | ⚠️ attaches **no** egress connector — _intended_ deny-all, **not yet verified** on a real microVM (see known gaps) |
-| `network: NetworkRule[]`              | ✅ **in-VM egress proxy** (domain rules) + optional `vpcEgressConnector` — **richer than docker**                  |
-| runtime host mounts (`addMount` …)    | ❌ `SandboxUnsupportedError` — a host path has no referent in a remote microVM                                     |
-| hibernate / `restore`                 | ⏳ fast-follow (#223) — native `suspend`/`resume`                                                                  |
-
-**Divergence from docker (intentional):** `sandbox-docker-next` throws
-`SandboxUnsupportedError` for a `NetworkRule[]` because `NetworkMode` cannot
-express per-domain rules. Lambda **can** — the in-VM proxy runs the base's
-shared `matchRequest` and injects `HTTP(S)_PROXY` into every exec env. Lambda's
-VPC egress connectors govern only IP/port/CIDR, so per-domain enforcement lives
-in-VM, exactly as the local provider does it.
+| Capability                                | On Lambda MicroVMs                                                                    |
+| ----------------------------------------- | ------------------------------------------------------------------------------------- |
+| `exec`                                    | Supported. WebSocket frames reach `onOutput`, then a terminal exit frame. No ceiling. |
+| `readFile` / `writeFile` / `editFile`     | Supported over HTTP. `editFile` runs `applyEdits` in-VM with an atomic write-back.    |
+| `network: true`                           | Supported — attaches `internetEgressConnector` when configured.                       |
+| `network: false` / omitted                | Attaches no egress connector. Intended as deny-all but **unverified** (see gaps).     |
+| `network: NetworkRule[]`                  | Supported by the in-VM proxy, plus `vpcEgressConnector` when configured.              |
+| `addMount` / `removeMount` / `listMounts` | Throws `SandboxUnsupportedError` — a host path has no referent in a remote microVM.   |
+| `restore` / hibernate                     | Not implemented. The platform has native suspend and resume; the seam isn't wired.    |
 
 ## Building the microVM image
 
-`sandbox-lambda-next` ships the **in-VM agent bundle + a documented Dockerfile
-scaffold ONLY** (ADR 60, Ryan's ruling). The adopter runs `create-microvm-image`
-(→ S3 → poll `CREATED`) as their own DevOps; the resulting image ARN becomes
-`LambdaProviderConfig.imageIdentifier`. See [`Dockerfile`](./Dockerfile) — it
-`FROM`s a Node base, bundles the agent, `EXPOSE 8080`, and `CMD`s the agent so
-`create-microvm-image` snapshots it started-and-ready (no cold boot on run).
+This package ships the in-VM agent bundle and a documented [`Dockerfile`](./Dockerfile) scaffold. Building the image is yours: run `create-microvm-image` against your artifact, and the resulting ARN becomes `imageIdentifier`.
 
-Per-session config (`env`, network rules) is delivered via the `run-microvm`
-`runHookPayload`; the agent bin reads workspace/port/rules from the environment
-(`SANDBOX_WORKSPACE` / `SANDBOX_AGENT_PORT` / `SANDBOX_NET_RULES`). Wiring the
-`/run` lifecycle hook to translate the payload into that env is the image's
-responsibility (documented integration point).
+The scaffold layers on a Node base, bundles the agent, exposes port 8080, and sets the agent as `CMD` so `create-microvm-image` snapshots it already started — which is what removes cold boot from `create()`. Pin your own base image and add whatever toolchain your workloads will `exec`.
 
-## Security invariants (ADR 60)
+Per-sandbox configuration travels in the `run-microvm` hook payload. The agent bin reads its workspace, port, and network rules from the environment (`SANDBOX_WORKSPACE`, `SANDBOX_AGENT_PORT`, `SANDBOX_NET_RULES`), and translating the hook payload into that environment is the image's `/run` lifecycle hook — a documented integration point, not something this package can do for you.
 
-- **Credentials never cross the wire.** The provider's AWS creds
-  (`lambda-microvms:*`, S3, ENI) are server-side only (instance profile / IRSA /
-  task role — never static keys). The JWE microVM token is minted server-side by
-  `create-microvm-auth-token`, held by the (server-side) `EndpointClient`, and
-  **never projected to the client**.
-- **IAM / IMDS (highest severity — NOT yet a hard lock).** There is no
-  dedicated IMDS (`169.254.169.254`) block in the code. IMDS is reached only
-  when the in-VM egress proxy is engaged (i.e. a `NetworkRule[]` was supplied)
-  AND then only by its **default-deny** of unlisted hosts — and even that is a
-  **soft** boundary: the proxy is enforced via `HTTP(S)_PROXY` env injection, so
-  a process that ignores those vars bypasses it (see the `TODO(#226)` in
-  `provider.ts`). A coarse-`network` sandbox (no rule list) starts **no** proxy
-  at all. A hard IMDS lock — plus confirming whether Lambda injects a per-microVM
-  runtime role — is an open pre-ship item (see known gaps).
+## Security posture
 
-## Status
+**Credentials never cross the wire.** AWS credentials stay server-side and should come from an instance profile, IRSA, or a task role — never static keys. The JWE endpoint token is minted server-side by `createAuthToken`, held by the server-side `EndpointClient`, and never projected to a client.
 
-**Wave: ADR 60 core contract.** Provider (`create`/`exec`/`readFile`/
-`writeFile`/`editFile`/`destroy`) + coarse network switch + in-VM egress proxy
-for domain rules + mounts capability-tier. AWS SDK client
-(`@aws-sdk/client-lambda-microvms@^3.1080.0`) is a dependency and wired into
-`awsLambdaMicrovmsControlPlane`.
+> [!CAUTION]
+> **There is no hard IMDS block, and this is the highest-severity open item.** Nothing in the code denies `169.254.169.254` outright. It's unreachable only when a rule list engaged the in-VM proxy, and then only via the proxy's default-deny — which the warning above already tells you is bypassable. A sandbox created with coarse `network: true` starts no proxy at all. Do not run untrusted code against a microVM whose runtime role you haven't audited.
 
-### Roadmap & known gaps
+## API
 
-- **Hibernate/restore (#223)** — `provider.restore`, `suspend`/`resume`,
-  retain-on-`destroy`, `SandboxSnapshot = { microvmId }`. A tight fast-follow;
-  Lambda MicroVMs is the first provider with a real checkpoint.
-  `// TODO(#223)` trailheads mark the seams in `provider.ts` + `lambda-sandbox.ts`.
-- **EFS / S3-prefix mounts** — a provider-extension reinterpretation of
-  `addMount` (host binds stay unsupported). `// TODO(#226-followup)`.
-- **`ProxiedRequest` → harness stream** — the in-VM proxy logs an audit trail +
-  fires an `onProxiedRequest` callback; streaming it to the `sandbox:command`
-  bridge is a follow-on.
-- **Image-build helper CLI** — out of scope (adopter DevOps); may follow if it
-  earns its keep.
-- **`network: false` deny-all — UNVERIFIED (security-critical).** `resolveNetwork`
-  attaches no egress connector for `false`/undefined, on the assumption that
-  omission = deny-all. AWS networking docs suggest microVMs may have public
-  egress BY DEFAULT; if so, `network: false` silently grants full internet.
-  Needs confirmation on a real microVM, and likely an explicit deny/no-egress
-  connector. `// TODO(#226)` in `provider.ts`.
-- **Hard IMDS lock + per-microVM runtime role** — the current IMDS story is a
-  soft, proxy-only, default-deny (above). A dedicated hard block and
-  confirmation of Lambda's runtime-role injection are pre-ship items.
-- **Large-file `readFile`** — `agentReadFile` buffers the whole file into the
-  response body with **no** size backstop (the 64 MB `MAX_BODY_BYTES` limit
-  gates only inbound `writeFile`/`editFile` REQUEST bodies, not read responses).
-  SSE/WS streaming for very large reads is a follow-on.
+### `@agentick/sandbox-lambda`
+
+| Export                                                                                                           | Purpose                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lambdaProvider(config)`                                                                                         | The provider.                                                                                                                                                                                                      |
+| `LambdaProviderConfig`                                                                                           | `imageIdentifier`, `imageVersion`, `controlPlane`, `aws`, `ingressNetworkConnectors`, `internetEgressConnector`, `vpcEgressConnector`, `idlePolicy`, `maximumDurationInSeconds`, `authExpiryMinutes`, `agentPort`. |
+| `LambdaSandbox` / `LambdaSandboxInit`                                                                            | The handle: a client stub over one microVM.                                                                                                                                                                        |
+| `EndpointClient` / `EndpointClientConfig`                                                                        | Server-side HTTP and WebSocket client to the in-VM agent.                                                                                                                                                          |
+| `awsLambdaMicrovmsControlPlane(config?)`                                                                         | The AWS SDK v3 control plane, and the default when you pass `aws`.                                                                                                                                                 |
+| `LambdaMicrovmsControlPlane`                                                                                     | The injectable seam: `runMicrovm`, `waitRunning`, `createAuthToken`, `terminateMicrovm`.                                                                                                                           |
+| `AwsControlPlaneConfig`                                                                                          | `region`, `client`, `pollIntervalMs`, `pollTimeoutMs`.                                                                                                                                                             |
+| `MicrovmIdlePolicy` / `RunMicrovmOptions` / `RunMicrovmResult` / `WaitRunningOptions` / `CreateAuthTokenOptions` | Control-plane call shapes.                                                                                                                                                                                         |
+| `encodeRunHookPayload` / `decodeRunHookPayload` / `RunHookPayload`                                               | Per-sandbox config delivery to the image.                                                                                                                                                                          |
+| `AGENT_DEFAULT_PORT` / `SerializedSandboxError`                                                                  | Port default (8080) and the wire error shape.                                                                                                                                                                      |
+
+### `@agentick/sandbox-lambda/agent`
+
+Runs **inside** the VM. The provider never imports it.
+
+| Export                                                                        | Purpose                               |
+| ----------------------------------------------------------------------------- | ------------------------------------- |
+| `startSandboxAgent(options)` / `SandboxAgent`                                 | The far-side server.                  |
+| `AgentEgressProxy` / `EgressProxyConfig`                                      | The in-VM domain-egress proxy.        |
+| `runExec` / `ExecController` / `ExecRunOptions` / `ExecRunResult`             | The exec primitive behind `WS /exec`. |
+| `agentReadFile` / `agentWriteFile` / `agentEditFile` / `resolveWorkspacePath` | The filesystem primitives.            |
+
+### `@agentick/sandbox-lambda/testing`
+
+| Export                                         | Purpose                                                   |
+| ---------------------------------------------- | --------------------------------------------------------- |
+| `fakeLambdaMicrovmsControlPlane(options?)`     | Loopback control plane starting a real agent per microVM. |
+| `FakeControlPlane` / `FakeControlPlaneOptions` | Its type and configuration.                               |
+
+## Patterns
+
+**Under an agent.** [@agentick/sandbox](../sandbox) wraps the handle with journaling, the approval gate, and the four model-facing tools.
+
+**Choosing a provider.** [@agentick/sandbox-local](../sandbox-local) for development on the host with OS jails; [@agentick/sandbox-docker](../sandbox-docker) for container reproducibility; this one when the sandbox must not share a machine with your server.
+
+**Certifying your own.** `runSandboxProviderConformance` from `@agentick/sandbox/testing` is what pins this provider over the loopback wire.
+
+## Roadmap & known gaps
+
+- **`network: false` deny-all is unverified, and it's security-critical.** The provider attaches no egress connector for `false` or omitted, assuming omission means deny-all. AWS networking documentation suggests microVMs may have public egress by default — if so, `network: false` silently grants full internet. Confirm on a real microVM before trusting it, and expect this to need an explicit no-egress connector.
+- **No hard IMDS lock.** See the security note above. A dedicated block, plus confirmation of how Lambda injects a per-microVM runtime role, are pre-ship items.
+- **Hibernate and restore aren't wired.** The platform has native `suspend` and `resume`, which would make this the first provider with a real checkpoint, but `provider.restore`, retain-on-destroy, and the snapshot shape are unimplemented.
+- **No EFS or S3-prefix mounts.** Reinterpreting `addMount` for remote storage is the obvious extension; host binds stay unsupported regardless.
+- **Proxy audit trail doesn't reach the harness.** The in-VM proxy keeps a log and fires `onProxiedRequest`, but streaming those records onto the sandbox event surface is unbuilt.
+- **`readFile` has no size backstop.** It buffers the whole file into the response body. The 64 MB inbound body limit gates `writeFile` and `editFile` requests only, not read responses, so a very large read can exhaust memory. Streaming reads are a follow-on.
+- **No image-build helper.** Image construction is deliberately left to adopter DevOps; only the agent bundle and the Dockerfile scaffold ship here.
 
 ## Verified by
 
-- `src/__tests__/loopback-conformance.spec.ts` — the shared #218
-  `runSandboxProviderConformance` suite against a **real** in-VM agent over a
-  loopback wire (real HTTP/WS, real fs, real bash). Exercises
-  exec-stream/readFile/writeFile/editFile/mounts-tier/destroy.
-- `src/__tests__/control-plane.spec.ts` — provider `create()` orchestration
-  order (`runMicrovm → waitRunning → createAuthToken → handle → terminate`) via
-  a spy over the loopback fake; create-time env delivery; **plus** the
-  AWS-integration conformance run, gated on real AWS (`SANDBOX_LAMBDA_TEST_IMAGE`
-  - region), registered skipped where AWS is absent.
-- `src/__tests__/egress-proxy.spec.ts` — the in-VM proxy forwards an allowed
-  host (200) and denies an unlisted host (403, default-deny) against a real
-  origin.
+- `src/__tests__/loopback-conformance.spec.ts` — `runSandboxProviderConformance` against a real in-VM agent over a loopback wire: real HTTP and WebSocket, real filesystem, real `bash`. Covers exec streaming, `readFile`, `writeFile`, `editFile`, the mounts capability tier, and destroy.
+- `src/__tests__/control-plane.spec.ts` — `create()` orchestration order (`runMicrovm` → `waitRunning` → `createAuthToken` → handle → `terminateMicrovm`) observed through a spy over the loopback fake, and create-time environment delivery. Also runs the conformance suite against real AWS when `SANDBOX_LAMBDA_TEST_IMAGE` and a region are set, registering as skipped otherwise.
+- `src/__tests__/egress-proxy.spec.ts` — the in-VM proxy forwards an allowed host and returns 403 for an unlisted one, against a real origin server.

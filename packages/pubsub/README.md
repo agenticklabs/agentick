@@ -1,219 +1,272 @@
 # @agentick/pubsub
 
-Local observer / pub-sub primitives for Agentick v2.
+**Four fan-out primitives, and one distinction that decides which you want.** Does the subscriber need to be told _that_ something changed, or _what_ changed?
 
-Consolidates ~16 hand-rolled `Set<() => void>` / `Map<K, Set<listener>>` fan-out implementations across harnesses, bridges, transports, and compiler test doubles into one canonical set. The factories cover every fan-out shape the v2 framework needs:
+Telling a subscriber "re-read me" is a **pull** notification — that's `createNotifier` and `createKeyedNotifier`, and it's the shape `useSyncExternalStore` asks for. Handing the subscriber the delta so it never re-reads is **push** — that's `createChangeNotifier`. When subscribers need independent queues and backpressure instead of a synchronous callback, `createLocalPubSub` gives you an Effect `Stream`.
 
-| Primitive                            | Shape                                               | Replaces                                                                                                        |
-| ------------------------------------ | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `createNotifier<T = void>()`         | Single-channel observer                             | Bare `Set<() => void>` (timeline, sandbox, subscriptions, session-state, transport state, client state)         |
-| `createKeyedNotifier<K, T = void>()` | Keyed observer + optional wildcard channel          | `Map<K, Set<listener>> + Set<wildcard>` (knobs, state, skills, compiler test fakes, lifecycle store, MCP tasks) |
-| `createChangeNotifier<V, K>()`       | The **notify** seam — typed push carrying the delta | Per-mutation value-capture at projection sites (StateDelta, AG-UI steps, timeline events)                       |
-| `createLocalPubSub<T>()`             | Effect.Stream-based fan-out with drain-on-close     | Hand-rolled `Set<Queue<T>>` async-iterable fan-out (tasks fan-out is the current consumer)                      |
+The package depends only on `effect` and `@agentick/utils`, so it sits at the bottom of the dependency graph and anything can reach for it.
 
-**Pull vs push.** `createNotifier` / `createKeyedNotifier` are _pull_ — "something changed, re-read" (the `useSyncExternalStore` render pattern). `createChangeNotifier` is _push_ — it hands the consumer the delta (`{ key, value?, prev? }`) so it can project without re-reading and diffing. It is the read-only _notify_ seam of the operation model (ADR 76): observers are fire-and-forget and cannot affect the emitting operation.
+## Install
 
-The package depends only on `effect`. No coupling to harness, spec, or compiler — pubsub-next sits at the same layer as `@agentick/utils` in the dep graph.
+```bash
+npm install @agentick/pubsub
+```
+
+Subpaths: `/testing` (call-recording spies over each primitive).
 
 ## Quick start
-
-### `createNotifier` — sync single-channel
 
 ```ts
 import { createNotifier } from "@agentick/pubsub";
 
-const n = createNotifier();
-const off = n.subscribe(() => render());
-n.notify();
-off();
+function createCounter() {
+  const changed = createNotifier();
+  let count = 0;
 
-// Typed payload variant:
-const t = createNotifier<MyState>();
-t.subscribe((s) => apply(s));
-t.notify(currentState);
+  return {
+    subscribe: changed.subscribe, // (listener) => Unsubscribe
+    getSnapshot: () => count,
+    increment() {
+      count += 1;
+      changed.notify();
+    },
+  };
+}
+
+const counter = createCounter();
+const off = counter.subscribe(() => console.log(counter.getSnapshot()));
+
+counter.increment(); // logs 1
+off();
 ```
 
-Listener errors are caught per-listener — a buggy consumer cannot corrupt sibling listeners or the producer's state.
+That's the whole pattern: the notifier owns the listener set, the object owns the value. `subscribe` and `getSnapshot` are exactly the pair `useSyncExternalStore` wants, so this object binds to React with no adapter.
 
-### `createKeyedNotifier` — keyed + wildcards
+## Which one
+
+| Primitive                            | Fan-out shape                                  | Reach for it when                                                       |
+| ------------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------------- |
+| `createNotifier<T = void>()`         | One channel, synchronous                       | One thing changed and everyone re-reads it.                             |
+| `createKeyedNotifier<K, T = void>()` | Per-key channels plus a wildcard               | Subscribers care about individual keys, and something also watches all. |
+| `createChangeNotifier<V, K>()`       | One channel carrying `{ key, value?, prev? }`  | The consumer projects the delta instead of re-reading and diffing.      |
+| `createLocalPubSub<T>()`             | Effect `Stream` per subscriber, drain-on-close | Subscribers need their own queue, or you're already in Effect.          |
+
+## Pull — `createNotifier` and `createKeyedNotifier`
+
+Listener errors are caught per listener in both. A buggy consumer cannot corrupt sibling listeners or the producer's state, which is what makes these safe to expose on a long-lived object.
+
+```ts
+import { createNotifier } from "@agentick/pubsub";
+
+const state = createNotifier<{ status: string }>(); // typed payload
+state.subscribe((s) => console.log(s.status));
+state.notify({ status: "connected" });
+
+state.size; // diagnostic listener count
+state.clear(); // drop every subscriber on teardown
+```
+
+With `T = void` the listener takes no argument and `notify()` takes none either; with a payload type both take the value. One factory, and the call site can't get the arity wrong.
+
+`createKeyedNotifier` adds a key dimension plus a wildcard channel that fires after the keyed bucket:
 
 ```ts
 import { createKeyedNotifier } from "@agentick/pubsub";
 
-const n = createKeyedNotifier();
-n.subscribe("counter", () => render());
-n.subscribeAll(() => bumpVersion());
-n.notify("counter"); // fires counter-keyed + wildcards
-n.notifyAll(); // wildcards only — "everything changed"
+const changed = createKeyedNotifier();
+changed.subscribe("budget", () => rerenderBudget());
+changed.subscribeAll(() => bumpVersion());
 
-// Async dispatch:
-const t = createKeyedNotifier<string, MyEvent>();
-t.subscribe("foo", async (ev) => await persist(ev));
-await t.notifyAsync("foo", event); // serial; errors propagate
+changed.notify("budget"); // keyed bucket, then wildcards
+changed.notifyAll(); // wildcards only — "everything changed"
+
+changed.count("budget"); // 1
+changed.wildcardCount; // 1
+changed.size; // 2 — every key plus wildcards
 ```
 
-Buckets auto-collect on the last unsubscribe — long-lived harnesses don't leak `Map` slots.
+`notifyAll()` is for the case where per-key signalling would be noise — a full snapshot import, say. Keyed subscribers deliberately do not fire.
 
-### `createChangeNotifier` — the notify seam (typed push)
+Buckets are collected on the last unsubscribe, so a long-lived owner doesn't accumulate empty `Map` slots.
+
+When listeners need ordering or backpressure, `notifyAsync` awaits each one serially. Unlike the synchronous path it **propagates** errors, because a caller that chose to await has chosen to handle failure:
 
 ```ts
-import { createChangeNotifier, changeKind } from "@agentick/pubsub";
+const events = createKeyedNotifier<string, { id: string }>();
+events.subscribe("saved", async (ev) => await persist(ev));
 
-const changes = createChangeNotifier<number>(); // V = value type
+await events.notifyAsync("saved", { id: "a1" });
+```
 
-// Consumers project the delta — no re-read, no diff:
-changes.onChange((c) => stateDelta.push({ op: changeKind(c), path: `/${c.key}`, value: c.value }));
+## Push — `createChangeNotifier`
 
-// The producer (harness) supplies the full delta at the mutation site,
-// where it already knows `prev`:
+A pull notification forces the consumer to re-read and diff. When the consumer's job _is_ the diff — a JSON-Patch codec, a wire projection — that's wasted work, and worse, the producer already knew `prev` at the mutation site and threw it away.
+
+`createChangeNotifier` carries it:
+
+```ts
+import { changeKind, createChangeNotifier } from "@agentick/pubsub";
+
+const changes = createChangeNotifier<number>();
+
+changes.onChange((c) => {
+  patches.push({ op: changeKind(c), path: `/${c.key}`, value: c.value });
+});
+
+// At the mutation site, where `prev` is still in hand:
 const prev = values.get("budget");
 values.set("budget", 50);
 changes.emitChange({ key: "budget", value: 50, prev });
 ```
 
-`emitChange` fans out synchronously and error-isolated; a throwing observer cannot break the producer or sibling observers (the outcome is committed before notify). The notifier is a stateless pipe — it holds no values and computes no `prev`. `changeKind(c)` derives the mechanical `add`/`update`/`remove` from value/prev presence for CRUD consumers (JSON-Patch codecs, wire projections).
+`ChangeEvent` is **data, not a verb** — there is no `add`/`update`/`remove` discriminator on it. Only the emitting layer knows whether a value change means "completed" or "reordered" or "budget lowered", so naming the transition is its job. `changeKind` derives the mechanical CRUD shape for consumers that need it, from presence alone: value present and prev absent is an `add`, both present is an `update`, value absent is a `remove`.
 
-### `createLocalPubSub` — Stream-based
+Presence follows `Map` semantics — a side is _absent_ when the property is `undefined`, and producers omit the side that doesn't apply rather than setting it explicitly.
+
+The notifier holds no values and computes no diffs; it's a stateless pipe. Observers are read-only and fire-and-forget: the fan-out is synchronous, errors are isolated, and a listener's return value is never awaited or inspected. An observer cannot change the outcome — the fact is already committed by the time it's told.
+
+> [!NOTE]
+> `createChangeNotifier` is deliberately separate from `createKeyedNotifier` rather than a third type parameter on it. Keyed fan-out's job is `void`-or-`T` pings for render subscriptions; folding a value-plus-prev stream in would muddy that overload. They compose instead — an object can hold both, a keyed notifier for render pings and a change notifier for the delta stream.
+
+## Streams — `createLocalPubSub`
+
+Backed by Effect's `PubSub.unbounded()`, so every subscriber gets an independent dequeue and a slow consumer can't starve another. `publish` returns synchronously from the caller's point of view because the queue never blocks on offer.
 
 ```ts
 import { createLocalPubSub } from "@agentick/pubsub";
-import { Stream } from "effect";
+import { Effect, Stream } from "effect";
+
+type TaskEvent = { kind: "started" | "progress"; taskId: string };
 
 const bus = createLocalPubSub<TaskEvent>();
-const stream = bus.subscribe();
-bus.publish({ kind: "started", taskId: "t1" });
 
-// Stream is plain Stream<T, never, never> — no Scope to wire.
-Stream.runForEach(stream, (ev) => Effect.sync(() => render(ev))).pipe(Effect.runFork);
-
-// Filter on subscribe:
+// The Stream is scoped internally — plain Stream<T, never, never>, no Scope to wire.
+const all = bus.subscribe();
 const onlyProgress = bus.subscribe((e) => e.kind === "progress");
 
-// Drain + shutdown:
+Stream.runForEach(all, (ev) => Effect.sync(() => console.log(ev))).pipe(Effect.runFork);
+
+bus.publish({ kind: "started", taskId: "t1" });
+
 await bus.close();
 ```
 
-`close()` waits for every active subscriber to consume the events that were published BEFORE close was called. No published event is silently dropped from an active subscriber's queue.
+**`close()` drains before it shuts down.** It waits for every subscriber that was active when close was called to consume everything published before that point, then shuts the underlying PubSub down. No published event is silently dropped from an active subscriber's queue. Subscribers that detached earlier don't hold the drain up, and `close()` is idempotent; publishes after it are no-ops.
+
+Two construction options change that behavior:
+
+```ts
+const bus = createLocalPubSub<TaskEvent>({
+  replay: 1, // new subscribers immediately see the last event
+  closeDrainTimeoutMs: 5_000, // default; 0 skips the drain entirely
+  onPublish: (event) => forwardUpstream(event), // fan-in hook, errors isolated
+});
+```
+
+`replay: N` is Effect's native replay buffer — `replay: 1` behaves like an RxJS `BehaviorSubject`, larger values like a `ReplaySubject(N)`. `closeDrainTimeoutMs` is a defensive cap for a wedged downstream consumer; under normal operation the drain finishes in microseconds, and setting it to `0` gives you raw shutdown semantics with buffered events droppable.
+
+`onPublish` is the fan-in seam: it fires synchronously on every publish, **after** the event reaches in-process subscribers, so they always see it first. Use it to route publishes into a sink the bus itself shouldn't know about — a wire envelope, a journal — while the translation stays the caller's closure. Throws from the hook are swallowed, because a broken sink must never stop a subscriber from seeing an event; wrap it yourself if you need to observe sink failures.
+
+> [!IMPORTANT]
+> The replay buffer is a **global** ring of the last N published events, not per-key and not per-subscriber. A filtered subscriber sees only the subset of those N that matches its predicate, which may be none. For "the latest event for _this_ key", compose `Stream.concat(snapshot, bus.subscribe(...))` at the call site instead of relying on replay.
 
 ## API
 
-### `createNotifier<T = void>(): Notifier<T>`
+### Pull
 
-| Method                | Description                                                            |
-| --------------------- | ---------------------------------------------------------------------- |
-| `subscribe(listener)` | Add a listener. Returns the unsubscribe.                               |
-| `notify(value?)`      | Fire every listener. `T = void` → `notify()`; typed → `notify(value)`. |
-| `size`                | Diagnostic listener count.                                             |
-| `clear()`             | Drop every subscriber (long-lived owner teardown).                     |
+| `createNotifier<T = void>()` | Returns                                                        |
+| ---------------------------- | -------------------------------------------------------------- |
+| `subscribe(listener)`        | `Unsubscribe`. Subscribing the same function twice is a no-op. |
+| `notify(value?)`             | Fires every listener; errors isolated per listener.            |
+| `size`                       | Diagnostic listener count.                                     |
+| `clear()`                    | Drops every subscriber.                                        |
 
-### `createKeyedNotifier<K = string, T = void>(): KeyedNotifier<K, T>`
+| `createKeyedNotifier<K = string, T = void>()` | Returns                                                            |
+| --------------------------------------------- | ------------------------------------------------------------------ |
+| `subscribe(key, listener)`                    | `Unsubscribe`. Multiple listeners per key are fine.                |
+| `subscribeAll(listener)`                      | `Unsubscribe`. Fires after the keyed bucket.                       |
+| `notify(key, value?)`                         | Keyed bucket then wildcards; errors isolated.                      |
+| `notifyAll(value?)`                           | Wildcards only.                                                    |
+| `notifyAsync(key, value?)`                    | `Promise<void>` — awaits each listener serially; errors propagate. |
+| `count(key)` / `wildcardCount` / `size`       | Diagnostics.                                                       |
+| `clear()`                                     | Drops every subscriber.                                            |
 
-| Method                     | Description                                            |
-| -------------------------- | ------------------------------------------------------ |
-| `subscribe(key, listener)` | Subscribe to one key.                                  |
-| `subscribeAll(listener)`   | Subscribe to every published key.                      |
-| `notify(key, value?)`      | Fire keyed bucket + wildcards (sync; errors isolated). |
-| `notifyAll(value?)`        | Wildcards only — "everything changed".                 |
-| `notifyAsync(key, value?)` | Await each listener serially; errors propagate.        |
-| `count(key)`               | Listener count for one key (excludes wildcards).       |
-| `wildcardCount`            | Wildcard subscriber count.                             |
-| `size`                     | Total listeners (all keys + wildcards).                |
-| `clear()`                  | Drop every subscriber.                                 |
+### Push
 
-### `createChangeNotifier<V, K = string>(): ChangeNotifier<V, K>`
+| `createChangeNotifier<V, K = string>()` | Returns                                                    |
+| --------------------------------------- | ---------------------------------------------------------- |
+| `onChange(listener)`                    | `Unsubscribe`. Read-only, fire-and-forget, error-isolated. |
+| `emitChange(change)`                    | Fans a `ChangeEvent<V, K>` out synchronously.              |
+| `size` / `clear()`                      | Diagnostic count; drop every listener.                     |
 
-| Method               | Description                                                                       |
-| -------------------- | --------------------------------------------------------------------------------- |
-| `onChange(listener)` | Subscribe to every change (`ChangeEvent<V, K>`). Read-only, fire-and-forget.      |
-| `emitChange(change)` | Emit a delta. Producer supplies `key` + `value?` + `prev?`; sync, error-isolated. |
-| `size`               | Diagnostic listener count.                                                        |
-| `clear()`            | Drop every listener.                                                              |
+Also exported: `ChangeEvent<V, K>` (`{ key, value?, prev? }`) and `changeKind(change)` returning `"add" | "update" | "remove"`.
 
-Also exported: `ChangeEvent<V, K>` (the delta type) and `changeKind(change): "add" | "update" | "remove"` (pure CRUD derivation). Presence convention: a side is _absent_ when its property is `undefined` — producers omit the side that doesn't apply.
+### Streams
 
-### `createLocalPubSub<T>(): LocalPubSub<T>`
+| `createLocalPubSub<T>(options?)` | Returns                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| `publish(event)`                 | Synchronous from the caller's view. No-op after `close()`.                |
+| `subscribe(filter?)`             | `Stream<T, never, never>` — internally scoped.                            |
+| `close()`                        | `Promise<void>` — drains active subscribers, then shuts down. Idempotent. |
+| `subscriberCount`                | Diagnostic, best-effort.                                                  |
 
-| Method               | Description                                                        |
-| -------------------- | ------------------------------------------------------------------ |
-| `publish(event)`     | Publish an event. Sync from caller's POV (unbounded queue).        |
-| `subscribe(filter?)` | Returns `Stream<T, never, never>`. Filter is `(event) => boolean`. |
-| `close()`            | Drain in-flight to active subscribers, then shut down. Idempotent. |
-| `subscriberCount`    | Diagnostic (best-effort).                                          |
+`CreateLocalPubSubOptions<T>`: `replay` (default `0`), `closeDrainTimeoutMs` (default `5_000`), `onPublish`.
 
-`close()` polls subscribers until each has consumed every event that was published before close started. A configurable backstop (`closeDrainTimeoutMs`, default 5 seconds) avoids hangs from wedged consumers (defensive — shouldn't trip in practice).
+### Types
 
-### Options
+`Listener<T>`, `Unsubscribe`, `Notifier<T>`, `KeyedNotifier<K, T>`, `ChangeNotifier<V, K>`, `ChangeEvent<V, K>`, `LocalPubSub<T>`, `CreateLocalPubSubOptions<T>`. `Stream` and `Scope` are re-exported from `effect` so a consumer can type a subscriber without importing `effect` directly.
 
-| Option                | Default    | Purpose                                                                                                                                                                                                                   |
-| --------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `closeDrainTimeoutMs` | `5_000`    | Upper bound (ms) on close-time drain. Set to `0` to skip drain (behaves like raw `PubSub.shutdown`).                                                                                                                      |
-| `replay`              | `0` (none) | Replay buffer — number of past events automatically replayed to NEW subscribers (RxJS `ReplaySubject(N)` analogue). `replay: 1` ≈ RxJS `BehaviorSubject`. Implemented via Effect's native `PubSub.unbounded({ replay })`. |
+## `@agentick/pubsub/testing`
 
-**Caveat for filtered subscribers + replay:** the replay buffer is GLOBAL across all events. If subscribers filter by predicate, the buffer's N items may be drawn from any event — the filtered subscriber sees only the subset that matches their filter. For per-key snapshot semantics ("the latest event for THIS key"), compose `Stream.concat(snapshot, subscribe())` at the caller or reach for `SubscriptionRef` (the per-state primitive).
-
-## Testing subpath — `@agentick/pubsub/testing`
-
-Spy doubles per the Meszaros test-double convention. Each spy wraps
-the real primitive — listeners still fire — and records every notify
-/ publish call for assertion.
+Each primitive has a spy that **wraps the real implementation** — listeners still fire, streams still deliver — and records every call for assertion. That's the only double the subpath ships: the real implementations are deterministic, in-memory, and fast, so there is nothing to fake and no canned answer to stub.
 
 ```ts
-import { spyNotifier, spyKeyedNotifier, spyLocalPubSub } from "@agentick/pubsub/testing";
+import { spyKeyedNotifier, spyLocalPubSub, spyNotifier } from "@agentick/pubsub/testing";
 
 const spy = spyNotifier<{ tick: number }>();
-harness.attachNotifier(spy);
-harness.someMethodThatNotifies();
-expect(spy.calls).toEqual([{ tick: 1 }]);
-expect(spy.callCount).toBe(1);
-spy.reset(); // clear recorded calls; subscribers stay
+spy.notify({ tick: 1 });
+spy.calls; // [{ tick: 1 }]
+spy.callCount; // 1
+spy.reset(); // clears history; subscribers stay
 
-const keyedSpy = spyKeyedNotifier<string, MyEvent>();
-keyedSpy.notify("knob:verbose", { value: true });
-keyedSpy.notifyAll();
-expect(keyedSpy.calls).toEqual([
-  { kind: "notify", key: "knob:verbose", value: { value: true } },
-  { kind: "notifyAll", value: undefined },
-]);
-expect(keyedSpy.callsFor("knob:verbose")).toHaveLength(1);
+const keyed = spyKeyedNotifier<string, { value: boolean }>();
+keyed.notify("verbose", { value: true });
+keyed.calls; // [{ kind: "notify", key: "verbose", value: { value: true } }]
+keyed.callsFor("verbose"); // the same call, filtered by key
 
-const busSpy = spyLocalPubSub<TaskEvent>();
-busSpy.publish({ taskId: "t1", kind: "progress" });
-expect(busSpy.publishCalls).toEqual([{ taskId: "t1", kind: "progress" }]);
+const bus = spyLocalPubSub<{ taskId: string }>();
+bus.publish({ taskId: "t1" });
+bus.publishCalls; // [{ taskId: "t1" }]
 ```
 
-Why only spies (no `fake*` / `stub*`)? The real implementations are
-deterministic, in-memory, and fast — there's nothing to fake
-(`fakeNotifier()` would be `createNotifier()`), nothing to stub (no
-canned data), and no canned-answer use case. Spies cover the only
-real testing need: asserting call patterns from collaborators.
+| Export                                                | Purpose                                                        |
+| ----------------------------------------------------- | -------------------------------------------------------------- |
+| `spyNotifier<T>()` / `NotifierSpy<T>`                 | Adds `calls`, `callCount`, `reset()`.                          |
+| `spyKeyedNotifier<K, T>()` / `KeyedNotifierSpy<K, T>` | Adds `calls`, `callCount`, `callsFor(key)`, `reset()`.         |
+| `KeyedNotifierCall<K, T>`                             | Discriminated record: `notify`, `notifyAll`, or `notifyAsync`. |
+| `spyLocalPubSub<T>(options?)` / `LocalPubSubSpy<T>`   | Adds `publishCalls`, `publishCallCount`, `reset()`.            |
 
-| Export                   | Kind   | Purpose                                                                             |
-| ------------------------ | ------ | ----------------------------------------------------------------------------------- |
-| `spyNotifier<T>`         | helper | Working notifier that records every `notify` call in `.calls` + `.callCount`.       |
-| `NotifierSpy<T>`         | type   | `Notifier<T>` extended with `calls` / `callCount` / `reset()`.                      |
-| `spyKeyedNotifier<K,T>`  | helper | Working keyed notifier; records `notify` / `notifyAll` / `notifyAsync` distinctly.  |
-| `KeyedNotifierSpy<K,T>`  | type   | `KeyedNotifier<K, T>` extended with `calls` / `callCount` / `callsFor` / `reset()`. |
-| `KeyedNotifierCall<K,T>` | type   | Discriminated record of a single keyed notify call.                                 |
-| `spyLocalPubSub<T>`      | helper | Working local pubsub that records every `publish` call.                             |
-| `LocalPubSubSpy<T>`      | type   | `LocalPubSub<T>` extended with `publishCalls` / `publishCallCount` / `reset()`.     |
+## Patterns
 
-## Status
+**Subscription surfaces.** [@agentick/resources](../resources), [@agentick/timeline](../timeline), [@agentick/sandbox](../sandbox), and [@agentick/subscriptions](../subscriptions) expose `subscribe()` backed by these notifiers, which is what makes them bindable with `useSyncExternalStore`.
 
-- Layer 1 / Layer 2 / Layer 3 — landed
-- `createChangeNotifier` (the notify seam, ADR 75) — landed; consumers (StateDelta refit, timeline `event` projection) pending
-- Spy doubles for the pull/stream primitives — landed under `/testing`
-- 16 sweep sites migrated across knobs, state, skills, timeline, sandbox, subscriptions, session-state, client, transport-next, mcp, compiler (in-memory data bridge, lifecycle store, three test bridges)
+**Delta projection.** [@agentick/store](../store) drives its views off `createChangeNotifier`, because a projection wants the delta rather than a re-read.
+
+**Streamed events.** [@agentick/tasks](../tasks) and [@agentick/client-core](../client-core) fan status events out over `createLocalPubSub`, where per-subscriber queues matter.
+
+**Keyed dispatch.** [@agentick/compiler](../compiler) and [@agentick/gates](../gates) key their fan-out by identifier with a wildcard for "anything changed".
 
 ## Roadmap & known gaps
 
-- The `LocalPubSub.close()` drain uses a poll-and-yield loop. An Effect-native primitive (e.g. `Queue.awaitDrain`) doesn't exist in Effect's public surface today; if it lands, swap.
-- No back-pressure controls on `publish` — the underlying queue is unbounded. Adopters with bursty publishers and slow consumers should consider `createKeyedNotifier` for their backpressure needs (sync notify with `void` listeners) or wait for a future `createBoundedLocalPubSub` variant.
-- No replay-on-subscribe semantics — late subscribers don't see events published before they subscribed. If that's needed, an adopter wraps a `Ref<LastValue>` around the pubsub.
+- **The close-time drain is a poll loop.** It samples every millisecond until subscribers catch up. Effect's public surface has no drain-await primitive today; if one lands, this should swap to it.
+- **`publish` has no backpressure.** The queue is unbounded by construction, so a bursty publisher against a slow consumer grows memory rather than pushing back. A bounded variant isn't built.
+- **`notifyAsync` has no concurrency control.** It is strictly serial. Parallel-with-limit dispatch would need a new method rather than an option, and no consumer has asked for it.
+- **Spies only.** There is no fake or stub tier, by design — but it does mean a test that wants a notifier to _fail_ on subscribe has to hand-roll it.
 
 ## Verified by
 
-- `createNotifier` — subscribe/notify/unsubscribe semantics, listener-error isolation, mid-iteration unsubscribe, typed-payload variant — `src/__tests__/notifier.spec.ts`
-- `createKeyedNotifier` — keyed dispatch, wildcards, `notifyAll`, `notifyAsync` error propagation, auto-collection of empty buckets, diagnostic `count`/`wildcardCount`/`size` — `src/__tests__/keyed-notifier.spec.ts`
-- `createChangeNotifier` — full-delta fan-out, statelessness (no producer-injected `prev`), unsubscribe isolation, fire-and-forget error isolation, mid-fan-out subscribe snapshotting, `size`/`clear`; `changeKind` add/update/remove derivation — `src/__tests__/change-notifier.spec.ts`
-- `createLocalPubSub` — multi-subscriber fan-out, subscribe-time filter, `close()` drain semantics (slow subscriber receives every event), idempotent close — `src/__tests__/local-pubsub.spec.ts`
-- `spyNotifier` / `spyKeyedNotifier` / `spyLocalPubSub` — call recording, listener delivery preserved, `reset()` semantics, typed-payload + void variants — `src/__tests__/testing-spies.spec.ts`
+- `src/__tests__/notifier.spec.ts` — parameterless and typed-payload delivery, unsubscribe touching only the matching listener, listener-error isolation, mid-iteration unsubscribe, `size`, `clear()`.
+- `src/__tests__/keyed-notifier.spec.ts` — keyed-then-wildcard ordering, unknown-key firing wildcards only, typed payloads reaching both tiers, `notifyAll` leaving keyed subscribers untouched, `notifyAsync` serial ordering and error propagation against the synchronous path's isolation, empty-bucket collection, and the diagnostics.
+- `src/__tests__/change-notifier.spec.ts` — full-delta fan-out, statelessness (no `prev` computed by the notifier), per-listener unsubscribe, fire-and-forget error isolation, listener snapshotting so mid-fan-out subscription can't corrupt the current emit, and `changeKind` across add, update, remove, and a full patch sequence for one key.
+- `src/__tests__/local-pubsub.spec.ts` — independent multi-subscriber fan-out, subscribe-time filtering, `subscriberCount`, the `close()` drain against a deliberately slow subscriber, post-close publishes as no-ops, `replay: N`, `closeDrainTimeoutMs` at `0` and at a custom cap, and `onPublish` firing after subscribers with throws isolated and no fire after close.
+- `src/__tests__/testing-spies.spec.ts` — every spy records calls while still delivering to subscribers, `callsFor` filtering, pass-through diagnostics, and `reset()` clearing history without dropping subscribers.

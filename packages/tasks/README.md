@@ -1,1185 +1,331 @@
 # @agentick/tasks
 
-**TasksHarness** — substrate-level long-running tool primitive.
+**A task is a persisted state machine, not a promise you're holding.** Long-running work — a slow shell command, a deploy step, a multi-minute completion — is submitted as a record in a store, and _how_ it runs is a swappable strategy behind that record. The consequence: a task survives the session that started it, its lifecycle is journaled, and a client that connects halfway through still sees it.
 
-Every managed execution that takes longer than "one tick" — a slow shell
-command, a deploy step, an MCP server's `task: {ttl}` invocation, a
-multi-minute model completion — funnels through this one protocol so
-the lifecycle FSM, progress envelope, correlation engine, and
-cancellation semantics live in exactly one place.
+Everything else follows from that inversion. Cancellation is address-routed rather than object-routed, so it works across a cluster. Resume is honest rather than optimistic — a `working` record whose executor is gone becomes `interrupted`, never silently `completed`. And because the record is the truth, the states MCP names (`working`, `input_required`, `completed`, `failed`, `cancelled`) are the states here, so the wire codec is a pass-through.
 
-Same FSM as MCP's task model (`working / input_required / completed /
-failed / cancelled`) plus `interrupted` (ADR 68 orphan accounting);
-cluster-friendly via inbox-routed cancel / get / result and bus-channel
-status + progress notifications. Per ADR-23 §OQ23.15 ("substrate-aware
-Tasks bridge"), local invocations and MCP-wire invocations of a
-`taskSupport: required` tool both return the same `TaskHandle` shape —
-the MCP wire codec layers on top via a separate phase.
+## Install
 
-## Record-as-source-of-truth (ADR 68)
-
-A task is **not** primarily an in-process fiber with the record as a
-view. It is inverted: a task is a persisted **`TaskRecord`** state
-machine living in a **`TaskStore`**; **how it runs** is a swappable
-**`TaskExecutor`** strategy behind the record. The harness orchestrates
-— `submit` writes a `working` record and starts an executor; the
-executor **reports transitions** back through one uniform `report`
-callback; the harness turns each transition into a `store.put` PLUS the
-existing `task-status` / `task-progress` bus emit.
-
-**The bus stays the LIVE plane; the store is the DURABLE plane** — the
-wire payloads are byte-identical to the pre-ADR-68 harness, and the
-bundled in-process executor is behavior-identical for the caller. The
-seam is what unlocks the later tiers without a rewrite:
-
-| Piece          | Bundled default (here)           | Conforms to the same port later                   |
-| -------------- | -------------------------------- | ------------------------------------------------- |
-| `TaskStore`    | `InMemoryTaskStore` (node-local) | `@agentick/tasks-store-postgres` (across-restart) |
-| `TaskExecutor` | `InProcessTaskExecutor` (fiber)  | child-process (isolation) / sandbox / worker      |
-
-- The store/executor **port types** live in `@agentick/spec`
-  (`TaskRecord`, `TaskStore`, `TaskExecutor`, `TaskTransition`,
-  `TaskStoreQuery`); the bundled impls + `runTaskStoreConformance` live
-  here (mirroring `TimelineStore`).
-- `get` / `list` / `status` read a synchronous **projection** the
-  harness keeps in lockstep with its store writes (CQRS materialized
-  view — the protocol reads are sync, the store port is async).
-- **The store is app/gateway-scoped**: the AppHarness constructs one and
-  injects it into every session's harness, so a `detached` task survives
-  its spawning session's `close()`. See [Lifetime](#lifetime-semantics-adr-68).
-
-Private workspace package. Bundled into the `agentick` metapackage;
-not published independently.
-
-## Client — `tasksHandle` (`@agentick/tasks/client`)
-
-`session.tasks` is a `ClientHandle` — `list()`/`get(taskId)`/`subscribe(cb)` +
-`cancel(taskId, reason?)`. It reads over the generic `@agentick/client-core`
-`channelView` (NOT the tasks harness), so it stays out of the server bundle.
-
-**Render a live task list — 4 lines.** `list()` reflects the opening snapshot,
-so a client connecting mid-run sees the running tasks, not just ones that start
-after it joins:
-
-```ts
-import "@agentick/tasks/client"; // side-effect: types + registers the slot
-
-const tasks = client.session(id).tasks;
-tasks.subscribe(() => render(tasks.list())); // ← re-render on any transition
-const done = tasks.list().filter((t) => t.status === "completed");
+```bash
+npm install @agentick/tasks
 ```
 
-**Cancel by id.** Fire-and-observe: `cancel` issues `tasks/cancel` and resolves
-on gateway accept (no local hand-patch); the `cancelled` transition returns as a
-`task-status` delta that re-folds the view:
-
-```ts
-await tasks.cancel("task-7", "superseded");
-```
-
-- **The contract.** `list(): readonly TaskInfo[]` and
-  `get(taskId): TaskInfo | undefined` (Enumerable); `subscribe(cb: () => void)`
-  fires on change, `cb` takes NO arguments (read via `list()`); `close()`;
-  `cancel(taskId, reason?)`. Passes `runClientHandleConformance` (core +
-  Enumerable + the `cancel` write verb).
-- **`tasksHandle(client, sessionId)`** → `TasksHandle` is the free factory the
-  slot registers; call it directly for the headless/composition case.
-- **`taskStatusView(client, sessionId)`** → `ChannelView<TaskStatusMap>` remains
-  as the lower-level `Record<taskId, TaskInfo>` fold for consumers that want the
-  raw map.
-
-`client.session(id).tasks` is the CLIENT handle (a status fold + `cancel`); the
-server-side `session.tasks` (`TasksHarness`, the authority, with `.submit(...)`
-and the rich task API) is the truth. Same noun, two vantages — CQRS by design:
-the client's `cancel` is fire-and-observe (issues `tasks/cancel` and resolves on
-gateway accept; **no local hand-patch**), and the cancellation returns as a
-`cancelled` `task-status` delta that re-folds the view — state flows one way,
-through the channel (see the DX note in ADR 87).
-
-Each frame is one task's current `TaskInfo` (published on every FSM transition);
-the view folds them by `taskId`, latest wins. The subscription OPENS with a
-`kind: "snapshot"` frame — the full current task set (the harness's
-`ChannelSnapshotProvider`) — so a late/reconnecting subscriber renders the
-existing list, not just tasks that transition after it joined (the K8s
-watch-list model, [ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md)).
-This is the `useTasks` family source in [ADR 85](../../docs/proposals/v2/blueprint/85-ui-packages.md).
-
-## Status
-
-🚧 In active development as part of v2 (`feat/v2`).
-
-| Phase  | What                                                                                                                                                                                                                                                                                                                                                                                                                       | Status |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| A      | Substrate primitive — harness, registry, progress, cancel, conformance                                                                                                                                                                                                                                                                                                                                                     | ✅     |
-| A.1    | ToolExecutor integration — `ctx.tasks` on every handler, TaskHandle-return detection, Pattern A vs B branching on `taskSupport` annotation (#156)                                                                                                                                                                                                                                                                          | ✅     |
-| A.2    | Model-facing `task_*` tools — auto-registered `task_list / get / cancel / await` so the model can manage Pattern B tasks (#157)                                                                                                                                                                                                                                                                                            | ✅     |
-| B      | MCP wire codec — `tools/call` task opt-in, `notifications/tasks/status` translation, inbound `tasks/cancel`                                                                                                                                                                                                                                                                                                                | ✅     |
-| 68-A   | Record-as-source-of-truth — `TaskStore` port + `InMemoryTaskStore`, `TaskExecutor` seam + `InProcessTaskExecutor`, `detached` lifetime, `interrupted` on hydration                                                                                                                                                                                                                                                         | ✅     |
-| 68-B   | Child-process executor over IPC (isolation / detached) + executor registry keyed by `.kind`, per-submit selection — conforms to the `TaskExecutor` seam                                                                                                                                                                                                                                                                    | ✅     |
-| 68-pg  | `@agentick/tasks-store-postgres` durable store — durable records + `interrupted`-on-restart + terminal adoption across app-process restart (cross-restart child reattach-by-pid still deferred)                                                                                                                                                                                                                            | ✅     |
-| 68-ir  | `ctx.awaitingInput` — `working → input_required → working` status wrapper (the origin seam for elicitation escalation); worker self-terminates on parent IPC `disconnect` (#120-followup)                                                                                                                                                                                                                                  | ✅     |
-| 69-T1  | Request escalation — task `ctx.elicit` escalates to the connected client via nested `inbox.ask`; `interactive ⊥ detached` guard. Root-session case                                                                                                                                                                                                                                                                         | ✅     |
-| WAKE   | Task-completion wake — an unobserved terminal transition synthesizes exactly one follow-up `session.send` (bounded metadata, no raw output) via `inbox.send` to `session:{sessionId}`; consume-on-observe dedup (get/status/result/cancel); per-task `wake` + session `defaultWake`                                                                                                                                        | ✅     |
-| 69-T2a | Multi-agent bubbling — recursive spawn-lineage hop (`session → parentSessionId`), ancestor **interception** (`session.interceptEscalation` — answer / deny / forward), `lineage` provenance (origin task+session → each hop), and the `awaitingInput(Effect)` overload (real fiber interruptibility)                                                                                                                       | ✅     |
-| 69-T2b | Cross-process child elicit bridge — a **forked** task's `ctx.elicit` marshals a serializable intent `{method, args}` over IPC; the parent (`ChildProcessTaskExecutor`) reconstructs the live-schema request via the injected sugar and feeds the SAME `escalate` chain, so interception + lineage apply for free. The live `StandardSchemaV1` never crosses (sugar methods cross; raw `form(liveSchema)` fails loud)       | ✅     |
-| D      | Effect-native internals — `Effect<T,E,never>` work overload + real `Fiber.interrupt` on cancel (#155); events fan out over Effect `Stream` (`LocalPubSub` + `Stream.takeUntil`). **Landed.** The protocol _surface_ stays Promise/`AsyncIterable` by design (Promise-at-the-edge, Effect-internal — as everywhere in v2); exposing `Effect`/`Stream` at the boundary is a whole-framework decision, not a tasks-local gap. | ✅     |
+Subpaths: `/client` (browser-side handle + view), `/testing` (doubles + three conformance suites).
 
 ## Quick start
 
-### Install on a session
+Install the extension, then submit from any tool handler. `ctx.tasks` is dispatch-resolved, so the handler reaches the session's harness instance without capturing anything at render:
 
 ```ts
-import { createApp } from "@agentick/app";
 import { withTasks } from "@agentick/tasks";
+import type { SessionExtension, ToolHandler } from "@agentick/spec";
 
-const app = await createApp(<Agent />, {
-  modelExecutor,
-  extensions: [withTasks()],
-});
+// Session extension — also registers the four model-facing task_* tools.
+const extensions: SessionExtension[] = [withTasks()];
 
-const session = await app.createSession();
+export const deployHandler: ToolHandler = async (input, { ctx }) => {
+  const { target } = input as { target: string };
+
+  const handle = ctx.tasks!.submit(async (task) => {
+    task.setStatusMessage(`deploying ${target}`);
+    for (let step = 0; step < 3; step++) {
+      task.signal.throwIfAborted();
+      task.onProgress({ current: step, total: 3 });
+      await runStep(step, target);
+    }
+    return [{ type: "text" as const, text: `deployed ${target}` }];
+  });
+
+  return handle; // the model gets a task ref, not a blocked tick
+};
 ```
 
-`withTasks()` does NOT construct the per-session `TasksHarness` —
-the AppHarness owns construction via the single-construction-site
-pattern (#159). The harness is reachable as `session.tasks`,
-`bridges.tasks`, and `ctx.tasks` from any tool handler on that
-session. What `withTasks()` does is auto-register the four
-model-facing `task_*` tools so the model can list / get /
-cancel / await framework tasks.
+Returning the handle is the interesting half: the tool executor turns it into a `session_task_ref` content block, the tick ends, and the model manages the task across later ticks with the tools below. Returning `await handle.result` instead blocks the tick and the model never learns a task existed. Both are legitimate.
 
-> The `agentick` metapackage bundles `withTasks()` automatically.
-> The standalone `withTasks()` import is for adopters wiring `app-next`
-> directly without the metapackage.
+Declaring the tool around that handler is [@agentick/compiler-react](../compiler-react)'s `createTool`; nothing below depends on which declaration surface you use.
 
-### About the trichotomy (ADR 42)
+## Two shapes, one submit
 
-`withTasks` does NOT accept the array/instance/config-object slot trichotomy that `withSkills` / `withPrompts` / `withMCP` accept. The per-session `TasksHarness` is owned by the parent `AppHarness` (single-construction-site #159), not by this extension — constructing one here would collide on the inbox address (`tasks:${sessionId}:tasks`) and cause `bridges.tasks` / `ctx.tasks` / `session.tasks` to resolve to different instances. The only slot `withTasks` carries today is `registerModelTools` (boolean opt-out). The adopter-facing `Tasks` (= `TasksHarnessProtocol`) noun alias is still exported from `@agentick/spec` for downstream code that takes a `Tasks` reference directly (cross-harness wiring, custom bridges).
+| Return                | What the model sees                                               |
+| --------------------- | ----------------------------------------------------------------- |
+| `await handle.result` | Ordinary tool output. It never knows this was a task.             |
+| `handle`              | A `session_task_ref` block, plus the `task_*` tools to act on it. |
 
-### Submit a task from a tool handler
+The choice is per call and the harness behaves identically either way — same record, same journaling, same channels. Which one a tool gets can also be driven by its `taskSupport` annotation; see [@agentick/tool](../tool).
 
-```ts
-import { createTool } from "@agentick/tool";
-import { z } from "zod";
+## The model-facing tools
 
-const Deploy = createTool({
-  name: "deploy",
-  description: "Deploy the current branch.",
-  inputSchema: z.object({ target: z.string() }),
-  annotations: { taskSupport: "required" }, // Pattern B — see below
-  handler: async ({ target }, { ctx }) => {
-    return ctx.tasks!.submit(
-      // The work body's ctx is `TaskWorkContext = OperationCtx & TaskWorkVerbs`
-      // (ADR 91 §2): the harness derives the submitting op's trunk + facets via
-      // `deriveContext` and composes the task verbs in as branded extras. So a
-      // task reads `taskCtx.sessionId` and can `taskCtx.log(...)` / open spans /
-      // run ops — ALONGSIDE the verbs (`signal` / `onProgress` / ...).
-      async (taskCtx) => {
-        const { signal, onProgress, setStatusMessage } = taskCtx;
-        taskCtx.log.info({ msg: `deploy starting`, session: taskCtx.sessionId });
-        setStatusMessage(`provisioning ${target}`);
-        for (let step = 0; step < 10; step++) {
-          if (signal.aborted) throw new DOMException("aborted", "AbortError");
-          onProgress({ current: step, total: 10, message: `step ${step}` });
-          await doWorkChunk();
-        }
-        return [{ type: "text", text: `deployed to ${target}` }];
-      },
-      { statusMessage: "queued", ttl: 5 * 60_000 },
-    );
-  },
-});
-```
+`withTasks()` registers four, scoped explicitly in their descriptions to framework-spawned background tasks so they never read as a todo-list API:
 
-> **ADR 91 §2 note (out-of-process caveat).** A `child-process` / worker
-> executor runs the work body in a forked process that cannot reach the
-> parent's live facets across the IPC boundary. Its `taskCtx` still carries the
-> trunk (`sessionId` from `record.scope`), but `log` is dropped, `trace` /
-> `metrics` collapse to off-path no-ops, and `run` / `runner` throw (there is no
-> operation ladder in a bare child). See the `TODO(phase-3)` in
-> `packages/tasks/src/worker.ts` — bridging worker `ctx.log` over IPC is a
-> follow-up.
+| Tool          | Purpose                                                                  |
+| ------------- | ------------------------------------------------------------------------ |
+| `task_list`   | Discover in-flight and recently terminal tasks, local plus remote.       |
+| `task_get`    | Poll one task's `TaskInfo`.                                              |
+| `task_cancel` | Abort an in-flight task. Idempotent.                                     |
+| `task_await`  | Block this tick until terminal — the escape hatch back to inline output. |
 
-The handler returns the `TaskHandle` directly. What happens next
-depends on the `taskSupport` annotation on the tool:
+Without them a task ref is inert: the model receives an id it cannot act on. Pass `withTasks({ registerModelTools: false })` for a headless server driving tasks entirely from adopter code.
 
-### Pattern A — model-transparent (default)
+`task_list` also enumerates tasks living on connected MCP servers. It looks up the `mcp` namespace at call time — so install order between `withTasks()` and `withMCP()` doesn't matter — and returns `{ tasks, remote }` where each `remote` entry carries either that server's tasks or an `error` string. One unreachable server degrades its own row instead of blanking the listing.
 
-`taskSupport: "unsupported"` (or omitted) → the **executor awaits
-`handle.result` transparently**. The model sees the eventual content
-blocks; it never sees a task id. Use this for any tool whose only
-reason to use `submit` is to get progress envelopes / signal-aware
-cancellation — the long-running shape is an implementation detail.
+## Waking the model when a task finishes
 
-### Pattern B — model-visible task ref
-
-`taskSupport: "required"` → on the **model-tick path** the executor
-**returns immediately** with a typed task-ref content block
-(`{ _kind: "session_task_ref", taskId, status, statusMessage?, ttl? }`)
-instead of awaiting. The model now owns the task and manages it via
-the four auto-registered model-facing tools (see
-[Model-facing tools](#model-facing-tools) below).
-
-This is the MCP `taskSupport: "required"` semantic — bring the model
-into the conversation about long-running work instead of blocking a
-tick on it.
-
-**Host-side `session.dispatch` defaults to Pattern A** even for
-`taskSupport: "required"` tools (#164) — the host caller usually just
-wants the final blocks. Pass `{ task: "ref" }` to opt in to Pattern B:
+A backgrounded task that completes while nothing is watching is a dead end: the model moved on and will never poll. A `wake` policy closes it by synthesizing **exactly one** follow-up send into the owning session — a real, journaled execution.
 
 ```ts
-// host-side — awaits transparently, returns final blocks
-const blocks = await session.dispatch("deploy_branch", input);
+// Default wake: bounded metadata (task id, status, duration). Never raw output.
+ctx.tasks!.submit(work, { wake: true });
 
-// host-side — opt in to Pattern B, returns the task-ref block
-const refBlocks = await session.dispatch("deploy_branch", input, {
-  task: "ref",
-});
-```
-
-The `_kind: "session_task_ref"` discriminator matches the `session_*`
-namespace used by the model tools — `task_get`,
-`task_cancel`, etc. consume the `taskId` from this ref.
-
-### Task-completion wake (the TASK-WAKE seam)
-
-Pattern B lets the model move on. But if a backgrounded task finishes
-while **nothing is observing it** — the model already responded and the
-session went idle — the completion would sit silently in the store until
-the next turn. The **wake** seam closes that gap: an unobserved terminal
-transition synthesizes **exactly one** follow-up `session.send` into the
-owning session (a real, journaled execution), nudging the model to react.
-
-Opt in per-task with `wake` on `submit`, or app-wide with
-`tasks.defaultWake`:
-
-```ts
-// per task — the default bounded-metadata wake
-ctx.tasks.submit(work, { wake: true });
-
-// shape or suppress it (a typed callback at the decision point)
-ctx.tasks.submit(work, {
+// Or shape it — and return null to suppress.
+ctx.tasks!.submit(work, {
   wake: (outcome) =>
     outcome.status === "failed"
-      ? { messages: [{ role: "user", content: `heads-up: ${outcome.taskId} failed` }] }
-      : null, // return null to suppress
+      ? {
+          messages: [
+            { role: "user" as const, content: `Deploy failed: ${outcome.failure?.reason}` },
+          ],
+        }
+      : null, // successes stay quiet
 });
 ```
 
-- **Bounded metadata, never raw output.** The wake carries the task id,
-  terminal status, and duration — NOT the result blocks. The model
-  fetches the actual output via `task_get` / `task_await`
-  if it needs it. `wake: true` synthesizes a default user-role message;
-  provenance (`metadata.source === "task-wake"` + `taskId`) is stamped so
-  timelines/clients attribute it as a system wake, not a real user turn.
-- **Consume-on-observe (exactly-once).** The wake is **consumed** — never
-  fires — if the completion is seen in-band first: the model called
-  `task_await` (a `result(taskId)` read) or `task_get` /
-  `status(taskId)` and saw the terminal state, or the task was cancelled.
-  Exactly-once holds between the in-band and out-of-band paths. The wake
-  is deferred one event-loop turn so a same-turn in-band read wins the
-  race; a read that runs after the wake has fired does not un-fire it.
-- **Steering-safe.** The wake rides the normal `session.send` path, so a
-  completion while an execution is running STEERS into that execution
-  (no colliding second execution); an idle session runs a fresh one.
-- **Close / eviction.** A closing harness cancels pending wakes (no zombie
-  sends). A wake to an evicted/closed session has no inbox address and is
-  dropped — the completion stays observable via the durable store. The
-  wake policy is **runtime-local**: it is not persisted and does not
-  survive hydration (rehydrate-then-wake was rejected as LRU-thrashing;
-  the durable store already makes the outcome observable).
+> [!IMPORTANT]
+> The wake is **consumed on observe**. If the model called `task_await`, or called `task_get` and saw a terminal state, or the task was cancelled, the wake never fires. Exactly one of {observed in-band, woken out-of-band} happens — there is no path to both.
 
-Verified by `src/__tests__/task-wake.spec.ts` (fire / bounded metadata /
-observed-first via result+get+status / cancel-consumes / race both
-orderings / callable shape+suppress / default policy + override / close /
-eviction-drop) and `@agentick/session`'s
-`src/__tests__/task-wake.spec.ts` (real journaled wake execution +
-provenance, observed → no wake, steering during a running execution).
+The default is off, because waking interrupts. Flip it for a whole session with `defaultWake`, and a per-task `wake: false` still overrides. A wake carries identity and outcome only; the model fetches actual output through `task_get` or `task_await` if it wants it, which is what stops a background task from injecting arbitrary content into the window.
 
-## Model-facing tools
+Wake policy is process-local runtime state. It isn't persisted on the record and doesn't survive rehydration — a detached task that outlives its process won't wake, though its completion is still readable from the store.
 
-When `withTasks()` is installed, four tools are auto-registered into
-every session so the model can manage Pattern B (`taskSupport:
-"required"`) tasks across ticks:
+## Pausing for input
 
-| Tool          | Purpose                                                          |
-| ------------- | ---------------------------------------------------------------- |
-| `task_list`   | List local + remote (MCP) framework background tasks (#175)      |
-| `task_get`    | Fetch a single task's `TaskInfo` snapshot by id                  |
-| `task_cancel` | Abort an in-flight task (idempotent)                             |
-| `task_await`  | Block this tick until a task reaches terminal; return its blocks |
-
-### Remote-task visibility (`task_list` → `remote` slot)
-
-Per #175 the list handler reads `bridges.mcp` at call time and merges
-each connected server's `tasks/list` snapshot into the response. The
-model sees:
-
-```json
-{
-  "tasks": [
-    /* local TaskInfo[] */
-  ],
-  "remote": [
-    {
-      "serverId": "demo",
-      "tasks": [{ "taskId": "...", "status": "working", "statusMessage": "scanning" }]
-    },
-    { "serverId": "broken", "error": "connection refused" },
-    { "serverId": "ancient", "error": "tasks-unsupported" }
-  ]
-}
-```
-
-- `remote` is omitted entirely when no MCP servers are connected
-  (backward-compatible with the pre-#175 response shape).
-- A single down / tasks-unsupported server contributes an `error`
-  entry; the rest of the listing returns normally.
-- The lookup is structural — anything matching `{ clients: [{
-serverId, harness: { listTasks(): Promise<{tasks}> }}] }` on the
-  `mcp` slot is queried. The framework doesn't depend on
-  `@agentick/mcp`; adopters wiring custom MCP-style integrations
-  can publish the same shape and get remote-task enumeration free.
-
-### Naming: why `session_*`, why underscores
-
-- **`session_`** — these tools are scoped to the current conversational
-  session and managed by the framework, not by the user's domain. The
-  prefix prevents collision with the broad set of user-provided "tasks"
-  tools (todos, project trackers, kanban). It also doesn't leak brand
-  (`agentick.*`) or jargon (`runtime.*`) — the model doesn't need to
-  know it's in a framework, only that these tools manage _its_ in-flight
-  work.
-- **Underscores, not dots** — some providers historically rejected dots
-  in tool names (OpenAI). Underscores work universally across OpenAI,
-  Anthropic, Google, and MCP.
-
-The same namespace is reserved for future model-visible framework
-primitives: `session_knobs_*`, `session_timeline_*`,
-`session_state_*`, etc.
-
-### Opting out
+Wrap any external wait in `awaitingInput` and the task flips `working → input_required → working` for its duration, so observers — a UI, an MCP client, the model — can tell "blocked, provide something" from "actively working":
 
 ```ts
-withTasks({ registerModelTools: false });
+ctx.tasks!.submit(async (task) => {
+  const approval = await task.awaitingInput(waitForWebhook(), { message: "awaiting approval" });
+  return [{ type: "text" as const, text: `approved by ${approval.who}` }];
+});
 ```
 
-Skips the model surface. Use this for headless adopters that drive
-tasks from server code with no LLM in the loop — the substrate
-(`ctx.tasks`, `bridges.tasks`) is still wired, but the model doesn't
-see the four tools.
+`working` is restored in a `finally`, so a throw or a cancel can't strand the task. Hand it an `Effect` instead of a promise and the pause becomes a real interruptible child fiber bound to the task's signal — `Effect.sleep`, finalizers, and `onInterrupt` actually unwind on cancel, which a promise that merely receives a flag cannot do.
 
-### Observe events directly (advanced)
-
-The `TaskHandle` exposes an event stream via `.events()` and a snapshot
-accessor:
+`task.elicit` is the same mechanism aimed at a person. It escalates up the ownership chain to the owning session and its client, then resolves with the answer:
 
 ```ts
-const handle = session.tasks.submit(async ({ onProgress }) => {
-  for (let i = 0; i < 10; i++) {
-    onProgress({ current: i, total: 10 });
-    await doWorkChunk();
-  }
-  return [{ type: "text", text: "done" }];
+ctx.tasks!.submit(async (task) => {
+  const ok = await task.elicit.confirm("Deploy to production?");
+  if (!ok) return [{ type: "text" as const, text: "cancelled by operator" }];
+  return runDeploy();
+});
+```
+
+> [!WARNING]
+> `elicit` and `awaitingInput` throw on a `detached: true` task. Detached work has no guaranteed live ancestor to reach a client, so it fails loudly rather than hanging against a dead address. Interactive and detached are mutually exclusive by construction.
+
+Reaching a client requires an injected elicit factory (`buildElicit`). A bare harness has no client, and `task.elicit` throws a "not configured" error there rather than pretending.
+
+## Lifetime and durability
+
+The store is app-scoped: one instance injected into every session's harness. That's what makes `detached` mean anything.
+
+```ts
+ctx.tasks!.submit(work, {
+  detached: true, // not aborted when the spawning session closes
+  ttl: 300_000, // failed with kind: "timeout" if still running after five minutes
+});
+```
+
+Closing a session cancels its non-detached tasks with reason `harness_closed` and leaves detached ones running and persisted. On construction the harness reads its scope-filtered records back; a terminal record surfaces read-only, and a still-`working` record is offered to its executor's `reattach`. If nothing can reattach, it's marked `interrupted` — an outcome distinguishable from both success and failure.
+
+With the bundled `InMemoryTaskStore` that survives session close but not process exit. Swap in [@agentick/tasks-store-postgres](../tasks-store-postgres) and it survives restart, at which point `interrupted` starts doing real work.
+
+The store is a small port — `put`, `get`, `list(query)`, `delete`, an optional `prune`, plus the generic `query`/`mutate` seam. Certify your own:
+
+```ts
+import { runTaskStoreConformance } from "@agentick/tasks/testing";
+import { myTaskStore } from "../src/index.js";
+
+runTaskStoreConformance({ label: "my-store", factory: () => myTaskStore() });
+```
+
+`prune(before)` only ever removes terminal records. An in-flight task is never pruned no matter how old.
+
+## Choosing where work runs
+
+Executors are registered by their self-reported `kind` and selected per submit. `"in-process"` is always present; anything you supply merges over it.
+
+```ts
+import { ChildProcessTaskExecutor } from "@agentick/tasks";
+
+const childExecutor = new ChildProcessTaskExecutor({
+  workerModule: "/abs/path/to/worker.js",
+  forkOptions: { execArgv: ["--import", "tsx"] }, // your build, your loader
+  killGracePeriodMs: 5_000,
+});
+// → pass [childExecutor] as the harness's `executors`
+```
+
+A closure can't cross a process boundary, so out-of-process work is submitted **by reference** — no work function at all, just a `handlerRef` and the input to resolve it with:
+
+```ts
+ctx.tasks!.submit({
+  executorKind: "child-process",
+  handlerRef: "deploy",
+  input: { target: "prod" },
+});
+```
+
+The worker module registers handlers and hands control to the IPC driver:
+
+```ts
+// worker.ts — the file you pointed workerModule at
+import { registerTaskHandler, runTaskWorker } from "@agentick/tasks";
+
+registerTaskHandler<{ target: string }>("deploy", async (task, input) => {
+  task.onProgress({ current: 0, total: 1, message: `deploying ${input.target}` });
+  await runDeploy(input.target, task.signal);
+  return [{ type: "text" as const, text: "deployed" }];
 });
 
-// The event stream via `.events()`:
+runTaskWorker(); // drives process.on("message"); one fork services one task
+```
+
+One fork per task, so crash-risky or CPU-heavy work can't corrupt a sibling and cleanup is just process exit. Cancel sends a cooperative message first and `SIGKILL`s after the grace period. Progress, status, `awaitingInput`, and `elicit` all cross the IPC boundary, so a child task is as interactive as an in-process one.
+
+`registerTaskHandler` writes to a process-wide registry; `TaskHandlerRegistry` and `defaultTaskHandlerRegistry()` are there when you need isolated ones. The registry is transport-agnostic — resolve-work-by-ref is the reusable part, and `runTaskWorker` is only the child-process driver bolted onto it.
+
+Pin a custom executor with the executor suite, which drives four canonical cases (`echo`, `progress`, `thrower`, `slow`) against a real instance:
+
+```ts
+import { runTaskExecutorConformance } from "@agentick/tasks/testing";
+
+runTaskExecutorConformance({ label: "my-executor", setup: () => makeShell() });
+```
+
+## Watching a task
+
+Every transition publishes on two channels — `task-status` carrying a `TaskInfo`, and `task-progress` carrying `{ taskId, current, total?, message? }`. Two channels rather than one discriminated stream, so a task list and a progress bar can subscribe to different things.
+
+In process, the handle is the stream. It opens with a synthesized snapshot and closes on the terminal frame:
+
+```ts
 for await (const event of handle.events()) {
-  if (event.kind === "progress") {
-    console.log(`progress: ${event.current}/${event.total}`);
-  } else if (event.kind === "status" && event.info.status === "completed") {
-    break;
-  }
+  if (event.kind === "progress") render(event.current, event.total);
+  else if (event.kind === "status") setStatus(event.info.status);
 }
-
-const result = await handle.result; // resolves with ContentBlock[]
 ```
 
-## What this package owns
+## The client side
 
-- **`TasksHarness`** — `BaseHarness<"tasks">` impl. Per-session
-  registry; cluster-friendly via inbox + bus.
-- **`withTasks()`** — `SessionExtension` factory; auto-registers the
-  four model-facing `task_*` tools (list / get / cancel /
-  await) so Pattern B is usable. Does NOT construct the harness —
-  the AppHarness is the single construction site for the per-session
-  `TasksHarness` (#159); this extension reads `installer.tasks` and
-  `ctx.tasks` instead.
-- **Bus channels** —
-  - `session:channel:task-status` for FSM transitions (payload:
-    `TaskInfo`).
-  - `session:channel:task-progress` for in-flight updates (payload:
-    `{ taskId, current, total?, message? }`).
-- **Inbox message types** — `tasks-cancel`, `tasks-get`,
-  `tasks-result`. Cluster-portable cross-harness operations route
-  through these against `harness.address`.
-- **`InMemoryTaskStore`** — the bundled default `TaskStore` (ADR 68);
-  `Map`-backed, node-local, `:memory:` semantics.
-- **`InProcessTaskExecutor`** — the bundled default `TaskExecutor`; the
-  current Promise/Effect fiber model on the report seam.
-- **Conformance suites** —
-  - `runTasksHarnessConformance(factory)` — the protocol battery, any
-    `TasksHarnessProtocol` impl.
-  - `runTaskStoreConformance({ label, factory })` — the store-port
-    battery, any `TaskStore` impl (mirrors `runTimelineStoreConformance`).
-- **Test doubles** under `/testing` — `fakeTasks()` + `stubTasks()`,
-  per the Meszaros vocabulary (see "Test doubles" below).
+`session.tasks` self-assembles on import — a live handle folding the `task-status` channel:
+
+```ts
+import "@agentick/tasks/client";
+
+const tasks = client.session(sessionId).tasks;
+
+tasks.subscribe(() => render(tasks.list())); // re-read on any change
+tasks.get(taskId)?.status;
+await tasks.cancel(taskId, "user cancelled");
+```
+
+The subscription **opens with a snapshot frame** carrying the full current task set, so a client connecting mid-run renders existing tasks rather than only ones that transition afterwards. Live deltas that follow are bare `TaskInfo` values, folded latest-wins by id.
+
+`cancel` is fire-and-observe: it issues the RPC and resolves when the gateway accepts. The `cancelled` state arrives as an ordinary channel delta, never as a local hand-patch — state flows one way.
+
+`taskStatusView(client, sessionId)` is the headless fold underneath, returning `get` / `subscribe` / `close` over a map keyed by `taskId`. Reach for it when composing rather than binding. Both `/client` exports depend only on the generic client, so neither drags the server runtime into a browser bundle.
 
 ## API
 
-### `submit(work, opts?)`
-
-```ts
-submit<T = readonly ContentBlock[]>(
-  work: (ctx: TaskWorkContext) => Promise<T> | T,
-  opts?: {
-    ttl?: number;
-    pollInterval?: number;
-    statusMessage?: string;
-    detached?: boolean; // ADR 68 — survive spawning session close
-    input?: unknown; // audit / replay; payload a by-ref executor resolves work with
-    handlerRef?: string; // by-ref work for an out-of-process executor
-    executorKind?: string; // ADR 68 Build B — which registered executor runs this (default "in-process")
-    wake?: boolean | ((outcome: TaskWakeOutcome) => SendInput | null); // TASK-WAKE — see "Task-completion wake"
-  },
-): TaskHandle<T>
-```
-
-Returns synchronously. The work fn is invoked **synchronously up to
-its first await** so that `signal.addEventListener("abort", ...)`
-inside the work registers BEFORE any concurrent `cancel()` /
-`close()` could fire — AbortSignal listeners attached post-abort don't
-fire.
-
-`TaskWorkContext`:
-
-- `signal: AbortSignal` — aborts on `cancel()` / harness `close()`.
-- `onProgress(update: ProgressUpdate): void` — emit progress.
-- `setStatusMessage(message: string): void` — update the human-readable
-  status without emitting a progress event.
-- `awaitingInput<T>(promise, opts?): Promise<T>` — run `promise` in the
-  `input_required` state. **Also accepts an `Effect<T, E, never>`** — the
-  Effect overload runs the pause as a real interruptible child fiber (a
-  cancel / ttl `Fiber.interrupt`s it). See below.
-- `elicit: Elicit` — request input from the connected client, from inside
-  a task, via request escalation (ADR 69). See below.
-
-#### `awaitingInput` — pause on external input (`input_required`)
-
-Wrap ANY external-input await so observers can tell **"blocked on input,
-provide it"** from **"actively working"**. The task flips
-`working → input_required` for the duration of the pause (optionally with a
-`message` statusMessage), then back to `working` when the promise settles:
-
-```ts
-ctx.tasks.submit(async (task) => {
-  // `askOperator()` returns a Promise that settles when the human answers
-  // (an elicit, a webhook, a UI approval — anything external). While it's
-  // pending the task shows `input_required` on the bus, the model's
-  // `task_*` view, and the MCP wire.
-  const answer = await task.awaitingInput(askOperator("Approve deploy to prod?"), {
-    message: "awaiting approval",
-  });
-  if (!answer.approved) return [{ type: "text", text: "cancelled by operator" }];
-  return deploy();
-});
-```
-
-It is **generic — not elicitation-coupled**: wrap an elicit, MCP sampling,
-a roots request, a webhook, any external await. Tasks take no dependency on
-elicitation. The flip runs through the same `report` seam as `onProgress` /
-`setStatusMessage`, so it lands on the durable `TaskStore` record, the
-`task-status` bus channel, AND the MCP wire (which maps `input_required`
-1:1). A `finally` restores `working` even if the promise **rejects** — so a
-throw can't strand the task paused. And if the task is **cancelled while
-paused**, the caller's `cancelled` transition wins (it's terminal); the
-`finally`'s `working` report is a post-terminal no-op, so cancel is honored
-— the task does not revert. `input_required` means "provide input," a state
-distinct from `working`.
-
-**Promise vs Effect (real interruptibility).** `awaitingInput` mirrors
-`submit`'s Promise/Effect duality. Hand it a **Promise** and cancellation is
-AbortSignal-flag-only — the promise keeps running until it observes the
-signal. Hand it an **`Effect<T, E, never>`** and the pause runs as a real
-interruptible child fiber bound to the task's `signal`: a `cancel()` / ttl
-while paused natively `Fiber.interrupt`s it, so `Effect.sleep`, `Effect.async`
-finalizers, `Effect.onInterrupt`, and generator yields inside the pause
-actually unwind. Use the Effect overload whenever a pause must hard-cancel
-(a long poll, a held resource, a nested request):
-
-```ts
-ctx.tasks.submit(async (task) => {
-  // Effect pause — a cancel while blocked interrupts the fiber and runs
-  // the release finalizer (a Promise pause would leak it).
-  const lease = await task.awaitingInput(
-    acquireLease.pipe(Effect.onInterrupt(() => releaseLease)),
-    { message: "acquiring lease" },
-  );
-  return run(lease);
-});
-```
-
-Both overloads flip `working → input_required → working` identically and both
-honor the `interactive ⊥ detached` guard.
-
-#### `ctx.elicit` — ask the client, from inside a task (ADR 69)
-
-`awaitingInput` is generic but leaves you holding the promise. When the
-"external input" you want is a structured answer **from the connected
-client**, use `ctx.elicit` — the same [`Elicit`](../elicitation) sugar a
-tool handler sees (`text`, `confirm`, `select`, `number`, `boolean`, the
-`try*` variants), but sourced through **request escalation** instead of a
-live per-tick elicitation:
-
-```ts
-ctx.tasks.submit(async (task) => {
-  // Flips working → input_required, escalates the request up the
-  // ownership chain to the connected client, resolves with the answer,
-  // and restores working — all in one call.
-  const approved = await task.elicit.confirm("Approve deploy to prod?");
-  if (!approved) return [{ type: "text", text: "cancelled by operator" }];
-  return deploy();
-});
-```
-
-Each call composes `awaitingInput(escalate(request))`: the task flips to
-`input_required`, the request **escalates as nested `inbox.ask`** to the
-task's owning session (and, up the spawn lineage, ultimately the client),
-and the answer threads back down the `ask` return stack. The escalation
-relay is **payload-agnostic substrate** — this package takes no dependency
-on `@agentick/elicitation`; the elicit sugar is injected by the
-session that owns the harness.
-
-`interactive ⊥ detached` — a **`detached: true`** task has no guaranteed
-live ancestor chain to reach the client, so `ctx.elicit` (and the
-underlying `awaitingInput`) **throw** `DetachedTaskCannotElicitError`
-rather than hang. Detached means non-interactive, fire-and-forget,
-durable-result work.
-
-**A forked (child-process) task's `ctx.elicit` works too** (T2b). The
-child has a SEPARATE inbox, so it can't nest-`ask` the parent session
-directly — instead each sugar call marshals a serializable **intent**
-`{method, args}` to the parent over IPC; the parent
-(`ChildProcessTaskExecutor`) reconstructs the live-schema request via the
-same injected sugar and escalates it in-runtime through the **same
-`escalate` chain** an in-process task uses. So ancestor **interception +
-lineage apply to a forked task for free** — the bridge is pure IPC
-marshaling, not a second escalation path. The `working → input_required →
-working` flip crosses IPC via `awaitingInput`.
-
-The **live `StandardSchemaV1` never crosses the process boundary** — its
-`validate()` is a function, not structured-cloneable. The sugar methods
-(`text` / `confirm` / `select` / `number` / `boolean` / …) carry only
-serializable args and cross fine; a raw `form(liveSchema)` call **fails
-loud** with a clear boundary error (never a silent drop or hang). Use a
-sugar method, or run the task in-process, when you need a bespoke schema.
-
-> **Tier.** T1 + **T2a** + **T2b** (this release). T1 wires the
-> root-session case: a task in a connected session escalates to that
-> session, which resolves terminally against the real client elicitation.
-> **T2a** adds deeper bubbling — a **sub-agent** session forwarding to its
-> spawner up the `parentSessionId` lineage, ancestor **interception**
-> (`session.interceptEscalation` — a hop answering / denying / forwarding
-> instead of blindly relaying), and `lineage` provenance (origin task +
-> session → each forwarding hop). **T2b** completes the "any nested unit,
-> in-process OR forked, can reach the client" story: the cross-process
-> child bridge over IPC. See
-> [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
-
-Verified by `src/__tests__/escalation.spec.ts` (origin guards),
-`src/__tests__/child-elicit.spec.ts` (the **real-fork** child bridge:
-intent-only marshaling on the wire, the answer + FSM flip round-trip, the
-typed-decline round-trip via the error codec, and the live-schema boundary
-failing loud), and `@agentick/session`'s
-`src/__tests__/escalation.spec.ts` (the root-session round-trip + FSM
-flip, the T2a 2-session bubbling chain, interception short-circuit / deny
-/ forward + lineage, and the **T2b forked-child interception-composes**
-proof through a real 2-session chain).
-
-### `TaskHandle<T>`
-
-- `taskId: string`
-- `initialStatus: TaskStatus` — snapshot at handle construction.
-- `result: Promise<T>` — resolves on `completed` with the work's
-  return value; rejects with `TaskRejection` on `failed` /
-  `cancelled`. Resolves independently of iterating events.
-- `info(): TaskInfo` — live snapshot.
-- `events(): AsyncIterable<TaskEvent>` — the event stream
-  (`for await (const ev of handle.events())`); emits the current status
-  snapshot, then live progress + status transitions, closes on terminal.
-- `cancel(reason?: string): Promise<void>` — cluster-portable cancel.
-  No-op if already terminal.
-
-#### `TaskHandle` IS the canonical `OperationHandle` shape
-
-Per the v2 audit (#291), `TaskHandle` is the canonical shape for any
-long-running operation handle in the framework. New surfaces that
-need lifetime management should adopt the same six-field convention:
-
-| Concern          | Field                                                          |
-| ---------------- | -------------------------------------------------------------- |
-| Identity         | `taskId` (rename to `opId` / `handleId` for non-task surfaces) |
-| Initial status   | `initialStatus`                                                |
-| Result           | `result: Promise<T>`                                           |
-| Live snapshot    | `info()`                                                       |
-| Streaming events | `events(): AsyncIterable<...>`                                 |
-| Cancellation     | `cancel(reason?)`                                              |
-
-Operations that are bounded request/response (e.g., `sandbox.exec`,
-`mcp.callTool`) intentionally return `Promise<Result>` without a
-handle — there's nothing to manage between request and response.
-The handle shape is for work where the caller may want to observe
-progress, cancel mid-flight, or persist across boundaries.
-
-### Lifetime semantics (ADR 68)
-
-`TasksHarness` is per-session (#159), but the `TaskStore` is
-app/gateway-scoped:
-
-- **Per-task**: `handle.cancel(reason?)` applies the `cancelled`
-  transition, aborts the AbortSignal, and (Effect path) interrupts the
-  work fiber via `Fiber.interrupt` — `await cancel()` waits for
-  finalizers (settled-cancel).
-- **Per-session (default, `detached: false`)**: `harness.close()`
-  cancels ALL non-detached in-flight tasks via the cascading interrupt
-  path — today's behavior, IDENTICAL.
-- **Detached (`submit(work, { detached: true })`)**: NOT aborted on
-  session close. The executor keeps running and the record persists in
-  the shared app-scoped store, so the session can stop and the task
-  continues — as long as the app process is alive (with the in-memory
-  store). Survival across app-process **restart** needs a durable store
-  (`@agentick/tasks-store-postgres`, a shipped sibling on the same port).
-- **Orphan accounting (`interrupted`)**: on construction the harness
-  reads its scope-filtered store records; any still-`working` record
-  with no reattachable executor is marked `interrupted` (a lost
-  in-process fiber can't reattach). With the in-memory store this is a
-  same-process no-op; the durable store exercises it across restart.
-
-Truly **distributed** execution (a task running on a different node) is
-the ambitious tier — a distributed-worker `TaskExecutor` + a shared
-store — and is not built here. The seam is ready for it.
-
-### Lookups by id
-
-`get(id)`, `status(id)`, `result(id)`, `cancel(id, reason?)`,
-`events(id)`. All throw `UnknownTaskError` (`_tag`-discriminated) for
-unknown ids — same shape across local and cluster paths.
-
-### `TaskStatus`
-
-`"working" | "input_required" | "completed" | "failed" | "cancelled" |
-"interrupted"`. The first five map 1:1 to MCP's task FSM.
-`input_required` is a **live, produced** state: a work fn opts in by
-wrapping an external-input pause in
-[`ctx.awaitingInput`](#awaitinginput--pause-on-external-input-input_required),
-which flips `working → input_required → working` and surfaces on the bus +
-the MCP wire. `interrupted` (ADR 68) is the orphan-accounting terminal — a `working`
-record whose live executor is gone (harness re-hydrated a store record
-with no reattachable execution). It has **no MCP-wire representation**
-(the MCP enum stops at `cancelled`); the server codec lossy-maps it to
-`failed` at the wire boundary.
-
-### `TaskStore`, `TaskExecutor` (ADR 68)
-
-The durability + execution seams. Port types in `@agentick/spec`,
-re-exported here; bundled impls (`InMemoryTaskStore`,
-`InProcessTaskExecutor`) exported from the package root.
-
-```ts
-import {
-  InMemoryTaskStore,
-  InProcessTaskExecutor,
-  runTaskStoreConformance,
-  type TaskStore,
-  type TaskExecutor,
-} from "@agentick/tasks";
-
-// Inject a custom store + executor registry at construction:
-new TasksHarness(id, journal, bus, inbox, { store, executors: [childExecutor] });
-```
-
-`TaskStore` — `put` / `get` / `list(query?)` / `delete` / `prune?` +
-`backend`. `TaskExecutor` — `start(record, work, report, signal, hooks?)` →
-`TaskExecution`, `reattach?`, `cancel(exec, reason?)`. Any custom store
-proves compliance via `runTaskStoreConformance({ label, factory })`.
-
-#### Build your own store — back tasks with your stack
-
-The record is the **source of truth**, so `put` is a whole-record upsert on
-every transition; reads serve `get` / `list`. The in-memory default is just
-one impl — a SQL, Redis, or DynamoDB store swaps in identically.
-
-```ts
-import type { TaskStore, TaskRecord, TaskStoreQuery } from "@agentick/tasks";
-import { runTaskStoreConformance } from "@agentick/tasks";
-
-class SqlTaskStore implements TaskStore {
-  readonly backend = "sql";
-  constructor(private readonly db: Db) {}
-
-  put(r: TaskRecord) {
-    return this.db.upsert("tasks", r.taskId, r);
-  } // full record
-  get(id: string) {
-    return this.db.find("tasks", id);
-  }
-  list(q?: TaskStoreQuery) {
-    return this.db.query("tasks", q?.scope, q?.status);
-  }
-  delete(id: string) {
-    return this.db.remove("tasks", id);
-  }
-  prune(before: number) {
-    return this.db.removeTerminalsBefore("tasks", before);
-  }
-}
-
-// Prove it with the SAME suite the in-memory default passes:
-runTaskStoreConformance({ label: "sql", factory: () => new SqlTaskStore(testDb()) });
-```
-
-#### Build your own executor — run work where you want
-
-`report` is the **one path back**: every transition (progress, terminal)
-flows through it → the harness persists the record + emits the events.
-`reattach` re-adopts a still-running job after a restart (durability); return
-`undefined` and the harness marks the orphan `interrupted`.
-
-```ts
-import type {
-  TaskExecutor,
-  TaskExecution,
-  TaskRecord,
-  TaskWork,
-  TaskReport,
-} from "@agentick/tasks";
-
-class QueueTaskExecutor implements TaskExecutor {
-  readonly kind = "queue";
-  constructor(private readonly queue: Queue) {}
-
-  start(
-    record: TaskRecord,
-    _work: TaskWork,
-    report: TaskReport,
-    signal: AbortSignal,
-  ): TaskExecution {
-    const job = this.queue.enqueue(record.handlerRef!, record.input);
-    job.onProgress((progress) => report({ progress }));
-    job.onDone((result) => report({ status: "completed", result }));
-    job.onError((e) => report({ status: "failed", failure: { kind: "error", reason: String(e) } }));
-    signal.addEventListener("abort", () => this.queue.cancel(job.id));
-    return { kind: this.kind, jobId: job.id }; // → persisted on record.executorState
-  }
-
-  reattach(record: TaskRecord, report: TaskReport): TaskExecution | undefined {
-    const jobId = (record.executorState as { jobId?: string }).jobId;
-    const job = jobId ? this.queue.adopt(jobId) : undefined; // still alive after restart?
-    if (!job) return undefined; // gone → harness marks it `interrupted`
-    job.onDone((result) => report({ status: "completed", result }));
-    return { kind: this.kind, jobId };
-  }
-
-  cancel(exec: TaskExecution, reason?: string): void {
-    this.queue.cancel((exec as { jobId: string }).jobId, reason);
-  }
-}
-```
-
-The bundled `ChildProcessTaskExecutor` (below) is a worked instance of exactly
-this seam; a `@agentick/tasks-store-postgres` store is a worked instance of the
-store port.
-
-## Executor registry + selecting an executor (ADR 68 Build B)
-
-An app runs MOST tasks in-process (cheap — a fiber) and opts SPECIFIC tasks out
-to an isolated child (crash-risky / CPU-heavy work). The harness holds a
-**registry of executors keyed by `.kind`**; a submit selects one **per task**
-via `executorKind` (omitted → `"in-process"`, the bundled default). Hydration
-and cancel dispatch on the record's `executorKind`.
-
-The registry is the bundled in-process default MERGED with the provided list —
-a provided executor wins on `.kind` collision, and each entry is keyed by its
-own self-reported `.kind` (you never write a `Record` whose keys duplicate
-`.kind`):
-
-```ts
-// App-scoped wiring (createApp) — NOT a cascade. Detached tasks + child
-// reattach need shared singletons that outlive any one session, so the
-// store + executors are owned by the app for its whole lifetime.
-createApp(RootAgent, {
-  model,
-  compiler,
-  tasks: {
-    // store defaults to a node-local InMemoryTaskStore; swap a durable one.
-    executors: [
-      new ChildProcessTaskExecutor({
-        workerModule: path.resolve("./dist/task-worker.js"),
-      }),
-    ],
-  },
-});
-```
-
-Select per submit from a tool handler:
-
-```ts
-// in-process (default) — a closure runs on the main event loop
-ctx.tasks.submit(async ({ onProgress }) => {
-  onProgress({ current: 1, total: 1 });
-  return [{ type: "text", text: "done" }];
-});
-
-// child-process — a by-ref submit; no closure crosses the boundary
-ctx.tasks.submit({ executorKind: "child-process", handlerRef: "deploy", input });
-```
-
-A submit routed to a by-ref executor (`byRef: true`) without a `handlerRef`
-throws `TaskHandlerRefRequiredError` at `submit`, before anything forks; an
-unregistered `executorKind` throws `UnknownTaskExecutorError`.
-
-## The child-process executor (ADR 68 Build B)
-
-`ChildProcessTaskExecutor` (`byRef = true`) forks a Node child per submit for
-**execution isolation** and — because the store is app-scoped — survival of the
-spawning session's close. A closure can't cross a process boundary, so the
-executor IGNORES the `work` closure and hands the child a **serializable
-descriptor** (the `TaskRecord` — `handlerRef` + `input` live on it). The child
-resolves the handler from a registry, runs it, and reports
-status / progress / result back over IPC → parent → the uniform `report` seam.
-
-**The worker-module pattern.** The adopter authors a `workerModule` — register
-handlers, then call `runTaskWorker()`:
-
-```ts
-// task-worker.ts — the adopter's workerModule
-import { registerTaskHandler, runTaskWorker } from "@agentick/tasks";
-
-registerTaskHandler<{ target: string }>("deploy", async (ctx, input) => {
-  ctx.onProgress({ current: 0, total: 1, message: `deploying ${input.target}` });
-  await deploy(input.target, ctx.signal); // honor the abort signal for cancel
-  return [{ type: "text", text: "deployed" }];
-});
-
-runTaskWorker(); // one fork = one task; reports the terminal transition, exits
-```
-
-`registerTaskHandler` + `TaskHandlerRegistry` are **transport-agnostic** —
-resolve-work-by-ref with input/result generics the non-generic `TaskExecutor`
-port can't give. `runTaskWorker` is the child-process-IPC driver bolted on top;
-a future distributed executor reuses the SAME registry + `(ctx, input) => …`
-contract with its own driver (a queue-consumer loop) in place of it.
-
-**The adopter owns the loader.** `forkOptions` is passed straight to `fork` —
-the executor hardcodes no `execArgv`. A built JS worker needs nothing; a TS
-worker under `tsx` passes `{ execArgv: ["--import", "tsx"] }`.
-
-**Constraint (by-ref).** No closures cross the boundary — work is resolved from
-`handlerRef`. Both `input` and the returned result cross by **V8 structured
-clone** (the executor forks with `serialization: "advanced"` — so `Date`,
-`Map` / `Set`, `Buffer` / typed-arrays survive intact, which matters for image /
-binary `ContentBlock` results; functions and class prototypes do NOT). Override
-`forkOptions.serialization` if you need JSON-wire semantics. `TaskFailure.cause`
-is deliberately NOT sent (an arbitrary thrown value may not clone) — failures
-lossy-encode to `reason`, the same wire-boundary asymmetry the MCP codec
-documents.
-
-**What it delivers vs. defers.** Delivers: isolation, independent killability
-(graceful IPC-cancel → `SIGKILL` backstop after `killGracePeriodMs`), crash →
-`failed` (a child that dies mid-work surfaces honestly), and — because the
-executor instance is app-scoped — a `detached` child that survives its
-session's close and can be reattached WITHIN the app process. Defers: reattach
-across **app-process restart** (needs a durable store + the child pid on
-`record.executorState` — `TODO(ADR-68 pg)`).
-
-## Test doubles
-
-Per the test-doubles convention (Meszaros), every layer exports its
-doubles under a `/testing` subpath. For tasks:
-
-### `fakeTasks(options?)` — working impl
-
-A real `TasksHarness` on a fresh in-memory substrate. Returns the
-harness, the substrate primitives (so tests can subscribe to the bus,
-assert journal entries, etc.), and an idempotent `close()`.
-
-```ts
-import { fakeTasks } from "@agentick/tasks/testing";
-
-const { harness, bus, journal, inbox, close } = await fakeTasks();
-try {
-  const handle = harness.submit(async () => [{ type: "text", text: "ok" }]);
-  expect(await handle.result).toEqual([{ type: "text", text: "ok" }]);
-} finally {
-  await close();
-}
-```
-
-Options:
-
-- `harnessId?: string` — defaults to `"fake-tasks"`.
-- `sessionId?: string` — stamps `parentScope.sessionId` on every
-  envelope, mirroring the real `withTasks()` install path.
-
-### `stubTasks(options?)` — canned-answer stub
-
-No substrate, no registry, no work runner. Satisfies
-`TasksHarnessProtocol` with `submit` returning a pre-completed
-handle and a single status event. Use when a downstream consumer
-needs to _receive_ a `tasks` slot without exercising the lifecycle.
-
-```ts
-import { stubTasks } from "@agentick/tasks/testing";
-
-const tasks = stubTasks({
-  cannedResult: [{ type: "text", text: "pretend done" }],
-  onSubmit: (work, opts) => console.log("submit observed", opts),
-});
-```
-
-Options:
-
-- `id?: string` — defaults to `"stub-tasks"`. Surfaces as `id` /
-  `address` (`tasks:${id}`).
-- `cannedResult?: readonly ContentBlock[]` — what `result` /
-  `handle.result` resolves with. Defaults to `[]`.
-- `onSubmit?: (work, opts) => void` — observe submission args without
-  exercising the work fn.
-
-Both doubles are typed against the spec interface
-(`TasksHarnessProtocol`), so spec changes break stale doubles at
-compile time — no silent drift.
-
-## Conformance
-
-`runTasksHarnessConformance(factory)` drives any
-`TasksHarnessProtocol` impl through the protocol suite covering: submit
-→ result, work-fn errors, cancel, progress envelope, events stream,
-unknown-id errors, harness-close cancellation of in-flight tasks.
-Lives at the package root so adopter impls (cluster-shimmed variants,
-custom registries) import it without reaching into `/testing`:
-
-```ts
-import { runTasksHarnessConformance } from "@agentick/tasks";
-
-runTasksHarnessConformance(async ({ harnessId }) => {
-  const bundle = await yourFactory(harnessId);
-  return { harness: bundle.harness, close: bundle.close };
-});
-```
-
-## Command hooks — the submit(sync) / settle(async) split (ADR 83)
-
-The session and elicitation harnesses route their verbs through `runOperation`
-(via `sessionOp` / `elicitOp`), so each mints a derived `onBefore…` / `onAfter…`
-command-lifecycle hook. The two natural task hook points are:
-
-| Seam                | Would-be hooks                               | "before" = …                         | "after" = …                      |
-| ------------------- | -------------------------------------------- | ------------------------------------ | -------------------------------- |
-| `submit` (accept)   | `onBeforeTasksSubmit` / `onAfterTasksSubmit` | gate / transform / veto a submission | the accepted `TaskHandle`        |
-| `settle` (complete) | `onBeforeTasksSettle` / `onAfterTasksSettle` | inspect the terminal record          | react "after the task COMPLETES" |
-
-The name derivation is locked by a test
-(`src/__tests__/command-hooks.spec.ts`): `deriveHookNames("tasks:command:submit")`
-=== `["onBeforeTasksSubmit", "onAfterTasksSubmit"]` (the `:command:` infix is
-stripped, then each segment PascalCases).
-
-**Status: NOT yet wired — deferred, by design.** Unlike `send` / `elicit`,
-neither task seam is currently routed through `runOperation`, so no task hook
-fires today. This is a structural constraint, not an oversight:
-
-- **`submit` is synchronous.** It returns `TaskHandle<T>` (not a Promise) and
-  starts the executor synchronously so signal listeners register before it
-  returns — the public overloads and the existing suite depend on reading
-  `handle.taskId` immediately. The `runOperation` interceptor seam is
-  intrinsically **async**: command hooks lift through `asBefore`/`asAfter`
-  (both `async`) via `Effect.tryPromise`. Extracting a synchronous result from
-  that effect needs `Effect.runSyncExit`, which **dies** on any async boundary.
-  A `runSyncExit`-based `submit` would therefore work only with zero hooks
-  registered (hollow) and would _regress_ (throw) under any inherited async
-  interceptor — strictly worse than today. So `submit` stays a plain method.
-- **`settle` is a synchronous `void` on the executor callback path.** The
-  "after the task completes" hook lives at the terminal transition
-  (`applyTransition` → `settle`), which is invoked from the executor's report
-  callback, the ttl reaper, and cancel. Making that async to host a hook would
-  risk the FSM ordering + "cancel wins the race" post-terminal-no-op invariant
-  the suite pins. Not forced.
-
-**Unblockers** (both out of scope here — one changes a public type, the other
-touches shared `@agentick/runtime` hook semantics used by every harness,
-so both want explicit sign-off):
-
-1. Make `submit` async (`Promise<TaskHandle<T>>`) — the only way to host async
-   before-hooks; breaks the synchronous `handle.taskId` contract.
-2. A synchronous-hook fast-path in `runtime-next` (the `asBefore`/`asAfter` lift
-   - `registerCommandHook`): keep a synchronous hook synchronous, only going
-     async when the hook returns a Promise. Lets `runSyncExit` host sync hooks;
-     async submit hooks still throw loudly. Necessary-but-insufficient — it does
-     not fix the async-inherited-interceptor regression.
-3. For `settle`: rework the FSM transition path to compose an Effect (async
-   `makeReport` + ttl/cancel callers), OR add a dedicated task-lifecycle event
-   seam that fires the terminal hook off the durable record without reordering
-   the transition.
-
-See the in-code `NOTE(adr-83, …)` blocks at `submit` and `applyTransition` in
-`src/harness.ts` for the full reasoning + trailheads.
-
-## What does NOT belong here
-
-- **MCP wire encoding** — lives in `@agentick/mcp`, layers on top.
-  This package's harness is wire-agnostic.
-- **Persistence across process restart** — the bundled
-  `InMemoryTaskStore` is node-local + lost on process exit. `detached`
-  tasks survive their spawning session's close (same process), but
-  survival across an app-process restart needs a durable store
-  (`@agentick/tasks-store-postgres`, same `TaskStore` port — a shipped
-  sibling package, not part of this one). The `interrupted`-on-hydration
-  logic is wired here; the pg store is what exercises it across restart.
-- **The distributed executor** — the ambitious tier (a task running on
-  another node): a distributed-worker `TaskExecutor` + a shared store.
-  Implements the same `TaskExecutor` seam; not built here. The
-  child-process executor (ADR 68 Build B) IS built here — see above.
-- **ToolExecutor return-shape detection** — the executor's logic for
-  detecting a `TaskHandle` return and branching on `taskSupport`
-  lives in `@agentick/tool-executor` (#156).
-
-## Verified by
-
-- `src/__tests__/harness.spec.ts` — 31 tests covering submit /
-  result / progress envelope / cancel / close / events / errors /
-  identity / subscriber fan-out / synchronous-first-tick abort
-  semantics / Effect-typed work (interrupt, Cause handling, settled
-  cancel). Includes a direct-iteration equivalence test: iterating the
-  handle yields the SAME events as `handle.events()` while `.result`
-  resolves independently. The bus-envelope tests pin the byte-identical
-  `task-status` / `task-progress` wire payloads (ADR 68 parity gate).
-- `src/__tests__/store.spec.ts` — 15 tests: `runTaskStoreConformance`
-  against `InMemoryTaskStore` (10) + the ADR 68 durability behaviors —
-  detached-survives-close (non-detached still aborts), every-transition
-  persisted, shared-store cross-session isolation, and
-  `interrupted`-on-hydration (orphaned `working` → `interrupted`;
-  terminal prior-run records surfaced read-only).
-- `src/__tests__/input-required.spec.ts` — the `awaitingInput` seam on the
-  in-process executor: the full `working → input_required → working →
-completed` status timeline (bus envelopes) with the paused-state
-  statusMessage, the durable `TaskStore` record reflecting `input_required`
-  while paused, and cancel-while-paused landing terminal `cancelled` (the
-  `finally`'s `working` report proven a post-terminal no-op). Plus the ADR
-  69 T2a **`awaitingInput(Effect)`** overload: an Effect pause flips the
-  same status timeline and resolves with the Effect's value, and a cancel
-  while paused **interrupts the Effect fiber** (an `Effect.onInterrupt`
-  finalizer is proven to fire) and lands terminal `cancelled` — the
-  real-interruptibility proof vs the AbortSignal-flag-only Promise path.
-- `src/__tests__/child-executor.spec.ts` — 13 tests that ACTUALLY fork a
-  `tsx`-loaded child and round-trip over IPC (no fakes for the process
-  boundary): echo result round-trip, ordered progress over IPC, thrower →
-  `failed`, graceful cancel (child exits), `SIGKILL` backstop for a child
-  that ignores cancel, `TaskHandlerRefRequiredError` on a by-ref submit
-  without `handlerRef` (before forking), `UnknownTaskExecutorError` on an
-  unregistered kind, registry merge (in-process + child both resolvable),
-  detached-survives-`close()` + reattach-within-process + cancel,
-  non-detached killed on `close()`, and `awaitingInput` flipping
-  `input_required → working → completed` over IPC (message-triggered
-  release — deterministic, real fork).
-- `src/__tests__/executor-conformance.spec.ts` — `runTaskExecutorConformance`
-  green for BOTH bundled strategies: `InProcessTaskExecutor` (closures) and
-  `ChildProcessTaskExecutor` (by-ref over a real fork). The proof the seam
-  is honestly uniform.
-- `src/__tests__/escalation.spec.ts` — 3 tests: the ADR 69 escalation
-  origin guards — a detached task's `awaitingInput` throws
-  `DetachedTaskCannotElicitError` (fails, doesn't hang), an unconfigured
-  `ctx.elicit` throws a clear "not configured" error, and its capability
-  probes report `false` rather than throw. The root-session round-trip +
-  FSM flip live in `@agentick/session`'s `escalation.spec.ts`.
-- `src/__tests__/child-elicit.spec.ts` — 5 tests that ACTUALLY fork a
-  `tsx`-loaded child, proving the ADR 69 T2b elicit bridge over real IPC:
-  at the raw wire, the child marshals ONLY `{method, args}` (never the
-  live schema) + resolves on `elicit-response` + flips `input_required →
-working → completed`, and reconstructs a typed error from a serialized
-  `elicit-error` (`ElicitationDeclined` round-trips via the error codec);
-  integrated through a real `TasksHarness` + the real `buildElicitSugar` +
-  a test escalation terminal, the parent reconstructs the LIVE request +
-  the answer/FSM-flip round-trip, a decline round-trips as
-  `ElicitationDeclined`, and a raw `form(liveSchema)` fails LOUD at the
-  boundary (never escalates, never hangs). The forked-child
-  interception-composes proof lives in `@agentick/session`'s
-  `escalation.spec.ts`.
-- `src/__tests__/command-hooks.spec.ts` — 2 tests locking the ADR 83
-  hook-name derivation for the tasks verbs (`tasks:command:submit` →
-  `onBeforeTasksSubmit` / `onAfterTasksSubmit`; `:settle` symmetric). A naming
-  contract lock for the deferred wiring — NOT a claim the verbs fire.
-- `src/__tests__/cluster-inbox.spec.ts` — 6 tests covering
-  cluster-portable cancel / get / result via inbox addressing.
-- `src/__tests__/conformance.spec.ts` — drives
-  `runTasksHarnessConformance` against `TasksHarness` (17 protocol
-  tests) — the in-process default is behavior-identical to pre-ADR-68.
-- `src/__tests__/session-tasks-tools.spec.ts` — 19 tests covering
-  every model-facing tool's handler directly (no tool-executor in
-  the dep tree to avoid `tasks ↔ tool-executor` cycle): list / get
-  / cancel / await against known + unknown ids, structured failure
-  shape, bundle structural assertions, sessionId-scoped handler
-  refs, extension factory smoke.
-- `packages/tool-executor/src/__tests__/task-handle.spec.ts`
-  (sibling package) — `ctx.tasks` wiring, Pattern A (await
-  transparently), Pattern B (return task-ref), and abort propagation
-  from dispatch into the in-flight task.
-- `packages/mcp/src/__tests__/task-bridge.spec.ts` +
-  `mcp/src/server/__tests__/tasks-projection.spec.ts` (sibling
-  package) — the MCP wire round-trip is unchanged under the refactor
-  (byte-identical `task-status` / `task-progress` payloads), plus a
-  PRODUCED `input_required` projecting onto the wire (`tasks/get`
-  reports the paused state a task entered via `ctx.awaitingInput`).
-
-The `session.tasks` `ClientHandle` (Enumerable read + `cancel` write):
-
-- `src/__tests__/wire.spec.ts` — the `tasksWireExtension` (`tasks/cancel`)
-  handler: session resolution across the gateway's apps, `taskId` / `reason`
-  passthrough to `session.tasks.cancel`, `null` result (state flows via the
-  channel), and `AppNotFoundError` on an unresolved session.
-- `src/client/__tests__/task-status-view.spec.ts` — `taskStatusView` folds
-  `TaskInfo` frames into a map by `taskId` (latest wins), seeds the whole store
-  from the opening `snapshot` frame, and builds the session scope + channel
-  query.
-- `src/client/__tests__/tasks-handle.spec.ts` — `tasksHandle`: `cancel(taskId,
-reason?)` issues the wire-shaped `tasks/cancel` request (reason omitted when
-  absent), `list()`/`get(id)` seed from a snapshot, the CQRS round-trip (a cancel
-  delta re-folds the view; no local hand-patch), and `subscribe(cb)` fires with
-  NO arguments per frame.
-- `src/client/__tests__/tasks-handle.conformance.spec.ts` — `tasksHandle` passes
-  `runClientHandleConformance` (core + Enumerable + the `cancel` write verb).
-- `packages/transport-in-process/src/__tests__/tasks-cancel-e2e.spec.ts`
-  (sibling package) — the full client ↔ gateway ↔ session round-trip through the
-  REAL `GatewayHarness` + `inProcessTransport`: `client.session(id).tasks.cancel`
-  transitions the server task to `cancelled` (with the reason) and the transition
-  re-folds the client view; cancelling an unknown id surfaces the harness error
-  over the wire.
+### `@agentick/tasks`
+
+| Export                                                                                           | Purpose                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `withTasks(options?)`                                                                            | Session extension. Options: `registerModelTools`.                                                                                             |
+| `TasksHarness` / `TasksHarnessOptions`                                                           | The implementation. Options: `parentScope`, `store`, `executors`, `buildElicit`, `defaultWake`, `inheritedInterceptors`, `interceptorParent`. |
+| `InMemoryTaskStore`                                                                              | Bundled zero-dependency store. Lost on process exit.                                                                                          |
+| `InProcessTaskExecutor`                                                                          | The default executor — Promise and Effect work in one fiber model.                                                                            |
+| `ChildProcessTaskExecutor` / `ChildProcessTaskExecutorOptions`                                   | Fork-per-task isolation. Options: `workerModule`, `forkOptions`, `killGracePeriodMs`.                                                         |
+| `registerTaskHandler` / `TaskHandlerRegistry` / `defaultTaskHandlerRegistry` / `TaskHandlerWork` | By-ref handler registration.                                                                                                                  |
+| `runTaskWorker(registry?)`                                                                       | The child-side IPC driver.                                                                                                                    |
+| `TASK_LIST` / `TASK_GET` / `TASK_CANCEL` / `TASK_AWAIT`                                          | The four model tool names.                                                                                                                    |
+| `buildSessionTasksTools(sessionId, getNamespace?)`                                               | The declarations plus handlers, if you register them yourself.                                                                                |
+| `TASK_STATUS_CHANNEL` / `TASK_PROGRESS_CHANNEL` (and `_FQN` variants)                            | Channel names, bare and fully qualified.                                                                                                      |
+| `TASKS_CANCEL_MESSAGE_TYPE` / `TASKS_GET_MESSAGE_TYPE` / `TASKS_RESULT_MESSAGE_TYPE`             | Inbox message types, with their payload and reply types.                                                                                      |
+| `tasksWireExtension`                                                                             | Serves `tasks/cancel` over the gateway wire.                                                                                                  |
+| `TASKS_EXTENSION_NAME`                                                                           | The extension's registered name.                                                                                                              |
+| Port types (re-exported)                                                                         | `TaskStore`, `TaskStoreQuery`, `TaskRecord`, `TaskExecutor`, `TaskExecution`, `TaskReport`, `TaskTransition`, `TaskWork`.                     |
+
+### `session.tasks`
+
+| Member                    | Returns                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------- |
+| `submit(work, opts?)`     | `TaskHandle<T>`, **synchronously**. Work may be a Promise/sync function or an Effect.               |
+| `submit(opts)`            | The by-ref form; `handlerRef` and `executorKind` are both required.                                 |
+| `get(taskId)`             | `TaskInfo \| undefined`. A terminal read consumes a pending wake.                                   |
+| `list()`                  | Every task this harness knows about.                                                                |
+| `status(taskId)`          | `TaskStatus \| undefined`. Same consume-on-terminal semantics.                                      |
+| `result(taskId)`          | Resolves on `completed`, rejects with a `TaskRejection` otherwise. Consumes the wake at invocation. |
+| `cancel(taskId, reason?)` | Idempotent. Throws `UnknownTaskError` for an unknown id.                                            |
+| `events(taskId)`          | `AsyncIterable<TaskEvent>`, closing on the terminal frame.                                          |
+
+`TaskCreationInput`: `ttl`, `pollInterval`, `statusMessage`, `detached`, `input`, `handlerRef`, `executorKind`, `scope`, `wake`.
+
+States: `working`, `input_required`, `completed`, `failed`, `cancelled`, `interrupted`. The first five map onto MCP one-to-one; `interrupted` has no wire representation.
+
+Inside a work function, `ctx` carries the framework spine (`sessionId`, `log`, `trace`, `metrics`, `run`) plus `signal`, `onProgress`, `setStatusMessage`, `awaitingInput`, and `elicit`.
+
+### `@agentick/tasks/client`
+
+| Export                              | Purpose                                                              |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `session.tasks`                     | Registered on import: `list`, `get`, `subscribe`, `cancel`, `close`. |
+| `tasksHandle(client, sessionId)`    | The same handle, constructed explicitly.                             |
+| `taskStatusView(client, sessionId)` | The headless fold: `get`, `subscribe`, `close`.                      |
+
+### `@agentick/tasks/testing`
+
+| Export                       | Purpose                                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| `fakeTasks(options?)`        | A real harness on fresh in-memory substrate, plus its journal, bus, inbox, and `close()`. |
+| `stubTasks(options?)`        | Canned answers for consumers that don't need a real registry.                             |
+| `runTasksHarnessConformance` | Certify an alternate implementation.                                                      |
+| `runTaskStoreConformance`    | Certify a store adapter.                                                                  |
+| `runTaskExecutorConformance` | Certify an executor.                                                                      |
+
+## Patterns
+
+**Long-running tools.** [@agentick/tool](../tool) owns the `taskSupport` annotation and the `session_task_ref` block; [@agentick/tool-executor](../tool-executor) decides per call whether a handler yields inline output or a task ref.
+
+**Approval and input.** [@agentick/elicitation](../elicitation) owns the prompt transport `task.elicit` escalates onto. This package takes no dependency on it — the factory is injected.
+
+**Durability.** [@agentick/tasks-store-postgres](../tasks-store-postgres) implements `TaskStore` and passes the conformance suite. The generic `Store` seam and its shared suite skeleton live in [@agentick/store](../store).
+
+**Wire.** [@agentick/gateway](../gateway) serves `tasks/cancel` through `tasksWireExtension`; the read half is the wired `task-status` channel.
+
+**Remote tasks.** [@agentick/mcp](../mcp) publishes the namespace `task_list` reads for cross-server enumeration, and projects local tasks onto the MCP task wire.
 
 ## Roadmap & known gaps
 
-- **ADR 68 pg (`@agentick/tasks-store-postgres`)** — LANDED. A durable
-  `TaskStore` conforming to the same port; adds cross-app-restart record
-  durability and is what actually exercises the `interrupted`-on-hydration
-  path (proven against a real postgres). Cross-restart _child reattach_ is
-  NOT unlocked by durability alone and is NOT a fork-IPC follow-on: a fresh
-  process cannot re-attach to a child spawned by the dead parent (fork IPC is
-  a non-reconnectable spawn-time pipe), so a persisted pid buys no channel.
-  A worker whose reports outlive its parent must report via a reconnectable
-  transport (shared store / cluster bus) — the **distributed-executor tier**
-  below. Across a restart the child-process executor's honest outcome is
-  `interrupted`; its worker self-terminates on IPC `disconnect`.
-- **Hookable task verbs (ADR 83)** — DEFERRED. `submit` (sync return) and
-  `settle` (sync `void` on the executor callback path) cannot be routed through
-  the async `runOperation` interceptor seam behavior-preservingly. See the
-  "Command hooks" section above + the `NOTE(adr-83, …)` blocks in `harness.ts`
-  for the blocker and the unblockers (async `submit`, or a sync-hook fast-path
-  in `runtime-next`, or an async FSM transition path for the terminal hook).
-- **`taskSupport: "supported"`** — the caller-choice mode declared in
-  the spec annotation but not yet branched on by the executor (the
-  `"supported"` branch needs capability negotiation — see the TODO in
-  `@agentick/tool-executor`'s `harness.ts`). Lands with the
-  caller-side opt-in tooling.
+- **`submit` has no interceptor seam.** It returns a handle synchronously — callers read `handle.taskId` immediately, and the executor must start before it returns — while the middleware seam is intrinsically async. Wrapping it would either break the synchronous contract or throw the moment any hook is registered, so guarding or transforming a submission isn't available.
+- **No terminal-completion hook.** The more useful reactive seam ("react when the task actually finishes") sits on a synchronous callback path from the executor, and making it async would put the FSM ordering and the cancel-wins-the-race invariant at risk. Subscribe to the channels instead.
+- **Store writes aren't awaited.** Persistence is write-through off the critical path, and a store failure is swallowed so it can't crash the harness. The in-memory default resolves synchronously so nothing is lost there, but a durable adapter wants a flush barrier and a typed write-failure surface, and neither exists.
+- **A dropped wake is invisible.** Delivery swallows every error, not just the benign "session already gone" case, so a genuine delivery bug looks like a task that simply didn't wake.
+- **No cross-restart child reattach.** Fork IPC is a spawn-time pipe a fresh process cannot rejoin, so a persisted pid buys nothing. After a restart the honest outcome for a child task is `interrupted`, and the worker self-terminates when IPC disconnects. Reattaching across restarts needs an executor that reports over a reconnectable transport.
+- **`interrupted` is lossy on the MCP wire.** The MCP status enum stops at `cancelled`, so a codec crossing the wire maps it onto something less precise.
 
-@see [`docs/proposals/v2/blueprint/23-mcp-as-harness.md`](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md) §Tasks
-@see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
-@see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)
+## Verified by
+
+- `src/__tests__/harness.spec.ts` — the state machine end to end: submit through terminal, progress and status-message transitions, cancel winning the race against late work, ttl expiry, post-terminal reports as no-ops, close cancelling non-detached tasks while detached ones survive, and the exact channel payload shapes.
+- `src/__tests__/conformance.spec.ts` + `conformance.ts` — the protocol invariants: round-trip, typed failure rejection, cancel and double-cancel idempotence, `UnknownTaskError` on unknown ids, snapshot and status reads, the event stream closing on terminal, and close semantics.
+- `src/__tests__/store.spec.ts` + `store-conformance.ts` — put/get round-trip, upsert in place, scope- and status-filtered `list`, delete, and prune restricted to terminal records.
+- `src/__tests__/executor-conformance.spec.ts` + `executor-conformance.ts` — the four canonical cases against the in-process executor, including ordered progress delivery and cancellation of work that honors its signal.
+- `src/__tests__/child-executor.spec.ts` — fork-per-task lifecycle, by-ref handler resolution, progress and status over IPC, cooperative cancel with the `SIGKILL` backstop, and terminal-send flush discipline.
+- `src/__tests__/input-required.spec.ts` — `awaitingInput` flipping `working → input_required → working`, restoration on throw, and the Effect overload interrupting on cancel.
+- `src/__tests__/escalation.spec.ts` + `child-elicit.spec.ts` — `task.elicit` escalating to the owning session and resolving with the answer, in process and across IPC, plus the detached-task rejection.
+- `src/__tests__/task-wake.spec.ts` — exactly-once wake, consume-on-observe from `task_get`, `task_await`, and cancel, the callable policy shaping and suppressing, `defaultWake` with a per-task override, and no wake during close.
+- `src/__tests__/task-tools.spec.ts` — the four tools' declarations and handlers, including unknown-id responses and the `remote` slot's per-server error capture.
+- `src/__tests__/cluster-inbox.spec.ts` — the three inbox verbs routing cancel, get, and result by address, with replies over `request-response`.
+- `src/__tests__/wire.spec.ts` — `tasks/cancel` resolving its session through the gateway and returning no state.
+- `src/__tests__/command-hooks.spec.ts` + `ctx-spine.spec.ts` — inherited interceptors reaching this harness's operations, and the context spine a work body receives.
+- `src/client/__tests__/tasks-handle.spec.ts` + `tasks-handle.conformance.spec.ts` + `session-tasks.spec.ts` + `task-status-view.spec.ts` — the opening snapshot seeding the set, latest-wins delta folding, reference stability between changes, `cancel` issuing the RPC without hand-patching, and `session.tasks` self-registration.
