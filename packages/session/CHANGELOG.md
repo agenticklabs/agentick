@@ -1,5 +1,69 @@
 # @agentick/session
 
+## 1.0.0-next.15
+
+### Minor Changes
+
+- Three follow-ups riding one slice. (1) The run-level `execution` summary
+  event now EXISTS: the loop emits `kind: "execution"` (output, usage,
+  stopReason, durationMs) after `execution-end` on any terminal carrying a
+  result — exactly as the per-tick `"tick"` follows `"tick-end"` — and the
+  session forwards it as the `type: "execution"` StreamEvent, which was
+  declared in spec but had no producer anywhere. Adopters now get a
+  per-execution duration, not just per-tick. (2) BREAKING: the superseded
+  `session/timeline_history` gateway porcelain is DELETED — handler, spec
+  `WireMethods` row, and the `SessionTimelineHistoryParams`/`Entry`/
+  `Result` types (the `Entry.cursor` co-location affordance was never
+  populated by anything and dies with it). `timeline/history` — the
+  harness's own grant-gated declared read — is the one wire door; the
+  bounded-tool-output hint now points there. (3) `LoopExecutorFactory`,
+  `ToolExecutorFactory`, and `SessionHarnessFactory` all type `deps` as
+  OPTIONAL, matching their implementations' documented local-substrate
+  fallback (the `CompilerFactory` cure applied to its three twins) —
+  dep-less construction is now reachable through the public types and
+  pinned by tests in all three packages.
+
+- Verified-defect hygiene slice, every behavior fix red-first. `<H1>`–`<H3>`
+  and `<Paragraph>` actually render now — the wrappers emitted `heading`/
+  `paragraph` intrinsics no contributor claims, so heading levels and block
+  boundaries were silently dropped; they now emit the claimed `h1`–`h3`/`p`
+  (byte-identical to the lowercase intrinsics, pinned). `guard(...)` bags
+  of inline verdict literals contextually type without `as const` — the
+  decider/bag overload pair collapsed into one union signature. A
+  `renderedWith` or caller-pinned formatter ref that matches neither a
+  registered id nor a format is now reported as a `formatter-unresolved`
+  warning diagnostic (once per distinct ref; the tree still renders through
+  the default) — new shared `resolveFormatterRef`/`describeUnresolvedFormatter`
+  exports in @agentick/formatters are the one lookup both `formatTree` and
+  the compiler harness use, and the mount now binds the harness's real
+  default ref instead of a sentinel. `defineSession`'s no-op model handle
+  reads `current` as `undefined` (the documented model-less case) instead
+  of throwing; writes still reject. Plus: direct unit suites for
+  `ulid`/`waitFor`/`waitForStable`, and accurate barrel docblocks for spec
+  and eval.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.15
+  - @agentick/compiler-react@1.0.0-next.15
+  - @agentick/elicitation@1.0.0-next.15
+  - @agentick/gates@1.0.0-next.15
+  - @agentick/knobs@1.0.0-next.15
+  - @agentick/loop-executor@1.0.0-next.15
+  - @agentick/model@1.0.0-next.15
+  - @agentick/model-executor@1.0.0-next.15
+  - @agentick/pubsub@1.0.0-next.15
+  - @agentick/resources@1.0.0-next.15
+  - @agentick/runtime@1.0.0-next.15
+  - @agentick/spec@1.0.0-next.15
+  - @agentick/state@1.0.0-next.15
+  - @agentick/store@1.0.0-next.15
+  - @agentick/tasks@1.0.0-next.15
+  - @agentick/timeline@1.0.0-next.15
+  - @agentick/tool-executor@1.0.0-next.15
+  - @agentick/utils@1.0.0-next.15
+
 ## 1.0.0-next.14
 
 ### Minor Changes

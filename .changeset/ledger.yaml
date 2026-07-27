@@ -1,7 +1,23 @@
+"@agentick/compiler-react@1.0.0-next.15":
+  dir: packages/compiler-react
+  intents:
+    - hygiene-2-defect-slice
+"@agentick/formatters@1.0.0-next.15":
+  dir: packages/formatters
+  intents:
+    - hygiene-2-defect-slice
+"@agentick/gateway@1.0.0-next.15":
+  dir: packages/gateway
+  intents:
+    - execution-summary-and-read-door-cutover
 "@agentick/loop-executor@1.0.0-next.14":
   dir: packages/loop-executor
   intents:
     - cancellation-parity
+"@agentick/loop-executor@1.0.0-next.15":
+  dir: packages/loop-executor
+  intents:
+    - execution-summary-and-read-door-cutover
 "@agentick/mcp@1.0.0-next.11":
   dir: packages/mcp
   intents:
@@ -18,6 +34,15 @@
   dir: packages/mcp
   intents:
     - op-grammar-slice-a
+"@agentick/prompts@1.0.0-next.15":
+  dir: packages/prompts
+  intents:
+    - definitions-d3
+"@agentick/runtime@1.0.0-next.15":
+  dir: packages/runtime
+  intents:
+    - definitions-d3
+    - hygiene-2-defect-slice
 "@agentick/session@1.0.0-next.12":
   dir: packages/session
   intents:
@@ -26,6 +51,15 @@
   dir: packages/session
   intents:
     - cancellation-parity
+"@agentick/session@1.0.0-next.15":
+  dir: packages/session
+  intents:
+    - execution-summary-and-read-door-cutover
+    - hygiene-2-defect-slice
+"@agentick/skills@1.0.0-next.15":
+  dir: packages/skills
+  intents:
+    - definitions-d3
 "@agentick/spec@1.0.0-next.0":
   dir: packages/spec
   intents:
@@ -38,6 +72,11 @@
   dir: packages/spec
   intents:
     - slice-a-residuals
+"@agentick/spec@1.0.0-next.15":
+  dir: packages/spec
+  intents:
+    - definitions-d3
+    - execution-summary-and-read-door-cutover
 "@agentick/spec@1.0.0-next.2":
   dir: packages/spec
   intents:
@@ -66,6 +105,10 @@
   dir: packages/timeline
   intents:
     - definitions-d2
+"@agentick/tool-executor@1.0.0-next.15":
+  dir: packages/tool-executor
+  intents:
+    - execution-summary-and-read-door-cutover
 "@agentick/transport@1.0.0-next.13":
   dir: packages/transport
   intents:

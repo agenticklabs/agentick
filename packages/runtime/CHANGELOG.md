@@ -1,5 +1,52 @@
 # @agentick/runtime
 
+## 1.0.0-next.15
+
+### Minor Changes
+
+- ADR 93 D3 — skills + prompts join the definition grammar.
+  `defineSkills({ store?, hydrate?, hooks?, guards? })` and
+  `definePrompts({ ... })` — identity + brand, inert until per-session
+  install, the D1 pattern verbatim. Source unification: the parallel
+  source-config vocabulary is DELETED (moot #3) in favor of named
+  hydrators — `hydrateFromDirectory(dir)`, `composeHydrators(...)`, and
+  literal seeding — with the node-only directory loader split onto its
+  own subpath so browser bundles stay clean; the package `./loaders`
+  subpath is renamed `./hydrators`. Prompts gains `store?` (moot #4 — the
+  withPrompts-lacks-store asymmetry dies). Genesis default for both is
+  none/explicit; the three genesis laws are enforced and tested
+  (seed-never-append, fork/spawn never re-runs genesis, a throwing
+  hydrator fails session creation with typed `SkillsHydrateFailed` /
+  `PromptsHydrateFailed`). `hydrate(ctx)` carries the typed store facet
+  and trunk identity — `ctx.principal` is readable, the tiered-catalog
+  seam. `createApp({ skills, prompts })` top-level slots land via the
+  same augmentation + side-effect slot registration as timeline.
+
+- Verified-defect hygiene slice, every behavior fix red-first. `<H1>`–`<H3>`
+  and `<Paragraph>` actually render now — the wrappers emitted `heading`/
+  `paragraph` intrinsics no contributor claims, so heading levels and block
+  boundaries were silently dropped; they now emit the claimed `h1`–`h3`/`p`
+  (byte-identical to the lowercase intrinsics, pinned). `guard(...)` bags
+  of inline verdict literals contextually type without `as const` — the
+  decider/bag overload pair collapsed into one union signature. A
+  `renderedWith` or caller-pinned formatter ref that matches neither a
+  registered id nor a format is now reported as a `formatter-unresolved`
+  warning diagnostic (once per distinct ref; the tree still renders through
+  the default) — new shared `resolveFormatterRef`/`describeUnresolvedFormatter`
+  exports in @agentick/formatters are the one lookup both `formatTree` and
+  the compiler harness use, and the mount now binds the harness's real
+  default ref instead of a sentinel. `defineSession`'s no-op model handle
+  reads `current` as `undefined` (the documented model-less case) instead
+  of throwing; writes still reject. Plus: direct unit suites for
+  `ulid`/`waitFor`/`waitForStable`, and accurate barrel docblocks for spec
+  and eval.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/spec@1.0.0-next.15
+  - @agentick/utils@1.0.0-next.15
+
 ## 1.0.0-next.14
 
 ### Patch Changes

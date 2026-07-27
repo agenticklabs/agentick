@@ -1,5 +1,13 @@
 # @agentick/store
 
+## 1.0.0-next.15
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/pubsub@1.0.0-next.15
+  - @agentick/spec@1.0.0-next.15
+
 ## 1.0.0-next.14
 
 ### Patch Changes
