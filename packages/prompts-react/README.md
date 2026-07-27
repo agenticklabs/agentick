@@ -1,31 +1,57 @@
 # @agentick/prompts-react
 
-React binding for [`@agentick/prompts`](../prompts). Lets adopters author prompts as React JSX (`<message>`, `<section>`, `<H1>`, `<List>`, `useData`, …) and have them render to `MessageEntry[]` at invoke time.
+The React surface over [@agentick/prompts](../prompts). Author a durable,
+parameterized prompt as JSX — `<System>`, `<User>`, `<Section>`, `useData` — and
+it renders to `MessageEntry[]` at invoke time.
 
-> Pre-1.0. Pair this with `@agentick/prompts` (core) and `@agentick/compiler-react` (provides `compileTemplate`).
+The core already handles a `string` template and a literal `MessageEntry[]`.
+This package contributes the renderer that handles a `ReactNode`, so a prompt
+body can be a component instead of a template string.
+
+## Install
+
+```bash
+npm install @agentick/prompts-react
+```
+
+Peers: `react` ^19, plus [@agentick/prompts](../prompts) and
+[@agentick/compiler-react](../compiler-react) (which owns `compileTemplate` and
+the JSX components).
 
 ## Quick start
 
+`withReactPrompts()` is `withPrompts` with the React renderer pre-baked. Hand it
+your prompt library; invoke a prompt by name.
+
 ```tsx
-import { createApp } from "@agentick/app";
+import { createApp } from "@agentick/app/react";
+import { Section, System, User } from "@agentick/compiler-react";
 import { withReactPrompts } from "@agentick/prompts-react";
 
-const app = createApp(<Agent />, {
-  model: openai("gpt-5"),
+const app = await createApp(<Agent />, {
+  model,
   extensions: [
     withReactPrompts({
       initial: [
         {
           declaration: {
             name: "weekly_status",
-            description: "Weekly status template",
-            arguments: [{ name: "week", required: true }],
+            description: "Draft the weekly status report",
+            arguments: [
+              { name: "week", required: true },
+              { name: "team", required: false },
+            ],
+            // The prompt body is a component. `args` are already validated.
             render: (args) => (
               <>
-                <message role="system">You are a status report assistant.</message>
-                <message role="user">
-                  Generate the weekly status report for week {String(args.week)}.
-                </message>
+                <System>You write terse, factual status reports.</System>
+                <Section id="format" title="Format">
+                  Three sections, in order: Shipped, In flight, Blocked.
+                </Section>
+                <User>
+                  Draft the report for week {String(args.week)}
+                  {args.team ? ` (team: ${String(args.team)})` : ""}.
+                </User>
               </>
             ),
           },
@@ -35,130 +61,266 @@ const app = createApp(<Agent />, {
   ],
 });
 
-// At runtime:
-await session.prompts.invoke({
+const session = await app.createSession({});
+// `session.prompts` appears because the extension is installed — install-to-appear,
+// so it is optional on the type.
+await session.prompts?.invoke({ name: "weekly_status", args: { week: "2026-06-28" } });
+// → the rendered messages land on the timeline, ahead of the next send.
+await session.send({ messages: [] });
+```
+
+`invoke` renders **and** queues onto the timeline. `render` does the same
+compile and hands the messages back without queueing — the read-only door for a
+UI preview or a wire projection.
+
+```ts
+declare const prompts: import("@agentick/prompts").PromptsHandle;
+
+const { messages } = await prompts.render({
   name: "weekly_status",
   args: { week: "2026-06-28" },
 });
-// → both messages enter the timeline ahead of the next send.
+console.log(messages.map((m) => m.role)); // ["system", "user"]
 ```
 
-## How JSX projects to `MessageEntry[]`
+## Composing renderers
 
-The renderer calls `compileTemplate(node)` and walks the resulting IR's context entries:
-
-| Authored JSX                              | Projected entry                                              |
-| ----------------------------------------- | ------------------------------------------------------------ |
-| `<message role="...">...</message>`       | passthrough `MessageEntry` (role preserved)                  |
-| `<section title="..."><p>…</p></section>` | absorbed into the running system-message buffer              |
-| Loose text / headings / lists             | absorbed into the running system-message buffer              |
-| Section's `title` prop                    | leading `# title` text block in that buffered system message |
-
-Explicit `<message>` JSX **flushes** the buffered system message, so authoring order is preserved on the wire. Two consecutive sections concatenate into a single system message whose content blocks are the parts.
-
-### Why "loose stuff goes to system"
-
-The compiler IR has only two top-level kinds: `MessageEntry` (role-bearing) and `SectionEntry` (structured context). For a prompt, the natural projection is:
-
-- An explicit `<message>` says "this is a turn." Honor it.
-- Anything else is grounding context the model should see ambient, which maps cleanly to a `system` message.
-
-This is the v1-equivalent of how regular Agentick agents handle non-message content — folded into the system prompt.
-
-## API
-
-```ts
-import {
-  reactPromptRenderer, // singleton PromptRenderer
-  createReactPromptRenderer, // factory — opts: { compile, handles }
-  withReactPrompts, // SessionExtension factory (sugar over withPrompts)
-} from "@agentick/prompts-react";
-```
-
-`withReactPrompts(opts)` is exactly `withPrompts({ ...opts, renderers: [reactPromptRenderer, ...(opts.extraRenderers ?? [])] })`. Use the core `withPrompts` directly if you need to combine multiple framework renderers:
+`withReactPrompts` is a convenience, not the mechanism. When the library spans
+frameworks, or when the renderer order needs to be explicit, use the core
+extension and pass renderers yourself:
 
 ```ts
 import { withPrompts } from "@agentick/prompts";
 import { reactPromptRenderer } from "@agentick/prompts-react";
-// import { angularPromptRenderer } from "@agentick/prompts-angular"; // hypothetical
 
-withPrompts({
-  renderers: [reactPromptRenderer /*, angularPromptRenderer*/],
-  initial: [...],
+const extension = withPrompts({
+  renderers: [reactPromptRenderer /*, someOtherFrameworkRenderer */],
+  initial: [],
 });
 ```
 
-`createReactPromptRenderer({ compile, handles })`:
-
-- `compile?: CompileTemplateOptions` — registry / `defaultFormatter` / `maxIterations` passed through to `compileTemplate`.
-- `handles?: (content) => boolean` — narrow the predicate when sharing a registry with non-React renderers that also accept objects. Defaults to "anything React would accept as a child".
-
-## Authoring patterns
-
-**Static prompt (text only):**
+Dispatch is first-match-wins on each renderer's `handles(content)` predicate.
+The React predicate is deliberately wide — it accepts anything React would take
+as a child (element, fragment, array, string, number) — so put narrower
+renderers first, or narrow this one:
 
 ```ts
-{ name: "greet", description: "Greet", template: "Hello there." }
+import { createReactPromptRenderer } from "@agentick/prompts-react";
+
+const renderer = createReactPromptRenderer({
+  // Only claim real elements; leave plain objects to a sibling renderer.
+  handles: (content) => typeof content === "object" && content !== null && "$$typeof" in content,
+  // Anything `compileTemplate` accepts: a custom intrinsic registry, a default
+  // formatter, an iteration cap.
+  compile: { maxIterations: 20 },
+});
 ```
 
-The core handles the string — no React needed.
+`withReactPrompts` also takes `extraRenderers` when you want the React renderer
+first and your own after it.
 
-**Dynamic JSX prompt:**
+## How JSX projects to `MessageEntry[]`
+
+The renderer compiles the node with `compileTemplate`, then walks the IR's
+context entries. There are only two entry kinds, so the projection is two rules.
+
+| Authored JSX                        | Projected                                     |
+| ----------------------------------- | --------------------------------------------- |
+| `<System>` / `<User>` / `<Message>` | Passthrough `MessageEntry`, role preserved    |
+| `<Section>` and loose text          | Buffered into a running `system`-role message |
+| A section's `title` prop            | A leading `# title` text block in that buffer |
+
+An explicit message **flushes** the buffer, so authoring order survives.
+Consecutive sections concatenate into one system message whose content blocks
+are the parts.
+
+The rule behind it: an explicit `<message>` says "this is a turn" — honor it.
+Anything else is ambient grounding, which maps to `system`. That is the same
+projection ordinary agents get for non-message content.
+
+## Async data in a prompt body
+
+The renderer is `compileTemplate` underneath, which renders until stable — so
+`useData` suspends resolve before the messages come out.
 
 ```tsx
-{
-  name: "summarize",
-  description: "Summarize a document",
-  arguments: [{ name: "docId", required: true }],
-  render: (args) => <message role="user">Summarize doc {String(args.docId)}.</message>,
+import { useData } from "@agentick/compiler-react";
+import { User } from "@agentick/compiler-react";
+
+declare function fetchTickets(sprint: string): Promise<{ id: string; title: string }[]>;
+
+function SprintReview({ sprint }: { sprint: string }) {
+  const tickets = useData(`tickets:${sprint}`, () => fetchTickets(sprint));
+  return (
+    <User>
+      Review these {tickets.length} tickets: {tickets.map((t) => t.id).join(", ")}
+    </User>
+  );
 }
+
+const declaration = {
+  name: "sprint_review",
+  description: "Review a sprint's tickets",
+  arguments: [{ name: "sprint", required: true }],
+  render: (args: Record<string, unknown>) => <SprintReview sprint={String(args.sprint)} />,
+};
 ```
 
-**Section + message (grounding + turn):**
+> [!IMPORTANT]
+> `compileTemplate` mounts a **minimal** bridge set — the data bridge for
+> `useData`, stubs for loop and session. Knob, state, and timeline bridges are
+> absent, so `useKnob` / `useTimeline` and a `createTool` `<Tool>` do not work
+> inside a prompt body. Those belong in the agent tree, which the full compiler
+> renders.
+
+## Reaching a model
+
+Two hops, and neither is bespoke. A declaration's `render(args, ctx)` produces
+the node; the renderer projects it to `MessageEntry[]`; `invoke` appends those
+onto the timeline; the next send re-renders the timeline into context. Nothing
+about the JSX crosses a boundary — only the messages it produced.
+
+`ctx` is the invoking operation's context, so a prompt can render per-principal
+content:
 
 ```tsx
-{
-  name: "qa",
-  description: "Answer a question with grounding",
-  arguments: [{ name: "q", required: true }],
-  render: (args) => (
-    <>
-      <section id="sys" title="System">You are a careful answerer.</section>
-      <message role="user">{String(args.q)}</message>
-    </>
+import { User } from "@agentick/compiler-react";
+import type { OperationCtx, PromptDeclaration } from "@agentick/spec";
+
+// `ctx.user` is an empty seed — augment it with whatever your boundary stamps.
+declare module "@agentick/spec" {
+  interface RuntimeContextUser {
+    readonly userId?: string;
+  }
+}
+
+const myOpenItems: PromptDeclaration = {
+  name: "my_open_items",
+  description: "List the caller's open items",
+  render: (_args: Readonly<Record<string, unknown>>, ctx?: OperationCtx) => (
+    <User>List open items for {ctx?.user?.userId ?? "the current user"}.</User>
   ),
-}
+};
 ```
 
-**`useData` + suspends:**
+> [!NOTE]
+> `ctx` reaches the declaration's `render`, not the component tree — the
+> renderer's own signature is `(content, args)`. Read what you need off `ctx`
+> at the top and pass it down as props.
 
-The renderer awaits `useData` suspends to completion (it's `compileTemplate` under the hood), so async data lookups are first-class. Same iteration cap (default 10) applies.
+## Reaching an MCP client
+
+An MCP server projects a prompt catalog over `prompts/list` and `prompts/get`.
+The render happens server-side, so a JSX body works over the wire — a function
+is never serialized, and only the resulting messages travel.
+
+That requires the server to project a source that **has** the React renderer,
+which means the `use:` form:
+
+```ts
+import { PromptsHarness } from "@agentick/prompts";
+import { reactPromptRenderer } from "@agentick/prompts-react";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+
+declare const declaration: import("@agentick/spec").PromptDeclaration;
+
+// Build the source yourself so it carries the React renderer …
+const prompts = new PromptsHarness(
+  "mcp:prompts",
+  new MemoryJournal({ capacity: 1024 }),
+  new LocalEventBus(),
+  new LocalInbox(),
+  { renderers: [reactPromptRenderer] },
+);
+await prompts.ready;
+await prompts.register({ declaration });
+
+// … then hand it to the MCP server's prompts slot as `use:`:
+//   { name: "status-prompts", transports: [stdioTransport()], prompts: { use: prompts } }
+```
+
+> [!WARNING]
+> The `prompts: [declaration, …]` and `prompts: { declarations: [...] }` forms let
+> the MCP server build the source itself, and that source has **no renderers**. A
+> JSX-bodied prompt registered that way fails to render. Build the source, wire
+> `reactPromptRenderer`, pass it as `use:`.
+
+`withPrompts` also projects each prompt as a read-only `prompt://<name>`
+resource by default. Content is served honestly: a string `template` becomes
+`text/markdown`, while a `render` function becomes a
+`{ name, description, arguments }` declaration document — a JSX body is never
+faked into a rendered result on that surface. Pass
+`exposeAsResources: false` to keep prompts off it.
+
+## API
+
+| Export                                | Purpose                                                               |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `reactPromptRenderer`                 | The default-configured `PromptRenderer`. Enough for most adopters.    |
+| `createReactPromptRenderer(options?)` | Same renderer, configured: `compile`, `handles`                       |
+| `withReactPrompts(options?)`          | `SessionExtension` — `withPrompts` with the React renderer pre-baked  |
+| `ReactPromptRendererOptions` (type)   | `compile?: CompileTemplateOptions` · `handles?: (content) => boolean` |
+| `WithReactPromptsOptions` (type)      | `WithPromptsOptions` minus `renderers`, plus `extraRenderers`         |
+
+`withReactPrompts` forwards every other `withPrompts` slot: `initial` ·
+`loaders` · `use` · `exposeAsResources`.
+
+There are no components or hooks in this package. The JSX vocabulary is
+[@agentick/compiler-react](../compiler-react)'s; this package only teaches
+Prompts how to compile it.
+
+## Patterns
+
+**The catalog and its verbs.** [@agentick/prompts](../prompts) owns
+`session.prompts` — `register` / `update` / `remove` / `list` / `get` /
+`resolve` / `require` / `invoke` / `render` / `reload` — plus loaders and the
+`prompt://` projection. Everything here is content-shape plumbing beneath it.
+
+**The JSX vocabulary.** [@agentick/compiler-react](../compiler-react) owns
+`compileTemplate`, the message and content-block components, and `useData`.
+
+**Mixed libraries.** Keep the string prompts as strings. The core handles them
+with no renderer, and `{ name, description, template: "…" }` stays the cheapest
+form for anything static.
+
+## Roadmap & known gaps
+
+- **No top-level `createApp({ prompts })` slot.** Prompts install through
+  `extensions: []`; a first-class namespace slot with a `definePrompts(...)`
+  definition is not registered yet, so there is no `hooks:` / `guards:` /
+  `hydrate` bag for prompts either.
+- **No filesystem loaders for React prompts.** The core ships `fromArray` /
+  `fromModule` / `fromStaticUrl`; React-specific `fromReactModule` /
+  `fromReactDirectory` for a directory of `.tsx` prompt files are not built.
+- **Structure inside a section flattens to text.** A `<Section>`'s children
+  become the buffered system message's content blocks, and the block-level
+  wrappers (`<H2>`, `<Paragraph>`) currently render intrinsics no contributor
+  claims, so their children pass through as bare text with the structure lost.
+  Author the shape you want in the string, or emit explicit content blocks.
+- **Loose content always projects to `system`.** There is no way to change that
+  default role; wrap in an explicit `<User>` / `<Message>` if you want another.
+- **A section's `id` is dropped.** `MessageEntry` has no analogue, so section
+  identity does not survive projection — only the `title` does, as a heading.
+- **The component tree can't reach `ctx`.** The renderer receives
+  `(content, args)`; the invoking `OperationCtx` stops at the declaration's
+  `render`. There is no hook for it inside the body.
+- **Compile diagnostics are dropped.** `compileTemplate` returns warnings
+  (an iteration cap hit, an await timeout) and the renderer discards them; a
+  render failure surfaces as `PromptRenderFailed` with no diagnostic detail.
+- **`useData` isn't pinned here.** The render-until-stable behavior is
+  [@agentick/compiler-react](../compiler-react)'s and tested there; this
+  package's suite doesn't exercise a suspending prompt body.
 
 ## Verified by
 
-- `src/__tests__/renderer.spec.tsx` — JSX → MessageEntry[] projection (section/message/title/handles predicate), direct `render()` API + end-to-end `PromptsHarness` integration.
-
-## Status & roadmap
-
-**Shipped:**
-
-- `reactPromptRenderer` + `createReactPromptRenderer`
-- `withReactPrompts` convenience extension
-- JSX → MessageEntry[] projection (passthrough + system-message buffering)
-
-**Planned:**
-
-- **React-specific loaders** (#247) — `fromReactModule` / `fromReactDirectory` for filesystem-backed prompt libraries
-- Adapter for v2 semantic components (`<H1>`/`<List>`/...) → richer content blocks beyond plain text
-
-**Known gaps:**
-
-- Loose content always projects to `system` role. If an adopter wants a different default role (e.g., loose text → user), they currently need to wrap each block in `<message>` explicitly.
-- Section ordering is preserved but the `id` field on sections is dropped during projection (it has no analogue in the wire `MessageEntry`).
-
-## See also
-
-- [`@agentick/prompts`](../prompts) — core PromptsHarness + `withPrompts`
-- [`@agentick/compiler-react`](../compiler-react) — provides `compileTemplate` and the JSX runtime
-- [ADR 32 — Extension shape spectrum](../../docs/proposals/v2/blueprint/32-extension-shape-spectrum.md)
-- [ADR 23 — MCP as harness](../../docs/proposals/v2/blueprint/23-mcp-as-harness.md)
+- `src/__tests__/renderer.spec.tsx` — the projection rules: a loose section
+  becoming one `system` entry, a section `title` emitting a leading
+  `# title` block, an explicit `<message>` passing through with its role, an
+  explicit message flushing the section buffer so order survives, and two
+  sections concatenating into a single system message; the `handles` predicate
+  accepting elements, arrays, and strings while rejecting `null` / `undefined`,
+  and a narrowed predicate from `createReactPromptRenderer` being respected;
+  plus two end-to-end renders through a real prompt catalog wired with
+  `reactPromptRenderer` — a single-message JSX template interpolating its
+  argument, and a mixed section-plus-message template projecting to
+  `[system, user]`.

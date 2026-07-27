@@ -1,591 +1,462 @@
 # @agentick/session
 
-**SessionHarness — one agent run, one long-lived conversation.**
+**One conversation, one session.** A session owns the durable conversation, the state a run accumulates, and the single verb that runs an agent: `session.send({ messages })`. It is the integration site — the compiled tree, the loop, the model, the tool registry, the timeline, knobs, gates and tasks all meet here, and everything an adopter does to a live agent goes through this object.
 
-The integration site where v2's harness surfaces — compiler, loop
-model-executor, tool executor, timeline, knobs, state, elicitation, tasks,
-prompts — wire together for a single conversation. One session per
-human dialog; sessions are created by an app harness and persist
-across ticks.
+Most adopters never construct one. `createApp` builds sessions for you; `app.createSession()` opens or resumes one by id.
 
-Published on the v2 `next` lane (`@agentick/session@1.0.0-next.N`);
-most adopters reach it through `createApp` rather than importing it
-directly.
+## Install
+
+```bash
+npm install @agentick/session
+```
+
+Subpath: `/testing` (the resume acceptance suite + the session-store conformance suite). [@agentick/app](../app) already depends on this package, so `createApp` has it.
 
 ## Quick start
 
-Most adopters never construct a `SessionHarness` directly — they
-write an agent (a function or React component returning JSX
-declarations) and call `createApp(MyAgent, options).run(input)`. The
-app harness spins up a session per run.
+Configuration is app-level, and each layer is a first-class slot on `createApp`. `createSession` takes no messages — it opens a conversation. `send` runs it.
 
-For session-level commands (REPL apps, agent-side asks not initiated
-by tool dispatch, snapshot/restore workflows), reach for the
-session surface directly:
+```tsx
+import { createApp } from "@agentick/app/react";
+import { System } from "@agentick/compiler-react";
+import { defineTimeline } from "@agentick/timeline";
 
-```ts
-// createSession takes no messages — it opens (or rehydrates) a session.
-// Messages are handed to session.send below.
+function Agent() {
+  return <System>You are a helpful assistant.</System>;
+}
+
+const app = await createApp(<Agent />, {
+  model, // an adapter — openai("gpt-4o"), anthropic(…), …
+  timeline: defineTimeline({ store }), // durable conversation
+});
+
+// Open (or resume) a conversation. Same id twice = the same session.
 const session = await app.createSession({ sessionId: "s:1" });
 
-// Built-in harness surfaces. Each is added via TypeScript module
-// augmentation by its own package (ADR 27); the `agentick` metapackage
-// bundles all of them, so every session in the metapackage has them.
-session.timeline      // TimelineHandle — durable conversation history
-session.knobs         // KnobsHandle — model-facing reactive config
-session.state         // StateHandle — adopter-stash K/V (not model-visible)
-session.tasks         // Tasks — long-running work registry
-session.resources     // Resources — resource read-projection (ADR 62)
-session.gates         // GatesHandle — unified gate registry
-session.gate("write") // GateHandle | undefined — per-gate handle
-session.model         // ModelSelectionHandle — model selection / swap facade (ADR 89 §2)
-session.tools         // ToolsHandle — tool registry projection + host-door dispatch (§F)
-
-// Elicitation — ask the user for typed input.
-session.elicitation   // ElicitationHarnessProtocol — raw substrate
-session.elicit        // Elicit — sugar surface (preferred)
-
-// Dispatch + send.
-await session.tools.dispatch("rename-file", { from: "a", to: "b" });
-await session.send({ messages: [{ role: "user", content: [...] }] });
-```
-
-Each surface is contributed by a bundled harness package
-(`@agentick/timeline`, `-knobs-`, `-state-`, `-tasks-`,
-`-resources-`, `-gates-`, `-elicitation-`) via `declare module
-"@agentick/spec"` — no slot is hardcoded in spec. On the reference
-`SessionHarness` each is also reachable as `bridges.<name>` inside the
-compiler/executor flow; the two views point at the SAME instance.
-
-## `session.elicit` vs. `session.elicitation`
-
-Per ADR 43 §"Sugar surfaces converge": every session exposes two
-surfaces for asking the user:
-
-| Surface               | Type                               | Use when                                                                                                                             |
-| --------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `session.elicit`      | `Elicit` (sugar)                   | typed single-call asks — `text`, `confirm`, `select`, `number`, `boolean`, `url`, `multiSelect`, `requireUrls`, plus `try*` variants |
-| `session.elicitation` | `ElicitationHarnessProtocol` (raw) | structured request with `Standard-Schema` validator + bespoke timeout/abort/hints control                                            |
-
-The sugar `Elicit` interface is identical to what tool handlers see
-via `ctx.elicit` (whether dispatched in-process or via MCP server).
-Adopter code using `await session.elicit.text(...)` is the canonical
-shape; reach for the raw protocol only when the sugar is too narrow.
-
-This session is also the **escalation terminal / hop** for input requests
-that originate deeper in the ownership tree: a long-running task's
-`ctx.elicit` (or a spawned sub-agent's) escalates up the spawn lineage
-(`parentSessionId`) as a nested `inbox.ask`. A **root** session resolves it
-here against the real client; a **spawned** session forwards it one hop up
-to its own spawner (appending a `lineage` provenance entry). Adopters don't
-wire this; it's handled in `handleMessage`. See ADR 69.
-
-**`session.interceptEscalation(handler)` (ADR 69 T2a)** lets an ancestor
-session **mediate its descendants' input requests** instead of blindly
-forwarding — the value of a chain over a dumb pipe. The handler is consulted
-first on every hop the session receives:
-
-```ts
-// A parent agent answering / denying / forwarding a sub-agent's elicit.
-const unsub = session.interceptEscalation(async (payload) => {
-  if (payload.class === "elicit" && isKnownAnswer(payload)) {
-    // Answer it here — the client is never bothered (dedupe / cache / policy).
-    return { forward: false, response: { outcome: "accepted", value: cached } };
-  }
-  if (isRateLimited(payload)) throw new Error("denied"); // hard deny → origin rejects
-  return { forward: true }; // fall through to forward / terminal
-});
-```
-
-`{ forward: false, response }` short-circuits (this hop answered); a **throw**
-is a hard deny (propagates as the origin's `ctx.elicit` rejection);
-`{ forward: true }` falls through. Payload-agnostic — the handler branches on
-`payload.class`; no policy DSL. With none registered, behavior is identical to
-plain forward/resolve (T1 parity). The escalation envelope carries a `lineage`
-path (origin task + session → each forwarding hop, principal-stamped best-
-effort per ADR 51) the interceptor can inspect.
-
-### Task-completion wake (the TASK-WAKE seam)
-
-`handleMessage` also handles a second inbox message — a **task-completion
-wake** (`session:task-wake`). When a backgrounded (Pattern B) task finishes
-while **nothing is observing it**, its `TasksHarness` fires a fire-and-forget
-`inbox.send` here carrying bounded completion metadata (task id, terminal
-status, duration — **never raw output**) plus a `SendInput`. The session turns
-it into a real turn via the **normal `session.send` path** — journaled, hooked,
-streamed — so a wake that arrives while an execution is running STEERS into it
-(no colliding second execution) and an idle session runs a fresh one.
-
-Provenance is stamped authoritatively here: `metadata.source === "task-wake"`
-plus `taskId` on both the execution and every wake message, so timelines and
-clients attribute the synthesized turn to a task completion rather than a real
-user turn. Consume-on-observe dedup + the wake policy itself live in
-`@agentick/tasks` (per-task `wake` / app-wide `tasks.defaultWake`); the
-session only owns the receive-and-send half. Verified by
-`__tests__/task-wake.spec.ts` (real journaled wake execution + provenance,
-observed → no wake, steering during a running execution).
-
-```ts
-// 90% case — sugar
-const name = await session.elicit.text("Your name?");
-const role = await session.elicit.select("Role?", ["admin", "user"] as const);
-
-// Decline / cancel throw typed errors (exported from @agentick/spec)
-import { ElicitationCancelled, ElicitationDeclined } from "@agentick/spec";
-
-try {
-  await session.elicit.confirm("Apply changes?");
-} catch (err) {
-  if (err instanceof ElicitationDeclined) {
-    /* user declined */
-  }
-  if (err instanceof ElicitationCancelled) {
-    /* user cancelled */
-  }
-}
-
-// Non-throwing variants
-const outcome = await session.elicit.tryConfirm("Apply?");
-if (outcome.status === "accept" && outcome.value) {
-  /* proceed */
-}
-```
-
-See [`@agentick/elicitation`](../elicitation/README.md) for the
-full `Elicit` interface contract.
-
-## Surface integration
-
-```
-SessionHarness
-├── compiler (per-tick, ephemeral)       — JSX → RenderedTree
-├── loopExecutor (per-tick, ephemeral)     — runs ticks until terminal
-├── toolExecutor (session-scoped)          — dispatch handlers; ctx.elicit, ctx.tasks
-├── timeline (session-scoped, durable)     — message + section + event log
-├── knobs (session-scoped, reactive)       — model-visible config
-├── state (session-scoped, persisted)      — adopter-stash K/V (not model-visible)
-├── gates (session-scoped, reactive)       — unified gate registry; session.gate(name)
-├── elicitation (session-scoped)           — raw substrate primitive
-│   └── elicit                             — sugar surface (Elicit interface)
-├── tasks (session-scoped)                 — long-running work registry
-├── resources (session-scoped)             — resource read-projection (ADR 62)
-└── prompts (session-scoped, optional)     — when withPrompts mounted
-```
-
-Every harness whose lifecycle is bound to a session is constructed
-once per session at create-time and surfaced both:
-
-1. On the `SessionHarnessProtocol` (this object) for adopter code, AND
-2. Via `bridges.<name>` inside compiler / executor flow.
-
-The two views point at the SAME instance. `session.elicitation ===
-bridges.elicitation` always.
-
-## Constructing a `SessionHarness`
-
-The reference `SessionHarness` takes the **substrate positionally**
-(`journal`, `bus`, `inbox` — typically the AppHarness's, inherited as
-defaults) and **everything else in an options bag**. The positional
-shape makes the "substrate flows from parent by default" semantic
-visible at every call site (ADR 31 §Two-phase construction).
-
-```ts
-import { SessionHarness } from "@agentick/session";
-
-const session = new SessionHarness(journal, bus, inbox, {
-  sessionId: "s:1",
-  agent: <MyAgent />, // opaque — forwarded to compiler.mount({ element })
-  compiler, // CompilerProtocol
-  loop, // LoopExecutorProtocol
-  modelExecutor, // ExecutorProtocol
-  toolExecutor, // ToolExecutorProtocol
-  target, // ExecutionTarget — the default model; overridable per send
-  defaultMaxTicks: 8,
-});
-
 const handle = await session.send({
-  messages: [{ role: "user", content: "Hello" }],
+  messages: [{ role: "user", content: "What changed in the last release?" }],
 });
+
 for await (const event of handle.events()) {
-  /* StreamEvent: tick-start | model deltas | tool-dispatch | result | ... */
+  if (event.type === "tool-dispatch-start") log.info({ tool: event.name });
 }
-const result = await handle.result; // SendResult
+
+const { response, usage, stopReason } = await handle.result;
 ```
 
-`send` returns a `SessionExecutionHandle` — its event stream is reached
-via `.events(): AsyncIterable<StreamEvent>`, plus
-`.result: Promise<SendResult>`, `.status`, and `.abort(reason?)`. A
-`send()` while an execution is
-running is **steering** (ADR 53): the messages append to the timeline
-(visible next tick), and the _in-flight_ handle is returned rather than
-starting a fresh run.
+For a runtime-built or conditional install, `extensions: [withTimeline(definition)]` takes the same definition — the slot is the front door, `extensions` is the escape hatch.
 
-The busy-send behavior is the `onBusy?: "steer" | "queue"` option.
-`"steer"` joins the in-flight turn (above); `"queue"` waits for the
-session to fully quiesce, then runs a fresh execution. **Smart default**
-(unset): a send carrying structured output (`output`/`responseFormat`)
-defaults to `"queue"` — a steer has no final turn of its own to shape — so
-it runs as its own execution; a plain send defaults to `"steer"`. Both
-modes are identical on an idle session (fresh execution).
+### What a session hands you
 
-### Structured final turns (`trail-response-format-send`)
+Each surface below is contributed by its own package and points at the same instance the JSX tree sees. Nothing is hardcoded on the session.
 
-A send can constrain its final turn to a typed shape via the declarative,
-wire-safe `responseFormat` directive:
+| Surface                                | What it is                                             | Lives in                          |
+| -------------------------------------- | ------------------------------------------------------ | --------------------------------- |
+| `session.timeline`                     | The conversation — read, append, compact, page history | [timeline](../timeline)           |
+| `session.knobs` / `session.knob(name)` | Model-visible, model-settable config                   | [knobs](../knobs)                 |
+| `session.state`                        | Adopter K/V stash; not model-visible                   | [state](../state)                 |
+| `session.gates` / `session.gate(name)` | Loop-continuation gates, tree-declared or programmatic | [gates](../gates)                 |
+| `session.tools`                        | Tool registry reads + the host door `dispatch()`       | [tool-executor](../tool-executor) |
+| `session.tasks`                        | Long-running work registry                             | [tasks](../tasks)                 |
+| `session.resources`                    | Resource reads without a tool ctx                      | [resources](../resources)         |
+| `session.elicit` / `.elicitation`      | Ask the user for typed input                           | [elicitation](../elicitation)     |
+| `session.model`                        | Model selection and swap                               | this package                      |
+
+```ts
+session.timeline.read().entries; // what the model will see next tick
+await session.knobs.set({ id: "verbosity", value: "terse" });
+await session.tools.dispatch("rename_file", { from: "a", to: "b" }); // no model involved
+```
+
+Optional installs contribute slots the same way — `session.prompts` ([prompts](../prompts)), `session.skills` ([skills](../skills)), `session.live` ([live](../live)) — so they are typed as optional and present only when their package is mounted.
+
+## The execution handle — two views of one run
+
+`send()` resolves to a `SessionExecutionHandle`. It is not the result; it is the run. Await `.result` for the final outcome, iterate `.events()` for the stream, and both derive from the same execution — iterating does not consume the result, and awaiting the result does not starve another iterator.
+
+```ts
+const handle = await session.send({ messages });
+
+handle.executionId; // stable id, stamped on every event and timeline entry
+handle.status; // "running" | "completed" | "error" | "aborted"
+
+const events = (async () => {
+  for await (const ev of handle.events()) log.debug({ seq: ev.sequence, type: ev.type });
+})();
+
+const result = await handle.result; // SendResult
+await events;
+```
+
+Events carry a dense, monotonic per-session `sequence`, so a UI can order, replay, or de-duplicate them. `handle.abort("user cancelled")` tears the in-flight execution down structurally; the result settles with `stopReason: "aborted"`. A `timeoutMs` on the send does the same on expiry with `stopReason: "timeout"`.
+
+Streaming is a cascade: `send({ stream })` beats `createSession({ streaming })` beats `createApp({ streaming })` beats the model's own capability. With streaming off the handle still yields summary events (`message`, `content`, `tool-call`) — just not deltas.
+
+## Steering — a send during a running execution joins it
+
+There is no pending queue. A `send()` while an execution is in flight appends its messages and returns **the in-flight handle**: the loop runs another tick, and the model addresses the new input in the same execution.
+
+```ts
+const handle = await session.send({ messages: [{ role: "user", content: "refactor the parser" }] });
+
+// …the agent is three ticks deep…
+const same = await session.send({ messages: [{ role: "user", content: "wait — dry run only" }] });
+same === handle; // true — the running execution absorbed the correction
+```
+
+The steer lands at the next tick boundary — after that tick's tool results apply, before the next render — so `tool_use`/`tool_result` adjacency is never broken. On an idle session a steer is just a normal send.
+
+`onBusy` names the other choice:
+
+```ts
+// Wait for the session to fully quiesce, then run a FRESH execution.
+await session.send({ messages, onBusy: "queue" });
+```
+
+Unset, `onBusy` resolves per send shape: a send carrying structured output (`output` or `responseFormat`) defaults to `"queue"`, because a steer joins a turn whose ending is already committed and so has no final turn of its own to shape; every other send defaults to `"steer"`. An **explicit** `onBusy: "steer"` carrying structured output that actually joins is rejected with `SteerCannotCarryStructuredOutput` rather than silently dropping the directive.
+
+## Structured output — `output` in, `data` out
+
+Pass a schema and get a validated value back:
+
+```ts
+import { z } from "zod";
+
+const Answer = z.object({ summary: z.string(), risk: z.enum(["low", "high"]) });
+
+const { response, data } = await (await session.send({ messages, output: Answer })).result;
+
+data?.risk; // typed + validated
+response; // any prose the model emitted alongside it
+```
+
+**The delivery mechanism is a terminal tool.** The loop injects a synthetic tool whose input schema _is_ your output schema (default name `submit_result`); the model calls it to deliver the answer, and that call is the completion event. This ties "done" to "shaped" and makes validation free — every provider constrains tool arguments natively. The terminal tool is never registered and never dispatched: the loop captures its raw input, validates it, and lifts the validated value onto `SendResult.data` with `stopReason: "output_delivered"`. A synthesized `tool_result` pairs the call in the timeline so the next send starts clean.
+
+Strategy selection is capability-aware. With `strategy: "auto"` (the default) the loop picks the terminal tool whenever real tools are mounted **or** the target has no native `json_schema` support; it falls back to a plain `responseFormat` directive on a bare send to a target that does support it, and degrades to that honestly when a target supports neither.
+
+Be precise about what is guaranteed:
+
+1. **Natural path.** The tool's presence and description usually elicit the call. Whether a given model complies unforced is model behavior — measure it with [@agentick/eval](../eval), don't assume it.
+2. **Forced path.** If the model finishes without calling the terminal tool, the loop runs one wrap-up tick with `toolChoice` pinned to it. The provider cannot answer without calling it, with arguments constrained to the schema.
+3. **Typed failure.** At the tick cap with no room to wrap up, the send rejects with `StructuredOutputIncomplete`. A delivered value that fails the schema rejects with `ResponseValidationError` (carrying `issues` and `raw`). Errors over nulls.
+
+A tree-level `<Output>` says "every execution of this agent produces this shape" — the extraction-agent case — and produces a validated `data` too, because the loop is the validation authority either way. A send-level `output` overrides it. A tree tool colliding with the terminal name fails the send with `TerminalToolNameCollision`; two `<Output>`s fail with `MultipleStructuredOutputs`.
+
+```tsx
+import { Output, System } from "@agentick/compiler-react";
+import { z } from "zod";
+
+function Extractor() {
+  return (
+    <>
+      <System>Extract the invoice fields.</System>
+      <Output schema={z.object({ total: z.number(), vendor: z.string() })} />
+    </>
+  );
+}
+```
+
+> [!NOTE]
+> `output` holds a live validator, so it cannot cross the wire. `responseFormat` is the serializable twin — a JSON-shaped directive applied on every tick, overriding both a tree-level `<model responseFormat>` and a per-tick `<Model>`. Wire callers declare `responseFormat` and parse `response` themselves. OpenAI and Google honor it natively; Anthropic and the ai-sdk adapter currently drop it, which is exactly the gap the terminal tool closes.
 
 ```ts
 await session.send({
   messages,
-  responseFormat: {
-    type: "json_schema",
-    name: "answer",
-    schema: {
-      /* … */
-    },
+  responseFormat: { type: "json_schema", name: "answer", schema: { type: "object" } },
+});
+```
+
+## Restricting what one send exposes
+
+`allowedTools` filters the merged, precedence-resolved model-visible tool list down to an allowlist of canonical names. It applies after the compiler-tools merge and before terminal-tool injection, so the loop's own terminal tool is exempt.
+
+```ts
+await session.send({
+  messages,
+  allowedTools: ["read_file", "grep"], // the model sees these two, nothing else
+});
+```
+
+It composes additively with `tools` (an execution-scoped tool must _also_ be named to reach the model), and the dispatch door is untouched — `session.tools.dispatch("write_file", …)` still works. Restricting to an empty set makes the send behave as if no tools were mounted, which is what `"auto"` strategy resolution reads.
+
+Execution-scoped tools live and die with the send:
+
+```ts
+await session.send({
+  messages,
+  tools: [reviewTool], // registered for this execution, removed when it ends
+});
+```
+
+## Choosing and swapping the model
+
+`session.model` is the model-selection surface. `setModel` swaps the runner and its target; `setTarget` swaps only the target, keeping the runner. Both are journaled and hookable, and both take effect on the **next** send — never mid-execution.
+
+```ts
+import { openai } from "@agentick/model-openai";
+
+session.model.current; // the session default in effect right now
+
+await session.model.setModel(openai("gpt-4o")); // adapter sugar, same as construction
+await session.model.setTarget({
+  kind: "language-model",
+  provider: "openai",
+  modelId: "gpt-4o-mini",
+});
+```
+
+The adapter form is wrapped into an executor for you. An app built with a BYO `modelExecutor` opted out of that machinery, so passing a bare adapter there throws `ModelExecutorBuilderMissingError` — pass a `{ modelExecutor, target }` pair instead. Either form normalizes before the command fires, so a policy hook sees identical input:
+
+```ts
+session.hook({
+  onBeforeSessionSetModel: (input) => {
+    if (denylist.has(input.target.modelId)) throw new Error("model not allowed");
   },
 });
 ```
 
-- **`responseFormat`** is the serializable form. It rides `session/send`
-  unchanged, applied on **every tick**, overriding both the tree-level
-  `<model responseFormat>` and a per-tick `<Model>` `parameters` (explicit
-  send-level beats ambient). Wire callers declare `responseFormat` and
-  parse the returned `response` text client-side.
-- **Explicit-steer conflict.** An **explicit** `onBusy: "steer"` (which
-  joins an in-flight turn) that carries `responseFormat` **or** `output`
-  is rejected with the typed `SteerCannotCarryStructuredOutput` — a steer
-  injects messages into the running turn and has no final turn of its own
-  to shape. Omit `onBusy` (structured sends default to `"queue"`) or set
-  `onBusy: "queue"` to run the structured request as a fresh execution.
-  Only an **explicit** steer reaches this guard: an unset `onBusy` on a
-  structured send resolves to `"queue"` under the smart default (below)
-  and never joins.
+### Interceptors that survive a swap
 
-> **Adapter caveat.** OpenAI and Google honor `responseFormat` natively;
-> the Anthropic and ai-sdk adapters currently DROP it
-> (`TODO(trail-anthropic-structured)` /
-> `TODO(trail-aisdk-experimental-output)`) — on those adapters it is a
-> best-effort generation hint. The `output` sugar below erases this gap on
-> tool-using turns (the terminal-tool strategy — all providers constrain
-> tool arguments natively).
-
-### Structured execution results — `output` → `data` (§B2)
-
-The live-schema sugar: `SendInput.output` takes a `StandardSchemaV1`
-(Zod, Valibot, `jsonSchema()`), and `SendResult.data` returns the typed,
-**validated** value.
+A swap can replace the whole executor, so an interceptor registered on executor A evaporates the moment you move to executor B. `session.model.use` and `.guard` register against the model-call operation rather than any executor instance, and one execution is one fiber, so they reach whichever executor actually issues a call — including a per-tick `<Model>`-swapped one. Registered once, they hold across every subsequent swap.
 
 ```ts
-const { data } = await (
-  await session.send({ messages, output: answerSchema, tools: [...] })
-).result;
-data; // typed + validated, or the send rejected with ResponseValidationError
+// A metering transform on every model call — survives setModel.
+const offUse = session.model.use(async (input, next, ctx) => {
+  metrics.count("model.calls");
+  log.debug({ op: ctx.op, opId: ctx.opId });
+  return next(input);
+});
+
+// Admission control on the model call. Guards compose outermost, so no
+// transform can swallow a veto.
+const offGuard = session.model.guard((_input, ctx) =>
+  overBudget(ctx) ? { kind: "veto", reason: "cost ceiling" } : undefined,
+);
 ```
 
-**The strategy is a terminal tool.** The loop injects a synthetic tool
-whose `inputSchema` IS the output schema (default name `submit_result`);
-the model calls it to deliver the final answer, and the call is the
-completion event. This ties "done" to "shaped" and makes validation free
-(providers constrain tool arguments natively). The terminal tool is
-**never registered / never dispatched**; the loop captures its raw input
-and — as the structured-output **validation authority** — validates it
-against the resolved schema, surfacing the validated value on
-`ExecutionRunResult.data` which the session lifts verbatim onto
-`SendResult.data`. A synthesized `tool_result` pairs the call in the
-timeline so the next send is clean. (That synthesized result exists for
-timeline pairing + history only; the model never sees it in the capturing
-execution — there is no next tick, by design.)
+Effective-model precedence is unchanged by any of this: a per-tick `<Model model={…}>` beats a per-send `send({ modelExecutor, target })`, which beats the session default. `setModel` moves only the default.
 
-**Capability-aware strategy auto.** With `strategy: "auto"` (the default),
-the loop picks the terminal tool whenever real tools are mounted **or** the
-target lacks native `json_schema` (Anthropic and ai-sdk drop
-`responseFormat`) — the terminal tool is provider-agnostic, so it is the
-correct default there. It falls back to a plain `responseFormat` directive
-(`generateObject`'s domain) only on a **bare** send to a target with native
-`json_schema`, or as the honest degradation when the target supports
-NEITHER json_schema NOR tools. Overridable via `strategy` on a tree-level
-`<Output>` or (implicitly) per send.
+## Spawn, fork, lineage
 
-**`stopReason: "output_delivered"`.** When the answer is delivered via the
-terminal tool (natural OR forced wrap-up path), `SendResult.stopReason` is
-`"output_delivered"` — the loop stopped because the declared output was
-delivered, not on a pending `tool_use`. The `responseFormat` strategy
-(bare send) keeps the provider's stop reason.
+`spawn` creates a child session bound to the same app. Omit `agent` and the child is a same-image copy of its parent; supply `send` and the spawn runs one execution and hands you the child's handle instead of the child.
 
-**Prose AND a typed result in one turn.** Providers may emit text
-alongside the terminal call in a single assistant turn. When they do, the
-text lands in `SendResult.response` as usual and the validated answer in
-`data` — a human summary and a typed result, zero extra ticks:
-
-```ts
-const { response, data } = await (
-  await session.send({ messages, output: answerSchema, tools: [...] })
-).result;
-response; // "Here's a short summary for you…"  (prose)
-data; //     { … }  (validated)
+```tsx
+const child = await session.spawn({ agent: <SubAgent />, initialKnobs: { depth: 1 } });
+const handle = await session.spawn({ send: { messages: [{ role: "user", content: "audit" }] } });
 ```
 
-**The honest guarantees chain** — do not frame `output` as a blanket
-"structured output" promise; `skills.run` is its flagship consumer, and
-this is plumbing:
-
-1. **Natural path (usually):** the tool's presence + description
-   ("call this when the task is complete with the final answer") elicits
-   the call. Whether the model does so unforced is _model behavior_,
-   measured in `@agentick/eval`, reported as numbers — never asserted
-   here. See the compliance eval example.
-2. **Forced path (a hard guarantee):** if the model finishes without
-   calling the terminal tool, the loop runs ONE wrap-up tick with
-   `toolChoice: { tool: submit_result }` — the provider cannot respond
-   without calling it, arguments constrained to the schema.
-3. **Failure mode (the residual sliver):** at the `maxTicks` cap with no
-   room to wrap up, or if the forced tick still misses, the send rejects
-   with the typed `StructuredOutputIncomplete`. A conforming schema that
-   the delivered value fails to satisfy rejects with `ResponseValidationError`
-   (carrying `issues` + `raw`). Errors over nulls.
-
-A tree-level `<Output schema … />` declares "every execution of this agent
-produces this shape" (dedicated extraction agents, skill-runner children,
-forks); a send-level `output` overrides it. Because the loop is the
-validation authority (the schema is always in loop scope — send-level OR
-tree-resolved), a **tree-only** `<Output>` — no send-level `output` — now
-produces a validated `SendResult.data` too, not merely an enforced
-completion: the dedicated-extraction-agent story is complete. A tree tool
-that collides with the terminal name fails the send with
-`TerminalToolNameCollision` rather than silently shadowing; 2+ tree
-`<Output>`s fail with `MultipleStructuredOutputs`.
-
-> **Verified by** `__tests__/structured-output.spec.ts` (injection / detection /
-> stop / sibling-calls-first / timeline pairing / steer-proof stop / wrap-up /
-> miss / validation / collision / precedence / steer conflict / capability-aware
-> strategy auto / the double-gap responseFormat fallback / loop-side validation
-> authority for tree-only `<Output>` → typed `data` + `output_delivered`) and
-> `__tests__/structured-send.spec.ts` (the declarative `responseFormat`
-> directive + threading). Both suites drive the canonical
-> `FakeLanguageModelExecutor` (its `seenRuns` ledger + scripted `holdUntil`) —
-> no bespoke executors. The prefix-cache tail-ordering guarantee is verified in
-> `@agentick/tool-executor` (`layered-tools.spec.ts`).
-
-**`session.skills.run` is the flagship consumer** of this `output` path — a
-`session.send` primed with a skill's content, the model as executor. See
-[`@agentick/skills`](../skills/README.md#skillsrun--the-model-executes-the-skill-guides).
-The skills harness reaches `send` through a late-bound `bindRunner(send)`
-capability injected at session install (the App's session-construction fold
-feature-detects the `RunnerBindable` contract — the harness never holds the
-session, only its `send`).
-
-### Injecting a model registry (`models`, #206)
-
-Supply a `ModelRegistry` (provider → prefix → `ModelInfo`, merged over
-`SEED_MODELS`) so the session can resolve the active model's
-`contextWindow` for `useContextInfo`. Registries are federated: adapters
-export fragments, the app merges and injects.
+`fork()` is spawn plus a restore of the parent's live snapshot: the child copies every snapshot-capable surface (timeline, knobs, state, gates) and the tick/usage accounting, gets its own id and lineage, and is **always returned unbound** — a fork never auto-sends. From that instant the two diverge; a knob set on one is invisible to the other. This is the isolation primitive behind `skills.run(name, { isolate: true })`.
 
 ```ts
-import { mergeRegistry, SEED_MODELS } from "@agentick/model";
+const branch = await session.fork();
+await (
+  await branch.send({ messages: [{ role: "user", content: "try the risky plan" }] })
+).result;
+await branch.close(); // the parent never saw it
+```
 
-new SessionHarness(journal, bus, inbox, {
-  /* ... */,
-  models: mergeRegistry(SEED_MODELS, { anthropic: { "claude-": myModelInfo } }),
+Three things are enforced on the parent side:
+
+- **Depth.** Every session carries a `spawnPath` (ancestor ids, root-first) and a ceiling (`createApp({ sessions: { maxSpawnDepth } })`, default 10). A session already at the ceiling throws `SpawnDepthExceededError` — fail-closed against runaway self-spawn. Depth _is_ `spawnPath.length`; there is no second counter.
+- **Attribution.** `spawnPath` is stamped on the child's durable record, on the loop's execution and tick event scopes, and on every event the child's handle emits. With `parentSessionId`, the spawn tree reconstructs from records alone.
+- **Teardown.** The parent's construction signal fans into each child, and the parent disposes its children on close and on abort. Disposal waits for quiescence first, so closing never unmounts a compiler mid-tick. Sub-trees collapse transitively.
+
+Ownership descends: a child inherits its parent's `principal` (not caller-choosable), which is what the wire dispatch gate reads for its same-principal rule. `createSession({ requiredScopes })` sets the complementary ceiling on the work axis — a construction-bound, server-declared scope requirement checked structurally at the wire gate before any policy runs.
+
+## Asking the user
+
+Two surfaces, one substrate. `session.elicit` is the typed sugar and the 90% case; it is the identical `Elicit` interface a tool handler sees as `ctx.elicit`, in-process or over MCP.
+
+```ts
+import { ElicitationCancelled, ElicitationDeclined } from "@agentick/spec";
+
+const name = await session.elicit.text("Your name?");
+const role = await session.elicit.select("Role?", ["admin", "user"] as const);
+
+try {
+  await session.elicit.confirm("Apply changes?");
+} catch (err) {
+  if (err instanceof ElicitationDeclined) log.info({ declined: true });
+  if (err instanceof ElicitationCancelled) log.info({ cancelled: true });
+}
+
+// Non-throwing variants return a discriminated outcome.
+const outcome = await session.elicit.tryConfirm("Apply?");
+if (outcome.status === "accept" && outcome.value) log.info({ applied: true });
+```
+
+`session.elicitation` is the raw substrate underneath — reach for it when you need a bespoke Standard-Schema validator, hints, or timeout/abort control that the sugar doesn't expose. See [@agentick/elicitation](../elicitation) for the full contract.
+
+### Mediating a descendant's ask
+
+An ask raised deep in the ownership tree — a long-running task's `ctx.elicit`, or a spawned sub-agent's — travels up the spawn lineage. A root session resolves it against the real client; a spawned session forwards one hop to its own spawner. You wire none of that. What you _can_ do is answer on the way past:
+
+```ts
+const off = session.interceptEscalation(async (payload) => {
+  if (payload.class === "elicit" && cache.has(payload)) {
+    return { forward: false, response: { outcome: "accepted", value: cache.get(payload) } };
+  }
+  if (isRateLimited(payload)) throw new Error("denied"); // hard deny at the origin
+  return { forward: true }; // fall through to forward or resolve
 });
 ```
 
-### `requiredScopes` — the wire dispatch ceiling (#199)
+`{ forward: false, response }` short-circuits — this hop answered and the client is never bothered. A throw is a hard deny that surfaces as the origin's rejection. `{ forward: true }` falls through. The handler branches on `payload.class` itself; there is no policy DSL. With none registered, behavior is plain forward-and-resolve. The envelope carries a `lineage` path (origin task and session, then each forwarding hop) the interceptor can inspect.
 
-A construction-bound scope ceiling checked at the wire dispatch gate —
-structural, before policy and before any authorizer short-circuit. A
-caller whose claims do not COVER (glob-aware) every listed scope is
-Forbidden regardless of grants. Server-declared only (via
-`CreateSessionInput`); deliberately **not** settable over the wire. It
-requires claim-carrying identities — under a pure grant-table deployment
-a non-empty ceiling makes the session wire-inaccessible, by design.
+## Waking on task completion
 
-### `principal` — the owning principal (ADR 48)
+A backgrounded task that finishes while nothing is observing it wakes its owning session, and the wake becomes a **real turn** through the normal `send` path — journaled, hooked, streamed. So a wake arriving mid-execution steers into it rather than colliding with a second execution, and an idle session runs a fresh one.
 
-The construction-bound identity axis of the session (`SessionHarness.principal`),
-the twin of `requiredScopes` on the work axis. Set from `CreateSessionInput.principal`
-(host-door, or stamped from the authenticated wire caller by `app/create_session`)
-and folded into the durable `SessionRecord.principal`. Inherited by spawned /
-forked children (`spawn()` / `fork()` thread `this.principal` onto the child —
-not caller-choosable). Read by the wire dispatch gate for the same-principal
-target rule (a caller reaching a session owned by another principal is Forbidden)
-and stamped authoritatively onto every emitted event scope by `BaseHarness`.
-`undefined` for a principal-less (local single-user) deployment.
+The synthesized turn is labelled authoritatively, so timelines and clients never mistake it for a user turn:
 
-> **Verified by** `../transport/src/__tests__/session-principal.spec.ts` (the
-> gate engages on the stamped principal) and
-> `../app/src/__tests__/session-principal-lifecycle.spec.tsx` (spawn/fork inherit it).
+```ts
+session.hooks.onBeforeSessionSend((input) => {
+  if (input.metadata?.source === "task-wake") {
+    log.info({ wokenBy: input.metadata.taskId });
+  }
+});
+```
+
+The wake carries bounded completion metadata — task id, terminal status, duration — and never raw output. Whether a task wakes at all, and with what message, is a task-level policy (`wake` per task, or `tasks.defaultWake` app-wide) in [@agentick/tasks](../tasks); the session owns only the receive-and-send half.
+
+## Snapshot and restore
+
+`snapshot()` captures the whole session; `restore()` puts it back. Neither method knows the name of a single layer: both fold **every** snapshot-capable surface generically, keyed under `bridges`.
+
+```ts
+const snap = await session.snapshot();
+snap.bridges.timeline; // persisted log + projection
+snap.bridges.knobs; // knob values
+snap.bridges.state; // K/V state
+// …plus any installed extension that can snapshot — zero session change
+
+await session.restore({ snapshot: snap });
+```
+
+Add a snapshot-capable extension (sandbox, subscriptions, your own) and it round-trips automatically. One authoritative payload per layer, so nothing can diverge from a denormalized copy.
+
+Both are commands, so the hook quartet falls out for free: `onAfterSessionSnapshot` transforms the captured snapshot on its way out (the redaction seam), `onBeforeSessionSnapshot` can veto the capture, and the restore pair mirrors them.
+
+```ts
+session.hooks.onAfterSessionSnapshot((snap) => ({ ...snap, metadata: redact(snap.metadata) }));
+```
+
+**Schema evolution is a callback at the decision point.** A snapshot whose `specVersion` differs from the running version is a migration event. Supply one function and own any version dispatch inside it; supply none and a skew throws `SnapshotVersionMismatch` rather than applying a stale shape.
+
+```tsx
+import { createApp } from "@agentick/app/react";
+
+const app = await createApp(<Agent />, {
+  model,
+  migrateSnapshot: (snap, { from, to }) => upgrade(snap, from, to),
+});
+```
+
+> [!NOTE]
+> This is distinct from resume. A durable `TimelineStore` hydrates the conversation at open, and `createSession` with a known id is create-and-resume. `snapshot()`/`restore()` is the on-demand full-session capture and transplant — it moves knobs, state and every extension too, and it is what a fork is built on.
 
 ## The render ↔ runtime feedback loop
 
-The session is the **per-render fact producer** and the **model
-resolver** for the loop. Each `send` hands the loop two resolvers it
-calls per tick — this is how the JSX tree renders _for the model it is
-about to call_, _within the window it has left_:
+A session is the per-render fact producer for the loop. Each send hands the loop two resolvers it calls per tick, which is how the tree renders _for the model it is about to call_, _within the window it has left_:
 
-- **`resolveRenderContext()`** (ADR 55) — the session folds every
-  `RenderContext` slot it can supply into one envelope: the active
-  model's window (via `effectiveModelInfo(target, models)`) into
-  `contextInfo`, and the active model itself (a projection of the target)
-  into `activeModel`. The loop threads the whole envelope into
-  `renderTree({ renderContext })`; `useContextInfo` / `useActiveModel`
-  read it **synchronously** while producing the IR. Future per-render
-  facts (budget, principal) fold in here as augmented slots — no spec
-  widening per fact.
-- **`resolveModel(modelRef)`** (ADR 56) — resolves against the mount's
-  `ModelBridge` (`bridges.models`). `useModelRegistration` registers
-  tree-declared models on that bridge at render time; the loop looks up
-  `declarations.model.modelRef` per tick and runs _that_ executor +
-  target. No default registration — the loop falls back to the session's
-  `executor`/`target` for the undeclared case. Precedence: **tick-IR >
-  send > session**.
+- The active model's context window and a projection of the model itself fold into one render envelope. `useContextInfo()` and `useActiveModel()` read it synchronously while producing output — that is what makes budget-aware compaction possible without a round trip.
+- A tree-declared `<Model>` is resolved per tick against the model bridge, and the loop runs _that_ executor and target for that tick. Undeclared falls back to the session default.
 
-The loop stays a dumb conduit — no per-fact knowledge. The **backward**
-half of the loop is the state applicator: after each tick the loop calls
-`applyExecutorResult` (append the assistant message + this generation's
-usage) and `applyToolResults` (append tool messages) so the _next_
-render sees them via `<Timeline/>`.
+The backward half closes the loop: after each tick the session appends the assistant message with that generation's usage, then the tool results, so the _next_ render sees them.
 
-**`notifyLifecycle` is the session's continuation decision (ADR 67).** The
-loop calls it once per tick — AFTER the compiler tick-end has settled the
-tree — with the settled `TickResult`, and the session folds every
-continuation predicate it owns into ONE `TickEndForwardDecision`, in tier
-order (mirroring the loop's own resolution):
+```tsx
+import { useContextInfo } from "@agentick/compiler-react";
+import { Timeline } from "@agentick/timeline/react";
 
-1. **stop-force** — a trusted tree `stopAfterTick` (via `useLoopControl`) →
-   `{ kind: "stop" }`. Tier-1; beats everything. Provenance (ADR 51): gates
-   only ever _continue_-force, so a drained `stop` can only be trusted tree
-   code — the model cannot stop-force.
-2. **continue-force** — an active/blocking **gate** (evaluated here via
-   `session.gates.handleTickEnd(result)`), a tree `continueAfterTick`, or
-   **steering** (input appended mid-execution) → `{ kind: "continue" }`. A
-   gate holds the loop open exactly as steering does.
-3. **abstain** — `undefined` → the loop's own default (tool_use), under its
-   `maxTicks` hard cap.
-
-The settle-then-decide order is load-bearing: a tick-end effect may update a
-knob a gate checks, so the tree must settle before the predicates read it.
-Gate evaluation lives here, not in the compiler mount — `useGate` is
-registration-only. Since ADR 89 §4 the SETTLE itself is a session-registered
-`onAfterLoopTick` forwarder (below), awaited in the `loop:tick` command
-cascade — before the command terminal, hence before this decide.
-
-## The lifecycle projection — the session wires it (ADR 89 §4)
-
-The React `useOn*` hooks are a **projection of the command-hook system** —
-there is no bespoke lifecycle feed. The session, as the composition root,
-registers the forwarders at construction (`src/lifecycle-projection.ts`)
-and unhooks them on `close()`:
-
-- **`loop:run-execution` / `loop:tick` / `tool:dispatch`** — tier-2 hooks on
-  the (app-shared) loop + tool executor, identity-filtered by the payloads'
-  `mountId` / `sessionId` so each session projects only its own mount.
-  tick-start and the tick-end **settle** are AWAITED in-cascade; the rest are
-  fire-and-forget. Tool events use the around form (`onToolDispatch`) so a
-  HARD handler failure projects `tool-end (failed)` + `useOnError`
-  (`phase: "tool"`); a FAILED executor terminal projects `useOnError`
-  (`phase: "model"`).
-- **`model:generate[_stream]`** — tier-4 call-scoped middleware wrapped
-  around each `loop.fx.runExecution` (`withCallMiddleware`), so the
-  projection reaches WHICHEVER executor instance runs a tick, including a
-  per-tick `<Model>`-swapped executor (ADR 56) outside the session's
-  interceptor tree.
-- The target is the compiler's optional `LifecycleProjectionTarget`
-  capability (`dispatchLifecycle`); a compiler without it gets no
-  projection.
-
-## `defineSession` — adopter-facing factory
-
-Most adopters use `createApp(MyAgent, options)` which constructs
-sessions via `defineSession` under the hood. For custom session
-shapes (testing, alternative runtime topologies), call directly:
-
-```ts
-import { defineSession } from "@agentick/session";
-
-const factory = defineSession({
-  // ── Required: lifecycle + core verbs ──
-  send: async (input) => {
-    /* returns a SessionExecutionHandle */
-  },
-  snapshot: () => ({
-    /* SessionSnapshot */
-  }),
-  // ── Required: the state-applicator triple the loop calls ──
-  applyExecutorResult: async (input) => ({ appendedEntryIds: [] }),
-  applyToolResults: async (input) => ({ appendedEntryIds: [] }),
-  appendEntry: async (input) => ({ appendedEntryIds: [] }),
-
-  // ── Optional: everything below has a default ──
-  close: async () => {
-    /* ... */
-  },
-  dispatch: async (name, input) => [], // unconfigured → throws "not configured"
-  // Top-level handles — override to expose real state; otherwise no-op stubs.
-  timeline: customTimelineHandle,
-  knobs: customKnobsHandle,
-  state: customStateHandle,
-  elicitation: existingElicitationHarness, // optional; factory builds one if absent
-  tasks: existingTasksHarness, // optional; same
-});
-
-const session = factory({ scopeId: "test-session" });
+function AdaptiveTimeline() {
+  const { utilization } = useContextInfo(); // 0..1 — live, from the session
+  return <Timeline strategy="sliding-window" headroom={(utilization ?? 0) > 0.75 ? 4096 : 8192} />;
+}
 ```
 
-`send`, `snapshot`, and the state-applicator triple
-(`applyExecutorResult` / `applyToolResults` / `appendEntry`) are
-**required**; every other callback defaults to throwing a "not
-configured" error, and the extended verbs (`spawn`, `dispatch`,
-`channel`, `knob`) do the same. `timeline` / `knobs` / `state` default
-to **no-op handle stubs** unless you supply real ones. `elicitation`
-and `tasks` are the only session-scoped harnesses the factory builds
-eagerly on the supplied substrate when omitted; there is no
-`bridges.*` wiring — that plumbing is exclusive to the reference
-`SessionHarness`.
+### Continuation is the session's decision
 
-## Telemetry — nested traces (ADR 77 / 78)
+Once per tick — after the tree has settled — the session folds every continuation predicate it owns into one verdict, in tier order:
 
-> **The full observability model — the one-switch `createApp({ telemetry })`,
-> attribute-key naming, per-call `SendInput.telemetry` (functionId + metadata),
-> usage/cost, and all six enrichment seams — lives in one place: see
-> "Observability" in `@agentick/runtime`'s README.** This section covers
-> only the session-specific nesting mechanics.
->
-> **Per-call identity (rung 2):** `session.send({ telemetry: { functionId,
-metadata } })` stamps every span the send touches (ticks, model calls, tool
-> dispatches) via the tier-4 seam; `functionId` defaults to the app `name`.
-> Active only when app-level enrichment is on. Verified in
-> `__tests__/telemetry.spec.ts` ("rung 2").
+1. **Stop.** A trusted tree `stopAfterTick` (via `useLoopControl`) halts the loop. Gates can only ever force _continue_, so a stop is provably tree code: the model cannot stop-force.
+2. **Continue.** An engaged gate, a tree `continueAfterTick`, or steering (input appended mid-execution). A gate holds the loop open exactly the way a steer does.
+3. **Abstain.** Nothing to say — the loop's own default (pending `tool_use`) applies, under its tick cap.
 
-Because the session runs the execution as ONE Effect fiber (the ADR 77 spine —
-`send → loop → executor → tool`), running it on a tracer runtime yields a
-**nested** span tree for free, with `parentOpId` auto-linked via FiberRef. No
-manual span threading.
+Settle-then-decide is load-bearing: a tick-end effect may set a knob a gate reads, so the tree must settle before the predicates run. That ordering is what makes `useOnTickEnd` usable as a real hook rather than a fire-and-forget notification — and the whole `useOn*` family is a projection of the real command lifecycle, not a bespoke feed.
 
-You bring the tracer (the framework bundles no OpenTelemetry dependency —
-capability, not opinion). Supply a telemetry `Layer` to `createApp`; the app
-builds a `ManagedRuntime` from it ONCE and forwards it (plus the whitelabel
-`telemetryNamespace`) to each session, which runs the composed loop on it:
+## Middleware, guards, and hooks
+
+`session.use(mw)` wraps **this session's** operations — narrower than `app.use`, which wraps every session. Reach for it for concerns bound to one conversation: per-session rate limiting, a redaction pass, request logging keyed to `ctx.sessionId`.
 
 ```ts
-import { NodeSdk } from "@effect/opentelemetry";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
+session.use(async (input, next, ctx) => {
+  log.debug({ session: ctx.sessionId, op: ctx.op, opId: ctx.opId });
+  return next(input);
+});
+```
 
-const telemetry = NodeSdk.layer(() => ({
-  resource: { serviceName: "my-agent" },
-  spanProcessor: new BatchSpanProcessor(new OTLPTraceExporter()),
-}));
+The async form severs the fiber; `session.fx.use` is the in-fiber twin. Because the loop, executors and tool registry are app-shared singletons — construction _siblings_ of a session, not children — middleware that must wrap the model call or a tool dispatch **for one send only** is call-scoped instead: `session.model.use` above is exactly that seam, alive for the fiber of a send and gone when it settles. See [@agentick/runtime](../runtime) for the full tier model and the `use` vs `fx.use` split.
 
+Every public verb routes through the operation runner, so each one mints a typed before/after hook pair:
+
+| Verb                            | Hooks                                                |
+| ------------------------------- | ---------------------------------------------------- |
+| `send`                          | `onBeforeSessionSend` / `onAfterSessionSend`         |
+| `appendEntry`                   | `onBeforeSessionAppend` / `onAfterSessionAppend`     |
+| `applyExecutorResult`           | `onBeforeSessionApplyExecutorResult` / `onAfter…`    |
+| `applyToolResults`              | `onBeforeSessionApplyToolResults` / `onAfter…`       |
+| `model.setModel` / `.setTarget` | `onBeforeSessionSetModel` / `onAfterSessionSetModel` |
+| `snapshot`                      | `onBeforeSessionSnapshot` / `onAfterSessionSnapshot` |
+| `restore`                       | `onBeforeSessionRestore` / `onAfterSessionRestore`   |
+| `spawn` (and `fork`)            | `onBeforeSessionSpawn` / `onAfterSessionSpawn`       |
+| `close`                         | `onBeforeSessionClose` / `onAfterSessionClose`       |
+
+```ts
+// Declarative — returns an Unsubscribe.
+const off = session.hook({
+  onBeforeSessionSend: (input) => ({ ...input, maxTicks: 4 }), // transform
+});
+
+// Per-verb imperative.
+session.hooks.onBeforeSessionAppend((input) => audit.record(input));
+```
+
+A before-hook returning a value **transforms** the input; returning nothing observes; throwing vetoes and the operation aborts. After-hooks are symmetric over the output.
+
+Because `spawn` and `close` are operations, policies that used to be inexpressible are one guard:
+
+```ts
+// "This app's agents may not spawn sub-agents."
+app.guard({ sessionSpawn: () => ({ kind: "veto" as const, reason: "no-subagents" }) });
+
+// Hold teardown open for a drain — but only on a genuine end.
+session.hooks.onBeforeSessionClose((input) =>
+  input.reason === "closed" ? waitForDrain() : undefined,
+);
+```
+
+`close` carries its provenance. `{ reason: "closed" }` is a real session end; `{ reason: "evicted" }` is what the app's idle sweep and memory cap pass, and it is transparent **paging** — the durable record and the timeline store survive, the session reconstructs on its next open, and app-level close handlers do not fire. Page-out and hangup take the same code path; the record tells them apart, not the control flow.
+
+> [!IMPORTANT]
+> These operations are hookable but **not** wire-addressable. `SendInput` carries non-serializable per-call overrides (a live executor, an `AbortSignal`, tool registrations with real handlers), and `spawn` takes an agent root in and hands a live session out — none of that has a wire form. The gateway exposes the serializable porcelain (`session/send`, `session/respond_to_elicitation`) instead.
+
+## Tracing a send
+
+You bring the tracer; the framework bundles no OpenTelemetry dependency. Supply a telemetry `Layer` to `createApp` and every session runs its executions on the resulting runtime.
+
+```tsx
+import { createApp } from "@agentick/app/react";
+
+// `telemetryLayer` is an Effect Layer you build yourself — e.g.
+// `NodeSdk.layer(…)` from @effect/opentelemetry wrapping an OTLP exporter.
 const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
-  telemetry, // → session.send now emits a nested trace to your exporter
-  telemetryNamespace: "acme", // whitelabels the attribute keys (acme.op_id, …)
+  model,
+  telemetry: telemetryLayer,
+  telemetryNamespace: "acme", // whitelabels the attribute keys — acme.op_id, …
 });
-
-await (await session.send({ messages })).result;
 ```
 
-A single `session.send` produces:
+Because one send is one fiber, nesting is free — no manual span threading. A single `session.send` yields:
 
 ```
 loop:command:run-execution                 (the execution span — root)
@@ -595,618 +466,182 @@ loop:command:run-execution                 (the execution span — root)
 └─ tool:command:dispatch                    (one per parallel tool call)
 ```
 
-Every child's `<ns>.parent_op_id` equals the execution's `<ns>.op_id`. Without
-a telemetry Layer, spans emit against Effect's no-op tracer (discarded) — the
-run is otherwise identical. Verified in `__tests__/telemetry.spec.ts`.
+Every child's `parent_op_id` equals the execution's `op_id`. Without a Layer, spans emit against a no-op tracer and the run is otherwise identical.
 
-> **Known gap:** the namespace whitelabels SESSION-owned spans; the shared spine
-> harnesses carry their own (default `"agentick"`). A whole-spine whitelabel
-> needs the namespace read from fiber context — `TODO(stage-4:
-fiber-context-namespace)`. Nesting is unaffected.
+Per-call identity rides the send, and stamps every span it touches — ticks, model calls, tool dispatches:
 
-## Middleware — per-session (tier 2) and per-send (tier 4)
-
-`session.use(mw)` wraps **this session's own** operations (ADR 76, tier 2) —
-narrower than `app.use` (which wraps every session; tier 3). Use it for
-session-scoped concerns bound to one conversation: per-session rate limiting,
-a redaction pass, request logging keyed to `ctx.sessionId`.
-
-```typescript
-// Async form (severs the fiber; reads ctx). Effect form is `session.fx.use`.
-session.use(async (input, next, ctx) => {
-  log.debug("session op", { session: ctx.sessionId, op: ctx.opId });
-  return next(input);
+```ts
+await session.send({
+  messages,
+  telemetry: { functionId: "triage", metadata: { tenant: "acme" } },
 });
 ```
 
-Because the loop / executor / tool harnesses are shared singletons (construction
-_siblings_, not children of the session), middleware that must wrap **the model
-call or a tool dispatch for one send only** is tier 4 — `withCallMiddleware`,
-scoped to the fiber of that `send` and gone when it settles. That's the ADR 77
-spine paying off: one send is one fiber, so a call-scoped FiberRef reaches across
-the shared harnesses. See [runtime README — Operation middleware](../runtime/README.md#operation-middleware--three-tiers-adr-76)
-for the full tier model and the `use` vs `fx.use` split.
+`functionId` defaults to the app's `name`, so a single-purpose app gets function-level traces with no configuration. The full observability model — attribute naming, usage and cost, the enrichment seams — is documented once, in [@agentick/runtime](../runtime).
 
-## Command hooks — the session verbs are hookable (ADR 80 / 83)
+## Listing and resuming sessions
 
-Every public session verb routes through `runOperation` (via the private
-`sessionOp` wrapper), so each fires the ADR-83 interceptor seam — guards,
-`.use()` middleware, and the derived **command lifecycle hooks** — plus the
-full phase contract (`requested` → `before` → terminal). The verbs and their
-minted hook names:
+Two structures, deliberately unmerged. The app's live registry maps ids to live sessions for routing; the durable store maps ids to `SessionRecord`s and is the resume index behind every "list my conversations" screen.
 
-| Verb                       | CommandRegistry key             | Hooks                                                |
-| -------------------------- | ------------------------------- | ---------------------------------------------------- |
-| `send`                     | `session:send`                  | `onBeforeSessionSend` / `onAfterSessionSend`         |
-| `appendEntry`              | `session:append`                | `onBeforeSessionAppend` / `onAfterSessionAppend`     |
-| `applyExecutorResult`      | `session:apply-executor-result` | `onBeforeSessionApplyExecutorResult` / `onAfter…`    |
-| `applyToolResults`         | `session:apply-tool-results`    | `onBeforeSessionApplyToolResults` / `onAfter…`       |
-| `model.setModel/setTarget` | `session:set-model`             | `onBeforeSessionSetModel` / `onAfterSessionSetModel` |
-| `snapshot`                 | `session:snapshot`              | `onBeforeSessionSnapshot` / `onAfterSessionSnapshot` |
-| `restore`                  | `session:restore`               | `onBeforeSessionRestore` / `onAfterSessionRestore`   |
-| `spawn` (and `fork`)       | `session:spawn`                 | `onBeforeSessionSpawn` / `onAfterSessionSpawn`       |
-| `close`                    | `session:close`                 | `onBeforeSessionClose` / `onAfterSessionClose`       |
+|          | Live registry        | `SessionStore`                                              |
+| -------- | -------------------- | ----------------------------------------------------------- |
+| Value    | the live session     | a `SessionRecord`                                           |
+| Purpose  | routing, interaction | durable, queryable metadata                                 |
+| Lifetime | dropped on close     | the superset — every non-ephemeral session, closed included |
+| Read via | `app.getSession(id)` | `app.listSessions(query)` / `app.getSessionRecord(id)`      |
 
-Kebab `-what` segments PascalCase into the hook name (`apply-executor-result` →
-`ApplyExecutorResult`), so every verb yields a clean, dot-accessible hook.
-
-```typescript
-// Declarative (returns an Unsubscribe):
-const off = session.hook({
-  onBeforeSessionSend: (input) => reshape(input), // transform, or void to observe, or throw to veto
-});
-
-// Per-verb imperative (typed Proxy):
-session.hooks.onBeforeSessionAppend((input) => audit(input));
+```ts
+const recent = await app.listSessions({ status: "idle", updatedAfter: Date.now() - 86_400_000 });
+await app.setSessionMeta("s:1", { title: "Release triage" });
 ```
 
-A before-hook returning a value **transforms** the input; `void` passes through;
-`throw` vetoes (the op aborts on the `E` channel). After-hooks are symmetric over
-the output.
+Records are written off the critical path — one write per status transition, never read back during render. `title`, `description` and `metadata` are yours: the framework stores them and is blind to their semantics. There is no `currentTick` on a record, because a tick is execution-local. `InMemorySessionStore` is the bundled default; any adapter that passes `runSessionStoreConformance` swaps in.
 
-### Lifecycle verbs — `spawn` and `close` (ADR 92 Family 2)
+## Building a session yourself
 
-`spawn` / `fork` and `close` joined the table above in ADR 92's Slice B; before
-it they were plain methods, which made two policies inexpressible.
+The reference implementation takes its **substrate positionally** — journal, bus, inbox, typically inherited from the app — and everything else in an options bag. The positional shape keeps "substrate flows from the parent by default" visible at every call site.
 
-**Spawn is two linked records.** A spawn traverses two real layers, so it
-produces two records, and the second names the first as its `parentOpId`:
+```tsx
+import { mergeRegistry, SEED_MODELS } from "@agentick/model";
+import { SessionHarness } from "@agentick/session";
 
-| Op                                 | Layer   | Owns                                                                     |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------ |
-| `session:command:spawn`            | session | depth ceiling (SP4), lineage extension (SP5), principal descent (ADR 48) |
-| `app:command:create-child-session` | app     | construction, registry admission, LRU accounting                         |
-
-The child-create op's scope carries the whole lineage — `sessionId` (the child),
-`parentSessionId`, and `spawnPath` — so the spawn tree reconstructs from the
-journal alone. A `fork` adds two more records around them (`session:snapshot`
-on the parent, `session:restore` on the child), one per real layer.
-
-```typescript
-// "This agent may not spawn sub-agents" — previously inexpressible; the only
-// bound was the framework's own `maxSpawnDepth` ceiling.
-app.guard((_input, ctx) =>
-  ctx.op === "SessionSpawn" ? { kind: "veto", reason: "no-subagents" } : undefined,
-);
-```
-
-The child-create verb is deliberately distinct from `app:create-session`: the two
-share a **body**, not an envelope, so a guard on host session creation does not
-silently police spawns, and vice-versa. The ADR-48 `onSessionCreate` hook still
-fires for spawns exactly as before — the promotion added the envelope, not a
-second hook.
-
-**Close is bus-only, and eviction routes through it.** `session:command:close`
-is marked `"bus-only"` in the harness's `JournalingPolicy.override`: the body
-reaches substrate teardown, so a terminal appended afterwards could target a
-journal an `onClose` handler already closed (the same rule `app:close-app` and
-`gateway:close` follow). The input carries provenance:
-
-```typescript
-await session.close(); // { reason: "closed" } — a genuine session end
-await session.close({ reason: "evicted" }); // what the app's LRU / idle sweep passes
-```
-
-`"evicted"` is transparent **paging**, not a lifecycle end: the durable
-`SessionRecord` and timeline store survive, the session reconstructs on its next
-open, and the app-level `onSessionClose` handlers do not fire. Page-out and
-hangup take the **same** code path — the record tells them apart, not the
-control flow.
-
-```typescript
-// Hold teardown open for a drain:
-session.hooks.onBeforeSessionClose((input) =>
-  input.reason === "closed" ? waitForDrain() : undefined,
-);
-```
-
-### Wire limitation — hookable, NOT addressable (ADR 51)
-
-These ops are the **in-process door only**. `SendInput` carries non-serializable
-per-call overrides (`executor`, `target`, `signal`, and tool registrations with
-_live_ handlers) that, by ADR 51 §1.2, cannot cross the wire — so **no wire
-`CommandDescriptor` is declared** for the session verbs. `spawn` is in the same
-position for the same reason (a JSX agent root in, a live session out). Wire addressability
-would require a designed serializable input subset (`messages` + `maxTicks` +
-`stream` — the porcelain the wire's `session/send` already carries), which
-remains future work. `session:dispatch` (name + JSON input) is fully
-serializable and is the natural first wire declaration when that pass lands.
-
-## Snapshot / restore — the generic bridge fold (ADR 27 "Step 6")
-
-`session.snapshot()` and `session.restore(input)` are commands (see the table
-above), so the **persist/restore hook quartet** falls out of the CommandRegistry
-derivation — no bespoke callback slots.
-
-**Generic composition.** Neither method hardcodes `timeline`/`knobs`. They fold
-**every** `SnapshotCapable` bridge generically (feature-detection via the spec
-`isSnapshotCapable` guard — the same pattern as the channel `snapshotProviders()`
-scan). Each bridge's state lands under `SessionSnapshot.bridges[name]`:
-
-```typescript
-const snap = await session.snapshot(); // Promise<SessionSnapshot>
-snap.bridges.timeline; // TimelineHarnessSnapshot ({ persisted, projection, … })
-snap.bridges.knobs; // knob value map
-snap.bridges.state; // K/V state map
-// …plus any installed SnapshotCapable extension bridge — ZERO session change
-
-await session.restore({ snapshot: snap }); // fans importSnapshot() back out
-```
-
-A new SnapshotCapable extension harness (sandbox, subscriptions, …) round-trips
-automatically. The single authoritative payload per bridge avoids the divergence
-a denormalized top-level copy would invite.
-
-**The hooks map to v1 parity.** `onAfterSessionSnapshot` (transform the output)
-is the v1 `onPersist` **augment/redact** seam; `onBeforeSessionSnapshot` vetoes.
-`onBefore/AfterSessionRestore` are the v1 `onRestore` parity.
-
-```typescript
-// Redact before the snapshot leaves the process (v1 onPersist):
-session.hooks.onAfterSessionSnapshot((snap) => ({ ...snap, metadata: redact(snap.metadata) }));
-```
-
-**The migration seam.** A snapshot whose `specVersion` differs from the running
-`SPEC_VERSION` is a schema-evolution event. Supply a typed `migrateSnapshot`
-callback (construction-bound on the session, or `createApp({ migrateSnapshot })`)
-— invoked at the restore version-check decision point to bring the old shape
-forward. With none supplied, a skew throws `SnapshotVersionMismatch` (fail-closed
-— no silent stale apply). Per the seam-over-setting rule this is one callback at
-the decision point, not a version registry; the adopter owns any version dispatch
-inside it.
-
-```typescript
-const app = await createApp(Agent, {
-  model,
-  migrateSnapshot: (snap, { from, to }) => upgrade(snap, from, to),
+const session = new SessionHarness(journal, bus, inbox, {
+  sessionId: "s:1",
+  agent: <Agent />, // opaque — forwarded to the compiler at mount
+  compiler: myCompiler,
+  loop: myLoop,
+  modelExecutor: myModelExecutor,
+  toolExecutor: myToolExecutor,
+  target: myTarget, // the default model; overridable per send
+  defaultMaxTicks: 8,
+  // The model registry is how the session resolves the active model's context
+  // window for `useContextInfo`. Registries are federated — adapters export
+  // fragments, you merge and inject.
+  models: mergeRegistry(SEED_MODELS, { anthropic: { "claude-": myModelInfo } }),
 });
 ```
 
-> Distinct from the ADR-49 open-or-rehydrate path (a durable `TimelineStore`
-> auto-hydrates the persisted log at construction). `snapshot()`/`restore()` are
-> the on-demand full-session capture/transplant — they round-trip knobs, state,
-> and every extension bridge, not just the timeline.
+For a session whose orchestration is fundamentally different — a test double, an alternative topology — `defineSession` builds a conforming session from callbacks. `send`, `snapshot` and the state-applicator triple the loop calls are required; every other verb defaults to throwing "not configured", and `timeline` / `knobs` / `state` default to no-op handles.
 
-## Model selection / swap — `session.model` (ADR 89 §2)
+```ts
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { defineSession } from "@agentick/session";
 
-`session.model` is a **facade**, not a harness. The session already owns the
-stable model-selection state — the construction-bound default `RegisteredModel`
-(`this.modelExecutor` + `this.target`), the per-tick `resolveModel`, and the
-`input.modelExecutor ?? this.modelExecutor` override — so cross-swap concerns
-live here as a thin projection, not a new harness sibling. (The escape hatch —
-promote to a real `BaseHarness` if the model layer ever needs its own identity /
-inbox-addressability / lifecycle FSM — is documented in ADR 89 §2.)
+const factory = defineSession({
+  send: async () => scriptedHandle,
+  snapshot: () => scriptedSnapshot,
+  applyExecutorResult: async () => ({ appendedEntryIds: [] }),
+  applyToolResults: async () => ({ appendedEntryIds: [] }),
+  appendEntry: async () => ({ appendedEntryIds: [] }),
+  timeline: customTimelineHandle, // override to expose real state
+});
 
-```typescript
-session.model.current; // the session-default RegisteredModel in effect now
-
-// Swap the session default — the runner AND its target. Journaled + hookable
-// via the `session:set-model` command; effective on the NEXT send (never
-// mid-execution). setTarget swaps ONLY the target (keeps the current runner).
-await session.model.setModel({ modelExecutor: gpt4o, target: gpt4oTarget });
-await session.model.setTarget({ ...target, modelId: "gpt-4o-mini" });
-
-// Policy — veto a swap (onBeforeSessionSetModel throws → the command aborts):
-session.hook({
-  onBeforeSessionSetModel: (input) => {
-    if (denylist.has(input.target.modelId)) throw new Error("model not allowed");
-  },
+const session = factory({
+  scopeId: "test-session",
+  journal: new MemoryJournal(),
+  bus: new LocalEventBus(),
+  inbox: new LocalInbox(),
 });
 ```
 
-### `setModel` accepts an adapter too — parity with construction
-
-`setModel` takes **either** overload form, mirroring construction's
-`createApp({ model: openai("gpt-4o") })` sugar:
-
-- a `RegisteredModel` (`{ modelExecutor, target }`) — BYO executor, used as-is;
-- a bare `LanguageModelAdapter` (`openai("gpt-4o")`, `anthropic(...)`, …) —
-  wrapped in an executor **for you**.
-
-```typescript
-// Ergonomic parity — pass the same adapter sugar you'd pass at construction.
-await session.model.setModel(openai("gpt-4o"));
-```
-
-The session stays **adapter-agnostic**: it never imports
-executor-construction machinery. The app owns the adapter→executor build (the
-same `LanguageModelExecutor`-on-the-app-substrate path the construction-time
-`model` slot uses) and injects it as a `buildModelExecutor` closure. Both
-overload forms normalize to a `RegisteredModel` **before** the
-`session:set-model` command, so `onBeforeSessionSetModel` (the veto path) sees
-identical input regardless of which form the caller passed.
-
-A **BYO-executor app** — one constructed with `modelExecutor` rather than a
-`model` adapter — opted out of the app's adapter-wrapping machinery, so it
-injects no builder; passing an adapter to `setModel` then throws
-`ModelExecutorBuilderMissingError`. Pass a `RegisteredModel` there instead.
-
-### Interceptors that PERSIST across a `setModel` swap — the payoff
-
-A model swap can swap the whole executor (a different adapter), so an
-interceptor registered on executor-A evaporates once you swap to executor-B.
-`session.model.use` / `.guard` solve this **without a new harness**: they
-register interceptors op-scoped to the `model:generate[_stream]` commands (ADR
-89 §1), riding the **tier-4 call-middleware seam** (the same seam the §4
-lifecycle projection uses), not any executor instance. The ADR-77 one-fiber
-spine threads them to whichever executor issues a send's model calls — including
-a per-tick `<Model>`-swapped executor (ADR 56) — so, registered once, they hold
-across every subsequent swap.
-
-```typescript
-// A cost/redaction transform on the model call — survives setModel swaps.
-// The handler is a standard AsyncMiddleware: (input, next, ctx) — the same
-// InterceptorCtx every middleware receives (log / trace / metrics / opId).
-const offUse = session.model.use(async (input, next, ctx) => {
-  meter.record(input, { opId: ctx.opId });
-  return next(input);
-});
-
-// A guard on the model call — admission control (proceed | veto | replace |
-// defer). Survives setModel swaps; composes OUTERMOST (deny-before-transform).
-const offGuard = session.model.guard((input, ctx) =>
-  overBudget(ctx) ? { kind: "veto", reason: "cost ceiling" } : undefined,
-);
-```
-
-**Effective-model precedence (unchanged).** Per-tick `<Model model={…}>`
-(`resolveModel`) > per-send `send({ modelExecutor, target })` > the session
-default. `setModel` changes only the DEFAULT; the loop resolves the effective
-`RegisteredModel` per tick exactly as before.
-
-## Spawn hardening — depth, lineage, teardown (SP4–SP6)
-
-`session.spawn(input)` creates a child session bound to the same app (it needs a
-`SpawnContext`, injected by the app). The hardening is threaded on
-`SessionHarnessOptions` and enforced by the harness:
-
-- **Depth ceiling (SP4).** `maxSpawnDepth` (from `createApp({ sessions:
-{ maxSpawnDepth } })`, default 10 — v1 `MAX_SPAWN_DEPTH` parity) is stamped on
-  every session. `spawn()` throws the typed `SpawnDepthExceededError` when the
-  parent's lineage is already at the ceiling — fail-closed against runaway
-  self-spawn. Depth is `spawnPath.length`; there is no separate depth counter.
-- **Lineage (SP5).** A child's `spawnPath` is `[...parent.spawnPath,
-parentId]` — the ancestor chain, root-first. It is stamped on the child's
-  `SessionRecord.spawnPath`, threaded into the loop's `run-execution` / `tick`
-  `EventScope` (bus/journal envelope attribution), and stamped on every
-  `StreamEvent` the child's execution handle emits. With `parentSessionId`, the
-  records reconstruct the spawn DAG.
-- **Teardown (SP6).** The parent's construction signal is fanned into each child
-  at spawn, so a parent abort tears down the child's in-flight work (merged into
-  the child's execution signal, PA1 plumbing). The parent tracks its children
-  (`_children`) and disposes them on close (`onClose`) AND on construction-signal
-  abort, via `SpawnContext.disposeChildSession`. Abort-driven disposal awaits
-  `whenQuiescent()` first, so closing never unmounts the compiler mid-tick.
-  Children collapse their own sub-trees transitively.
-
-### Same-image children + `session.fork()` (C2)
-
-The session retains its own agent root (`agentRoot`, from `SessionHarnessOptions.agent`),
-so `SpawnInput.agent` is **optional**: `spawn({})` defaults the child to a
-same-image copy of this session (the parent resolves `input.agent ?? this.agentRoot`
-before crossing the `SpawnContext` boundary, which stays required-agent).
-
-`session.fork(input?)` builds on that: it is `spawn` (no send, own agent root) +
-`restore` of the parent's live `snapshot()`. The child copies every
-`SnapshotCapable` bridge's state (timeline, knobs, state, gates) plus the
-tick/usage accounting, gets its **own** `sessionId` and spawn lineage, and is
-**always returned unbound** — a fork never auto-sends. Post-fork the two
-sessions diverge: a knob set or a new send on one is invisible to the other.
-This is the isolation primitive `skills.run(name, { isolate: true })` routes
-through (via the session-installed `bindIsolationRunner` closure:
-`fork → send → dispose-after-settle`). Verified by
-`@agentick/app` `src/__tests__/fork.spec.tsx` (copy + lineage + divergence)
-and the spawn-default-agent case in `src/__tests__/extended-surface.spec.ts`.
-
-### Per-execution tool restriction — `SendInput.allowedTools` (C2)
-
-A send may carry `allowedTools?: readonly string[]` (canonical tool names). The
-loop filters the **merged, precedence-resolved** model-visible tool list down to
-that allowlist — applied after the compiler-tools merge, **before**
-structured-output terminal-tool injection (the terminal tool is loop-owned and
-exempt). The post-restriction count feeds `"auto"` strategy resolution, so an
-empty result behaves as `toolsMounted: false`. Composes with `SendInput.tools`
-(additive): an execution-scoped tool still must be named in `allowedTools` to
-reach the model. The **dispatch door is unaffected** — restriction scopes only
-what the model sees. Verified by `src/__tests__/tool-restriction.spec.ts`.
+`elicitation`, `tasks` and `resources` are the only layers the factory builds eagerly on the supplied substrate when omitted. There is no bridge wiring — that plumbing belongs to `SessionHarness`.
 
 ## API
 
-Full surface in the [typedoc]. The package root exports the thin set an
-adopter or the app harness actually constructs against:
+### `@agentick/session`
 
-| Export                                                 | What                                                                           |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `SessionHarness` / `SessionHarnessOptions`             | Reference `SessionHarnessProtocol` impl + its construction options bag.        |
-| `defineSession` / `DefineSessionInput`                 | Callback-style factory for custom / test session topologies.                   |
-| `SessionRuntime`                                       | Per-session status / tick / usage projection (advanced; the harness owns one). |
-| `InMemorySessionStore`                                 | Bundled in-memory `SessionStore` default (E11) — the durable session registry. |
-| `runSessionStoreConformance`                           | Conformance suite every `SessionStore` adapter must pass.                      |
-| `SessionRecord` / `SessionStore` / `SessionStoreQuery` | Re-exported from spec — the E11 record + port + query.                         |
-| `SessionSubstrateParent`                               | Re-exported from spec — portable factory-typing for substrate overrides.       |
+| Export                                                 | Purpose                                                        |
+| ------------------------------------------------------ | -------------------------------------------------------------- |
+| `SessionHarness` / `SessionHarnessOptions`             | The reference implementation and its construction options      |
+| `defineSession` / `DefineSessionInput`                 | Callback-built session for custom or test topologies           |
+| `SessionModelFacade` / `ModelSelectionHandle`          | What `session.model` is, and its type                          |
+| `SetModelInput`                                        | The input a `setModel` / `setTarget` hook sees                 |
+| `SessionRuntime`                                       | Per-session status / tick / usage projection (advanced)        |
+| `InMemorySessionStore`                                 | The bundled in-memory session registry                         |
+| `SessionRecord` / `SessionStore` / `SessionStoreQuery` | The durable record, its port, and its query — re-exported      |
+| `SessionSubstrateParent`                               | Portable typing for substrate override factories — re-exported |
 
-## The durable session registry — `SessionStore` (E11)
+### `session.send(input)`
 
-The `SessionStateStore` above is the harness's synchronous in-memory metadata
-cell (status / tick / usage). The **`SessionStore`** is the harness's _durable_
-metadata mirror — the collection-archetype store (`@agentick/store`
-`MemoryCollection` under the bundled `InMemorySessionStore`) holding
-`sessionId → SessionRecord`. It is bigger than a metadata bag: per the data-layer
-plan (E11) it is the **session registry + resume index + the backing for every
-"list / resume my sessions" surface**, and the `SessionRecord` is the natural
-home for the Phase-4 per-store cursor **manifest** (`stores?`, not populated
-yet).
+| Slot                                | Effect                                                             |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `messages`                          | Appended the moment they arrive; visible to the first render       |
+| `output`                            | Live schema → validated `SendResult.data` (in-process only)        |
+| `responseFormat`                    | Serializable structured-turn directive, applied every tick         |
+| `tools`                             | Execution-scoped tool declarations, removed when the send ends     |
+| `allowedTools`                      | Allowlist of canonical names the model may see                     |
+| `onBusy`                            | `"steer"` joins an in-flight run; `"queue"` waits for idle         |
+| `modelExecutor` / `target`          | Per-call model override — beats the session default                |
+| `stream`                            | Per-call streaming; falls back to session, app, then capability    |
+| `maxTicks` / `timeoutMs` / `signal` | Per-call bounds and cancellation                                   |
+| `toolConcurrency`                   | `"unbounded"` (default) or a positive cap for a tick's tool calls  |
+| `telemetry`                         | `{ functionId, metadata }` stamped on every span this send touches |
+| `props` / `metadata`                | Component props for this run; adopter bag carried on the execution |
 
-### The live-registry vs. record-store split
+### Session verbs
 
-Two structures, deliberately NOT merged:
+| Method                          | Returns                                                        |
+| ------------------------------- | -------------------------------------------------------------- |
+| `send(input)`                   | `Promise<SessionExecutionHandle>` — `.result` + `.events()`    |
+| `spawn(input)`                  | A child session, or its handle when `send` is supplied         |
+| `fork(input?)`                  | An unbound same-image child with the parent's state copied     |
+| `snapshot()` / `restore(input)` | Capture / reapply every snapshot-capable layer                 |
+| `close(opts?)`                  | Teardown; `{ reason: "evicted" }` is paging, not an end        |
+| `channel(name)`                 | Per-channel publish/subscribe plus correlated request/response |
+| `interceptEscalation(handler)`  | Mediate a descendant's input request; returns an `Unsubscribe` |
+| `use` / `guard` / `hook`        | Session-scoped interceptors and the command hook surface       |
 
-|             | Live registry (app)               | `SessionStore` (this)                                             |
-| ----------- | --------------------------------- | ----------------------------------------------------------------- |
-| Key → value | `sessionId → live SessionHarness` | `sessionId → SessionRecord`                                       |
-| Purpose     | routing / interaction             | durable, queryable metadata                                       |
-| Lifetime    | ephemeral — dropped on close      | the **superset** — every non-ephemeral session ever, incl. closed |
-| Read via    | `app.getSession(id)`              | `app.listSessions(query)` / `app.getSessionRecord(id)`            |
+### `@agentick/session/testing`
 
-The app's `getSession` routes to the live object; `listSessions` /
-`getSessionRecord` read the durable store. They coexist — this run is additive
-and does not replace `SessionSnapshot` or the live registry.
+| Export                                                    | Purpose                                        |
+| --------------------------------------------------------- | ---------------------------------------------- |
+| `runKillResumeAcceptance` / `KillResumeAcceptanceOptions` | Kill-and-resume acceptance for a store backing |
+| `runSessionStoreConformance` / `…Options`                 | Certify a `SessionStore` adapter               |
 
-### How the harness populates its record
+## Patterns
 
-The `SessionHarness` mirrors its metadata into an injected `SessionStore` **off
-the critical path** — `void store.put(record).catch(() => undefined)`, exactly
-like the tasks store, and with **NO projection** (the record is written, never
-read back during render). One subscription to the `SessionStateStore`'s metadata
-notify catches every `setStatus` (running / idle / failed / closed); the
-execution boundary bumps `executionCount` + toggles `currentExecutionId` before
-`setStatus`, so a single write per transition captures the full delta:
+**Conversation.** [@agentick/timeline](../timeline) owns the log, the projection, and compaction. A session appends to it; `<Timeline/>` decides what folds into context.
 
-| Site              | Record delta                                                              |
-| ----------------- | ------------------------------------------------------------------------- |
-| construction      | initial record — `createdAt`, `status: idle`, `executionCount: 0`         |
-| status transition | `status` + `updatedAt`                                                    |
-| execution start   | `currentExecutionId` set, `executionCount++`, `status: running`           |
-| execution end     | `currentExecutionId` cleared, `usage` aggregated, `status: idle`/`failed` |
-| `close()`         | `status: closed`                                                          |
+**Parenting.** [@agentick/app](../app) constructs sessions, owns the live registry and the eviction policy, and injects the spawn context that makes `spawn`/`fork` work.
 
-`title` / `description` / `metadata` are **app-owned slots** (the framework
-STORES them, never populates their semantics). Seed them at
-`createSession({ title, description })` or set them later via
-`app.setSessionMeta(sessionId, ...)` (routed through the live session's
-`setMeta`, which is the single writer). There is **no `currentTick`** on the
-record — a tick is execution-local, so it is execution-scoped runtime, not
-session metadata.
+**Skills.** [@agentick/skills](../skills) runs a skill as a send primed with the skill's content, riding the structured-output path — `isolate: true` routes through `fork`.
 
-`session.send` / `snapshot` / `spawn` / `fork` / `channel` / `knob` /
-`gate` / `tools` and the harness surfaces (`timeline`, `knobs`, `state`,
-`gates`, `tasks`, `resources`, `elicitation`, `elicit`) are all defined on
-`SessionHarnessProtocol` in `@agentick/spec` (built up by each
-harness package's module augmentation) — see the individual harness
-package READMEs for each surface's contract.
+**Wire.** [@agentick/gateway](../gateway) serves the serializable subset (`session/send`, elicitation responses, timeline history) and enforces the principal and scope rules a session carries.
 
-**`@agentick/session/testing`** — `runKillResumeAcceptance` +
-`KillResumeAcceptanceOptions`, the parameterized ADR 49 open-or-rehydrate
-acceptance suite that store adapters (memory / fs / postgres) run against
-their backing.
-
-[typedoc]: https://example.com/typedoc/session
-
-## Status
-
-- ✅ SessionHarness construction + lifecycle
-- ✅ Per-session timeline / knobs / state / gates / elicitation / tasks / resources
-- ✅ ToolBridge integration with layered tool registry (#135-#141)
-- ✅ `session.elicit` sugar surface (#272 / ADR 43)
-- ✅ Session execution handle (`send` → `Promise<SessionExecutionHandle>`)
-- ✅ Session snapshot/restore (`snapshot()` / `restore()` commands) —
-  generic `SnapshotCapable` bridge fold (ADR 27 "Step 6"), persist/restore
-  hook quartet, and the typed `migrateSnapshot` schema-evolution seam
-- ✅ Open-or-rehydrate resume from an injected `TimelineStore` (ADR 49)
-- ✅ Per-tick `RenderContext` production (`contextInfo` + `activeModel`,
-  ADR 55) and model resolution against the `ModelBridge` (ADR 56)
-- ✅ Lifecycle bridge driving the compiler `useOn*` hook family (#206)
-- ✅ Model registry injection (`models`, #206) + `requiredScopes`
-  ceiling (#199)
-- ✅ Durable `SessionStore` (E11) — `InMemorySessionStore` + record
-  population at construction / status / execution boundary / close
-- ✅ `session.model` selection / swap facade (ADR 89 §2) — `setModel` /
-  `setTarget` via the journaled + hookable `session:set-model` command;
-  `use` / `guard` interceptors on the model call that persist across swaps
-- ⏳ `session.prompts` — depends on whether withPrompts is mounted (ADR 42 audit)
+**Observability.** [@agentick/runtime](../runtime) owns the interceptor tiers, the operation journal, and the telemetry model this package plugs into.
 
 ## Roadmap & known gaps
 
-- **`activeModel` is construction-bound.** The model is `session.target`,
-  so `RenderContext.activeModel` is stable across ticks. Under #169 it
-  becomes IR-derived per tick (`TODO(trail-per-tick-model)`).
-- **Session verbs are hookable, not wire-addressable.** The verbs DO run
-  through `runOperation` (the command-hooks table above), but `SendInput`
-  carries non-serializable per-call overrides (`executor`, `target`,
-  `signal`, live tool handlers), so no wire `CommandDescriptor` is
-  declared for them — `TODO(adr-51-session-verbs)`. The gateway's
-  `session/send` (the serializable porcelain subset) and
-  `session/respond_to_elicitation` are already routed.
-- **Inbox dispatch mostly not wired.** `handleMessage` handles the
-  `session:escalation` message type — the terminal / forward hop of ADR 69
-  request escalation (a task or sub-agent asking the client for input;
-  root session resolves it against its elicitation harness, a spawned
-  session forwards to its `parentSessionId`). It consults a registered
-  `interceptEscalation` handler first (T2a — answer / deny / forward) and
-  appends a `lineage` provenance entry per forward hop. Every other message
-  type still rejects with `HandlerError` (Phase 4e+). The recursive forward
-  hop + interception + lineage are tested (T2a); the cross-process child
-  elicit bridge is `TODO(ADR-69 T2b)` — see
-  [ADR 69](../../docs/proposals/v2/blueprint/69-request-escalation.md).
-- **Snapshot/restore round-trips the full session.** `SessionSnapshot.bridges`
-  now folds every `SnapshotCapable` bridge — the timeline slice carries BOTH
-  the persisted log AND the (potentially compacted) projection
-  (`TimelineHarnessSnapshot`), plus knobs, state, and any extension bridge.
-  `session.restore()` fans `importSnapshot()` back out generically. Done in
-  recovery pass #1 (was the "Step 6 SnapshotHarness" placeholder).
-- **`SessionStore` coexists with `SessionSnapshot`; the manifest is not
-  built.** The durable `SessionRecord` is written alongside (not instead of)
-  `SessionSnapshot`. The `SessionRecord.stores?` per-store cursor manifest is a
-  documented `TODO(store-phase-4)` placeholder (commented in
-  `spec-next/protocol/session-store.ts`) — a cross-store restore manifest is a
-  separate future step from the in-process `snapshot()`/`restore()` shipped here.
-- **`setSessionMeta` targets LIVE sessions only.** Editing a closed
-  session's record (absent from the live registry) needs a store
-  read-modify-write path — `TODO(store-phase-4)`.
+- **Session verbs are not wire-addressable.** They are hookable and journaled, but `SendInput` carries live handlers, an executor and a signal, so no wire command is declared. A designed serializable subset (`messages` + `maxTicks` + `stream`) is future work; the tool-dispatch verb is the natural first one to land.
+- **The telemetry namespace whitelabels session-owned spans only.** App-shared layers carry their own default prefix. Reading the namespace from fiber context is pending; nesting is unaffected either way.
+- **Inbox dispatch is narrow.** A session handles escalation and task-wake messages. Every other message type rejects.
+- **The per-store cursor manifest is not built.** A `SessionRecord` has a slot reserved for per-store cursors, but nothing populates it, so a cross-store restore manifest is still a separate step from in-process `snapshot()`/`restore()`.
+- **`setSessionMeta` targets live sessions only.** Editing a closed session's record needs a read-modify-write path against the store.
+- **`defineSession` has no inbox dispatch.** A callback-built session stores an escalation interceptor for protocol conformance but never consults it, and every inbox message rejects. Escalation and task-wake work on `SessionHarness` only.
 
 ## Verified by
 
-- `src/__tests__/session-store.spec.ts` — `InMemorySessionStore` runs the
-  full `runSessionStoreConformance` suite (E11): put/get round-trip, upsert,
-  `list` filtered by `appId` / `status` / `parentSessionId` / `updatedAfter`
-  recency, enumerate-all, delete, and prune-of-closed. The harness's own
-  record population (construction / execution boundary / usage aggregation /
-  close) is verified in `@agentick/app`'s `app-harness.spec.tsx`, where a
-  real `SessionHarness` + store are wired together.
-- `src/__tests__/conformance.spec.ts` — `SessionHarnessProtocol`
-  conformance suite.
-- `src/__tests__/session-hooks.spec.ts` — the session verbs route through
-  `runOperation` (ADR 83): `onBeforeSessionSend` fires on `send`,
-  `onBeforeSessionAppend` on `appendEntry`, `onAfterSessionSend` sees the
-  `SessionExecutionHandle`; plus the `deriveHookNames` ↔ `Pascal` agreement
-  for `session:command:send` / `:append`.
-- `@agentick/app`'s `src/__tests__/lifecycle-operations.spec.tsx` — the ADR 92
-  Slice B lifecycle verbs, against a real app substrate (the test lives where
-  both layers do). Spawn: both ops emit, the child-create carries
-  `{ sessionId, parentSessionId, spawnPath }` as scope and names the spawn op as
-  its `parentOpId`; a spawn does NOT emit `app:create-session`; both records
-  journal; a fork adds the snapshot + restore records; `onSessionCreate` still
-  fires. Guards: a veto at either layer creates no child and adds no registry
-  entry, and a spawn-only guard does not block a host `createSession`. Close:
-  the op carries `reason: "closed"`, is absent from the journal (bus-only
-  policy), and a veto leaves the session usable; both the idle sweep and the LRU
-  page-out emit it with `reason: "evicted"`.
-- `src/__tests__/model-facade.spec.ts` — the `session.model` facade (ADR 89
-  §2): `setModel` swaps the session default (the next send uses the new
-  executor); `setTarget` swaps only the target; `onBeforeSessionSetModel`
-  vetoes a swap (default unchanged); a `session.model.use` transform AND a
-  `session.model.guard` veto, registered once, still apply to the model call
-  across a `setModel` executor swap; per-send `modelExecutor` override beats
-  the swapped default (precedence). Plus the adapter-overload parity:
-  `setModel(adapter)` swaps the default via the injected `buildModelExecutor`
-  (next send uses the built executor); the adapter form with NO injected
-  builder throws `ModelExecutorBuilderMissingError`; and
-  `onBeforeSessionSetModel` vetoes the adapter form identically (normalized to
-  a `RegisteredModel` before the command). End-to-end through `createApp` in
-  `@agentick/app`'s `set-model.spec.tsx`.
-- `src/__tests__/structured-send.spec.ts` — structured final turns
-  (`trail-response-format-send`, declarative form): a send-level
-  `responseFormat` is threaded to the executor over a tree
-  `<model responseFormat>` (recording-executor observation); with no
-  send-level directive the tree one stays; multi-tick applies the
-  directive on EVERY tick; and an explicit `onBusy: "steer"` carrying
-  `responseFormat` rejects with `SteerCannotCarryStructuredOutput` while
-  the same request with `onBusy: "queue"` (or unset) runs.
-- `src/__tests__/structured-output.spec.ts` — the §B2 terminal-tool
-  strategy: `output` → validated `data`, tool-vs-responseFormat injection,
-  detection + stop, sibling-calls-first, timeline pairing, steer-proof
-  stop, the forced wrap-up tick, and the typed miss / validation /
-  collision / precedence / steer-conflict errors.
-- `src/__tests__/define-session.spec.ts` — `defineSession` factory wiring.
-- `src/__tests__/model-bridge.spec.tsx` — tree-declared per-tick model,
-  real loop resolving the `ModelBridge` (ADR 56); tick-IR precedence over
-  the session default.
-- `src/__tests__/lifecycle-bridge.spec.tsx` — the real loop driving the
-  whole `useOn*` hook family + `useContextInfo` yielding a live window
-  and utilization (#206 / ADR 55). Plus the ADR 89 §4 projection suite:
-  per-mount routing (two sessions on ONE shared loop — only the running
-  session's hooks fire; unsubscribe on close), THE BARRIER (a knob
-  mutated by an async `useOnTickEnd` effect is visible to the decide —
-  settle-before-decide), `useOnModelGenerateStart/End` from the real
-  `model:generate_stream` command via tier-4 call middleware, and the
-  error projection (failed executor terminal → `phase: "model"`; hard
-  tool-handler throw → `tool-end` failed + `phase: "tool"`).
-- `src/__tests__/gates-integration.spec.tsx` — the continuation decision
-  (ADR 67): a real execution drives `notifyLifecycle`, which evaluates the
-  shared gate controller against the settled `TickResult`; both a
-  tree-declared and a programmatic gate engage AND hold the loop open to
-  `maxTicks` (the load-bearing continue-force proof).
-- `src/__tests__/snapshot-command.spec.tsx` — the `session:snapshot` /
-  `session:restore` commands (recovery pass #1): the hook quartet fires
-  (`onBefore/AfterSessionSnapshot`, `onBefore/AfterSessionRestore`), the
-  after-snapshot hook redacts the output (v1 `onPersist` parity), a
-  before-snapshot hook vetoes; the Step-6 generic fold picks up a FAKE
-  `SnapshotCapable` extension bridge and restores it via `importSnapshot` with
-  zero session change; the `migrateSnapshot` seam runs on a `specVersion` skew
-  (its output is applied) and `SnapshotVersionMismatch` throws when absent; plus
-  the `deriveHookNames` ↔ `Pascal` agreement for `session:command:snapshot` /
-  `:restore`.
-- `src/__tests__/snapshot-restore.spec.tsx` — `InMemoryDataBridge`
-  export/import round-trip (the data bridge the session wires into
-  `bridges.data`); a compiler-level bridge fold, complementary to the
-  session-level fold above.
-- `src/testing/kill-resume-acceptance.tsx` — the ADR-49 acceptance suite
-  (hard gate) additionally proves a `snapshot()` → `restore()` round-trip
-  transplants a completed turn into a fresh, storeless session (independent of
-  the durable-store hydration path), JSON-firewall-safe.
-- `src/__tests__/streaming-handle.spec.tsx` — `SessionExecutionHandle`
-  streaming iterator (event order, dense monotonic sequence,
-  id/sessionId/executionId stamping, streaming vs non-streaming paths,
-  and `handle.events()` yielding the event stream while `.result`
-  resolves independently).
-- `src/__tests__/extended-surface.spec.ts`,
-  `layered-tools.spec.ts` — host-side `dispatch` (incl.
-  `ToolPermissionError`), timeline handle append/`trailingInput`,
-  layered execution-scoped vs session-scoped tool registry (#139),
-  plus `spawn()` routing through a `SpawnContext`.
-- Spawn hardening (SP4–SP6) is verified cross-harness (spawn needs a real
-  app-provided `SpawnContext`) in `@agentick/app`
-  `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling +
-  `SpawnDepthExceededError`, `spawnPath` on record / loop `EventScope` /
-  handle stream, and parent close/abort → child disposal.
-- `src/__tests__/timeline-durability.spec.ts` — open-or-rehydrate
-  hydration + the execution-end flush barrier (`TimelineWriteFailed`
-  → `status=failed`); also exercises `session.snapshot().bridges.timeline.persisted`.
-- `src/__tests__/kill-resume.spec.ts` +
-  `src/testing/kill-resume-acceptance.tsx` — the end-to-end
-  kill-and-resume acceptance (`runKillResumeAcceptance`) across the
-  memory / fs / postgres store poles (ADR 49).
-- `src/__tests__/escalation.spec.ts` — ADR 69 T1 + T2a request escalation.
-  T1: a task's `ctx.elicit` escalates (nested `inbox.ask`) to its root
-  owning session, which resolves terminally against the real client
-  elicitation; the answer round-trips and the task FSM flips
-  `working → input_required → working → completed`; plus the
-  `interactive ⊥ detached` guard end-to-end. **T2a** (5 tests): a real
-  2-session chain proving the recursive `parentSessionId` forward hop
-  (child task elicit → child forwards → root parent terminal resolve →
-  answer threads back + FSM flip); ancestor **interception** — short-circuit
-  (parent answers, the real client elicit is never called), **deny**
-  (interceptor throws → child `ctx.elicit` rejects), and **forward**
-  (`{ forward: true }` reaches the terminal); and **lineage** (the envelope
-  reaching the parent carries `[origin(task+session), child-session hop]`
-  in order).
-
-## See also
-
-- [ADR 43 — Unified ToolHandlerCtx](../../docs/proposals/v2/blueprint/43-unified-tool-handler-ctx.md)
-  — the cross-transport sugar story `session.elicit` participates in.
-- [`@agentick/elicitation`](../elicitation/README.md) — the
-  underlying ElicitationHarness + `Elicit` sugar contract.
-- [`@agentick/app`](../app/README.md) — the parent harness that
-  spins sessions up per run.
-- [ADR 26 — Harness API shape](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
+- `src/__tests__/conformance.spec.ts` — the protocol conformance suite against a real journal, bus and inbox.
+- `src/__tests__/extended-surface.spec.ts` — host-door `dispatch` including `ToolPermissionError`, the tool registry read surface, timeline append and `trailingInput`, channel publish/subscribe plus correlated request/response and its timeout, the knob handle, `spawn` routing through a spawn context and defaulting to the parent's own agent, **steering** (the join returns the in-flight handle and the loop answers the new input), two un-awaited sends collapsing to one execution, a send after settle running fresh rather than joining a dead handle, provenance and per-generation usage stamps, and `onBusy` steer-vs-queue including an aborted execution dropping an undrained steer; cancellation parity — `abort()` on an in-flight execution and a pre-aborted send `signal` both RESOLVE with `stopReason: "aborted"` rather than rejecting.
+- `src/__tests__/streaming-handle.spec.tsx` — event order, dense monotonic sequence from 1, id/session/execution stamping, the streaming and non-streaming paths, and `.events()` yielding while `.result` resolves independently.
+- `src/__tests__/structured-output.spec.ts` — terminal-tool injection and tail ordering, capability-aware strategy resolution (no native `json_schema` → the tool; neither tools nor `json_schema` → `responseFormat`), detection/stop/validated `data`, prose and a typed result in one tick, sibling tools dispatching first, timeline pairing letting the next send succeed, a tree-only `<Output>` producing validated `data` and `output_delivered`, the forced wrap-up tick, steer-proof stop, and the typed failures — `StructuredOutputIncomplete`, `ResponseValidationError`, `TerminalToolNameCollision` — plus send-beats-tree precedence and the explicit-steer conflict.
+- `src/__tests__/structured-send.spec.ts` — `responseFormat` threaded to the executor over a tree declaration, retained when no send-level directive is given, applied on every tick of a multi-tick run, and the explicit-steer rejection whose `onBusy: "queue"` twin runs.
+- `src/__tests__/tool-restriction.spec.ts` — only allowlisted tools reach the model, the unrestricted control, the dispatch door unaffected, additivity with `tools`, the terminal tool's exemption, and an empty allowlist resolving strategy as if no tools were mounted.
+- `src/__tests__/model-facade.spec.ts` — `setModel` swapping the default (the next send uses the new executor), `setTarget` swapping only the target, `onBeforeSessionSetModel` vetoing, a `use` transform and a `guard` veto registered once still applying across an executor swap, the adapter overload via the injected builder, `ModelExecutorBuilderMissingError` without one, identical veto input for both overload forms, and per-send override precedence.
+- `src/__tests__/session-hooks.spec.ts` — hook-name derivation agreement, `onBeforeSessionSend` and `onBeforeSessionAppend` firing on their verbs, and `onAfterSessionSend` seeing the handle.
+- `src/__tests__/snapshot-command.spec.tsx` — the hook quartet, after-snapshot redaction, before-snapshot veto, the generic fold picking up a fake snapshot-capable extension and restoring it with zero session change, and the migration seam — applied on a version skew, `SnapshotVersionMismatch` without one.
+- `src/__tests__/snapshot-restore.spec.tsx` — the compiler-level bridge fold: data cache, knob and state round-trip, rehydration onto a fresh mount, and survival of a JSON round-trip.
+- `src/__tests__/timeline-durability.spec.ts` — hydration from an injected store before the first render, the flush barrier at execution end, and a buffered write failure rejecting the send with `TimelineWriteFailed` and landing `status: "failed"`.
+- `src/__tests__/kill-resume.spec.ts` + `src/testing/kill-resume-acceptance.tsx` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings, which also proves a `snapshot()` → `restore()` transplant into a fresh storeless session.
+- `src/__tests__/session-store.spec.ts` — `InMemorySessionStore` under the full store conformance suite: round-trip, upsert, filtering by app / status / parent / recency, enumerate-all, delete, and prune-of-closed.
+- `src/__tests__/escalation.spec.ts` — a task's `ctx.elicit` resolving terminally at its root session with the answer round-tripping and the task state machine flipping, the interactive-versus-detached guard, a real two-session chain forwarding by `parentSessionId`, interception in all three modes (answer without touching the client, deny by throwing, fall through), lineage order in the forwarded envelope, and a forked child's escalation composing the same chain across processes.
+- `src/__tests__/task-wake.spec.ts` — an unobserved completion synthesizing a real journaled execution with task-wake provenance, an in-band result read consuming the wake so nothing is synthesized, and a wake arriving during a running execution steering into it.
+- `src/__tests__/telemetry.spec.ts` — a send emitting a nested span tree on a tracer runtime, an async loop middleware not breaking the downstream tree, no telemetry runtime still working, and per-call `functionId` + metadata landing on every span the send touches (with nothing registered when telemetry is off).
+- `src/__tests__/lifecycle-bridge.spec.tsx` — a real loop driving the whole `useOn*` family with `useContextInfo` yielding a live window and utilization; per-mount routing (two sessions on one shared loop — only the running one's hooks fire, and close unsubscribes); the settle-before-decide barrier (a knob mutated by an async tick-end effect is visible to the continuation decision); model-generate hooks from the real streaming command; and error projection phases for a failed executor terminal versus a hard tool throw.
+- `src/__tests__/gates-integration.spec.tsx` — one gate registry behind both front ends, evaluated against a settled tick result, holding a real execution open to the tick cap, and a tree stop overriding a gate's continue in the same tick.
+- `src/__tests__/model-bridge.spec.tsx` — a tree-declared per-tick model winning over the session default, and the fallback when the tree declares none.
+- `src/__tests__/tree-interceptors.spec.tsx` — tree-side guards vetoing and admitting a model tool call, a deferred call resolved by an elicitation confirm in both directions, a transform reaching the model's actual projected input, per-mount isolation on a shared loop, freshness against the latest render's state, and unmounting mid-execution without a crash.
+- `src/__tests__/layered-tools.spec.ts` — execution-scoped registration and removal, execution-over-session precedence, and session-scoped tools persisting across sends.
+- `src/__tests__/channel-snapshot.spec.ts` — a channel opening on its current frame, an unowned channel reporting none, and a pending ask seeding the elicitation channel.
+- `src/__tests__/define-session.spec.ts` — the factory marker, delegation to the supplied callbacks, helpful errors from unconfigured verbs, and no-op handles resolving cleanly.
+- Spawn, fork and lifecycle operations are verified where both layers live, in [@agentick/app](../app): `spawn-hardening.spec.tsx` (the depth ceiling and `SpawnDepthExceededError`, `spawnPath` on the record / event scope / handle stream, parent close and abort disposing children), `fork.spec.tsx` (state copy, lineage, divergence), `lifecycle-operations.spec.tsx` (the linked spawn and child-create records, a guard vetoing at either layer, the bus-only close op and its `"evicted"` provenance from both the idle sweep and the memory cap), `set-model.spec.tsx` (the swap end-to-end through `createApp`), and `session-principal-lifecycle.spec.tsx` (spawn and fork inheriting the principal). The wire gate engaging on the stamped principal is pinned in [@agentick/transport](../transport) (`session-principal.spec.ts`).

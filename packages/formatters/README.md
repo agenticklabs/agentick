@@ -1,259 +1,356 @@
 # @agentick/formatters
 
-Pure-function content formatters for Agentick v2. Ships the
-`createFormatter` builder plus markdown / xml / text reference
-formatters. The compiler harness dispatches by `FormatterRef` to
-turn semantic content into wire-ready prompts for the model.
+The IR → string pass. A formatter turns the compiler's semantic content blocks into wire-ready blocks for the model, and it owns the framing too — how a section is wrapped, how a message is labelled, how a list of blocks becomes one string. That framing is the formatter's business, not the compiler's, which is why markdown emits `## Instructions` and XML emits `<section id="instructions">` from the identical tree.
 
-**Spec firewall:** This package depends only on `@agentick/spec`. No
-substrate, no runtime, no harness machinery.
+Pure functions over plain data. This package depends on [@agentick/spec](../spec) for shapes and [@agentick/utils](../utils) for one helper — no substrate, no harness, no runtime.
 
-**Design:** [ADR 22](../../docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md) ·
-[Blueprint §04](../../docs/proposals/v2/blueprint/04-formatters.md)
+## Install
+
+```bash
+npm install @agentick/formatters
+```
+
+Markdown is already wired as the default, so most adopters never install this directly — they install it to swap the default, register a custom formatter, or format an IR tree they are holding themselves.
 
 ## Quick start
 
-```ts
-import { createApp } from "@agentick/app";
-import { openai } from "@agentick/model-openai";
-
-// Markdown is the default — no formatter wiring needed.
-const app = await createApp(<Agent />, {
-  model: openai("gpt-5"),
-});
-```
-
-To pick a different default:
+Same tree, two formatters, two entirely different documents:
 
 ```ts
-import { xmlFormatter, builtInFormatters } from "@agentick/formatters";
+import { formatTree, markdownFormatter, xmlFormatter } from "@agentick/formatters";
+import { SPEC_VERSION, type RenderedTree } from "@agentick/spec";
 
-const app = await createApp(<Agent />, {
-  model: openai("gpt-5"),
-  compiler: {
-    formatters: builtInFormatters(),
-    defaultFormatterId: xmlFormatter.__identity.id,
+const tree: RenderedTree = {
+  specVersion: SPEC_VERSION,
+  context: {
+    entries: [
+      {
+        kind: "section",
+        id: "instructions",
+        title: "Instructions",
+        content: [{ type: "text", text: "Be terse." }],
+      },
+      { kind: "message", role: "user", content: [{ type: "text", text: "Hello" }] },
+    ],
   },
-});
-```
-
-To switch formatters inside the JSX tree:
-
-```tsx
-import { Markdown, XML, PlainText } from "@agentick/compiler-react";
-
-<Agent>
-  <XML>
-    <section id="instructions">
-      Use <strong>structured</strong> output.
-    </section>
-  </XML>
-  <Markdown>
-    <message role="user">Hello, world!</message>
-  </Markdown>
-</Agent>;
-```
-
-## API
-
-### `Formatter`
-
-```ts
-type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
-```
-
-Pure function. Input may carry `semanticNode` sidecars on `TextBlock`s
-(from JSX semantic HTML — `<strong>`, `<h1>`, `<ul>`, etc.). Output is
-wire-shape `ContentBlock[]` ready for the executor's projection to
-provider format.
-
-Imported from `@agentick/spec`.
-
-### `createFormatter(spec)`
-
-Decorate a render function with identity metadata so the compiler's
-registry can dispatch by `FormatterRef`. Per [ADR
-36](../../docs/proposals/v2/blueprint/36-define-vs-create-convention.md):
-formatters need no parent-substrate to construct, so the verb is
-`create`, not `define`.
-
-```ts
-import { createFormatter } from "@agentick/formatters";
-
-const upperCaseFormatter = createFormatter({
-  id: "demo.uppercase",
-  format: "markdown",
-  version: "1.0.0",
-  render: (blocks) =>
-    blocks.map((b) => (b.type === "text" ? { ...b, text: b.text.toUpperCase() } : b)),
-});
-```
-
-The returned `DefinedFormatter` has a non-enumerable `__identity`
-property carrying `{ id, format, version? }`. (The return-type name
-`DefinedFormatter` stays — ADR 36 covers function names, not type names.)
-
-#### Tree-level serialization (optional)
-
-Beyond the block-level `render` callback, a formatter can OWN its
-own serialization of a full `RenderedTree` to a string by supplying
-three additional callbacks:
-
-```ts
-createFormatter({
-  id: "demo.yaml",
-  format: "yaml",
-  render: (blocks) => blocks.map(/* block-level pass */),
-
-  // How a SectionEntry's formatted body becomes a string
-  frameSection: (entry, body) => `${entry.title ?? entry.id}:\n  ${body.replace(/\n/g, "\n  ")}`,
-
-  // How a MessageEntry's formatted body becomes a string
-  frameMessage: (entry, body) => `${entry.role}: |\n  ${body.replace(/\n/g, "\n  ")}`,
-
-  // How the formatter's ContentBlock[] output becomes a single string
-  blocksToText: (blocks) =>
-    blocks.map((b) => ("text" in b ? (b.text ?? "") : `[${b.type}]`)).join("\n"),
-});
-```
-
-`formatTree` (below) reads these methods. The three built-in
-formatters (`markdownFormatter`, `xmlFormatter`, `textFormatter`)
-all supply them. 3rd-party formatters that omit them fall back to
-markdown-flavored defaults in `formatTree`. **Custom formatters
-SHOULD supply all three** to get full control over their output
-shape; otherwise the framing your callers see won't match the
-syntax you produced at the block level.
-
-### `markdownFormatter` · `xmlFormatter` · `textFormatter`
-
-Reference formatters. Each is itself the result of a `createFormatter`
-call.
-
-| Formatter           | Semantic input                                                                           | Output style |
-| ------------------- | ---------------------------------------------------------------------------------------- | ------------ |
-| `markdownFormatter` | `<strong>` → `**...**`, `<h1>` → `# ...`, `<ul>`/`<li>` → `- ...`, `<a>` → `[...](href)` | Markdown     |
-| `xmlFormatter`      | `<strong>` → `<strong>...</strong>`, `<h1>` → `<h1>...</h1>`, etc.                       | XML tags     |
-| `textFormatter`     | Strips all semantic markup                                                               | Plain text   |
-
-Each handles the full `SemanticType` set defined in
-`@agentick/spec/data/semantic.ts`.
-
-### `builtInFormatters()`
-
-Returns a `ReadonlyMap<string, DefinedFormatter>` pre-loaded with the
-three reference formatters, keyed by `__identity.id` (`formatter.markdown`,
-`formatter.xml`, `formatter.text`). Pass it into
-`CompilerHarnessOptions.formatters` to enable the reference set; the
-compiler does this by default.
-
-### `refOf(formatter)`
-
-Extract the `FormatterRef` from a `DefinedFormatter`.
-
-```ts
-const ref = refOf(markdownFormatter);
-// → { id: "formatter.markdown", format: "markdown" }
-```
-
-### `formatTree(tree, defaultFormatter, opts?)`
-
-Tree-level IR → final string. The single entry point for "I have a
-`RenderedTree`, give me the formatted output." Used by:
-
-- `CompilerHarness.renderToString` (full reactive harness path)
-- `renderTemplate` in `@agentick/compiler-react` (one-shot
-  static template path)
-- adopters who hold the IR (e.g., from `compileTemplate` or from a
-  `RenderedTree` shipped over the wire) and want the string
-
-```ts
-import {
-  formatTree,
-  markdownFormatter,
-  xmlFormatter,
-  builtInFormatters,
-} from "@agentick/formatters";
-
-// Simple — single formatter for everything; ignores entry.renderedWith.
-const md = formatTree(tree, markdownFormatter);
-
-// Per-entry resolution — honors `entry.renderedWith` set by
-// in-template `<format>` scope providers. Each entry resolved
-// against the map by id, then by format hint; defaultFormatter
-// applies when no match.
-const out = formatTree(tree, markdownFormatter, {
-  formatters: builtInFormatters(),
-});
-```
-
-The function delegates ALL serialization work to the formatter:
-
-1. **Block-level pass**: `formatter(entry.content)` — the existing
-   `Formatter` contract (`SemanticContentBlock[] → ContentBlock[]`).
-2. **Block-to-text flatten**: `formatter.blocksToText(blocks)` — the
-   formatter's own block-to-string rules.
-3. **Section / message framing**: `formatter.frameSection(entry, body)`
-   / `formatter.frameMessage(entry, body)`.
-
-When a formatter omits any of those tree-level methods, `formatTree`
-falls back to markdown-flavored defaults. 3rd-party formatters that
-want full output control supply all three.
-
-## Patterns
-
-### Composing formatters (middleware via functions)
-
-No harness, no `aroundFormat` plumbing — plain function composition:
-
-```ts
-type FormatterMiddleware = (next: Formatter) => Formatter;
-
-const withCache: FormatterMiddleware = (next) => {
-  const cache = new Map<string, readonly ContentBlock[]>();
-  return (blocks) => {
-    const key = JSON.stringify(blocks);
-    return cache.get(key) ?? cache.set(key, next(blocks)).get(key)!;
-  };
 };
 
-const cachedMarkdown = withCache(markdownFormatter);
+formatTree(tree, markdownFormatter);
+// ## Instructions
+//
+// Be terse.
+//
+// **user:** Hello
+
+formatTree(tree, xmlFormatter);
+// <section id="instructions" title="Instructions">
+// Be terse.
+// </section>
+//
+// <message role="user">
+// Hello
+// </message>
 ```
 
-### Provider-specific formatter
+Nothing about the entries changed. The wrapping, the label, the separator — all of it came from the formatter.
+
+## What a formatter owns
+
+`createFormatter` takes one required callback and three optional ones. The required one is the block-level contract; the optional three are the framing rules.
+
+| Callback       | Signature                                    | Owns                                        |
+| -------------- | -------------------------------------------- | ------------------------------------------- |
+| `render`       | `(SemanticContentBlock[]) => ContentBlock[]` | Block-level serialization. **Required.**    |
+| `blocksToText` | `(ContentBlock[]) => string`                 | How your own output collapses to one string |
+| `frameSection` | `(SectionEntry, body: string) => string`     | The wrapper around a section's body         |
+| `frameMessage` | `(MessageEntry, body: string) => string`     | The wrapper around a message's body         |
+
+`render` is the pass that runs on the model-facing path: the compiler hands it the collected blocks — `TextBlock`s carrying optional `semanticNode` sidecars from JSX semantic HTML (`<strong>`, `<h1>`, `<ul>`, `<table>`) — and takes back wire-shape `ContentBlock[]`. Media, tool-use, and tool-result blocks normally pass through untouched so the provider still receives them natively.
+
+The other three only run when something asks for a string. `formatTree` reads them off the formatter; when a formatter omits one, it falls back to a markdown-flavored default.
+
+> [!IMPORTANT]
+> Supply all three, or none. A formatter that emits XML at the block level but inherits markdown's `## title` framing produces a document in two syntaxes — which is the exact failure the framing callbacks exist to prevent. All three bundled formatters supply all three.
+
+## The bundled formatters
+
+```ts
+import { markdownFormatter, textFormatter, xmlFormatter } from "@agentick/formatters";
+import type { SemanticContentBlock } from "@agentick/spec";
+
+const blocks: readonly SemanticContentBlock[] = [
+  {
+    type: "text",
+    text: "",
+    semanticNode: {
+      semantic: "paragraph",
+      children: [{ text: "Use " }, { semantic: "strong", children: [{ text: "care" }] }],
+    },
+  },
+  { type: "code", text: "rm -rf /", language: "bash" },
+];
+
+markdownFormatter(blocks);
+// → "Use **care**\n\n"                    and the command inside a bash fence
+xmlFormatter(blocks);
+// → "<p>Use <strong>care</strong></p>"    and '<code language="bash">rm -rf /</code>'
+textFormatter(blocks);
+// → "Use care\n\n"                        and the bare command, unfenced
+```
+
+| Formatter           | `format`   | Semantic markup                                              | Framing                                 |
+| ------------------- | ---------- | ------------------------------------------------------------ | --------------------------------------- |
+| `markdownFormatter` | `markdown` | `**bold**`, `# heading`, `- item`, `[text](href)`, fences    | `## title` · `**role:** body`           |
+| `xmlFormatter`      | `xml`      | `<strong>`, `<h1>`, `<ul><li>`, `<a href>`, escaped text     | `<section id title>` · `<message role>` |
+| `textFormatter`     | `text`     | stripped — `text (href)` for links, `[image: src]` for media | `title\nbody` · `role: body`            |
+
+All three cover the full semantic-node vocabulary the compiler can emit, including tables, blockquotes, and the generic structural (`block`) and inline (`inline`) containers. `markdownFormatter` is the default.
+
+## Choosing a formatter per subtree
+
+Selection is data. Every IR entry carries an optional `renderedWith: FormatterRef` — `{ id, format?, version? }` — and the compiler stamps it from the nearest formatter scope in the tree. [@agentick/compiler-react](../compiler-react) ships the scope providers:
+
+```tsx
+import { Markdown, Message, PlainText, Section, XML } from "@agentick/compiler-react";
+
+export function Agent() {
+  return (
+    <>
+      <XML>
+        <Section id="instructions" title="Instructions">
+          Answer with <strong>structured</strong> output.
+        </Section>
+        <Markdown>
+          {/* A nested scope wins for its own descendants. */}
+          <Section id="notes" title="Notes">
+            Free-form prose is easier to read as markdown.
+          </Section>
+        </Markdown>
+      </XML>
+      <PlainText purpose="message">
+        {/* Only messages go plain here — sections keep the ambient formatter. */}
+        <Message role="user">No decoration at all.</Message>
+      </PlainText>
+    </>
+  );
+}
+```
+
+`<Markdown>`, `<XML>`, and `<PlainText>` are one-line wrappers over `<FormatScope>`, which is the primitive — reach for it directly with any ref, including one for a formatter you wrote:
+
+```tsx
+import { FormatScope, Section } from "@agentick/compiler-react";
+import { refOf, xmlFormatter } from "@agentick/formatters";
+
+export function Grounding() {
+  return (
+    <FormatScope formatter={refOf(xmlFormatter)}>
+      <Section id="evidence">…</Section>
+    </FormatScope>
+  );
+}
+```
+
+A scope contributes no IR of its own — it only rebinds the formatter for its descendants, and a nested scope wins over an outer one. The optional `purpose` prop narrows the rebinding to a single slot: a section entry resolves its formatter with purpose `"section"` and a message entry with `"message"`, so `purpose="message"` leaves sections on whatever the ambient default is. The full slot set is `"context"`, `"message"`, `"section"`, `"free-root"`, `"resource"`, `"output"`.
+
+Resolution of a `FormatterRef` against the registry, in order:
+
+1. exact `id` match,
+2. otherwise the first registered formatter whose `format` matches the ref's `format`,
+3. otherwise the configured default.
+
+That second step is why `<Markdown>` works: its ref is `{ id: "markdown", format: "markdown" }`, which misses the bundled id `formatter.markdown` and lands on the format hint.
+
+## Wiring the registry
+
+`builtInFormatters()` is the reference set as a `ReadonlyMap` keyed by id. The compiler installs it by default; pass your own map to add a formatter or change the default:
+
+```tsx
+import { createApp } from "@agentick/app/react";
+import { reactCompiler } from "@agentick/compiler-react";
+import { builtInFormatters, xmlFormatter, type DefinedFormatter } from "@agentick/formatters";
+
+declare const yamlFormatter: DefinedFormatter; // see "Writing your own", below
+
+const formatters = new Map<string, DefinedFormatter>([
+  ...builtInFormatters(),
+  [yamlFormatter.__identity.id, yamlFormatter],
+]);
+
+const app = await createApp(<Agent />, {
+  model,
+  compiler: reactCompiler({
+    formatters,
+    defaultFormatterId: xmlFormatter.__identity.id, // what an unpinned entry gets
+  }),
+});
+```
+
+For a one-shot render with no session, `renderTemplate` takes the formatter directly:
+
+```tsx
+import { renderTemplate } from "@agentick/compiler-react";
+import { xmlFormatter } from "@agentick/formatters";
+
+const { output } = await renderTemplate(<Agent />, { formatter: xmlFormatter });
+```
+
+## Content reduction
+
+Where markdown / XML / text change how blocks _serialize_, these change _which blocks survive_. Same `Formatter` signature, same registry, so they compose identically — a connector applies one to outbound assistant content so a chat surface shows prose instead of raw tool-call JSON.
+
+```ts
+import { createSummarizedFormatter, createToolSummarizer } from "@agentick/formatters";
+import type { SemanticContentBlock } from "@agentick/spec";
+
+const blocks: readonly SemanticContentBlock[] = [
+  { type: "text", text: "Cleaning up." },
+  { type: "tool_use", toolUseId: "t1", name: "bash", input: { command: "rm -rf ./tmp" } },
+  {
+    type: "tool_result",
+    toolUseId: "t1",
+    name: "bash",
+    content: [{ type: "text", text: "…4kB of output…" }],
+  },
+];
+
+// summarizedFormatter (the bundled default instance) collapses each tool_use
+// into a line and drops the tool_result:
+//   [{ type: "text", text: "Cleaning up." }, { type: "text", text: "[Ran: rm -rf ./tmp]" }]
+
+// Override the phrasing per tool name; unknown tools keep the `[Used <name>]` fallback.
+const formatter = createSummarizedFormatter(
+  createToolSummarizer({
+    bash: (input) => `[shell] ${String(input.command ?? "")}`,
+    deploy: () => "[deploying]",
+  }),
+);
+formatter(blocks);
+```
+
+`textOnlyFormatter` is the blunter policy: keep text and media, drop `tool_use` and `tool_result` entirely.
+
+> [!NOTE]
+> Neither reduction formatter supplies framing callbacks — they are content policies, not output syntaxes, so a string produced through one gets markdown-flavored framing. Neither is in `builtInFormatters()`; register them if you want to reach them by ref.
+
+## Writing your own
+
+One complete formatter, all four callbacks — a YAML-flavored output where framing is the whole point:
+
+```ts
+import { createFormatter, formatTree, type DefinedFormatter } from "@agentick/formatters";
+import type { ContentBlock, RenderedTree, SemanticNode } from "@agentick/spec";
+
+const indent = (s: string) => s.replace(/^/gm, "  ");
+const flatten = (node: SemanticNode): string =>
+  node.text ?? (node.children ?? []).map(flatten).join("");
+
+export const yamlFormatter: DefinedFormatter = createFormatter({
+  id: "formatter.yaml",
+  format: "yaml",
+  version: "1.0.0",
+
+  // Block level. Collapse semantic trees to their text; leave every other
+  // block alone so media and tool blocks still reach the provider natively.
+  render: (blocks) =>
+    blocks.map((block) =>
+      block.semanticNode
+        ? ({ type: "text", text: flatten(block.semanticNode) } satisfies ContentBlock)
+        : block,
+    ),
+
+  // Flatten: how this formatter's own output becomes one string.
+  blocksToText: (blocks) =>
+    blocks
+      .map((b) => ("text" in b && typeof b.text === "string" ? b.text : `[${b.type}]`))
+      .filter((s) => s.length > 0)
+      .join("\n"),
+
+  // Framing: block-level syntax and framing must agree, so both live here.
+  frameSection: (entry, body) => `${entry.title ?? entry.id}: |\n${indent(body)}`,
+  frameMessage: (entry, body) => `${entry.role}: |\n${indent(body)}`,
+});
+
+declare const tree: RenderedTree; // the same tree as the quick start
+formatTree(tree, yamlFormatter);
+// Instructions: |
+//   Be terse.
+//
+// user: |
+//   Hello
+```
+
+`createFormatter` returns the render function itself, decorated with `__identity` (`{ id, format, version? }`) plus whichever framing callbacks you supplied — so a `DefinedFormatter` is callable, and `refOf(yamlFormatter)` gives you the ref to point a `<FormatScope>` at. The verb is `create`, not `define`, because a formatter needs no substrate to construct.
+
+## Composing formatters
+
+A formatter is a function, so middleware is function composition. No plumbing, no `aroundFormat` seam.
 
 ```ts
 import { markdownFormatter } from "@agentick/formatters";
+import type { ContentBlock, Formatter } from "@agentick/spec";
 
-export const anthropicCacheFormatter = createFormatter({
-  id: "formatter.anthropic-cache",
-  format: "markdown",
-  render: (blocks) => {
-    const out: ContentBlock[] = [];
-    for (const block of blocks) {
-      out.push(...markdownFormatter([block]));
-      // Insert cache-control markers between blocks
-      out.push({ type: "text", text: "<!-- @anthropic-cache -->" });
-    }
+const memoize = (next: Formatter): Formatter => {
+  const cache = new Map<string, readonly ContentBlock[]>();
+  return (blocks) => {
+    const key = JSON.stringify(blocks);
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const out = next(blocks);
+    cache.set(key, out);
     return out;
-  },
-});
+  };
+};
+
+const cachedMarkdown = memoize(markdownFormatter);
 ```
 
-## What's not here
+Wrapping this way returns a bare `Formatter`, not a `DefinedFormatter` — to register the result, pass the wrapped function as `render` to `createFormatter` and give it its own id.
 
-- **Streaming formatters.** The model streams; the formatter doesn't.
-  Defer until a real use case demands it.
-- **`renderToText` / `renderResource` / `inspectCapabilities` commands.**
-  Dropped — these were `FormatterHarnessProtocol` methods with no
-  consumers. `renderToText` is just `textFormatter`.
-- **Per-format conformance suite.** Replaced by golden-output tests on
-  each formatter. See `src/__tests__/formatters.spec.ts`.
+## API
 
-## See also
+| Export                             | Kind     | Purpose                                                                 |
+| ---------------------------------- | -------- | ----------------------------------------------------------------------- |
+| `createFormatter(input)`           | function | Decorate a render function with identity + optional framing callbacks   |
+| `refOf(formatter)`                 | function | The formatter's `FormatterRef`, for a scope provider or a registry key  |
+| `formatTree(tree, default, opts?)` | function | `RenderedTree` → string; `opts.formatters` enables per-entry resolution |
+| `builtInFormatters()`              | function | `ReadonlyMap` of the three reference formatters, keyed by id            |
+| `markdownFormatter`                | value    | The default — markdown blocks and markdown framing                      |
+| `xmlFormatter`                     | value    | XML tags, escaped text, `<section>` / `<message>` framing               |
+| `textFormatter`                    | value    | Semantic markup stripped; bare `title` / `role:` framing                |
+| `textOnlyFormatter`                | value    | Content policy: keep text + media, drop tool blocks                     |
+| `summarizedFormatter`              | value    | Content policy: `tool_use` → one line, `tool_result` dropped            |
+| `createSummarizedFormatter(fn?)`   | function | The same policy with a custom `ToolSummarizer`                          |
+| `createToolSummarizer(overrides?)` | function | Build a summarizer: overrides → built-in defaults → `[Used <name>]`     |
+| `CreateFormatterInput`             | type     | `id` · `format` · `version?` · `render` · the three framing callbacks   |
+| `DefinedFormatter`                 | type     | A callable `Formatter` carrying `__identity` and its framing callbacks  |
+| `FormatTreeOptions`                | type     | `{ formatters?: ReadonlyMap<string, DefinedFormatter> }`                |
+| `ToolSummarizer`                   | type     | `(name, input) => string`                                               |
 
-- [`@agentick/spec`](../spec) — `Formatter`, `SemanticContentBlock`,
-  `FormatterRef`, `SemanticNode` types.
-- [`@agentick/compiler-react`](../compiler-react) — the compiler
-  that dispatches formatters during its fold pass.
-- [Blueprint §04 — Formatters](../../docs/proposals/v2/blueprint/04-formatters.md)
+`Formatter`, `FormatterRef`, `FormatterIdentity`, `FormatPurpose`, `SemanticContentBlock`, `SemanticNode`, `SectionEntry`, `MessageEntry`, and `RenderedTree` are owned by [@agentick/spec](../spec).
+
+## Patterns
+
+**In the compile pipeline.** [@agentick/compiler-react](../compiler-react) runs `render` over every entry on each tick — so `renderedWith` decides what the model sees, not just what a string dump looks like — and delegates the whole string path to `formatTree` from both `renderToString` and `renderTemplate`.
+
+**Reaching a formatter from elsewhere.** Any holder of a `RenderedTree` can call `formatTree` — a tree that arrived over the wire, one from `compileTemplate`, a doc generator, a snapshot test.
+
+**Content policy at a delivery edge.** [@agentick/connector](../connector) is where `textOnlyFormatter` / `summarizedFormatter` earn their keep: reduce, then chunk with `splitMessage` from [@agentick/utils](../utils), then deliver.
+
+## Roadmap & known gaps
+
+- **No streaming formatter.** The model streams; the formatter does not. A partial-block contract waits on a use case that needs it.
+- **The scope sugar's refs don't match the bundled ids.** `<Markdown>` emits `{ id: "markdown" }` while `markdownFormatter.__identity.id` is `formatter.markdown`, so those bindings resolve through the `format` hint rather than by id. It works, and the fallback is tested, but a custom registry that omits a matching `format` will silently land on the default instead.
+- **A formatter cannot vary its output by purpose.** `purpose` selects _which_ formatter a slot resolves to, but the `Formatter` signature takes only blocks — nothing reaches the formatter to tell it whether it is framing a section, a message, or a resource. A formatter that wants both behaviors ships as two registered formatters.
+- **`FormatterCapabilities` is unused.** The spec declares a capability shape for formatters; nothing advertises or reads it, so there is no negotiation.
+- **`version` is carried, never checked.** `FormatterRef.version` rides through resolution untouched — id, then format, and that is the whole chain.
+- **`blocksToText` has no golden-output suite.** The block-level `render` output of all three bundled formatters is pinned here; their framing and flatten callbacks are covered through the compiler's string tests rather than directly.
+- **No conformance suite.** A third-party formatter has no `runFormatterConformance` to certify against; the bar is golden-output tests you write yourself.
+
+## Verified by
+
+- `src/__tests__/formatters.spec.ts` — `createFormatter` identity metadata including the optional `version`; `markdownFormatter` passing text through, fencing code, compact-stringifying JSON, `<strong>` → `**`, a nested semantic tree, heading levels, unordered lists, and native image blocks passing through; `xmlFormatter` tag wrapping, special-character escaping, `h1`–`h6`, `<ol>`, and `<code language>`; `textFormatter` stripping markup, flattening code to bare text, and rendering links as `text (href)`; and `builtInFormatters()` keying all three by their `__identity.id`.
+- `src/__tests__/content-policy.spec.ts` — `textOnlyFormatter` keeping text and media while dropping `tool_use` and `tool_result`; `summarizedFormatter` collapsing a `tool_use` into a summary line and dropping the result; the built-in summaries for known file and shell tools; the generic fallback for an unknown tool; and `createToolSummarizer` overrides winning.
+- Per-subtree selection is pinned in [@agentick/compiler-react](../compiler-react): `formatter-scope.spec.tsx` — `<FormatScope>` contributing no IR fragment of its own, and `<Markdown>` / `<XML>` / `<PlainText>` each stamping `renderedWith` on descendant entries while an outer scope keeps its own.
+- Registry resolution is pinned in [@agentick/compiler-react](../compiler-react): `formatter-registry.spec.tsx` — a custom formatter map taking effect, the missing-id → matching-`format` fallback, and markdown as the default when nothing is supplied.
+- The string path is pinned in [@agentick/compiler-react](../compiler-react): `render-to-string.spec.tsx` — markdown section and message framing, blank-line joins between entries, XML tags and escaping from an in-scope XML formatter, a per-call formatter override beating `renderedWith`, and code / image / JSON block serialization; `template.spec.tsx` covers the same path through `renderTemplate`.

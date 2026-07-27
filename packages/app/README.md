@@ -1,498 +1,270 @@
 # @agentick/app
 
-**Reference app harness** for Agentick v2 — the outermost runtime
-boundary that owns shared substrate, shared sub-harnesses
-(compiler, loop, executor, tool-executor), the session registry,
-and the `createApp` ergonomic surface.
+**The outermost runtime boundary.** One app owns the substrate (journal, bus, inbox), the shared spine (compiler, loop, model executor, tool executor), and the session registry. `createApp` is the one door into all of it.
 
-Compiler-agnostic. Adopters writing React agents import from
-`@agentick/app/react` (defaults the compiler to `reactCompiler()`);
-adopters using a custom compiler import from `@agentick/app`
-directly and pass their own factory.
+The split that explains the whole options bag: everything at the app is **shared**, everything below it is **per-session**. `model` sits at the app because provider clients are session-agnostic; a conversation sits at the session because a conversation is. Configure the shared things once and every session inherits them.
 
-**Design:**
-[ADR 09 — App harness](../../docs/proposals/v2/blueprint/09-app-harness.md) ·
-[ADR 31 — Harness hierarchy](../../docs/proposals/v2/blueprint/31-harness-hierarchy.md) ·
-[ADR 38 — Cluster lifecycle + ownership](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)
+## Install
+
+```bash
+npm install @agentick/app
+```
+
+Subpaths: `/react` (same surface, with the JSX compiler pre-wired).
 
 ## Quick start
 
-### React (the 80% case)
-
-```typescript
+```tsx
 import { createApp } from "@agentick/app/react";
-import { aisdk } from "@agentick/model-ai-sdk";
-import { openai } from "@ai-sdk/openai";
+import { openai } from "@agentick/model-openai";
 
-const app = await createApp(<Agent />, {
-  model: aisdk(openai("gpt-4o")),
-});
+const app = await createApp(<Agent />, { model: openai("gpt-4o") });
 
 const session = await app.createSession();
-const handle = await session.send({
-  messages: [{ role: "user", content: "Hello" }],
-});
+const handle = await session.send({ messages: [{ role: "user", content: "Hello" }] });
 console.log((await handle.result).response);
+
 await app.closeApp();
 ```
 
-### Custom compiler
+`createApp` is async because the substrate's inbox registrations must be complete before the first command — awaiting it is the guarantee that `app.createSession()` on the next line cannot race.
 
-```typescript
-import { createApp } from "@agentick/app";
-import { openai } from "@agentick/model-openai";
-import { myCompiler } from "./my-compiler";
-
-const app = await createApp(rootElement, {
-  model: openai("gpt-4o"),
-  compiler: myCompiler(),
-});
-```
-
-### One-shot: `run()`
-
-No persistent app — a temporary app + session is created, the element
-executes once (full loop: tree + model + tools), and everything tears
-down when the execution settles:
+The `/react` subpath defaults `compiler` to the JSX compiler. Bring your own and import from `@agentick/app` instead:
 
 ```ts
+import { createApp } from "@agentick/app";
+import type { CompilerFactory } from "@agentick/spec";
+
+declare const myCompiler: CompilerFactory;
+
+const app = await createApp(rootElement, { model, compiler: myCompiler });
+```
+
+`rootElement` is opaque to the app — the bound compiler owns its type.
+
+## One execution, nothing persists — `run()`
+
+```tsx
 import { run } from "@agentick/app/react";
-import { openai } from "@agentick/model-openai";
 
 const result = await run(<Agent />, {
   model: openai("gpt-4o"),
   messages: [{ role: "user", content: "What's 47 * 23?" }],
 }).result;
+```
 
-// Or stream it:
+A temporary app and session are created, the element executes once — full loop, tree and model and tools — and everything tears down when the execution settles. It streams too:
+
+```tsx
 for await (const event of run(<Agent />, { model, messages })) {
   render(event);
 }
 ```
 
-The ergonomics ladder: `generate({ model, messages })` (one model call,
-no tree — from `@agentick/model`) → `run(<Agent/>, ...)` (one
-execution, nothing persists — this package) → `createApp` + sessions
-(persistent). Each tier strictly adds.
+`run` takes every `createApp` option plus `messages`, `history`, `props`, `maxTicks`, and `signal`. It is the middle rung of a three-step ladder, each step strictly adding to the last:
 
-## Cluster integration
+| Reach for                | When                                              | From                        |
+| ------------------------ | ------------------------------------------------- | --------------------------- |
+| `generate({ model, … })` | One model call, no tree, no tools                 | [@agentick/model](../model) |
+| `run(<Agent/>, …)`       | One execution — tree, model, tools — nothing kept | this package                |
+| `createApp` + sessions   | Conversations that persist and resume             | this package                |
 
-Pass `cluster: ClusterFactory` to wrap the app's substrate with
-cluster-aware bus + inbox routing. `app.closeApp()` tears down the
-cluster.
+## Configuring the app
 
-```typescript
+### `model` vs `modelExecutor`
+
+`model` is _what to call_ — a bare adapter. The app wraps it in the one model executor on its substrate, so executor events land on `app.events(...)` with no wiring. `modelExecutor` is _how to execute_ — an engine you built. **At most one:** passing both throws, and passing a bare adapter to `modelExecutor` throws (it belongs on `model`).
+
+Passing **neither** is legal. A model-less app is fully valid — dispatch, snapshot/restore, and wire plumbing all work without one. The requirement is enforced at execution time: a `send` whose effective-model cascade (per-tick `<Model>` → per-send override → session default) resolves empty fails with `NoModelForExecutionError`.
+
+### Namespace slots — configuring a per-session capability from the app
+
+A namespace like the timeline is per-session, but its _configuration_ belongs at the app. So each namespace package contributes its own top-level slot:
+
+```tsx
 import { createApp } from "@agentick/app/react";
-import { defineUnixCluster } from "@agentick/cluster-net";
+import { defineTimeline, hydrateTail } from "@agentick/timeline";
+import { fsTimelineStore } from "@agentick/timeline-fs";
 
 const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
-  cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
-});
-
-// app.bus, app.inbox, app.journal are now the cluster-wrapped versions.
-// Local emits fan out to other nodes; remote events arrive locally.
-
-await app.closeApp(); // closes the cluster too
-```
-
-**One cluster per process.** Multiple `createApp({cluster})` calls
-with the same `ClusterFactory` produce INDEPENDENT clusters (double
-connections, double-delivery). For multi-app deployments, use a
-gateway — see
-[`@agentick/gateway`](../gateway/README.md) and
-[ADR 38 §"Hard rules"](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md#hard-rules).
-
-**Constraint.** `createApp({cluster, bus: instance})` is fine. `createApp({cluster, bus: LocalEventBus.factory()})` throws — the cluster needs a concrete substrate to wrap; we can't resolve factories without the parent shell that IS the substrate. Resolve factories yourself if you need this combination.
-
-## API reference
-
-### `createApp(rootElement, options)`
-
-**`model` vs `modelExecutor` (ADR 52).** `model` is _what to call_ — a bare
-`LanguageModelAdapter`; the app wraps it in the ONE
-`LanguageModelExecutor` on its substrate, so executor events land on
-`app.events(...)` with zero wiring. `modelExecutor` is _how to execute_ — a
-BYO engine you constructed yourself. **At most one** — passing both throws,
-and they are mutually exclusive; passing a bare adapter to `modelExecutor`
-throws (it belongs on `model`). Passing **neither** is legal: a model-less
-app is fully valid (dispatch, snapshot/restore, and wire plumbing all work
-without a model). The model requirement is enforced at **execution time** —
-a `send` whose effective-model cascade (`per-tick <Model>` > `per-send
-override` > `session default`) is empty fails with `NoModelForExecutionError`.
-
-| Field                | Type                                                   | Notes                                                                                                                                                                                                                                                                                                                                                                            |
-| -------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`              | `LanguageModelAdapter`                                 | The model to call — `openai("gpt-4o")`, `aisdk(model)`, `google(...)`, etc. Standard path. At most one of `model` / `modelExecutor`; both omitted → model-less app (send fails at execution time).                                                                                                                                                                               |
-| `modelExecutor`      | `LanguageModelExecutor` or `ExecutorFactory`           | BYO execution engine. A bare adapter goes on `model`, not here.                                                                                                                                                                                                                                                                                                                  |
-| `target`             | `ExecutionTarget`                                      | Optional. Defaults to `modelExecutor.target`.                                                                                                                                                                                                                                                                                                                                    |
-| `compiler`           | `CompilerProtocol` or `CompilerFactory`                | Required (omittable via `/react` subpath default).                                                                                                                                                                                                                                                                                                                               |
-| `loop`               | `LoopExecutorProtocol` or factory                      | Optional. Defaults to the bundled `LoopExecutorHarness`.                                                                                                                                                                                                                                                                                                                         |
-| `cluster`            | `ClusterFactory`                                       | Optional. See "Cluster integration" above.                                                                                                                                                                                                                                                                                                                                       |
-| `tools`              | `ToolDeclaration[]`                                    | App-scope tool registry. Threads to every session.                                                                                                                                                                                                                                                                                                                               |
-| `hooks`              | `CommandHooks`                                         | App-scope command-lifecycle hooks (`onBefore*` / `onAfter*`, ADR 80). Folded once at construction; every session composes its own onto these (ADR 82). See the "Hooks" pattern below.                                                                                                                                                                                            |
-| `extensions`         | `Extension[]`                                          | App + session extensions. Composed at construction.                                                                                                                                                                                                                                                                                                                              |
-| `bus`                | `EventBus` or factory                                  | Optional substrate override.                                                                                                                                                                                                                                                                                                                                                     |
-| `inbox`              | `MessageInbox` or factory                              | Optional substrate override.                                                                                                                                                                                                                                                                                                                                                     |
-| `journal`            | `OperationJournal` or factory                          | Optional substrate override.                                                                                                                                                                                                                                                                                                                                                     |
-| `signal`             | `AbortSignal`                                          | App-wide cascade (PA1). Firing it aborts every active session's in-flight execution and refuses new work — `closeApp()` in abort shape. See "App-wide `signal`" below.                                                                                                                                                                                                           |
-| `sessions`           | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable session store + the bounded-registry knobs (PA2/PA3) + the spawn depth ceiling (SP4). See "Bounded live registry" and "Spawn hardening" below.                                                                                                                                                                                                                           |
-| `metadata`           | `Record<string, unknown>`                              | Adopter-defined bag carried on the harness instance.                                                                                                                                                                                                                                                                                                                             |
-| `name`               | `string`                                               | Logical app name — the telemetry agent-identity dimension. Stamped as `<ns>.app.name` and used as the default `functionId` when telemetry enrichment is on. Otherwise inert.                                                                                                                                                                                                     |
-| `telemetry`          | `boolean \| TelemetryLayer \| TelemetryOptions`        | **The one switch** (strictly opt-in). `true` turns on framework enrichment + OTLP autodiscovery; `{ serviceName?, attributes?, spanProcessor?, metricReader?, layer?, autoDiscover? }` (build it with `createTelemetry`) wires standard-OTel export; a raw `Layer` is the Effect escape hatch. Off (omitted/`false`) = zero overhead. **See "Observability & telemetry" below.** |
-| `telemetryNamespace` | `string`                                               | Prefix on every framework attribute (`<ns>.op_id`, `<ns>.app.name`, …). Defaults to `"agentick"`; whitelabels the framework keys. `gen_ai.*` semconv keys stay verbatim (never whitelabeled).                                                                                                                                                                                    |
-| `appId`              | `string`                                               | Defaults to `app:${ulid()}`.                                                                                                                                                                                                                                                                                                                                                     |
-
-Returns `Promise<AppHarness>` after substrate readiness signals. Not
-exhaustive — see [typedoc](https://agentick.dev) / `AppHarnessOptions`
-in `src/harness.ts` for every slot (`models`, `session`, `toolExecutor`,
-`defaultMaxTicks`, `streaming`, …).
-
-### Observability & telemetry
-
-The `telemetry` switch is strictly opt-in and takes three inline forms, all
-turning framework enrichment on (agent-identity + model/tool/tick attrs, token
-usage + cost on generate terminals) AND threading a provider down to
-`ctx.trace` / `ctx.metrics` in your tool handlers:
-
-- **`telemetry: true`** — enrichment on. With no exporter wired it attempts
-  **env-driven OTLP autodiscovery**: if `OTEL_EXPORTER_OTLP_ENDPOINT` is set it
-  lazily loads `@agentick/telemetry-otlp` and exports over OTLP; if that
-  package isn't installed it logs one line and continues (never crashes). This
-  is a deliberate divergence from the OTel SDK's silent-localhost default —
-  autodiscovery fires **only** when the endpoint env is explicitly set, so
-  there's no accidental export spam. With no endpoint env, enrichment still
-  annotates spans on the no-op tracer (annotation on, export off).
-- **`telemetry: createTelemetry(options, ...sinks)`** — the standard-OTel form,
-  no Effect import. A `TelemetrySink = { spanProcessor?, metricReader?, attributes? }`
-  is a destination bundle; a raw object literal IS a valid sink, or use
-  `otlpSink()` from `@agentick/telemetry-otlp`. `createTelemetry` merges
-  every sink (span processors concat, metric readers concat, `attributes` merge
-  under the options') and returns the existing `TelemetrySetting` — the slot
-  union does not grow.
-- **`telemetry: { layer }`** — the Effect-native escape hatch (ADR-42
-  dichotomy). Hand in an `@effect/opentelemetry` tracer `Layer` when you already
-  have one. A `layer` and `spanProcessor`s given together compose **additively**
-  (both export); the `layer` is never overridden.
-
-```ts
-import { createApp, createTelemetry } from "@agentick/app/react";
-import { otlpSink } from "@agentick/telemetry-otlp";
-
-const app = await createApp(<Agent />, {
-  name: "triage-bot",
-  telemetry: createTelemetry({ serviceName: "triage-bot" }, otlpSink()),
+  model,
+  timeline: defineTimeline({
+    store: fsTimelineStore({ dir: "./.agentick/transcripts" }),
+    hydrate: hydrateTail(200),
+  }),
 });
 ```
 
-**The never-wrap guardrail.** The framework adds **no** proprietary layer between
-you and OpenTelemetry: sampling, filtering, and batching stay expressed as your
-own standard OTel `SpanProcessor` / `MetricReader` instances. `createTelemetry`
-merges destinations and hands the raw objects to the SDK — nothing wraps them.
-Span processors become an Effect tracer runtime (via `@effect/opentelemetry`);
-metric readers back an OTel `MeterProvider` behind the `MetricSink` seam. OTel
-exporter deps live in `@agentick/telemetry-otlp`, so this package stays
-exporter-dep-free. `telemetryNamespace` whitelabels the framework's own
-attribute keys (`gen_ai.*` semconv keys stay verbatim).
+There is **no `timeline?:` line in this package.** The slot arrives by module augmentation from `@agentick/timeline` and a side-effect registration that tells the app "`timeline` is a namespace key, forward it" — the app names no namespace and imports no namespace package for this. Install an optional namespace and its slot appears on `createApp` the same way; don't, and it never exists at the type level.
 
-**Metric labels + multi-app sharing.** Every `ctx.metrics.*` emission carries the
-low-cardinality ambient labels `{ tool, op }`, plus `{ app: <name> }` when the
-app is named. The `app` label matters under a gateway: two apps inheriting one
-gateway `telemetry` setting share the SAME `MetricReader` instances, and a reader
-binds to exactly one `MeterProvider`, so the wiring materializes **one
-`MeterProvider` per `createTelemetry` product** and shares the `MetricSink`
-across every inheriting app (refcounted — the last app to close flushes + shuts
-it down). The `app` label keeps those shared-sink metrics distinguishable. High-
-cardinality identity (`sessionId` / `executionId`) rides spans + logs, never a
-metric label.
+Every slot takes the same two forms and no third: a `defineX(...)` **definition** (or the identical inline bag — `timeline: { store }` is the same type) or a **live instance** when you own the lifecycle.
 
-> Verified by `src/__tests__/telemetry-e2e.spec.tsx` (the full
-> `createTelemetry` → `ctx.trace`/`ctx.metrics` → sink path),
-> `src/__tests__/telemetry-wiring.spec.ts` (merge + validation + env + build),
-> and `src/__tests__/telemetry.spec.ts` (enrichment on/off). The complete model
-> lives in the [observability guide](../../docs/proposals/v2/guide-observability.md).
+```tsx
+const app = await createApp(<Agent />, { model, timeline: { store } }); // inline bag
+```
 
-### `app.createSession(opts?)`
+### `extensions` — the fully-dynamic escape hatch
 
-Constructs a `SessionHarness` bound to this app. Sessions share the
-app's substrate + sub-harnesses; only session-scope state (timeline,
-knobs, extensions targeting `"session"`) is per-session.
+Slots are declarative and statically typed. `extensions: []` is the array you build at runtime — conditional composition, a slot-less third party, anything assembled in a loop:
 
-**Single construction site for substrate primitives (#159).** The
-AppHarness is the ONE place the per-session `ElicitationHarness`,
-`TasksHarness`, and `ResourcesHarness` (ADR 62) are constructed — BEFORE
-session-extension installs run. Each is threaded, as a single shared
-instance, into the ToolExecutor (`ctx.elicitation` / `ctx.tasks` /
-`ctx.resource`), the session bridges (`bridges.*`), the session accessors
-(`session.elicitation` / `session.tasks` / `session.resources`), and the
-`SessionInstaller` (`installer.elicitation` / `.tasks` / `.resources`).
-Extensions (`withTasks`, `withResources`, `withMCP`, …) must NOT
-construct their own — that would collide on the inbox address and fork
-the registry that `ctx.*` vs `bridges.*` vs `session.*` resolve to. They
-consume the wired instance instead (e.g. `withResources` registers the
-`resource_*` model tools; `withMCP` proxy-registers remote resources into
-`installer.resources`).
+```tsx
+import { withMCP } from "@agentick/mcp";
+import { withTimeline } from "@agentick/timeline";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
-### `app.getSession(id)` vs. `app.listSessions(query)` — the E11 split
+const app = await createApp(<Agent />, {
+  model,
+  extensions: [
+    withMCP({
+      servers: [
+        {
+          serverId: "fs",
+          transport: new StdioClientTransport({ command: "mcp-server-filesystem" }),
+        },
+      ],
+    }),
+    ...(process.env.TRANSCRIPTS ? [withTimeline({ store })] : []),
+  ],
+});
+```
 
-The app keeps **two** structures for sessions, deliberately not merged (data-layer
-plan E11):
+App extensions install once at construction; session extensions re-install per session. The `target` field routes each one — you never sort them yourself. Order is install order, and a slot-name collision is last-writer-wins, so an adopter extension listed after a framework default overrides it.
 
-- The **live registry** — `sessionId → live SessionHarness`, in-memory,
-  ephemeral (a session is dropped from it on close). Read it for **routing /
-  interaction** via `app.getSession(id)`.
-- The durable **`SessionStore`** — `sessionId → SessionRecord`, the queryable
-  **superset** (every non-ephemeral session ever, including closed ones the live
-  registry dropped). It is the backing for every "list / resume my sessions"
-  surface. Read it via:
-  - `app.listSessions(query?)` → `Promise<readonly SessionRecord[]>`, filtered by
-    `appId` / `status` / `parentSessionId` / `updatedAfter` recency.
-  - `app.getSessionRecord(id)` → `Promise<SessionRecord | undefined>` (resolves
-    closed / historical sessions too).
+### Genesis — what a session opens on
 
-The store is an app-singleton (`createApp({ sessions: { store } })`, defaults to a
-node-local `InMemorySessionStore` — swap a durable adapter for survival across app
-restart, the store's purpose as the resume index). Each non-ephemeral session
-mirrors its metadata into it off the critical path (no projection). Ephemeral
-`runOnce` sessions get NO store — they are throwaway and stay out of the durable
-list.
+A store-bearing namespace carries a `hydrate` seam, and the app is what runs it. Three laws are worth knowing because they are the ones that bite:
 
-App-owned descriptive slots (`title` / `description` / `metadata`) are the app's
-to populate — seed them at `createSession({ title, description })` or set them
-later via `app.setSessionMeta(id, { title?, description?, metadata? })`. The
-framework STORES them and is blind to their semantics.
+- **Genesis completes before the first render.** The first compile already sees the resumed conversation — there is no window where the tree renders against an empty log.
+- **A throwing hydrator fails `createSession`** with its typed error (`TimelineHydrateFailed` for the timeline). There is no half-hydrated session that only explodes at the first `send`.
+- **Genesis runs on create and resume, never on fork or spawn.** A forked child inherits its parent's image directly, so a second genesis would duplicate it.
 
-### Bounded live registry — `sessions.maxActive` / `sessions.idleTimeout` (PA2/PA3)
+```tsx
+const app = await createApp(<Agent />, { model, timeline: { store } });
 
-The live registry (`getSession`) is otherwise an unbounded `Map` — a memory
-leak in long-lived deployments that open sessions and never close them. Two
-knobs cap it by **paging out** idle sessions:
+const a = await app.createSession({ sessionId: "chat-1" }); // genesis runs
+const b = await app.createSession({ sessionId: "chat-1" }); // same id, later process → genesis runs
+const child = await a.spawn(<SubAgent />, { messages }); // inherits; no genesis
+```
+
+Create-is-resume: there is no separate `resume` verb. Opening a session id whose durable log exists rehydrates it.
+
+## Sessions
+
+### `getSession` vs `listSessions`
+
+The app keeps **two** structures for sessions, deliberately not merged:
+
+| Structure         | Holds                                         | Read it for                                        |
+| ----------------- | --------------------------------------------- | -------------------------------------------------- |
+| **Live registry** | `sessionId → live session`, in-memory         | Routing and interaction — `app.getSession(id)`     |
+| **Session store** | `sessionId → SessionRecord`, durable superset | "List / resume my sessions" — `app.listSessions()` |
+
+The store is the queryable superset: every non-ephemeral session ever, including closed ones the live registry dropped.
 
 ```ts
+const live = app.getSession("chat-1"); // undefined once closed or paged out
+const mine = await app.listSessions({ status: "active", updatedAfter: Date.now() - 86_400_000 });
+const record = await app.getSessionRecord("chat-1"); // resolves closed sessions too
+```
+
+It is an app singleton, defaulting to a node-local in-memory store. Swap a durable adapter and the list survives an app restart — which is the store's entire purpose. Ephemeral `runOnce` sessions get no store entry; they are throwaway and stay out of the durable list.
+
+`title` / `description` / `metadata` are yours to populate — seed them at `createSession({ title })` or set them later with `app.setSessionMeta(id, { title })`. The framework stores them and is blind to their semantics.
+
+### Bounding the live registry
+
+The live registry is otherwise an unbounded map — a leak in a deployment that opens sessions and never closes them. Two knobs cap it by **paging out** idle sessions:
+
+```tsx
 const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
+  model,
   sessions: {
-    store: pgSessionStore, // durable resume index (E11)
-    maxActive: 500, // soft LRU cap on LIVE sessions
+    store: pgSessionStore,
+    maxActive: 500, // soft LRU cap on live sessions
     idleTimeout: 30 * 60_000, // page out after 30 min idle
   },
 });
 ```
 
-- **`maxActive`** — a **soft** LRU cap. When a `createSession` pushes the live
-  count over it, the **least-recently-active evictable** session is paged out.
-  Soft because an in-flight session is never evicted, so a burst of concurrent
-  work may exceed the cap transiently; the bound is restored at the next create
-  or idle sweep.
-- **`idleTimeout`** — ms of inactivity after which a background sweep pages a
-  session out. The sweep runs on an `unref`'d timer, so a **quiet** long-lived
-  app still releases memory (no traffic required to fire it).
+`maxActive` is a **soft** cap: when a create pushes the live count over it, the least-recently-active evictable session is paged out. Soft because an in-flight session is never evicted, so a burst may exceed the cap transiently; the bound is restored at the next create or sweep. `idleTimeout` is milliseconds of inactivity after which a background sweep pages a session out — on an `unref`'d timer, so a quiet app still releases memory without traffic to trigger it.
 
-**Activity** = any operation scoped to the session (send, dispatch, snapshot, a
-repeat `createSession` open, …), tracked off the shared bus. _Caveat:_ a session
-constructed with its OWN bus factory (`createSession({ bus: LocalEventBus.factory() })`,
-a multi-tenant-isolation lever) does not publish to the app bus and so is not
-activity-tracked this way — pair per-session-bus isolation with explicit
-`session.close()` rather than idle eviction.
+> [!IMPORTANT]
+> **Eviction is paging, not deletion.** The live harness is torn down; the durable record and timeline store survive. The next `createSession(sameId)` reconstructs and rehydrates it, so eviction is invisible to correctness — _provided_ the backing is durable. Without a durable timeline store, a paged-out session reopens with an empty conversation.
 
-**Eviction is paging, NOT deletion.** An evicted session's live harness is torn
-down (compiler mount + bridges freed) but its durable `SessionRecord` + timeline
-store survive. The next `createSession(sameId)` transparently reconstructs and
-rehydrates it via the ADR-49 open-or-rehydrate path — so eviction is invisible
-to correctness. Two consequences to know:
+A `getSession(id)` handle captured before an eviction points at the closed instance; re-fetch after the window. Activity is any operation scoped to the session, tracked off the shared bus — so a session constructed with its **own** bus factory (a multi-tenant isolation lever) is not activity-tracked, and should be paired with an explicit `session.close()` rather than idle eviction.
 
-- Rehydrated state is only as complete as the durable backing. Configure a
-  durable **timeline store** (`createApp({ timeline: { store } })`) if you need a
-  paged-out session's conversation to survive; without one, reopen starts fresh.
-- A `getSession(id)` handle captured _before_ an eviction is stale (points at the
-  now-closed instance). Re-fetch via `createSession(id)` / `getSession(id)` after
-  the eviction window — the E11 "live routing handle may be dropped" contract.
+Both the LRU page-out and the idle sweep call `session.close({ reason: "evicted" })` — the same operation an explicit teardown runs, not a path around it. So a `onBeforeSessionClose` observer sees page-outs, and the audit trail tells a page-out from a hangup by the record's `reason`, not by which code path ran.
 
-The app-level `onSessionClose` handler does **not** fire on eviction (paging is
-not a lifecycle end); the session's own bridge/extension close handlers do.
-Ephemeral `runOnce` sessions are never LRU/idle-evicted — they self-dispose.
+### App-wide `signal`
 
-**Eviction routes through the close op.** Both the LRU page-out and the idle
-sweep call `session.close({ reason: "evicted" })` — the same
-`session:command:close` operation an explicit teardown runs (ADR 92 Family 2
-§5), not a path around it. So a `session.hooks.onBeforeSessionClose` observer
-sees page-outs, and the audit trail tells a page-out from a hangup by the
-record's `reason`, not by which code path ran. The close op is bus-only, so
-these envelopes reach `app.events(...)` without filling the journal.
+One `AbortSignal` fans into every session. It is `closeApp()` in **abort shape** — a cascading cancel, not a teardown (the substrate survives):
 
-### App-wide `signal` (PA1)
-
-`createApp({ signal })` fans a single `AbortSignal` into every session. It is
-`closeApp()` in **abort shape** — a cascading cancel rather than a teardown (it
-does not dispose the substrate):
-
-```ts
+```tsx
 const controller = new AbortController();
 const app = await createApp(<Agent />, { model, signal: controller.signal });
-// … later, on shutdown / deadline / client disconnect:
-controller.abort();
+
+controller.abort(); // shutdown, deadline, client disconnect
 ```
 
-When the signal fires:
+When it fires, every active session's in-flight execution aborts (the app signal merges into each per-send execution signal), and new work is refused: `createSession` / `runOnce` throw `AppClosedError`, and a `send()` on an already-created session resolves `aborted` with 0 ticks and no model call. A per-session `createSession({ signal })` overrides the app signal for that session.
 
-- every active session's **in-flight execution aborts** — each session merges the
-  app signal into its per-send execution signal, so the loop tears the work down
-  immediately (reusing the existing per-send abort plumbing, no bespoke engine);
-- **new work is refused** — `createSession` / `runOnce` throw `AppClosedError`
-  (admission treats an aborted app like a closed one), and a `send()` on an
-  already-created session resolves an `aborted` result (`stopReason: "aborted"`,
-  0 ticks) without a model call.
+### Spawn — depth, lineage, teardown
 
-A per-session `createSession({ signal })` overrides the app signal for that
-session (the caller owns that session's cancel).
+`session.spawn(...)` creates a child session bound to the same app.
 
-### Spawn hardening — depth ceiling, lineage, teardown (SP4–SP6)
+```tsx
+const app = await createApp(<Agent />, { model, sessions: { maxSpawnDepth: 10 } });
+```
 
-`session.spawn(...)` creates a **child session** bound to the same app. Three
-guarantees keep a sub-agent tree safe and observable:
+- **Depth ceiling.** A session already `maxSpawnDepth` deep cannot spawn further — `spawn()` throws `SpawnDepthExceededError` with `{ depth, maxDepth }`. It fails closed, so a self-recursive agent crashes with a clear error instead of blowing the stack. Depth is just `spawnPath.length`; the default is 10.
+- **Lineage.** A child carries `spawnPath` — its ancestor ids, root-first. It lands on the child's `SessionRecord`, on the loop's event scope (so bus and journal envelopes attribute sub-agent work), and on the child's execution handle stream. With `parentSessionId`, the records reconstruct the whole spawn graph.
+- **Teardown cascade.** The parent's signal is fanned into each child, so a parent abort tears down the child's in-flight work; a parent close or abort disposes its children transitively. No sub-session leaks.
+
+## Lifecycle operations
+
+Spawn and close are **operations**, not bare method calls — they run through the same pipeline as any command, which is what makes them guardable.
+
+A spawn is two linked operations: `session:command:spawn` (this session's layer — the depth ceiling, lineage, principal descent) parents `app:command:create-child-session` (this app's layer — construction and registry admission). They share a **body** with host `createSession`, not an envelope. That distinction is the point:
 
 ```ts
+// "This agent may not spawn sub-agents" — without also blocking host session creation.
+app.guard((_input, ctx) =>
+  ctx.op === "SessionSpawn" ? { kind: "veto", reason: "no-subagents" } : undefined,
+);
+```
+
+A spawn emits no `app:create-session` record, so a guard on host session creation does not silently police spawns, and vice versa. A veto at either layer creates no child and no registry entry.
+
+Close emits `session:command:close` carrying its `reason` (`"closed"`, `"evicted"`, …). It is bus-only by policy — the envelope reaches `app.events(...)` without filling the journal — and a veto leaves the session usable.
+
+## Hooks, guards, and middleware
+
+Three seams around operations, distinguished by how much they know about the op:
+
+| Seam           | Sees                                | Scope                | Registered                                  |
+| -------------- | ----------------------------------- | -------------------- | ------------------------------------------- |
+| **Guard**      | One named verb's input → a verdict  | Admission, outermost | `createApp({ guards })` or `app.guard(fn)`  |
+| **Hook**       | One named verb's typed input/output | Transform            | `createApp({ hooks })` or `app.hook({ … })` |
+| **Middleware** | Every op, opaquely                  | Wrap                 | `app.use(mw)` / `app.fx.use(mw)`            |
+
+```tsx
 const app = await createApp(<Agent />, {
   model,
-  sessions: { maxSpawnDepth: 10 }, // default 10 — the recursion bound
+  hooks: {
+    onAfterToolDispatch: (result) => redactSecrets(result),
+  },
+  guards: {
+    timelineAppend: (input) =>
+      input.entries.length > 500 ? { kind: "veto", reason: "batch too large" } : undefined,
+  },
 });
 ```
 
-- **Depth ceiling (SP4).** A session whose spawn lineage is already
-  `maxSpawnDepth` deep cannot spawn further — `spawn()` throws the typed
-  `SpawnDepthExceededError` (`{ depth, maxDepth }`), failing closed so an agent
-  that recursively spawns itself crashes with a clear error instead of blowing
-  the stack. Depth is simply `spawnPath.length`.
-- **Lineage / attribution (SP5).** A child carries a `spawnPath` — the ancestor
-  session ids, root-first (`[root, …, parent]`); its length is the depth. It is
-  stamped on the child's `SessionRecord.spawnPath` (so a sessions-list attributes
-  a sub-agent to its whole chain), on the loop's `run-execution`/`tick`
-  `EventScope` (so bus/journal envelopes attribute sub-agent work), and on the
-  child's per-execution handle stream. Combined with `parentSessionId`, the
-  session records reconstruct the whole spawn DAG.
-- **Teardown cascade (SP6).** The parent's construction signal is fanned into
-  each child, so a **parent abort tears down the child's in-flight work**
-  (the same merge-into-execution plumbing as the app signal). A **parent close
-  or abort disposes its children** — removed from the live registry and closed —
-  so no sub-session leaks; children dispose their own children transitively.
-- **The spawn envelope (ADR 92 Family 2).** A spawn is two linked operations:
-  `session:command:spawn` (this session's layer — the depth ceiling, lineage,
-  principal descent above) parents `app:command:create-child-session` (this
-  app's layer — construction and registry admission), with the child-create
-  op's scope carrying `{ sessionId, parentSessionId, spawnPath }`. A spawn does
-  **not** emit `app:create-session`: the two verbs share a body, not an
-  envelope, so a guard on host session creation does not silently police spawns
-  and vice-versa. `onSessionCreate` (ADR 48) still fires for spawns unchanged —
-  the promotion added the envelope, not a second hook.
+Hook keys are `onBefore`/`onAfter` + the command (`onBeforeToolDispatch`). Guard keys are the bare command (`timelineAppend`) — guards are not lifecycle observers, they are admission decisions, and the naming says so. Both are derived from the command registry, so a typo is a compile error and a new command mints its keys automatically.
 
-  ```ts
-  // Adopter-expressible policy the hardcoded `maxSpawnDepth` could not say:
-  app.guard((_input, ctx) =>
-    ctx.op === "SessionSpawn" ? { kind: "veto", reason: "no-subagents" } : undefined,
-  );
-  ```
+Middleware wraps every op the app or anything it constructs runs — the deployment-global seam for audit, tracing, and metrics:
 
-### Owning principal — stamped → inherited → readable (ADR 48)
-
-Every session carries a construction-bound **owning principal** — the identity
-axis of its structural identity. It is set once and never changes:
-
-- **Stamped** at creation. Host-door: `app.createSession({ principal })`
-  (server-declared, exactly like `requiredScopes` — deliberately NOT settable
-  over the wire; the `app/create_session` wire method stamps it from the
-  authenticated caller's `ctx.principal`, and a `principal` smuggled in the
-  request body is ignored). It lands on the `SessionHarness.principal` field AND
-  the durable `SessionRecord.principal` (the resume index carries ownership).
-- **Inherited** by children. `session.spawn(...)` / `session.fork()` thread the
-  parent's principal onto the child (harness + record); ownership descends the
-  session tree and is not caller-choosable (no `SpawnInput` / `ForkInput`
-  override). A `fork()` additionally inherits the parent's adopter `metadata`
-  bag when `ForkInput.metadata` is absent (a fork is a same-image copy); a
-  `spawn()` does NOT auto-inherit metadata (adopter-selective — see the
-  `onSessionCreate` reshape arm below).
-- **Read** by the wire dispatch gate for the **same-principal target rule**
-  (ADR 51 §4.2): a caller reaching a session owned by a different principal is
-  Forbidden. Extensions read it at install via `installer.principal` (+
-  `installer.metadata`) to construct per-session, tier-scoped backing stores.
-
-`onSessionCreate` is the adopter reshape seam — the house before-hook grammar:
-return `{ kind: "veto", reason? }` to refuse, return a `CreateSessionInput` to
-reshape the input the rest of construction sees (e.g. read `input.parentSessionId`,
-look up the parent record, inject chosen metadata keys into a spawned child), or
-`void` to pass.
-
-> **Verified by** `../transport/src/__tests__/session-principal.spec.ts` (wire
-> stamp + the same-principal gate engaging on the stamped value) and
-> `src/__tests__/session-principal-lifecycle.spec.tsx` (spawn/fork inheritance,
-> fork metadata, the reshape/veto arms, `SessionInstaller` identity).
-
-### `app.closeApp()` / `app.close()`
-
-Closes every registered session, fires extension close handlers in
-reverse registration order, closes the cluster (if `createApp({cluster})`
-was used), then tears down the substrate. Idempotent.
-
-## Patterns
-
-### Tools at the app scope
-
-```typescript
-import { createTool } from "@agentick/tool";
-import { z } from "zod";
-
-const calculator = createTool({
-  name: "calculator",
-  inputSchema: z.object({ a: z.number(), b: z.number() }),
-  handler: async ({ a, b }) => [{ type: "text", text: `${a + b}` }],
-});
-
-const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
-  tools: [calculator],
-});
-```
-
-Tools at this scope are available to every session created from this
-app. Per-session scoping happens via `app.createSession({ tools })`
-overrides (`CreateSessionInput.tools`, session scope wins over app).
-
-### Extensions
-
-App-level extensions install once at construction and stay alive for
-the app's lifetime. Session-level extensions install per-session via
-the same `extensions: [...]` array; the harness routes by `target`.
-
-```typescript
-import { withMCP } from "@agentick/mcp";
-
-const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
-  extensions: [
-    withMCP({ servers: [...] }), // target: "session" — re-installs per session
-  ],
-});
-```
-
-### Middleware — deployment-global (tier 3)
-
-The app is each session's **construction parent**, so `app.use(mw)`
-structurally wraps _every_ operation of _every_ session it creates — the
-deployment-global seam for audit, tracing, journaling, and metrics (ADR 76,
-tier 3). It's the same middleware primitive every harness exposes; registering
-it on the app just gives it the broadest structural scope. **Guards
-(`harness.guard(...)`, ADR 83) inherit the same way** — guards and transforms
-ride one interceptor chain, folded down the construction tree together.
-
-**The cascade is a construction-fold (ADR 83).** Each session snapshots the
-app's resolved interceptors at construction; there is no live parent-walk. So
-`app.use` / `app.guard` registered BEFORE a session is created reaches that
-session; registered AFTER it does not (its fold already ran). Guards are
-registered imperatively via `harness.guard(...)` — there is **no
-`createApp({ guards })` option** (unlike `hooks`, which folds declaratively).
-
-```typescript
-// Pure-JS async form — reads the op's RuntimeContext (ctx) and severs the
-// fiber at `await` (fine for observation). Returns an Unsubscribe.
+```ts
 const off = app.use(async (input, next, ctx) => {
   const started = Date.now();
   try {
@@ -501,109 +273,162 @@ const off = app.use(async (input, next, ctx) => {
     audit.record({ session: ctx.sessionId, op: ctx.opId, ms: Date.now() - started });
   }
 });
-
-// Effect-native form for middleware that must stay in-fiber (span-nesting,
-// structured cancel that reaches inner ops):
-app.fx.use((input, next) =>
-  Effect.gen(function* () {
-    /* … */ return yield* next(input);
-  }),
-);
 ```
 
-Note the SHARED spine harnesses (loop / executor / tool) are construction
-_siblings_ of the session, not children — a **per-session** concern _around the
-model call_ is tier 4 (`withCallMiddleware`), not `app.use`. Full tier model and
-the `use` vs `fx.use` split: [runtime README — Operation middleware](../runtime/README.md#operation-middleware--three-tiers-adr-76).
+Use `app.fx.use` for middleware that must stay in-fiber (span nesting, structured cancel that reaches inner ops) — the async form severs the fiber at `await`, which is fine for observation and wrong for propagation.
 
-### Hooks — lifecycle participation (`onBefore*` / `onAfter*`)
+### The cascade
 
-Where middleware wraps _every_ op opaquely, **hooks** participate in a _named_
-verb by command id — `onBeforeToolDispatch`, `onAfterToolDispatch`, … — typed
-over that verb's real input/output. A `before` hook transforms the command input
-(or vetoes by throwing); an `after` hook transforms the output. They ride the
-same `liftMiddleware` fiber path as `use`, so ambient context and interruption
-survive the `await`.
+**Guards float outermost, then the fold composes.** For any one operation the order is: app guards → definition guards → app `before` hooks → definition `before` hooks, with `after` hooks unwinding in reverse. Governance outranks local policy; a `defineX({ guards })` bag never runs ahead of the app's.
 
-```typescript
+Hooks **compose, they do not override** — app-level and session-level both fire, app-outer. And the cascade is a **construction fold**: each session snapshots the app's resolved interceptors at birth, so `app.use` / `app.guard` registered _before_ a session is created reaches it and registered _after_ does not. Register app-level policy before you open sessions.
+
+## Telemetry
+
+Strictly opt-in, one switch, three forms — all of them turn on framework enrichment (agent identity, model/tool/tick attributes, token usage and cost on generate terminals) and thread a provider down to `ctx.trace` / `ctx.metrics` in your tool handlers.
+
+```tsx
+import { createApp, createTelemetry } from "@agentick/app/react";
+import { otlpSink } from "@agentick/telemetry-otlp";
+
 const app = await createApp(<Agent />, {
-  model: openai("gpt-4o"),
-  hooks: {
-    // Transform the dispatch result soundly (sees + returns a DispatchResult).
-    onAfterToolDispatch: (result, ctx) => redactSecrets(result),
-  },
+  name: "triage-bot",
+  model,
+  telemetry: createTelemetry({ serviceName: "triage-bot" }, otlpSink()),
 });
 ```
 
-**The cascade composes, it does not override.** App hooks fold at construction;
-`createSession({ hooks })` composes the session's own onto the app's (both fire,
-**app-outer**). Guards and `use` middleware inherit through the **same
-construction-fold** (ADR 83) — one snapshot at the session's birth, no live
-parent-walk. Hooks can also be registered **imperatively at runtime** on any
-harness: `harness.hook({ onBeforeToolDispatch: fn })` or the per-verb proxy
-`harness.hooks.onBeforeToolDispatch(fn)` — each returns an `Unsubscribe`. Like
-`use`/`guard`, imperative registration affects that harness's own future ops, not
-already-constructed children (the fold snapshot). Full mechanism (naming as a
-total function of the command id, the typed `CommandRegistry`, compose-not-override,
-the construction-fold): [runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82).
+- **`telemetry: true`** — enrichment on. With no exporter wired it attempts env-driven OTLP autodiscovery: if `OTEL_EXPORTER_OTLP_ENDPOINT` is set it lazily loads `@agentick/telemetry-otlp` and exports; if that package isn't installed it logs one line and continues. Autodiscovery fires **only** when the endpoint env is explicitly set — a deliberate divergence from the OTel SDK's silent-localhost default, so there is no accidental export spam. With no endpoint, enrichment still annotates spans on the no-op tracer.
+- **`createTelemetry(options, ...sinks)`** — the standard-OTel form, no Effect import. A sink is `{ spanProcessor?, metricReader?, attributes? }`; a plain object literal is a valid sink. Every sink merges (processors concat, readers concat, attributes merge under the options').
+- **`{ layer }`** — hand in an `@effect/opentelemetry` tracer layer when you already have one. A layer and span processors given together compose additively; the layer is never overridden.
 
-## Status
+Nothing wraps your instruments. Sampling, filtering, and batching stay expressed as your own OTel `SpanProcessor` / `MetricReader` instances, handed to the SDK raw. Exporter dependencies live in `@agentick/telemetry-otlp`, so this package stays exporter-dep-free.
 
-Phase 5 (cluster fusion) — landed. `createApp({cluster})` is the
-substrate-fusion adopter path; `joinXCluster` is the side-channel
-counterpart (see [ADR 38](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md)).
+`telemetryNamespace` prefixes every framework attribute (`<ns>.op_id`, `<ns>.app.name`), defaulting to `"agentick"` — whitelabel the framework's keys without touching `gen_ai.*` semconv keys, which stay verbatim.
+
+Every `ctx.metrics.*` emission carries the low-cardinality labels `{ tool, op }`, plus `{ app: <name> }` when the app is named. That `app` label matters under a gateway: two apps inheriting one gateway telemetry setting share the same reader instances, so the wiring materializes one meter provider per `createTelemetry` product and refcounts it across every inheriting app. High-cardinality identity (`sessionId`, `executionId`) rides spans and logs, never a metric label.
+
+## Cluster
+
+Pass a `cluster` factory to replace the app's substrate with cluster-aware bus and inbox routing. Local emits fan out to other nodes; remote events arrive locally.
+
+```tsx
+import { defineUnixCluster } from "@agentick/cluster-net";
+
+const app = await createApp(<Agent />, {
+  model,
+  cluster: defineUnixCluster({ socketPath: "/tmp/cluster.sock" }),
+});
+
+await app.closeApp(); // closes the cluster too
+```
+
+> [!WARNING]
+> **One cluster per process.** Two `createApp({ cluster })` calls with the same factory produce two independent clusters — double connections, double delivery. For multi-app deployments wire the cluster at the [gateway](../gateway) and let apps inherit.
+
+`createApp({ cluster, bus: instance })` is fine; `createApp({ cluster, bus: LocalEventBus.factory() })` throws. The cluster needs a concrete substrate to wrap and cannot resolve a factory without the parent shell that _is_ the substrate — resolve factories yourself if you need that combination.
+
+## API
+
+### `@agentick/app`
+
+| Export                                           | Purpose                                                  |
+| ------------------------------------------------ | -------------------------------------------------------- |
+| `createApp(rootElement, options)`                | Construct an app; resolves once the substrate is ready   |
+| `run(rootElement, options)`                      | One execution, nothing persists; awaitable and iterable  |
+| `createTelemetry(options, ...sinks)`             | Build a telemetry setting from standard OTel instruments |
+| `AppHarness`                                     | The implementation, for direct construction              |
+| `builtinWireExtensions`                          | The bundled wire methods, for a hand-assembled gateway   |
+| `AppHarnessOptions` / `CreateAppOptions` (types) | The full options surface                                 |
+
+### `createApp` options
+
+| Field                       | Type                                                   | Notes                                                                                    |
+| --------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `model`                     | `LanguageModelAdapter`                                 | What to call. At most one of `model` / `modelExecutor`; both omitted is a model-less app |
+| `modelExecutor`             | `LanguageModelExecutor` \| factory                     | How to execute. A bare adapter belongs on `model`                                        |
+| `compiler`                  | `CompilerProtocol` \| factory                          | Required; defaulted by the `/react` subpath                                              |
+| `loop`                      | `LoopExecutorProtocol` \| factory                      | Defaults to the bundled loop executor                                                    |
+| `tools`                     | `ToolDeclaration[]`                                    | App-scope registry; threads to every session                                             |
+| `hooks`                     | `CommandHooks`                                         | Declarative per-verb transforms; folded once at construction                             |
+| `guards`                    | `CommandGuards`                                        | Declarative per-verb admission verdicts                                                  |
+| `extensions`                | `Extension[]`                                          | The dynamic composition array; routed by `target`                                        |
+| `sessions`                  | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable resume index, live-registry bounds, spawn ceiling                                |
+| `signal`                    | `AbortSignal`                                          | App-wide cascading cancel                                                                |
+| `cluster`                   | `ClusterFactory`                                       | Substrate fusion across nodes                                                            |
+| `bus` / `inbox` / `journal` | instance \| factory                                    | Substrate overrides                                                                      |
+| `telemetry`                 | `boolean` \| `TelemetrySetting`                        | The one observability switch; off by default                                             |
+| `telemetryNamespace`        | `string`                                               | Prefix on framework attribute keys; defaults to `"agentick"`                             |
+| `name`                      | `string`                                               | Logical app name — the telemetry identity dimension and default `functionId`             |
+| `metadata`                  | `Record<string, unknown>`                              | Adopter bag carried on the instance                                                      |
+| `appId`                     | `string`                                               | Defaults to `app:${ulid()}`                                                              |
+| _namespace slots_           | e.g. `timeline`                                        | Contributed by namespace packages; not declared here                                     |
+
+Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, `streaming`, `narrate`, `migrateSnapshot`, `initialProps`, `initialKnobs`, `target`, `interceptorParent`.
+
+### `AppHarness`
+
+| Member                           | Returns                                                     |
+| -------------------------------- | ----------------------------------------------------------- |
+| `createSession(input?)`          | A session bound to this app; opening an existing id resumes |
+| `runOnce(input)`                 | One execution in an ephemeral session                       |
+| `getSession(id)`                 | The live session, or `undefined`                            |
+| `listSessions(query?)`           | Durable records — the queryable superset                    |
+| `getSessionRecord(id)`           | One durable record, closed sessions included                |
+| `setSessionMeta(id, meta)`       | Set app-owned `title` / `description` / `metadata`          |
+| `events(query?)`                 | Cross-session bus subscription                              |
+| `use(mw)` / `fx.use(mw)`         | Register middleware; returns an unsubscribe                 |
+| `guard(fn)` / `hook(bag)`        | Register a guard / hooks imperatively                       |
+| `hooks.onBeforeToolDispatch(fn)` | Per-verb imperative registrar                               |
+| `closeApp()`                     | Close every session, fire close handlers, tear down         |
+
+`closeApp()` closes registered sessions, fires extension close handlers in reverse registration order, closes the cluster if there is one, then tears down the substrate. Idempotent. `close()` is the same operation under the name every harness shares.
+
+## Patterns
+
+**Tools at app scope.** `createApp({ tools })` reaches every session; `createSession({ tools })` overrides per session, and the narrower scope wins. Build them with [@agentick/tool](../tool).
+
+```tsx
+import { createTool } from "@agentick/tool";
+import { z } from "zod";
+
+const calculator = createTool({
+  name: "calculator",
+  description: "Add two numbers",
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  handler: async ({ a, b }) => [{ type: "text", text: `${a + b}` }],
+});
+
+const app = await createApp(<Agent />, { model, tools: [calculator] });
+```
+
+**Sessions.** [@agentick/session](../session) owns `send`, steering, spawn/fork, and the snapshot surface.
+
+**Conversations.** [@agentick/timeline](../timeline) owns the log, its store port, and compaction.
+
+**Serving over a wire.** [@agentick/gateway](../gateway) hosts apps, owns the cluster for multi-app deployments, and cascades extensions down to every app and session beneath it.
+
+**Interceptor mechanics.** [@agentick/runtime](../runtime) owns the operation pipeline, the hook-name derivation, and the middleware tiers.
+
+## Roadmap & known gaps
+
+- **No double-wrap detection.** Pass the same substrate instance to two `createApp({ cluster })` calls and the local bus gets two subscriptions per cluster event — double delivery, with nothing to warn you.
+- **No mid-flight cluster swap.** Replacing a cluster means closing the app and constructing a new one.
+- **Namespace slots carry a name only.** The app pulls a slot's value out at the layer that owns the namespace. Extension-installed namespaces (skills, prompts, tasks, sandbox) still need `extensions: []` rather than a top-level slot.
+- **No per-session namespace override.** Namespace configuration is app-wide; `createSession` takes no `timeline` override.
+- **`onSessionClose` does not fire on eviction.** Paging out is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run.
 
 ## Verified by
 
-- `src/__tests__/app-harness.spec.tsx` — construction + session
-  lifecycle + close cascade; the durable `SessionStore` (E11):
-  `listSessions` / `getSessionRecord` read the store, records mirror
-  lifecycle + execution accounting (status, `executionCount`,
-  `currentExecutionId`, aggregated `usage`, close→`closed`),
-  `setSessionMeta` sets app-owned slots, and ephemeral `runOnce` sessions
-  stay out of the durable list.
-- `src/__tests__/create-app-cluster.spec.tsx` — `cluster: ...`
-  wiring, factory-substrate rejection, close-via-registry-removal.
-- `src/__tests__/session-extensions.spec.ts` — extension target
-  routing + per-session install.
-- `src/__tests__/layered-tools.spec.tsx` — app-scope tool propagation
-  to sessions.
-- `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` fires
-  on dispatch, `createSession({ hooks })` composes app-outer, `onAfter*`
-  transforms flow through, no-hooks is behavior-preserving.
-- `src/__tests__/session-eviction.spec.tsx` (PA2/PA3) — `maxActive`
-  evicts the least-recently-active session (LRU order proven via a send
-  that refreshes an older session), `idleTimeout` pages out a quiet
-  session on the background sweep, an evicted session reopens with its
-  timeline rehydrated from the durable store, and an in-flight execution
-  is never evicted (soft cap restored once it settles).
-- `src/__tests__/app-signal.spec.tsx` (PA1) — an aborted app signal
-  refuses new work at the app edge, is fanned into every session (a
-  post-abort `send` on any resolves `aborted`, 0 ticks), and tears down
-  an in-flight execution mid-flight.
-- `src/__tests__/spawn-hardening.spec.tsx` (SP4–SP6) — `maxSpawnDepth`
-  fails a too-deep spawn with `SpawnDepthExceededError` (configured cap +
-  the default-10 chain), a child's `spawnPath` lineage lands on its
-  `SessionRecord`, its loop `EventScope`, and its handle stream, and a
-  parent close / abort disposes its spawned children (no registry leak;
-  abort mid-child-execution tears the child down without a compiler race).
-- `src/__tests__/lifecycle-operations.spec.tsx` (ADR 92 Slice B) — the spawn
-  and close envelopes end-to-end. Spawn emits `session:command:spawn` +
-  `app:command:create-child-session`, the child-create carries
-  `{ sessionId, parentSessionId, spawnPath }` as scope and names the spawn op as
-  its `parentOpId`, both records journal, a spawn adds no
-  `app:create-session` record, a fork adds the snapshot + restore records, and
-  `onSessionCreate` still fires. A guard veto at either layer creates no child
-  and no registry entry, while a spawn-only guard leaves host `createSession`
-  alone. Close emits `session:command:close` with `reason: "closed"`, stays out
-  of the journal (bus-only policy), and a veto leaves the session usable; the
-  idle sweep and the LRU page-out both emit it with `reason: "evicted"`.
-
-## Known gaps
-
-- No double-wrap detection. If an adopter passes the same shared
-  substrate instance to multiple `createApp({cluster})` calls, the
-  local bus receives two subscriptions for every cluster event →
-  double-deliver. See [ADR 38 §"What this ADR does NOT pin"](../../docs/proposals/v2/blueprint/38-cluster-lifecycle-and-ownership.md#what-this-adr-does-not-pin).
-- No mid-flight cluster swap. To replace a cluster, close the app
-  and construct a new one.
+- `src/__tests__/app-harness.spec.tsx` — construction, session lifecycle, close cascade, and the durable store: `listSessions` / `getSessionRecord` read it, records mirror lifecycle and execution accounting (status, `executionCount`, `currentExecutionId`, aggregated usage, close → `closed`), `setSessionMeta` sets the app-owned slots, and ephemeral `runOnce` sessions stay out of the list.
+- `src/__tests__/genesis-lifecycle.spec.tsx` — the app-level namespace slot reaching the session's timeline (definition form and inline bag), the genesis and shaping seams riding it, the zero-config default with no slot, genesis completing before first render, `createSession` failing with the typed error on a throwing hydrator, and the fork/spawn law (no re-genesis) against a resume that does re-run it.
+- `src/__tests__/lifecycle-operations.spec.tsx` — the spawn and close envelopes end to end: spawn emits both operations with the child-create carrying `{ sessionId, parentSessionId, spawnPath }` and naming the spawn as its parent op, a spawn adds no host-create record, a fork adds snapshot + restore records, a guard veto at either layer creates no child, a spawn-only guard leaves host `createSession` alone, and close stays out of the journal while a veto leaves the session usable.
+- `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` firing on dispatch, `createSession({ hooks })` composing app-outer, `onAfter*` transforms flowing through, and no-hooks being behavior-preserving.
+- `src/__tests__/session-eviction.spec.tsx` — `maxActive` evicting the least-recently-active session (LRU order proven via a send that refreshes an older one), `idleTimeout` paging out a quiet session on the sweep, an evicted session reopening with its timeline rehydrated, and an in-flight execution never being evicted.
+- `src/__tests__/app-signal.spec.tsx` — an aborted app signal refusing new work at the edge, fanning into every session so a post-abort `send` resolves `aborted` with 0 ticks, and tearing down an in-flight execution.
+- `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling failing a too-deep spawn (configured cap and the default chain), `spawnPath` landing on the record, the loop scope, and the handle stream, and a parent close or abort disposing its children with no registry leak.
+- `src/__tests__/session-principal-lifecycle.spec.tsx` — owning-principal inheritance across spawn and fork, fork metadata inheritance, and the `onSessionCreate` reshape and veto arms.
+- `src/__tests__/create-app-cluster.spec.tsx` — cluster wiring, factory-substrate rejection, and close via registry removal.
+- `src/__tests__/session-extensions.spec.ts` + `layered-tools.spec.tsx` — extension target routing with per-session install, and app-scope tool propagation.
+- `src/__tests__/telemetry-e2e.spec.tsx`, `telemetry-wiring.spec.ts`, `telemetry.spec.ts` — the `createTelemetry` → `ctx.trace` / `ctx.metrics` → sink path, sink merging and validation and env autodiscovery, and enrichment on/off.
+- `src/__tests__/run.spec.tsx` — `run()` as awaitable and iterable, with teardown on settle.
