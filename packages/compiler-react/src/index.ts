@@ -120,6 +120,8 @@ export type { ProviderToolProps } from "./react/components/index.js";
 export { Output } from "./react/components/index.js";
 export type { OutputProps } from "./react/components/index.js";
 export { System, User, Assistant, Paragraph, H1, H2, H3 } from "./react/components/index.js";
+// HTML/SVG-colliding content blocks — the wrappers jsx-intrinsics.ts points at.
+export { Text, Code, Image, Audio, Video } from "./react/components/index.js";
 export { ToolGate } from "./react/components/index.js";
 export type { ToolGateProps } from "./react/components/index.js";
 
