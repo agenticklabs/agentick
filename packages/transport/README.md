@@ -1,79 +1,35 @@
 # @agentick/transport
 
-Shared plumbing every `@agentick/transport-*-next` package depends on.
+**A transport is only its bytes.** Everything above the bytes — RPC correlation, subscription streams and their re-key dance, reconnect backoff, JSON-RPC dispatch, ingress authentication, the web-security posture, the client-facing output bound — lives in this package once and is shared by every wire.
 
-`BaseClientTransport` (abstract) owns the bulk of transport behavior;
-concrete transports (in-process, WebSocket, HTTP, Unix-socket) subclass
-and supply wire-specific connection management. The shared
-`dispatchRequest` resolves JSON-RPC frames through the gateway's
-`WireExtension` registry (three bootstrap builtins — `initialize`,
-`ping`, `_extensions/list` — dispatch directly; every other method,
-including `session/send` and `sub/subscribe`, is a registered
-`WireExtension`), authorizes each resolved method at the dispatch choke
-point, then invokes its handler — same dispatcher reused across every
-transport.
+That is why writing a new transport is small: you implement "open the wire", "close the wire", "write a frame", and "here is a frame that arrived". And it is why the wires behave identically — not by convention, but because there is one implementation and a conformance suite that every transport runs. A security default cannot drift between the HTTP edge and the WebSocket edge when both call the same resolver.
 
-## What this package is
+## Install
 
-The result of a Phase 33.C.1 extraction. After WS + in-process landed
-as separate packages, the shared plumbing (RPC correlation, stream
-registries, state machine, notification routing, JSON-RPC dispatch)
-turned into ~400 LOC of duplication. This package consolidates it into
-one place; concrete transports become wire-specific and small.
-
-## Architecture
-
-```
-                ┌────────────────────────────────┐
-                │      ClientTransport interface │
-                │      (in @agentick/spec)  │
-                └─────────────┬──────────────────┘
-                              │ implements
-                              ▼
-                ┌────────────────────────────────┐
-                │      BaseClientTransport       │
-                │      (abstract, this package)  │
-                │                                │
-                │  - state machine               │
-                │  - RPC correlation             │
-                │  - subscription/progress       │
-                │    stream registries           │
-                │  - notification routing        │
-                │  - cursor-aware resubscribe    │
-                │  - AbortSignal → cancelled     │
-                └─────────────┬──────────────────┘
-                              │ subclass + fill in
-                              ▼
-                ┌────────────────────────────────┐
-                │  Concrete transports           │
-                │  - InProcessTransport          │
-                │  - WebSocketTransport          │
-                │  - HttpTransport (Phase 33.D)  │
-                │  - UnixSocketTransport (33.E)  │
-                │                                │
-                │  Override:                     │
-                │    openConnection / close      │
-                │    sendFrame                   │
-                │  Receive inbound via:          │
-                │    this.routeFrame(frame)      │
-                └────────────────────────────────┘
+```bash
+npm install @agentick/transport
 ```
 
-## Quick start (writing a new transport)
+Subpaths: `/client` (the base client transport, streams, backoff), `/server` (dispatch, connection context, ingress authn, web security), `/testing` (the ingress-authentication conformance suite).
+
+You install this only when writing a transport. To _use_ one, install the concrete package: [@agentick/transport-websocket](../transport-websocket), [@agentick/transport-http](../transport-http), [@agentick/transport-unix-socket](../transport-unix-socket), or [@agentick/transport-in-process](../transport-in-process).
+
+## Quick start — writing a transport
+
+A transport is two halves that never meet: a client that speaks frames outbound, and a per-connection server adapter that receives them. Both have a base class here, and neither knows anything about agentick's protocol.
+
+### The client half
 
 ```ts
-import {
-  BaseClientTransport,
-  type ClientTransport,
-  type JsonRpcFrame,
-  type TransportCapabilities,
-} from "@agentick/transport";
+import { BaseClientTransport } from "@agentick/transport";
+import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec";
 
 const CAPABILITIES: TransportCapabilities = {
-  bidirectional: true,
-  streamingRequest: true,
-  reconnectable: false,
+  bidirectional: true, // server can push outside any RPC
+  streamingRequest: true, // server can stream during an open RPC
+  reconnectable: false, // no self-reconnect on this wire
   binaryFrames: false,
+  media: false,
 };
 
 class MyTransport extends BaseClientTransport {
@@ -82,245 +38,309 @@ class MyTransport extends BaseClientTransport {
 
   protected async openConnection(): Promise<void> {
     this.setState("connecting");
-    // ... open the wire
+    await this.wire.open();
     this.setState("open");
   }
 
   protected async closeConnection(): Promise<void> {
-    // ... tear down
+    await this.wire.shutdown();
   }
 
   protected sendFrame(frame: JsonRpcFrame): void {
-    // ... write frame to the wire (e.g., socket.send(JSON.stringify(frame)))
+    this.wire.write(JSON.stringify(frame));
   }
 
-  // When bytes arrive from the wire and decode to a frame, call
-  // this.routeFrame(frame). The base class dispatches responses to
-  // pending RPCs and notifications to subscription / progress streams.
+  // Inbound: decode bytes, hand the frame to the base class. It matches
+  // responses to pending RPCs and routes notifications to the right
+  // subscription or progress stream.
+  private onBytes(text: string): void {
+    this.routeFrame(JSON.parse(text) as JsonRpcFrame);
+  }
 }
 
-export function myTransport(opts: { ... }): ClientTransport {
-  return new MyTransport(opts);
+export function myTransport(options: MyOptions): ClientTransport {
+  return new MyTransport(options);
 }
 ```
 
-## API surface
+### The server half
 
-### Client
-
-- `BaseClientTransport` — abstract base class
-- `DEFAULT_RECONNECT_POLICY`, `computeFullJitterBackoff`, `ReconnectPolicy` —
-  full-jitter reconnect backoff (exported for property-based testing)
-- `MultiplexedStream<T>` — AsyncIterable used by subscription + progress
-  streams. Per-stream backpressure via `BackpressureOptions<T>`:
-  `policy` (`"unbounded"` default / `"drop-oldest"` / `"drop-newest"` /
-  `"close-on-overflow"`), `capacity` (required when bounded), `onDrop`,
-  `onOverflow`. `close-on-overflow` terminates the stream with a
-  `BackpressureError` (`{ kind: "backpressure" }`).
-- `BackpressurePolicy`, `BackpressureOptions<T>`, `BackpressureError` — backpressure types
-- `ActiveSubscription` — bookkeeping shape for cursor-aware resubscribe
-
-### Server
-
-- `dispatchRequest(host, req, sink, identity?)` — transport-agnostic
-  JSON-RPC dispatcher. Resolves each method through the gateway's
-  `WireExtension` registry and authorizes it (verb-derived scope label,
-  target-session ceiling) before running the handler. The authorized
-  handler then routes through `host.runWireDispatch` — the gateway's
-  interceptor seam (ADR 83 §wire) — so a wire method fires the gateway's
-  guards/hooks (`gateway.hooks.onBeforeWireSessionSend` around the
-  `wire:`-prefixed `wire:session/send` op, distinct from the `session:send`
-  op's `onBeforeSessionSend`) AFTER the un-waivable auth pre-gate. `identity` is the ingress identity
-  stamped at the edge (see below); WS, HTTP, Unix-socket adapters all call
-  this. Per-connection state (auth, subscriptions, in-flight ids) lives on
-  the adapter, not in the dispatcher.
-- `DispatchHost = GatewayHarnessProtocol` — type alias
-- `DispatchSink` — contract every connection adapter implements:
-  - `sendNotification(notification)` — emit a notification frame to the client
-  - `registerSubscription(subId, unsubscribe)` / `unregisterSubscription(subId)`
-  - `registerInFlight(id, abort)` / `unregisterInFlight(id)` for `notifications/cancelled` routing
-- `resolveWebSecurity(options?)` — the shared HTTP-facing web-security policy
-  (STATUS A2 §4c). Single-sources the safe-by-default posture every
-  network-facing server edge enforces: `checkAccess` (Host allow-list +
-  cross-site `Origin`/`Sec-Fetch-Site` rejection), `checkCsrf` (per-process
-  token on mutations), `corsHeadersFor` (allowlisted origin echoed exactly —
-  never `*`), `effectivePeer` (forwarded-header trust only from a loopback
-  peer). `isLoopbackAddress`, `CSRF_HEADER`, and `DEFAULT_BIND_HOST` are the
-  companion exports. See the "Web security defaults" pattern below.
-
-## Patterns
-
-### Cursor-aware resubscribe
-
-After a reconnect, transports that support it (WS, HTTP-with-SSE) call
-`this.resubscribeAfterReconnect()`. The base class iterates
-`this.activeSubscriptions` and re-issues `subscribe` RPCs with each
-subscription's last-seen cursor. Server-side bus retention decides
-whether the cursor is still in window; out-of-retention cursors fail
-loudly via `notifications/subscription/evicted` and surface on the
-stream's failure channel.
-
-### Subscription id re-key
-
-When `transport.subscribe(scope, query, fromCursor)` is called, the
-base class:
-
-1. Generates a tentative client-side id (`tentative-sub-<n>`)
-2. Creates a `MultiplexedStream` keyed by that tentative id
-3. Issues a `subscribe` RPC
-4. On response, re-keys the stream to the server-allocated
-   `subscriptionId`
-
-Subsequent `notifications/subscription/event` frames route by the
-server id. Adopters who close the stream early get the unsubscribe RPC
-sent under the real id.
-
-### Ingress authentication (ADR 61)
-
-Every transport edge authenticates a trust-boundary crossing through one
-shared helper:
+`BaseConnectionContext` is the per-connection adapter. It owns the subscription registry, the in-flight RPC registry, cancellation routing, and the dispatch call; you supply the encoding.
 
 ```ts
-import { authenticateIngress, staticTokenAuthSource } from "@agentick/transport";
+import { BaseConnectionContext } from "@agentick/transport/server";
+import type { IngressIdentity, JsonRpcFrame } from "@agentick/spec";
+
+class MyConnection extends BaseConnectionContext {
+  constructor(
+    gateway,
+    private readonly socket: MySocket,
+    identity?: IngressIdentity,
+  ) {
+    super(gateway, identity);
+  }
+
+  protected sendFrame(frame: JsonRpcFrame): void {
+    this.socket.write(JSON.stringify(frame));
+  }
+
+  protected async closeWire(): Promise<void> {
+    this.socket.end();
+  }
+
+  // Every decoded inbound frame goes here. Requests get a response to
+  // write back; notifications return null.
+  async onFrame(frame: JsonRpcFrame): Promise<void> {
+    const response = await this.dispatchInbound(frame);
+    if (response) this.sendFrame(response);
+  }
+}
+```
+
+That is the whole surface. `close()` on the context iterates both registries and cleans up, so a dropped connection cannot leak a server-side subscription.
+
+## What the client base class already did for you
+
+| Concern                  | Behavior                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| **State machine**        | `connecting` → `open` → `closed`, observable via `onStateChange`.              |
+| **RPC correlation**      | Request ids allocated, responses matched, errors rejected as typed failures.   |
+| **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.       |
+| **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`.              |
+| **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.     |
+| **Reconnect backoff**    | Full-jitter, capped. `DEFAULT_RECONNECT_POLICY` is the shared shape.           |
+| **Resubscribe**          | After a reconnect, re-issues each live subscription from its last-seen cursor. |
+
+### The subscription id re-key
+
+Subscribing is asynchronous but the caller wants a stream immediately, so the base class hands out a stream keyed by a tentative client-side id, issues the `subscribe` RPC, and re-keys the stream to the server-allocated `subscriptionId` when the response lands. Frames route by the server id from then on, and a stream closed early sends its unsubscribe under the real id.
+
+You get this for free. It matters only if you are debugging why a frame arrived before the id you expected existed.
+
+### Backpressure is per stream
+
+A stream is unbounded by default. Bound it and pick what gives:
+
+```ts
+import { MultiplexedStream, type BackpressureError } from "@agentick/transport";
+
+const stream = new MultiplexedStream("events", onClose, {
+  policy: "drop-oldest", // "unbounded" (default) | "drop-oldest" | "drop-newest" | "close-on-overflow"
+  capacity: 1000, // required whenever the policy is bounded
+  onDrop: (value) => metrics.count("stream.dropped"),
+});
+```
+
+`drop-oldest` keeps the newest values, `drop-newest` keeps the oldest, and `close-on-overflow` terminates the stream with a `BackpressureError` (`{ kind: "backpressure" }`) rather than silently losing data. A bounded policy without a `capacity` is a constructor error, as is a zero, negative, or non-finite one — a bound you forgot to size is a bug, not a default. A consumer already parked in `next()` receives a pushed value directly and never touches the buffer, so the policy only engages under genuine backlog.
+
+## The server dispatcher
+
+`dispatchRequest` turns one JSON-RPC frame into one response. It is transport-agnostic — every adapter calls the same function, so there is no per-transport wire logic to drift.
+
+```ts
+import { dispatchRequest, type DispatchSink } from "@agentick/transport/server";
+
+const response = await dispatchRequest(gateway, request, sink, identity);
+```
+
+Resolution order: the three bootstrap methods (`initialize`, `ping`, `_extensions/list`) short-circuit **before** the registry lookup, because they must answer before the registry is queryable. Everything else — including `session/send` and `sub/subscribe` — is a registered wire extension resolved through the gateway's registry. A method in neither place is `MethodNotFound`, and a handler that throws becomes a JSON-RPC error response rather than an unhandled rejection.
+
+Each resolved method is **authorized before its handler runs**, then routed through the gateway's operation seam so the dispatch fires the gateway's guards and hooks — after the un-waivable authorization pre-gate, never before. A hook self-scopes by operation: one registered for a different wire method does not fire.
+
+`DispatchSink` is the contract your adapter implements, and it is the only thing the dispatcher knows about your wire:
+
+| Member                                            | Purpose                                             |
+| ------------------------------------------------- | --------------------------------------------------- |
+| `sendNotification(notification)`                  | Emit a notification frame to the client.            |
+| `registerSubscription` / `unregisterSubscription` | Track a live subscription for cleanup.              |
+| `registerInFlight` / `unregisterInFlight`         | Route `notifications/cancelled` to the right abort. |
+
+Per-connection state — identity, subscriptions, in-flight ids — lives on the adapter, not in the dispatcher. That is what makes one dispatcher safe to share across every connection of every transport.
+
+Handlers reach the client through their context: `ctx.publish` emits a notification, and it **rejects any notification the extension did not declare** — including the case where it declared none at all. An undeclared notification is a bug at the wire, not a frame to be forwarded.
+
+## Ingress authentication
+
+Every transport edge authenticates its trust-boundary crossing through one helper:
+
+```ts
+import { staticTokenAuthSource } from "@agentick/transport";
+import { authenticateIngress } from "@agentick/transport/server";
 
 const enriched = await authenticateIngress(
   { transportKind: "http", credential: { kind: "bearer", token, headers } },
   options.authSource, // an AuthSource, or undefined
 );
-// enriched.identity → stamp on the connection / thread into dispatch
+// enriched.identity → stamp on the connection, thread into dispatch
 ```
 
-Rules the helper enforces: **no `AuthSource` → the local/trusted pole**
-(identity undefined, admitted); **configured `AuthSource` → run it and
-FAIL CLOSED** (a rejection propagates; the edge maps it to a 401 / dropped
-connection — it never falls through to the pole). The helper is
-**enrichment-only** — it never authorizes (that is the `Authorizer` at
-dispatch). `staticTokenAuthSource` is the bundled reference `AuthSource`:
-a token → identity table with a prototype-key-bypass guard. The seam is
-**server-side only** — `AuthSource` and tokens never project to the
-client.
+Two poles, and the helper enforces the boundary between them:
 
-Slice 1 (#146) calls `authenticateIngress` directly at each edge — the
-degenerate single-interceptor form. The multi-interceptor
-`GatewayInstaller.interceptIngress` chain and the `platform` (federated
-connector) credential are later slices.
+- **No `AuthSource`** → the local/trusted pole. No identity is stamped, and the crossing is admitted.
+- **`AuthSource` configured** → run it and **fail closed**. A rejection propagates so the edge can map it to a 401 or a dropped connection. It never falls through to the pole.
 
-#### A refused crossing leaves a trace (ADR 92 §Family 1.3)
+The helper is **enrichment only** — it never authorizes. That is the `Authorizer` at dispatch, and keeping the two apart is what makes "who are you" testable without a policy. `staticTokenAuthSource` is the bundled reference implementation: a token-to-identity table, with a guard so inherited object members (`toString`, `constructor`) are not valid tokens.
 
-Admission stays PRE-OP — a refused crossing ran no work, so there is no
-operation to journal. But an audit trail that records nothing when a client
-is probing an edge is worse than useless, so the helper takes an optional
-third argument: a reporter it calls on the rejection path, before rethrowing.
+> [!IMPORTANT]
+> This seam is **server-side only**. `AuthSource` implementations and token material never project to a client.
+
+### A refused crossing leaves a trace
+
+Admission stays pre-operation: a refused crossing ran no work, so there is nothing to journal. But an audit trail that records nothing while a client probes your edge is worse than useless, so the helper takes a reporter it calls on the rejection path, before rethrowing:
 
 ```ts
 await authenticateIngress(ingressContext, options.authSource, (failure) =>
-  options.gateway.emitAdmissionFailure?.({
+  gateway.emitAdmissionFailure({
     ...failure,
-    // The edge enriches with what only it knows.
-    ...(remoteAddress !== undefined ? { remoteAddress } : {}),
+    ...(remoteAddress !== undefined ? { remoteAddress } : {}), // the edge knows this; the helper doesn't
   }),
 );
 ```
 
-The helper stays a pure function of its inputs — no bus, no gateway
-reference, testable with a recording callback. Every server transport wires
-it to its `DispatchHost` (the gateway), which publishes
-`gateway:admission:failed` on the gateway surface. The payload carries the
-connection SHAPE (`failureClass`, `transportKind`, `connectionId?`,
-`remoteAddress?`, `reason?`) and **never credential material** — no token,
-no header bag. The audit trail is the last place a bearer should be durable.
+The helper stays a pure function of its inputs — no bus, no gateway reference, testable with a recording callback. The payload carries the connection **shape** (`failureClass`, `transportKind`, and optionally `connectionId`, `remoteAddress`, `reason`) and **never credential material**: no token, no header bag. The audit trail is the last place a bearer should be durable.
 
-The law is asserted for every edge by `runIngressAuthnConformance` (a
-refused crossing emits exactly one event; an admitted one emits none; the
-payload contains no credential), so a new transport cannot skip it.
+### Scopes narrow at connect, never widen
 
-### Web security defaults (STATUS A2 §4c)
-
-Ingress authn answers _who_ is calling; web security answers _whether the
-caller should be able to reach us at all_ — the browser-drive-by / DNS-rebinding
-threat model for an exposed loopback server (the opencode CVE class: an exposed
-server plus a permissive origin lets any web page drive a shell). One shared
-policy backs both HTTP and WebSocket server edges so the posture is uniform:
+A client may request a subset of its credential's scopes on the `initialize` frame. The connection applies the **intersection** — effective scopes are the credential's claims ∩ the request — before dispatch, so `initialize` itself and everything after run under the narrowed set.
 
 ```ts
-import { resolveWebSecurity } from "@agentick/transport";
-
-const security = resolveWebSecurity(options); // options: WebSecurityOptions (flat)
-
-const access = security.checkAccess(req); // host allow-list + cross-site gate
-if (!access.ok) reject(access.status); // 403
-
-if (security.csrfEnabled) issue(CSRF_HEADER, security.csrfToken); // bootstrap
-const csrf = security.checkCsrf(req); // mutation token gate (HTTP only)
-if (!csrf.ok) reject(csrf.status);
+await client.request("initialize", { scopes: ["session:send"] }); // drop everything else
 ```
 
-Defaults, all overridable (`allowedOrigins`, `allowedHosts`, `trustProxy`,
-`csrf`) but closed when omitted:
+This is least-privilege for a long-lived connection: a client that only needs to send messages sheds its `knobs:set` claim for the life of the socket. The intersection is cover-aware, so a `session:*` claim survives narrowing to `session:send`. Re-initializing can only narrow **further** — a dropped scope is unrecoverable on that connection, which is what makes the narrowing worth trusting.
 
-- **Cross-site rejection** — `Sec-Fetch-Site: cross-site` or a foreign `Origin`
-  is rejected; a request with neither (a non-browser caller) is admitted.
-- **Host allow-list** — loopback names + configured hosts only.
-- **Forwarded-header trust** — `X-Forwarded-Host`/`-Proto` honored ONLY when
-  `trustProxy` is set AND the immediate peer is loopback (the proxy pattern);
-  a direct non-loopback peer cannot spoof past the host check.
-- **CSRF token** — per-process random token, issued on the bootstrap handshake
-  and required in `x-agentick-csrf` on mutations (HTTP; a WS upgrade is not
-  classic-CSRF-vulnerable, so it relies on the unforgeable `Origin`).
-- **Non-permissive CORS** — `corsHeadersFor` echoes an allowlisted origin
-  exactly; there is no wildcard code path.
+> [!NOTE]
+> Narrowing is not the security floor. A session's `requiredScopes` ceiling is structural and holds even against a host with no authorizer at all; downscoping only ever removes reach.
 
-Port-owning transports bind `DEFAULT_BIND_HOST` (`127.0.0.1`) unless a `host`
-is given — loopback is the security boundary, widened only by explicit opt-in.
+## Web security defaults
 
-## Verified by
+Ingress authentication answers _who_ is calling. Web security answers _whether this caller should reach us at all_ — the browser drive-by and DNS-rebinding threat model for a server bound to a local port, where an exposed port plus a permissive origin lets any page in the user's browser drive it. One resolver backs both the HTTP and WebSocket edges, so the posture cannot differ between them:
 
-| Concern                                                                                                                                                                                                                | Test file                                                                                            |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| End-to-end via in-process transport                                                                                                                                                                                    | `../transport-in-process/src/__tests__/transport-conformance.spec.ts`                                |
-| End-to-end via WebSocket transport                                                                                                                                                                                     | `../transport-websocket/src/__tests__/transport-conformance.spec.ts`                                 |
-| State machine, RPC correlation, multiplex, cancellation, subscription routing, progress streams                                                                                                                        | `../spec-conformance/src/transport.ts` (`runTransportConformance` — invoked by every transport)      |
-| Ingress authn seam — fail-closed, local-pole default, prototype-key guard, once-per-crossing                                                                                                                           | `src/testing/index.ts` (`runIngressAuthnConformance` — run by every transport against a real server) |
-| `staticTokenAuthSource` credential-kind switch + platform rejection + prototype-key bypass                                                                                                                             | `src/__tests__/wire-lane-e2e.spec.ts`                                                                |
-| `MultiplexedStream` backpressure — drop-oldest / drop-newest / close-on-overflow / capacity guard                                                                                                                      | `src/__tests__/multiplexed-stream-backpressure.spec.ts`                                              |
-| Full-jitter reconnect backoff bounds                                                                                                                                                                                   | `src/__tests__/backoff-jitter.spec.ts`                                                               |
-| Web-security policy (STATUS A2 §4c) — host allow-list, cross-site rejection, CSRF token, forwarded-header trust (incl. non-loopback-peer spoof deny), never-`*` CORS — allow + deny for each default and each override | `src/__tests__/web-security.spec.ts`                                                                 |
-| WireExtension registry dispatch, bootstrap short-circuit, `_extensions/list`, `ctx.publish` declared-notification guard                                                                                                | `src/__tests__/wire-extension-dispatch.spec.ts`                                                      |
+```ts
+import { resolveWebSecurity, CSRF_HEADER } from "@agentick/transport/server";
 
-`runTransportConformance(name, factory)` in
-`@agentick/spec-conformance` ships the shared behavioral suite.
-Per-transport tests cover wire-specific concerns (subprotocol
-negotiation for WS, peer credentials for Unix socket, etc.).
+const security = resolveWebSecurity(options); // flat WebSecurityOptions
 
-## Status
+// Host allow-list + cross-site gate runs FIRST, so a rejected cross-site
+// caller never learns the CSRF token.
+const access = security.checkAccess(req);
+if (!access.ok) return reject(access.status ?? 403);
 
-Phase 33.C.1 of the v2 implementation plan — see
-`docs/proposals/v2/STATUS.md`.
+const cors = security.corsHeadersFor(origin, req); // null unless allow-listed
+if (cors) for (const [k, v] of Object.entries(cors)) setHeader(k, v);
+
+if (security.csrfEnabled) setHeader(CSRF_HEADER, security.csrfToken); // bootstrap handshake
+
+const csrf = security.checkCsrf(req); // mutation gate (HTTP)
+if (!csrf.ok) return reject(csrf.status ?? 403);
+```
+
+Every default is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf` — and every default is closed:
+
+| Default                    | Behavior                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Loopback bind**          | `DEFAULT_BIND_HOST` is `127.0.0.1`. A port-owning transport widens only on an explicit `host`.                                          |
+| **Host allow-list**        | Loopback names plus configured hosts. A non-loopback or missing `Host` is 403 — the DNS-rebinding defense.                              |
+| **Cross-site rejection**   | `Sec-Fetch-Site: cross-site` or a foreign `Origin` is rejected. A request carrying **neither** is a non-browser caller and is admitted. |
+| **CSRF token**             | A per-process token issued on the bootstrap handshake, required on every mutation. Reads (GET/HEAD/OPTIONS) need none.                  |
+| **Forwarded-header trust** | `X-Forwarded-Host`/`-Proto` honored only when `trustProxy` is set **and** the immediate peer is loopback.                               |
+| **Non-permissive CORS**    | `corsHeadersFor` echoes an allow-listed origin exactly.                                                                                 |
+
+> [!WARNING]
+> There is no code path that emits `Access-Control-Allow-Origin: *`, and that is deliberate rather than a default you can flip. A wildcard origin on a reachable agent server is the difference between a local tool and a remote shell.
+
+A WebSocket upgrade is not vulnerable to classic CSRF, so the WS edge relies on the unforgeable `Origin` rather than the token.
+
+## Bounding client-facing output
+
+When the gateway opts into truncating tool results, this is where it happens — one funnel, so there is no path that bounds a result while leaking a notification. `projectClientResult` and `projectClientNotification` are the two projectors, and `dispatchRequest` applies them.
+
+They are **pure**: the input is never mutated, so the durable store and the model-facing view keep the full bytes while the client copy is bounded. With no policy configured the boundary does zero work and frames pass through by reference.
+
+You will rarely call these directly; they are exported because a bespoke adapter that bypasses `dispatchRequest` still owes the client the same guarantee.
+
+## Conformance — the point of the shared base
+
+Two suites, and a transport that skips them is not a transport:
+
+```ts
+import { runTransportConformance } from "@agentick/spec-conformance";
+import { runIngressAuthnConformance } from "@agentick/transport/testing";
+
+runTransportConformance("my-transport", () => myTransport(opts));
+runIngressAuthnConformance({
+  kind: "websocket",
+  credentialModel: "bearer", // or "none" for a host-local wire
+  crossingModel: "per-connection", // "per-request" for HTTP
+  withServer: (opts, body) => bringUpRealServer(opts, body),
+});
+```
+
+`runTransportConformance` pins the behavioral contract — state machine, RPC correlation, multiplexing, cancellation, subscription routing, progress streams. `runIngressAuthnConformance` runs against a **real server** and is credential-model aware: bearer transports are asserted on token-to-principal stamping, refusal of a missing or invalid token, the prototype-key bypass, and once-per-crossing isolation (two crossings on one session must not bleed identity); `none`-credential transports like the Unix socket are asserted on host-local trust instead. It also pins the admission-failure event and that its payload carries no credential — so a new transport cannot quietly skip the audit trail.
+
+## API
+
+### `@agentick/transport/client`
+
+| Export                                                             | Purpose                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------- |
+| `BaseClientTransport`                                              | The abstract client base. Implement three methods.            |
+| `MultiplexedStream<T>`                                             | The `AsyncIterable` behind subscription and progress streams. |
+| `DEFAULT_RECONNECT_POLICY` / `computeFullJitterBackoff`            | The shared reconnect backoff, exported for testing.           |
+| `ReconnectPolicy` / `ActiveSubscription` (types)                   | Policy shape and resubscribe bookkeeping.                     |
+| `BackpressurePolicy` / `BackpressureOptions` / `BackpressureError` | Per-stream backpressure types.                                |
+
+### `@agentick/transport/server`
+
+| Export                                                    | Purpose                                     |
+| --------------------------------------------------------- | ------------------------------------------- |
+| `dispatchRequest(host, req, sink, identity?)`             | The one JSON-RPC dispatcher.                |
+| `BaseConnectionContext`                                   | The abstract per-connection server adapter. |
+| `DispatchHost` / `DispatchSink` (types)                   | The dispatcher's two contracts.             |
+| `authenticateIngress(context, authSource?, onRejected?)`  | The ingress crossing. Enrichment only.      |
+| `resolveWebSecurity(options?)`                            | The shared HTTP-facing security policy.     |
+| `CSRF_HEADER` / `DEFAULT_BIND_HOST` / `isLoopbackAddress` | Companion constants and predicate.          |
+| `projectClientResult` / `projectClientNotification`       | The client-facing output bounders.          |
+
+### `@agentick/transport/testing`
+
+| Export                                | Purpose                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `runIngressAuthnConformance(factory)` | Certify an edge's authentication against a real server. |
+| `INGRESS_AUTHN_TOKENS`                | The canonical token fixtures the suite uses.            |
+
+## Patterns
+
+**Concrete transports.** [@agentick/transport-in-process](../transport-in-process) is the zero-wire loopback, [@agentick/transport-websocket](../transport-websocket) and [@agentick/transport-http](../transport-http) are the network edges, [@agentick/transport-unix-socket](../transport-unix-socket) is the host-local one. Each is small precisely because this package is not.
+
+**The host.** [@agentick/gateway](../gateway) is the `DispatchHost`: it owns the wire-extension registry the dispatcher resolves through, the `Authorizer` it gates with, and the truncation policy it applies.
+
+**The client.** [@agentick/client](../client) sits on top of a `ClientTransport` and knows nothing about which wire it got.
+
+**Shapes.** [@agentick/spec](../spec) owns `ClientTransport`, `ServerTransport`, `TransportCapabilities`, `AuthSource`, `IngressIdentity`, `Authorizer`, and the JSON-RPC frame types.
+
+**Behavioral suite.** `@agentick/spec-conformance` ships `runTransportConformance`; per-transport tests then cover only what is wire-specific — subprotocol negotiation for WebSocket, peer credentials for the Unix socket.
 
 ## Roadmap & known gaps
 
-- **Cursor-aware resubscribe under retention pressure** —
-  resubscribe wire path works (verified by reconnect tests); the
-  cursor-evicted-on-resubscribe path is wired in the base class but
-  not exercised under retention pressure. Needs a test fixture with
-  tight `LocalEventBus` retention.
-- **Server-side `notifications/cancelled` plumbing** — `DispatchSink`
-  ships `registerInFlight` / `unregisterInFlight`. The transport-
-  websocket server adapter wires it; in-process server adapter pattern
-  doesn't have a single adapter (handlers are user-provided), so
-  cancellation propagation depends on adopter handler design.
-- **JSON-RPC batch requests** — `dispatchRequest` is per-frame by
-  design; the WS / HTTP / Unix server adapters fan a batch array into
-  per-frame dispatch and collect the responses, so batch works
-  end-to-end. What's missing is a dedicated batch-semantics test in
-  this package (adapters exercise it incidentally).
+- **Cursor eviction on resubscribe is not exercised under pressure.** The resubscribe wire path works and the evicted-cursor path is wired in the base class, but proving it needs a fixture with tight bus retention, and that fixture does not exist. Out-of-retention cursors are intended to fail loudly through `notifications/subscription/evicted`.
+- **Server-side cancellation depends on the adapter.** `DispatchSink` ships `registerInFlight`/`unregisterInFlight` and the WebSocket adapter wires them. The in-process server has no single adapter — handlers are adopter-supplied — so cancellation propagation there depends on how those handlers are written.
+- **No batch-semantics test in this package.** `dispatchRequest` is per-frame by design; the concrete adapters fan a batch array into per-frame dispatch and collect responses, so batching works end-to-end and `initialize` advertises it. What is missing is a test that pins the semantics here rather than incidentally in an adapter.
+- **The ingress chain is a single interceptor.** Each edge calls `authenticateIngress` directly — the degenerate one-link form. A multi-interceptor chain, and a federated `platform` credential kind, are not built; `staticTokenAuthSource` explicitly rejects the platform credential rather than mishandling it.
+- **`media` capability is declared but has no in-band lane.** Transports report `media: false` today; the flag exists so a media-capable transport can be feature-detected when one lands.
 
-## Development plan
+## Verified by
 
-| Step                               | Status                                                                                                           |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Phase 33.C.1 — extraction          | Landed                                                                                                           |
-| Backpressure on MultiplexedStream  | Landed (per-stream policy on `MultiplexedStream`)                                                                |
-| Phase 33.D — HTTP transport        | Landed (`@agentick/transport-http`)                                                                              |
-| Phase 33.E — Unix-socket transport | Landed (`@agentick/transport-unix-socket`)                                                                       |
-| Batch request dispatch             | Works via adapter fan-out (`initialize` advertises `batch: true`); dedicated batch-semantics test still deferred |
+- `src/__tests__/web-security.spec.ts` — every default and every override, allow **and** deny for each: loopback predicate across the whole `127.0.0.0/8` block, host allow-list rejecting a rebinding host and a missing `Host`, cross-site rejection admitting a non-browser caller while denying a foreign `Origin`, the CSRF token on mutations but not reads, forwarded-header trust denying a spoof from a non-loopback peer, and that no wildcard CORS code path exists.
+- `src/__tests__/wire-extension-dispatch.spec.ts` — registry routing, `MethodNotFound` for unknown methods, handler exceptions becoming error responses, `_extensions/list` including the no-registry case, the bootstrap short-circuit landing before the registry lookup, `ctx.session`/`ctx.app` resolution from params, and `ctx.publish` rejecting undeclared notifications.
+- `src/__tests__/wire-dispatch-seam.spec.ts` — a gateway wire hook firing exactly once around dispatch, self-scoping by operation, and authorization rejecting **before** the seam.
+- `src/__tests__/wire-declarative-auth.spec.ts` — verb-scope default, `required: false` skipping policy, additive roles, the anti-bypass rule that a role alone never reaches the verb, and `required: false` failing to waive a session's structural ceiling.
+- `src/__tests__/wire-lane-e2e.spec.ts` — against a real gateway and session: a granted principal round-tripping `timeline/compact`, gated discovery, an addressable-but-not-wire verb returning `MethodNotFound` even when granted, Forbidden for ungranted and anonymous callers, exact-beats-dynamic on a real registry, the same-principal rule denying cross-principal access, prototype-key bypass rejection, `allowAnonymous` admitting the `none` credential, and the full scope-refinement story — `initialize` narrowing claims, cover-aware glob intersection, re-initialize only narrowing further, and the session ceiling holding with no authorizer present.
+- `src/__tests__/authorize-seam.spec.ts` — a contextual scope flipping a policy deny to allow, and the structural ceiling denying regardless while the hook never fires.
+- `src/__tests__/session-principal.spec.ts` — the owning principal stamped from the edge onto both harness and record, a body-smuggled principal ignored, an unauthenticated create left unstamped, and the same-principal gate engaging on the stamped value.
+- `src/__tests__/wire-identity-hook.spec.ts` — a hook reading `ctx.identity` and overriding a smuggled principal, identity absent when unauthenticated, a handler reading the full structured identity, and a non-wire operation seeing none.
+- `src/__tests__/wire-command-e2e.spec.ts` — a wire method as a full command: journaled operation, typed hook transform, middleware, span attributes, live context facets, and define-time guard verdicts mapping to Forbidden and rate-limited at the JSON-RPC edge with the handler never running.
+- `src/__tests__/client-projection.spec.ts` — each bounded path for results and notifications, unknown methods passing through by reference, no input mutation, the default-off zero-overhead path, raised and infinite ceilings, and the two-tier proof that the client copy is bounded while store and model views keep full bytes.
+- `src/__tests__/multiplexed-stream-backpressure.spec.ts` — unbounded never dropping, capacity validation, drop-oldest and drop-newest eviction order, close-on-overflow terminating with a backpressure error and ignoring later pushes, and a parked consumer bypassing the buffer.
+- `src/__tests__/backoff-jitter.spec.ts` — full-jitter shape: per-attempt bounds, cap doubling to the maximum, never exceeding it, uniform distribution across the range, and reproducibility under an injected RNG.
+- `src/testing/index.ts` (`runIngressAuthnConformance`) and `@agentick/spec-conformance`'s `runTransportConformance` — run by every concrete transport against a real server; see [@agentick/transport-websocket](../transport-websocket) and [@agentick/transport-in-process](../transport-in-process) for the invocations.

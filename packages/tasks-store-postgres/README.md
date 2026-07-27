@@ -1,142 +1,41 @@
 # @agentick/tasks-store-postgres
 
-**Postgres** `TaskStore` adapter — the durable, flexible **cloud pole** of
-the persistent-task substrate from
-[ADR 68, "persistent tasks"](../../docs/proposals/v2/blueprint/68-persistent-tasks.md).
-Sibling of [`@agentick/timeline-postgres`](../timeline-postgres); same
-escape-hatch surface, same BYO-pool discipline.
+**A task that outlives the process that started it.** `postgresTaskStore` persists the task state machine to Postgres, which is what makes a background task resumable: the record is the truth, the running fiber is just how it happens to be executing right now. Kill the app mid-task and a fresh boot over the same table knows what was in flight, what finished, and what was orphaned.
 
-The bundled [`InMemoryTaskStore`](../tasks/src/store.ts) is `:memory:` — task
-records die with the process. This adapter makes them **durable across
-app-process restart**, which is the whole point of ADR 68's record-as-source-
-of-truth pivot: a task is a persisted `TaskRecord` state machine, not an
-in-process fiber, so a fresh `TasksHarness` over the same table can pick up
-where a dead process left off.
+The bundled in-memory store is `:memory:` — records die with the process, and every cross-restart behavior is a same-process no-op there. This adapter is where those behaviors become real.
 
-## What it unlocks
+## Install
 
-Three behaviors the in-memory store structurally cannot demonstrate (they are
-same-process no-ops there):
-
-- **Durable records across restart.** Every FSM transition upserts the full
-  record; it survives the process that wrote it.
-- **`interrupted`-on-restart, for real.** On construction a `TasksHarness`
-  hydrates its scope's records and marks any orphaned `working` record whose
-  in-process fiber died `interrupted` (the in-process executor can't reattach
-  a lost fiber). With a durable store this is honest cross-restart orphan
-  accounting, not a same-process no-op.
-- **Terminal adoption across restart.** A task that `completed` in the old
-  process is hydrated by the new one; `harness.result(taskId)` returns the
-  stored result blocks decoded from `jsonb`, not from a live fiber.
-
-## Purpose
-
-Persist the task FSM to Postgres. The `payload` `jsonb` column is the
-**authoritative full `TaskRecord`**; `scope` (`jsonb`), `status` (`text`), and
-`updated_at` (`bigint`) are **denormalized projections** re-written on every
-`put` purely so the store can answer queries — scope containment (`@>`),
-status filter, terminal `prune` — without deserializing every payload. **No
-ORM.** **The library never owns your schema:** every SQL concern is an escape
-hatch on the factory.
+```bash
+npm install @agentick/tasks-store-postgres pg
+```
 
 ## Quick start
 
+One app-scoped store. Bring your own pool; the adapter never creates one and never closes one:
+
 ```ts
 import { Pool } from "pg";
-import { createApp } from "agentick";
+import { createApp } from "@agentick/app/react";
 import { postgresTaskStore } from "@agentick/tasks-store-postgres";
 
-// BYO pool — the adapter never creates or closes it.
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-// Inject one app-scoped durable store; detached tasks survive session close
-// and the whole app process, resumable on the next boot. The store is
-// app-scoped (a shared singleton), so it rides on `createApp`, not `withTasks`.
-createApp(MyAgent, { model, tasks: { store: postgresTaskStore({ executor: pool }) } });
+const app = await createApp(MyAgent, {
+  model,
+  tasks: { store: postgresTaskStore({ executor: pool }) },
+});
 ```
 
-Apply the schema with your own migration tooling (the recommended path):
+The store is app-scoped rather than per-session on purpose: a detached task survives the session that spawned it, so its record cannot live in session-shaped storage.
+
+Apply the schema with your own migration tooling — the recommended path:
 
 ```ts
 import { postgresTaskSchemaSql } from "@agentick/tasks-store-postgres";
 
 await pool.query(postgresTaskSchemaSql());
-// → CREATE TABLE IF NOT EXISTS "agentick_tasks" ( ... );
 ```
-
-Or let the adapter create it once, lazily (opt-in, never forced):
-
-```ts
-postgresTaskStore({ executor: pool, migrate: "create-if-absent" });
-```
-
-## API
-
-### `postgresTaskStore(options): TaskStore`
-
-| Option     | Type                          | Default            | Description                                                                                |
-| ---------- | ----------------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
-| `executor` | `pg.Pool \| QueryExecutor`    | **required**       | BYO connection. A `pg.Pool` or a minimal `{ query(text, values?) }`. Never owned.          |
-| `table`    | `string`                      | `"agentick_tasks"` | Table name.                                                                                |
-| `columns`  | `Partial<TaskColumns>`        | snake_case         | Map logical `taskId`/`scope`/`status`/`updatedAt`/`payload`/`schemaVer` onto real columns. |
-| `sql`      | `TaskSqlOverrides`            | generated          | Per-operation FULL SQL override (see below).                                               |
-| `codec`    | `TaskCodec`                   | identity           | `jsonb` payload encode/decode + schema-on-read (`encrypt`, `compress`, migrate).           |
-| `migrate`  | `"off" \| "create-if-absent"` | `"off"`            | `"off"` never runs DDL; `"create-if-absent"` runs `CREATE TABLE IF NOT EXISTS` once.       |
-
-`backend` is `"postgres"`. Implements the full [`TaskStore`](../spec/src/protocol/tasks-store.ts)
-port (`put` upsert, `get`, `list`, `delete`, `prune`). Per ADR 49's "NO
-`define*` helper" amendment, the adapter `implements TaskStore` directly via a
-factory — the `postgresTimelineStore` shape.
-
-### `postgresTaskSchemaSql(table?, columns?): string`
-
-The default DDL (table + GIN scope index + btree status index), exported for
-manual application. Shipped for your migration tooling, not auto-run.
-
-### Escape hatches
-
-**Existing / partitioned / multi-tenant table** — map column names:
-
-```ts
-postgresTaskStore({
-  executor: pool,
-  table: "jobs",
-  columns: { taskId: "job_id", payload: "body", status: "state" },
-});
-```
-
-**Full per-operation SQL** — each override is a function that receives the
-operation's inputs and returns `{ text, values }`. Project the configured
-column names so the store can read results back (`get` / `list` must return
-`<payload>` + `<schemaVer>`):
-
-```ts
-postgresTaskStore({
-  executor: pool,
-  sql: {
-    // Multi-tenant: scope every read to the current tenant.
-    get: ({ taskId }) => ({
-      text: `SELECT payload, schema_ver FROM jobs
-             WHERE tenant_id = current_setting('app.tenant')::int AND job_id = $1`,
-      values: [taskId],
-    }),
-  },
-});
-```
-
-**Encrypted / versioned payloads** — the codec owns the `jsonb` boundary:
-
-```ts
-postgresTaskStore({
-  executor: pool,
-  codec: {
-    encode: (record) => encrypt(record),
-    decode: (payload, schemaVer) => migrate(decrypt(payload), schemaVer),
-  },
-});
-```
-
-## Default schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS "agentick_tasks" (
@@ -152,75 +51,202 @@ CREATE INDEX IF NOT EXISTS "agentick_tasks_scope_gin" ON "agentick_tasks" USING 
 CREATE INDEX IF NOT EXISTS "agentick_tasks_status_idx" ON "agentick_tasks" ("status");
 ```
 
-## Design notes
+Or let the adapter create it once, lazily. Opt-in, never forced:
 
-- **`payload` is the single source of truth.** Reads reconstruct the record
-  from `payload` alone; `scope`/`status`/`updated_at` are write-only query
-  keys. This keeps the record self-consistent even if a projection column and
-  the payload ever disagree.
-- **Upsert per transition.** `put` is `INSERT ... ON CONFLICT (task_id) DO
-UPDATE` — the harness `put`s a new record on every FSM transition; later
-  `put`s of the same id replace in place.
-- **Scope containment via GIN.** `list({ scope })` issues `scope @> $1::jsonb`
-  (every provided dimension must match), indexed by the GIN index. `status`
-  narrows via `status = ANY($n::text[])` (a single status is normalized to a
-  one-element array).
-- **Terminal-only `prune`.** `prune(before)` deletes `updated_at < before AND
-status = ANY('{completed,failed,cancelled,interrupted}')` — an in-flight
-  `working` / `input_required` task is never pruned, matching
-  `InMemoryTaskStore.prune`.
-- **`bigint` is write-only here.** `updated_at` is a `bigint` column; pg
-  returns `bigint` as a string, but this adapter only ever writes it (the
-  record's `updatedAt` also rides inside `payload`, which is what reads use),
-  so no read-side `Number` coercion is needed.
-- **Minimal executor shape.** No operation depends on `rowCount`; a bare
-  `{ query(text, values?): Promise<{ rows }> }` satisfies `QueryExecutor`.
+```ts
+postgresTaskStore({ executor: pool, migrate: "create-if-absent" });
+```
+
+## What durability actually buys
+
+Three behaviors that only exist once records outlive the process:
+
+**Orphan accounting that means something.** On construction, tasks hydrates its scope's records. A record still marked `working` whose in-process fiber died with the previous process gets marked `interrupted` — an honest terminal state, written back durably. With an in-memory store there is nothing to hydrate and nothing to orphan.
+
+**Terminal adoption.** A task that completed in the old process is hydrated by the new one, and `result(taskId)` returns the stored blocks decoded from `jsonb` rather than from a live promise nobody holds any more.
+
+**Detached tasks that survive session close.** The record is app-scoped and durable, so "keep working after the user disconnects" is storage, not a special execution mode.
+
+> [!IMPORTANT]
+> Cross-restart **reattach** is a different thing and is deliberately not offered. A lost in-process fiber cannot be resumed, and neither can a forked child — its IPC channel is a spawn-time pipe a restarted parent cannot re-open. `interrupted` is the correct outcome for both bundled executors. This store persists `executorState` faithfully for an executor that reports over a reconnectable transport, but durable storage is necessary, not sufficient.
+
+## Project, don't translate
+
+The `payload` column holds the **whole record**, encoded by the codec and otherwise untouched. Everything else is a **projection**: a column that exists only because a query needs it.
+
+| Column       | Role                                                                             |
+| ------------ | -------------------------------------------------------------------------------- |
+| `payload`    | The record. The single source of truth; reads reconstruct from it alone          |
+| `task_id`    | Primary key — the upsert target                                                  |
+| `scope`      | Write-only query key. `list({ scope })` issues `scope @> $1::jsonb`, GIN-indexed |
+| `status`     | Write-only query key. `status = ANY($n::text[])`, btree-indexed                  |
+| `updated_at` | Write-only query key. Drives the terminal-only `prune`                           |
+
+The projections are re-written on every `put` and **never read back into a record**. That keeps a record self-consistent even if a projection column and the payload ever disagree, and it means the record's shape can evolve without a schema migration.
+
+The rule to copy in your own SQL adapter: add a projection column when a query needs one, never to normalize the record. Version drift is handled on read — every row carries `schema_ver`, and `codec.decode(payload, schemaVer)` is where a pure migration runs.
+
+```ts
+postgresTaskStore({
+  executor: pool,
+  codec: {
+    encode: (record) => encrypt(record),
+    decode: (payload, schemaVer) => migrateRecord(decrypt(payload), schemaVer),
+  },
+});
+```
+
+## The library never owns your schema
+
+Already have a `jobs` table? Map the logical columns onto it:
+
+```ts
+postgresTaskStore({
+  executor: pool,
+  table: "jobs",
+  columns: { taskId: "job_id", payload: "body", status: "state" },
+});
+```
+
+When mapping isn't enough — a partitioned table, row-level tenancy, a computed column — replace the statement. Each `sql` override is a function of the operation's inputs returning `{ text, values }`:
+
+```ts
+postgresTaskStore({
+  executor: pool,
+  table: "jobs",
+  columns: { taskId: "job_id", payload: "body", status: "state" },
+  sql: {
+    // Row-level tenancy: scope every read to the current tenant.
+    get: ({ taskId }) => ({
+      text: `SELECT body, schema_ver FROM jobs
+             WHERE tenant_id = current_setting('app.tenant')::int AND job_id = $1`,
+      values: [taskId],
+    }),
+  },
+});
+```
+
+Each override has to project what the store reads back, aliased to your configured column names:
+
+| Override | Receives                                                   | Must project                                |
+| -------- | ---------------------------------------------------------- | ------------------------------------------- |
+| `put`    | `{ taskId, scope, status, updatedAt, payload, schemaVer }` | nothing — the result is ignored             |
+| `get`    | `{ taskId }`                                               | at most one row: `<payload>`, `<schemaVer>` |
+| `list`   | `{ query }` — the `{ scope?, status? }` filter             | rows of `<payload>`, `<schemaVer>`          |
+| `delete` | `{ taskId }`                                               | nothing                                     |
+| `prune`  | `{ before }` — the ms-epoch cutoff                         | nothing                                     |
+
+`put` receives the already-encoded payload, so an override can build any partitioned or encrypted UPSERT without re-running the codec. Omit an override and that operation uses generated SQL.
+
+## Implementing your own
+
+This adapter is a factory returning an object that implements `TaskStore` directly — no base class, no wrapper, and yours doesn't need one. The port is five verbs plus one optional:
+
+| Verb                  | Required | Contract                                                                                                         |
+| --------------------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `put(record, ctx)`    | yes      | **Upsert** — called on every FSM transition. A later `put` of the same `taskId` replaces                         |
+| `get(taskId, ctx)`    | yes      | The record, or `undefined` for an id the store has never seen                                                    |
+| `list(query, ctx)`    | yes      | Filter by `scope` (every provided dimension must match) and `status` (one or a set). No query returns everything |
+| `delete(taskId, ctx)` | yes      | Remove one record. Idempotent — deleting an absent id settles normally                                           |
+| `prune(before, ctx)`  | no       | GC **terminal** records with `updatedAt < before`. An in-flight task is never eligible                           |
+| `query` / `mutate`    | derived  | The generic `Store` seam — `query` is `list`, `mutate` is the put/delete arms                                    |
+
+Three rules the types cannot enforce:
+
+- **The record round-trip is lossless.** Records are opaque blobs. Whatever `put` took, `get` and `list` return — including `result` and `executorState`, whose types are `unknown` precisely because a task's return value is generic.
+- **`put` replaces, never merges.** Every transition writes a complete record. A store that patches fields will silently keep stale ones.
+- **`prune` is terminal-only.** `completed`, `failed`, `cancelled`, `interrupted` are eligible; `working` and `input_required` are not, no matter how old. Reaping an in-flight task loses work.
+
+### `StoreCtx`
+
+Every data method takes a `StoreCtx` as its final parameter. Two lines of truth:
+
+- An **in-memory** store accepts and ignores it — it holds no durable state that identity or idempotency would change.
+- A **durable** store reads `ctx.opId` as the **idempotency key** to dedup a retried write, and `ctx.principal` (plus the `EventScope` coordinates) to scope reads and writes by tenant.
+
+`ctx.signal` is an optional abort a long-running statement may honor. Every field is optional — outside an active operation scope they are `undefined`.
+
+### Certify it
+
+`jsonb` containment, upsert-in-place, and terminal-only pruning are not type-checkable. Run the suite against a **real** backend — this package refuses `pg-mem` and in-memory stand-ins, which don't honor `@>` containment faithfully, so a green there would be a lie:
+
+```ts
+import { Pool } from "pg";
+import { runTaskStoreConformance } from "@agentick/tasks/testing";
+import { postgresTaskStore } from "@agentick/tasks-store-postgres";
+
+const url = process.env.TASKS_PG_URL;
+const pool = url ? new Pool({ connectionString: url }) : undefined;
+let n = 0;
+
+runTaskStoreConformance({
+  label: url ? "postgres" : "postgres (skipped: TASKS_PG_URL unset)",
+  skip: pool === undefined,
+  factory: () =>
+    postgresTaskStore({
+      executor: pool!,
+      table: `agentick_tasks_test_${process.pid}_${++n}`,
+      migrate: "create-if-absent",
+    }),
+});
+```
+
+The `skip` flag is what keeps a backend-gated suite honest: absent a connection string it registers as **skipped** rather than passing vacuously. A fresh uniquely-named table per store isolates each case; drop them in `afterAll`.
+
+Then add what the shared suite cannot reach. For this adapter that is the cross-process proof: drive a harness against the store, abandon it without closing, build a second harness over a fresh adapter on the same table, and assert the orphan came back `interrupted` — in the projection and in the database.
+
+## Operational notes
+
+**Write volume.** `put` fires on every transition: submit, each progress fold, each status-message change, and the terminal write. A chatty task is a chatty writer. `ON CONFLICT (task_id) DO UPDATE` keeps it one round-trip and one row.
+
+**Retention.** `prune(before)` deletes terminal records older than an ms-epoch cutoff. Nothing schedules it — call it from your own reaper.
+
+**Indexes.** The GIN index on `scope` serves the containment filter; the btree on `status` serves the status filter and the prune predicate. Drop either and `list` degrades to a scan.
+
+**`bigint` is write-only.** `updated_at` is a `bigint` column, which the driver returns as a string — but this adapter only ever writes it. The record's own `updatedAt` rides inside `payload`, which is what reads use, so there is no coercion on the read path.
+
+## API
+
+### `postgresTaskStore(options): TaskStore`
+
+| Option     | Type                          | Default            | Description                                                                             |
+| ---------- | ----------------------------- | ------------------ | --------------------------------------------------------------------------------------- |
+| `executor` | `pg.Pool \| QueryExecutor`    | **required**       | BYO connection. Never created, never closed by the adapter                              |
+| `table`    | `string`                      | `"agentick_tasks"` | Table name                                                                              |
+| `columns`  | `Partial<TaskColumns>`        | snake_case         | Map `taskId` / `scope` / `status` / `updatedAt` / `payload` / `schemaVer` / `createdAt` |
+| `sql`      | `TaskSqlOverrides`            | generated          | Per-operation full SQL override                                                         |
+| `codec`    | `TaskCodec`                   | identity           | `jsonb` encode/decode plus schema-on-read migration                                     |
+| `migrate`  | `"off" \| "create-if-absent"` | `"off"`            | `"off"` never runs DDL; `"create-if-absent"` runs the DDL once, lazily                  |
+
+`backend` is `"postgres"`. No operation depends on `rowCount`, so a bare `{ query(text, values?): Promise<{ rows }> }` satisfies `QueryExecutor`.
+
+### Other exports
+
+| Export                                                                     | Purpose                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `postgresTaskSchemaSql(table?, columns?)`                                  | The default DDL — table plus both indexes — for your tooling |
+| `DEFAULT_TABLE` / `DEFAULT_COLUMNS`                                        | The defaults, for building a variant config                  |
+| `SCHEMA_VERSION`                                                           | The version stamped on every row this adapter writes         |
+| `TaskPutProjection` (type)                                                 | What a `put` override receives                               |
+| `TaskCodec` / `TaskSqlOverrides` / `TaskColumns` / `QueryExecutor` (types) | The escape-hatch shapes                                      |
+
+## Patterns
+
+**Tasks.** [@agentick/tasks](../tasks) owns `InMemoryTaskStore`, the FSM, the executor seam, the `task_*` model-facing tools, and the conformance suite. This package is durability and nothing else.
+
+**Timeline durability.** [@agentick/timeline-postgres](../timeline-postgres) is the sibling adapter with the same BYO-pool discipline and escape-hatch surface, over an append-only log rather than a mutable keyed table.
+
+**Shapes.** [@agentick/spec](../spec) owns `TaskRecord`, `TaskStore`, `TaskStoreQuery`, `TaskStatus`, `EventScope`, and `StoreCtx`.
+
+## Roadmap & known gaps
+
+- **`StoreCtx` is accepted and ignored.** No write is deduped on `ctx.opId`, and no read is scoped by `ctx.principal` — tenancy today means a `sql` override or a separate table.
+- **No cross-restart reattach.** By design, per the note above: a lost fiber or a forked child cannot be resumed, and `interrupted` is the honest outcome. A reattaching executor needs a reconnectable transport, not just this store.
+- **`ttl` is persisted but not enforced.** A record carries its `ttl`; nothing reaps a task whose `ttl` elapsed. A store-side reaper could ride on `prune`.
+- **Record-shape migration is manual.** `schema_ver` is written and handed to `codec.decode`, so schema-on-read is expressible — but there is no migration-function registry to declare one per version.
+- **`list` ordering is by `updated_at`.** The port leaves order unspecified; this adapter picks a stable one. Don't depend on it, and don't expect a `limit` or cursor — neither is in the port.
 
 ## Verified by
 
-- `src/__tests__/conformance.spec.ts` — runs `runTaskStoreConformance` against
-  a **REAL Postgres** (real `jsonb`, real `@>` containment, real GIN/btree
-  indexes). No fakes: no pg-mem, no in-memory stand-in (they don't honor
-  `jsonb` containment faithfully). **Gated** on a `TASKS_PG_URL` connection
-  string; absent, the suite registers **skipped** via the conformance suite's
-  `skip` option (the `sandbox-docker` gate pattern) — the correct, honest
-  outcome without a real backend. Each test gets a fresh uniquely-named table
-  (`migrate: "create-if-absent"`); `afterAll` drops them. **Validated:** all
-  10 conformance cases pass against Postgres 16 (`docker run postgres:16`).
-- `src/__tests__/resume.spec.ts` — the cross-process resume PROOF (also
-  `TASKS_PG_URL`-gated): (1) **interrupted-on-restart** — harness #1 submits a
-  never-settling in-process task and is abandoned WITHOUT `close()`; harness #2
-  over a fresh adapter on the SAME pool+table hydrates and marks the orphan
-  `interrupted` (asserted in the projection AND in pg). (2) **terminal
-  adoption** — harness #1 completes a task; harness #2 hydrates and
-  `result(taskId)` returns the stored blocks decoded from pg. **Validated:**
-  both cases pass against Postgres 16.
-
-## Status & roadmap
-
-- **Status:** complete for the ADR 68 v2.0 pg-tier contract. Passes the shared
-  `TaskStore` conformance suite + the cross-process resume proof against real
-  Postgres 16.
-
-### Known gaps
-
-- **Cross-restart CHILD reattach is out of scope for a fork-IPC executor —
-  it's the distributed tier.** `interrupted`-on-restart is the _correct_
-  outcome for both bundled executors: a lost in-process fiber can't reattach,
-  and a `ChildProcessTaskExecutor` child can't either — fork IPC is a
-  spawn-time pipe (`NODE_CHANNEL_FD`) that a freshly-restarted process cannot
-  re-attach to, so re-finding the child by pid gives no channel to receive its
-  transitions. Durable storage of the record is necessary but nowhere near
-  sufficient. A worker whose reports must survive parent death has to report
-  via a reconnectable transport (this durable store / the cluster bus) with the
-  parent _observing_ that plane — which is the **distributed-executor tier**
-  (ADR 68 ambitious), not a follow-on to the child-process executor. This store
-  persists `executorState` faithfully for whatever that tier needs; the
-  fork-IPC executor self-terminates its worker on IPC `disconnect` rather than
-  orphaning it.
-- **`ttl` enforcement.** `ttl` is persisted on the record but nothing reaps a
-  task whose `ttl` elapsed (shared ADR 68 gap, `TODO(ADR-68 ttl)` in the
-  harness). A store-side reaper could ride on `prune`.
-- **Entry wire-shape migration.** `schema_ver` is written (default 1) and
-  passed to `codec.decode`, so schema-on-read migration is expressible today;
-  a first-class migration-function registry is an additive follow-up.
+- `src/__tests__/conformance.spec.ts` — the shared `runTaskStoreConformance` suite against a **real Postgres** (real `jsonb`, real `@>` containment, real GIN and btree indexes), gated on a `TASKS_PG_URL` connection string and registering as skipped without one: put/get round-trip, upsert-in-place, unfiltered `list`, scope containment, status filtering by single value and by set, the two filters combined, idempotent `delete`, terminal-only `prune`, and a stable non-empty `backend`. A fresh uniquely-named table per case; `afterAll` drops them. Validated against Postgres 16.
+- `src/__tests__/resume.spec.ts` — the cross-process proof, on the same gate. A first harness submits a never-settling task and is abandoned without closing; a second harness over a fresh adapter on the same pool and table hydrates it, reports `interrupted` in the projection, persists `interrupted` to the database, and rejects `result()` with the interrupted status. Separately: a task that completed in the first harness is adopted by the second, whose `result()` returns the blocks decoded from `jsonb` rather than from a live fiber.

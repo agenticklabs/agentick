@@ -1,195 +1,192 @@
 # @agentick/transport-unix-socket
 
-Unix-socket transport for agentick — newline-delimited JSON-RPC 2.0
-over a Node `net.Server` / `net.Socket`. Ships both ends. **Node-only**
-(no browser); the canonical local-IPC wire for same-host adopters.
+**One line of JSON per frame, over a socket file.** Newline-delimited JSON-RPC 2.0 across a Node `net.Server` / `net.Socket` — no headers, no upgrade handshake, no TLS, no port. Both ends ship here. Node only.
 
-## What this package is
+The bet is that a CLI or TUI talking to a long-lived same-host daemon is the same split as a browser talking to a server, minus the network — so it should cost what the network costs, and no more. Trust is host-local, which changes the security posture rather than removing it: the crossing carries no credential by default, admission is still a hook you can veto, and a refused connection still leaves an audit trace. The framing is plain enough to read with `socat`.
 
-Required for **tentickle-class deployments** — a CLI / TUI talking to
-a same-host daemon process where HTTP framing overhead is wasted and
-no network hop exists. Lowest-latency wire we ship: no headers, no
-upgrade handshake, no encoding overhead beyond a `\n` per frame.
+## Install
 
-Subclasses `BaseClientTransport` from `@agentick/transport` — the
-fourth transport built on the same base, weighing in at ~170 LOC of
-socket-specific code.
+```bash
+npm install @agentick/transport-unix-socket
+```
+
+Subpaths: `/server` (the `net.Server` side), `/client` (the `ClientTransport`). The root re-exports both.
 
 ## Quick start
 
-### Server (daemon)
-
-```ts
-import { createGateway } from "@agentick/gateway";
-import { unixSocketServer } from "@agentick/transport-unix-socket/server";
-
-const gateway = await createGateway();
-const server = unixSocketServer({
-  path: "/tmp/agentick.sock",
-  gateway,
-});
-```
-
-### Server, gateway-owned (ADR 84 `ServerTransport`)
-
-`unixSocketServerTransport(config)` binds the socket `path` at
-construction and takes the dispatch host at `listen()`. It is the
-simplest wrapper — the underlying `net.Server` binds itself — so
-`gateway.listen()` just defers the host and awaits the `listening`
-event; `gateway.close()` closes the socket (Node unlinks the path).
+**The daemon.** Hand the socket path to the gateway and let it own the bind:
 
 ```ts
 import { createGateway } from "@agentick/gateway";
 import { unixSocketServerTransport } from "@agentick/transport-unix-socket/server";
 
 const gateway = await createGateway({
-  transports: [unixSocketServerTransport({ path: "/run/agentick.sock" })],
+  transports: [unixSocketServerTransport({ path: "/tmp/myagent.sock" })],
 });
 
-await gateway.listen(); // binds the net.Server on the socket path
-// ...
-await gateway.close(); // closes the socket; Node unlinks the path
+await gateway.listen(); // resolves once the socket is accepting
+
+process.on("SIGTERM", () => {
+  void gateway.close(); // closes the socket; Node unlinks the path
+});
 ```
 
-### Client (TUI / CLI)
+**The client.** Same surface as every other transport:
 
 ```ts
-import { createClient } from "@agentick/client";
+import { createClient } from "@agentick/client-core";
 import { unixSocket } from "@agentick/transport-unix-socket/client";
 
-const client = await createClient({
-  transport: unixSocket({ path: "/tmp/agentick.sock" }),
-});
-
+const client = await createClient({ transport: unixSocket({ path: "/tmp/myagent.sock" }) });
 await client.connect();
-const apps = await client.gateway().listApps();
+
+const { apps } = await client.gateway().listApps();
+
+const { output } = await client.session(sessionId).send({
+  messages: [{ role: "user", content: "status?" }],
+}).result;
 ```
 
-## API surface
-
-### `unixSocket(options): ClientTransport`
+Concurrent calls multiplex on the one socket, and a server-thrown error arrives as the same class it was thrown as:
 
 ```ts
-interface UnixSocketTransportOptions {
-  path: string; // absolute path to the Unix socket
-  reconnect?: ReconnectPolicy;
-  id?: string;
-}
+const [a, b, list] = await Promise.all([
+  client.gateway().getApp("app-1"),
+  client.gateway().getApp("app-2"),
+  client.gateway().listApps(),
+]);
+
+await client.gateway().getApp("missing"); // rejects with AppNotFoundError { appId: "missing" }
 ```
 
-### `unixSocketServer(options): UnixSocketServerHandle`
+## Owning the bind yourself
+
+`unixSocketServerTransport` defers the dispatch host to `gateway.listen(host)`. When you'd rather drive the socket directly — a daemon that isn't structured around a gateway's transport list — `unixSocketServer` takes the host up front and hands back the raw `net.Server`:
 
 ```ts
-interface UnixSocketServerOptions {
-  path: string;
-  gateway: GatewayHarnessProtocol; // DispatchHost
-  /** Optional ingress auth (ADR 61). A unix socket is host-local
-   *  trust: the default crossing is `credential.kind: "none"` (local
-   *  pole, no principal). Supplying an AuthSource runs the shared
-   *  `authenticateIngress` helper for parity with the network
-   *  transports; a rejection destroys the socket (fail closed). */
-  authSource?: AuthSource;
-}
+import { unixSocketServer } from "@agentick/transport-unix-socket/server";
+
+const server = unixSocketServer({ path: "/tmp/myagent.sock", gateway });
+await new Promise<void>((resolve) => server.server.once("listening", () => resolve()));
+
+// ...later
+await server.close(); // unsubscribes live connections, then closes the net.Server
 ```
 
-`unixSocketServer` returns a `UnixSocketServerHandle` (`{ server, close }`) —
-`server` is the underlying `net.Server`. Caller owns the socket file's
-lifecycle. To rebind cleanly after a daemon restart, `fs.unlink(path)`
-before `unixSocketServer({ path })` when an existing file is found.
-
-### `unixSocketServerTransport(config): ServerTransport`
-
-```ts
-type UnixSocketServerTransportConfig = Omit<UnixSocketServerOptions, "gateway">; // { path, authSource? }
-```
-
-The gateway injects the dispatch host at `listen()`. The wrapper awaits
-the `net.Server` `listening` event so a resolved `gateway.listen()`
-means a client can connect immediately.
+> [!IMPORTANT]
+> The raw factory calls `server.listen(path)` for you and does not wait for it. Attach a `once("error")` listener before the next tick or a stale socket file (`EADDRINUSE`) surfaces as an uncaught exception. `unixSocketServerTransport` does that waiting for you — its `listen()` rejects on the bind error instead. Nothing unlinks a stale path: `fs.unlink` it yourself before rebinding after an unclean shutdown.
 
 ## Wire format
 
-Each frame is `JSON.stringify(frame) + '\n'`. Receivers split on `\n`
-and JSON-parse each line. Trivial to inspect with `socat`:
+Each frame is `JSON.stringify(frame) + "\n"`. Receivers split on `\n`, then parse and validate each line against the JSON-RPC shape. That makes the traffic directly inspectable:
 
 ```sh
-socat - UNIX-CONNECT:/tmp/agentick.sock
+socat - UNIX-CONNECT:/tmp/myagent.sock
 {"jsonrpc":"2.0","id":1,"method":"ping","params":{}}
 ```
 
-Multiplexing N concurrent RPCs + M subscriptions on the same socket
-works the same way as every other agentick transport — `BaseClientTransport`
-handles RPC correlation by JSON-RPC `id`, subscriptions by
-`subscriptionId`, progress streams by `progressToken`.
+Multiplexing N in-flight RPCs plus M subscriptions on one socket works as it does everywhere else in agentick: `BaseClientTransport` correlates responses by JSON-RPC `id`, subscription events by `subscriptionId`, progress by `progressToken`. Passing a request an `AbortSignal` emits `notifications/cancelled` on the socket when it fires.
+
+## Ingress authentication
+
+A Unix socket is host-local trust, so the default crossing carries `credential.kind: "none"` and no principal — the local pole. That default is a decision, not an omission, and it is overridable: pass an `AuthSource` and the shared ingress path runs it once per connection, exactly as the network transports do.
+
+```ts
+import { IngressAuthRequired, type AuthSource } from "@agentick/spec";
+import { createGateway } from "@agentick/gateway";
+import { unixSocketServerTransport } from "@agentick/transport-unix-socket/server";
+
+// A socket in a world-readable directory: refuse anonymous crossings outright.
+const denyAnonymous: AuthSource = {
+  backend: "deny-anonymous",
+  authenticate: () => Promise.reject(new IngressAuthRequired({ backend: "deny-anonymous" })),
+};
+
+const gateway = await createGateway({
+  transports: [
+    unixSocketServerTransport({ path: "/run/agentick.sock", authSource: denyAnonymous }),
+  ],
+});
+```
+
+A rejected crossing **fails closed**: the socket is destroyed before a single frame is read, and the refusal publishes a `gateway:admission:failed` record carrying the transport kind and a `failureClass` of `"authenticate"` — never the credential material. One refusal never disturbs the listener.
+
+## Per-connection admission
+
+Authentication answers "who is this"; admission answers "should this connection exist at all". The `onBeforeGatewayAccept` hook fires once per socket, after authentication and before any byte is read, and a throw drops the connection:
+
+```ts
+gateway.hook({
+  onBeforeGatewayAccept: (info) => {
+    // info.transportId is `unix-socket:${path}` — which edge admitted this
+    if (!allowed(info.transportId)) throw new Error("rejected by policy");
+    return info;
+  },
+});
+```
+
+Incoming bytes buffer on the paused socket until the connection is wired up, so a rejected connection is dropped without ever being read and an admitted one still sees its first frame.
+
+## API
+
+### `@agentick/transport-unix-socket/client`
+
+| Export                              | Purpose                                       |
+| ----------------------------------- | --------------------------------------------- |
+| `unixSocket(options)`               | The `ClientTransport`                         |
+| `UnixSocketTransportOptions` (type) | `{ path, reconnect?, id? }`                   |
+| `ReconnectPolicy` (type)            | Re-exported from the shared transport package |
+
+| Option      | Purpose                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `path`      | Absolute path to the socket file                                                          |
+| `reconnect` | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }` — exponential backoff, full jitter |
+| `id`        | Transport id; defaults to a `unix-N` counter                                              |
+
+Capabilities: `bidirectional: true` · `streamingRequest: true` · `reconnectable: true` · `binaryFrames: false` · `media: false`.
+
+### `@agentick/transport-unix-socket/server`
+
+| Export                                   | Purpose                                                      |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| `unixSocketServerTransport(config)`      | `ServerTransport` — the gateway injects the host at `listen` |
+| `unixSocketServer(options)`              | Raw factory — you supply the host, you get the `net.Server`  |
+| `UnixSocketServerTransportConfig` (type) | `UnixSocketServerOptions` minus `gateway`                    |
+| `UnixSocketServerOptions` (type)         | `{ path, gateway, transportId?, authSource? }`               |
+| `UnixSocketServerHandle` (type)          | `{ server, close() }`                                        |
+| `DispatchHost` (type)                    | Re-exported: what `gateway` must satisfy                     |
+
+| Option        | Purpose                                                                          |
+| ------------- | -------------------------------------------------------------------------------- |
+| `path`        | Socket path to bind                                                              |
+| `gateway`     | The dispatch host (raw factory only — `ServerTransport` receives it at `listen`) |
+| `transportId` | Id threaded into each connection's admission info; defaults to `"unix"`          |
+| `authSource`  | Ingress authentication; omit for host-local trust                                |
 
 ## Patterns
 
-### tentickle-class TUI ↔ same-host daemon
+**Shared plumbing.** [@agentick/transport](../transport) owns `BaseClientTransport` (state machine, RPC correlation, subscription and progress registries, reconnect with backoff, cursor-aware resubscribe) and `dispatchRequest` (the transport-agnostic JSON-RPC dispatcher, plus the ingress-authentication path). This package is only the socket-specific remainder.
 
-```ts
-// daemon.ts
-const gateway = await createGateway();
-const server = unixSocketServer({ path: "/tmp/myagent.sock", gateway });
+**Sibling wires.** [@agentick/transport-websocket](../transport-websocket) and [@agentick/transport-http](../transport-http) for the network hop; [@agentick/transport-in-process](../transport-in-process) when the client and the gateway share a process and there is no hop at all. Identical client surface — the transport is the swappable part.
 
-process.on("SIGTERM", async () => {
-  await server.close();
-  await gateway.close();
-  process.exit(0);
-});
-```
+**Server.** [@agentick/gateway](../gateway) is the dispatch host, owns the transport list, and fans `listen()` / `close()` across it.
 
-```ts
-// tui.ts
-const client = await createClient({
-  transport: unixSocket({ path: "/tmp/myagent.sock" }),
-});
-await client.connect();
+**Client.** [@agentick/client-core](../client-core) is the lean core; [@agentick/client](../client) is the same surface with every built-in `/client` session sub-handle pre-registered.
 
-const session = client.session("my-session");
-for await (const event of session.send({ messages: [...] })) {
-  render(event);
-}
-```
-
-## Status
-
-Phase 33.E of the v2 implementation plan — see
-`docs/proposals/v2/STATUS.md`.
-
-## Verified by
-
-| Concern                                                                                                                                                                           | Test file                                                                                                       |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                                                         | `src/__tests__/smoke.spec.ts`                                                                                   |
-| State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams                            | `src/__tests__/transport-conformance.spec.ts` (via `runTransportConformance` from `@agentick/spec-conformance`) |
-| Ingress authn (ADR 61) — host-local `none` credential → local pole; configured `authSource` rejecting `none` fails closed; `allowAnonymous` admits with no principal              | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                            |
-| `unixSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the socket, ping round-trips; `gateway.close()` unlinks the path) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                      |
+**Shapes.** [@agentick/spec](../spec) owns `ClientTransport`, `ServerTransport`, `AuthSource`, the ingress error classes, and the JSON-RPC frame types.
 
 ## Roadmap & known gaps
 
-**Done:**
+- **No peer-credential enrichment.** Deriving a principal from the connecting uid (`SO_PEERCRED`) is the natural identity source for a host-local socket and isn't built. Today the crossing is `credential.kind: "none"`, so an `AuthSource` sees `none` rather than peer credentials.
+- **No socket-file lifecycle helper.** Unlinking a stale path after an unclean shutdown is the adopter's job; there is no `unlinkBeforeBind` option.
+- **No frame-size limit.** The NDJSON decoder buffers until it sees a newline, so a peer can push an unbounded line. Acceptable for host-local trust, but it is defense-in-depth this transport doesn't have.
+- **Reconnect isn't exercised against a daemon bounce.** The backoff and cursor-aware resubscribe machinery is the shared base's, tested there and by the WebSocket transport; this package has no server-restart test of its own.
+- **No broadcast fan-out.** The server tracks live connections for teardown only. A server-initiated notification to all connected clients, outside a dispatch, is unbuilt.
+- **Two decode paths ship without a test here.** The server aborts an in-flight dispatch on an inbound `notifications/cancelled`, and both ends decode a batch (a JSON array of frames) and answer a malformed line with a parse error instead of dropping the connection. All three are wired; none is pinned by a test in this package.
 
-- ✓ NDJSON framing (newline-delimited JSON)
-- ✓ State machine via `BaseClientTransport`
-- ✓ RPC correlation + subscription multiplexing
-- ✓ Reconnect with exponential backoff + full jitter (shared base)
-- ✓ Cursor-aware resubscribe on reconnect (shared base)
-- ✓ `notifications/cancelled` client emit + server handle
-- ✓ Ingress authn (ADR 61) — host-local trust: the crossing carries `credential.kind: "none"` by default (local pole, no principal). An optional `authSource?` runs the shared `authenticateIngress` helper for parity with the network transports; a rejection destroys the socket (fail closed). Verified by `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`).
+## Verified by
 
-**Claimed but not yet under test (✗):**
-
-- ✗ **Reconnect over daemon restart** — reconnect machinery is inherited from `BaseClientTransport`; not exercised by a server-bounce test (parallel to WS's `reconnect.spec.ts`).
-- ✗ **`SO_PEERCRED` peer-credential enrichment** — deriving the connecting uid → principal is a later ingress interceptor (`TODO(#146)` at the server). Today the crossing is `credential.kind: "none"`; an adopter `AuthSource` sees `none`, not peer creds.
-- ✗ **Socket file lifecycle helpers** — adopters currently handle `fs.unlink` of stale socket files themselves. A `unixSocketServer({ unlinkBeforeBind: true })` knob would be useful.
-- ✗ **Per-message framing limits** — no max-frame-size; a malicious peer could send an unbounded NDJSON line. Defense-in-depth deferred.
-- ✗ **Server-initiated notification fan-out (#311)** — the server tracks live connections for teardown but does NOT register them with the gateway (`gateway.acceptConnection`) or fan a `gateway.notify(...)` broadcast to connected clients. Notifications today only flow within a dispatch. Broadcast fan-out is unbuilt.
-
-## Development plan
-
-| Step                               | Lands when                                                                                                                |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Phase 33.E MVP                     | Landed                                                                                                                    |
-| Backpressure wiring                | Primitive landed in `@agentick/transport` (`MultiplexedStream`); this transport still uses the default `unbounded` policy |
-| `SO_PEERCRED` peer-cred enrichment | ADR 61 later interceptor (`TODO(#146)`)                                                                                   |
-| Reconnect-over-daemon-restart test | Optional; the base-class machinery is the same path WS exercises                                                          |
+- `src/__tests__/smoke.spec.ts` — `ping` over a real socket against a real gateway, `listApps` reflecting `createApp`, a typed `AppNotFoundError` crossing the wire intact, concurrent multiplexed RPCs on one socket, clean `close()` transition.
+- `src/__tests__/transport-conformance.spec.ts` — the shared `ClientTransport` suite over a real `net.Server`: state machine, pre-connect rejection, RPC error mapping, concurrent multiplexed RPCs, `notifications/cancelled` emit, subscription id re-keying / routing / close / eviction, progress streams.
+- `src/__tests__/ingress-authn.spec.ts` — the ingress conformance suite for a host-local edge: local pole by default, fail-closed when a configured `AuthSource` rejects `none`, admitted-with-no-principal under `allowAnonymous`, and the `gateway:admission:failed` record on refusal (correct `failureClass` and transport kind, no credential material, nothing published on an admitted crossing).
+- `src/__tests__/server-transport.spec.ts` — `ServerTransport` conformance plus a real gateway-owned bind: `gateway.listen()` accepts a client and `ping` round-trips, `gateway.close()` releases the path, a throwing `onBeforeGatewayAccept` drops the connection, and a permitting one fires exactly once with `transportId` set to `unix-socket:${path}`.

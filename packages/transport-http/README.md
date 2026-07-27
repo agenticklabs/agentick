@@ -1,308 +1,293 @@
 # @agentick/transport-http
 
-Streamable HTTP transport for agentick — JSON-RPC 2.0 over a single
-endpoint per the **MCP 2025-03-26 Streamable HTTP** spec.
+**One URL carries the whole protocol.** JSON-RPC 2.0 over Streamable HTTP: `POST` for requests — answered with `application/json`, or with `text/event-stream` when the request asks for progress — a persistent `GET` for notifications that belong to no single call, and `DELETE` to release server state. Session affinity rides the `Mcp-Session-Id` header, so a load balancer sticky-routes without parsing bodies.
 
-Ships **both ends**: a `fetch`-based client (Node 22+, browser, Bun,
-Deno, edge runtimes) and a Node `http.Server`-mountable adapter.
+That single-endpoint shape is the bet. It reaches the places a socket cannot: proxies that strip `Upgrade`, CDNs, serverless platforms with no upgrade path. And because a request and a response are web standards, the same package also ships a `(req: Request) => Promise<Response>` handler you mount inside Hono / Nitro / Next.js — so a gateway can be a route in an app you already run instead of a port you have to open.
 
-## What this package is
+## Install
 
-The HTTP fallback for environments where WebSocket is blocked (corporate
-proxies, certain CDNs, serverless platforms that don't allow WS upgrade).
-Same JSON-RPC 2.0 wire as `@agentick/transport-websocket`; different
-HTTP topology.
+```bash
+npm install @agentick/transport-http
+```
 
-Subclasses `BaseClientTransport` from `@agentick/transport` — the
-extraction in Phase 33.C.1 means HTTP gets state machine, RPC
-correlation, subscription multiplexing, notification routing, and
-cursor-aware resubscribe for free. The HTTP-specific code is just the
-wire (POST / GET / DELETE + SSE parsing).
+| Subpath                              | What it gives you                                                     |
+| ------------------------------------ | --------------------------------------------------------------------- |
+| `@agentick/transport-http/client`    | `http(options)` — a `fetch`-based `ClientTransport`                   |
+| `@agentick/transport-http/server`    | `httpServer` / `httpServerTransport` — mounts on a Node `http.Server` |
+| `@agentick/transport-http/fetch`     | `fetchServerTransport` — the embedded web-standard handler            |
+| `@agentick/transport-http` (default) | all of the above                                                      |
 
-## Architecture
-
-Streamable HTTP routes everything through one URL using HTTP method
-discrimination:
-
-| Method                                       | Purpose                                                                                                                                                                                                        |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST <url>`                                 | JSON-RPC request. Response is `application/json` for non-streaming RPCs; `text/event-stream` when the request carries `_meta.progressToken` (server streams `notifications/progress` then the final response). |
-| `GET <url>` with `Accept: text/event-stream` | Persistent SSE channel for notifications outside any specific RPC — subscription events, `notifications/auth/expired`, etc.                                                                                    |
-| `DELETE <url>`                               | Terminate the server-side session state.                                                                                                                                                                       |
-
-Session affinity via the `Mcp-Session-Id` header — server returns it on
-first response; client echoes on subsequent requests. Load balancers
-sticky-route by header.
+The client runs anywhere `fetch` does (Node 20.19+, browser, Bun, Deno, edge). The Node server paths need `node:http`. Pair the server with [@agentick/gateway](../gateway) and the client with [@agentick/client-core](../client-core).
 
 ## Quick start
 
-### Client
-
-```ts
-import { createClient } from "@agentick/client";
-import { http } from "@agentick/transport-http/client";
-
-const client = await createClient({
-  transport: http({ url: "https://api.example.com/rpc" }),
-});
-
-await client.connect();
-const result = await client.request("ping", {});
-```
-
-### Server
-
-```ts
-import { createServer } from "node:http";
-import { createGateway } from "@agentick/gateway";
-import { httpServer } from "@agentick/transport-http/server";
-
-const gateway = await createGateway();
-const node = createServer();
-const server = httpServer({
-  httpServer: node,
-  gateway,
-  allowedOrigins: ["https://my-app.example.com"],
-});
-
-node.listen(8080);
-```
-
-### Server, gateway-owned (ADR 84 `ServerTransport`)
-
-`httpServerTransport(config)` binds the wire config at construction and
-takes the dispatch host at `listen()`. Because `httpServer` mounts on a
-caller-supplied Node server, the wrapper owns the port: given `{ port }`
-it creates the Node `http.Server` on `gateway.listen()`, mounts the
-handler, and binds; `gateway.close()` tears both down.
+Hand the transport to the gateway and the gateway owns the port:
 
 ```ts
 import { createGateway } from "@agentick/gateway";
 import { httpServerTransport } from "@agentick/transport-http/server";
 
 const gateway = await createGateway({
-  transports: [httpServerTransport({ port: 3000, host: "0.0.0.0" })],
+  transports: [httpServerTransport({ port: 3000 })],
 });
 
-await gateway.listen(); // creates + binds the node:http server on :3000
-// ...
-await gateway.close(); // closes the request handler AND the server it created
+await gateway.listen(); // creates the node:http server, binds 127.0.0.1:3000
+// … serve traffic …
+await gateway.close(); // detaches the handler AND closes the server it created
 ```
 
-Pass `{ httpServer }` instead of `{ port }` to mount on a server the
-adopter already owns (shared with a WS transport, an `https.Server`);
-the wrapper does not close what it did not create.
-
-## API surface
-
-### `http(options): ClientTransport`
+Point a client at the URL and the wire is done:
 
 ```ts
-interface HttpTransportOptions {
-  url: string;
-  /** Custom fetch override (auth wrappers, mTLS, etc.). Defaults to globalThis.fetch. */
-  fetch?: typeof globalThis.fetch;
-  headers?: Record<string, string>;
-  reconnect?: ReconnectPolicy;
-  id?: string;
+import { createClient } from "@agentick/client-core";
+import { http } from "@agentick/transport-http/client";
+
+const client = await createClient({
+  transport: http({ url: "http://127.0.0.1:3000" }),
+});
+
+await client.connect(); // opens the GET notification stream, completes the CSRF handshake
+await client.request("ping", {});
+
+const { apps } = await client.gateway().listApps();
+```
+
+`connect()` does three things that matter later: it opens the persistent `GET` stream, captures the CSRF token the server issues on it, and remembers the `Mcp-Session-Id` the first response carries. Every subsequent `POST` echoes both.
+
+> [!IMPORTANT]
+> `httpServerTransport({ port })` binds `127.0.0.1` unless you pass `host`. That default is a security boundary, not a convenience. Read [Security defaults](#security-defaults) before widening it to `0.0.0.0`.
+
+## One URL, three methods
+
+| Request                                      | Response                                                                                                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST <url>`                                 | `application/json` for an ordinary RPC. `text/event-stream` when the request carries `_meta.progressToken` — progress notifications, then the final response |
+| `GET <url>` with `Accept: text/event-stream` | The persistent notification channel: subscription events, auth expiry, anything not scoped to one call. Keep-alive comments every 30s                        |
+| `DELETE <url>`                               | Releases the session's fan-out state (subscriptions, notification stream)                                                                                    |
+| `OPTIONS <url>`                              | CORS preflight — `204`, and headers only for an explicitly allowlisted origin                                                                                |
+
+A JSON array body is a JSON-RPC batch and answers with an array of responses. A frame with no `id` is a notification and answers `204`; `notifications/cancelled` routes into the abort registry of the in-flight request it names.
+
+## Streaming a long-running call
+
+A request that carries `_meta.progressToken` gets an SSE body instead of a JSON one: progress notifications first, the final JSON-RPC response as the terminal frame. The client unpacks that stream and fans the frames to the matching progress stream — nothing to configure.
+
+```ts
+import { createClient } from "@agentick/client-core";
+import { http } from "@agentick/transport-http/client";
+
+const transport = http({ url: "http://127.0.0.1:3000" });
+const client = await createClient({ transport });
+await client.connect();
+
+// Frames for a progress token land here, whichever body shape carried them.
+const progress = transport.progress("run-1");
+for await (const frame of progress) {
+  console.log(frame.cursor, frame.envelope);
 }
 ```
 
-### `httpServer(options): HttpServerHandle`
+Notifications that belong to no request — subscription events, auth expiry — arrive on the persistent `GET` stream instead, and route to `transport.subscribe(...)` streams by subscription id.
+
+## Security defaults
+
+The unconfigured server ships closed. Four defaults come from the policy in [@agentick/transport](../transport), shared with every network-facing edge so the posture is identical across them:
+
+| Default                   | What it blocks                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-site rejection      | `Sec-Fetch-Site: cross-site`, or an `Origin` that is neither same-origin nor allowlisted → `403` before dispatch                            |
+| `Host` allow-list         | Only loopback names and hostnames you list. Defeats DNS rebinding — an attacker name resolving to `127.0.0.1` arrives with a foreign `Host` |
+| Loopback-only proxy trust | `X-Forwarded-Host` / `-Proto` are honored only with `trustProxy: true` **and** a loopback TCP peer                                          |
+| CSRF token                | A per-process token issued on the `GET` bootstrap, required in `x-agentick-csrf` on every mutation                                          |
+
+CORS is never permissive: an allowlisted origin is echoed back verbatim, and there is no code path that emits `*`.
+
+Each default is overridable, and widening is explicit:
 
 ```ts
-interface HttpServerOptions {
-  httpServer: http.Server;
-  gateway: GatewayHarnessProtocol;
-  path?: string;
-  heartbeatIntervalMs?: number;
-  // ── Security defaults (STATUS A2 §4c) — safe when omitted, each overridable.
-  /** Cross-origin allow-list. Omitted → same-origin only. NEVER `"*"`. */
-  allowedOrigins?: readonly string[];
-  /** Extra `Host` values beyond loopback + allowedOrigins' hosts. */
-  allowedHosts?: readonly string[];
-  /** Trust `X-Forwarded-Host`/`-Proto` — only from a loopback peer. Default false. */
-  trustProxy?: boolean;
-  /** Require the `x-agentick-csrf` token on mutations. Default true. */
-  csrf?: boolean;
-  /**
-   * Ingress authentication (ADR 61). HTTP is stateless, so this runs
-   * PER REQUEST — each POST authenticates from its own
-   * `Authorization: Bearer` header and that request's identity governs
-   * only that request's dispatch (no cross-request bleed). GET/SSE
-   * authenticates at stream-open. Rejection → 401. Omitted = anonymous
-   * (the local pole).
-   */
-  authSource?: AuthSource;
-}
+import { httpServerTransport } from "@agentick/transport-http/server";
+
+const transport = httpServerTransport({
+  port: 3000,
+  host: "0.0.0.0", // public bind — deliberate
+  allowedHosts: ["agents.example.com"], // required once you serve under a real hostname
+  allowedOrigins: ["https://app.example.com"], // echoed exactly; never `*`
+  trustProxy: true, // honored only when the TCP peer is loopback
+});
 ```
 
-> **Security defaults.** The unconfigured server ships closed (STATUS A2 §4c),
-> enforcing a shared `@agentick/transport` policy: cross-site `Origin` /
-> `Sec-Fetch-Site` rejection, a `Host` allow-list (loopback + configured only —
-> DNS-rebinding defense), non-permissive CORS (an allowlisted origin echoed
-> exactly, never `*`), and a per-process CSRF token issued on the GET bootstrap
-> handshake and required in the `x-agentick-csrf` header on every mutation. The
-> framework client handshakes the token transparently; a raw non-browser caller
-> either performs the GET-then-echo handshake or sets `csrf: false`.
+> [!WARNING]
+> A non-browser caller that cannot run the `GET`-then-echo handshake needs `csrf: false`. That turns off **only** the CSRF token — the cross-site and `Host` gates stay in force. The framework client handshakes the token for you, so `csrf: false` is for raw callers, not browsers.
 
-### `httpServerTransport(config): ServerTransport`
+## Per-request authentication
+
+HTTP is request-oriented, so an `AuthSource` runs **per request**: each `POST` authenticates from its own `Authorization: Bearer` header, and that request's identity governs only that request's dispatch. Two `POST`s sharing one `Mcp-Session-Id` with different tokens resolve to their own principals — the per-session state deliberately caches no identity, so identity cannot bleed between requests.
 
 ```ts
-// Common path — the wrapper owns the Node http.Server:
-type HttpServerTransportPortConfig = Omit<HttpServerOptions, "gateway" | "httpServer"> & {
-  port: number;
-  host?: string; // bind address; DEFAULT 127.0.0.1 (loopback only — the security boundary)
-};
-// Or mount on an adopter-owned server:
-type HttpServerTransportConfig = HttpServerTransportPortConfig | Omit<HttpServerOptions, "gateway">; // { httpServer, ... }
+import { createGateway } from "@agentick/gateway";
+import { staticTokenAuthSource } from "@agentick/transport";
+import { httpServerTransport } from "@agentick/transport-http/server";
+
+const gateway = await createGateway({
+  transports: [
+    httpServerTransport({
+      port: 3000,
+      // Any AuthSource: a JWT verifier, an OAuth introspection call, or this
+      // reference table. Rejection → 401, and dispatch is never reached.
+      authSource: staticTokenAuthSource({ tokens: { "tok-alice": "alice" } }),
+    }),
+  ],
+});
+await gateway.listen();
 ```
 
-> **Server-side auth (prod edge).** `authSource` authenticates the
-> INBOUND request. It is unrelated to the client-side `fetch` example
-> below (which attaches the caller's credential). Two POSTs on one
-> `Mcp-Session-Id` with different tokens resolve to their own
-> principals — the per-session connection state deliberately caches no
-> identity.
+Omitting `authSource` admits every request as the local pole — no principal, appropriate for a loopback bind behind your own process boundary. Configuring one makes the edge fail closed: a missing or unknown token is a `401`, never a silent downgrade to anonymous.
 
-### `fetchServerTransport(options): { transport, handler }` — the embedded gateway (`@agentick/transport-http/fetch`)
+A refused crossing publishes a `gateway:admission:failed` event carrying the failure class and transport kind, with the peer address the edge alone knows. Credential material never rides along — no token, no header bag, no `credential` key.
 
-Mount the gateway INSIDE an existing fetch-native HTTP framework (Hono,
-Nitro, Next.js route handlers, Bun/Deno) instead of owning a port. The
-embedded door is the **fifth `ServerTransport`** (alongside in-process / ws /
-http / unix): the gateway owns it, so `gateway.listen()` binds it and
-`gateway.close()` sweeps every open SSE connection. Same pipeline as
-`httpServer` (`dispatchRequest`, `resolveWebSecurity`, the SSE codec) behind a
-web-standard `(req: Request) => Promise<Response>`:
+## Embedded in a fetch-native framework
+
+`fetchServerTransport` swaps the Node server for a web-standard handler you mount in your own route table. The gateway still owns the lifecycle: `gateway.listen()` binds it, `gateway.close()` sweeps every open SSE stream.
 
 ```ts
-import { fetchServerTransport } from "@agentick/transport-http/fetch";
+import { createGateway } from "@agentick/gateway";
+import { fetchServerTransport, type Identity } from "@agentick/transport-http/fetch";
 
-// Construct BEFORE the gateway exists, so you can mount the handler in your
-// framework's route table at app-setup time.
+// Construct BEFORE the gateway exists, so the handler can be mounted at
+// app-setup time — it closes over a host slot that listen() fills.
 const { transport, handler } = fetchServerTransport({
-  // YOUR auth already ran in YOUR middleware — hand us the RESULT, never tokens.
-  identity: async (req) => {
-    const user = await myAuth(req); // your session/JWT/cookie check
+  // YOUR auth already ran in YOUR middleware. Hand back the RESULT, never tokens.
+  identity: async (req): Promise<Identity | Response> => {
+    const user = await authenticate(req);
     if (!user) return new Response(null, { status: 401 }); // your rejection, verbatim
     return {
-      principal: user.id, //           → ADR-48 event stamping
-      user: { tenantId: user.tenantId }, // → RuntimeContextUser (ctx.user everywhere)
-      scopes: user.scopes, //          → the authorizer
+      principal: user.id, // stamped on every event this request produces
+      user: { tenantId: user.tenantId }, // reachable as ctx.user everywhere
+      scopes: user.scopes, // fed to the gateway's authorizer
     };
   },
 });
 
-app.all("/agentick/*", (c) => handler(c.req.raw)); // Hono
+app.all("/agentick/*", (c) => handler(c.req.raw)); // Hono; Nitro/Next are the same shape
 
 const gateway = await createGateway({ transports: [transport] });
-await gateway.listen(); // binds the transport (fills the host slot)
-// …later: await gateway.close() sweeps open SSE streams + unbinds.
+await gateway.listen();
 ```
 
-`transport.listen(host)` fills the handler's host slot (the one thing only the
-gateway can supply, ADR 84 §2 — all other config binds at construction); a
-request that arrives **before `listen()` or after `close()`** gets an honest
-`503` (typed JSON-RPC `InvalidRequest` body — the gateway enforces
-`listen()`-before-`createApp`, so pre-listen traffic is a host-app ordering
-bug, never a silent queue).
+`identity` is the only difference from the standalone server. Returning a `Response` short-circuits — the caller gets your 401 or redirect byte for byte and dispatch is never reached. Returning an `Identity` threads it into dispatch as the ingress identity, where the gateway's authorizer enforces `scopes` at the same choke point every other transport uses. Token material stays inside your callback.
 
-`identity` is the ONLY difference from standalone HTTP: the host's existing
-auth piggybacks here per request. Returning a `Response` short-circuits (the
-adopter's 401 / redirect, verbatim); returning an `Identity` (`{ principal?,
-user?, scopes? }` — the same `IngressIdentity` every ingress edge stamps)
-threads straight into dispatch. Token material NEVER crosses into the
-framework.
+> [!WARNING]
+> Embedded mode is fail-closed. With no `identity` callback, **every request is refused** with a typed `IngressAuthRequired` `401` — a missing resolver is a misconfiguration, not an invitation to run as the local pole. The one documented opt-out is `security: "host-managed"`: you attest that your framework gates access, and requests then run as the local pole.
 
-> **Security is ON by default, even embedded (fail closed).** No `identity`
-> callback → every request is REFUSED (`401`, typed `IngressAuthRequired`).
-> The single documented opt-out is `security: "host-managed"` — the adopter
-> attests their host framework gates access, and requests then run as the
-> trusted local pole. The `Host` / `Origin` / CSRF defenses still run against
-> the request headers, so serving under a real hostname requires configuring
-> `allowedHosts` (security applies MORE when embedded, not less). There is no
-> TCP peer on a web `Request`, so `trustProxy` is inert — the adopter's
-> framework terminates the connection and owns the network boundary.
+Two things behave differently when embedded. `trustProxy` is inert — a web `Request` exposes no TCP peer, so your framework owns the network boundary. And the `Host` / `Origin` / CSRF gates still run against the request headers, which means serving under a real hostname requires `allowedHosts`. Security applies _more_ when embedded, not less.
+
+A request that arrives before `listen()` or after `close()` gets an honest `503` with a typed JSON-RPC body. There is no silent queue: the gateway requires `listen()` before apps exist, so pre-listen traffic is a host-app ordering bug and is surfaced as one.
+
+## Sharing a Node server
+
+Pass `{ httpServer }` instead of `{ port }` to mount on a server you already own — an `https.Server`, Express's underlying listener, or one shared with the WebSocket transport. The wrapper attaches and, since it did not create the server, does not close it.
+
+```ts
+import { createServer } from "node:http";
+import { createGateway } from "@agentick/gateway";
+import { httpServerTransport } from "@agentick/transport-http/server";
+
+const server = createServer();
+server.on("request", (req, res) => {
+  if (req.url === "/health") res.end("ok"); // else: not ours — write nothing
+});
+
+const gateway = await createGateway({
+  transports: [httpServerTransport({ httpServer: server, path: "/agentick" })],
+});
+await gateway.listen(); // attaches; does NOT bind — the server is yours
+server.listen(8080);
+```
+
+> [!IMPORTANT]
+> Every Node `request` listener fires for every request. On an attached server the transport therefore **ignores** requests outside its `path` rather than answering `404` — writing one would double-respond against your framework and clobber its headers. On a server the transport created (`{ port }`), nothing else can answer, so a non-matching request is safely `404`'d. That's what `ownsServer` selects, and the wrapper sets it from the config branch you took.
+
+## API
+
+### `@agentick/transport-http/client`
+
+| Export                        | Purpose                                      |
+| ----------------------------- | -------------------------------------------- |
+| `http(options)`               | The `fetch`-based `ClientTransport`          |
+| `HttpTransportOptions` (type) | `url`, `fetch`, `headers`, `reconnect`, `id` |
+
+| Option      | Meaning                                                                                  |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| `url`       | The single endpoint. Required                                                            |
+| `fetch`     | Override `globalThis.fetch` — auth wrappers, mTLS, interceptors                          |
+| `headers`   | Attached to every request; snapshotted at construction                                   |
+| `reconnect` | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }`. Full-jitter backoff, 100ms → 30s |
+| `id`        | Stable transport id for logs. Defaults to `http-<n>`                                     |
+
+### `@agentick/transport-http/server`
+
+| Export                        | Purpose                                                                                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `httpServerTransport(config)` | `ServerTransport` the gateway owns. `{ port, host? }` or `{ httpServer }`                                |
+| `httpServer(options)`         | The raw factory — attaches to a Node server you supply, returns `{ close() }`                            |
+| `HttpServerOptions` (type)    | `httpServer`, `gateway`, `path`, `heartbeatIntervalMs`, `authSource`, `ownsServer` + the security fields |
+
+Security fields (shared, from [@agentick/transport](../transport)): `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`.
+
+### `@agentick/transport-http/fetch`
+
+| Export                          | Purpose                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `fetchServerTransport(options)` | Returns `{ transport, handler }` — the gateway owns one, you mount the other                        |
+| `FetchHandler` (type)           | `(req: Request) => Promise<Response>`                                                               |
+| `Identity` (type)               | `{ principal?, user?, scopes? }` — what your auth returns; the same shape every ingress edge stamps |
+| `FetchHandlerOptions` (type)    | `identity`, `security`, `path`, `heartbeatIntervalMs` + the security fields                         |
+
+Transport ids are stable and readable: `http:3000` for a port config, `http:attached` for an adopter-owned server, `http:fetch` for the embedded handler.
 
 ## Patterns
 
-### Adopter-supplied `fetch` for auth
+**Client-side credentials.** `headers` covers a static token; `fetch` covers a rotating one, because the wrapper runs per request:
 
 ```ts
+import { http } from "@agentick/transport-http/client";
+
 const authedFetch: typeof fetch = async (input, init) => {
-  const token = await getAccessToken();
+  const token = await getAccessToken(); // refreshes on its own schedule
   return fetch(input, {
     ...init,
     headers: { ...init?.headers, Authorization: `Bearer ${token}` },
   });
 };
 
-const transport = http({ url, fetch: authedFetch });
+const transport = http({ url: "https://agents.example.com/rpc", fetch: authedFetch });
 ```
 
-### Streaming response for long-running RPCs
+That is the client attaching _its_ credential. It is unrelated to `authSource`, which authenticates inbound requests on the server.
 
-Pass `_meta.progressToken` on the request. The server responds with
-`Content-Type: text/event-stream` and streams `notifications/progress`
-followed by the final result, all as SSE `data:` frames. Adopters don't
-do anything special — the client unpacks the stream transparently and
-fans events to the matching `transport.progress(token)` stream.
+**Shared plumbing.** [@agentick/transport](../transport) owns `BaseClientTransport` (state machine, RPC correlation, subscription and progress multiplexing, cursor-aware resubscribe, full-jitter backoff), `dispatchRequest`, and the web-security policy. This package is the wire: methods, bodies, and SSE framing.
 
-### Notification channel (subscriptions)
+**Sibling wires.** [@agentick/transport-websocket](../transport-websocket) speaks the same JSON-RPC over a persistent socket, and the two coexist on one Node server. [@agentick/transport-in-process](../transport-in-process) skips serialization entirely for tests and single-process apps.
 
-Client opens `GET <url>` with `Accept: text/event-stream` at connect
-time and keeps it open. Server pushes `notifications/subscription/event`,
-`notifications/auth/expired`, etc. through this channel. Reconnect
-re-opens it with exponential backoff and replays subscriptions from
-their last cursor (via `BaseClientTransport.resubscribeAfterReconnect`).
-
-## Status
-
-Phase 33.D of the v2 implementation plan — see
-`docs/proposals/v2/STATUS.md`.
-
-## Verified by
-
-Every claim in this README has a corresponding test, or appears below
-under "Roadmap & known gaps" with an explicit marker.
-
-| Concern                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Test file                                                                                                      |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| End-to-end ping, listApps, RPC error → TransportError, multiplexed RPCs, close transition                                                                                                                                                                                                                                                                                                                                                                                                                 | `src/__tests__/smoke.spec.ts`                                                                                  |
-| State machine, RPC correlation, multiplexed concurrent RPCs, `notifications/cancelled` emit, subscription routing + close + eviction, progress streams                                                                                                                                                                                                                                                                                                                                                    | `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance` from `@agentick/spec-conformance`)    |
-| SSE codec — `encodeSseFrame` + `parseSseFrames`                                                                                                                                                                                                                                                                                                                                                                                                                                                           | covered via the conformance suite's streaming-response path                                                    |
-| Per-request ingress authn — valid/invalid/missing bearer, prototype-key guard, no cross-request identity bleed (two POSTs, one session)                                                                                                                                                                                                                                                                                                                                                                   | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)                                           |
-| `httpServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` creates + binds the node server, ping round-trips; `gateway.close()` frees the port)                                                                                                                                                                                                                                                                                                                  | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`)                                     |
-| Security defaults (STATUS A2 §4c) — CSRF bootstrap handshake + missing/invalid-token deny, cross-site `Origin`/`Sec-Fetch-Site` deny, `Host` allow-list deny, non-permissive CORS (allowlisted origin echoed, never `*`), loopback bind default; overrides (`csrf:false`, `allowedOrigins`, `allowedHosts`)                                                                                                                                                                                               | `src/__tests__/security.spec.ts` + policy matrix in `@agentick/transport` `src/__tests__/web-security.spec.ts` |
-| Embedded gateway (`fetchServerTransport`) — identity round-trip (dispatch sees the callback's principal), identity `Response` short-circuit, fail-closed default + `security: "host-managed"` local-pole opt-out, scopes denied through the existing `authorizeDispatch` choke point, subscription stream (GET SSE + `sub/subscribe` → frame → teardown), cross-site reject when embedded, Hono-style mount typechecks, `gateway.close()` sweeps live SSE sessions, pre-listen / post-close `503` refusal | `src/__tests__/embedded-fetch-handler.spec.ts`                                                                 |
-| Embedded door `ServerTransport` conformance — stable id (`http:fetch`), `listen`/`close` bind + teardown, idempotent listen + close, re-listen after close                                                                                                                                                                                                                                                                                                                                                | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance("fetchServerTransport", …)`)          |
+**Wire shapes.** [@agentick/spec](../spec) owns `ClientTransport`, `ServerTransport`, `AuthSource`, `IngressIdentity`, and the JSON-RPC types.
 
 ## Roadmap & known gaps
 
-**Done:**
+- **Backpressure is unbounded here.** The bounded-buffer policies live on `MultiplexedStream` in [@agentick/transport](../transport), but this transport constructs subscription and progress streams with the default `unbounded` policy and exposes no per-stream option. A slow consumer behind a fast emitter grows the buffer.
+- **No compression.** No `Accept-Encoding` negotiation, no `zlib` on responses. Straightforward to add; not done.
+- **`DELETE` is not authenticated.** A configured `authSource` gates `POST` and the `GET` stream open, but not the session teardown. Whoever knows a session id can release its fan-out state.
+- **No wall-clock ceiling on authentication.** A hung `AuthSource` leaves the request pending rather than rejecting on a timeout.
+- **Sticky-route survival is untested.** The server returns `Mcp-Session-Id`, the client stores it and echoes it, but nothing exercises the client across a load-balancer reshuffle.
+- **Notification-stream reconnect is untested here.** The reconnect machinery is shared and covered, but the HTTP-specific "persistent `GET` survives a server bounce" path has no test (the WebSocket package has the equivalent).
+- **MCP method namespaces are not served.** The wire follows the Streamable HTTP transport profile; the server does not answer MCP's own method names.
 
-- ✓ Streamable HTTP routing: POST (JSON or SSE response), GET (persistent SSE), DELETE
-- ✓ Session-id propagation via `Mcp-Session-Id` header (sticky-routing-ready)
-- ✓ Universal `fetch` on the client side
-- ✓ SSE codec with W3C `data:` field handling (multi-line `data:` support, `\r\n\r\n` and `\n\n` separators)
-- ✓ Exponential backoff with full jitter reconnect (shared with WS via `BaseClientTransport`)
-- ✓ Cursor-aware resubscribe on reconnect (shared with WS via `BaseClientTransport`)
-- ✓ Non-permissive CORS via `allowedOrigins` (allowlisted origin echoed exactly, never `*`); OPTIONS preflight handler
-- ✓ Security defaults (STATUS A2 §4c): loopback bind default, cross-site `Origin`/`Sec-Fetch-Site` rejection, `Host` allow-list, loopback-only forwarded-header trust, per-process CSRF token (bootstrap handshake + `x-agentick-csrf` on mutations) — each overridable
-- ✓ `notifications/cancelled` client emit + server-side routing into per-session abort callbacks
+## Verified by
 
-**Claimed but not yet under test (✗):**
-
-- ✗ **`Mcp-Session-Id` echo on reconnect** — server returns the id; client stores it; client echoes on subsequent POSTs. Wire-tested only by the implicit cookie-shaped behavior; no explicit "client survives a sticky-route shuffle" test.
-- ✗ **Persistent notification GET reconnect under server bounce** — the reconnect machinery is wired; not exercised by a server-bounce test (unlike WS where `reconnect.spec.ts` covers it).
-- ✗ **Per-message-deflate / brotli compression** — not implemented; trivial to add via `Accept-Encoding` + Node `zlib`.
-- ✗ **Bilingual MCP** — server doesn't yet implement MCP method namespaces; landing with `@agentick/mcp-surface` (Phase 33.I).
-
-## Development plan
-
-| Step                                | Lands when                                                                                                                                |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 33.D MVP                      | Landed                                                                                                                                    |
-| Backpressure wiring                 | Primitive landed in `@agentick/transport` (`MultiplexedStream`); this transport still uses the default `unbounded` policy                 |
-| Notification-channel reconnect test | Base reconnect machinery lives in `@agentick/transport`; an HTTP server-bounce test (parallel to WS `reconnect.spec.ts`) is still missing |
-| Bilingual MCP support               | Phase 33.I                                                                                                                                |
+- `src/__tests__/smoke.spec.ts` — `POST` round-trip and `GET` channel against a real gateway, `listApps` reflecting `createApp`, concurrent RPCs on one client, a server error arriving typed (`_tag` preserved), clean close.
+- `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance`) — state machine, RPC correlation, pre-connect rejection, `JsonRpcError` → `TransportError`, concurrent multiplexing, `notifications/cancelled` on abort, subscription routing plus `closed` and `evicted`, and progress frames reaching `progress(token)` through the streaming-response path. Exercises the SSE codec end to end.
+- `src/__tests__/security.spec.ts` — the CSRF bootstrap handshake, missing and forged token denial, `csrf: false`, cross-site `Origin`/`Sec-Fetch-Site` denial, same-origin admission, `Host` allow-list denial and the `allowedHosts` override, exact-origin CORS echo and disallowed-preflight denial, and a real client round-trip over the loopback bind default.
+- `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) — valid bearer stamping a principal, missing and invalid and prototype-key tokens refused at the edge, local pole with no `authSource`, two `POST`s on one session resolving to their own principals, plus the admission-failure event: published on refusal, absent on admission, and carrying no credential material.
+- `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) — the lifecycle contract for both `httpServerTransport` and `fetchServerTransport` (stable id, bind, teardown, idempotent listen and close, re-listen), plus a real gateway-owned bind: `gateway.listen()` binds the port and a client pings through it, `gateway.close()` frees it.
+- `src/__tests__/embedded-fetch-handler.spec.ts` — identity round-trip through the authorizer, `Response` short-circuit reaching nothing, fail-closed default and the `host-managed` opt-out, out-of-scope denial at the dispatch choke point, `GET` SSE plus `sub/subscribe` delivering a frame then tearing down on cancel, cross-site rejection while embedded, a Hono-shaped mount, `gateway.close()` closing live streams, and the pre-listen / post-close `503`.
+- Shared-server coexistence — one Node server carrying this transport, the WebSocket transport, a foreign `/health` handler, and a foreign upgrade listener — is verified in [@agentick/transport-websocket](../transport-websocket) (`src/__tests__/shared-server-coexistence.spec.ts`), which drives both transports at once.
+- The security policy's full allow/deny matrix and the full-jitter backoff distribution are verified upstream in [@agentick/transport](../transport).

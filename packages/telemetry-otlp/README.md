@@ -1,47 +1,24 @@
 # @agentick/telemetry-otlp
 
-The **OTLP exporter sink** for Agentick v2 telemetry — `otlpSink()` returns a
-standard-OpenTelemetry [`TelemetrySink`](../spec/src/protocol/app-harness.ts)
-(a `BatchSpanProcessor` + a `PeriodicExportingMetricReader` over the OTLP
-`http/protobuf` · `http/json` · `grpc` exporters) with `OTEL_EXPORTER_OTLP_*`
-env auto-fill under an explicit-beats-ambient, per-field precedence law.
+**One call instead of six imports.** `otlpSink()` returns a `TelemetrySink` — a `BatchSpanProcessor` over an OTLP trace exporter plus a `PeriodicExportingMetricReader` over an OTLP metric exporter — with the `OTEL_EXPORTER_OTLP_*` environment variables read at call time under an explicit-beats-ambient law applied per field.
 
-**This package holds the OTel exporter dependencies** (`@opentelemetry/exporter-*`)
-so that [`@agentick/app`](../app) stays exporter-dep-free. The app
-lazy-imports this package for env-driven autodiscovery
-(`TelemetryOptions.autoDiscover`) — the exporter wiring only loads when an
-adopter actually wants OTLP export. Optional install, not bundled into the
-metapackage.
+The exporter dependencies live **here**, which is the point of a separate package: [@agentick/app](../app) declares no `@opentelemetry/exporter-*` dependency at all and lazy-imports this one only when you actually want OTLP. Installing the framework does not pull the exporter tree.
 
-## Purpose
+## Install
 
-A `TelemetrySink` is a telemetry DESTINATION bundle — span processor(s) and/or
-metric reader(s) plus optional resource attributes — that `createTelemetry()`
-merges into the `createApp({ telemetry })` switch. A raw object literal is
-already a valid sink (`{ spanProcessor: new BatchSpanProcessor(exporter) }`);
-this package factors out the boilerplate for the single most common
-destination: an OTLP collector.
+```bash
+npm install @agentick/telemetry-otlp
+```
 
-`otlpSink()` does three things the hand-rolled literal makes you repeat:
+## Quick start
 
-- **Picks the exporter package by wire protocol** — `http/protobuf` (default),
-  `http/json`, or `grpc` — so you name a protocol, not six imports.
-- **Reads the `OTEL_EXPORTER_OTLP_*` env vars at call time**, matching the
-  OpenTelemetry environment-variable spec, under an explicit-beats-ambient law
-  applied **per field** (an explicit option never loses to an env var; an
-  absent option falls back).
-- **Wraps the exporters in the standard batching primitives** —
-  `BatchSpanProcessor` for spans, `PeriodicExportingMetricReader` for metrics.
+Compose the sink into `createTelemetry` and hand the result to `createApp`:
 
-## Quick Start
-
-Compose the sink into `createTelemetry` and pass the result to `createApp`:
-
-```ts
-import { createApp, createTelemetry } from "@agentick/app";
+```tsx
+import { createApp, createTelemetry } from "@agentick/app/react";
 import { otlpSink } from "@agentick/telemetry-otlp";
 
-const app = createApp(MyAgent, {
+const app = await createApp(<Agent />, {
   model,
   telemetry: createTelemetry(
     { serviceName: "orders-agent" },
@@ -50,46 +27,33 @@ const app = createApp(MyAgent, {
 });
 ```
 
-Env-only — no code-level endpoint, everything from the environment:
+Env-only, no endpoint in code:
 
 ```ts
 // OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.internal:4318
 // OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer abc,x-tenant=acme
 // OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-telemetry: createTelemetry({ serviceName: "orders-agent" }, otlpSink());
+createTelemetry({ serviceName: "orders-agent" }, otlpSink());
 ```
 
-Autodiscovery — you do not even name the sink. When `telemetry` enrichment is on
-and NO exporter is wired, `@agentick/app` lazy-imports this package and
-calls `otlpSink()` for you — **but only when `OTEL_EXPORTER_OTLP_ENDPOINT` is
-explicitly set** (a deliberate divergence from the OTel SDK's silent-localhost
-default: no export spam). Set `autoDiscover: false` to suppress it.
+Or don't name the sink at all. With telemetry enabled and no exporter wired, the app lazy-imports this package and builds an `otlpSink()` for you — **but only when `OTEL_EXPORTER_OTLP_ENDPOINT` is explicitly set**:
 
 ```ts
-// endpoint env present ⇒ the app builds an otlpSink() automatically
 telemetry: {
   serviceName: "orders-agent";
-} // createApp({ telemetry })
+}
 ```
 
-## API
+> [!NOTE]
+> That endpoint condition is a deliberate divergence from the OpenTelemetry SDK, which defaults to `localhost:4318` and quietly retries forever against nothing. No endpoint means no exporter here. Pass `autoDiscover: false` to suppress the attempt even when the variable is present.
 
-### `otlpSink(options?: OtlpSinkOptions): TelemetrySink`
+Constructing a sink performs no I/O and opens no connection.
 
-Returns a `TelemetrySink` whose `spanProcessor` is a `BatchSpanProcessor`
-wrapping an OTLP trace exporter and whose `metricReader` is a
-`PeriodicExportingMetricReader` wrapping an OTLP metric exporter. Never performs
-I/O at construction — building the sink opens no connection.
+## Picking a protocol
 
-### `OtlpSinkOptions`
-
-| Field      | Type                                       | Default                |
-| ---------- | ------------------------------------------ | ---------------------- |
-| `endpoint` | `string`                                   | env / exporter default |
-| `headers`  | `Readonly<Record<string, string>>`         | env / none             |
-| `protocol` | `"http/protobuf" \| "http/json" \| "grpc"` | `"http/protobuf"`      |
-
-### Protocol → exporter package
+```ts
+otlpSink({ protocol: "grpc", endpoint: "https://collector.internal:4317" });
+```
 
 | `protocol`      | Trace exporter                             | Metric exporter                              |
 | --------------- | ------------------------------------------ | -------------------------------------------- |
@@ -97,69 +61,95 @@ I/O at construction — building the sink opens no connection.
 | `http/json`     | `@opentelemetry/exporter-trace-otlp-http`  | `@opentelemetry/exporter-metrics-otlp-http`  |
 | `grpc`          | `@opentelemetry/exporter-trace-otlp-grpc`  | `@opentelemetry/exporter-metrics-otlp-grpc`  |
 
-### Env precedence — EXPLICIT-BEATS-AMBIENT, per field
+`http/protobuf` is the default, matching the OpenTelemetry specification's own.
 
-Env is read at **call time** (not module load), so a var set after import still
-takes effect. Each field resolves independently:
+> [!WARNING]
+> **gRPC does not forward headers.** The gRPC exporter's config has no `headers` field — headers there are gRPC `Metadata`, which would mean depending on `@grpc/grpc-js` and constructing a metadata object. To keep this package dependency-light the gRPC path passes only the endpoint URL, so header-based auth on gRPC has to be wired at the collector or through a hand-built exporter. Both HTTP protocols forward headers normally.
 
-| Field      | Env var                       | Resolution                                                                                              |
-| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | `options.endpoint ?? env`                                                                               |
-| `headers`  | `OTEL_EXPORTER_OTLP_HEADERS`  | **per-key merge**: parse the env's `k1=v1,k2=v2` list, then explicit keys win; env-only kept            |
-| `protocol` | `OTEL_EXPORTER_OTLP_PROTOCOL` | `options.protocol ?? valid-env ?? "http/protobuf"`; an **unrecognized** env value falls back (no throw) |
+## Env precedence — explicit beats ambient, per field
 
-The header merge is genuinely per-key, not all-or-nothing: with
-`OTEL_EXPORTER_OTLP_HEADERS=authorization=env,x-env-only=keep` and
-`otlpSink({ headers: { authorization: "explicit" } })`, the exporter receives
-`{ authorization: "explicit", "x-env-only": "keep" }`.
+Environment variables are read when you **call** `otlpSink()`, not when the module loads, so a variable set after import still takes effect. Each field resolves on its own:
+
+| Field      | Variable                      | Resolution                                                                                                                |
+| ---------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | the option, else the variable, else the exporter's own default                                                            |
+| `headers`  | `OTEL_EXPORTER_OTLP_HEADERS`  | **per-key merge** — parse the `k1=v1,k2=v2` list, then explicit keys win and env-only keys are kept                       |
+| `protocol` | `OTEL_EXPORTER_OTLP_PROTOCOL` | the option, else a recognized variable value, else `http/protobuf`. An unrecognized value falls back rather than throwing |
+
+The header merge is genuinely per-key, which is what makes "override the token, keep the tenant tag" work:
+
+```ts
+// OTEL_EXPORTER_OTLP_HEADERS=authorization=env,x-env-only=keep
+otlpSink({ headers: { authorization: "explicit" } });
+// exporter receives { authorization: "explicit", "x-env-only": "keep" }
+```
+
+A malformed fragment in the variable — empty, no `=`, an empty key — is skipped, never thrown on. Telemetry wiring must not be the thing that crashes a boot.
+
+## Implementing your own destination
+
+**A sink is data, not a subclass.** The port is three optional fields, and a raw object literal is a first-class sink:
+
+| Field           | Type                               | Purpose                                          |
+| --------------- | ---------------------------------- | ------------------------------------------------ |
+| `spanProcessor` | `SpanProcessor \| SpanProcessor[]` | Standard OpenTelemetry span processors           |
+| `metricReader`  | `MetricReader \| MetricReader[]`   | Standard OpenTelemetry metric readers            |
+| `attributes`    | `Record<string, unknown>`          | Resource attributes this destination contributes |
+
+Everything in those slots is a standard OpenTelemetry object, passed through untouched — the framework wraps nothing of its own around them. So sampling, filtering, and batching stay expressible exactly as you'd write them against the OTel SDK:
+
+```ts
+import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+import type { TelemetrySink } from "@agentick/spec";
+
+const tuned: TelemetrySink = {
+  spanProcessor: new BatchSpanProcessor(
+    new OTLPTraceExporter({ url: "https://collector.internal:4318/v1/traces" }),
+    { scheduledDelayMillis: 1_000, maxQueueSize: 4_096 },
+  ),
+  attributes: { "deployment.environment": "staging" },
+};
+```
+
+`createTelemetry(options, ...sinks)` merges any number of them: span processors concatenate, metric readers concatenate, and attributes merge with the explicit options winning per key over each sink's, which in turn win over `OTEL_RESOURCE_ATTRIBUTES`. So fanning out to two destinations is two arguments:
+
+```ts
+createTelemetry({ serviceName: "orders-agent" }, otlpSink(), tuned);
+```
+
+Each supplied processor and reader is validated structurally at merge time, so a plain object in the wrong slot fails at wiring rather than silently dropping every span.
+
+**Keep the precedence logic pure.** This package's own resolution is factored into standalone functions — header parsing, the per-key merge, protocol resolution, exporter construction — so the law is tested without touching a network or asserting on a live exporter. Do the same in your own factory: resolve configuration in pure functions, and let the impure part be nothing but construction.
+
+## API
+
+### `otlpSink(options?): TelemetrySink`
+
+| Option     | Type                                       | Default                          |
+| ---------- | ------------------------------------------ | -------------------------------- |
+| `endpoint` | `string`                                   | env, else the exporter's default |
+| `headers`  | `Readonly<Record<string, string>>`         | env, else none                   |
+| `protocol` | `"http/protobuf" \| "http/json" \| "grpc"` | `"http/protobuf"`                |
+
+`otlpSink` and `OtlpSinkOptions` are the whole public surface. The resolution helpers are internal.
 
 ## Patterns
 
-- **The exporter deps live HERE, not in the app.** `@agentick/app` declares
-  zero `@opentelemetry/exporter-*` dependencies; it lazy-imports this package
-  only when autodiscovery fires. Installing the app does not pull the OTLP
-  exporter tree unless you opt into OTLP.
-- **A sink is just data.** `otlpSink()` returns the same `TelemetrySink` shape a
-  hand-written `{ spanProcessor, metricReader }` literal produces — the
-  framework wraps nothing proprietary around the OTel objects. Sampling /
-  filtering / batching stay expressible as standard OTel objects if you build
-  the sink by hand instead.
-- **Pure, testable seams.** Protocol resolution and header parsing/merge are
-  exported pure functions (`resolveOtlpProtocol`, `parseOtlpHeaders`,
-  `mergeHeaders`) so the precedence law is unit-tested without constructing
-  exporters or hitting a network.
+**Where the switch lives.** [@agentick/app](../app) owns `createTelemetry`, the `createApp({ telemetry })` switch, and autodiscovery. Telemetry is strictly opt-in: omitted or `false` means no runtime, no interceptors, and no overhead.
 
-## Status
+**The port.** [@agentick/spec](../spec) owns `TelemetrySink`, `TelemetryOptions`, and `TelemetrySetting`.
 
-Shipped: `otlpSink()` + the three OTLP protocols + full `OTEL_EXPORTER_OTLP_*`
-env auto-fill with per-field explicit-beats-ambient precedence and per-key
-header merge. All exporter construction is I/O-free.
+**What gets instrumented.** Spans and metrics are emitted by the layers that do the work — the session loop, the model executor, the tool executor. This package only decides where they go.
 
 ## Roadmap & known gaps
 
-- **gRPC headers are not forwarded.** The gRPC exporter config type omits HTTP
-  `headers` (headers map to gRPC `Metadata`, which requires importing
-  `@grpc/grpc-js` and building a `Metadata` object). To keep this package
-  dependency-light, the `grpc` path passes **only** the endpoint URL — header
-  auth on gRPC must be wired at the collector or via a custom exporter. HTTP
-  protocols (`http/protobuf`, `http/json`) forward headers normally.
-  <!-- TODO(telemetry-phase-2): map headers → grpc Metadata when a consumer needs gRPC header auth. -->
-- **No per-signal endpoint override.** The OTel spec's per-signal
-  `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `..._METRICS_ENDPOINT` (and the
-  matching `_HEADERS` / `_PROTOCOL`) are not read yet — a single `endpoint`
-  drives both trace and metric exporters. <!-- TODO(telemetry-phase-2): honor per-signal OTEL_EXPORTER_OTLP_{TRACES,METRICS}_* overrides. -->
-- **Batching / interval knobs are exporter defaults.** `BatchSpanProcessor` and
-  `PeriodicExportingMetricReader` are constructed with library defaults; no
-  option surfaces `scheduledDelayMillis` / `exportIntervalMillis` yet. Build the
-  sink by hand for now if you need to tune them.
+- **gRPC headers are not forwarded.** Per the warning above; wire header auth at the collector or build the exporter by hand.
+- **No per-signal endpoint override.** The specification's `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` and `..._METRICS_ENDPOINT` (and their `_HEADERS` / `_PROTOCOL` siblings) are not read — one `endpoint` drives both exporters.
+- **Batching knobs are exporter defaults.** `BatchSpanProcessor` and `PeriodicExportingMetricReader` are constructed with library defaults; no option surfaces `scheduledDelayMillis` or `exportIntervalMillis`. Build the sink by hand to tune them, as shown above.
+- **Logs are not covered.** Trace and metric exporters only; there is no OTLP log-record exporter here.
+- **The resolution helpers are not exported.** Header parsing, the per-key merge, protocol resolution, and exporter construction are internal, so a factory built on the same precedence law has to re-derive them.
 
 ## Verified by
 
-- `src/__tests__/otlp-sink.spec.ts` — the sink shape (both `spanProcessor` and
-  `metricReader` defined as the expected batching primitives), explicit endpoint,
-  env endpoint fallback, explicit-beats-env, header env parsing, per-key header
-  merge (explicit wins / env-only kept), protocol→exporter selection (structural
-  `instanceof` against the real per-protocol classes), and unknown-protocol-env
-  fallback.
-- The `TelemetrySink` contract this package implements lives in
-  [`packages/spec/src/protocol/app-harness.ts`](../spec/src/protocol/app-harness.ts).
+- `src/__tests__/otlp-sink.spec.ts` — the sink shape with both slots populated by the expected batching primitives, an explicit endpoint, the env-endpoint fallback, explicit beating env, header parsing from the env list, the per-key header merge in both directions (explicit wins, env-only kept), protocol-to-exporter selection asserted structurally against the real per-protocol classes, and an unrecognized protocol value falling back instead of throwing.

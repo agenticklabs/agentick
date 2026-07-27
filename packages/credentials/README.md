@@ -1,171 +1,126 @@
 # @agentick/credentials
 
-**v2 substrate-level credential storage.** Server-resident; credentials never cross the wire.
+**Credentials never cross the wire, and the secret is never an operation input.** This is the server-resident store for OAuth tokens, API keys, and anything else an agent must hold but must not leak: namespaced, generically typed, reactive when the backend can be, and pluggable behind one small adapter interface.
 
-Bundled in the `agentick` metapackage. Drop-in replacement for v1's
-`@agentick/secrets`, with generic-typed values, namespaced keys, native
-reactivity, and the typed-error infrastructure from ADR 41.
+The second half of that sentence is the design. Credential writes are journaled operations — guardable, hookable, auditable — but the value is structurally absent from the operation's input type. There is no redaction pass to misconfigure or forget, because there is nothing to redact: what was never in the input cannot be journaled, broadcast, or handed to adopter code.
 
-## Status
+## Install
 
-Slice **281a** (shipped): substrate interfaces + bundled reference
-adapters (`inMemoryCredentialsStore`, `envCredentialsStore`) + typed
-errors + store conformance suite.
-
-Slice **281b.1** (this commit): `CredentialsHarness` substrate
-harness class (Effect-typed; `BaseHarness`-derived) + module
-augmentation adding `bridges.credentials` slot + harness conformance
-suite + `/testing` doubles (`fakeCredentialsHarness`,
-`stubCredentialsStore`, `unavailableCredentialsStore`). NO Extension
-factory yet; NO app/gateway wiring yet — pure harness contract
-testable in isolation.
-
-Slice **281b.2** (this commit): `withCredentials({ store })`
-`AppExtension` factory — constructs ONE `CredentialsHarness` at
-install time and registers it on the app's `extensionBridges`
-map. Sessions inherit the SAME instance via the existing
-`extensionBridges`-cascade pattern (the app's `createSession`
-copies the app-level map into each session's bridge tree).
-Cross-session sharing is therefore an emergent property of
-`AppHarness` — already covered by app-next's own tests — not a
-property of `withCredentials`. This slice tests the extension's
-own contract: registration shape, harness wiring, lifecycle.
-
-Slice **281c**: Migrate `withMCP` from the placeholder
-`CredentialsStore<T>` shim (#277a) to read `installer.credentials`.
-Delete the per-MCP shim.
-
-When #254 (`GatewayExtension` factory) ships, `withCredentials`
-gains a third install variant that puts the harness at gateway level
-— cascading down to apps the same way app-level cascades to sessions
-today.
-
-## Why a new package
-
-v1's `@agentick/secrets` had the right shape but the wrong types:
-
-| Concern      | v1 `secrets`                        | v2 `credentials-next`                                  |
-| ------------ | ----------------------------------- | ------------------------------------------------------ |
-| Value type   | `string` only                       | Generic `T` per call site                              |
-| Namespacing  | Flat key-space                      | `(namespace, key)` tuples                              |
-| Reactivity   | None — poll if you care             | `onChange` + harness PubSub fan-out                    |
-| Enumeration  | `list()` over flat keys             | `keys(namespace)` per-domain                           |
-| Errors       | Throws raw `Error`                  | `AgentickError` subclasses (ADR 41)                    |
-| Effect-typed | No                                  | Yes (via spec-next errors)                             |
-| Pluggable    | Yes (keychain/libsecret/env/memory) | Yes (same set + encrypted-file + KV + adopter-written) |
-
-The shape is intentionally similar to v1's, just with the type system
-and reactivity v2 has elsewhere — adopters porting from v1 will find
-the conceptual move trivial.
-
-## Architecture
-
-```
-┌────────────────────────────────────────┐
-│  CredentialsHarness  (281b)            │  ← substrate harness;
-│  - lifecycle, conformance              │    augments HookBridges,
-│  - change-notification PubSub          │    owns scoping, reactive
-│  - namespace scoping                   │    fan-out
-└──────────────┬─────────────────────────┘
-               │ .store: CredentialsStore
-               ▼
-┌────────────────────────────────────────┐
-│  CredentialsStore  (interface)         │  ← pluggable backend
-│  - get / set / delete / has / keys     │    adapter; ONE per
-│  - optional onChange                   │    gateway
-└──────────────┬─────────────────────────┘
-               │ implementations
-               ▼
-┌────────────────────────────────────────┐
-│  Bundled reference adapters            │
-│  ✅ inMemoryCredentialsStore           │
-│  ✅ envCredentialsStore                │
-│  ⏳ keychainCredentialsStore (macOS)   │
-│  ⏳ libsecretCredentialsStore (Linux)  │
-│  ⏳ encryptedFileCredentialsStore      │
-│  ⏳ kvCredentialsStore (cluster-redis) │
-│                                        │
-│  Adopter-written adapters              │
-│  • 1Password, Vault, AWS Secrets       │
-│  • Same interface; same conformance    │
-└────────────────────────────────────────┘
+```bash
+npm install @agentick/credentials
 ```
 
-Same pattern as `@agentick/sandbox` + its runtime adapters
-(`sandbox-local`, `sandbox-docker`, `sandbox-secure-exec`).
-
-## Server-resident invariant
-
-**Credentials never cross the wire.** The harness lives at the
-gateway, all adapters are constructed server-side, all reads/writes
-happen server-side. Browser/React UIs that need to drive credential
-lifecycle (re-auth, disconnect) do so via action verbs over the
-client wire — the server resolves the verb against the
-credentials harness; the response carries status (`connected`,
-`credentials-expired`, etc.), never tokens.
-
-See `feedback_credentials_never_cross_wire` memory and #279 for the
-client wire projection design.
-
-### Async-only, no projection, empty wire surface
-
-Credentials is the data-layer store-substrate's deliberate
-counter-example — the store-backed harness that proves three Playbook
-rules are CONDITIONAL, not universal:
-
-- **No `View` (P5).** The harness reads its `CredentialsStore`
-  LIVE and async — `get`/`has`/`keys` are bare `await store.<verb>()`,
-  with NO synchronous cache. Post-convergence a store-backed harness
-  holds a `View` / `LogView` **IFF it has a synchronous read surface**:
-  the render-read / sync-read harnesses (knobs, state, skills, prompts,
-  tasks, timeline, resources) all do; credentials is the deliberate
-  async-only exception — its reads are off the render path, so it holds
-  NO `View` and is not `SnapshotCapable`. The rule is "every SYNC-READ
-  harness has a view", not "every store-backed harness does".
-- **Empty wire surface (P6).** The harness projects NOTHING to the
-  client — the valid empty case. Client-driven lifecycle travels as
-  action verbs, not a state mirror.
-- **`onChange` as change SOURCE.** When the adapter exposes
-  `onChange`, the harness forwards THAT (a possibly-shared,
-  externally-mutated store) as its change source rather than
-  publishing a self-caused stream — the cross-consumer observation
-  seam, not a single-writer's own echo.
+Subpaths: `/testing` (doubles plus the store and harness conformance suites).
 
 ## Quick start
 
+Install it as an app extension and every session of that app shares one instance:
+
 ```ts
-import {
-  inMemoryCredentialsStore,
-  envCredentialsStore,
-} from "@agentick/credentials";
+import { withCredentials, envCredentialsStore } from "@agentick/credentials";
 
-// Tests / ephemeral CLI
-const store = inMemoryCredentialsStore();
-
-// Platform-managed env vars (k8s secrets, Vercel env, Docker --env-file)
-const envStore = envCredentialsStore({ prefix: "AGENTICK_CRED" });
-
-// Adopter use — app-level install (the production path):
 const app = await createApp(<Agent />, {
-  modelExecutor,
-  extensions: [
-    withCredentials({ store: envStore }),
-  ],
+  compiler,
+  model,
+  extensions: [withCredentials({ store: envCredentialsStore({ prefix: "AGENTICK_CRED" }) })],
 });
-
-// Sessions automatically inherit the shared CredentialsHarness via
-// the app's extensionBridges cascade. From a session:
-//   const tokens = await session.bridges.credentials?.get<OAuthTokens>(
-//     "mcp", "linear",
-//   );
 ```
 
-## API
+From a session, or from any tool handler that can reach the bridges:
 
-### `CredentialsStore`
+```ts
+const tokens = await session.bridges.credentials?.get<OAuthTokens>("mcp", "linear");
+await session.bridges.credentials?.set("mcp", "linear", refreshed);
+```
 
-Adapter interface every backend implements. Always async — even
-in-memory.
+Sessions share the instance rather than each getting their own, which is the point: an OAuth grant obtained in one conversation is usable in the next without re-authenticating. That sharing is a property of how the app cascades its extension bridges, not something this package arranges.
+
+## Namespaced, not flat
+
+Every value is addressed by a `(namespace, key)` pair, and the store sees only opaque triples. The conventions:
+
+| Namespace             | Holds                                                  |
+| --------------------- | ------------------------------------------------------ |
+| `mcp:<serverId>`      | Credentials for one MCP server.                        |
+| `gateway:bearer`      | Gateway service authentication.                        |
+| `sandbox:<runtimeId>` | Sandbox runtime credentials.                           |
+| `secrets:<name>`      | Confidential payloads that are not credentials — rare. |
+
+Namespacing is what makes the audit and guard stories usable: "who touched production credentials" is a scope query, and "require approval for production writes" is a guard that reads one field.
+
+> [!WARNING]
+> A namespace organizes the key space; it is **not** a capability boundary. Nothing structural stops a caller from passing a namespace it has no business reading — see [Roadmap & known gaps](#roadmap--known-gaps).
+
+Enumeration is part of the interface, not an extra. Every backend implements `keys(namespace)`, so a UI can render what exists without being told the keys first.
+
+## The redaction law
+
+`set` and `delete` are operations. A credential write is a security state mutation, so it belongs in the audit trail and under a guard:
+
+| Operation                    | Scope                                    | Input                | Journaled            |
+| ---------------------------- | ---------------------------------------- | -------------------- | -------------------- |
+| `credentials:command:set`    | `{ credentialNamespace, credentialKey }` | `{ namespace, key }` | requested + terminal |
+| `credentials:command:delete` | `{ credentialNamespace, credentialKey }` | `{ namespace, key }` | requested + terminal |
+
+**The value is not an operation input.** That single fact is the whole law:
+
+```ts
+export interface CredentialsMutationInput {
+  readonly namespace: string;
+  readonly key: string;
+  // there is no `value` field, and there never will be
+}
+```
+
+The journal record, the bus envelope, every middleware, and every guard observe the operation's **input**. The value travels as a closure argument on the operation body instead, reaching the store and nothing else.
+
+> [!IMPORTANT]
+> This is why the law is structural rather than a scrubbing pass. A post-hoc redaction step can be misconfigured, skipped, or left behind when someone adds a field. Here, adding a leak would mean editing that interface — which is a code review, not an oversight.
+
+So a guard sees the address and never the material:
+
+```ts
+harness.guard<{ namespace: string }>((input) =>
+  input.namespace === "production" && !operatorApproved()
+    ? { kind: "veto", reason: "production-credentials-require-approval" }
+    : undefined,
+);
+```
+
+A vetoed `set` never reaches the store and publishes no change notification; a vetoed `delete` leaves the entry in place. And because the harness folds into the installing app's interceptor chain — live, so a guard registered later still applies — an `app.guard()` reaches credential writes without knowing this package exists.
+
+Auditing is a scope query over the same operations:
+
+```ts
+app.events({ scope: { credentialNamespace: "oauth" } });
+```
+
+### Reads are data-plane
+
+`get`, `has`, and `keys` are **not** operations. They proxy straight to the store, emit nothing on the bus, and a blanket write-freezing guard does not block them. That asymmetry is deliberate: a read is not a state mutation, and making it an operation would put a namespace and key into the audit trail on every render-adjacent lookup for no security benefit.
+
+The corollary of the law is that `set` is deliberately **not inbox-addressable**. A credential has no serializable command form — making it one would turn the input into a wire payload by construction. A remote caller drives credential lifecycle through wire verbs that resolve server-side and return status, never material.
+
+Running under an operation does enrich the store's context: an adapter sees the write's own `opId`, `parentOpId`, `correlationId`, and `traceparent`. Reads, having no operation fiber, get the base construction context.
+
+## Reacting to change
+
+`subscribe` fans out `CredentialsChangeEvent` (`{ namespace, key }`) — and it covers rotations this process did not perform:
+
+```ts
+const off = harness.subscribe((ev) => {
+  console.log(`changed: ${ev.namespace}/${ev.key}`);
+  if (ev.namespace.startsWith("mcp:")) reconnectServer(ev.namespace);
+});
+```
+
+When the adapter implements `onChange`, the harness forwards **that** as its change source rather than publishing its own echo. This is what makes an externally-mutated store work correctly: a sibling process rotating a keychain entry, or an operator pushing to a shared KV, produces the same event a local write does. Routing everything through the single store seam is both complete and free of double-publishing. Only when the adapter has no `onChange` does the harness fall back to publishing its own writes — the only changes it can then see.
+
+A no-op delete publishes nothing. A throwing listener does not affect the others.
+
+## Backends
+
+`CredentialsStore` is the adapter interface. Always async, even in memory:
 
 ```ts
 interface CredentialsStore {
@@ -179,72 +134,40 @@ interface CredentialsStore {
 }
 ```
 
-Namespace conventions:
+Two are bundled:
 
-- `mcp:<serverId>` — MCP server credentials
-- `gateway:bearer` — gateway service auth
-- `sandbox:<runtimeId>` — sandbox runtime credentials
-- `secrets:<name>` — non-credential confidential payloads (rare;
-  encryption-at-rest keys, code-signing material)
+**`inMemoryCredentialsStore()`** — lost on process exit; the default for tests and ephemeral CLIs. Emits change events. It composes a memory collection from [@agentick/store](../store) over a composite key rather than hand-rolling a map and a listener set, so it inherits that generic's mechanics and its shared-store observation seam while keeping the key-value shape.
 
-### `inMemoryCredentialsStore()`
-
-Lost on process exit. Default for tests and ephemeral CLIs. Supports
-reactive change notification.
-
-Composes `MemoryCollection` from `@agentick/store` (composite
-`namespace\x1fkey` primary key over a `CredentialEntry` record) rather
-than hand-rolling a `Map` + listener set — the KV surface
-(`get`/`set`/`has`/`keys`/`delete`) maps onto the collection's
-`put`/`get`/`list`/`delete`, and `onChange` adapts the collection's
-`{ key, value?, prev? }` delta back to the credentials
-`{ namespace, key }` event. It keeps the KV port shape (it does NOT
-extend `CollectionStore` — different method signature) while inheriting
-the generic's mechanics and the shared-store `onChange` observation seam.
-
-### `envCredentialsStore(options?)`
-
-Environment-variable backed. Reads `<PREFIX>_<NAMESPACE_UPPER>_<KEY_UPPER>`
-(default prefix `AGENTICK_CRED`). Values JSON-encoded.
+**`envCredentialsStore(options?)`** — reads `<PREFIX>_<NAMESPACE>_<KEY>` (uppercased, default prefix `AGENTICK_CRED`) with JSON-encoded values. The backend for platform-managed secrets: Kubernetes secrets, a hosting provider's env vars, `docker --env-file`.
 
 ```ts
-envCredentialsStore({ prefix?: string; writable?: boolean })
+envCredentialsStore({ prefix: "AGENTICK_CRED", writable: false });
 ```
 
-- `prefix` (default `"AGENTICK_CRED"`) — env-var namespace prefix.
-- `writable` (default `false`) — allow `set` / `delete` to mutate
-  `process.env`. Off by default so accidental writes throw rather
-  than silently mutating process-local state.
+`writable` is `false` by default, so an accidental `set` throws rather than silently mutating process-local state that no other process will see. Env has no change events, so there is no reactivity here, and keys come back lower-cased because the env-name slug is lossy.
 
-Limitations: no native reactivity (env doesn't emit change events);
-keys are recovered lower-cased from the env name (slug is lossy).
+### Writing your own
 
-### `runCredentialsStoreConformance(options)`
-
-Vitest-compatible conformance suite. Adopter-written adapters call
-this from their own test file with their factory to guarantee
-substrate compliance.
+Implement the interface and certify it. Vault, 1Password, and AWS Secrets Manager adapters are ordinary adopter code — there is no privileged backend.
 
 ```ts
+import { runCredentialsStoreConformance } from "@agentick/credentials/testing";
+
 runCredentialsStoreConformance({
   label: "myAdapter",
-  factory: () => myCredentialsStore({ ... }),
+  factory: () => myCredentialsStore({ endpoint }),
   capabilities: {
-    writable?: true,    // off if read-only
-    reactivity?: true,  // off if no native change events
+    writable: true, // omit if read-only
+    reactivity: true, // omit if no native change events
   },
 });
 ```
 
-Pinned behaviors: round-trip, namespace isolation, idempotent
-delete, complete enumeration, reactive change notifications,
-backend identifier stability.
+The suite pins round-trip, namespace isolation, idempotent delete, complete enumeration, change notification, and backend-identifier stability. The capability flags exist so a read-only or non-reactive backend is a legitimate implementation rather than a failing one.
 
-### `CredentialsHarness`
+## Constructing the harness directly
 
-Substrate harness wrapping a `CredentialsStore` with reactive change
-notification. Implements `CredentialsHarnessProtocol` (lives in
-`@agentick/spec`).
+`withCredentials` is the production path. Direct construction is for tests and custom integrations:
 
 ```ts
 import { CredentialsHarness, inMemoryCredentialsStore } from "@agentick/credentials";
@@ -258,156 +181,95 @@ const harness = new CredentialsHarness(
   new LocalInbox(),
 );
 
-await harness.set("mcp", "linear", { access_token: "..." });
+await harness.set("mcp", "linear", { access_token: "…" });
 const tokens = await harness.get<{ access_token: string }>("mcp", "linear");
 
-const off = harness.subscribe((ev) => {
-  console.log(`changed: ${ev.namespace}/${ev.key}`);
-});
-// ... later
-off();
-await harness.close();
+await harness.close(); // drops subscribers, unsubscribes from the store, idempotent
 ```
 
-Surface (matches `CredentialsHarnessProtocol`):
+## No projection, no client mirror
 
-- `set<T>(namespace, key, value)` / `delete(namespace, key)` — the WRITE verbs.
-  Operations (`credentials:command:{set,delete}`), so they are guardable,
-  hookable, and journaled. See [the redaction law](#the-redaction-law-writes-are-operations-secrets-are-not-inputs).
-- `get<T>(namespace, key)` / `has(namespace, key)` / `keys(namespace)` — the
-  READ verbs. Data-plane, not operations (ADR 92's exclusion list); they proxy
-  straight to the store, and a blanket write-freezing guard does not block them.
-- `subscribe(listener)` — fan-out of `CredentialsChangeEvent`
-  (`{ namespace, key }`) for internal writes AND external rotations
-  (when the adapter implements `onChange`).
-- `id` / `address` — BaseHarness convention; `address` is
-  `credentials:<id>`.
-- `close()` — drops subscribers, unsubscribes from the underlying
-  store, idempotent.
+Credentials is the deliberate exception to two patterns the other store-backed surfaces follow, and knowing that saves you looking for machinery that is intentionally absent.
 
-Adopters typically don't construct `CredentialsHarness` directly —
-slice 281b.2 ships `withCredentials({ store })` which wires
-construction + bridge registration through the app extension
-lifecycle. Direct construction is for tests, custom adapter
-integrations, and `fakeCredentialsHarness()`.
+**It holds no synchronous view.** Reads are bare awaits against the store with no synchronous cache, because credential reads are off the render path. A store-backed surface holds a synchronous projection if and only if it has a synchronous read surface — timeline, knobs, state, skills, prompts, tasks, and resources all do. This one does not, and so it is not snapshot-capable.
 
-### The redaction law — writes are operations, secrets are not inputs
+**It projects nothing to the client.** The wire surface is empty, and that is the valid empty case rather than an unfinished one. A browser UI that needs to drive credential lifecycle — re-authenticate, disconnect — sends an action verb; the server resolves it against the harness and answers with status (`connected`, `credentials-expired`), never with tokens.
 
-`set` and `delete` are operations (ADR 92 Family 2 §7). Before the promotion
-they were plain async CRUD while the sibling `state:set` had been an op all
-along — the sharpest inconsistency the 2026-07-26 crossing audit found. A
-credential write is a security state-mutation; it belongs in the audit trail and
-under a guard.
+## API
 
-| Op                           | Scope                                    | Input                | Journal              |
-| ---------------------------- | ---------------------------------------- | -------------------- | -------------------- |
-| `credentials:command:set`    | `{ credentialNamespace, credentialKey }` | `{ namespace, key }` | requested + terminal |
-| `credentials:command:delete` | `{ credentialNamespace, credentialKey }` | `{ namespace, key }` | requested + terminal |
+### `@agentick/credentials`
 
-**The value is not an operation input.** That single fact IS the redaction law,
-and it is why the law is structural rather than a scrubbing pass:
+| Export                            | Purpose                                                      |
+| --------------------------------- | ------------------------------------------------------------ |
+| `withCredentials({ store })`      | App extension. One harness per app, shared by every session. |
+| `CredentialsHarness`              | The implementation, for direct construction.                 |
+| `inMemoryCredentialsStore()`      | Bundled in-memory backend. Emits change events.              |
+| `envCredentialsStore(options?)`   | Bundled environment-variable backend.                        |
+| `CredentialsStore` (type)         | The adapter interface.                                       |
+| `CredentialsMutationInput` (type) | The operation input — the redaction law, as a type.          |
+| `CredentialsChangeEvent` (type)   | `{ namespace, key }`.                                        |
 
-```ts
-export interface CredentialsMutationInput {
-  readonly namespace: string;
-  readonly key: string;
-  // there is no `value` field, and there never will be
-}
-```
+### `bridges.credentials`
 
-The journal record, the bus envelope, every middleware, and every guard observe
-the operation's **input**. A secret that was never in the input cannot be
-journaled, broadcast, or handed to adopter code. There is no post-hoc redaction
-step to misconfigure, forget to run, or leave behind when a new field is added —
-adding one would mean editing that interface. The value travels as a closure
-argument on the operation body instead. This is the
-`credentials-never-cross-the-wire` invariant extended to the audit trail:
-**journal the fact and the key, never the secret.**
+| Member                          | Kind       | Returns                                                |
+| ------------------------------- | ---------- | ------------------------------------------------------ |
+| `set<T>(namespace, key, value)` | Operation  | Guardable, hookable, journaled.                        |
+| `delete(namespace, key)`        | Operation  | `boolean` — false when nothing was there.              |
+| `get<T>(namespace, key)`        | Data-plane | `T \| undefined`.                                      |
+| `has(namespace, key)`           | Data-plane | `boolean`.                                             |
+| `keys(namespace)`               | Data-plane | `readonly string[]`.                                   |
+| `subscribe(listener)`           | —          | `Unsubscribe`. Internal writes and external rotations. |
+| `id` / `address`                | —          | `address` is `credentials:<id>`.                       |
+| `close()`                       | —          | Idempotent teardown.                                   |
 
-The corollary: `set` is deliberately **not** inbox-addressable. A credential has
-no serializable command form, so the verbs are declared via `runOperation` plus
-the `CommandRegistry` hook surface rather than `BaseHarness.command()` — which
-would make the input a wire payload by construction. A remote caller drives
-credential lifecycle through wire-extension **verbs** that resolve server-side.
+### `@agentick/credentials/testing`
 
-```ts
-// A guard sees the ADDRESS, never the material:
-harness.guard<{ namespace: string }>((input) =>
-  input.namespace === "production" && !operatorApproved()
-    ? { kind: "veto", reason: "production-credentials-require-approval" }
-    : undefined,
-);
+| Export                             | Purpose                                                      |
+| ---------------------------------- | ------------------------------------------------------------ |
+| `fakeCredentialsHarness(options?)` | The real harness over an in-memory store. Prefer this.       |
+| `fakeCredentialsStore()`           | The in-memory store alone, under the double's name.          |
+| `stubCredentialsStore(options?)`   | Canned answers, no persistence behavior.                     |
+| `unavailableCredentialsStore()`    | Every call fails — for exercising backend-unavailable paths. |
+| `runCredentialsStoreConformance`   | Certify a backend adapter.                                   |
+| `runCredentialsHarnessConformance` | Certify an alternate harness implementation.                 |
 
-// An auditor filters one namespace's mutation history:
-app.events({ scope: { credentialNamespace: "oauth" } });
-```
-
-Running under an operation also enriches the store ctx: the body threads
-`storeCtxEffect()`, so an adapter sees the write's own `opId`, `parentOpId`,
-`correlationId`, and `traceparent`. Reads, having no op fiber, keep the base
-construction-slot ctx.
+Prefer `fakeCredentialsHarness()` when testing consumer code: it exercises the real harness over an in-memory store, so your consumer hits the same code path production does. Reach for `stubCredentialsStore` only when the test cares what the consumer does _with_ a credential and not about persistence.
 
 ### Errors
 
-All `AgentickError` subclasses; round-trip-safe via the spec-next
-codec (#257). Re-exported from `@agentick/credentials` for
-convenience.
+All are `AgentickError` subclasses and round-trip safely across a process boundary. Re-exported here so a package depending only on credentials gets them without a second import.
 
-| Class                           | When it fires                                                        |
-| ------------------------------- | -------------------------------------------------------------------- |
-| `CredentialsError` (abstract)   | Base — `err instanceof CredentialsError` catches all                 |
-| `CredentialsNotFound`           | Caller asserted presence but key absent (`get` itself returns undef) |
-| `CredentialsBackendUnavailable` | Backend unreachable — keychain locked, KV refused, env missing       |
-| `CredentialsCorrupted`          | Read succeeded; value cannot be deserialized                         |
-| `CredentialsWriteFailed`        | Write rejected — disk full, keychain denied, read-only store         |
+| Class                           | Fires when                                                                          |
+| ------------------------------- | ----------------------------------------------------------------------------------- |
+| `CredentialsError` (abstract)   | Base — `err instanceof CredentialsError` catches all of them.                       |
+| `CredentialsNotFound`           | A caller asserted presence but the key is absent. `get` itself returns `undefined`. |
+| `CredentialsBackendUnavailable` | Backend unreachable — keychain locked, KV refused, env missing.                     |
+| `CredentialsCorrupted`          | The read succeeded but the value will not deserialize.                              |
+| `CredentialsWriteFailed`        | Write rejected — disk full, keychain denied, read-only store.                       |
 
-## Verified by
+## Patterns
 
-- `src/__tests__/conformance.spec.ts` — `inMemoryCredentialsStore` +
-  `envCredentialsStore` (writable mode) both pass the store
-  conformance suite.
-- `src/__tests__/harness-conformance.spec.ts` —
-  `fakeCredentialsHarness()` passes the harness contract: fan-out
-  of internal set/delete, forwarding of external store changes,
-  no double-publish when the adapter has native `onChange`, no-op
-  delete suppresses events, listener-error isolation, `Unsubscribe`
-  stops future events, `close()` idempotency, `close()` drops
-  subscribers, `id` + `address` follow BaseHarness convention.
-- `src/__tests__/mutation-operations.spec.ts` — the ADR 92 promotion and the
-  redaction law. `set` / `delete` emit `credentials:command:{set,delete}` with
-  the `{ credentialNamespace, credentialKey }` scope and journal both
-  `requested` and `terminal`; the op input is exactly `{ namespace, key }`; the
-  body threads the enriched store ctx (the adapter sees the write's `opId`).
-  **The redaction assertion**: after writing a distinctive secret as a bare
-  string AND nested inside an object, the fully serialized journal — every
-  record, not just the credentials ops — and the fully serialized bus stream
-  contain neither the value nor any fragment of it, while still containing the
-  op name and the key (so the assertion is not vacuous); a guard's observed
-  input carries the address only. Guard vetoes: a vetoed `set` never reaches the
-  store and publishes no change notification, a vetoed `delete` leaves the entry
-  in place, and an input-reading guard vetoes one namespace while a sibling
-  proceeds. Reads stay data-plane: `get` / `has` / `keys` emit nothing on the
-  bus and are unaffected by a blanket write-freezing guard.
-- `src/__tests__/with-credentials.spec.ts` — `withCredentials({ store })`
-  registers a `CredentialsHarness` under the `"credentials"` slot,
-  scopes the harness id under the host id (`<appId>:credentials`),
-  wires the harness over the adopter-supplied store, and schedules
-  `harness.close()` on host shutdown.
+**MCP servers.** [@agentick/mcp](../mcp) reads this surface for per-server OAuth tokens, which is why the `mcp:<serverId>` namespace convention exists.
+
+**Storage generics.** [@agentick/store](../store) supplies the collection primitive the in-memory backend composes, and is where to look when writing a backend over something that already has a store adapter.
+
+**Shapes.** [@agentick/spec](../spec) owns `CredentialsHarnessProtocol`, `CredentialsChangeEvent`, and the error classes.
+
+**The edge.** [@agentick/gateway](../gateway) is where the never-cross-the-wire invariant is enforced for the audit trail too: its admission-failure events carry connection shape and never credential material.
 
 ## Roadmap & known gaps
 
-- **`CredentialsHarness` substrate (281b)**: the harness itself is
-  not in this slice. Today adopters consume `CredentialsStore`
-  directly; the harness layer (PubSub fan-out, augmentation,
-  conformance integration with `HookBridges`) lands next.
-- **Gateway wiring (281c)**: `createGateway({ credentials })` and
-  `installer.credentials` slot are not wired yet. `withMCP` still
-  uses the placeholder `CredentialsStore<T>` from #277a; substrate
-  migration follows.
-- **Additional bundled adapters**: keychain, libsecret,
-  encrypted-file, and KV adapters port from v1 (or are written
-  fresh for the encrypted-file and KV cases) in follow-up slices.
-  The interface is locked, so they're additive.
-- **Client wire projection**: the client surface for credential
-  lifecycle (action verbs only; no token material) is #279, gated
-  on #280 (Wire Extensions framework).
+- **App-level install only.** `withCredentials` returns an app extension. A gateway-level variant that cascades to every hosted app is not built, so a multi-app process configures each app.
+- **Two bundled backends.** Keychain (macOS), libsecret (Linux), encrypted-file, and cluster-KV adapters are not shipped. The interface is locked, so they are purely additive — and adopter-written adapters are first-class today.
+- **No client wire projection.** The action-verb surface for driving credential lifecycle from a browser is described above as the intended design, but no wire extension implements it yet. Nothing about credentials is reachable from a client today.
+- **Env keys are lossy.** `envCredentialsStore` recovers keys lower-cased from the environment variable name, so a mixed-case key round-trips as lower-case. Enumeration over an env backend is therefore approximate.
+- **No expiry or rotation policy.** The store holds opaque values; token refresh, expiry tracking, and rotation schedules are the consumer's concern. `subscribe` is the hook a consumer builds those on.
+- **Namespace isolation is not construction-bound — treat the namespace as an argument, not a boundary.** A harness will read any namespace it is asked for, so two harnesses sharing one store do not isolate from each other: given a shared store, a handle scoped to `user-b` can read `user-a`'s namespace simply by passing it. Namespacing organizes the key space and gives audit and guards something to match on; it is not a capability boundary. Until a scoped handle binds its prefix at construction — which would make a cross-scope read unrepresentable rather than merely discouraged — enforce per-tenant separation with a guard on the write path and separate stores on the read path.
+
+## Verified by
+
+- `src/__tests__/mutation-operations.spec.ts` — the redaction law, asserted rather than asserted-about. `set` and `delete` emit their operations with the `{ credentialNamespace, credentialKey }` scope and journal both `requested` and `terminal`; the operation input is exactly `{ namespace, key }`; the body threads the enriched store context so an adapter sees the write's `opId`. **The redaction assertion:** after writing a distinctive secret both as a bare string and nested inside an object, the fully serialized journal — every record, not only the credentials operations — and the fully serialized bus stream contain neither the value nor any fragment of it, while still containing the operation name and the key, so the assertion is not vacuous. Also: a vetoed `set` never reaches the store and publishes nothing, a vetoed `delete` leaves the entry, an input-reading guard vetoes one namespace while a sibling proceeds, and `get`/`has`/`keys` emit nothing and survive a blanket write-freezing guard.
+- `src/__tests__/harness-conformance.spec.ts` — `fakeCredentialsHarness()` against the harness contract: fan-out for internal writes, forwarding of external store changes, **no double-publish** when the adapter has native `onChange`, no-op delete suppressing events, listener-error isolation, unsubscribe stopping future events, `close()` idempotency and subscriber drop, and the `id`/`address` convention.
+- `src/__tests__/conformance.spec.ts` — both bundled backends pass the store conformance suite, `envCredentialsStore` in writable mode.
+- `src/__tests__/with-credentials.spec.ts` — the extension registers a harness under the `credentials` slot, scopes its id under the host id, wires it over the adopter-supplied store, and schedules `close()` on host shutdown.
+- `src/__tests__/layered-isolation-proof.spec.ts` — several harnesses over one shared store: writes land in the shared backing, distinct namespaces do not observe each other through ordinary use, and — pinned deliberately as a gap rather than a property — a handle reading another namespace it was simply handed. See the isolation entry above.

@@ -1,430 +1,353 @@
 # @agentick/loop-executor
 
-**LoopExecutorHarness — one agent execution, run tick by tick.**
+**A tick is a command, not a private step.** The loop executor turns one agent execution into a bounded sequence of ticks — render, model call, tool dispatch, state apply — and each tick is a declared operation whose terminal is the barrier the next tick waits on.
 
-The orchestration harness that runs a single execution to terminal. It
-composes the four downstream harnesses — compiler, model-executor,
-tool-executor, and the session's state applicator — through the
-canonical tick loop, emitting a per-phase event stream so the whole
-execution is auditable from one subscriber on `surface: "loop"`.
+That is the bet. Because the tick is an operation rather than an inner block of a `while` loop, everything you would otherwise hand-plumb falls out of the same machinery every other layer uses: per-tick hooks, admission guards, journal causality, nested spans, structured cancellation, and the execution event stream. The loop itself holds no state and interprets nothing — it composes four protocol surfaces and stops.
 
-Private workspace package. Bundled into the `agentick` metapackage; not
-published independently.
+## Install
 
-## Purpose
-
-A `LoopExecutorProtocol` implementation owns the answer to "what
-happens between `session.send()` and the terminal result?" That is:
-
-1. **render** the JSX tree to a `RenderedTree` (compiler),
-2. **execute** it against the model (executor),
-3. **dispatch** every `toolCall` the model requested (tool-executor),
-4. **apply** the executor result + tool results back into session state
-   (the session's `StateApplicator`),
-5. **decide** whether to continue (default: `stopReason === "tool_use"`
-   with pending tool calls → continue; extended by the session's
-   tick-end forward decision), bounded by `maxTicks`,
-6. **repeat**.
-
-The loop is a _conduit_: it threads a `RenderContext` envelope into each
-render, resolves a per-tick model against the mount's `ModelBridge`, and
-bridges lifecycle moments to both the public event stream and the
-compiler's hook store — all without knowing what any individual fact
-or model _means_.
-
-## Quick Start
-
-Most adopters never touch the loop directly — `createApp(MyAgent, opts)`
-wires a `LoopExecutorHarness` in for you and the session drives it.
-Reach for this package when you need a _custom_ orchestration topology.
-
-### Use the reference harness
-
-```ts
-import { LoopExecutorHarness } from "@agentick/loop-executor";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-
-const loop = new LoopExecutorHarness(
-  "loop:my-scope",
-  new MemoryJournal(),
-  new LocalEventBus(),
-  new LocalInbox(),
-);
-
-const terminal = await loop.runExecution({
-  executionId: "exec:1",
-  sessionId: "s:1",
-  compiler, // CompilerProtocol
-  mountId, // string
-  modelExecutor, // ExecutorProtocol
-  target, // ExecutionTarget
-  toolExecutor, // ToolExecutorProtocol
-  stateApplicator, // StateApplicator (see NoopStateApplicator)
-  maxTicks: 8,
-});
-// terminal.outcome: "succeeded" | "canceled" | ...
-// terminal.result: ExecutionRunResult (ticks, usage, stopReason, output, toolResults)
+```bash
+npm install @agentick/loop-executor
 ```
 
-`loop:run-execution` is a **streaming command** (`commandStream`): its
-chunks ARE the `LoopExecutionEvent`s the run produces. The `loop.runExecution(input)`
-Promise facade above is its drain-only `run` face — it returns the settled
-terminal and drops the events. To consume the events, take the `.fx`
-sink-fold face, `loop.fx.runExecution(input, sink)` (what the session does —
-see [Event stream](#the-event-stream) below). Either way the run flows
-through `runOperation`, so the loop's typed lifecycle
-(`loop:command:run-execution`) — and its `onBefore/AfterLoopRunExecution`
-boundary hooks + the `onLoopRunExecutionChunk` per-chunk interceptor — flow
-onto the shared bus and journal. `abort({ executionId })` terminates an
-in-flight run with `outcome: "canceled"`.
+## Quick start
 
-### `NoopStateApplicator` — no session present
+Construct it on a substrate and run one execution to terminal. The compiler and tool executor are the ones your app already mounted; the model is scriptable, so this runs with no provider.
 
-The loop's contract requires a `StateApplicator` to write results back.
-When there is no session (tests, single-shot renders), plug in the noop:
+```ts
+import { LoopExecutorHarness, NoopStateApplicator } from "@agentick/loop-executor";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor";
+import { SPEC_VERSION } from "@agentick/spec";
+import type { CompilerProtocol, ToolExecutorProtocol } from "@agentick/spec";
+
+async function runOnce(compiler: CompilerProtocol, toolExecutor: ToolExecutorProtocol) {
+  const journal = new MemoryJournal();
+  const bus = new LocalEventBus();
+  const inbox = new LocalInbox();
+
+  const loop = new LoopExecutorHarness("loop:demo", journal, bus, inbox);
+  const model = new FakeLanguageModelExecutor("model:demo", journal, bus, inbox, {
+    scripted: {
+      result: {
+        specVersion: SPEC_VERSION,
+        output: [{ type: "text", text: "done" }],
+        stopReason: "end",
+        usage: { inputTokens: 12, outputTokens: 3, totalTokens: 15 },
+      },
+    },
+  });
+  await Promise.all([loop.ready, model.ready]);
+
+  const terminal = await loop.runExecution({
+    executionId: "exec-1",
+    sessionId: "session-1",
+    mountId: "mount-1",
+    compiler,
+    modelExecutor: model,
+    target: model.target,
+    toolExecutor,
+    stateApplicator: new NoopStateApplicator(),
+    maxTicks: 8,
+  });
+
+  console.log(terminal.outcome); // "succeeded"
+  console.log(terminal.result?.ticks); // 1
+  console.log(terminal.result?.stopReason); // "end"
+  console.log(terminal.result?.usage.totalTokens); // 15
+}
+```
+
+Most apps never write that. `createApp` constructs a `LoopExecutorHarness` on the app substrate and the session drives it. You reach for this package to **observe** a tick, **gate** the loop, **guard** a tick, or **replace** the orchestration outright.
+
+## What one tick does
+
+| Step | Call                                                                | Notes                                                                       |
+| ---- | ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 1    | `compiler.fx.renderTree({ mountId, renderContext })`                | Per-render facts are threaded in, read synchronously during render          |
+| 2    | `toolExecutor.fx.replaceCompilerTools` → `compileForTick`           | The render's tool slice syncs in; the resolved model-visible set comes back |
+| 3    | `modelExecutor.fx.run` **or** `project → executeStream → normalize` | Streaming when asked for and supported                                      |
+| 4    | `toolExecutor.fx.dispatch` per `result.toolCalls`                   | Concurrent by default; results stay in call order                           |
+| 5    | `stateApplicator.fx.applyExecutorResult` / `applyToolResults`       | Writes land **before** the continuation decision                            |
+
+Steps 1–5 are the body of the `loop:tick` command. Its terminal is the tick barrier: tick _k+1_ never starts before tick _k_ has settled.
+
+> [!IMPORTANT]
+> Step 5 precedes the decision by construction, which is what makes a dangling `tool_use` impossible. Even a hard stop at the `maxTicks` cap on a `tool_use` tick has already persisted that tick's `tool_result`s.
+
+Model resolution is per tick, in precedence order **tree-declared `<Model>` > send-level > session default**. When the tree's IR carries a model declaration, the loop resolves it through the caller-supplied `resolveModel` and runs that executor and target for the tick; `decl.parameters` overlay the compiled tree's generation config. A tick that resolves no model at all fails the execution with `NoModelForExecutionError` — model-less sessions are legal, model-less _ticks_ are not.
+
+## The continuation gate
+
+The loop's own disposition is intrinsic and dumb: `stopReason === "tool_use"` with pending tool calls means keep ticking, anything else means stop. It rides the settled `TickResult` as `shouldContinue`.
+
+The real decision is a seam. Supply `notifyTickEnd` and you own loop continuation:
+
+```ts
+import type { RunExecutionInput } from "@agentick/spec";
+
+type TickEndGate = NonNullable<RunExecutionInput["notifyTickEnd"]>;
+
+const notifyTickEnd: TickEndGate = async ({ result }) => {
+  // Hold the loop open even though the model stopped — new input arrived.
+  if (hasUnansweredInput()) return { kind: "continue" };
+  // Force a stop even though the model asked for more tools.
+  if (result !== undefined && result.toolResults.some((r) => !r.succeeded)) {
+    return { kind: "stop", reason: "tool failed" };
+  }
+  return undefined; // abstain — the loop's own disposition stands
+};
+
+declare function hasUnansweredInput(): boolean;
+```
+
+Resolution is two-tier: **stop-force beats continue-force beats abstain**, all under `maxTicks` as a hard cap that no `continue` can exceed. This is a _gate_ — it decides whether the loop runs another tick. It is not a guard; guards admit or deny a single operation (see below).
+
+`notifyTickEnd` runs **after** the tick command's terminal, so every hook registered on `onAfterLoopTick` has already settled. Settle is in the cascade; decide is outside it.
+
+## Hook and guard a tick
+
+The `loop:tick` and `loop:run-execution` commands mint their lifecycle surface. Registering on it is how the session projects React's `useOnTickStart` / `useOnTickEnd` — and it is available to you directly:
+
+```ts
+import type { LoopExecutorHarness } from "@agentick/loop-executor";
+
+declare const loop: LoopExecutorHarness;
+
+const off = loop.hook({
+  onBeforeLoopTick: (input) => {
+    console.log(`tick ${input.tickIndex} starting (${input.tickId})`);
+  },
+  onAfterLoopTick: async (result) => {
+    // Awaited IN the command cascade — the terminal does not resolve until
+    // this returns, so the continuation decision reads settled state.
+    await persist(result.toolResults);
+  },
+});
+
+// Admission, not continuation: veto the tick before it renders.
+const offGuard = loop.guard({
+  loopTick: (input) => (input.tickIndex > 3 ? { kind: "veto", reason: "budget" } : undefined),
+});
+
+off();
+offGuard();
+
+declare function persist(x: unknown): Promise<void>;
+```
+
+> [!WARNING]
+> `onBeforeLoopTick` and `onAfterLoopTick` are **awaited in the command cascade**, not fire-and-forget. A throw in either fails the whole execution. That is deliberate — the tick-end settle is load-bearing — but it means your handler owns its own error containment.
+
+| Verb                 | Hooks                                                                              | Guard key          |
+| -------------------- | ---------------------------------------------------------------------------------- | ------------------ |
+| `loop:run-execution` | `onBeforeLoopRunExecution` · `onAfterLoopRunExecution` · `onLoopRunExecutionChunk` | `loopRunExecution` |
+| `loop:tick`          | `onBeforeLoopTick` · `onAfterLoopTick`                                             | `loopTick`         |
+
+Both verbs are `exposure: "internal"` — their inputs carry live object references, so they are never inbox- or wire-addressable. The addressable execution surface belongs to the session.
+
+## The execution event stream
+
+`loop:run-execution` is a streaming command: its chunks **are** the `LoopExecutionEvent`s the run produces. `loop.runExecution(input)` is the drain-only face — it returns the settled terminal and drops the events. To read them, compose the sink-fold twin:
+
+```ts
+import { Effect } from "effect";
+import type { LoopExecutionEvent, RunExecutionInput } from "@agentick/spec";
+import type { LoopExecutorHarness } from "@agentick/loop-executor";
+
+declare const loop: LoopExecutorHarness;
+declare const input: RunExecutionInput;
+
+const events: LoopExecutionEvent[] = [];
+const terminal = await Effect.runPromise(
+  loop.fx.runExecution(input, (event) => Effect.sync(() => events.push(event))),
+);
+
+events.map((e) => e.kind);
+// ["execution-start", "tick-start", "model", …, "tick-end", "tick", "execution-end"]
+```
+
+Events are emitted on the run's own fiber, in order, with no intermediate queue — backpressure is your sink. The run's bookends and each tick's events share the one channel, so `model` deltas and tool-dispatch lifecycle interleave exactly as they happened.
+
+The same stream is tappable without wiring a sink at all, because a streaming command's chunks are interceptable:
+
+```ts
+import type { LoopExecutorHarness } from "@agentick/loop-executor";
+
+declare const loop: LoopExecutorHarness;
+
+const off = loop.hook({
+  onLoopRunExecutionChunk: {
+    observe: (event) => metrics.increment(`loop.event.${event.kind}`),
+  },
+});
+
+declare const metrics: { increment(name: string): void };
+```
+
+That observer fires on the drain-only Promise path too — zero wiring, no sink of your own.
+
+## Cancellation, timeout, and tool concurrency
+
+The whole run is one `Effect.gen` fiber, so cancellation is structural rather than cooperative. `abort()` fires a per-execution `AbortController`, merged with any caller `signal`, threaded to the in-flight model call **and** every in-flight tool dispatch:
+
+```ts
+import type { LoopExecutorHarness } from "@agentick/loop-executor";
+import type { RunExecutionInput } from "@agentick/spec";
+
+declare const loop: LoopExecutorHarness;
+declare const input: RunExecutionInput;
+
+const running = loop.runExecution({
+  ...input,
+  timeoutMs: 30_000, // opt-in; no default
+  toolConcurrency: "unbounded", // the default; a number caps, 1 is sequential
+});
+
+await loop.abort({ executionId: input.executionId, reason: "user-stop" });
+
+const terminal = await running;
+terminal.outcome; // "canceled"
+terminal.reason; // "user-stop"
+terminal.result?.output; // partial output up to the abort is preserved
+```
+
+A mid-flight abort tears the provider call down immediately, not at the next tick boundary. A `timeoutMs` expiry travels the same path and lands `outcome: "canceled"` with `stopReason: "timeout"`. A tick's tool calls dispatch concurrently by default, and results stay in **call order** regardless of completion order, so persistence and the model's next-tick view are deterministic.
+
+> [!NOTE]
+> `abort()` and `timeoutMs` produce `outcome: "canceled"`. A caller-supplied `signal` that aborts produces `outcome: "succeeded"` with `stopReason: "aborted"` — the two paths report differently, and the difference is pinned by tests rather than intended as API elegance. Read `stopReason`, not just `outcome`, if you care.
+
+## Structured output
+
+When the run carries an `outputSpec` — or the rendered tree declares one — the loop is the delivery and validation authority. Per tick it resolves the strategy (`"tool"` injects a synthetic terminal tool at the tail of the model-facing list; `"responseFormat"` folds a `json_schema` directive into the tick's config; `"auto"` picks between them from the tick's tool count and the target's capabilities), captures the terminal call's raw input, validates it against the resolved schema, and surfaces the validated value on `ExecutionRunResult.data`. A schema miss fails the execution with `ResponseValidationError`; a required terminal tool that went uncalled gets one forced wrap-up tick with `toolChoice: { tool }` before failing with `StructuredOutputIncomplete`.
+
+The overlay precedence for the generation directive is explicit-beats-ambient: a send-level `responseFormat` wins over a per-tick `<Model>` parameter patch, which wins over the tree's own config.
+
+## `defineLoop` — replace the orchestration
+
+Subclass `LoopExecutorHarness` to change one tick step. To change the _topology_ — a single-call loop with no tool round trip, a parallel multi-model fan-out, a replay driver — bring a callback instead:
+
+```ts
+import { defineLoop } from "@agentick/loop-executor";
+import type { ExecutionTerminal } from "@agentick/spec";
+
+export const singleTickLoop = defineLoop({
+  async runExecution(input): Promise<ExecutionTerminal> {
+    if (input.modelExecutor === undefined || input.target === undefined) {
+      throw new Error("no model resolved for this execution");
+    }
+
+    const { tree } = await input.compiler.renderTree({
+      mountId: input.mountId,
+      sessionId: input.sessionId,
+      executionId: input.executionId,
+    });
+    const tools = await input.toolExecutor.compileForTick({ exposure: "model" });
+
+    const terminal = await input.modelExecutor.run({
+      compiled: tree,
+      target: input.target,
+      tools,
+      scope: { sessionId: input.sessionId, executionId: input.executionId },
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
+    });
+    if (terminal.outcome !== "succeeded") return { outcome: terminal.outcome };
+
+    await input.stateApplicator.applyExecutorResult({
+      sessionId: input.sessionId,
+      executionId: input.executionId,
+      tickId: "tick-1",
+      result: terminal.result,
+    });
+
+    return {
+      outcome: "succeeded",
+      result: {
+        executionId: input.executionId,
+        ticks: 1,
+        usage: terminal.result.usage ?? { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        stopReason: terminal.result.stopReason,
+        output: terminal.result.output,
+        toolResults: [],
+      },
+    };
+  },
+});
+```
+
+`defineLoop` returns a `LoopExecutorFactory`. Pass it as `createApp({ loop: singleTickLoop })` and the app invokes it with the shared journal, bus, and inbox, so the callback loop's operation envelopes land on the same substrate as everything else. Called with no dependencies it builds its own in-memory substrate, which is what makes it usable standalone in a test.
+
+Throw to fail the execution — the wrapper folds an exception into `outcome: "failed"`. If your callback does not honour `input.signal`, supply an `abort` override; otherwise the wrapper layers its own `AbortController` over the input signal and routes `abort()` to it.
+
+## `NoopStateApplicator`
+
+The loop requires somewhere to write results. With no session present, plug in the noop:
 
 ```ts
 import { NoopStateApplicator } from "@agentick/loop-executor";
 
-await loop.runExecution({ /* ... */, stateApplicator: new NoopStateApplicator() });
+const stateApplicator = new NoopStateApplicator();
 ```
 
-With the noop, multi-tick runs do **not** reflect prior ticks' tool
-results in the next render (nothing writes to the timeline the tree
-reads). It is for single-tick and `maxTicks`-bounded scenarios; real
-multi-tick feedback needs the session harness's applicator.
-
-### `defineLoop` — a callback loop without subclassing
-
-For a fundamentally different orchestration (single-call no-tool loop,
-parallel multi-model, replay-based test harness), satisfy
-`LoopExecutorProtocol` with a callback instead of subclassing:
-
-```ts
-import { defineLoop } from "@agentick/loop-executor";
-
-const myLoop = defineLoop({
-  async runExecution(input) {
-    const { tree } = await input.compiler.renderTree({
-      mountId: input.mountId,
-      sessionId: input.sessionId,
-    });
-    const terminal = await input.modelExecutor.run({
-      compiled: tree,
-      target: input.target,
-      scope: { executionId: input.executionId, sessionId: input.sessionId },
-    });
-    return { outcome: "succeeded", result: /* assemble ExecutionRunResult */ ... };
-  },
-});
-
-const app = await createApp(<Agent />, { model: openai("gpt-4o"), loop: myLoop });
-```
-
-`defineLoop` returns a `LoopExecutorFactory` (marker
-`loopExecutorFactory: true`). Passed to `createApp({ loop })`, the parent
-harness invokes it with shared substrate so the callback loop's events
-flow onto the same bus/journal. Called standalone (no `deps`), it spins
-up its own in-memory substrate. When your `runExecution` doesn't honor
-`input.signal`, supply an `abort` override; otherwise the harness layers
-an `AbortController` over the input signal and routes `abort()` to it.
-
-Adopters who want to customize a _single tick step_ should subclass
-`LoopExecutorHarness` rather than rewrite the whole loop.
+Every apply call is a no-op, on both the Promise facade and the `fx` twins. Nothing writes to the timeline the tree reads, so multi-tick runs will not show prior ticks' tool results in the next render — it is for single-tick and cap-bounded scenarios, not a substitute for the real applicator.
 
 ## API
 
-| Export                | Kind  | Purpose                                                                            |
-| --------------------- | ----- | ---------------------------------------------------------------------------------- |
-| `LoopExecutorHarness` | class | Reference `LoopExecutorProtocol` — the canonical tick loop.                        |
-| `NoopStateApplicator` | class | No-op `StateApplicator` for session-less runs.                                     |
-| `defineLoop`          | fn    | Build a `LoopExecutorFactory` from a `runExecution` (+ optional `abort`) callback. |
-| `DefineLoopInput`     | type  | The callback bundle `defineLoop` accepts.                                          |
+### `@agentick/loop-executor`
 
-The protocol contract (`LoopExecutorProtocol`, `RunExecutionInput`,
-`ExecutionTerminal`, `ExecutionRunResult`, `LoopExecutionEvent`,
-`LoopExecutionSink`, `StateApplicator`, `LoopToolResult`) lives in
-`@agentick/spec` (`protocol/loop-executor.ts`).
+| Export                | Purpose                                                                            |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| `LoopExecutorHarness` | The reference tick loop. Construct with `(scopeId, journal, bus, inbox, options?)` |
+| `defineLoop(spec)`    | Build a `LoopExecutorFactory` from a `runExecution` (+ optional `abort`) callback  |
+| `NoopStateApplicator` | `StateApplicator` whose every write is a no-op                                     |
+| `DefineLoopInput`     | The callback bundle `defineLoop` accepts                                           |
+
+### The instance
+
+| Member                            | Returns                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| `runExecution(input)`             | `Promise<ExecutionTerminal>` — drain-only; events are dropped            |
+| `fx.runExecution(input, sink)`    | Un-run `Effect` — composes in your fiber, drains events to `sink`        |
+| `abort({ executionId, reason? })` | Cancels the named run; the terminal lands `canceled`                     |
+| `hook(config)` / `hooks.*`        | Register command lifecycle hooks; returns an unsubscribe                 |
+| `guard(config)`                   | Register an admission verdict (`proceed` / `veto` / `replace` / `defer`) |
+| `use(mw)`                         | Register middleware over this instance's operations                      |
+| `commands()`                      | Enumerate the declared verbs                                             |
+| `ready`                           | Resolves when the substrate is initialized                               |
+
+### Shapes
+
+`RunExecutionInput`, `ExecutionTerminal`, `ExecutionRunResult`, `TickInput`, `TickResult`, `LoopExecutionEvent`, `LoopExecutionSink`, `LoopToolResult`, and `StateApplicator` all live in [@agentick/spec](../spec).
 
 ## Patterns
 
-### The render ↔ runtime feedback loop
+**Who drives it.** [@agentick/app](../app) constructs a `LoopExecutorHarness` on the app substrate (or calls your `LoopExecutorFactory`) and folds the app's resolved interceptors into it, so a later `app.use()` / `app.guard()` / `app.hook()` reaches the loop too. [@agentick/session](../session) supplies the per-tick render context, the model resolver, the state applicator, and the continuation gate, and consumes `fx.runExecution` so the whole execution is one fiber.
 
-Each tick, the loop resolves two per-render inputs from the session and
-threads them into the render — this is how the tree renders _for the
-model it is about to call_ and _within the window it has left_:
+**What it composes.** [@agentick/compiler-react](../compiler-react) renders the tree, [@agentick/model-executor](../model-executor) makes the model call, [@agentick/tool-executor](../tool-executor) resolves and dispatches tools.
 
-- **`resolveRenderContext()`** → a `RenderContext` envelope (ADR 55).
-  Threaded into `renderTree({ renderContext })` so `useContextInfo` /
-  `useActiveModel` read the active model's window + identity
-  **synchronously** while the IR is produced. The loop has no per-slot
-  knowledge — it forwards the whole envelope.
-- **`resolveModel(modelRef)`** → a `RegisteredModel` (ADR 56). After
-  render, if the IR carried `declarations.model`, the loop resolves its
-  `modelRef` against the mount's `ModelBridge` and runs _that_
-  executor + target for the tick. Precedence: **tick-IR > send >
-  session**. `decl.parameters` overlay the compiled tree's `config`
-  (temperature, maxOutputTokens, …) for the tick. Absent, or an
-  unresolvable ref, falls back to `input.modelExecutor` / `input.target`.
-
-### The tick round is a command (`loop:tick`, ADR 89 §3)
-
-Each iteration of the tick loop is a **declared command on the loop
-harness** — `loop:tick`, minted in the constructor via `this.command` and
-reached in-fiber via `this.commandEffect` from the `run-execution` body. Its
-body is the tick **through SETTLE** (render → model → tool dispatch → state
-apply → compiler `tick-end`); its output is the settled `TickResult`.
-
-- **Settle is IN, decide is OUT.** The tick command body settles the tree
-  (compiler `tick-end`, running `useOnTickEnd`); the **continuation
-  decision** (`notifyTickEnd` fold / `maxTicks`, ADR 67) stays in the
-  `run-execution` while-loop, _after_ the command. So the session's
-  predicates read settled state.
-- **The command terminal IS the tick barrier.** The loop awaits
-  `commandEffect("loop:tick", …)`; the next tick starts only after this one
-  settles. Because the command runs in the `run-execution` fiber (ADR 77
-  one-fiber — `parentOpId` auto-threads), kill/resume interruption
-  propagates and tick ordering holds.
-- **Hooks.** The command mints `onBeforeLoopTick` (over the `TickInput` —
-  reads `tickId` / `tickIndex`) and `onAfterLoopTick` (over the settled
-  `TickResult`), alongside the existing `onBefore/AfterLoopRunExecution`.
-- **In-process only.** `TickInput` carries live object refs
-  (compiler / executor / tool / applicator + the session resolvers), so
-  the verb is `exposure: "internal"` — never inbox/wire-addressable (ADR 51
-  §1.2). It lives on the LOOP harness (the loop owns tick orchestration),
-  not the model executor (which owns the single model call).
-- **Per-execution tool restriction (`RunExecutionInput.allowedTools`, C2).**
-  When a send carries `allowedTools`, the tick filters the MERGED,
-  precedence-resolved model-visible tool list down to those canonical names —
-  after the compiler-tools merge, **before** structured-output terminal-tool
-  injection (the terminal tool is loop-owned and exempt). The post-restriction
-  count feeds `resolveAutoStrategy`, so an emptied list resolves `"auto"` as
-  `toolsMounted: false`. Dispatch-door tools are untouched.
-
-### Lifecycle is the projected command-hook system (ADR 89 §4)
-
-**The loop feeds no lifecycle store — `notifyLifecycle` is gone.** The
-React `useOn*` family is a PROJECTION the **session** (the composition
-root) wires: forwarders registered on this harness's command hooks
-route the real command lifecycle into the compiler's per-mount
-dispatch. The loop knows nothing about the compiler's observation
-layer.
-
-| Moment           | Command hook (the source)              | Lights up             | Timing                                       |
-| ---------------- | -------------------------------------- | --------------------- | -------------------------------------------- |
-| execution begins | `onBeforeLoopRunExecution`             | `useOnExecutionStart` | fire-and-forget                              |
-| tick begins      | `onBeforeLoopTick`                     | `useOnTickStart`      | **awaited in-cascade, before render**        |
-| tool dispatched  | `tool:dispatch` around (tool executor) | `useOnToolStart`      | fire-and-forget                              |
-| tool finished    | `tool:dispatch` around (tool executor) | `useOnToolEnd`        | fire-and-forget                              |
-| tick ends        | `onAfterLoopTick`                      | `useOnTickEnd`        | **awaited in-cascade — THE SETTLE (ADR 67)** |
-| execution ends   | `onAfterLoopRunExecution`              | `useOnExecutionEnd`   | fire-and-forget                              |
-
-The tick-end SETTLE runs as an in-cascade `onAfterLoopTick` hook —
-awaited BEFORE the `loop:tick` command terminal resolves, hence before
-the DECIDE (`notifyTickEnd`) in the run-execution continuation. Hook
-throws in fire-and-forget forwarders never fail the run (the compiler's
-dispatch isolates per-listener throws); a throw in the AWAITED
-tick-start / settle forwarders fails the run, as the retired in-body
-bridge did.
-
-<a id="the-event-stream"></a>
-
-### The event stream
-
-The **same** moments flow independently onto the public event stream as the
-**chunks of the `loop:run-execution` streaming command** (streaming-up,
-ADR 51 §2). Each chunk is a `LoopExecutionEvent`; the body emits it through a
-`LoopExecutionSink` (`(event) => Effect<void>`) — the run's bookends
-(`execution-start` / `tick-end` / `tick` / `execution-end`) and each
-`loop:tick`'s events (threaded down as `TickInput.emit`, the SAME sink), in
-emission order, on the run's own fiber. This is the ONE event channel — the
-former `RunExecutionInput.onEvent` push-callback is retired.
-
-The session consumes the `.fx` sink-fold face
-(`loop.fx.runExecution(input, sink)`), passing
-`(ev) => Effect.sync(() => …stamp+push…)` — the events land on the
-`SessionExecutionHandle` iterator, in-fiber, with no intermediate queue
-(backpressure = the caller's sink). Because the sink IS the command's chunk
-pipeline, a `hooks.onLoopRunExecutionChunk` observer/transform taps or
-rewrites the stream for free (ADR 80 Phase 2) — even on the drain-only
-facade path. Two channels, different questions: the lifecycle bridge is for
-in-tree React hooks that must settle before the next operation; the event
-sink is the data stream for the caller. Bus envelopes fan out to
-observability (devtools, telemetry) in parallel with both.
-
-### Streaming vs non-streaming
-
-The loop takes the streaming path when `input.stream` is set **and** the
-tick's executor exposes `executeStream` **and** the target's
-`capabilities.supportsStreaming` is not explicitly `false`. On the
-streaming path the adapter owns symmetric event emission (`message` /
-`content` / `tool-call` / `message-end` deltas drained through the
-run-execution sink); on the non-streaming path the loop synthesizes those
-summary deltas from the normalized result so subscribers see the same events
-either way.
-
-### The fiber spine — `.fx` and the edge-facade (ADR 77)
-
-The loop's `runExecutionBody` is **one `Effect.gen` fiber**. Every
-downstream harness call composes in-fiber via its `.fx` twin — `yield*
-compiler.fx.renderTree(...)`, `executor.fx.{run,project,executeStream,
-normalize}(...)`, `toolExecutor.fx.{replaceCompilerTools,compileForTick,
-dispatch}(...)`, `stateApplicator.fx.apply*(...)` — with no `runPromise`
-root between boundaries.
-
-**Two first-class public surfaces, one operation.** Every spine harness
-exposes both:
-
-- **The Promise edge-facade** (`loop.runExecution(...)`, `executor.run(...)`,
-  …) — the ergonomic default. `await` it; it resolves the result. This is
-  the entity boundary the gateway/client/wire speak.
-- **The `.fx` Effect-native twin** (`loop.fx.runExecution(...)`,
-  `executor.fx.run(...)`, …) — the composable surface for adopters who
-  work in Effect. `harness.fx.<op>(...)` returns an **un-run** `Effect`;
-  `yield*` it inside your own `Effect.gen` to compose it into your fiber
-  tree (telemetry, interruption, and `FiberRef` context all propagate).
-  The facade is exactly `runHarnessProtocol(harness.fx.<op>(...))` — the
-  twin minus the terminal `runPromise`.
-
-Neither is second-class: the facade is the default; `.fx` is the peer for
-Effect-native composition. The framework itself composes the spine through
-`.fx`.
-
-Because the spine is one fiber, three capabilities fall out:
-
-- **Nested telemetry.** Run the composed execution on a tracer
-  `ManagedRuntime` (the session does this automatically when the app has a
-  `telemetry` Layer) and the whole trace nests — `loop:command:run-execution`
-  > `executor:command:*` + `tool:command:dispatch` + `compiler:command:
-render-tree` — with `parentOpId` auto-linked via `FiberRef`. No manual
-  > span threading.
-- **Structured cancellation.** `loop.abort()` (→ `session.send(...).abort()`)
-  tears down the IN-FLIGHT model call / tool handler immediately: a
-  per-execution `AbortController`, merged with the caller's `signal`, is
-  threaded to `executor.fx.run`/`executeStream` + `toolExecutor.fx.dispatch`.
-  The executor turns it into real Effect fiber interruption of the provider
-  call. Partial output up to the abort is preserved on the canceled terminal.
-- **Parallel tool dispatch.** A tick's tool calls dispatch **concurrently**
-  by default (`input.toolConcurrency` / `SendInput.toolConcurrency`,
-  `"unbounded"`; set a number to cap, `1` for sequential). `Effect.all`
-  keeps results in call-order regardless of concurrency; abort/timeout
-  interrupts every in-flight tool fiber.
-- **Execution timeout.** Opt-in `input.timeoutMs` / `SendInput.timeoutMs`
-  (no default — the framework ships the mechanism, not a policy). On expiry
-  the execution structurally aborts and the terminal lands `canceled` with
-  `stopReason: "timeout"`.
-
-## Status
-
-- ✅ Canonical tick loop (`LoopExecutorHarness`): render → execute →
-  dispatch → apply → continuation, bounded by `maxTicks`.
-- ✅ **Fiber spine (ADR 77)** — `runExecutionBody` is one `Effect.gen`
-  composing every downstream call via its `.fx` twin. Dual public surface:
-  the Promise edge-facade + the `.fx` Effect-native twin.
-- ✅ **Nested telemetry** — spans nest under the execution when run on a
-  tracer runtime (session-wired); `parentOpId` auto-threads via `FiberRef`.
-- ✅ **Structured cancellation** — `abort()` tears down in-flight model/tool
-  work immediately (merged `AbortSignal` → executor + dispatch), preserving
-  partial output.
-- ✅ **Parallel tool dispatch** — concurrent by default, call-order results,
-  `toolConcurrency`-configurable.
-- ✅ **Execution timeout** — opt-in `timeoutMs`, structured abort,
-  `stopReason: "timeout"`.
-- ✅ Streaming + non-streaming execution paths with symmetric events.
-- ✅ **Streaming-up (ADR 51 §2)** — `loop:run-execution` is a `commandStream`;
-  its chunks ARE the `LoopExecutionEvent`s, drained through a `LoopExecutionSink`
-  (`.fx` sink-fold for the session, `.run` no-op drain for the facade). The
-  `onLoopRunExecutionChunk` per-chunk interceptor is minted for free.
-- ✅ Lifecycle bridge to the compiler hook store (ADR 54/55) —
-  tick/execution/tool start+end.
-- ✅ Per-tick `RenderContext` threading (`resolveRenderContext`, ADR 55).
-- ✅ Per-tick model resolution against the `ModelBridge`
-  (`resolveModel`, precedence tick-IR > send > session, ADR 56).
-- ✅ Tick-end forward decision (ADR 53 steering — new input mid-execution
-  keeps the loop ticking).
-- ✅ `defineLoop` callback factory; `NoopStateApplicator`.
+**Certifying an alternate loop.** `runLoopExecutorConformance` in [@agentick/spec-conformance](../spec-conformance) exercises the `LoopExecutorProtocol` contract against any implementation, including one built with `defineLoop`.
 
 ## Roadmap & known gaps
 
-- **Internal-exposure command.** `loop:run-execution` is declared
-  `exposure: "internal"` — its input carries live object refs (compiler,
-  executor, tool-executor, `stateApplicator`, the session resolvers + the
-  event sink), so it is never inbox/wire-addressable (ADR 51 §1.2). The
-  addressable execution surface is the _session's_, not the loop's — see
-  the session harness `TODO(adr-51-session-verbs)`.
-- **Inbox dispatch not wired.** `handleMessage` rejects with
-  `HandlerError` on both `LoopExecutorHarness` and the `defineLoop`
-  `CallbackLoopExecutor`. Loop-addressed inbox messages (external
-  `halt`, replay control) are a later phase.
-- **`resolveModel` precedence is post-render.** Reflecting the IR-declared
-  model back into the render-context `activeModel` slot (so the _same_
-  render sees the model it will run) needs render → resolve → re-render
-  convergence — `TODO(adr-56-slice-2: force-render activeModel)`. The
-  per-tick _execution_ model resolves without that (no chicken-and-egg).
-- **`<Model model={adapter}>` sugar deferred.** The adopter face that
-  derives `{modelExecutor, target}` from a live `@agentick/model` adapter
-  lands in a binding package depending on both compiler-react +
-  model-next — `TODO(adr-56-slice-1)`. Until then, refs register directly
-  on the `ModelBridge`.
-- **`ExecutionRunResult.outputs`** (Phase 4f `OutputDeclaration`
-  extractions) is threaded through the type but not populated by the loop.
-- **Structured output — the loop is the validation authority (§B2/§B3).**
-  When a send carries `output` or a tree renders `<Output>`, the loop
-  resolves the delivery strategy per tick (`"auto"` → terminal tool when
-  tools are mounted OR the target lacks native `json_schema`; else
-  `responseFormat`; the text-only double-gap falls back to `responseFormat`),
-  injects the synthetic terminal tool (tail of the tools list) or a
-  `responseFormat` overlay, captures the terminal call, and **validates the
-  captured value / final text against the resolved schema** — the schema is
-  always in loop scope, so a **tree-only** `<Output>` produces a validated
-  `ExecutionRunResult.data` too. Success surfaces `data`; a schema miss fails
-  the execution with `ResponseValidationError` (unwrapped, alongside the
-  other structured-output errors); a missed required terminal call runs one
-  forced wrap-up tick (`toolChoice: { tool }`), then fails with
-  `StructuredOutputIncomplete`. `terminalCapture` is kept raw for
-  observability beside the validated `data`.
-  - TODO(loop-log): emit a `ctx.log` warning on the double-gap fallback once
-    the log facet is threaded into the loop tick body (the loop has no
-    `ctx.log` yet — it is tool-executor + session only today).
+- **Inbox dispatch is not wired.** `handleMessage` rejects with `HandlerError` on both `LoopExecutorHarness` and the `defineLoop` wrapper. Loop-addressed messages (external halt, replay control) are unbuilt.
+- **`defineLoop` cannot stream events.** The callback returns a terminal, so the `runExecution` sink it is handed has nothing to drain. Subclass `LoopExecutorHarness` if you need the event stream from custom orchestration.
+- **The tree-declared model is resolved post-render.** A `<Model>` in the IR selects the executor for _that_ tick, but the render that declared it did not see it in its own render context. Closing that needs render → resolve → re-render convergence.
+- **`ExecutionRunResult.outputs`** is threaded through the type and never populated.
+- **No `ctx.log` in the tick body.** The log facet is threaded into the tool executor and the session but not the loop, so decisions like the structured-output strategy fallback are silent rather than warned.
+- **Signal-abort versus `abort()` asymmetry.** A caller `signal` abort yields `outcome: "succeeded"` with `stopReason: "aborted"`; `abort()` yields `outcome: "canceled"`. Pinned as current behaviour, not defended as correct.
 
 ## Verified by
 
-- `src/__tests__/conformance.spec.ts` — `LoopExecutorProtocol`
-  conformance suite against the reference harness.
-- `src/__tests__/define-loop.spec.ts` — `defineLoop` factory wiring,
-  substrate sharing, abort routing.
-- `src/__tests__/layered-tools.spec.ts` — tool-declaration sync into the
-  tool executor + per-tick model-visible compile.
-- `src/__tests__/characterization.spec.ts` — 28-test net pinning the tick
-  loop's control flow / continuation behavior byte-identical across the
-  `Effect.gen` rewrite (ADR 77 Gate 0).
-- `src/__tests__/fx-run-execution.spec.ts` — the `.fx.runExecution` twin is
-  a composable Effect; the facade is its `runHarnessProtocol` derivation.
-- `src/__tests__/cancellation.spec.ts` — structured cancellation (abort
-  tears down a hanging model call / tool handler), parallel dispatch
-  (rendezvous proof of concurrency + call-order results), execution timeout
-  (`stopReason: "timeout"`).
-- Cross-harness integration (real compiler + executor + tool-executor,
-  lifecycle bridge, per-tick model resolution) lives in
-  `@agentick/session/__tests__/` (`lifecycle-bridge.spec.tsx`,
-  `model-bridge.spec.tsx`) — tests live where their dependencies live
-  (ADR 27).
-- The loop's structured-output validation authority (capability-aware
-  strategy auto, tool + responseFormat loop-side validation, tree-only
-  `<Output>` → typed `data`, the typed miss/validation errors) is verified
-  end-to-end in `@agentick/session/__tests__/structured-output.spec.ts`
-  (the schema is a live in-process object — the test needs the real session +
-  compiler, so it lives where its dependencies live, ADR 27).
-
-## See also
-
-- [ADR 05 — Loop executor](../../docs/proposals/v2/blueprint/05-loop-executor.md)
-- [ADR 77 — Operation spine + dual-typed edge](../../docs/proposals/v2/blueprint/77-operation-spine-and-dual-typed-edge.md)
-  · [SPINE-COMPOSE-PLAN](../../docs/proposals/v2/SPINE-COMPOSE-PLAN.md) — the staged tracker
-- [ADR 53 — Timeline offsets / steering](../../docs/proposals/v2/blueprint/53-timeline-offsets-not-tiers.md)
-- [ADR 55 — Render-context seam](../../docs/proposals/v2/blueprint/55-render-context-seam.md)
-- [ADR 56 — Tree-declared model per tick](../../docs/proposals/v2/blueprint/56-tree-declared-model-per-tick.md)
-- [`@agentick/session`](../session/README.md) — the harness that
-  drives the loop and produces its render-context + model resolvers.
-- [`@agentick/spec`](../spec/README.md) — the protocol contracts.
-  </content>
+- `src/__tests__/conformance.spec.ts` — the `LoopExecutorProtocol` contract against the reference loop.
+- `src/__tests__/characterization.spec.ts` — tick counts and stop reasons for `end` / `tool_use` / `max_ticks`; the two-tier gate resolution including the cap; settle-before-decide and persist-before-decide ordering; executor failure, cancel, and veto paths; soft and hard tool-dispatch errors; usage accumulation across ticks; the event order `execution-start → tick-start → tick-end → tick → execution-end`; streaming and non-streaming parity.
+- `src/__tests__/tick-command.spec.ts` — N ticks mint N `loop:tick` commands in order, the tick barrier (tick _k+1_'s `onBefore` only after tick _k_'s `onAfter`), and the async settle completing inside the cascade before the decision.
+- `src/__tests__/cancellation.spec.ts` — `abort()` tearing down a hanging model call and a hanging tool handler; concurrent dispatch proven by a rendezvous that would deadlock if sequential, with call-order results; `toolConcurrency: 1`; `timeoutMs` landing `stopReason: "timeout"`.
+- `src/__tests__/no-dangling-tool-use.spec.ts` — `applyToolResults` observed even when the loop stops at the cap on a `tool_use` tick.
+- `src/__tests__/layered-tools.spec.ts` — the render's tool slice syncing into a real tool executor, precedence over extension-bound tools, model-exposure filtering, and clearing the slice when a tick renders nothing.
+- `src/__tests__/run-execution-chunk-hook.spec.ts` — `onLoopRunExecutionChunk` seeing the run's events in order on the drain-only path, and unsubscribing.
+- `src/__tests__/fx-run-execution.spec.ts` — `fx.runExecution` is an un-run `Effect`; the Promise method is its facade; both produce the same terminal.
+- `src/__tests__/fx-state-applicator.spec.ts` — `NoopStateApplicator`'s twins are composable Effects that nest in one `Effect.gen`.
+- `src/__tests__/response-format-overlay.spec.ts` — send-level `responseFormat` beating both the tree config and a per-tick `<Model>` parameter patch.
+- `src/__tests__/define-loop.spec.ts` — the factory marker, callback delegation, default and custom abort routing, and envelopes reaching the supplied bus.
+- `src/__tests__/telemetry-parity.spec.ts` — an interceptor on `loop:run-execution` emitting metrics that reach a late-bound meter with the ambient labels.
+- Integration against the real compiler and executors (lifecycle projection, per-tick model resolution) and the end-to-end structured-output behaviour live in [@agentick/session](../session), where their dependencies live.

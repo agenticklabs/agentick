@@ -1,192 +1,81 @@
 # @agentick/transport-websocket
 
-WebSocket transport for agentick. JSON-RPC 2.0 over WS with
-`agentick-rpc-v1` subprotocol negotiation, cursor-aware reconnect,
-and MCP-compatible wire conventions.
+**One socket, many conversations — and a drop that doesn't lose events.** A single WebSocket carries N concurrent JSON-RPC requests (correlated by `id`) alongside N persistent subscriptions and progress streams (correlated by `subscriptionId` and `progressToken`). When the wire breaks, the client backs off with full jitter, reconnects, and replays every still-open subscription **from its last-seen cursor**.
 
-Ships **both ends**: the client transport (browser, Node 22+, Bun,
-Deno, edge) and the server adapter (Node, via the `ws` library).
+That last part is the bet. Reconnection is treated as a data problem, not a connection problem: the server's bus retains events, the client remembers where it was, and resuming is a cursor read rather than a resync protocol. Everything else follows — plain WebSocket with a negotiated subprotocol instead of a framing library, JSON-RPC instead of a bespoke envelope, and identity pinned once at the upgrade because the connection _is_ the session.
 
-## What this package is
+## Install
 
-The first network transport in agentick's `ClientTransport` family. A
-single WebSocket connection carries N concurrent JSON-RPC requests
-(correlated by `id`) plus N persistent subscriptions and execution
-progress streams (correlated by `subscriptionId` / `progressToken`).
-The same multiplexing pattern Phoenix Channels and Slack's gateway
-use — no Socket.IO. (See `docs/proposals/v2/blueprint/33-client-and-transports.md`
-for why JSON-RPC 2.0 + plain WS is the right call over Socket.IO.)
+```bash
+npm install @agentick/transport-websocket
+```
+
+| Subpath                                   | What it gives you                              |
+| ----------------------------------------- | ---------------------------------------------- |
+| `@agentick/transport-websocket/client`    | `websocket(options)` — the `ClientTransport`   |
+| `@agentick/transport-websocket/server`    | `websocketServer` / `webSocketServerTransport` |
+| `@agentick/transport-websocket` (default) | both, plus `AGENTICK_SUBPROTOCOL`              |
+
+The client uses `globalThis.WebSocket` (Node 22+, browser, Bun, Deno, edge) — no isomorphic shim. The server uses the bundled `ws` library, because Node's native WebSocket is client-only. Pair the server with [@agentick/gateway](../gateway) and the client with [@agentick/client-core](../client-core).
 
 ## Quick start
 
-### Client
-
-```ts
-import { createClient } from "@agentick/client";
-import { websocket } from "@agentick/transport-websocket/client";
-
-const client = await createClient({
-  transport: websocket({ url: "wss://api.example.com" }),
-});
-
-await client.connect();
-const result = await client.request("ping", {});
-```
-
-### Server
-
-```ts
-import { createServer } from "node:http";
-import { createGateway } from "@agentick/gateway";
-import { websocketServer } from "@agentick/transport-websocket/server";
-
-const gateway = await createGateway();
-const httpServer = createServer();
-const server = websocketServer({
-  httpServer,
-  gateway,
-  allowedOrigins: ["https://my-app.example.com"],
-});
-
-httpServer.listen(8080);
-```
-
-Browser clients send `Sec-WebSocket-Protocol: agentick-rpc-v1`; the
-server rejects connections that don't.
-
-### Server, gateway-owned (ADR 84 `ServerTransport`)
-
-`webSocketServerTransport(config)` inverts the raw factory: the wire
-config (`port`, TLS, origins) binds at construction, and the gateway
-injects itself as the dispatch host at `listen()`. Hand it to
-`createGateway({ transports })` and the gateway owns the whole
-lifecycle — `gateway.listen()` creates and binds the Node `http.Server`;
-`gateway.close()` tears both the WS handler and the server down.
+Hand the transport to the gateway and the gateway owns the whole listener:
 
 ```ts
 import { createGateway } from "@agentick/gateway";
 import { webSocketServerTransport } from "@agentick/transport-websocket/server";
 
 const gateway = await createGateway({
-  transports: [
-    webSocketServerTransport({
-      port: 8080,
-      host: "0.0.0.0",
-      allowedOrigins: ["https://my-app.example.com"],
-    }),
-  ],
+  transports: [webSocketServerTransport({ port: 8080 })],
 });
 
-await gateway.listen(); // creates node:http server, attaches WS, binds :8080
-// ...
+await gateway.listen(); // creates the node:http server, attaches WS, binds 127.0.0.1:8080
+// … serve traffic …
 await gateway.close(); // tears down the WS handler AND the server it created
 ```
 
-An adopter that already owns a Node server (shared with an HTTP
-transport, an `https.Server`) passes `{ httpServer }` instead of
-`{ port }` — the wrapper attaches to it and, since it did not create it,
-does not close it.
-
-## API surface
-
-### `websocket(options): ClientTransport`
+Point a client at it:
 
 ```ts
-interface WebSocketTransportOptions {
-  url: string;
-  /** Defaults to `globalThis.WebSocket`. Pass `(await import("ws")).WebSocket`
-   *  for Node 18/20 or when you need custom headers in Node. */
-  WebSocket?: WebSocketConstructor;
-  /** Additional subprotocols offered at the upgrade. E.g. ["mcp"] for
-   *  bilingual servers that also speak MCP. */
-  extraSubprotocols?: readonly string[];
-  /** Exponential backoff (100ms → 30s cap) with full jitter by default. */
-  reconnect?: ReconnectPolicy;
-  id?: string;
-}
+import { createClient } from "@agentick/client-core";
+import { websocket } from "@agentick/transport-websocket/client";
 
-interface ReconnectPolicy {
-  enabled?: boolean;
-  initialDelayMs?: number;
-  maxDelayMs?: number;
-  maxAttempts?: number;
-}
+const client = await createClient({
+  transport: websocket({ url: "ws://127.0.0.1:8080" }),
+});
+
+await client.connect();
+await client.request("ping", {});
+
+const { apps } = await client.gateway().listApps();
 ```
 
-### `websocketServer(options): WebSocketServerHandle`
+> [!IMPORTANT]
+> `webSocketServerTransport({ port })` binds `127.0.0.1` unless you pass `host`. That default is a security boundary, not a convenience. Read [Security defaults](#security-defaults) before widening it to `0.0.0.0`.
+
+## The subprotocol is the handshake
+
+Clients offer `Sec-WebSocket-Protocol: agentick-rpc-v1`; the server selects it or refuses the upgrade outright. A socket that negotiated no protocol never carries a frame, which makes protocol confusion impossible rather than merely unlikely — a stray browser tab pointed at the port fails at the handshake, not three frames in.
+
+The constant is exported so a custom server or a probe can offer it verbatim:
 
 ```ts
-interface WebSocketServerOptions {
-  httpServer: http.Server;
-  gateway: GatewayHarnessProtocol; // DispatchHost
-  path?: string;
-  /** WS-level ping/pong interval. Default 30_000 ms. */
-  heartbeatIntervalMs?: number;
-  // ── Security defaults (STATUS A2 §4c) — safe when omitted, each overridable.
-  /** Cross-origin allow-list. Omitted → same-origin only. NEVER `"*"`. */
-  allowedOrigins?: readonly string[];
-  /** Extra `Host` values beyond loopback + allowedOrigins' hosts. */
-  allowedHosts?: readonly string[];
-  /** Trust `X-Forwarded-Host`/`-Proto` — only from a loopback peer. Default false. */
-  trustProxy?: boolean;
-  /** Ingress authentication (ADR 61). Runs ONCE per connection at
-   *  upgrade; rejection destroys the socket with 401. Omitted = every
-   *  connection is anonymous (the local pole). */
-  authSource?: AuthSource;
-  /** Accept the bearer token from `?token=`. DEFAULT FALSE (query
-   *  strings leak into proxy logs / history). */
-  allowQueryToken?: boolean;
-}
-```
-
-### `webSocketServerTransport(config): ServerTransport`
-
-```ts
-// Common path — the wrapper owns the Node http.Server:
-type WebSocketServerTransportPortConfig = Omit<WebSocketServerOptions, "gateway" | "httpServer"> & {
-  port: number;
-  host?: string; // bind address; DEFAULT 127.0.0.1 (loopback only — the security boundary)
-};
-// Or attach to an adopter-owned server:
-type WebSocketServerTransportConfig =
-  | WebSocketServerTransportPortConfig
-  | Omit<WebSocketServerOptions, "gateway">; // { httpServer, ... }
-```
-
-Server auth extracts the bearer from `Authorization: Bearer ...` (and,
-only when `allowQueryToken` is set, `?token=`), then runs it through
-the shared `authenticateIngress` helper before completing the upgrade.
-
-## Patterns
-
-### Native `WebSocket` everywhere
-
-The client transport uses `globalThis.WebSocket` by default. As of
-**Node 22 LTS**, native `WebSocket` is stable on the global — same API
-as browsers. Bun, Deno, and Cloudflare Workers have it too. **No
-isomorphic shim needed.**
-
-For Node 18/20, install `ws` and pass it explicitly:
-
-```ts
+import { AGENTICK_SUBPROTOCOL } from "@agentick/transport-websocket";
 import { WebSocket } from "ws";
+
+const raw = new WebSocket("ws://127.0.0.1:8080", [AGENTICK_SUBPROTOCOL]);
+```
+
+`extraSubprotocols` appends further offers to the upgrade for a server that speaks more than one dialect on the same endpoint; `agentick-rpc-v1` stays first in preference order.
+
+## Reconnect with cursor-aware resubscribe
+
+```ts
 import { websocket } from "@agentick/transport-websocket/client";
 
 const transport = websocket({
-  url: "ws://localhost:8080",
-  WebSocket,
-});
-```
-
-Same constructor override lets you pass `ws` in Node when you need
-custom HTTP headers on the upgrade (the browser `WebSocket` API
-doesn't expose headers).
-
-### Reconnect with cursor-aware resubscribe
-
-```ts
-const transport = websocket({
-  url: "wss://api.example.com",
+  url: "wss://agents.example.com",
   reconnect: {
     initialDelayMs: 100,
     maxDelayMs: 30_000,
@@ -195,138 +84,202 @@ const transport = websocket({
 });
 ```
 
-On connection drop:
+That is the default policy written out. On a drop the transport moves to `reconnecting`, waits a full-jitter exponential delay, opens a fresh socket, and replays each still-open subscription from its last-seen cursor. If the cursor is still inside the server's retention window the subscription resumes with no gap. If it fell out, the stream surfaces `notifications/subscription/evicted` as a protocol error, so the decision to resume from oldest, jump to latest, or give up is yours to make explicitly rather than silently.
 
-1. Transport enters `state: "reconnecting"`
-2. Exponential backoff with full jitter (per AWS Builder's Library
-   "Timeouts, retries, and backoff with jitter")
-3. New WS connection opens
-4. Every still-open subscription replays from its last-seen cursor
-5. Server's bus has retention; if the cursor is still in window, the
-   subscription resumes. If evicted (`notifications/subscription/evicted`),
-   the registered lifecycle handler decides policy
-   (`resubscribe-from-oldest` / `resubscribe-from-latest` / `give-up`).
+Two escapes matter and both are pinned by tests: `close()` never triggers a reconnect, and `reconnect: { enabled: false }` transitions straight to `closed` on a drop instead of retrying.
 
-This is the load-bearing improvement over Socket.IO and v1: **the wire
-drop doesn't drop events**.
+## Any `WebSocket` implementation
 
-### Bilingual MCP support
+The default is `globalThis.WebSocket`, which is stable on Node 22 LTS, browsers, Bun, Deno, and Cloudflare Workers. Override the constructor for Node 18/20, or when you need HTTP headers on the upgrade — the browser API cannot set them, `ws` can:
 
 ```ts
+import { WebSocket } from "ws";
+import { websocket } from "@agentick/transport-websocket/client";
+import type { WebSocketTransportOptions } from "@agentick/transport-websocket/client";
+
 const transport = websocket({
-  url: "wss://gateway.example.com",
-  extraSubprotocols: ["mcp"],
+  url: "ws://127.0.0.1:8080",
+  // `ws` has a wider signature than the global; the transport only uses the
+  // wire-shape subset, so the cast is safe.
+  WebSocket: WebSocket as unknown as WebSocketTransportOptions["WebSocket"],
 });
 ```
 
-A server that mounts both `@agentick/transport-websocket/server`
-and the future `@agentick/mcp-surface` extension accepts either
-protocol on the same endpoint. Client picks `agentick-rpc-v1` first;
-falls back to `mcp` if the server only speaks that.
+With no global `WebSocket` and no override, construction throws with the fix in the message rather than failing later at connect.
 
-## Status
+## Authentication is pinned at the upgrade
 
-Phase 33.C of the v2 implementation plan — see
-`docs/proposals/v2/STATUS.md` and
-`docs/proposals/v2/blueprint/33-client-and-transports.md`.
+WebSocket is connection-oriented, so an `AuthSource` runs **once**, at the upgrade, before the socket is wired for frames. The resolved identity governs every frame that connection ever sends. A rejection destroys the socket with `401` — there is no half-open state where an unauthenticated connection can dispatch.
+
+```ts
+import { createGateway } from "@agentick/gateway";
+import { staticTokenAuthSource } from "@agentick/transport";
+import { webSocketServerTransport } from "@agentick/transport-websocket/server";
+
+const gateway = await createGateway({
+  transports: [
+    webSocketServerTransport({
+      port: 8080,
+      // Any AuthSource: a JWT verifier, an OAuth introspection call, or this
+      // reference table. Rejection destroys the socket before dispatch exists.
+      authSource: staticTokenAuthSource({ tokens: { "tok-alice": "alice" } }),
+    }),
+  ],
+});
+await gateway.listen();
+```
+
+The token comes from `Authorization: Bearer …`. Omitting `authSource` admits every connection as the local pole — no principal, appropriate for a loopback bind behind your own process boundary. Configuring one makes the edge fail closed: missing or unknown tokens are refused, never downgraded to anonymous.
+
+A refused upgrade publishes a `gateway:admission:failed` event carrying the failure class, transport kind, and the peer address the edge alone knows. Credential material never rides along — no token, no header bag, no `credential` key.
+
+> [!WARNING]
+> `allowQueryToken: true` accepts the bearer from `?token=`. It defaults to **false** for good reason: query strings land in proxy access logs, browser history, and `Referer` headers. Enable it only for clients that genuinely cannot set headers, and only with short-lived tokens.
+
+## Per-connection admission
+
+Because a connection is a durable thing, it gets its own admission decision — fired after authentication, before the socket receives frames. A hook that throws rejects the connection; the server closes it with the WebSocket policy-violation code `1008` and never wires it up.
+
+```ts
+const gateway = await createGateway({
+  transports: [webSocketServerTransport({ port: 8080 })],
+});
+
+gateway.hook({
+  onBeforeGatewayAccept: (info) => {
+    // info.transportId — e.g. "websocket:8080"; info.identity — from the
+    // AuthSource; info.remoteAddress — the TCP peer.
+    if (info.remoteAddress && isBanned(info.remoteAddress)) {
+      throw new Error("connection rejected");
+    }
+    return info;
+  },
+});
+
+await gateway.listen();
+```
+
+Rejecting one connection never takes the listener down. This is the connection-shaped counterpart to per-request authorization: rate limits per peer, tenant pinning, and connection quotas all live here rather than being re-derived on every frame.
+
+## Security defaults
+
+The unconfigured server ships closed, enforcing the policy in [@agentick/transport](../transport) at the upgrade:
+
+| Default                   | What it blocks                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-site rejection      | An `Origin` that is neither same-origin nor allowlisted → `403` at the upgrade. A drive-by page cannot open the socket                      |
+| `Host` allow-list         | Only loopback names and hostnames you list. Defeats DNS rebinding — an attacker name resolving to `127.0.0.1` arrives with a foreign `Host` |
+| Loopback-only proxy trust | `X-Forwarded-Host` / `-Proto` are honored only with `trustProxy: true` **and** a loopback TCP peer                                          |
+| Loopback bind             | `webSocketServerTransport({ port })` binds `127.0.0.1` unless `host` says otherwise                                                         |
+
+Widening is explicit:
+
+```ts
+const transport = webSocketServerTransport({
+  port: 8080,
+  host: "0.0.0.0", // public bind — deliberate
+  allowedHosts: ["agents.example.com"], // required once you serve under a real hostname
+  allowedOrigins: ["https://app.example.com"], // exact origins; never `*`
+});
+```
+
+A request carrying no `Origin` is a non-browser caller and is admitted — browsers always send one, so its absence is information, not a bypass.
+
+> [!NOTE]
+> There is no CSRF token here, and that is not an omission. A browser sends an unforgeable `Origin` on a WebSocket upgrade, so the origin and host gates _are_ the defense; a per-request token has nothing to protect on a persistent connection. The HTTP transport, whose mutations are forgeable, does carry one.
+
+## Sharing a Node server
+
+Pass `{ httpServer }` instead of `{ port }` to attach to a server you already own — one shared with the HTTP transport, an `https.Server`, or Express's underlying listener. The wrapper attaches and, since it did not create the server, does not close it.
+
+```ts
+import { createServer } from "node:http";
+import { createGateway } from "@agentick/gateway";
+import { httpServerTransport } from "@agentick/transport-http/server";
+import { webSocketServerTransport } from "@agentick/transport-websocket/server";
+
+const server = createServer();
+server.on("request", (req, res) => {
+  if (req.url === "/health") res.end("ok"); // else: not ours — write nothing
+});
+
+const gateway = await createGateway({
+  transports: [
+    httpServerTransport({ httpServer: server, path: "/agentick" }),
+    webSocketServerTransport({ httpServer: server, path: "/agentick/ws" }),
+  ],
+});
+await gateway.listen(); // attaches both; binds nothing — the server is yours
+server.listen(8080);
+```
+
+> [!IMPORTANT]
+> Node's `upgrade` semantics are first-wins, and an upgrade no listener claims is destroyed by Node itself. On an **attached** server this transport therefore leaves non-matching upgrades untouched, so a Socket.IO endpoint or a second transport on another path still gets its socket alive. On a server the transport created (`{ port }`), nothing else can legitimately claim an upgrade, so a non-matching one is destroyed. That is what `ownsServer` selects, and the wrapper sets it from the config branch you took.
+
+## API
+
+### `@agentick/transport-websocket/client`
+
+| Export                             | Purpose                            |
+| ---------------------------------- | ---------------------------------- |
+| `websocket(options)`               | The `ClientTransport`              |
+| `WebSocketTransportOptions` (type) | The option bag below               |
+| `ReconnectPolicy` (type)           | Re-exported from the base plumbing |
+
+| Option              | Meaning                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| `url`               | `ws://` or `wss://` endpoint. Required                                                   |
+| `WebSocket`         | Constructor override. Defaults to `globalThis.WebSocket`                                 |
+| `extraSubprotocols` | Additional offers appended after `agentick-rpc-v1`                                       |
+| `reconnect`         | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }`. Full-jitter backoff, 100ms → 30s |
+| `id`                | Stable transport id for logs. Defaults to `ws-<n>`                                       |
+
+### `@agentick/transport-websocket/server`
+
+| Export                             | Purpose                                                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `webSocketServerTransport(config)` | `ServerTransport` the gateway owns. `{ port, host? }` or `{ httpServer }`                                                                  |
+| `websocketServer(options)`         | The raw factory — attaches to a Node server you supply, returns `{ close() }`                                                              |
+| `WebSocketServerOptions` (type)    | `httpServer`, `gateway`, `path`, `heartbeatIntervalMs`, `authSource`, `allowQueryToken`, `transportId`, `ownsServer` + the security fields |
+
+Security fields (shared, from [@agentick/transport](../transport)): `allowedOrigins`, `allowedHosts`, `trustProxy`. Transport ids are stable and readable: `websocket:8080` for a port config, `websocket:attached` for an adopter-owned server — and that id is what `onBeforeGatewayAccept` sees.
+
+### `@agentick/transport-websocket`
+
+| Export                 | Purpose                                               |
+| ---------------------- | ----------------------------------------------------- |
+| `AGENTICK_SUBPROTOCOL` | `"agentick-rpc-v1"` — the negotiated subprotocol name |
+
+## Patterns
+
+**Shared plumbing.** [@agentick/transport](../transport) owns `BaseClientTransport` (state machine, RPC correlation, subscription and progress multiplexing, cursor-aware resubscribe, full-jitter backoff), `dispatchRequest`, and the web-security policy. This package is the wire: upgrade, subprotocol, and frame codec.
+
+**Sibling wires.** [@agentick/transport-http](../transport-http) speaks the same JSON-RPC over a single HTTP endpoint — the fallback where upgrades are blocked, and mountable inside a fetch-native framework. [@agentick/transport-in-process](../transport-in-process) skips serialization entirely for tests and single-process apps. All three coexist on one gateway.
+
+**Wire shapes.** [@agentick/spec](../spec) owns `ClientTransport`, `ServerTransport`, `AuthSource`, `IngressIdentity`, `ConnectionInfo`, and the JSON-RPC types. Every inbound frame is validated against them before the transport touches it.
 
 ## Roadmap & known gaps
 
-**High severity (will land in a 33.C hardening pass):**
-
-- **Backpressure not wired at this transport.** The bounded-buffer
-  primitive now lives in the base `MultiplexedStream`
-  (`@agentick/transport`: `drop-oldest` / `drop-newest` /
-  `close-on-overflow` / `unbounded`), but the WS transport constructs
-  its subscription / progress streams with the default `unbounded`
-  policy and does not yet expose a per-stream backpressure option — a
-  slow consumer with a fast emitter still grows the buffer unbounded.
-- **No real `session/send` end-to-end test.** The dispatcher handles
-  `session/send` with progress notifications; no test runs against a
-  real session with a real model adapter. The shape is verified by
-  type and by the in-process smoke tests; the wire path is exercised
-  but only with stub executors.
-
-**Medium severity:**
-
-- **No per-message-deflate compression** (RFC 7692). `ws` supports it;
-  not enabled. Cheap bandwidth win for large payloads.
-- **No session affinity echo.** `initialize` returns `connectionId`;
-  client doesn't carry it on reconnect, so load balancers can't
-  sticky-route. Works for single-node deploys, breaks for clustered.
-- **No bilingual MCP integration test.** Client supports the
-  subprotocol option; a real bilingual server is the `@agentick/mcp-surface`
-  scope (Phase 33.I).
-- **No `outboundBackpressure` check on `ws.send()`.** A misbehaving
-  emitter could fill the WS buffer; we don't check `bufferedAmount`.
-- **No tuned `maxPayload`.** `ws` default is 100 MB. Misbehaving client
-  could DoS the server with huge frames.
-
-**Architecture:**
-
-- **No `GatewayExtension` wrapper for the server side.** Ships as a
-  plain `websocketServer(opts)` factory; ADR 33 rev-3 specified the
-  server side as shape-1 (`GatewayExtension` with substrate audit + per-
-  connection state). Deferred until the shared dispatcher gets
-  extracted (Phase 33.D cleanup).
-- **No server-initiated notification fan-out (#311).** The server
-  tracks live sockets for teardown but does NOT register connections
-  with the gateway (`gateway.acceptConnection`) or fan a
-  `gateway.notify(...)` broadcast out to connected clients. Notifications
-  today only flow within a dispatch (subscription events, progress).
-  Broadcast fan-out with connection-metadata targeting is unbuilt.
-
-**Done in this phase:**
-
-- ✓ Subprotocol negotiation — `agentick-rpc-v1` only, server rejects others (`security.spec.ts`)
-- ✓ Frame multiplexing — N concurrent RPCs verified (`smoke.spec.ts`)
-- ✓ Reconnect machinery — server-bounce → reconnect transition, explicit-close suppression, disabled-reconnect → straight to closed (`reconnect.spec.ts`)
-- ✓ Origin validation — disallowed Origin → 403; allowed → accept; no Origin → accept (`security.spec.ts`)
-- ✓ Security defaults (STATUS A2 §4c) — safe default (no `allowedOrigins`) rejects a cross-origin upgrade, accepts same-origin; `Host` allow-list rejects a spoofed non-loopback Host; loopback bind default; loopback-only forwarded-header trust (`security.spec.ts` + policy matrix in `@agentick/transport`)
-- ✓ `notifications/cancelled` from client (frame emit on AbortSignal) + server-side ConnectionContext routing (`cancellation.spec.ts`)
-- ✓ Custom `WebSocket` constructor override (e.g., `ws` library) (`custom-ws-ctor.spec.ts`)
-- ✓ Spec-validator integration at the wire boundary (`wire-conformance.spec.ts`)
-- ✓ Wire conformance suite passes (`wire-conformance.spec.ts`)
-- ✓ Shared transport conformance — `runTransportConformance` (`transport-conformance.spec.ts`)
-- ✓ Per-connection ingress authn (`ingress-authn.spec.ts` via `runIngressAuthnConformance`)
-- ✓ Full-jitter backoff distribution — verified upstream on the shared `computeFullJitterBackoff` in `@agentick/transport` (`backoff-jitter.spec.ts`); this transport inherits it
-
-**Claimed but not yet under test (moved from "done" to here; promoted back when verified):**
-
-- ✗ **Cursor-aware resubscribe under retention.** Reconnect machinery works; the cursor-aware replay path is wired but not exercised under retention pressure. Needs a `LocalEventBus` with a tight `retention.maxEvents`, a subscription that falls behind, and an assertion that the new subscription receives `notifications/subscription/evicted`. Lands in the 33.C hardening pass.
-- ✗ **WS-level ping/pong heartbeat.** Server schedules pings; client receives them; the "idle client terminated on missed pong" branch is unverified. Needs a misbehaving client that ignores ping. Deferred.
-- ✗ **Bilingual MCP subprotocol negotiation.** Client accepts `extraSubprotocols`; no integration test against a bilingual server. Lands with `@agentick/mcp-surface` (Phase 33.I).
-- ✗ **Real `session/send` end-to-end with model adapter.** Wire path is verified; session/send dispatch into a real session with progress events flowing is not (needs a real model adapter). Lands in the hardening pass.
-
-## Development plan
-
-| Step                             | Lands when                                                                                                                                |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Phase 33.C MVP                   | This commit — `a14670c8`                                                                                                                  |
-| 33.C hardening pass              | After Phase 33.D + 33.E so backpressure design covers all transports; adds bounded streams, real `session/send` test with a model adapter |
-| Compression / max-payload tuning | When a real workload surfaces the need                                                                                                    |
-| `GatewayExtension` wrapper       | When the shared `@agentick/gateway-rpc-adapter` lands (33.D extraction)                                                                   |
-| Session affinity                 | When ADR 29 Phase D cluster substrate lands                                                                                               |
-| Bilingual MCP test               | Phase 33.I (`@agentick/mcp-surface`)                                                                                                      |
+- **Backpressure is unbounded here.** The bounded-buffer policies live on `MultiplexedStream` in [@agentick/transport](../transport), but this transport constructs subscription and progress streams with the default `unbounded` policy and exposes no per-stream option. A slow consumer behind a fast emitter grows the buffer. Outbound is equally unguarded: `ws.send()` is called without checking `bufferedAmount`.
+- **No compression.** `per-message-deflate` (RFC 7692) is supported by `ws` and not enabled. A real bandwidth win for large payloads.
+- **`maxPayload` is untuned.** The `ws` default of 100 MB stands, so a misbehaving client can send very large frames.
+- **No session affinity across reconnects.** `initialize` returns a `connectionId`, but the client does not carry it on reconnect, so a load balancer cannot sticky-route. Fine for single-node deployments; broken for clustered ones.
+- **No server-initiated broadcast.** The server tracks live sockets for teardown but does not fan a gateway-level `notify` out to connected clients. Notifications flow only within a dispatch — subscription events and progress.
+- **No wall-clock ceiling on authentication.** A hung `AuthSource` leaves the upgrade pending and leaks the socket rather than rejecting on a timeout.
+- **Heartbeat termination is unverified.** The server pings on an interval and terminates a socket that misses its pong; the miss branch has no test (it needs a client that deliberately ignores `ping`).
+- **Cursor-aware replay under retention pressure is unverified.** Reconnect is covered and the replay path is wired, but no test drives a subscription past a tight retention window to assert the `evicted` notification arrives.
+- **`extraSubprotocols` has no integration test.** The client offers them; nothing exercises a server that actually speaks a second dialect.
 
 ## Verified by
 
-Every claim in the **Done in this phase** checklist above is verified by
-tests in `src/__tests__/`. Claims listed in **Claimed but not yet under
-test** sit in the same checklist with an `✗` marker — they document
-behavior the design intends but tests don't yet exercise. The
-discipline: a `✓` claim has a test or it doesn't ship with the `✓`.
-
-| Concern                                                                                                                                                                      | Test file                                                                  |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| End-to-end smoke (WS connect, ping, listApps, multiplexed RPCs)                                                                                                              | `src/__tests__/smoke.spec.ts`                                              |
-| Shared transport conformance (`runTransportConformance`)                                                                                                                     | `src/__tests__/transport-conformance.spec.ts`                              |
-| Reconnect state machine                                                                                                                                                      | `src/__tests__/reconnect.spec.ts`                                          |
-| Wire conformance (envelope roundtrips, validator integration, batches)                                                                                                       | `src/__tests__/wire-conformance.spec.ts`                                   |
-| Subprotocol enforcement (`agentick-rpc-v1`-only)                                                                                                                             | `src/__tests__/security.spec.ts`                                           |
-| Origin validation (`allowedOrigins`)                                                                                                                                         | `src/__tests__/security.spec.ts`                                           |
-| Security defaults — safe cross-origin deny / same-origin allow / Host allow-list (STATUS A2 §4c)                                                                             | `src/__tests__/security.spec.ts`                                           |
-| `notifications/cancelled` client emit + server handle                                                                                                                        | `src/__tests__/cancellation.spec.ts`                                       |
-| Custom WebSocket constructor (`ws` library)                                                                                                                                  | `src/__tests__/custom-ws-ctor.spec.ts`                                     |
-| Ingress authn (ADR 61) — per-connection bearer auth, fail-closed 401, prototype-key guard, once-per-socket, local pole when no `authSource`                                  | `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`)       |
-| `webSocketServerTransport` — `ServerTransport` conformance + real gateway-owned bind (`gateway.listen()` binds the port + WS round-trips a ping; `gateway.close()` frees it) | `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) |
+- `src/__tests__/smoke.spec.ts` — upgrade with subprotocol negotiation against a real gateway, `ping` round-trip, `listApps` reflecting `createApp`, a server error arriving typed (`_tag` preserved), several RPCs multiplexed on one socket, clean close with subsequent requests rejecting, and a subprotocol-less client refused.
+- `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance`) — state machine and listener notification, RPC correlation, pre-connect rejection, `JsonRpcError` → `TransportError`, concurrent multiplexing, `notifications/cancelled` on abort, subscription routing plus `closed` and `evicted`, and progress frames reaching `progress(token)`.
+- `src/__tests__/reconnect.spec.ts` — a server bounce driving `reconnecting` → `open` with the wire working afterwards, explicit `close()` suppressing reconnect, and `enabled: false` going straight to `closed`.
+- `src/__tests__/security.spec.ts` — upgrades refused with no subprotocol and with an unrecognised one, accepted with `agentick-rpc-v1`; disallowed `Origin` refused and allowlisted accepted; no `Origin` admitted; and the default posture — cross-origin refused, same-origin admitted, spoofed non-loopback `Host` refused.
+- `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) — valid bearer stamping a principal, missing and invalid and prototype-key tokens refused at the edge, local pole with no `authSource`, two dispatches on one socket sharing the connection's identity, plus the admission-failure event: published on refusal, absent on admission, and carrying no credential material.
+- `src/__tests__/cancellation.spec.ts` — the client emitting `notifications/cancelled` with the matching `requestId` and `reason: "aborted"` when a signal fires mid-request, and the server tolerating a cancellation for an unknown id while staying responsive.
+- `src/__tests__/custom-ws-ctor.spec.ts` — the `ws` library passed as the `WebSocket` override, connecting and round-tripping.
+- `src/__tests__/wire-conformance.spec.ts` (`runWireConformance`) — envelope round-trips and batch handling through the codec.
+- `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) — the lifecycle contract (stable id, bind, teardown, idempotent listen and close, re-listen), a real gateway-owned bind with a client ping and a freed port after `close()`, and per-connection admission: a throwing `onBeforeGatewayAccept` dropping the connection with code `1008`, a permitting one firing exactly once with the transport id.
+- `src/__tests__/shared-server-coexistence.spec.ts` — one Node server carrying four consumers at once: this transport, [@agentick/transport-http](../transport-http), a foreign `/health` request listener that still answers `200`, and a foreign upgrade listener whose socket survives — concurrently.
+- The security policy's full allow/deny matrix and the full-jitter backoff distribution are verified upstream in [@agentick/transport](../transport).
