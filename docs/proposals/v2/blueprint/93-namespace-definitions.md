@@ -39,17 +39,28 @@ is the op layer; write mediation is decoration.
 
 ## Per-namespace map
 
-| Namespace | Definition | Genesis default | Notes |
-| --- | --- | --- | --- |
-| timeline | `defineTimeline({ store?, hydrate?, compact?, writePolicy? })` | `hydrateFromStore()` (ADR 49 open-or-rehydrate preserved) | proving instance; §2.7 bounded projection rides along so a bounded hydrator really loads N |
-| skills | `defineSkills({ store?, hydrate? })` | none (explicit) | UNIFIES sources: directory/URL/literal become named hydrators (`hydrateFromDirectory`, `composeHydrators`); tiered catalogs are hydrators reading `ctx.principal` |
-| prompts | `definePrompts({ store?, hydrate? })` | none | kills the withPrompts-lacks-store asymmetry |
-| tasks | `defineTasks({ store?, executor?, hydrate? })` | none | `hydrate` = pending-task reload on resume (currently undefined semantics → adopter policy) |
-| sessions (registry) | `defineSessions({ store?, evict? })` | n/a | `evict(ctx) ⇒ verdict` turns the idle-eviction sweep into a seam (pairs with ADR 92 Slice B) |
-| knobs / state / credentials | `defineKnobs/State/Credentials({ store? })` | store-backed | thin members; conforming costs nothing |
-| resources | `defineResources({ hydrate? })` | none | tree-mounted declarations stay tree concerns; per-URI resolvers stay subject seams |
+All slots are augmentation-registered per the top-level-slots law
+(never hardcoded; built-ins always lit via the metapackage, optionals
+light on install; `extensions: []` remains the dynamic escape hatch).
+Every slot accepts `definition | live instance` and carries the
+`hooks:`/`guards:` bags.
 
-| sandbox | `defineSandbox({ provider, bootstrap?, hooks?, guards? })` | `bootstrap(ctx)` — imperative | the ENVIRONMENT-namespace genesis verb: no store slot (not store-bearing), no hydrate; `ctx.sandbox` is the live handle (eve's bootstrap idiom, landed). Fork semantics (re-bootstrap vs provider clone) = open D-phase question. |
+| Namespace | Slot (config) | Definition | Genesis | Notes |
+| --- | --- | --- | --- | --- |
+| timeline | `app.timeline` | `defineTimeline({ store?, hydrate?, compact?, writePolicy? })` | `hydrate` — default `hydrateFromStore()` (ADR 49 preserved) | proving instance (D1, incl. slot-registration mechanics); §2.7 bounded projection rides along |
+| skills | `app.skills` | `defineSkills({ store?, hydrate? })` | `hydrate` — default none (explicit) | UNIFIES sources: directory/URL/literal become named hydrators (`hydrateFromDirectory`, `composeHydrators`); tiered catalogs are hydrators reading `ctx.principal` |
+| prompts | `app.prompts` | `definePrompts({ store?, hydrate? })` | `hydrate` — default none | kills the withPrompts-lacks-store asymmetry |
+| tasks | `app.tasks` | `defineTasks({ store?, executor?, hydrate? })` | `hydrate` — default none | `hydrate` = pending-task reload on resume (undefined semantics → adopter policy); lands WITH Family 3's async submit |
+| sessions (registry) | `app.sessions` | `defineSessions({ store?, evict? })` | n/a (registry) | `evict(ctx) ⇒ verdict` turns the idle-eviction sweep into a seam |
+| state | `app.state` | `defineState({ store? })` | `hydrate` — default `hydrateFromStore()` | thin member |
+| knobs | `app.knobs` | `defineKnobs({ store?, hydrate? })` | `hydrate` — default `hydrateFromStore()` | thin member |
+| credentials | `app.credentials` | `defineCredentials({ store? })` | none (async-only, no view — deliberate) | mutations are ops under the redaction law (ADR 92 B) |
+| resources | `app.resources` | `defineResources({ hydrate? })` | `hydrate` — default none | fs is the SOURCE (`resourcesFromDirectory`), store stays memory-default; tree-mounts stay tree concerns |
+| sandbox | `app.sandbox` | `defineSandbox({ provider, bootstrap? })` | `bootstrap(ctx)` — imperative | ENVIRONMENT namespace: no store, no hydrate; `ctx.sandbox` = the live handle; fork semantics (re-bootstrap vs provider clone) = open D-phase question |
+| elicitation | `app.elicitation` | `defineElicitation({})` | none | bags-only member today (`hooks:`/`guards:` on the elicit op); definition exists for consistency + future policy seams |
+| mcp (client) | `app.mcp` | optional-package slot: `withMCP`'s existing options | n/a | OPTIONAL package proving the augmentation mechanism — its slot lights on install; config is not a store-bearing definition (defineX = guidance, not law) |
+| model | `app.model` (exists) | provider adapter / executor | n/a | non-member of defineX; already first-class |
+| transports / auth / mcpServers | gateway config (exist) | gateway-life concerns | n/a | gateway placement per the slots law; already top-level |
 
 **The genesis seam has two verbs, by namespace nature:** DATA
 namespaces `hydrate(ctx) ⇒ records` (source-agnostic catch-up);
