@@ -220,8 +220,25 @@ function blockToText(block: ContentBlock): string {
     case "system_event":
     case "state_change":
       return block.text ?? "";
-    case "custom":
-      return block.content;
+    case "custom": {
+      // A custom block's WHOLE PURPOSE is "render this under my own tag", and
+      // `tag`/`attrs` are required fields on it — so dropping them and
+      // returning bare `content` lost the only thing the block carried. This
+      // case now matches the custom SEMANTIC node one switch above, which has
+      // always emitted `<tag>…</tag>`; the two were inconsistent inside one
+      // formatter. Markdown keeps dropping the tag on BOTH paths, which is
+      // correct for a syntax with no tags.
+      //
+      // Attribute values are escaped (they sit in attribute position);
+      // `content` is escaped too, matching the `text` block case — an adopter
+      // who wants raw markup through has the `html` block for that.
+      const attrs = Object.entries(block.attrs ?? {})
+        .map(([k, v]) => ` ${k}="${escapeXml(String(v))}"`)
+        .join("");
+      return block.selfClosing === true
+        ? `<${block.tag}${attrs} />`
+        : `<${block.tag}${attrs}>${escapeXml(block.content)}</${block.tag}>`;
+    }
     default:
       return "";
   }

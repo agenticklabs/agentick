@@ -188,6 +188,49 @@ describe("textFormatter", () => {
   });
 });
 
+describe("custom content blocks — the tag is the whole point", () => {
+  // `CustomContentBlock` declares `tag` and `attrs` as REQUIRED fields, and the
+  // xml formatter already honours a custom SEMANTIC NODE by emitting
+  // `<tag>…</tag>`. Its BLOCK case dropped both and returned bare `content`,
+  // so the one construct whose purpose is "render this under my own tag" lost
+  // its tag — inconsistent with the same formatter one switch over.
+  const block = {
+    type: "custom" as const,
+    tag: "memory-kind",
+    content: "episodic recall",
+    attrs: { kind: "episodic", weight: "0.8" },
+  };
+
+  // The drop is on the COLLAPSE path (`blocksToText`) — what `formatTree` calls
+  // to fold a slot's blocks into one string — not on `render`.
+  const xmlText = (b: unknown) => xmlFormatter.blocksToText!([b as never]);
+  const mdText = (b: unknown) => markdownFormatter.blocksToText!([b as never]);
+
+  it("xml emits the custom tag with its attributes", () => {
+    expect(xmlText(block)).toBe(
+      '<memory-kind kind="episodic" weight="0.8">episodic recall</memory-kind>',
+    );
+  });
+
+  it("xml escapes attribute values", () => {
+    expect(xmlText({ ...block, attrs: { note: 'a "quoted" & <raw>' } })).toContain(
+      'note="a &quot;quoted&quot; &amp; &lt;raw&gt;"',
+    );
+  });
+
+  it("xml honours selfClosing", () => {
+    expect(xmlText({ ...block, content: "", selfClosing: true })).toBe(
+      '<memory-kind kind="episodic" weight="0.8" />',
+    );
+  });
+
+  it("markdown keeps dropping the tag — consistent with its semantic-node case", () => {
+    // NOT a bug: markdown's custom SEMANTIC node also returns bare child text,
+    // because markdown has no tag syntax. Pinned so the two stay aligned.
+    expect(mdText(block)).toBe("episodic recall");
+  });
+});
+
 describe("builtInFormatters", () => {
   it("includes markdown, xml, text formatters keyed by their id", async () => {
     const { builtInFormatters } = await import("../index.js");
