@@ -26,6 +26,7 @@ import {
   isTaskHandle,
   McpServerConfigInvalid,
   normalizeToolResult,
+  type McpAuthenticatedUser,
   type McpRequestContext,
   type PromptDeclaration,
   type Prompts,
@@ -335,6 +336,26 @@ export interface McpServerElicitOptions {
 export type McpServerInstructions = string | ((ctx: McpRequestContext) => string | Promise<string>);
 
 /**
+ * The adopter's redaction seam for the ingress identity STAMP — the
+ * `IngressIdentity.user` record that rides `EventScope` on every crossing
+ * operation and therefore lands in the durable journal for the persisted op
+ * classes (`mcp:command:call-tool`, `mcp:command:initialize`).
+ *
+ * Receives the full authenticated record the `Authenticator` resolved; returns
+ * the record to stamp, or `undefined` to stamp none. What it returns is used
+ * VERBATIM — the adopter owns the policy, the framework owns the guarantee that
+ * nothing ELSE reaches the stamp.
+ *
+ * Framework-derived fields are NOT this hook's job: `principal` (always
+ * `user.id`) and `scopes` (always `user.scopes`) are stamped regardless.
+ *
+ * @see McpServerOptions.identityProjection
+ */
+export type McpIdentityProjection = (
+  user: McpAuthenticatedUser,
+) => Readonly<Record<string, unknown>> | undefined;
+
+/**
  * Pluggable security stages. Defaults are transport-aware (stdio +
  * in-memory = allowAll; HTTP/WS = localOnly + rejectAll until config
  * provides explicit auth). Adopters override stages individually.
@@ -409,6 +430,50 @@ export interface McpServerOptions {
   readonly extensions?: McpServerExtensionsOptions;
   /** Security pipeline. Defaults are transport-aware; adopters override stages individually. */
   readonly auth?: McpServerAuthOptions;
+  /**
+   * **The PII / credential redaction seam for the audit trail.** Projects the
+   * authenticated user record onto `IngressIdentity.user` — the value stamped on
+   * every crossing operation's `EventScope`, hence written to the durable
+   * journal for the persisted op classes (`call-tool`, `initialize`) and
+   * published on the bus for every crossing.
+   *
+   * Absent ⇒ the SAFE DEFAULT: only the four fields `McpAuthenticatedUser`
+   * declares (`id`, `displayName`, `roles`, `scopes`). Anything an
+   * `Authenticator` added through the record's open index signature — bearer
+   * tokens, OAuth refresh material, email, tenant rows — is dropped, because
+   * that bag is precisely where credentials live and the framework cannot tell
+   * an adopter's `token` key from its `tenantId` key.
+   *
+   * Supply this hook to stamp MORE (a tenant id your dashboards group by) or
+   * LESS (return `undefined` to stamp no `user` record at all). What you return
+   * is stamped verbatim — including anything sensitive you put in it.
+   *
+   * The full record always remains available IN-PROCESS to tool handlers via
+   * `ctx.mcp.user`; this option governs only what is serialized.
+   *
+   * ```ts
+   * identityProjection: (user) => ({ id: user.id, tenantId: user.tenantId }),
+   * ```
+   *
+   * TODO(identity-projection-home): OPEN PLACEMENT QUESTION — should this hook
+   * ride the AUTHENTICATION component instead of server config? The transport
+   * edge already resolves the tension the other way: `AuthSource.authenticate()`
+   * returns an `IngressIdentity` directly, so at that edge the authenticator's
+   * return value IS the audit stamp and there is nothing to project. Unifying
+   * would give one authentication contract across two edges, with the
+   * authenticator owning both the working record and its safe projection —
+   * which is arguably where the knowledge lives, since whoever mints the record
+   * knows which of its fields are credentials.
+   *
+   * Config-side FOR NOW because: (a) `Authenticator` stays single-purpose —
+   * verification, not serialization policy; (b) redaction policy sits beside its
+   * policy siblings (`auth`, journaling, `capabilities`) rather than inside a
+   * stage; (c) shipped stages (`bearerTokenAuth`, `roleBasedAuthz`) would
+   * otherwise grow pass-through projection options every adopter has to thread.
+   *
+   * @see McpIdentityProjection
+   */
+  readonly identityProjection?: McpIdentityProjection;
   /** Adopter-defined metadata (logging context, deployment tier, etc.). */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Server identification advertised in `initialize`. Default: `{ name, version: "0.0.0" }`. */
@@ -492,6 +557,14 @@ export function validateOptions(options: McpServerOptions): McpServerOptions {
   }
   if (options.auth !== undefined && options.auth !== null && typeof options.auth !== "object") {
     throw invalid("auth must be an object", ["auth"]);
+  }
+  if (
+    options.identityProjection !== undefined &&
+    typeof options.identityProjection !== "function"
+  ) {
+    throw invalid("identityProjection must be a (user) => record | undefined function", [
+      "identityProjection",
+    ]);
   }
   if (
     options.instructions !== undefined &&

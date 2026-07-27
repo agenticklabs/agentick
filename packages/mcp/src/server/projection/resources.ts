@@ -144,6 +144,13 @@ export function installResourcesHandlers(
           // carries the caller's identity + the connection dim. `onFiber`
           // normalizes the Exit exactly like the Promise facade did, so
           // `ResourceNotFound` still arrives as itself.
+          //
+          // ADR 91 — a `ResourceResolver(uri, ctx)` receives the REDACTED trunk identity
+          // (`ctx.identity`, what the journal records) PLUS the `mcp` boundary
+          // facet (`ctx.mcp.user`, the caller's authenticated record with its
+          // credential) — in-fiber only, never serialized. The crossing publishes
+          // it via `withBoundaryFacets`; `currentOperationCtx` folds it in as
+          // `deriveContext`'s extras.
           try {
             const contents = await onFiber(source.fx.read({ uri: request.params.uri }));
             return { contents: contents.map(toWireContents) };

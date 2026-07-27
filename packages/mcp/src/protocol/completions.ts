@@ -1,4 +1,4 @@
-import type { OperationCtx } from "@agentick/spec";
+import type { McpRequestExtras, OperationCtx } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
 /**
@@ -56,6 +56,22 @@ export interface CompletionContext extends OperationCtx {
    * `context.arguments`.
    */
   readonly resolvedArguments: Readonly<Record<string, string>>;
+  /**
+   * The MCP boundary facet — the SAME `ctx.mcp` a tool handler reads
+   * (connection id, transport kind, client info, and the FULL authenticated
+   * user record the `Authenticator` resolved).
+   *
+   * **This is the credential's legitimate home.** `ctx.identity` on the trunk
+   * is the REDACTED projection: it is stamped on the crossing's `EventScope`
+   * and therefore journaled, so it carries identifiers only (see
+   * `McpServerOptions.identityProjection`). This facet is ctx-only — never
+   * serialized, never on an `EventScope` — so a completion handler that must
+   * call a downstream API on the caller's behalf reads the live credential
+   * here: `ctx.mcp?.user?.token`.
+   *
+   * `undefined` when the handler was invoked outside an MCP crossing.
+   */
+  readonly mcp?: McpRequestExtras;
 }
 
 /**

@@ -43,6 +43,60 @@ export const RuntimeContextRef = FiberRef.unsafeMake<RuntimeContext>(EMPTY_CONTE
 /** Effect-native read. */
 export const getContext: Effect.Effect<RuntimeContext> = FiberRef.get(RuntimeContextRef);
 
+// ============================================================================
+// Boundary facets — the in-fiber channel that is NEVER serialized
+// ============================================================================
+
+/**
+ * The FiberRef holding a boundary's NON-TRUNK ctx additions — the channel for a
+ * value a handler seam legitimately needs while the work runs, and that must
+ * NEVER reach an envelope.
+ *
+ * **Why this is not the trunk.** Every enumerable trunk key is copied onto a
+ * child operation's `EventScope` (`inheritScope`), and `EventScope` goes to the
+ * bus and the journal wholesale — no allowlist. So a credential on the trunk is
+ * a credential in the durable journal (the ADR 92 redaction law; the MCP
+ * identity-projection fix exists because of exactly that leak). Boundary facets
+ * ride a SEPARATE ref that `inheritScope` never reads: they reach
+ * `deriveContext`'s `extras` channel — the derived ctx a seam holds in-fiber —
+ * and stop there.
+ *
+ * The canonical member is MCP's `mcp: { user, connectionId }`, where `user`
+ * carries the caller's live credential for a tool handler, a prompt `render`, or
+ * a completion handler to call an upstream API with. Its redacted twin —
+ * identifiers and scopes only — travels as `ctx.identity`, and that is the one
+ * the journal records.
+ *
+ * Substrate-internal: `withBoundaryFacets` is the documented setter, and
+ * `BaseHarness.currentOperationCtx()` is the reader that folds them into a seam
+ * ctx.
+ *
+ * @see docs/proposals/v2/blueprint/91-ctx-spine.md
+ * @see docs/proposals/v2/blueprint/92-operation-grammar-completion.md — redaction
+ */
+export const BoundaryFacetsRef = FiberRef.unsafeMake<Readonly<Record<string, unknown>>>({});
+
+/** Effect-native read of the ambient boundary facets (`{}` when none). */
+export const getBoundaryFacets: Effect.Effect<Readonly<Record<string, unknown>>> =
+  FiberRef.get(BoundaryFacetsRef);
+
+/**
+ * Run `effect` with `facets` added to the ambient boundary facets — the setter a
+ * wire/protocol boundary uses once, around the work it admits.
+ *
+ * Additive and innermost-wins: a nested boundary contributes its own keys
+ * without erasing an outer boundary's, so a crossing that runs inside another
+ * crossing keeps both. Scoped to the fiber, so it unwinds with the boundary.
+ */
+export function withBoundaryFacets<R, E, A>(
+  facets: Readonly<Record<string, unknown>>,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> {
+  return Effect.flatMap(getBoundaryFacets, (outer) =>
+    Effect.locally(BoundaryFacetsRef, { ...outer, ...facets })(effect),
+  );
+}
+
 /**
  * Synchronous accessor for the active runtime context.
  *

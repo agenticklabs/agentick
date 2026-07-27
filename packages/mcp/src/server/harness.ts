@@ -23,6 +23,7 @@ import {
   deriveContext,
   runHarnessProtocol,
   runHarnessProtocolOn,
+  withBoundaryFacets,
   ulid,
   withCallMiddleware,
   type Unsubscribe,
@@ -66,6 +67,7 @@ import {
   resolvePromptsOption,
   resolveResourcesOption,
   resolveToolsOption,
+  type McpIdentityProjection,
   type McpServerOptions,
   type PromptsFilter,
   type ResolvedCompletionsOptions,
@@ -151,20 +153,55 @@ const MCP_SERVER_JOURNALING_POLICY: JournalingPolicy = {
 };
 
 /**
+ * The ONLY fields the default identity projection copies out of an
+ * authenticated user record: the four `McpAuthenticatedUser` DECLARES. Every
+ * other key on the record arrived through that interface's open index signature
+ * — the adopter's own bag — which is exactly where credentials, tokens and PII
+ * live. The stamp is journaled, so the default copies nothing it cannot name.
+ *
+ * @see toIngressIdentity — and `identityProjection` for the adopter's override.
+ */
+const DECLARED_USER_FIELDS = ["id", "displayName", "roles", "scopes"] as const;
+
+/**
  * Project an authenticated MCP user onto the trunk's structured ingress
- * identity (ADR 34/51). `principal` is the scalar identity-scope key; `user` is
- * the adopter-shaped record; `scopes` are the credential's grants. Identifiers
- * and scopes only — never the credential itself.
+ * identity (ADR 34/51). `principal` is the scalar identity-scope key; `scopes`
+ * are the credential's grants; `user` is the redacted record.
+ *
+ * **The redaction law (ADR 92).** This value rides `EventScope` on every
+ * crossing operation, and `mcp:command:call-tool` / `mcp:command:initialize`
+ * are the PERSISTED op classes — so whatever lands in `user` is written to the
+ * durable journal on every tool call and every connection. The default
+ * projection is therefore STRUCTURAL, not a post-hoc scrub: it copies the four
+ * fields {@link DECLARED_USER_FIELDS} names and nothing else. An adopter
+ * authenticator that hangs a live bearer token off the record's open bag (the
+ * common shape — tool handlers need it, see `ctx.mcp.user`) cannot leak it here,
+ * because the default never reads a key it cannot name.
+ *
+ * `projection` is the adopter's override — see
+ * {@link McpServerOptions.identityProjection}. What it returns becomes `user`
+ * verbatim; `undefined` omits `user` entirely. `principal` and `scopes` stay
+ * framework-derived either way.
  */
 function toIngressIdentity(
   user: McpAuthenticatedUser | null | undefined,
+  projection?: McpIdentityProjection,
 ): IngressIdentity | undefined {
   if (user === null || user === undefined) return undefined;
   return omitUndefined({
     principal: user.id,
-    user: { ...user } as Readonly<Record<string, unknown>>,
+    user: projection ? projection(user) : declaredFieldsOnly(user),
     scopes: user.scopes,
   });
+}
+
+/** The default projection: a fresh record carrying only the declared fields. */
+function declaredFieldsOnly(user: McpAuthenticatedUser): Readonly<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const field of DECLARED_USER_FIELDS) {
+    if (user[field] !== undefined) out[field] = user[field];
+  }
+  return out;
 }
 
 /**
@@ -215,6 +252,13 @@ export class McpServerHarness
 
   /** Resolved security stack (transport-aware defaults + adopter config). */
   private readonly security: ResolvedSecurity;
+
+  /**
+   * Adopter override for the journaled identity stamp (see
+   * {@link McpServerOptions.identityProjection}). `undefined` ⇒ the safe
+   * declared-fields-only default in {@link toIngressIdentity}.
+   */
+  private readonly identityProjection: McpIdentityProjection | undefined;
 
   /**
    * Resolved tools projection — registry + handler resolver + filter +
@@ -428,6 +472,7 @@ export class McpServerHarness
       this.options.auth,
       this.options.transports.map((t) => t.kind),
     );
+    this.identityProjection = this.options.identityProjection;
   }
 
   // ─────────── Read-side surface ───────────
@@ -581,7 +626,7 @@ export class McpServerHarness
     }
 
     const connectionId = `conn:${ulid()}`;
-    const identity = toIngressIdentity(info.authenticatedUser);
+    const identity = toIngressIdentity(info.authenticatedUser, this.identityProjection);
     const scope: EventScope = omitUndefined({
       mcpServerId: this.scopeId,
       mcpConnectionId: connectionId,
@@ -880,7 +925,7 @@ export class McpServerHarness
       // The CROSSING ctx — the same connection, now carrying the identity
       // admission resolved. Minted (not spread over the admission ctx) so the
       // whole composition stays branded and the lazy facets stay lazy.
-      const identity = toIngressIdentity(authn.user);
+      const identity = toIngressIdentity(authn.user, this.identityProjection);
       const ctx = buildRequestContext(
         omitUndefined({ user: authn.user, identity, progressToken: crossing.progressToken }),
       );
@@ -912,25 +957,43 @@ export class McpServerHarness
       });
 
       const opEffect = this.runOperation(op, (input) =>
-        Effect.gen(this, function* () {
-          // ADR 64/78/91 — bind the ctx to the RUNNING op: the captured runtime
-          // parents `ctx.trace` spans and makes `ctx.run` a child op, and the
-          // op's trunk coordinates (opId as the child's parentOpId) land on the
-          // ctx the handler reads.
-          const runtime = yield* Effect.runtime<never>();
-          this.defineOperationFacets(ctx, scope, runtime, command);
-          // The crossing is a ROOT op (it is driven from the SDK's own
-          // callback, outside any fiber), so there is no parentOpId to stamp —
-          // only its own opId, which the handler reads and its `ctx.run`
-          // children inherit as THEIR parent.
-          Object.assign(ctx, { opId: op.opId });
-          // The same captured runtime, handed to the body as the seam for
-          // composing harness `.fx` twins ON THIS FIBER (ADR 92 §Slice A) — the
-          // projection's resource reads / prompt renders inherit the trunk
-          // instead of re-entering Effect as orphaned roots.
-          const onFiber: OnCrossingFiber = (effect) => runHarnessProtocolOn(runtime, effect);
-          return yield* crossingBody(crossing.run, ctx, onFiber)(input);
-        }),
+        // ADR 91 — publish the crossing's `mcp` facet as a BOUNDARY facet BEFORE
+        // the runtime is captured, so the captured runtime carries it: the seams
+        // that mint their own ctx from the ambient fiber
+        // (`PromptDeclaration.render`, a `ResourceResolver`, via
+        // `BaseHarness.currentOperationCtx`) then reach the caller's
+        // authenticated record — credential included — exactly as a tool handler
+        // does. Wrapping INSIDE the capture would publish it to a fiber the
+        // seams never run on (they run on the captured runtime via `onFiber`).
+        //
+        // Deliberately NOT on the trunk: trunk keys are copied onto every child
+        // op's `EventScope` and therefore into the bus and the journal
+        // (`inheritScope`, no allowlist), which is the leak `identityProjection`
+        // exists to close. Boundary facets ride `deriveContext`'s extras channel
+        // and stop at the seam's own ctx. What the journal records is
+        // `identity` — the redacted twin.
+        withBoundaryFacets(
+          { mcp: ctx.mcp },
+          Effect.gen(this, function* () {
+            // ADR 64/78/91 — bind the ctx to the RUNNING op: the captured runtime
+            // parents `ctx.trace` spans and makes `ctx.run` a child op, and the
+            // op's trunk coordinates (opId as the child's parentOpId) land on the
+            // ctx the handler reads.
+            const runtime = yield* Effect.runtime<never>();
+            this.defineOperationFacets(ctx, scope, runtime, command);
+            // The crossing is a ROOT op (it is driven from the SDK's own
+            // callback, outside any fiber), so there is no parentOpId to stamp —
+            // only its own opId, which the handler reads and its `ctx.run`
+            // children inherit as THEIR parent.
+            Object.assign(ctx, { opId: op.opId });
+            // The same captured runtime, handed to the body as the seam for
+            // composing harness `.fx` twins ON THIS FIBER (ADR 92 §Slice A) — the
+            // projection's resource reads / prompt renders inherit the trunk
+            // instead of re-entering Effect as orphaned roots.
+            const onFiber: OnCrossingFiber = (effect) => runHarnessProtocolOn(runtime, effect);
+            return yield* crossingBody(crossing.run, ctx, onFiber)(input);
+          }),
+        ),
       );
       // `runHarnessProtocol` unwraps the Exit so a rejected stage throws its
       // ORIGINAL `McpServerError` — the SDK serializer sees the same value it

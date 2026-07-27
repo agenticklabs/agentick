@@ -119,6 +119,13 @@ export function installPromptsHandlers(
           // `render(args, ctx)` receives an `OperationCtx` carrying the caller's
           // identity + the connection dim. Through the Promise facade the render
           // re-entered Effect on a fresh root fiber and saw neither.
+          //
+          // ADR 91 — `render(args, ctx)` receives the REDACTED trunk identity
+          // (`ctx.identity`, what the journal records) PLUS the `mcp` boundary
+          // facet (`ctx.mcp.user`, the caller's authenticated record with its
+          // credential) — in-fiber only, never serialized. The crossing publishes
+          // it via `withBoundaryFacets`; `currentOperationCtx` folds it in as
+          // `deriveContext`'s extras.
           const result: PromptsGetResult = await onFiber(
             options.source.fx.render({
               name: request.params.name,

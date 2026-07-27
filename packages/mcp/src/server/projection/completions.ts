@@ -74,16 +74,25 @@ export function installCompletionsHandlers(
         params: { ref: ref.type, argument: argument.name },
         // The crossing threads its authenticated ctx (ADR 91 §2 / ADR 92 §Slice
         // A) so the completion handler sees the SAME trunk the request carries —
-        // the request's `identity` + `mcp.user` plus the `log`/`trace`/`run`
-        // facets, with `ctx.run` minting CHILD ops of this crossing. A DB-backed
-        // completion scopes its query to the authenticated principal off this
-        // ctx; a prefix-match handler ignores everything but `resolvedArguments`.
+        // the request's redacted `identity` plus the `log`/`trace`/`run` facets,
+        // with `ctx.run` minting CHILD ops of this crossing. It also carries the
+        // `mcp` BOUNDARY FACET verbatim (`CompletionContext.mcp`): a ctx-only,
+        // never-serialized handle on the full authenticated record, which is
+        // where a handler that must call a downstream API on the caller's behalf
+        // reads the live credential. A DB-backed completion scopes its query to
+        // `ctx.identity.principal`; a prefix-match handler ignores everything but
+        // `resolvedArguments`.
         run: async (_input, ctx): Promise<CompleteResult> => {
           const handler = resolveHandler(options, ref, argument.name);
           if (!handler) {
             return { completion: { values: [] } };
           }
 
+          // TODO(adr91-brand): this spread erases the `Derived` brand and eagerly
+          // FORCES the five lazy facet getters. Correct-but-eager today because
+          // the projection holds no `ContextFacets` to re-mint with; the fix is
+          // for `runCrossing` to expose a per-crossing `derive(extras)` seam so
+          // the boundary's own field composes INTO the branded mint.
           const raw = await handler(argument.value, { ...ctx, resolvedArguments });
           const result = normalizeCompletionResult(raw);
           // CompletionResult uses readonly arrays; the SDK wire type wants

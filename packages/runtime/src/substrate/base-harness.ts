@@ -74,7 +74,7 @@ import {
 } from "@agentick/spec";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
 import { ulid } from "./ulid.js";
-import { getContext, type RuntimeContext } from "./runtime-context.js";
+import { getBoundaryFacets, getContext, type RuntimeContext } from "./runtime-context.js";
 import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
 import {
   createCommandRunner,
@@ -1349,7 +1349,14 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     return Effect.gen(this, function* () {
       const parent = yield* getContext;
       const runtime = yield* Effect.runtime<never>();
-      return deriveContext(parent, this.operationFacets(parent, runtime, parent.op));
+      // Boundary facets ride the `extras` channel, NOT the trunk: the trunk is
+      // copied onto every child op's `EventScope` and therefore into the bus and
+      // journal, while extras stop at the derived ctx the seam holds in-fiber.
+      // That is what lets a starved seam (a `PromptDeclaration.render`, a
+      // `ResourceResolver`) reach a caller credential the journal must never
+      // see. `{}` when no boundary contributed any.
+      const boundary = yield* getBoundaryFacets;
+      return deriveContext(parent, this.operationFacets(parent, runtime, parent.op), boundary);
     });
   }
 

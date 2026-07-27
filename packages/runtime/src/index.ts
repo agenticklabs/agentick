@@ -92,9 +92,12 @@ export {
 } from "./substrate/base-harness.js";
 export {
   EMPTY_CONTEXT,
+  BoundaryFacetsRef,
   RuntimeContextRef,
+  getBoundaryFacets,
   getContext,
   readContext,
+  withBoundaryFacets,
   withContext,
   type RuntimeContext,
   type RuntimeContextUser,

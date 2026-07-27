@@ -68,6 +68,7 @@ interface McpServerOptions {
 
   readonly capabilities?: McpServerCapabilitiesOptions; // opt-OUTs only
   readonly auth?: McpServerAuthOptions; // five-stage pipeline
+  readonly identityProjection?: McpIdentityProjection; // what the audit trail records about the caller
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly serverInfo?: { name: string; version: string };
 }
@@ -397,28 +398,39 @@ A veto blocks the handler before it runs and terminates the op `vetoed`.
 
 ### Identity reaches every handler seam
 
-**ADR 91 stop-rule #2 is closed.** Over the wire, every seam an adopter
-writes receives an `OperationCtx` whose TRUNK carries the request's
-authenticated identity:
+Over the wire, every seam an adopter writes receives a context whose **trunk**
+carries the request's authenticated identity — `ctx.identity.principal`,
+`ctx.identity.scopes`, and the connection dimension.
 
-| Seam                                | How it is reached                          |
-| ----------------------------------- | ------------------------------------------ |
-| tool handler                        | the crossing's branded ctx, directly       |
-| completion handler                  | the crossing's branded ctx, directly       |
-| `ResourceResolver` (fixed/template) | through `resources:command:read`, in-fiber |
-| `PromptDeclaration.render`          | through `prompts:command:render`, in-fiber |
+A subset of seams additionally carries the **`mcp` boundary facet**
+(`ctx.mcp`): the connection metadata plus the FULL authenticated record the
+`Authenticator` resolved, credential included. The trunk identity is
+serialized (it is stamped on every crossing operation, so it lands in the
+audit trail and is redacted accordingly — see
+[Redacting the identity stamp](#redacting-the-identity-stamp)); the facet is
+never serialized, which is what makes it safe to carry a live token.
 
-The last two used to be blind. A resolver is not called by the projection —
-it is called by the resources harness, one command deeper. Through the
-harness's Promise facade (`resources.read(uri)`) that command re-entered
-Effect on a fresh ROOT fiber inheriting no `FiberRef`: it journaled as an
-orphaned root and the resolver saw no identity. The projections now compose
-the harness's Effect-canonical twin (`source.fx.read(...)`,
-`source.fx.render(...)`) on the runtime captured INSIDE the crossing
-operation, so the trunk flows. The inner command is a real linked record —
-`parentOpId` = the crossing's `opId`, connection dimension and identity
-inherited — and `currentOperationCtx()` in the harness derives the
-resolver's ctx from it.
+| Seam                                                | Trunk identity | `ctx.mcp` facet | How it is reached                          |
+| --------------------------------------------------- | -------------- | --------------- | ------------------------------------------ |
+| tool handler                                        | yes            | yes             | the crossing's branded ctx, directly       |
+| tools / prompts / resources per-connection `filter` | yes            | yes             | the crossing's branded ctx, directly       |
+| completion handler                                  | yes            | yes             | the crossing's branded ctx, directly       |
+| `ResourceResolver` (fixed/template)                 | yes            | yes             | through `resources:command:read`, in-fiber |
+| `PromptDeclaration.render`                          | yes            | yes             | through `prompts:command:render`, in-fiber |
+
+The last two are not called by the projection — they are called by Resources
+and Prompts, one command deeper. Through those harnesses' Promise facade
+(`resources.read(uri)`) the command re-entered Effect on a fresh root fiber
+inheriting nothing: it journaled as an orphaned root and the seam saw no
+identity at all. The projections now compose the Effect-canonical twin
+(`source.fx.read(...)`, `source.fx.render(...)`) on the runtime captured
+INSIDE the crossing operation, so the trunk flows. The inner command is a real
+linked record — `parentOpId` = the crossing's `opId`, connection dimension and
+identity inherited — and the ctx those seams receive is derived from it. The
+`mcp` facet reaches them on a channel of its own: the crossing publishes it as a
+**boundary facet**, which the runtime folds into any context derived on that
+fiber but never copies onto an operation's event scope. So the credential is
+reachable one command deeper without ever being serializable.
 
 ```ts
 resources.register("knowify://me", async (uri, ctx) => {
@@ -426,12 +438,75 @@ resources.register("knowify://me", async (uri, ctx) => {
   const principal = ctx?.identity?.principal;
   return [{ uri, text: await profileFor(principal) }];
 });
+
+// A completion handler that must call a downstream API as the caller reads
+// the credential off the facet, not off the trunk.
+const completions = {
+  prompts: {
+    invoice: {
+      customer: async (typed: string, ctx: CompletionContext) => {
+        const token = ctx.mcp?.user?.token as string | undefined;
+        return { values: await searchCustomers(typed, token) };
+      },
+    },
+  },
+};
 ```
 
-Verified by `crossing-operations.spec.ts` §3 — a real SDK client over an
-in-memory transport pair, asserting the resolver's / render's `ctx.identity`,
-`ctx.mcpConnectionId` and `ctx.parentOpId` against the crossing op observed
-on the bus.
+---
+
+### Redacting the identity stamp
+
+Every crossing operation stamps an `identity` record on its event scope, and
+`tools/call` + `initialize` are the **persisted** operation classes — so
+whatever the stamp carries is written to the durable journal on every tool
+call and every connection.
+
+`McpAuthenticatedUser` has an open index signature, and adopters use it: an
+`Authenticator` that resolves a bearer token routinely hangs the token, OAuth
+refresh material, or a whole user row off the record so tool handlers can act
+on the caller's behalf. **None of that belongs in the journal.**
+
+The default projection is therefore structural, not a post-hoc scrub. Only
+the four fields `McpAuthenticatedUser` declares are copied:
+
+| Stamped field        | Value                                                       |
+| -------------------- | ----------------------------------------------------------- |
+| `identity.principal` | `user.id`                                                   |
+| `identity.scopes`    | `user.scopes`                                               |
+| `identity.user`      | `{ id, displayName, roles, scopes }` — declared fields only |
+
+Everything else on the record is dropped, because the framework cannot tell
+an adopter's `token` key from its `tenantId` key. The full record stays
+reachable in-process on `ctx.mcp.user`.
+
+Override with `identityProjection` — the PII / credential redaction seam.
+What it returns becomes `identity.user` verbatim; `principal` and `scopes`
+stay framework-derived:
+
+```ts
+const server = new McpServerHarness(scopeId, journal, bus, inbox, {
+  name: "my-server",
+  transports: [httpTransport({ port: 8080 })],
+  auth: { authenticator: bearerTokenAuth({ verify: introspect }) },
+
+  // Stamp a tenant id your dashboards group by — and nothing else.
+  identityProjection: (user) => ({ id: user.id, tenantId: user.tenantId }),
+});
+```
+
+Return `undefined` to stamp no `user` record at all. Whatever you return IS
+serialized, so a hook that copies the token puts the token in the journal —
+the hook owns the policy, the framework guarantees nothing else reaches the
+stamp.
+
+> [!NOTE]
+> The transport edge draws the same line one step earlier: an `AuthSource`
+> returns an `IngressIdentity` directly, so its return value **is** the stamp —
+> there is no projection step to configure, and a credential placed in its
+> `user` record is a credential in the journal. Same rule, two edges: never put
+> the credential in `user`. See
+> [@agentick/transport](../../../transport#ingress-authentication).
 
 ---
 
@@ -665,6 +740,15 @@ interface McpRequestContext extends ToolHandlerCtx {
 }
 ```
 
+> [!IMPORTANT]
+> `ctx.mcp.user` and `ctx.identity` are not the same view of the caller.
+> `ctx.mcp.user` is the full record the `Authenticator` returned — open bag
+> and all — and lives only in this process. `ctx.identity` is the redacted
+> projection that rides the operation's event scope into the audit trail. Read
+> credentials off `ctx.mcp.user`; read the caller's identity for logging,
+> scoping, or authorization off `ctx.identity`. See
+> [Redacting the identity stamp](#redacting-the-identity-stamp).
+
 ---
 
 ## Capability advertisement
@@ -750,6 +834,8 @@ with #171g.
 | `createConnectionLogState` / `LOG_LEVEL_SEVERITY` / `ConnectionLogState`                                                                                                                       | Per-connection log-level state + syslog severity ordering (ADR 64)                                                                       |
 | `buildMcpElicit` / `inspectElicitationCapabilities`                                                                                                                                            | MCP-flavored `Elicit` sugar factory (ADR 43)                                                                                             |
 | `bearerTokenAuth` / `allowListGuard` / `roleBasedAuthz` / `slidingWindowLimiter`                                                                                                               | Built-in security stages                                                                                                                 |
+| `McpIdentityProjection`                                                                                                                                                                        | The PII / credential redaction seam for the journaled identity stamp                                                                     |
+| `ToolsFilter` / `PromptsFilter` / `ResourcesFilter`                                                                                                                                            | Per-connection visibility predicates — receive the full request context                                                                  |
 | `inMemoryServerTransport`                                                                                                                                                                      | In-process transport for tests                                                                                                           |
 | `ElicitationCancelled` / `ElicitationDeclined` / `ElicitationNotSupported` / `UrlElicitationRequired`                                                                                          | Elicit error classes (re-exports)                                                                                                        |
 
@@ -829,6 +915,36 @@ resource_metadata="…"` (derived url AND explicit `resourceMetadataUrl`)
   crossing; a rejected admission emits `mcpServer:admission:failed` with no
   crossing op and no credential material; and the four security stages run
   in order on the guard seam with the sanitizer scoped to tool calls only.
+- `__tests__/identity-redaction.spec.ts` — the redaction law over a real
+  authenticated round-trip (real `bearerTokenAuth`, real SDK `Client`, a user
+  record carrying a bearer token on the open bag): the FULL serialized journal
+  and the FULL serialized bus contain no occurrence of the credential or any
+  fragment of it, each with a non-vacuity guard proving the capture holds the
+  crossing ops and the principal; the default projection copies the four
+  declared fields and drops the open bag on both `call-tool` and the
+  pre-gate-authenticated `initialize`; `identityProjection` replaces
+  `identity.user` verbatim while `principal` + `scopes` stay
+  framework-derived; `undefined` omits `identity.user`; and the full record
+  still reaches the tool handler on `ctx.mcp.user`.
+- `__tests__/identity-facet.spec.ts` — which seams carry the `ctx.mcp`
+  boundary facet: tool handler, all three per-connection filters (tools,
+  prompts, resources), and completion handler all read `ctx.mcp.user.token`
+  over a real authenticated crossing (typed, no cast); the prompt-render and
+  resource-resolver seams reach the same credential through the boundary facet
+  one command deeper while their trunk identity stays redacted; and with all
+  five crossings exercised and the facet actually read, neither the bus nor the
+  journal contains the credential.
+
+## Roadmap & known gaps
+
+- **Elicitation is tool-only.** A `PromptDeclaration.render` receives no
+  `elicit` seam, so a render that needs to disambiguate an argument with the
+  user cannot ask — it has to resolve or fall back. Server-initiated
+  elicitation from a render is unbuilt.
+- **`initialize` stamps an identity only when the transport forward-derives
+  one.** The HTTP pre-gate does; trusted transports (stdio, in-memory) have
+  no credential to resolve at accept time, so the connection crossing carries
+  the connection dimension without an `identity`.
 
 ## See also
 
