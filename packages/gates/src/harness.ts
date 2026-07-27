@@ -41,7 +41,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, getContext } from "@agentick/runtime";
+import { BaseHarness, getContext, type BaseHarnessOptions } from "@agentick/runtime";
 import type {
   EventBus,
   MessageEnvelope,
@@ -67,7 +67,7 @@ const SURFACE = "gates" as const;
  * builds. The harness is a thin front-end: it owns no state of its own beyond
  * the controller, so its deps ARE the controller's.
  */
-export interface GatesHarnessDeps extends GatesControllerDeps {}
+export interface GatesHarnessDeps extends GatesControllerDeps, BaseHarnessOptions {}
 
 /** Wire input for `gates:clear`. */
 export interface GatesClearInput {
@@ -118,7 +118,11 @@ export class GatesHarness extends BaseHarness<"gates"> {
     inbox: MessageInbox,
     deps: GatesHarnessDeps,
   ) {
-    super(SURFACE, scopeId, journal, bus, inbox);
+    // ADR 93 landmine 11 — the interceptor fold reaches this harness's commands
+    // (`gates:clear` / `:defer` / `:override`) so `app.guard()` /
+    // `createApp({ hooks, guards })` wrap them. Gates used to construct `super`
+    // with no options at all.
+    super(SURFACE, scopeId, journal, bus, inbox, deps);
     this.controller = new GatesController(deps);
 
     const scope = () => ({ sessionId: this.scopeId });

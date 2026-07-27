@@ -1,48 +1,50 @@
 /**
- * `withTimeline()` — `SessionExtension` factory for the TimelineHarness.
+ * `withTimeline()` — the DYNAMIC install form for the TimelineHarness.
  *
- * Constructs a `TimelineHarness` per-session at session install time,
- * wired to the session's substrate. The session's required-set contract
- * guarantees this slot exists; adopters who want a custom implementation
- * (e.g., durable journaled persistence) pass their own `withTimeline({...})`.
+ * Two ways to configure a session's timeline, one type:
  *
- * **Wiring status (ADR 26 Step 8 — pending).** SessionInstaller exists
- * in the spec; SessionHarness doesn't drive session-targeted extensions
- * through it yet. Today the SessionHarness constructs TimelineHarness
- * directly in `session-bridges.ts`. When Step 8 lands, that direct
- * construction is replaced by an array of default `SessionExtension`s —
- * `[withTimeline(), withKnobs(), withState()]` — that the installer
- * resolves at session construction, and adopters override any of them
- * by passing a configured variant in `AppHarnessOptions.extensions`.
+ *   - `createApp({ timeline: defineTimeline({...}) })` — the top-level SLOT
+ *     (ADR 93), lit by this package's `augment.ts`. The normal path: the
+ *     definition flows down to the ONE harness the session constructs for its
+ *     required bridge set.
+ *   - `extensions: [withTimeline({...})]` — the fully-dynamic escape hatch
+ *     (runtime-built arrays, conditional composition). Installs a harness and
+ *     registers it as the session's `timeline` namespace, OVERRIDING the
+ *     session's own. Prefer the slot unless you need the dynamism.
+ *
+ * Both take the SAME {@link TimelineDefinition} — "the definition IS the
+ * options" (ADR 93 §Composition ruling). A live `TimelineHarnessProtocol` is
+ * also accepted: the BYO / single-session escape hatch, whose lifecycle the
+ * adopter owns (so it is NOT closed on session close, and genesis is NOT run —
+ * an instance the adopter built is an instance the adopter has already prepared).
+ *
+ * @see docs/proposals/v2/blueprint/93-namespace-definitions.md
+ * @see ./augment.ts — the top-level slot registration
  */
 
-import type {
-  CompactStrategy,
-  SessionExtension,
-  SessionInstaller,
-  TimelineEntry,
-  TimelineStore,
-} from "@agentick/spec";
+import type { SessionExtension, SessionInstaller, TimelineHarnessProtocol } from "@agentick/spec";
+import { inheritedFrom } from "@agentick/runtime";
 import { TimelineHarness } from "./harness.js";
+import { isTimelineHarnessInstance, type TimelineDefinition } from "./definition.js";
 
-export interface WithTimelineOptions {
-  /**
-   * Initial persisted entries seeded at construction. Ignored when a
-   * `store` is supplied — the durable log is the authority and is
-   * hydrated instead (ADR 49 open-or-rehydrate).
-   */
-  readonly initial?: readonly TimelineEntry[];
-  /** Durable append-log adapter for the persisted tier (ADR 49). */
-  readonly store?: TimelineStore;
-  /** `"behind"` (default; write-behind pump + flush barrier) | `"through"`. */
-  readonly writePolicy?: "behind" | "through";
-  /**
-   * Construction-bound default compaction strategy (ADR 51 signal
-   * form) — `timeline.compact()` with no argument, including a bare
-   * `timeline:compact` verb over the inbox, runs it.
-   */
-  readonly compact?: CompactStrategy;
-}
+/**
+ * What `withTimeline` / the `timeline` slot accept — the ADR-42 dichotomy, no
+ * third form: a DEFINITION (declarative, inert until install, constructed
+ * per-session) or a LIVE INSTANCE (the adopter owns its lifecycle).
+ */
+export type TimelineConfig = TimelineDefinition | TimelineHarnessProtocol;
+
+/**
+ * Options `withTimeline` accepts. An alias of {@link TimelineDefinition} — kept
+ * as a name because `withX` options types are part of the adopter vocabulary,
+ * but structurally identical: there is one shape, not a parallel one.
+ *
+ * `initial` is GONE (ADR 93): seeding is genesis. `withTimeline({ initial:
+ * entries })` becomes `withTimeline({ hydrate: async () => entries })` — the
+ * same effect, through the one seam, and now composable with a store, a
+ * principal, and the journal.
+ */
+export type WithTimelineOptions = TimelineDefinition;
 
 // TODO(tools-sweep / three-audiences-plan §D): a `src/tools.ts` shipping
 // model-facing `timeline_*` tools (e.g. `timeline_compact`) would slot in
@@ -53,38 +55,39 @@ export interface WithTimelineOptions {
 // filler. When added: register via `installer.registerToolHandler` +
 // `registerExtensionTool`, reach the harness through a `ctx.timeline` slot
 // (NOT `ctx.session`), and add the `ToolHandlerCtxExtensions` augmentation.
-export function withTimeline(options: WithTimelineOptions = {}): SessionExtension {
+export function withTimeline(config: TimelineConfig = {}): SessionExtension {
   return {
     name: "@agentick/timeline",
     target: "session",
     install: async (installer: SessionInstaller) => {
+      // ── Live-instance arm: register and get out of the way. The adopter owns
+      // construction, genesis, and teardown — we do not close what we did not
+      // open, and we do not re-run genesis on an already-prepared instance.
+      if (isTimelineHarnessInstance(config)) {
+        installer.registerNamespace("timeline", config);
+        return;
+      }
+
+      // ── Definition arm: construct THIS session's harness from the plan.
       const harness = new TimelineHarness(
         `${installer.hostId}:timeline`,
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
         {
-          ...(options.store !== undefined ? { store: options.store } : {}),
-          ...(options.writePolicy !== undefined ? { writePolicy: options.writePolicy } : {}),
-          ...(options.compact !== undefined ? { compact: options.compact } : {}),
+          ...config,
+          // ADR 93 landmine 11 — the cascade must be TOTAL. An extension-installed
+          // namespace inherits the app/session interceptor cascade through the
+          // installer's handle, exactly like a session-constructed bridge does;
+          // without this an app `guard`/`hook` silently skips it.
+          ...inheritedFrom(installer),
         },
       );
       await harness.ready;
-
-      if (options.store !== undefined) {
-        // Open-or-rehydrate (ADR 49): the durable log is the authority.
-        await harness.hydrate();
-      } else if (options.initial && options.initial.length > 0) {
-        await harness.importSnapshot(
-          {
-            persisted: options.initial,
-            projection: options.initial,
-            persistedVersion: options.initial.length,
-            projectionVersion: options.initial.length,
-          },
-          { mode: "as-is" },
-        );
-      }
+      // GENESIS (ADR 93) — before the harness is visible to any renderer.
+      // `hydrate()` is a no-op when the definition configures neither a store
+      // nor a hydrator, so the store-less default path stays zero-cost.
+      await harness.hydrate();
 
       installer.registerNamespace("timeline", harness);
       installer.onClose(() => harness.close());

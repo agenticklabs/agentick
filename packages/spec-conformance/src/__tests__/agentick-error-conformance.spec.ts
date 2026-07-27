@@ -77,7 +77,7 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
   ["ProjectionFailed", () => new Errors.ProjectionFailed({ reason: "test" })],
   ["Unknown", () => new Errors.UnknownExecutorError({ cause: new Error("test") })],
   ["CompactHandlerFailed", () => new Errors.CompactHandlerFailed({ cause: new Error("test") })],
-  ["RehydrateStrategyMissing", () => new Errors.RehydrateStrategyMissing({ reason: "test" })],
+  ["TimelineHydrateFailed", () => new Errors.TimelineHydrateFailed({ cause: "test" })],
 
   // Domain harness cluster
   ["ToolNotFoundError", () => new Errors.ToolNotFoundError({ toolName: "t1", registered: ["t2"] })],

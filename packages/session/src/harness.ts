@@ -117,7 +117,7 @@ import {
 import type { KnobsHandle } from "@agentick/knobs";
 import type { GateHandle, GatesHandle } from "@agentick/gates";
 import type { StateHandle } from "@agentick/state";
-import type { TimelineHandle, TimelineHarnessOptions } from "@agentick/timeline";
+import type { TimelineDefinition, TimelineHandle } from "@agentick/timeline";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { wireLifecycleProjection, type LifecycleProjection } from "./lifecycle-projection.js";
@@ -233,18 +233,22 @@ export interface SessionHarnessOptions<P = unknown> {
    * Timeline durability + policy slots (ADR 49 / A2.2), threaded to the
    * per-session `TimelineHarness`:
    *   - `store` — the shared durable append-log adapter (one instance
-   *     serves all sessions, keyed by scope). Supplying it makes
-   *     session construction **open-or-rehydrate**: the persisted tier
-   *     is loaded from the store before first render.
+   *     serves all sessions, keyed by scope).
+   *   - `hydrate` — the GENESIS seam (ADR 93). Defaults to
+   *     `hydrateFromStore()` when a store is present (ADR 49
+   *     open-or-rehydrate, preserved); `hydrateTail(n)` bounds it.
    *   - `writePolicy` — `"behind"` (default) | `"through"`.
-   *   - `compact` — the construction-bound default compaction strategy
+   *   - `compact` — the construction-bound default compaction
    *     (ADR 51 signal form): `timeline.compact()` with no argument —
    *     including a bare `timeline:compact` verb over the inbox/wire —
-   *     runs it.
-   * Flows from `createApp({ session: { timeline } })` via
-   * SessionDefaults.
+   *     runs it. Takes the `(entries, ctx)` sugar or a `CompactStrategy`.
+   *   - `hooks` / `guards` — namespace-local interceptor bags with
+   *     drop-layer keys (`onBeforeAppend`, `guards: { append }`).
+   *
+   * Flows from the TOP-LEVEL `createApp({ timeline })` slot (ADR 93) via
+   * SessionDefaults — `createApp({ session: { timeline } })` is GONE.
    */
-  readonly timeline?: Pick<TimelineHarnessOptions, "store" | "writePolicy" | "compact">;
+  readonly timeline?: TimelineDefinition;
   /** Scope ceiling (#199) — construction-bound, checked at the wire
    *  dispatch gate. See SessionHarnessProtocol.requiredScopes. */
   readonly requiredScopes?: readonly string[];
@@ -659,6 +663,18 @@ export class SessionHarness<P = unknown>
 
   private _closed = false;
   private _mountReady: Promise<void>;
+  /**
+   * GENESIS barrier (ADR 93) — resolves once every store-bearing namespace's
+   * `hydrate(ctx)` has run (or immediately, when none is configured or this is a
+   * fork/spawn-inherit). The App AWAITS this at `createSession`, so a hydrator
+   * that throws fails session CREATION with its typed error instead of surfacing
+   * later as a mount rejection: landmine 2, "no half-genesis session".
+   *
+   * Distinct from {@link mountReady} on purpose. Genesis must complete before
+   * the first render (the mount chains behind it), but the mount itself stays
+   * un-awaited at create — that latency is deliberate.
+   */
+  private readonly _genesisReady: Promise<void>;
   /** #199 — structural scope ceiling, surfaced for the dispatch gate. */
   readonly requiredScopes?: readonly string[] | undefined;
   /** Injected model registry (#206) — window resolution for useContextInfo. */
@@ -950,21 +966,34 @@ export class SessionHarness<P = unknown>
       this.onClose(() => sig.removeEventListener("abort", onAbort));
     }
 
-    // Open-or-rehydrate (ADR 49 §Hydration): when a durable store was
-    // injected, load the session's persisted log into the timeline
-    // BEFORE first render — the mount's first render must see the
-    // resumed conversation, and Class B state reconstructs from it.
-    // Without an injected store there is nothing durable to load
-    // (the bundled in-memory default is empty per-construction) and
-    // the chain is a resolved promise — zero-cost hot path.
-    const hydrated: Promise<void> =
-      options.timeline?.store !== undefined ? this.bridges.timeline.hydrate() : Promise.resolve();
+    // ─── GENESIS (ADR 93) ────────────────────────────────────────────────
+    //
+    // Run every store-bearing namespace's `hydrate(ctx)` HERE: after identity
+    // stamping (the runtime + bridges exist, so `ctx.sessionId`/`principal` are
+    // real), before first render (the mount chains behind this promise, so the
+    // first render sees the resumed conversation and Class B state reconstructs
+    // from it), and before any append.
+    //
+    // **The fork law (landmine 1).** A session that INHERITS its parent's image
+    // — a `spawn()`ed child, and therefore a `fork()` too (a fork is spawn +
+    // restore) — must NOT re-run genesis: the parent's entries arrive via
+    // `restore(snapshot)`, and a second genesis would duplicate them or diverge
+    // from them. Lineage is the discriminator, and only this layer knows it.
+    // Genesis runs on CREATE and RESUME; never on FORK / SPAWN-inherit.
+    const inheritsParentImage =
+      options.parentSessionId !== undefined || (options.spawnPath?.length ?? 0) > 0;
+    this._genesisReady = inheritsParentImage
+      ? Promise.resolve()
+      : // `timeline.hydrate()` is itself a no-op when the definition configures
+        // neither a `store` nor a `hydrate`, so the bundled in-memory default
+        // stays a zero-cost resolved promise.
+        this.bridges.timeline.hydrate();
 
     // Eagerly mount — the compiler exposes `.ready` for its own
     // inbox registration; our mount is awaited via `_mountReady`. The
     // element type is opaque here — `MountInput.element: unknown` in
     // the spec — and the bound compiler impl interprets it.
-    this._mountReady = hydrated
+    this._mountReady = this._genesisReady
       .then(() =>
         this.compiler.mount({
           mountId: this.mountId,
@@ -974,6 +1003,13 @@ export class SessionHarness<P = unknown>
         }),
       )
       .then(() => {});
+    // A failed GENESIS rejects `_genesisReady` (awaited at createSession — the
+    // typed failure surfaces THERE) and therefore also rejects this derived
+    // chain, which a never-created session will never await. Mark the derived
+    // rejection handled so it cannot escape as an unhandled rejection; real
+    // consumers (`sendBody` awaiting `_mountReady`) still observe it — `.catch`
+    // returns a NEW promise and leaves this one's rejection intact.
+    this._mountReady.catch(() => {});
 
     // E11 — the session's durable-registry mirror. The record write-through +
     // the metadata notifier the harness used to hand-roll here
@@ -1012,6 +1048,21 @@ export class SessionHarness<P = unknown>
    */
   get mountReady(): Promise<void> {
     return this._mountReady;
+  }
+
+  /**
+   * GENESIS barrier (ADR 93) — resolves once every store-bearing namespace's
+   * `hydrate(ctx)` has completed, REJECTING with the namespace's typed error
+   * (e.g. `TimelineHydrateFailed`) if a hydrator threw. The App awaits this at
+   * `createSession` so a failed genesis fails session creation rather than
+   * leaving a half-genesis session that only explodes at the first `send`.
+   *
+   * Resolves immediately for a fork / spawned child (it inherits its parent's
+   * image via `restore`, so genesis must not run) and for a session whose
+   * namespaces configure no store and no hydrator.
+   */
+  get genesisReady(): Promise<void> {
+    return this._genesisReady;
   }
 
   /**

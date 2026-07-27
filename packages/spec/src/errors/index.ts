@@ -164,7 +164,7 @@ export {
   ProviderTimeout,
   ReconcileError,
   type ReconcileErrorChannel,
-  RehydrateStrategyMissing,
+  TimelineHydrateFailed,
   RenderFailed,
   SkillAlreadyExists,
   SkillIsolationUnavailable,

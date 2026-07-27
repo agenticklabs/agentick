@@ -25,6 +25,7 @@ export {
 } from "./substrate/local-channel-publisher.js";
 export {
   BaseHarness,
+  inheritedFrom,
   MiddlewareChain,
   OperationOutcomeError,
   OperationVeto,
@@ -35,6 +36,10 @@ export {
   deriveChunkHookName,
   deriveHookNames,
   hooksToMiddlewares,
+  guardsToMiddlewares,
+  commandGuardMiddleware,
+  qualifyNamespaceGuards,
+  qualifyNamespaceHooks,
   interceptorKind,
   isOperationSignal,
   liftMiddleware,
@@ -68,11 +73,14 @@ export {
   type ChunkInterceptor,
   type ChunkObserver,
   type ChunkTransform,
+  type CommandGuards,
   type CommandHooks,
   type CommandMiddlewares,
   type HookRegistrars,
   type CommandRegistry,
   type GuardDecider,
+  type NamespaceGuards,
+  type NamespaceHooks,
   type HarnessFx,
   type HarnessShell,
   type InterceptorKind,
@@ -103,6 +111,13 @@ export {
 } from "./substrate/observability.js";
 export { deriveOps, type DeriveOpsDeps, type RunOperationFn } from "./substrate/ops.js";
 export { deriveContext, type ContextFacets } from "./substrate/derive-context.js";
+// ADR 93 — the top-level namespace-slot registry (the runtime half of the
+// slots law; the type half is `NamespaceSlots` augmentation in spec).
+export {
+  registerNamespaceSlot,
+  registeredNamespaceSlots,
+  collectNamespaceSlots,
+} from "./substrate/namespace-slots.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
 export { ulid } from "./substrate/ulid.js";

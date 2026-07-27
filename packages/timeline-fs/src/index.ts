@@ -7,10 +7,13 @@
  * durable in the file and survives `prune`.
  *
  * ```ts
- * import { withTimeline } from "agentick";
+ * import { createApp } from "agentick";
  * import { fsTimelineStore } from "@agentick/timeline-fs";
  *
- * withTimeline({ store: fsTimelineStore({ dir: "./.agentick/transcripts" }) });
+ * createApp(Agent, {
+ *   model,
+ *   timeline: { store: fsTimelineStore({ dir: "./.agentick/transcripts" }) },
+ * });
  * ```
  *
  * Per ADR 49's "NO `define*` helper" amendment, this adapter follows the

@@ -302,7 +302,7 @@ rehydrates it via the ADR-49 open-or-rehydrate path — so eviction is invisible
 to correctness. Two consequences to know:
 
 - Rehydrated state is only as complete as the durable backing. Configure a
-  durable **timeline store** (`session: { timeline: { store } }`) if you need a
+  durable **timeline store** (`createApp({ timeline: { store } })`) if you need a
   paged-out session's conversation to survive; without one, reopen starts fresh.
 - A `getSession(id)` handle captured _before_ an eviction is stale (points at the
   now-closed instance). Re-fetch via `createSession(id)` / `getSession(id)` after

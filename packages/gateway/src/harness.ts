@@ -613,6 +613,14 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       kind: "gateway",
       hostId: this.scopeId,
       substrate: { journal: this.journal, bus: this.bus, inbox: this.inbox },
+      // ADR 93 landmine 11 — the cascade is TOTAL at every host tier. A
+      // gateway-installed harness spreads `inheritedFrom(installer)` and
+      // inherits `gateway.use()` / `gateway.guard()` / `gateway.hook()`;
+      // `interceptorParent: this` keeps it live for later registrations.
+      interceptors: {
+        inheritedInterceptors: this.resolvedInterceptors(),
+        interceptorParent: this,
+      },
       gateway: host,
       registerNamespace(name, value): Unsubscribe {
         if (Object.prototype.hasOwnProperty.call(self._bridges, name)) {

@@ -29,8 +29,13 @@ import type {
   ChunkHooksOf,
   ChunkRegistrarsOf,
   Derived,
+  GuardDecision,
+  GuardsOf,
+  HandlerVerdict,
   HooksOf,
   Middleware,
+  NamespaceGuardsOf,
+  NamespaceHooksOf,
   Observability,
   OperationRunnerView,
   Ops,
@@ -39,10 +44,16 @@ import type {
   Unsubscribe,
   WireCommandMap,
 } from "@agentick/spec";
-import { createLog, parseHookKey } from "@agentick/spec";
+import {
+  createLog,
+  parseHookKey,
+  pascalOfCommand,
+  qualifyNamespaceGuardKey,
+  qualifyNamespaceHookKey,
+} from "@agentick/spec";
 import { getContext, type RuntimeContext } from "./runtime-context.js";
 import { NOOP_METRICS, OFF_TRACE } from "./observability.js";
-import { tagInterceptor } from "./op-signals.js";
+import { signalFromVerdict, tagInterceptor } from "./op-signals.js";
 
 // ============================================================================
 // InterceptorCtx — the facet-bearing ctx handed to every interceptor
@@ -234,6 +245,141 @@ export type CommandMiddlewares = {
 export type HookRegistrars = RegistrarsOf<CommandRegistry, InterceptorCtx> &
   CommandMiddlewares &
   ChunkRegistrarsOf<CommandRegistry, InterceptorCtx>;
+
+// ============================================================================
+// Command guards (ADR 93) — the verdict bag, sibling of CommandHooks
+// ============================================================================
+
+/**
+ * The derived DECLARATIVE guard surface (ADR 93) — the `guards:` bag at the app
+ * / gateway / session level, keyed by the DISCRIMINATED command
+ * (`{ timelineAppend, toolDispatch }`) and valued with a decider returning a
+ * {@link HandlerVerdict}. The sibling of {@link CommandHooks}: guards are a
+ * distinct KIND (verdict seam), never folded into hooks, and the operation
+ * runner floats every guard OUTERMOST so an app guard vetoes before any
+ * transform — or any narrower guard — runs.
+ */
+export type CommandGuards = GuardsOf<CommandRegistry, InterceptorCtx>;
+
+/**
+ * The DROP-LAYER guard bag for ONE namespace (ADR 93) — what a
+ * `defineX({ guards })` accepts: the same commands keyed by their bare verb
+ * (`{ append }` on a timeline definition) instead of the discriminated name.
+ * Desugars onto the identical op-scoped guard interceptor.
+ */
+export type NamespaceGuards<NS extends string> = NamespaceGuardsOf<
+  CommandRegistry,
+  NS,
+  InterceptorCtx
+>;
+
+/**
+ * The DROP-LAYER hook bag for ONE namespace (ADR 93) — what a
+ * `defineX({ hooks })` accepts: `onBeforeAppend` rather than
+ * `onBeforeTimelineAppend`. Desugars onto the identical op-scoped `transform`
+ * interceptor via {@link namespaceHooksToMiddlewares}.
+ */
+export type NamespaceHooks<NS extends string> = NamespaceHooksOf<
+  CommandRegistry,
+  NS,
+  InterceptorCtx
+>;
+
+/**
+ * Build ONE op-scoped `guard`-kind interceptor from a decider (ADR 93) — the
+ * shared core of `BaseHarness.guard({...})` (own chain) and
+ * {@link guardsToMiddlewares} (the declarative app/gateway config fold).
+ *
+ * `command` is the command's Pascal suffix (`"TimelineAppend"`) — the value
+ * `runOperation` stamps on `ctx.op` — so the guard self-scopes to one verb on
+ * the shared chain, exactly as a command hook does. A verdict other than
+ * `proceed` is raised as the control-signal `runOperation` maps to its terminal
+ * (`vetoed` / `replaced` / `deferred`); because guards compose outermost, no
+ * transform can swallow it.
+ */
+export function commandGuardMiddleware(
+  command: string,
+  decide: GuardDecision<unknown, unknown, InterceptorCtx>,
+): Middleware<unknown, unknown, unknown> {
+  const mw: AsyncMiddleware<unknown, unknown> = async (input, next, ctx) => {
+    const verdict = (await decide(input, ctx)) ?? ({ kind: "proceed" } as const);
+    if (verdict.kind === "proceed") return next(input);
+    // `liftMiddleware` runs this body on the Effect channel; a throw becomes the
+    // op's typed failure, which is exactly how the signal must travel.
+    throw signalFromVerdict(verdict as HandlerVerdict<unknown>);
+  };
+  return tagInterceptor("guard", liftMiddleware(scopeToCommand(command, mw))) as Middleware<
+    unknown,
+    unknown,
+    unknown
+  >;
+}
+
+/**
+ * Adapt a declarative {@link CommandGuards} config into op-scoped `guard`-kind
+ * middlewares (ADR 93) — the guard twin of {@link hooksToMiddlewares}, used by
+ * the app/gateway config fold so `createApp({ guards })` rides the SAME
+ * `inheritedInterceptors` cascade that carries hooks and `.use` transforms.
+ * Keys are the discriminated command in camelCase (`timelineAppend`).
+ */
+export function guardsToMiddlewares(
+  config: CommandGuards,
+): Middleware<unknown, unknown, unknown>[] {
+  const out: Middleware<unknown, unknown, unknown>[] = [];
+  for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
+    if (fn === undefined) continue;
+    out.push(
+      commandGuardMiddleware(
+        pascalOfCommand(key),
+        fn as GuardDecision<unknown, unknown, InterceptorCtx>,
+      ),
+    );
+  }
+  return out;
+}
+
+/**
+ * Requalify a namespace's DROP-LAYER `hooks:` bag onto the discriminated
+ * {@link CommandHooks} shape (ADR 93) — `{ onBeforeAppend }` on a `"timeline"`
+ * definition becomes `{ onBeforeTimelineAppend }`, which then desugars through
+ * the ordinary hook path. Keys that are not hook keys are dropped (defensive).
+ */
+export function qualifyNamespaceHooks(
+  namespace: string,
+  bag: Readonly<Record<string, unknown>>,
+): CommandHooks {
+  const out: Record<string, unknown> = {};
+  for (const [key, fn] of Object.entries(bag)) {
+    if (fn === undefined) continue;
+    const qualified = qualifyNamespaceHookKey(namespace, key);
+    if (qualified !== undefined) out[qualified] = fn;
+  }
+  return out as CommandHooks;
+}
+
+/**
+ * Requalify a namespace's DROP-LAYER `guards:` bag onto the discriminated
+ * {@link CommandGuards} shape (ADR 93) — `{ append }` on a `"timeline"`
+ * definition becomes `{ timelineAppend }`, which then desugars through the
+ * ordinary guard path onto `ctx.op === "TimelineAppend"`: the same op an
+ * app-level `guards: { timelineAppend }` reaches.
+ */
+export function qualifyNamespaceGuards(
+  namespace: string,
+  bag: Readonly<Record<string, unknown>>,
+): CommandGuards {
+  const out: Record<string, unknown> = {};
+  for (const [verb, fn] of Object.entries(bag)) {
+    if (fn === undefined) continue;
+    out[uncapitalize(qualifyNamespaceGuardKey(namespace, verb))] = fn;
+  }
+  return out as CommandGuards;
+}
+
+/** Lowercase the first char — the runtime twin of the type-level `Uncap`. */
+function uncapitalize(s: string): string {
+  return s === "" ? s : s.charAt(0).toLowerCase() + s.slice(1);
+}
 
 // ============================================================================
 // Composition + lifting

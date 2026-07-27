@@ -24,6 +24,12 @@ import type { AppInstaller } from "@agentick/spec";
 
 import { CredentialsHarness, inMemoryCredentialsStore, withCredentials } from "../index.js";
 
+// TODO(adr-93): six packages now hand-roll an installer stub
+// (credentials/resources/prompts/skills×3). They should share ONE
+// `stubAppInstaller` / `stubSessionInstaller` double typed against the spec
+// interfaces — see the test-doubles convention — so a spec change breaks them at
+// compile time in one place instead of drifting silently behind `as` casts. Home:
+// `@agentick/spec-conformance` (substrate passed in, so it needs no runtime dep).
 function stubAppInstaller(hostId = "app-test"): {
   readonly installer: AppInstaller;
   readonly bridges: Map<string, unknown>;
@@ -39,6 +45,9 @@ function stubAppInstaller(hostId = "app-test"): {
       bus: new LocalEventBus(),
       inbox: new LocalInbox(),
     },
+    // ADR 93 landmine 11 — a real host hands its resolved cascade here; this
+    // stub contributes none, which is what an isolated extension test wants.
+    interceptors: {},
     registerNamespace: (name, harness) => {
       bridges.set(name, harness);
       return () => {

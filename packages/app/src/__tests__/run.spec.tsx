@@ -116,7 +116,7 @@ describe("run({ history }) — timeline seeding (#187)", () => {
     await store.append("seeded-session:timeline", history, { sessionId: "seeded-session" });
     const app = await createApp(React.createElement(MinimalAgent), {
       model: scriptedAdapter("ok"),
-      session: { timeline: { store } },
+      timeline: { store },
     });
     const session = await app.createSession({ sessionId: "seeded-session" });
     await (session as unknown as { mountReady?: Promise<void> }).mountReady;

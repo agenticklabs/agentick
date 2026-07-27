@@ -16,7 +16,29 @@ import "./augment.js";
 
 export { TimelineHarness, type TimelineHarnessOptions } from "./harness.js";
 export type { TimelineHandle } from "./handle.js";
-export { withTimeline, type WithTimelineOptions } from "./extension.js";
+export { withTimeline, type TimelineConfig, type WithTimelineOptions } from "./extension.js";
+
+// ADR 93 — the namespace definition: `defineTimeline` (identity + brand) and
+// `defineTimelineStore` (the port's typed inline constructor), plus the genesis
+// seam's types. The definition IS the options for `withTimeline` and the
+// top-level `createApp({ timeline })` slot alike.
+export {
+  defineTimeline,
+  defineTimelineStore,
+  isTimelineDefinition,
+  isTimelineHarnessInstance,
+  type BrandedTimelineDefinition,
+  type TimelineCompactCtx,
+  type TimelineCompactor,
+  type TimelineDefinition,
+  type TimelineHydrateCtx,
+  type TimelineHydrator,
+  type TimelineStoreVerbs,
+} from "./definition.js";
+// The named hydrators — the genesis-seam library. `hydrateFromStore()` is the
+// default when a store is configured (ADR 49 preserved); `hydrateTail(n)` is
+// the bounded-memory form.
+export { hydrateFromStore, hydrateTail } from "./hydrators.js";
 
 // Compaction-strategy factories live at the `@agentick/timeline/strategies`
 // subpath (parallel to skills' `/loaders`) — they return CompactStrategy

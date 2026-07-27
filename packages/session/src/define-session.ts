@@ -393,7 +393,7 @@ function noopTimelineHandle(): TimelineHandle {
     compact: async (strategy) => ({
       entriesBefore: 0,
       entriesAfter: 0,
-      source: strategy.source ?? "persisted",
+      source: strategy?.source ?? "persisted",
     }),
   };
 }

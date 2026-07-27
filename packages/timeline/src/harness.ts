@@ -38,6 +38,8 @@ import { omitUndefined } from "@agentick/utils";
 import { Effect } from "effect";
 import {
   BaseHarness,
+  qualifyNamespaceGuards,
+  qualifyNamespaceHooks,
   runHarnessProtocol,
   ulid,
   type BaseHarnessOptions,
@@ -46,9 +48,18 @@ import {
 import { LogView } from "@agentick/store";
 
 import { MemoryTimelineStore } from "./store.js";
+import { hydrateFromStore } from "./hydrators.js";
+import type {
+  TimelineCompactCtx,
+  TimelineCompactor,
+  TimelineDefinition,
+  TimelineHydrateCtx,
+  TimelineHydrator,
+} from "./definition.js";
 import type {
   CompactResult,
   CompactStrategy,
+  ContentBlock,
   EventBus,
   MessageEnvelope,
   EventScope,
@@ -75,7 +86,7 @@ import {
   CompactHandlerFailed,
   CompactStrategyMissing,
   HandlerError,
-  RehydrateStrategyMissing,
+  TimelineHydrateFailed,
   TimelineWriteFailed,
 } from "@agentick/spec";
 
@@ -89,6 +100,9 @@ import {
 // type both carry on the registry key.
 declare module "@agentick/runtime" {
   interface CommandRegistry {
+    "timeline:append": { input: TimelineAppendInput; output: void };
+    "timeline:replaceProjection": { input: TimelineReplaceProjectionInput; output: void };
+    "timeline:resetProjection": { input: undefined; output: void };
     "timeline:compact": {
       input: { readonly instructions?: string | readonly unknown[] };
       output: CompactResult;
@@ -100,43 +114,17 @@ declare module "@agentick/runtime" {
 type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;
 
 /**
- * Construction options for {@link TimelineHarness} (ADR 49). Flat, per the
- * `withX` options convention — construction types live with the runtime.
+ * Construction options for {@link TimelineHarness} — the {@link
+ * TimelineDefinition} (ADR 93: *the definition IS the options*) plus the
+ * substrate slots every harness takes ({@link BaseHarnessOptions}: inherited
+ * interceptors, telemetry, metadata).
+ *
+ * There is exactly ONE adopter-facing shape. `defineTimeline({...})`,
+ * `withTimeline({...})`, `createApp({ timeline })`, and this constructor all
+ * consume the same definition; the only thing the constructor adds is what the
+ * runtime — never the adopter — supplies.
  */
-export interface TimelineHarnessOptions extends BaseHarnessOptions {
-  /**
-   * Emit a turn-boundary record at each execution end (ADR 53) —
-   * segmentation + turn-aggregate usage, load-bearing NOWHERE.
-   * Default true; set false to keep boundary rows out of your store.
-   */
-  readonly turnBoundaries?: boolean;
-  /**
-   * Durable backing for the persisted tier. Defaults to a bundled
-   * {@link MemoryTimelineStore} (`:memory:`, lost on exit). Inject a
-   * durable adapter (`@agentick/timeline-fs`, `-sqlite-next`,
-   * `-postgres-next`) for cross-restart durability.
-   */
-  readonly store?: TimelineStore;
-  /**
-   * When the store observes appends:
-   *   - `"behind"` (default) — memory-authoritative write-behind pump;
-   *     no store latency inside the tick loop. A crash mid-execution
-   *     loses at most the in-flight turn (drained at the `flush()`
-   *     barrier the loop executor awaits at execution end).
-   *   - `"through"` — every append awaits the store, for products that
-   *     demand zero loss at the cost of per-append latency.
-   */
-  readonly writePolicy?: "behind" | "through";
-  /**
-   * Construction-bound default compaction strategy (ADR 51 signal-form
-   * rule). With a default configured, `compact()` — the no-arg signal
-   * form, the one that can cross the inbox/wire as a bare verb — runs
-   * this strategy. An explicit `compact(strategy)` call-site argument
-   * overrides it (inner-scope-wins, in-process only: strategies are
-   * executable configuration and never travel).
-   */
-  readonly compact?: CompactStrategy;
-}
+export interface TimelineHarnessOptions extends BaseHarnessOptions, TimelineDefinition {}
 
 /**
  * Payload schema for the `timeline:compact` **signal form** (ADR 51):
@@ -186,8 +174,23 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   /** Emit turn-boundary records (ADR 53). Default true. */
   private readonly turnBoundaries: boolean;
   private readonly writePolicy: "behind" | "through";
-  /** Construction-bound default compaction strategy (ADR 51 signal form). */
-  private readonly defaultCompact?: CompactStrategy;
+  /**
+   * Construction-bound default compaction (ADR 51 signal form), in whichever
+   * arm of the dichotomy the definition supplied: a configured
+   * {@link CompactStrategy} value, or the `(entries, ctx)` function sugar. At
+   * most one is set; {@link defaultStrategy} collapses them to the one shape the
+   * body consumes.
+   */
+  private readonly compactStrategy?: CompactStrategy;
+  private readonly compactor?: TimelineCompactor;
+  /**
+   * The genesis seam (ADR 93) — resolved at construction from the definition's
+   * `hydrate` slot, defaulting to {@link hydrateFromStore} whenever a `store`
+   * was configured (ADR 49 open-or-rehydrate, preserved exactly). `undefined`
+   * means "no genesis": a store-less harness starts empty, which is what the
+   * bundled in-memory default has always done.
+   */
+  private readonly hydrator?: TimelineHydrator;
 
   // ─── Declared commands (ADR 51) — assigned in the constructor ───
   private readonly appendCmd: Cmd<TimelineAppendInput, void>;
@@ -213,7 +216,17 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     this.store = options.store ?? new MemoryTimelineStore();
     this.turnBoundaries = options?.turnBoundaries ?? true;
     this.writePolicy = options.writePolicy ?? "behind";
-    this.defaultCompact = options.compact;
+    // The `compact` slot takes either form of the ADR-42 dichotomy: a
+    // `(entries, ctx)` function (declarative shorthand) or a configured
+    // `CompactStrategy` value (`fromHandler(...)`, an adopter factory).
+    this.compactStrategy = typeof options.compact === "function" ? undefined : options.compact;
+    this.compactor = typeof options.compact === "function" ? options.compact : undefined;
+    // Genesis (ADR 93): the definition's hydrator, defaulting to the full
+    // store read whenever durability is configured. Resolved — not RUN — here:
+    // definitions are inert until install and genesis runs at session-open.
+    this.hydrator =
+      (options.hydrate as TimelineHydrator | undefined) ??
+      (options.store !== undefined ? hydrateFromStore() : undefined);
     // The two-tier / write-behind / compaction-target storage machine — keyed
     // by scopeId (= sessionId). The pump's raw store-write rejection is mapped
     // to the typed `TimelineWriteFailed` a session barrier catchTags (write-
@@ -266,7 +279,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       scope,
       handler: (signal) =>
         Effect.gen(this, function* () {
-          const base = this.defaultCompact;
+          const base = this.defaultStrategy();
           if (base === undefined) {
             return yield* Effect.fail(new CompactStrategyMissing());
           }
@@ -277,6 +290,81 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
           return yield* this.compactBody(effective);
         }),
     });
+
+    // ─── The definition's `hooks:` / `guards:` bags (ADR 93) ───
+    //
+    // DROP-LAYER keys (`onBeforeAppend`, `guards: { append }`) requalify onto
+    // the discriminated commands (`onBeforeTimelineAppend`, `TimelineAppend`)
+    // and register on this harness's OWN chain — deliberately NARROWER than the
+    // `inheritedInterceptors` an app/session hands down. That is the cascade
+    // law: broader scope wraps narrower, so app before-hooks run first and app
+    // guards veto before a definition guard is consulted (the runner's stable
+    // guard-outermost sort preserves tier order within the guard kind).
+    if (options.hooks !== undefined) {
+      this.hook(qualifyNamespaceHooks("timeline", options.hooks as Record<string, unknown>));
+    }
+    if (options.guards !== undefined) {
+      this.guard(qualifyNamespaceGuards("timeline", options.guards as Record<string, unknown>));
+    }
+  }
+
+  /**
+   * Collapse the `compact` slot's two dichotomy arms to the ONE shape the body
+   * consumes: a resident {@link CompactStrategy}. Returns `undefined` when no
+   * default was configured — the no-arg signal form then fails with
+   * `CompactStrategyMissing`, which is the contract.
+   */
+  private defaultStrategy(): CompactStrategy | undefined {
+    if (this.compactStrategy !== undefined) return this.compactStrategy;
+    const fn = this.compactor;
+    if (fn === undefined) return undefined;
+    // Adapt the `(entries, ctx)` sugar to the resident `CompactStrategy` shape.
+    // `source: "persisted"` matches `fromHandler`'s default — the fold input is
+    // the durable log. The ctx is derived PER CALL so the compactor sees the
+    // invoking op's identity + diagnostics, and the signal form's advisory
+    // `instructions` ride on it.
+    return {
+      source: "persisted",
+      run: async ({ entries, instructions }) => fn(entries, this.compactCtx(instructions)),
+    };
+  }
+
+  /**
+   * Derive the ctx handed to the `compact(entries, ctx)` definition sugar — the
+   * op's identity + facets, with the ADR-51 signal form's advisory
+   * `instructions` composed in as a boundary extra (branded in one mint, ADR 91
+   * §Phase-2, so the lazy facet getters survive).
+   */
+  private compactCtx(instructions?: string | readonly ContentBlock[]): TimelineCompactCtx {
+    return this.deriveOperationCtx(
+      { sessionId: this.scopeId, op: "TimelineCompact" },
+      omitUndefined({ instructions }),
+    ) as TimelineCompactCtx;
+  }
+
+  /**
+   * Derive the ctx handed to the definition's genesis hydrator (ADR 91/93).
+   *
+   * Minted through `deriveOperationCtx` — the branded boundary constructor — so
+   * the hydrator sees the session's identity (`sessionId`, `principal`) and
+   * diagnostics (`log`/`trace`/`metrics`/`run`) rather than nothing, plus two
+   * boundary facets composed INTO the same branded mint: the definition's
+   * `store` (the typed `ctx.store` facet) and the journal's READ slice
+   * (`journalReader`), which is what makes an event-sourced hydrator — a fold
+   * over the journal — writable with no framework change.
+   *
+   * The result is also a valid {@link StoreCtx}, so `hydrateFromStore` hands
+   * `ctx` straight to `store.read(key, ctx)` with no repacking.
+   */
+  private hydrateCtx(): TimelineHydrateCtx {
+    return this.deriveOperationCtx(
+      { sessionId: this.scopeId },
+      {
+        store: this.store,
+        journalReader: this.journal,
+        ...(this.principal !== undefined ? { principal: this.principal } : {}),
+      },
+    ) as TimelineHydrateCtx;
   }
 
   /**
@@ -372,15 +460,36 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   /**
-   * Load the session's persisted log from the store into the in-memory
-   * tiers — the resume path (ADR 49 §Hydration). Called once at session
-   * init, before first render and before any append (the session's
-   * constructor chains this ahead of the compiler mount when a store
-   * is injected — A2.2). Replaces both tiers with the durable log (the
-   * projection reconstructs by re-render / a subsequent compaction).
+   * GENESIS (ADR 93) — run the definition's `hydrate(ctx)` and SEED the
+   * harness with what it returns. The resume path (ADR 49 §Hydration), now
+   * behind an adopter seam instead of a hardcoded full store read.
+   *
+   * Called once at session-open: after identity stamping, before first render,
+   * before any append (the session chains this ahead of the compiler mount).
+   * A no-op when the definition configures neither a `store` nor a `hydrate`.
+   *
+   * **The seed law.** The returned entries are SEEDED into both tiers — they are
+   * NEVER appended, so nothing is written back to the store. A hydrator reads
+   * what is already durable (or deliberately synthesizes ephemera); re-appending
+   * would duplicate the log on every resume.
+   *
+   * **Fork/spawn.** Genesis must not run for a child that inherits its parent's
+   * image. That decision belongs to the session (it knows its lineage), which
+   * simply does not call this — see the session's `genesisReady`.
+   *
+   * @throws {TimelineError._tag === "TimelineHydrateFailed"} the hydrator threw;
+   *   session creation fails rather than half-genesising the session.
    */
   async hydrate(): Promise<void> {
-    await this.log.hydrate(this.storeCtx());
+    const hydrate = this.hydrator;
+    if (hydrate === undefined) return;
+    let entries: readonly TimelineEntry[];
+    try {
+      entries = await hydrate(this.hydrateCtx());
+    } catch (cause) {
+      throw cause instanceof TimelineHydrateFailed ? cause : new TimelineHydrateFailed({ cause });
+    }
+    this.log.seed(entries);
   }
 
   // TODO(A2.2): on store-write failure the current pump batch is dropped and
@@ -578,20 +687,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       case "persisted-only": {
         // Restore the durable log; projection re-mirrors persisted.
         this.log.importSnapshot(snapshot, { mode: "reset-projection" });
-        return;
-      }
-      case "rehydrate": {
-        if (!options.rehydrateStrategy) {
-          throw new RehydrateStrategyMissing({
-            reason:
-              "importSnapshot({ mode: 'rehydrate' }) requires `rehydrateStrategy`. " +
-              "Derive it from snapshot.lastCompaction.strategyMetadata or supply a new one.",
-          });
-        }
-        // Reset projection to log, then re-run the strategy (DOMAIN — the
-        // compaction strategy stays with the harness).
-        this.log.importSnapshot(snapshot, { mode: "reset-projection" });
-        await this.compact(options.rehydrateStrategy);
         return;
       }
     }

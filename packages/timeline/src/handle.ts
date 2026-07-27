@@ -45,8 +45,18 @@ export interface TimelineHandle {
   append(...entries: TimelineEntry[]): Promise<void>;
   /** Emit the turn-boundary record (ADR 53). */
   endTurn(input: TimelineEndTurnInput): Promise<void>;
-  /** Run a strategy that rewrites the projection; log is untouched. */
-  compact(strategy: CompactStrategy): Promise<CompactResult>;
+  /**
+   * Run a strategy that rewrites the projection; the durable log is untouched.
+   *
+   * No-arg is the ADR-51 SIGNAL form: it runs the construction-bound default
+   * from the definition (`defineTimeline({ compact })`) — the form that can
+   * cross the inbox/wire as a bare verb, because it carries no executable
+   * configuration. An explicit strategy is the in-process override.
+   *
+   * @throws {TimelineError._tag === "CompactStrategyMissing"} no-arg with no
+   *   construction-bound default configured.
+   */
+  compact(strategy?: CompactStrategy): Promise<CompactResult>;
   /**
    * Cursored, seq-tagged read of the DURABLE log (#187). Flushes the
    * write-behind buffer first so the read is complete, then delegates

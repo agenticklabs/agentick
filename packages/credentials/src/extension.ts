@@ -33,6 +33,7 @@
  */
 
 import type { AppExtension, AppInstaller } from "@agentick/spec";
+import { inheritedFrom } from "@agentick/runtime";
 
 import { CredentialsHarness } from "./harness.js";
 import type { CredentialsStore } from "./store.js";
@@ -64,6 +65,12 @@ export function withCredentials(options: WithCredentialsOptions): AppExtension {
         substrate.journal,
         substrate.bus,
         substrate.inbox,
+        // ADR 93 landmine 11 — credential MUTATIONS are ops under the redaction
+        // law (ADR 92 B), so they must sit inside the app's cascade: an
+        // `app.guard()` that vetoes a credential write, or an audit hook that
+        // records one, has to see it. The harness always accepted the fold; the
+        // installer had no handle to give it until now.
+        inheritedFrom(installer),
       );
       installer.registerNamespace("credentials", harness);
       installer.onClose(() => harness.close());

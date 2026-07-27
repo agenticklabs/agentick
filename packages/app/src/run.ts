@@ -30,7 +30,7 @@ import type {
 } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
-import { MemoryTimelineStore } from "@agentick/timeline";
+import { MemoryTimelineStore, type TimelineDefinition } from "@agentick/timeline";
 import { ulid } from "@agentick/utils";
 
 import { createApp, type CreateAppOptions } from "./create-app.js";
@@ -46,6 +46,8 @@ export interface RunOptions<P = unknown> extends CreateAppOptions<P> {
    * Seed the session's timeline before the run (#187) — the replay /
    * eval loop: a previous session's persisted log
    * (`snapshot().bridges.timeline.persisted`) goes in here verbatim.
+   * Seeding pre-populates a store under the run's session id, so the ADR-93
+   * genesis seam picks it up — seeding IS resuming.
    * Implemented as a pre-populated store handed to the ADR 49 hydration
    * path (no bespoke seeding machinery).
    */
@@ -95,12 +97,12 @@ export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): 
       // run's known session id directly (the store ignores it — MemoryTimelineStore
       // is in-memory — but the signature is mandatory across the Effect→Promise seam).
       await store.append(`${sessionId}:timeline`, history, { sessionId });
+      // ADR 93 — the `timeline` slot is TOP-LEVEL (`createApp({ timeline })`),
+      // and the definition IS the options, so the run's store composes over
+      // whatever definition the caller supplied.
       finalOptions = {
         ...finalOptions,
-        session: {
-          ...finalOptions.session,
-          timeline: { ...finalOptions.session?.timeline, store },
-        },
+        timeline: { ...(finalOptions.timeline as TimelineDefinition | undefined), store },
       };
     }
     const app = await createApp(rootElement, finalOptions);

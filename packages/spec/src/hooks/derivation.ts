@@ -13,6 +13,7 @@
  * @see docs/proposals/v2/blueprint/ ADR 80 — command lifecycle hooks
  */
 
+import type { HandlerVerdict } from "../data/outcomes.js";
 import type { Unsubscribe } from "../protocol/inbox.js";
 
 // ============================================================================
@@ -21,6 +22,9 @@ import type { Unsubscribe } from "../protocol/inbox.js";
 
 /** Uppercase the first char of `S`, leaving the tail untouched. */
 export type Cap<S extends string> = S extends `${infer H}${infer T}` ? `${Uppercase<H>}${T}` : S;
+
+/** Lowercase the first char of `S`, leaving the tail untouched. The inverse of {@link Cap}. */
+export type Uncap<S extends string> = S extends `${infer H}${infer T}` ? `${Lowercase<H>}${T}` : S;
 
 /**
  * PascalCase a command id, splitting on the `:` (command), `/` (wire), `-`
@@ -183,6 +187,86 @@ export type ChunkRegistrarsOf<Reg, Ctx> = {
 };
 
 // ============================================================================
+// Guards — the verdict-seam sibling of the hook surface (ADR 93)
+// ============================================================================
+
+/**
+ * A guard decider over one command: given the command's input + the ambient
+ * context, return a {@link HandlerVerdict} (`veto` / `replace` / `defer` /
+ * `proceed`) or `void` (≡ proceed). Guards are a distinct KIND from hooks — the
+ * interceptor cascade floats every guard OUTERMOST (deny-before-transform), so a
+ * guard always decides before any transform runs.
+ */
+export type GuardDecision<In, Out, Ctx = unknown> = (
+  input: In,
+  ctx: Ctx,
+) => HandlerVerdict<Out> | void | Promise<HandlerVerdict<Out> | void>;
+
+/**
+ * The derived DECLARATIVE guard surface over ANY registry keyed
+ * `{ input; output }` (ADR 93) — the `guards:` bag's type, sibling of
+ * {@link HooksOf}. Keys are the command id PascalCased then un-capitalized
+ * (`"timeline:append"` → `timelineAppend`), so a guard bag reads as a list of
+ * verbs rather than `on…`-prefixed lifecycle points: guards are not lifecycle
+ * observers, they are admission decisions.
+ */
+export type GuardsOf<Reg, Ctx> = {
+  [K in keyof Reg as Uncap<Pascal<K & string>>]?: GuardDecision<
+    Reg[K] extends { input: infer I } ? I : never,
+    Reg[K] extends { output: infer O } ? O : never,
+    Ctx
+  >;
+};
+
+// ============================================================================
+// Namespace-local (drop-layer) projections — ADR 93 definition bags
+// ============================================================================
+//
+// A `defineX({ hooks, guards })` bag names the namespace's OWN verbs with the
+// layer segment DROPPED (`onBeforeAppend`, `guards: { append }`); the app-level
+// bag keeps the discriminated name (`onBeforeTimelineAppend`, `guards: {
+// timelineAppend }`). Both desugar to the SAME op-scoped interceptor on the
+// SAME command — the drop-layer key is pure colocation sugar, derived from the
+// same registry so the two surfaces can never drift.
+
+/** The registry keys a namespace owns (`"timeline:append"` for `NS = "timeline"`). */
+export type CommandsOf<Reg, NS extends string> = Extract<keyof Reg, `${NS}:${string}`>;
+
+/** The verb half of a namespaced command key (`"timeline:append"`, `"timeline"` → `"append"`). */
+export type VerbOf<K extends string, NS extends string> = K extends `${NS}:${infer V}` ? V : never;
+
+/**
+ * The DROP-LAYER declarative hook surface for one namespace (ADR 93) — the
+ * `hooks:` bag inside a `defineX(...)`. Same before/after pairs {@link HooksOf}
+ * mints, keyed by the bare verb (`onBeforeAppend`) instead of the discriminated
+ * command (`onBeforeTimelineAppend`).
+ */
+export type NamespaceHooksOf<Reg, NS extends string, Ctx> = {
+  [K in CommandsOf<Reg, NS> as `onBefore${Pascal<VerbOf<K & string, NS>>}`]?: BeforeHook<
+    Reg[K] extends { input: infer I } ? I : never,
+    Ctx
+  >;
+} & {
+  [K in CommandsOf<Reg, NS> as `onAfter${Pascal<VerbOf<K & string, NS>>}`]?: AfterHook<
+    Reg[K] extends { output: infer O } ? O : never,
+    Ctx
+  >;
+};
+
+/**
+ * The DROP-LAYER declarative guard surface for one namespace (ADR 93) — the
+ * `guards:` bag inside a `defineX(...)`. Keyed by the bare verb (`append`)
+ * instead of the discriminated command (`timelineAppend`).
+ */
+export type NamespaceGuardsOf<Reg, NS extends string, Ctx> = {
+  [K in CommandsOf<Reg, NS> as Uncap<Pascal<VerbOf<K & string, NS>>>]?: GuardDecision<
+    Reg[K] extends { input: infer I } ? I : never,
+    Reg[K] extends { output: infer O } ? O : never,
+    Ctx
+  >;
+};
+
+// ============================================================================
 // Runtime name derivation (the exact twins of the type-level `Pascal`)
 // ============================================================================
 
@@ -209,6 +293,51 @@ export function deriveHookNames(opName: string): [string, string] {
  */
 export function deriveChunkHookName(opName: string): string {
   return `on${pascalOfOpName(opName)}Chunk`;
+}
+
+/**
+ * PascalCase a command id / verb — the exported runtime twin of the type-level
+ * {@link Pascal}. `"timeline:append"` → `"TimelineAppend"`,
+ * `"replaceProjection"` → `"ReplaceProjection"`. Used by the ADR-93 drop-layer
+ * desugaring to requalify a namespace-local key onto its discriminated command.
+ */
+export function pascalOfCommand(command: string): string {
+  return pascalOfOpName(command);
+}
+
+/**
+ * Requalify a DROP-LAYER hook key onto its discriminated command name (ADR 93):
+ * given the namespace (`"timeline"`) and a namespace-local key
+ * (`"onBeforeAppend"`), yield the app-level key the interceptor cascade knows
+ * (`"onBeforeTimelineAppend"`). The runtime twin of {@link NamespaceHooksOf}'s
+ * key derivation — the two MUST agree, so a definition bag and an app bag reach
+ * the same op. Returns `undefined` for a key that is not a hook key.
+ */
+export function qualifyNamespaceHookKey(namespace: string, key: string): string | undefined {
+  const parsed = parseHookKey(key);
+  if (parsed === undefined) return undefined;
+  const ns = pascalOfOpName(namespace);
+  switch (parsed.kind) {
+    case "before":
+      return `onBefore${ns}${parsed.command}`;
+    case "after":
+      return `onAfter${ns}${parsed.command}`;
+    case "chunk":
+      return `on${ns}${parsed.command}Chunk`;
+    case "around":
+      return `on${ns}${parsed.command}`;
+  }
+}
+
+/**
+ * Requalify a DROP-LAYER guard key onto its command's Pascal suffix (ADR 93):
+ * given the namespace (`"timeline"`) and a namespace-local verb (`"append"`),
+ * yield the `ctx.op` value the op-scoped guard compares against
+ * (`"TimelineAppend"`). An app-level guard key (`"timelineAppend"`) is
+ * requalified by {@link pascalOfCommand} alone.
+ */
+export function qualifyNamespaceGuardKey(namespace: string, verb: string): string {
+  return `${pascalOfOpName(namespace)}${pascalOfOpName(verb)}`;
 }
 
 /**

@@ -9,9 +9,13 @@ import type { EventQuery, ProtocolEvent, TimelineEntry } from "@agentick/spec";
 
 import { TimelineHarness } from "../harness.js";
 import { runTimelineHarnessConformance, messageEntry } from "../conformance.js";
+import type { TimelineDefinition } from "../definition.js";
 import { fromHandler } from "../strategies.js";
 
-async function makeHarness(scope = "test"): Promise<{
+async function makeHarness(
+  scope = "test",
+  definition: TimelineDefinition = {},
+): Promise<{
   harness: TimelineHarness;
   journal: MemoryJournal;
   bus: LocalEventBus;
@@ -20,7 +24,7 @@ async function makeHarness(scope = "test"): Promise<{
   const journal = new MemoryJournal({ capacity: 10_000 });
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const harness = new TimelineHarness(scope, journal, bus, inbox);
+  const harness = new TimelineHarness(scope, journal, bus, inbox, definition);
   await harness.ready;
   return { harness, journal, bus, inbox };
 }
@@ -165,6 +169,12 @@ describe("TimelineHarness — snapshot round-trip across instances", () => {
 runTimelineHarnessConformance({
   make: async () => {
     const { harness } = await makeHarness(`conformance-${ulid()}`);
+    return harness;
+  },
+  // ADR 93 — lights up the GENESIS section (the seed law, the typed hydrate
+  // failure). The definition IS the harness's options, so this is a pass-through.
+  makeFromDefinition: async (definition) => {
+    const { harness } = await makeHarness(`conformance-genesis-${ulid()}`, definition);
     return harness;
   },
 });

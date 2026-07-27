@@ -215,7 +215,7 @@ describe("PA2/PA3 — evicted session reopens with state", () => {
       inbox,
       // maxActive:1 makes the SECOND createSession evict the first.
       sessions: { maxActive: 1 },
-      session: { timeline: { store: timelineStore } },
+      timeline: { store: timelineStore },
     });
 
     // Turn on session A — the user message is persisted to the store.

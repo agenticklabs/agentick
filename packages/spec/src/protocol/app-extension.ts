@@ -33,6 +33,7 @@ import type { Validator } from "../data/validator.js";
 import type { EventBus } from "./bus.js";
 import type { MessageInbox, Unsubscribe } from "./inbox.js";
 import type { OperationJournal } from "./journal.js";
+import type { Middleware } from "./middleware.js";
 
 // ============================================================================
 // HarnessKind — open string union of host harness targets
@@ -144,6 +145,28 @@ export type AnyExtension = GatewayExtension | AppExtension | SessionExtension | 
  * Methods every installer offers, regardless of host harness type.
  * Extension authors writing host-agnostic helpers can target this base.
  */
+/**
+ * The host's interceptor-inheritance handle, as carried on a
+ * {@link BaseInstaller} (ADR 93 landmine 11). Structurally the
+ * `inheritedInterceptors` / `interceptorParent` pair a harness constructor
+ * takes; spread it into your harness options via `inheritedFrom(installer)`.
+ */
+export interface InstallerInterceptors {
+  /**
+   * The host's RESOLVED interceptor snapshot at install time — its own
+   * `.use` / `.guard` / `.hook` registrations plus everything it inherited,
+   * ordered root-outermost. Seeds the child's inherited layer.
+   */
+  readonly inheritedInterceptors?: readonly Middleware<unknown, unknown, unknown>[];
+  /**
+   * The host harness as the LIVE interceptor parent (ADR 83 §4), so a
+   * registration made AFTER the child exists still reaches it. Typed `unknown`
+   * because the nominal `BaseHarness` lives in `@agentick/runtime`; use
+   * `inheritedFrom(installer)` from that package to recover the precise type.
+   */
+  readonly interceptorParent?: unknown;
+}
+
 export interface BaseInstaller {
   /** Unique identifier of the host harness this installer belongs to. */
   readonly hostId: string;
@@ -154,6 +177,29 @@ export interface BaseInstaller {
    * the host's journal + bus and surface via `host.events(...)`.
    */
   readonly substrate: AppSubstrate;
+
+  /**
+   * The host's INTERCEPTOR-INHERITANCE handle (ADR 93 landmine 11) — the
+   * construction snapshot of the cascade plus the live parent, in exactly the
+   * shape a harness constructor takes.
+   *
+   * **Why this exists.** An extension-installed harness that does not thread
+   * this is INVISIBLE to `app.guard()` / `app.hook()` / `createApp({ hooks,
+   * guards })` — its ops run outside the cascade. That was silently true for
+   * every extension-installed namespace (the ADR-92 escape at the subscriptions
+   * extension), and it becomes a correctness bug the moment definitions
+   * advertise `hooks:` / `guards:` bags: adopters will assume the app bag wraps
+   * everything. Spread it into your harness options and the cascade is total:
+   *
+   * ```ts
+   * new MyHarness(id, journal, bus, inbox, { ...config, ...inheritedFrom(installer) });
+   * ```
+   *
+   * `inheritedFrom` (`@agentick/runtime`) is the typed accessor — it recovers
+   * the nominal parent type that spec cannot name (the nominal `BaseHarness`
+   * lives in `@agentick/runtime`; spec has no upward dep, hence the `unknown`).
+   */
+  readonly interceptors: InstallerInterceptors;
 
   /**
    * Register a sub-harness under the given slot name. Slot lookup uses

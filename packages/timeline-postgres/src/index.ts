@@ -8,11 +8,14 @@
  *
  * ```ts
  * import { Pool } from "pg";
- * import { withTimeline } from "agentick";
+ * import { createApp } from "agentick";
  * import { postgresTimelineStore } from "@agentick/timeline-postgres";
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });
- * withTimeline({ store: postgresTimelineStore({ executor: pool }) });
+ * createApp(Agent, {
+ *   model,
+ *   timeline: { store: postgresTimelineStore({ executor: pool }) },
+ * });
  * ```
  *
  * Per ADR 49's "NO `define*` helper" amendment, the adapter implements

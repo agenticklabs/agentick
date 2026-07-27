@@ -32,6 +32,7 @@ export * from "./middleware.js";
 export * from "./channels.js";
 export * from "./compiler.js";
 export * from "./hook-bridges.js";
+export * from "./namespace-slots.js";
 export * from "./render-context.js";
 export * from "./tool-executor.js";
 export * from "./executor.js";

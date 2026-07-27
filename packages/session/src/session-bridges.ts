@@ -25,7 +25,7 @@ import { StateHarness } from "@agentick/state";
 import { TasksHarness } from "@agentick/tasks";
 import { ResourcesHarness } from "@agentick/resources";
 import { GatesController, GatesHarness, type GateOverrideAudit } from "@agentick/gates";
-import { TimelineHarness, type TimelineHarnessOptions } from "@agentick/timeline";
+import { TimelineHarness, type TimelineDefinition } from "@agentick/timeline";
 import { type BaseHarness, type Middleware, ulid } from "@agentick/runtime";
 import type {
   ElicitationHarnessProtocol,
@@ -175,11 +175,13 @@ export interface BuildSessionBridgesOptions {
    */
   readonly resources?: Resources;
   /**
-   * Timeline durability + policy slots (ADR 49 / A2.2) — shared store
-   * adapter, write policy, construction-bound default compaction
-   * strategy. Threaded from `SessionHarnessOptions.timeline`.
+   * The timeline's ADR-93 namespace DEFINITION — store, genesis seam
+   * (`hydrate`), shaping seams (`compact`, `writePolicy`), and the
+   * `hooks:`/`guards:` bags. Threaded from `createApp({ timeline })` through
+   * `SessionHarnessOptions.timeline`; the definition IS the harness's options,
+   * so it passes through with no translation.
    */
-  readonly timeline?: Pick<TimelineHarnessOptions, "store" | "writePolicy" | "compact">;
+  readonly timeline?: TimelineDefinition;
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * session's `resolvedInterceptors()` (app-inherited incl. the app+session
@@ -209,14 +211,24 @@ export function buildSessionBridges(
   options: BuildSessionBridgesOptions = {},
 ): SessionHookBridges {
   // Timeline / Knobs / State are harnesses wired to the session's substrate (ADR 26).
+  // Every one of them takes the interceptor fold (ADR 93 landmine 11) — the
+  // cascade is TOTAL, not "whichever bridge someone remembered to thread".
   const timeline = new TimelineHarness(
     `${store.id}:timeline`,
     substrate.journal,
     substrate.bus,
     substrate.inbox,
-    // Durability + policy slots (ADR 49 / A2.2): shared store adapter,
-    // write policy, construction-bound default compaction strategy.
-    options.timeline ?? {},
+    {
+      // The ADR-93 namespace DEFINITION — store, genesis seam, shaping seams,
+      // hooks/guards bags — threaded verbatim from `createApp({ timeline })`.
+      // The definition IS the options, so there is nothing to translate.
+      ...(options.timeline ?? {}),
+      // ADR 93 landmine 11 — the cascade must be TOTAL. Timeline used to be the
+      // ONE bridge that took no interceptor threading, so `app.guard()` /
+      // `createApp({ hooks })` silently skipped `timeline:append` and friends.
+      inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
+    },
   );
   const knobs = new KnobsHarness(
     `${store.id}:knobs`,
@@ -242,6 +254,11 @@ export function buildSessionBridges(
     substrate.journal,
     substrate.bus,
     substrate.inbox,
+    // ADR 93 landmine 11 — same cascade totalization as timeline/knobs.
+    {
+      inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
+    },
   );
   const elicitation =
     options.elicitation ??
@@ -250,7 +267,14 @@ export function buildSessionBridges(
       substrate.journal,
       substrate.bus,
       substrate.inbox,
-      { parentScope: { sessionId: store.id } },
+      {
+        parentScope: { sessionId: store.id },
+        // ADR 93 landmine 11 — cascade totalization (this arm only runs when the
+        // app did NOT construct + inject the harness; the app's own construction
+        // already threads the fold).
+        inheritedInterceptors: options.inheritedInterceptors,
+        interceptorParent: options.interceptorParent,
+      },
     );
   const tasks =
     options.tasks ??
@@ -277,6 +301,11 @@ export function buildSessionBridges(
       substrate.journal,
       substrate.bus,
       substrate.inbox,
+      // ADR 93 landmine 11 — cascade totalization (fallback-construction arm).
+      {
+        inheritedInterceptors: options.inheritedInterceptors,
+        interceptorParent: options.interceptorParent,
+      },
     );
 
   const base = {
@@ -318,6 +347,9 @@ export function buildSessionBridges(
       loopControl: () => base.loop,
       audit: makeGateAudit(substrate.bus, store.id),
       parent: undefined,
+      // ADR 93 landmine 11 — cascade totalization.
+      inheritedInterceptors: options.inheritedInterceptors,
+      interceptorParent: options.interceptorParent,
     },
   );
   (base as { gates: GatesController }).gates = gatesHarness.controller;

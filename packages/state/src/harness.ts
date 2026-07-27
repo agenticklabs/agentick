@@ -36,7 +36,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Unsubscribe } from "@agentick/runtime";
+import { BaseHarness, type BaseHarnessOptions, type Unsubscribe } from "@agentick/runtime";
 import type {
   CollectionMutation,
   EventBus,
@@ -60,7 +60,7 @@ import { createStateStore, type StateEntry, type StateStoreQuery } from "./store
  * Construction options for {@link StateHarness}. Minimal — state takes its
  * substrate positionally; this carries only the durable store override.
  */
-export interface StateHarnessOptions {
+export interface StateHarnessOptions extends BaseHarnessOptions {
   /**
    * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createStateStore}. The store holds
@@ -111,7 +111,10 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     inbox: MessageInbox,
     options: StateHarnessOptions = {},
   ) {
-    super("state", scopeId, journal, bus, inbox);
+    // ADR 93 landmine 11 — the interceptor fold reaches this harness's commands
+    // (`state:set`, …) so `app.guard()` / `createApp({ hooks, guards })` wrap
+    // them. State used to construct `super` with no options at all.
+    super("state", scopeId, journal, bus, inbox, options);
     this.view = View.collection(options.store ?? createStateStore(), (entry) => entry.key);
     const scope = () => ({ sessionId: this.scopeId });
     this.set = this.command({

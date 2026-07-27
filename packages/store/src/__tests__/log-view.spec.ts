@@ -152,15 +152,32 @@ describe("LogView — replaceProjection diverges projection from persisted", () 
   });
 });
 
-describe("LogView — hydrate replaces both tiers", () => {
-  it("loads the durable log into persisted + projection (resume path)", async () => {
+describe("LogView — seed installs both tiers (ADR 93 genesis)", () => {
+  it("installs the supplied entries into persisted + projection", async () => {
     const store = new MemoryLog<Row>();
     await store.append("L", [row("x"), row("y")], stubStoreCtx());
     const { v } = log(store);
-    expect(ids(v.readPersisted())).toEqual([]); // nothing loaded yet
-    await v.hydrate(stubStoreCtx());
+    expect(ids(v.readPersisted())).toEqual([]); // nothing seeded yet
+    // Genesis authority is the CALLER's: it reads the store (or folds a
+    // journal, or synthesizes) and hands the result to `seed`.
+    v.seed(await store.read("L", stubStoreCtx()));
     expect(ids(v.readPersisted())).toEqual(["x", "y"]);
     expect(ids(v.read())).toEqual(["x", "y"]);
+  });
+
+  it("does NOT write the seed back to the store (the seed law)", async () => {
+    const store = new MemoryLog<Row>();
+    const appends: Row[][] = [];
+    const spy: typeof store.append = (key, entries, ctx) => {
+      appends.push([...entries]);
+      return store.append.call(store, key, entries, ctx);
+    };
+    const spied = Object.assign(Object.create(store) as MemoryLog<Row>, { append: spy });
+    const { v } = log(spied);
+    v.seed([row("g1"), row("g2")]);
+    await v.flush();
+    expect(appends).toEqual([]);
+    expect(ids(v.readPersisted())).toEqual(["g1", "g2"]);
   });
 });
 

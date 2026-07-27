@@ -43,6 +43,7 @@ import type {
   HandlerVerdict,
   HarnessFx,
   InboxError,
+  InstallerInterceptors,
   JournalError,
   JournalingPolicy,
   LogLevel,
@@ -182,7 +183,9 @@ import {
   MiddlewareChain,
   liftMiddleware,
   commandHookMiddleware,
+  guardsToMiddlewares,
   type AsyncMiddleware,
+  type CommandGuards,
   type CommandHooks,
   type HookRegistrars,
   type InterceptorCtx,
@@ -193,16 +196,23 @@ export {
   liftMiddleware,
   scopeToCommand,
   hooksToMiddlewares,
+  guardsToMiddlewares,
+  commandGuardMiddleware,
+  qualifyNamespaceGuards,
+  qualifyNamespaceHooks,
   withCallMiddleware,
   annotateOperationSpan,
   spanAttributes,
   spanMiddleware,
   type SpanAttributes,
   type AsyncMiddleware,
+  type CommandGuards,
   type CommandHooks,
   type CommandMiddlewares,
   type CommandRegistry,
   type HookRegistrars,
+  type NamespaceGuards,
+  type NamespaceHooks,
 } from "./middleware.js";
 
 // ============================================================================
@@ -371,6 +381,36 @@ export interface BaseHarnessOptions<I = unknown> {
    * top-of-tree harness (no parent to inherit from).
    */
   readonly interceptorParent?: BaseHarness<EventSurface, unknown>;
+}
+
+/**
+ * Recover the typed interceptor-inheritance options from an installer's handle
+ * (ADR 93 landmine 11) — the one-line call that makes the cascade TOTAL for an
+ * extension-installed harness:
+ *
+ * ```ts
+ * new MyHarness(id, journal, bus, inbox, { ...config, ...inheritedFrom(installer) });
+ * ```
+ *
+ * Spec carries `interceptorParent` as `unknown` because the nominal
+ * {@link BaseHarness} lives here, not in spec (no upward dep). This function is
+ * the SINGLE place that narrowing happens, so no harness package hand-rolls a
+ * cast. Absent/partial handles degrade to `{}` — a host that supplies no
+ * cascade simply contributes none.
+ */
+export function inheritedFrom(
+  installer: { readonly interceptors?: InstallerInterceptors } | undefined,
+): Pick<BaseHarnessOptions, "inheritedInterceptors" | "interceptorParent"> {
+  const handle = installer?.interceptors;
+  if (handle === undefined) return {};
+  return {
+    ...(handle.inheritedInterceptors !== undefined
+      ? { inheritedInterceptors: handle.inheritedInterceptors }
+      : {}),
+    ...(handle.interceptorParent !== undefined
+      ? { interceptorParent: handle.interceptorParent as BaseHarness<EventSurface, unknown> }
+      : {}),
+  };
 }
 
 export abstract class BaseHarness<Surface extends EventSurface = EventSurface, Input = unknown> {
@@ -636,10 +676,21 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * construction-ancestors the same way `.use()` middleware is (they live on
    * the same chain). Returns {@link Unsubscribe}.
    *
+   * Two forms (the ADR-42 dichotomy, discriminated by shape):
+   *   - a bare DECIDER guards every op on this harness;
+   *   - a {@link CommandGuards} BAG guards named commands only
+   *     (`{ timelineAppend: … }`), each entry self-scoping by `ctx.op` exactly
+   *     as a command hook does. This is the declarative twin of {@link hook},
+   *     and the shape `createApp({ guards })` / `defineX({ guards })` desugar
+   *     into.
+   *
    * ```ts
    * harness.guard((input, ctx) =>
    *   input.locked ? { kind: "veto", reason: "locked" } : undefined,
    * );
+   * harness.guard({ timelineAppend: (input) => (input.entries.length > 50
+   *   ? { kind: "veto", reason: "batch too large" }
+   *   : undefined) });
    * ```
    */
   guard<I = unknown, R = unknown>(
@@ -647,10 +698,29 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       input: I,
       ctx: RuntimeContext,
     ) => HandlerVerdict<R> | void | Promise<HandlerVerdict<R> | void>,
+  ): Unsubscribe;
+  guard(config: CommandGuards): Unsubscribe;
+  guard<I = unknown, R = unknown>(
+    decideOrConfig:
+      | ((
+          input: I,
+          ctx: RuntimeContext,
+        ) => HandlerVerdict<R> | void | Promise<HandlerVerdict<R> | void>)
+      | CommandGuards,
   ): Unsubscribe {
+    if (typeof decideOrConfig !== "function") {
+      // Declarative bag (ADR 93) — one op-scoped `guard`-kind interceptor per
+      // entry, registered on this harness's OWN chain. Removal is all-or-nothing
+      // (the same contract `hook(config)` has).
+      const offs = guardsToMiddlewares(decideOrConfig).map((mw) => this.registerOwn(mw));
+      return () => {
+        for (const off of offs) off();
+      };
+    }
+    const decide = decideOrConfig;
     return this.guardEffect<I, R>((input, ctx) =>
       Effect.suspend(() => {
-        const raw = decide(input, ctx);
+        const raw = decide(input as I, ctx);
         return isThenable(raw)
           ? Effect.promise(() => raw as Promise<HandlerVerdict<R> | void>)
           : Effect.succeed(raw as HandlerVerdict<R> | void);

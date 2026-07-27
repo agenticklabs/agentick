@@ -23,6 +23,8 @@ import { Effect, ManagedRuntime } from "effect";
 import {
   BaseHarness,
   busAsyncIterator,
+  collectNamespaceSlots,
+  type CommandGuards,
   type CommandHooks,
   forkBusSubscription,
   type HarnessShell,
@@ -124,6 +126,8 @@ import type {
   Unsubscribe,
   EventBusFactory,
   MessageInboxFactory,
+  Middleware,
+  NamespaceSlots,
   OperationJournalFactory,
 } from "@agentick/spec";
 
@@ -216,6 +220,11 @@ export type SessionDefaults<P = unknown> = Omit<
   | "buildModelExecutor"
   | "toolExecutor"
   | "target"
+  // ADR 93 — namespace configuration is a TOP-LEVEL slot
+  // (`createApp({ timeline })`), not a nested `session: { timeline }`. The
+  // registered slots are folded into this bag by `mergeSessionDefaults`; the
+  // adopter-facing longhand is gone (flat-options rule, no shim).
+  | keyof NamespaceSlots
 >;
 
 // App-level substrate slots use the framework's `HarnessShell` parent
@@ -235,7 +244,7 @@ export type ToolExecutorDefaults = Omit<
   "handlerResolver" | "elicitation"
 >;
 
-export interface AppHarnessOptions<P = unknown> {
+export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
   /** Stable app id; defaults to `app:${ulid()}`. */
   readonly appId?: string;
   /**
@@ -622,6 +631,21 @@ export interface AppHarnessOptions<P = unknown> {
   readonly hooks?: CommandHooks;
 
   /**
+   * App-level GUARDS (ADR 93) — the sibling bag of {@link hooks}, keyed by the
+   * DISCRIMINATED command (`{ timelineAppend, toolDispatch }`) and valued with a
+   * decider returning a `HandlerVerdict` (`veto` / `replace` / `defer` /
+   * `proceed`). A distinct KIND from hooks, never folded into them: the runner
+   * floats every guard OUTERMOST, so an app guard decides before any transform
+   * — and before any narrower guard (a `defineX({ guards })` bag) — runs.
+   * Governance outranks local policy.
+   *
+   * Registered on the app's own chain at construction and inherited by every
+   * session and per-session sub-harness through the same ONE
+   * `inheritedInterceptors` value that carries hooks and `.use` transforms.
+   */
+  readonly guards?: CommandGuards;
+
+  /**
    * LIVE interceptor parent (ADR 83 §4 / ADR 84 §3) — the GatewayHarness that
    * created this app. `gateway.createApp` passes `interceptorParent: gateway`
    * so the app registers as a live interceptor child of the gateway: a LATER
@@ -988,6 +1012,11 @@ export class AppHarness<P = unknown>
     // picks them up. `createSessionBody` folds the app's resolved layer per
     // session. This is the app's cascade base (was `this.hookLayer`).
     this.hook(options.hooks ?? {});
+    // ADR 93 — the app's declarative GUARD bag, on the same own-chain as the
+    // hooks above. Guard-kind, so `orderInterceptors` floats these ahead of
+    // every transform (and ahead of any narrower guard, since the sort is stable
+    // and the app layer seeds a child's inherited layer first).
+    if (options.guards !== undefined) this.guard(options.guards);
     // Local aliases for convenience in the rest of the constructor.
     const journal = this.journal;
     const bus = this.bus;
@@ -1277,6 +1306,15 @@ export class AppHarness<P = unknown>
     return {
       kind: "app",
       hostId: this.scopeId,
+      // ADR 93 landmine 11 — the interceptor cascade is TOTAL: an
+      // extension-installed harness spreads `inheritedFrom(installer)` and
+      // inherits `app.use()` / `app.guard()` / `createApp({ hooks, guards })`
+      // exactly like an app-constructed sub-harness. `interceptorParent: this`
+      // keeps it LIVE (a later registration still reaches it).
+      interceptors: {
+        inheritedInterceptors: this.resolvedInterceptors(),
+        interceptorParent: this,
+      },
       registerNamespace(name, harness): Unsubscribe {
         const prior = self.extensionBridges.get(name);
         self.extensionBridges.set(name, harness);
@@ -1363,6 +1401,12 @@ export class AppHarness<P = unknown>
     closeHandlers: Array<() => void | Promise<void>>,
     toolHandlerUnregs: Array<() => void>,
     busUnregs: Array<() => void>,
+    /**
+     * ADR 93 landmine 11 — the per-session interceptor snapshot (app layer +
+     * this session's declarative hooks), exposed to extensions so an
+     * extension-installed harness joins the SAME cascade.
+     */
+    inheritedInterceptors: readonly Middleware<unknown, unknown, unknown>[],
     /** ADR 48 — the session's owning principal, exposed to extensions at install. */
     principal?: string,
     /** The session's adopter metadata bag, exposed to extensions at install. */
@@ -1378,6 +1422,12 @@ export class AppHarness<P = unknown>
       kind: "session",
       hostId: sessionId,
       sessionId,
+      // ADR 93 landmine 11 — the per-session interceptor cascade (app layer +
+      // this session's declarative `createSession({ hooks })`), handed to every
+      // extension-installed namespace via `inheritedFrom(installer)`. This is
+      // what closes the escape that let a subscription fire, a credentials
+      // mutation, or a timeline append run outside `app.guard()`.
+      interceptors: { inheritedInterceptors, interceptorParent: this },
       // ADR 48 — the session's identity at install time, so an extension can
       // construct per-session, tier-scoped backing stores keyed by principal /
       // adopter routing metadata. Omitted keys stay absent (principal-less /
@@ -1881,6 +1931,9 @@ export class AppHarness<P = unknown>
         sessionCloseHandlers,
         sessionToolHandlerUnregs,
         sessionBusUnregs,
+        // ADR 93 landmine 11 — the same ONE fold every per-session sub-harness
+        // gets, now also reachable by extension-installed namespaces.
+        inheritedInterceptors,
         // ADR 48 — the session's identity, resolved for install-time reads.
         input.principal,
         input.metadata,
@@ -2168,7 +2221,16 @@ export class AppHarness<P = unknown>
     // `ready` / `close` aren't on `ToolExecutorProtocol` — duck-type
     // through `readyOf` / `closeOf` so both the reference harness AND
     // factory-produced impls work transparently.
-    await Promise.all([readyOf(tools), session.ready]);
+    // ADR 93 landmine 2 — AWAIT GENESIS at create. A hydrator that throws must
+    // fail session CREATION with its typed error (`TimelineHydrateFailed`, …),
+    // not surface later as a mount rejection on the first `send`. The compiler
+    // MOUNT stays deliberately un-awaited here (that latency is by design);
+    // genesis is the one pre-render step creation is answerable for.
+    await Promise.all([
+      readyOf(tools),
+      session.ready,
+      (session as unknown as { genesisReady?: Promise<void> }).genesisReady,
+    ]);
     await session.mountReady;
 
     // C-core (three-audiences-plan §C) — late-bind the session's `send` into
@@ -2622,6 +2684,19 @@ function mergeSessionDefaults<P>(options: AppHarnessOptions<P>): SessionDefaults
   if (fromLong.migrateSnapshot === undefined && options.migrateSnapshot !== undefined) {
     merged.migrateSnapshot = options.migrateSnapshot;
   }
+  // ADR 93 §"Top-level slots for every namespace" — fold the registered
+  // NAMESPACE slots (`createApp({ timeline })`) into the per-session defaults.
+  //
+  // The app names no namespace: `collectNamespaceSlots` reads the slot registry
+  // that each namespace package populated by side effect (`registerNamespaceSlot`),
+  // so the value passes through as `unknown` and the layer that OWNS that
+  // namespace (session-bridges for the eager built-ins) types it. That is what
+  // keeps ADR 27 intact — the metapackage bundles the built-ins, it does not
+  // privilege them, and nothing in this file mentions `timeline`.
+  Object.assign(
+    merged,
+    collectNamespaceSlots(options as unknown as Readonly<Record<string, unknown>>),
+  );
   return merged as SessionDefaults<P>;
 }
 

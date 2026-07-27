@@ -11,17 +11,35 @@
  *   - replaceProjection writes to projection ONLY
  *   - resetProjection rebuilds projection as a mirror of log
  *   - snapshot round-trip preserves log + projection + provenance
- *   - importSnapshot mode "persisted-only" discards projection; "rehydrate"
- *     requires + invokes a strategy
+ *   - importSnapshot mode "persisted-only" discards projection
+ *   - GENESIS (ADR 93, optional section): the hydrator seeds and is never
+ *     re-appended; a throwing hydrator surfaces typed
  */
 
 import { describe, expect, it } from "vitest";
-import type { CompactStrategy, TimelineEntry, TimelineHarnessProtocol } from "@agentick/spec";
-import { RehydrateStrategyMissing } from "@agentick/spec";
+import type {
+  CompactStrategy,
+  TimelineEntry,
+  TimelineHarnessProtocol,
+  TimelineStore,
+} from "@agentick/spec";
+import { TimelineHydrateFailed } from "@agentick/spec";
+import type { TimelineDefinition } from "./definition.js";
+import { MemoryTimelineStore } from "./store.js";
 
 export interface TimelineHarnessFactoryDeps {
   /** Construct a fresh harness. Caller MUST await `harness.ready`. */
   readonly make: () => Promise<TimelineHarnessProtocol>;
+  /**
+   * OPTIONAL — construct a harness from an ADR-93 {@link TimelineDefinition},
+   * lighting up the GENESIS conformance section (the seed law, the typed
+   * hydrate failure). Implementations that accept a definition should supply
+   * this; the harness's `hydrate()` must be callable by the caller (the session
+   * drives genesis, so the suite drives it here too).
+   */
+  readonly makeFromDefinition?: (
+    definition: TimelineDefinition,
+  ) => Promise<TimelineHarnessProtocol & { hydrate(): Promise<void> }>;
 }
 
 function messageEntry(id: string, text: string): TimelineEntry {
@@ -293,47 +311,103 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       await h.close();
     });
 
-    it("importSnapshot 'rehydrate' requires a strategy + re-runs it", async () => {
+    it("importSnapshot preserves projection provenance without re-running a strategy", async () => {
+      // ADR 93: `"rehydrate"` is gone — importSnapshot is a TRANSPLANT verb, not
+      // a resume path. The provenance rides through as DATA for tooling; nothing
+      // re-executes a compaction on restore.
       const h = await deps.make();
-      const e1 = messageEntry("e1", "a");
-      const e2 = messageEntry("e2", "b");
       const snapshot = {
-        persisted: [e1, e2],
-        projection: [messageEntry("stale", "x")],
+        persisted: [messageEntry("e1", "a"), messageEntry("e2", "b")],
+        projection: [messageEntry("summary", "[2 entries summarized]")],
         persistedVersion: 2,
         projectionVersion: 5,
         lastCompaction: {
-          at: Date.now(),
+          at: 1234,
           source: "persisted" as const,
           entriesBefore: 2,
           entriesAfter: 1,
           strategyMetadata: { strategy: "summarize" },
         },
       };
-      await h.importSnapshot(snapshot, {
-        mode: "rehydrate",
-        rehydrateStrategy: summarizeCompact(),
-      });
-      // The summarize strategy collapses to 1 entry that mentions count.
+      await h.importSnapshot(snapshot);
       expect(h.read().entries).toHaveLength(1);
-      const summary = h.read().entries[0] as unknown as {
-        message: { content: readonly { type: string; text: string }[] };
-      };
-      expect(summary.message.content[0]!.text).toContain("2 entries");
-      await h.close();
-    });
-
-    it("importSnapshot 'rehydrate' throws when strategy is missing", async () => {
-      const h = await deps.make();
-      await expect(
-        h.importSnapshot(
-          { persisted: [], projection: [], persistedVersion: 0, projectionVersion: 0 },
-          { mode: "rehydrate" },
-        ),
-      ).rejects.toBeInstanceOf(RehydrateStrategyMissing);
+      expect(h.exportSnapshot().lastCompaction).toEqual(snapshot.lastCompaction);
       await h.close();
     });
   });
+
+  // ── GENESIS (ADR 93) — optional section, lit by `makeFromDefinition` ──
+  //
+  // Registered via `describe.skipIf` (the same discipline `it.skipIf` gives the
+  // store suite's capability gates) so an implementation that cannot build from
+  // a definition reports the section as SKIPPED rather than silently omitting it.
+  const makeFromDefinition =
+    deps.makeFromDefinition ??
+    ((): never => {
+      throw new Error("unreachable: the genesis section is skipped without a factory");
+    });
+  describe.skipIf(deps.makeFromDefinition === undefined)(
+    "TimelineHarness — genesis seam (ADR 93)",
+    () => {
+      it("hydrate() seeds both tiers from the hydrator's return", async () => {
+        const seed = [messageEntry("g1", "a"), messageEntry("g2", "b")];
+        const h = await makeFromDefinition({ hydrate: async () => seed });
+        expect(h.readPersisted()).toEqual([]);
+        await h.hydrate();
+        expect(h.readPersisted()).toEqual(seed);
+        expect(h.read().entries).toEqual(seed);
+        await h.close();
+      });
+
+      it("THE SEED LAW: genesis entries never reach the store's append", async () => {
+        // The #1 adopter footgun (a hydrator whose output is written back
+        // duplicates the log on every resume). The store is spied end-to-end:
+        // after genesis + a flush barrier, `append` must not have been called.
+        const store = new MemoryTimelineStore();
+        const appended: TimelineEntry[][] = [];
+        const spy: TimelineStore = Object.assign(Object.create(store) as TimelineStore, {
+          append: (key: string, entries: readonly TimelineEntry[], ctx: never) => {
+            appended.push([...entries]);
+            return store.append(key, entries, ctx);
+          },
+        });
+        const h = await makeFromDefinition({
+          store: spy,
+          hydrate: async () => [messageEntry("g1", "a"), messageEntry("g2", "b")],
+        });
+        await h.hydrate();
+        await h.flush();
+        expect(appended).toEqual([]);
+        expect(h.readPersisted()).toHaveLength(2);
+        // A subsequent real append DOES reach the store — genesis is the only
+        // thing exempt.
+        await h.append(messageEntry("live", "c"));
+        await h.flush();
+        expect(appended.flat().map((e) => (e.kind === "message" ? e.message.id : ""))).toEqual([
+          "live",
+        ]);
+        await h.close();
+      });
+
+      it("a throwing hydrator surfaces TimelineHydrateFailed (no half-genesis)", async () => {
+        const boom = new Error("catalog unreachable");
+        const h = await makeFromDefinition({
+          hydrate: () => Promise.reject(boom),
+        });
+        await expect(h.hydrate()).rejects.toBeInstanceOf(TimelineHydrateFailed);
+        // Nothing was installed — the harness is empty, not partially seeded.
+        expect(h.readPersisted()).toEqual([]);
+        await h.close();
+      });
+
+      it("no store and no hydrator ⇒ genesis is a no-op", async () => {
+        const h = await makeFromDefinition({});
+        await h.hydrate();
+        expect(h.readPersisted()).toEqual([]);
+        await h.close();
+      });
+    },
+  );
 
   describe("TimelineHarness — turn boundaries + trailing-input fold (ADR 53)", () => {
     const userEntry = (id: string): TimelineEntry => ({

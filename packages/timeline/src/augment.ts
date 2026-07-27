@@ -18,12 +18,27 @@ import type { CommandInfo } from "@agentick/spec";
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
+import { registerNamespaceSlot } from "@agentick/runtime";
 import type { TimelineHarnessProtocol } from "@agentick/spec";
 import type { TimelineHandle } from "./handle.js";
+import type { TimelineConfig } from "./extension.js";
 
 declare module "@agentick/spec" {
   interface HookBridges {
     readonly timeline: TimelineHarnessProtocol;
+  }
+
+  /**
+   * ADR 93 — the top-level `timeline` config slot: `createApp({ timeline })`.
+   * Accepts the ADR-42 dichotomy, no third form: a `defineTimeline(...)`
+   * DEFINITION (or the identical inline bag) or a LIVE harness instance.
+   *
+   * Registered here, not in `@agentick/app` — the app package names no
+   * namespace (ADR 27: built-ins are bundled, never privileged). The runtime
+   * half is the `registerNamespaceSlot("timeline")` side effect below.
+   */
+  interface NamespaceSlots {
+    readonly timeline?: TimelineConfig;
   }
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -53,3 +68,11 @@ declare module "@agentick/spec" {
     };
   }
 }
+
+// ADR 93 — the RUNTIME half of the slot registration (the `NamespaceSlots`
+// augmentation above is the type half). Tells the app that `timeline` is a
+// namespace-config key it should forward, without the app importing this
+// package. A side effect on import, exactly like the `HookBridges` slot: the
+// metapackage bundles this package, so the slot is always lit for built-ins;
+// an optional package's slot lights up on install + import.
+registerNamespaceSlot("timeline");

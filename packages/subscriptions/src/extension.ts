@@ -21,6 +21,7 @@
  */
 
 import type { AppExtension, AppInstaller } from "@agentick/spec";
+import { inheritedFrom } from "@agentick/runtime";
 
 import { createSubscriptionBridge, type SubscriptionBridge } from "./bridge.js";
 import { SubscriptionsHarness } from "./harness.js";
@@ -54,19 +55,21 @@ export function withSubscriptions(options: WithSubscriptionsOptions = {}): AppEx
       // is a CLOSURE (evaluated per fire, long after install), so a `let` seam
       // resolves the cycle without a mutable field on either object.
       //
-      // TODO(adr-92): thread `inheritedInterceptors` + `interceptorParent` from
-      // the host AppHarness so an app-scope `app.guard()` / `app.use()` wraps
-      // subscription fires (ADR 83 §4 live inheritance). Blocked on
-      // `AppInstaller` exposing the host harness — no `AppExtension` in the
-      // tree can do this today, so this is a cross-package gap, not a local
-      // omission. Until then, register on `bridge.harness` directly.
       let bridge: SubscriptionBridge | undefined;
       const harness = new SubscriptionsHarness(
         installer.hostId,
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
-        { resolveInvoker: (id) => bridge?.invoker(id) },
+        {
+          resolveInvoker: (id) => bridge?.invoker(id),
+          // ADR 93 landmine 11 (closes the ADR-92 gap that lived here): the
+          // installer now exposes the host's interceptor handle, so a subscription
+          // FIRE runs inside `app.guard()` / `app.use()` / `createApp({ hooks,
+          // guards })` like every other op. Before this, fires escaped the cascade
+          // entirely — a cross-package gap no `AppExtension` could close alone.
+          ...inheritedFrom(installer),
+        },
       );
       await harness.ready;
       installer.onClose(() => harness.close());

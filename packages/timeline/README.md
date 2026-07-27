@@ -216,7 +216,18 @@ Set the policy once and it rides every tick — verbatim when roomy, aggressive 
 
 ### Compaction strategies
 
-A `CompactStrategy` is a plain value: a source tier plus an async function over its entries, whose return becomes the new projection. `fromHandler` is the escape hatch that turns any function into one.
+The simplest form is a function of the entries — set it on the definition and `compact()` with no argument runs it:
+
+```ts
+defineTimeline({
+  compact: (entries, ctx) => {
+    ctx.log.debug({ compacting: entries.length });
+    return entries.slice(-20);
+  },
+});
+```
+
+A `CompactStrategy` is the same thing as a configured value: a source tier plus an async function over its entries. `fromHandler` turns any function into one, and it is what you pass at a call site.
 
 ```ts
 import { fromHandler } from "@agentick/timeline/strategies";
@@ -229,27 +240,115 @@ const keepRecent = fromHandler({
 await session.timeline.compact(keepRecent);
 ```
 
-Bind one at construction and `compact()` with no argument runs it — including a bare `timeline:compact` verb arriving over the wire. An explicit call-site strategy wins over the bound default; calling with neither rejects with a typed error.
+Both forms go in the same `compact` slot. The no-argument `compact()` is the form that can arrive as a bare `timeline:compact` verb over the wire — a strategy is executable configuration and never travels, so the resident default is what runs, optionally taking advisory `instructions` off the signal. An explicit call-site strategy wins over the bound default; calling with neither rejects with a typed error.
 
-## Durability — stores, not snapshots
+## Configuring it — `defineTimeline`
 
-Inject a `TimelineStore` and sessions become open-or-rehydrate: `createSession({ sessionId })` with entries in the store hydrates the log before first render. Create and resume are the same call.
+One object configures the timeline, and it goes on the app:
 
 ```ts
-import { withTimeline, MemoryTimelineStore } from "@agentick/timeline";
+import { createApp } from "agentick";
+import { defineTimeline, hydrateTail } from "@agentick/timeline";
+import { fsTimelineStore } from "@agentick/timeline-fs";
 
-const timeline = withTimeline({
-  store: new MemoryTimelineStore(), // swap for a durable adapter
-  writePolicy: "behind", // "behind" (default) | "through"
-  compact: keepRecent, // construction-bound default strategy
+const app = await createApp(Agent, {
+  model,
+  timeline: defineTimeline({
+    store: fsTimelineStore({ dir: "./.agentick/transcripts" }),
+    hydrate: hydrateTail(200), // open on the last 200 entries
+    compact: async (entries) => entries.slice(-40), // the bound default
+    writePolicy: "behind", // "behind" (default) | "through"
+  }),
 });
 ```
 
+`defineTimeline` is identity plus a brand — it returns the object you gave it, so it is a value you can export from a config module, import in a test, and override a slot on. Nothing is constructed and no store is opened until a session installs it; each session builds its own timeline from the plan.
+
+The wrapper is optional. `timeline: { store }` is the same type and works identically; `defineTimeline` exists so a definition can be named, shared, and recognized.
+
+For a runtime-built or conditional install, `withTimeline(definition)` takes the same object and goes in `extensions: []`. A live `TimelineHarness` instance is accepted anywhere a definition is — the escape hatch for when you own the lifecycle.
+
+### Genesis — what a session opens on
+
+`hydrate(ctx)` decides what a session's timeline holds at open. It runs once, after identity is stamped and before the first render, so the first compile already sees the resumed conversation.
+
+```ts
+defineTimeline({
+  store,
+  // `ctx` is the session's real context: identity, principal, logging — plus
+  // `ctx.store`, this definition's own store, typed as the adapter you passed.
+  hydrate: async (ctx) => {
+    const all = await ctx.store.read(ctx.sessionId ?? "", ctx);
+    return all.filter((e) => e.visibility !== "log");
+  },
+});
+```
+
+Two hydrators ship with the package:
+
+| Hydrator             | Opens on              | Cost                                                                                                        |
+| -------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `hydrateFromStore()` | The whole durable log | The full log in memory. **The default** when a `store` is set.                                              |
+| `hydrateTail(n)`     | The last `n` entries  | `n` entries, whatever the log's length — it pages through the store's cursored read and never calls `read`. |
+
+> [!IMPORTANT]
+> What a hydrator returns is a **seed**, not a write. Genesis entries are never appended, so nothing is written back to the store. A hydrator that returns entries it also appends duplicates the log on every resume — this is the one mistake to know about, and the conformance suite asserts against it.
+>
+> Genesis runs on **create and resume, never on fork or spawn**: a forked child inherits its parent's conversation directly, so re-running genesis would duplicate it.
+
+A hydrator that throws fails `createSession` with `TimelineHydrateFailed` — there is no half-hydrated session.
+
+Because genesis is a function of the real context, sources beyond a store are just code: `ctx.principal` for a tenant-scoped read, `ctx.journalReader` to fold an event log, or a literal array for a fixture.
+
+```ts
+defineTimeline({ hydrate: async () => fixtureEntries }); // seed a test or an eval
+```
+
+### Writes and failure
+
 Writes trail through a write-behind pump by default, or await per-append with `writePolicy: "through"`. The `flush()` barrier at execution end guarantees that any process loading the store afterwards sees every completed execution. Store failures surface as typed errors — `TimelineWriteFailed` from the append or the flush, `CompactHandlerFailed` when a strategy (an LLM call, say) blows up — never as an unhandled defect.
 
-Compaction never touches the store. Seeding is resuming: replaying a previous session's entries goes through the same hydration path, which is what makes eval and replay loops work.
+Compaction never touches the store.
 
-`TimelineStore` is a log-shaped port — `append → seq[]`, `read`, `keys`, `delete`, plus optional `prune` and `history`. Entries are opaque to it and `seq` is the frozen ordering identity. The bundled `MemoryTimelineStore` is a plain in-memory log. Certify your own adapter with `runTimelineStoreConformance` from `/testing`; shipped adapters are [@agentick/timeline-fs](../timeline-fs) (JSONL) and [@agentick/timeline-postgres](../timeline-postgres).
+### The store port
+
+`TimelineStore` is a log-shaped port — `append → seq[]`, `read`, `keys`, `delete`, plus optional `prune` and `history`. Entries are opaque to it and `seq` is the frozen ordering identity. The bundled `MemoryTimelineStore` is a plain in-memory log; shipped adapters are [@agentick/timeline-fs](../timeline-fs) (JSONL) and [@agentick/timeline-postgres](../timeline-postgres).
+
+When durability is a few lines against a table you already have, `defineTimelineStore` builds a conforming store from its verbs — the `query`/`mutate` seam is derived for you:
+
+```ts
+import { defineTimelineStore } from "@agentick/timeline";
+
+const store = defineTimelineStore({
+  backend: "pg",
+  append: (key, entries) => insertReturningSeq(key, entries),
+  read: (key) => selectEntries(key),
+  keys: () => selectDistinctKeys(),
+  delete: (key) => deleteLog(key),
+  history: (key, o) => selectEntriesFrom(key, o?.fromSeq, o?.limit),
+});
+```
+
+`history` is optional in the port but worth implementing: it is what bounded hydration, history paging, and client scroll-back all use. Either way, certify the result with `runTimelineStoreConformance` from `/testing` — the `seq` contract (strictly increasing, never reused, stable across `prune`) is not something types can check.
+
+### Hooks and guards
+
+A definition carries the timeline's own interceptors, named by bare verb:
+
+```ts
+defineTimeline({
+  hooks: {
+    onBeforeAppend: (input) => log.debug({ appending: input.entries.length }),
+    onAfterCompact: (result) => metrics.count("compaction", result.entriesAfter),
+  },
+  guards: {
+    append: (input) =>
+      input.entries.length > 500 ? { kind: "veto", reason: "batch too large" } : undefined,
+  },
+});
+```
+
+These are colocation sugar over the same interceptors `createApp({ hooks, guards })` installs under discriminated names (`onBeforeTimelineAppend`, `guards: { timelineAppend }`). Scope decides order: app-level interceptors wrap definition-level ones, and an app guard vetoes before a definition guard is consulted.
 
 ## The client timeline
 
@@ -315,27 +414,34 @@ Both splices are copy-on-write — a new array reference each time, satisfying t
 
 ### `@agentick/timeline`
 
-| Export                                          | Purpose                                                    |
-| ----------------------------------------------- | ---------------------------------------------------------- |
-| `withTimeline(options?)`                        | Session extension: store, write policy, default compaction |
-| `TimelineHarness`                               | The implementation, for direct construction                |
-| `MemoryTimelineStore`                           | Bundled in-memory log store                                |
-| `TimelineHandle` (type)                         | What `session.timeline` exposes                            |
-| `TimelineStore` / `TimelineEntry` / `SeqTagged` | Port and data types, re-exported from the shapes package   |
+| Export                                            | Purpose                                                            |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| `defineTimeline(definition?)`                     | Name a timeline definition — identity + brand, inert until install |
+| `defineTimelineStore(verbs)`                      | Build a conforming `TimelineStore` from its log verbs              |
+| `hydrateFromStore()`                              | Genesis: the whole durable log (the default when a store is set)   |
+| `hydrateTail(n)`                                  | Genesis: the last `n` entries, without loading the log             |
+| `withTimeline(definition?)`                       | The same definition as a session extension, for `extensions: []`   |
+| `TimelineHarness`                                 | The implementation, for direct construction                        |
+| `MemoryTimelineStore`                             | Bundled in-memory log store                                        |
+| `TimelineDefinition` / `TimelineHydrator` (types) | The definition surface and the genesis seam's signature            |
+| `TimelineHandle` (type)                           | What `session.timeline` exposes                                    |
+| `TimelineStore` / `TimelineEntry` / `SeqTagged`   | Port and data types, re-exported from the shapes package           |
+
+Definition slots: `store` · `hydrate` · `compact` · `writePolicy` · `turnBoundaries` · `hooks` · `guards`.
 
 ### `session.timeline`
 
-| Method                          | Returns                                            |
-| ------------------------------- | -------------------------------------------------- |
-| `read()`                        | Projection snapshot `{ entries, version }`         |
-| `readPersisted()`               | The uncompacted durable log                        |
-| `trailingInput()`               | Input entries after the last assistant entry       |
-| `inputEntryCount()`             | Count of input entries in the persisted log        |
-| `append(...entries)`            | Append to log + projection atomically              |
-| `compact(strategy?)`            | Rewrite the projection; resolves a `CompactResult` |
-| `history({ fromSeq?, limit? })` | Seq-tagged durable page; flushes writes first      |
-| `endTurn(input)`                | Emit the turn-boundary record                      |
-| `subscribe(fn)`                 | Fires on any projection or log mutation            |
+| Method                          | Returns                                               |
+| ------------------------------- | ----------------------------------------------------- |
+| `read()`                        | Projection snapshot `{ entries, version }`            |
+| `readPersisted()`               | The uncompacted durable log                           |
+| `trailingInput()`               | Input entries after the last assistant entry          |
+| `inputEntryCount()`             | Count of input entries in the persisted log           |
+| `append(...entries)`            | Append to log + projection atomically                 |
+| `compact(strategy?)`            | Rewrite the projection; no-arg runs the bound default |
+| `history({ fromSeq?, limit? })` | Seq-tagged durable page; flushes writes first         |
+| `endTurn(input)`                | Emit the turn-boundary record                         |
+| `subscribe(fn)`                 | Fires on any projection or log mutation               |
 
 Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timeline:compact`, `timeline:replaceProjection`, `timeline:resetProjection`.
 
@@ -382,12 +488,20 @@ Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timel
 - **`<Timeline>` turn affordances** — trailing-input styling and boundary turn-separators aren't built.
 - **Cursor vs. seq** — the live tail is bus-cursor-ordered while durable history is seq-ordered, and the two are deliberately not unified. An app doing true infinite-scroll-up reconciles final ordering itself.
 - **`useTimeline` has no dedicated suite.** It is exercised through `<Timeline>`, which reads the projection through it; the re-render-on-version-advance path isn't pinned on its own.
+- **`hydrateTail` seeks forward.** The store port is forward-cursored by design, so locating the tail costs `ceil(log / page)` round-trips. Memory stays bounded regardless. An adapter that can answer "last n" in one query should ship its own one-line hydrator.
+- **The log still travels in snapshots.** A session snapshot carries the full durable log, because that is currently the only way to transplant a conversation into a session with a different id _and_ a different store (a fork, a cross-node move). Holding only the projection in memory waits on a transplant mechanism.
+- **Per-session definition overrides.** Configuration is app-wide; `createSession` takes no `timeline` override yet.
 
 ## Verified by
 
 - `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection invariants, inbox addressability, snapshot round-trip across instances.
 - `src/__tests__/harness-store.spec.ts` — write-behind and write-through, flush barrier and idempotence, hydration on resume, typed store failures, cursored `history()`, `turnBoundaries: false`, and that compaction never touches the store.
 - `src/__tests__/compact-default.spec.ts` — construction-bound default strategy, call-site override, typed rejection with neither, the bare `timeline:compact` verb, verb enumeration.
+- `src/__tests__/definition.spec.ts` — `defineTimeline` identity + non-enumerable brand, inertness (no store touched, no hydrator run), the inline-bag equivalence, and `defineTimelineStore` under the full store conformance suite plus its loud failure on a `fromSeq` query without `history`.
+- `src/__tests__/hydrators.spec.ts` — `hydrateFromStore` as the store-backed default, and the bounded-memory proof: an N-entry store with `hydrateTail(k)` reads only through the cursored `history` with a limit, never calls `read`, and transfers less than the log; plus the announced fallback when a store has no `history`.
+- `src/__tests__/genesis.spec.ts` — the seed law (genesis never reaches `append`, while a real append still does), typed `TimelineHydrateFailed` with nothing half-installed, the `ctx.store` facet carrying identity + the journal reader, the `compact(entries, ctx)` sugar in both dichotomy arms, the drop-layer `hooks:`/`guards:` bags, and the cascade order (app guards → definition guards → app before → definition before, afters unwinding reverse).
+- `src/__tests__/ctx-store.type.spec.ts` — compile-time pins on `ctx.store` inference from the `store` slot, its interplay with the derivation brand, and the variance that lets a definition specialized on a concrete adapter fit a port-typed slot.
+- The genesis lifecycle laws — the app-level `timeline` slot, ordering before first render, `createSession` failing on a throwing hydrator, and no genesis on fork or spawn — are covered in [@agentick/app](../app) (`genesis-lifecycle.spec.tsx`).
 - `src/__tests__/integration-with-compiler.spec.tsx` — `<Timeline/>` overriding the default fold, role/limit/predicate filtering, the render prop, budget eviction with `onEvict`, `preserveRoles`, the reference collapse pattern above, and `<Transcript>` identity.
 - `src/client/__tests__/timeline-view.spec.ts` + `timeline-handle.spec.ts` + `timeline-fanout.spec.ts` — `initial` seeding, `fromCursor` threading with no double-count, visibility filtering, copy-on-write refs, the window splices, `loadOlder` cursor advance and tail latch, and one shared subscription across minted views.
 - Steering and provenance stamps are covered in [@agentick/session](../session) (`extended-surface.spec.ts`); the `session/timeline_history` wire read in [@agentick/gateway](../gateway).

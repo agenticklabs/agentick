@@ -428,15 +428,21 @@ export class CompactHandlerFailed extends TimelineError {
 }
 registerAgentickError("CompactHandlerFailed", CompactHandlerFailed);
 
-export class RehydrateStrategyMissing extends TimelineError {
-  readonly _tag = "RehydrateStrategyMissing" as const;
-  readonly reason: string;
-  constructor(args: { readonly reason: string; readonly cause?: unknown }) {
-    super(`rehydrate strategy missing: ${args.reason}`, { cause: args.cause });
-    this.reason = args.reason;
+/**
+ * The timeline's GENESIS seam threw (ADR 93 landmine 2). A hydrator failing is
+ * not recoverable at session-open: a half-genesis session would render against a
+ * partial conversation, so session CREATION fails with this instead. Carries the
+ * hydrator's own error as `cause`.
+ */
+export class TimelineHydrateFailed extends TimelineError {
+  readonly _tag = "TimelineHydrateFailed" as const;
+  override readonly cause: unknown;
+  constructor(args: { readonly cause: unknown }) {
+    super(`timeline hydrate (genesis) failed: ${String(args.cause)}`, { cause: args.cause });
+    this.cause = args.cause;
   }
 }
-registerAgentickError("RehydrateStrategyMissing", RehydrateStrategyMissing);
+registerAgentickError("TimelineHydrateFailed", TimelineHydrateFailed);
 
 /**
  * `compact()` was invoked with no strategy argument and no
@@ -457,7 +463,7 @@ registerAgentickError("CompactStrategyMissing", CompactStrategyMissing);
 
 export type TimelineErrorChannel =
   | CompactHandlerFailed
-  | RehydrateStrategyMissing
+  | TimelineHydrateFailed
   | CompactStrategyMissing;
 
 // ============================================================================

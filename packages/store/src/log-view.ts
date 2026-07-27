@@ -43,6 +43,13 @@
  * view is Promise-shaped and never reads ambient context. The ctx passed to
  * {@link append} is captured for the pump batch it kicks.
  *
+ * ## Genesis is the caller's (ADR 93)
+ *
+ * The view does NOT read the store to initialize itself. {@link seed} installs
+ * entries the consuming harness's `hydrate(ctx)` seam produced — the whole log,
+ * a bounded tail, a journal fold, synthetic ephemera. The view holds the machine;
+ * the harness owns the policy.
+ *
  * @see docs/proposals/v2/data-layer-plan.md
  * @see View — the collection-archetype sibling projection.
  * @verifiedBy packages/store/src/__tests__/log-view.spec.ts
@@ -121,6 +128,17 @@ export interface LogViewConfig<T> {
 
 export class LogView<T> {
   // ─── Two tiers ───
+  // TODO(adr-93-d1b / data-layer §2.7): drop `_persisted` — the harness should
+  // hold only the bounded projection and read the log through the store
+  // (`readPersisted()` becomes an async store read). BLOCKED, not forgotten:
+  // `exportSnapshot()` is SYNC, so a harness with no log tier cannot put
+  // `persisted` on its snapshot — and the snapshot is today the ONLY transport
+  // for a cross-store TRANSPLANT. See the kill/resume acceptance case
+  // "snapshot→restore round-trip" (packages/session/src/testing/
+  // kill-resume-acceptance.tsx): the destination session has a DISTINCT id AND a
+  // DISTINCT store, so store+hydrate cannot supply the log. Landing §2.7 needs a
+  // transplant story first (a store-to-store log copy verb, or fork sharing the
+  // parent's logKey) — a design decision above this file's pay grade.
   /** The durable, append-only log — the source of truth. */
   private _persisted: T[] = [];
   /** The materialized projection — the read surface; diverges on compaction. */
@@ -231,12 +249,22 @@ export class LogView<T> {
   }
 
   /**
-   * Load the log from the store into BOTH in-memory tiers — the resume path.
-   * Replaces persisted + projection with the durable log (the projection
-   * reconstructs by a subsequent projection build / compaction).
+   * SEED both in-memory tiers from supplied entries — the genesis path (ADR 93).
+   *
+   * The caller decides WHAT the view opens on (the whole durable log, a bounded
+   * tail, a journal fold, synthetic ephemera): genesis authority belongs to the
+   * consuming harness's hydrator seam, not to the view. The view's job is only to
+   * install the result.
+   *
+   * **The seed law:** entries are installed, NEVER appended — nothing is written
+   * back to the store and the write-behind pump is not touched. Re-appending
+   * genesis would duplicate the log on every resume.
+   *
+   * Replaces persisted + projection with `entries` (the projection reconstructs
+   * by a subsequent projection build / compaction), bumps both versions,
+   * refreshes the snapshot, and pings once.
    */
-  async hydrate(ctx: StoreCtx): Promise<void> {
-    const entries = await this.store.read(this.logKey, ctx);
+  seed(entries: readonly T[]): void {
     this._persisted = [...entries];
     this._projection = [...entries];
     this._persistedVersion += 1;
