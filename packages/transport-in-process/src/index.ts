@@ -17,6 +17,7 @@ export {
   inProcessTransport,
   type InProcessTransportOptions,
   type InProcessGatewayHandler,
+  type InProcessNotificationHandler,
 } from "./transport.js";
 export {
   withHandshake,

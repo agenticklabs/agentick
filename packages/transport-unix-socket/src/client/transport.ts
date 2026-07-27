@@ -17,15 +17,23 @@ import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agen
 import {
   BaseClientTransport,
   DEFAULT_RECONNECT_POLICY,
+  transportError,
   type ReconnectPolicy,
 } from "@agentick/transport";
-import { NdjsonDecoder, encodeNdjson } from "../shared/ndjson.js";
+import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
 
 export interface UnixSocketTransportOptions {
   /** Absolute path to the Unix socket. */
   readonly path: string;
   readonly reconnect?: ReconnectPolicy;
   readonly id?: string;
+  /**
+   * Bytes one inbound NDJSON line may occupy before the decoder refuses it.
+   * Defaults to `DEFAULT_MAX_LINE_BYTES` (16 MiB). A server is usually more
+   * trusted than a client, but the framing bound is symmetric — an unbounded
+   * decoder is unbounded in both directions.
+   */
+  readonly maxLineBytes?: number;
 }
 
 export type { ReconnectPolicy };
@@ -49,13 +57,17 @@ class UnixSocketTransport extends BaseClientTransport {
   readonly capabilities = CAPABILITIES;
 
   private readonly socketPath: string;
+  private readonly decoderOptions: NdjsonDecoderOptions;
   private socket: Socket | null = null;
-  private decoder = new NdjsonDecoder();
+  private decoder: NdjsonDecoder;
 
   constructor(options: UnixSocketTransportOptions) {
     super();
     this.id = options.id ?? `unix-${++transportCounter}`;
     this.socketPath = options.path;
+    this.decoderOptions =
+      options.maxLineBytes !== undefined ? { maxLineBytes: options.maxLineBytes } : {};
+    this.decoder = new NdjsonDecoder(this.decoderOptions);
     this.reconnectPolicy = { ...DEFAULT_RECONNECT_POLICY, ...(options.reconnect ?? {}) };
   }
 
@@ -71,7 +83,7 @@ class UnixSocketTransport extends BaseClientTransport {
       this.socket.end();
       this.socket = null;
     }
-    this.decoder = new NdjsonDecoder();
+    this.decoder = new NdjsonDecoder(this.decoderOptions);
   }
 
   protected sendFrame(frame: JsonRpcFrame): void {
@@ -87,11 +99,15 @@ class UnixSocketTransport extends BaseClientTransport {
       const onError = (err: unknown) => {
         if (this.currentState !== "open") {
           socket.removeAllListeners();
-          reject({
-            kind: "connection",
-            message: `unix socket connect failed (${String(err)})`,
-            cause: err,
-          });
+          // An `Error` (stack, `instanceof`, logger-friendly) that is still
+          // structurally a `TransportError` — callers keep switching on `kind`.
+          reject(
+            transportError({
+              kind: "connection",
+              message: `unix socket connect failed (${String(err)})`,
+              cause: err,
+            }),
+          );
         }
       };
 
@@ -101,7 +117,7 @@ class UnixSocketTransport extends BaseClientTransport {
         socket.removeListener("error", onError);
         this.socket = socket;
         this.resetReconnectAttempts();
-        this.decoder = new NdjsonDecoder();
+        this.decoder = new NdjsonDecoder(this.decoderOptions);
         this.setState("open");
         this.resubscribeAfterReconnect();
         resolve();
@@ -109,7 +125,16 @@ class UnixSocketTransport extends BaseClientTransport {
 
       socket.on("data", (chunk: Buffer) => {
         for (const result of this.decoder.push(chunk)) {
-          if (!result.ok) continue;
+          if (!result.ok) {
+            // Framing lost (an oversized line) — nothing further on this socket
+            // can be trusted to start at a frame boundary. Drop it and let the
+            // base class's reconnect machinery decide what happens next.
+            if (result.fatal === true) {
+              socket.destroy();
+              return;
+            }
+            continue;
+          }
           const frame = result.frame;
           if (Array.isArray(frame)) {
             for (const f of frame) this.routeFrame(f as JsonRpcFrame);

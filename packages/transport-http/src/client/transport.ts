@@ -150,7 +150,11 @@ class HttpTransport extends BaseClientTransport {
       return;
     }
 
-    if (!response.ok && response.status === 204) return;
+    // `204 No Content` — the server's answer to a notification frame (the
+    // `notifications/cancelled` this client sends on every abort). There is no
+    // body by definition, so leave it unread: parsing it would throw on every
+    // cancellation. (`204` IS `ok`, so this cannot be predicated on `!ok`.)
+    if (response.status === 204) return;
     let body: unknown;
     try {
       body = await response.json();

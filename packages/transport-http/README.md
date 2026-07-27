@@ -123,6 +123,8 @@ const transport = httpServerTransport({
 
 HTTP is request-oriented, so an `AuthSource` runs **per request**: each `POST` authenticates from its own `Authorization: Bearer` header, and that request's identity governs only that request's dispatch. Two `POST`s sharing one `Mcp-Session-Id` with different tokens resolve to their own principals — the per-session state deliberately caches no identity, so identity cannot bleed between requests.
 
+Every method that reaches the gateway is gated the same way: `POST`, the `GET` stream open, and `DELETE`. Session teardown is a mutation with a real blast radius — it releases the subscriptions, the in-flight registry, and the notification stream — so a refused `DELETE` answers `401` and leaves the session standing.
+
 ```ts
 import { createGateway } from "@agentick/gateway";
 import { staticTokenAuthSource } from "@agentick/transport";
@@ -275,8 +277,6 @@ That is the client attaching _its_ credential. It is unrelated to `authSource`, 
 
 - **Backpressure is unbounded here.** The bounded-buffer policies live on `MultiplexedStream` in [@agentick/transport](../transport), but this transport constructs subscription and progress streams with the default `unbounded` policy and exposes no per-stream option. A slow consumer behind a fast emitter grows the buffer.
 - **No compression.** No `Accept-Encoding` negotiation, no `zlib` on responses. Straightforward to add; not done.
-- **`DELETE` is not authenticated.** A configured `authSource` gates `POST` and the `GET` stream open, but not the session teardown. Whoever knows a session id can release its fan-out state.
-- **No wall-clock ceiling on authentication.** A hung `AuthSource` leaves the request pending rather than rejecting on a timeout.
 - **Sticky-route survival is untested.** The server returns `Mcp-Session-Id`, the client stores it and echoes it, but nothing exercises the client across a load-balancer reshuffle.
 - **Notification-stream reconnect is untested here.** The reconnect machinery is shared and covered, but the HTTP-specific "persistent `GET` survives a server bounce" path has no test (the WebSocket package has the equivalent).
 - **MCP method namespaces are not served.** The wire follows the Streamable HTTP transport profile; the server does not answer MCP's own method names.
@@ -287,6 +287,9 @@ That is the client attaching _its_ credential. It is unrelated to `authSource`, 
 - `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance`) — state machine, RPC correlation, pre-connect rejection, `JsonRpcError` → `TransportError`, concurrent multiplexing, `notifications/cancelled` on abort, subscription routing plus `closed` and `evicted`, and progress frames reaching `progress(token)` through the streaming-response path. Exercises the SSE codec end to end.
 - `src/__tests__/security.spec.ts` — the CSRF bootstrap handshake, missing and forged token denial, `csrf: false`, cross-site `Origin`/`Sec-Fetch-Site` denial, same-origin admission, `Host` allow-list denial and the `allowedHosts` override, exact-origin CORS echo and disallowed-preflight denial, and a real client round-trip over the loopback bind default.
 - `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) — valid bearer stamping a principal, missing and invalid and prototype-key tokens refused at the edge, local pole with no `authSource`, two `POST`s on one session resolving to their own principals, plus the admission-failure event: published on refusal, absent on admission, and carrying no credential material.
+- `src/__tests__/client-204.spec.ts` — a `204 No Content` reply (the server's answer to the `notifications/cancelled` an abort produces) leaving its body unread — `json()` never called, `bodyUsed` still false — and the transport still open afterwards.
+- `src/__tests__/authn-timeout.spec.ts` — a never-answering `AuthSource` refused with `401` on `POST`, on the `GET` stream open, and on `DELETE` rather than hanging the request, and one that answers inside the ceiling still admitted.
+- `src/__tests__/delete-authn.spec.ts` — session teardown behind the same gate as the rest: an unauthenticated and an invalid-bearer `DELETE` each refused with `401` while an open `GET` stream on that session survives, the refusal publishing `gateway:admission:failed`, and an authenticated `DELETE` tearing the stream down.
 - `src/__tests__/server-transport.spec.ts` (`runServerTransportConformance`) — the lifecycle contract for both `httpServerTransport` and `fetchServerTransport` (stable id, bind, teardown, idempotent listen and close, re-listen), plus a real gateway-owned bind: `gateway.listen()` binds the port and a client pings through it, `gateway.close()` frees it.
 - `src/__tests__/embedded-fetch-handler.spec.ts` — identity round-trip through the authorizer, `Response` short-circuit reaching nothing, fail-closed default and the `host-managed` opt-out, out-of-scope denial at the dispatch choke point, `GET` SSE plus `sub/subscribe` delivering a frame then tearing down on cancel, cross-site rejection while embedded, a Hono-shaped mount, `gateway.close()` closing live streams, and the pre-listen / post-close `503`.
 - Shared-server coexistence — one Node server carrying this transport, the WebSocket transport, a foreign `/health` handler, and a foreign upgrade listener — is verified in [@agentick/transport-websocket](../transport-websocket) (`src/__tests__/shared-server-coexistence.spec.ts`), which drives both transports at once.

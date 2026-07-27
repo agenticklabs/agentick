@@ -23,7 +23,7 @@ import {
   type JsonRpcResponse,
 } from "@agentick/spec";
 import { authenticateIngress, dispatchRequest, type DispatchHost } from "@agentick/transport";
-import { NdjsonDecoder, encodeNdjson } from "../shared/ndjson.js";
+import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
 
 export interface UnixSocketServerOptions {
   readonly path: string;
@@ -47,16 +47,81 @@ export interface UnixSocketServerOptions {
    * not a bearer token.
    */
   readonly authSource?: AuthSource;
+  /**
+   * Wall-clock ceiling on the `authSource` call, in milliseconds. Defaults to
+   * `DEFAULT_INGRESS_AUTHN_TIMEOUT_MS` (10s); `Infinity` opts out. Exceeding it
+   * destroys the socket (fail closed) rather than holding it open on a hung
+   * authenticator.
+   */
+  readonly authnTimeoutMs?: number;
+  /**
+   * Bytes one inbound NDJSON line may occupy before the connection is refused
+   * and closed. Defaults to `DEFAULT_MAX_LINE_BYTES` (16 MiB). Framing is "read
+   * until newline", so without a cap a peer that never sends one grows this
+   * process's memory for as long as it keeps writing.
+   */
+  readonly maxLineBytes?: number;
+  /**
+   * Where non-fatal failures at this edge are reported.
+   *
+   * A transport whose whole job is moving bytes between two processes must not
+   * hide the byte-moving failing. Every site that has to stay best-effort —
+   * teardown must not throw, one rude peer must not take the listener down —
+   * reports here instead of swallowing: a reset or broken-pipe socket error, a
+   * failed write, a subscription cleanup or in-flight abort that threw.
+   *
+   * The DEFAULT is quiet: a host-local socket losing a peer is ordinary, and a
+   * framework that logs on its own behalf is a framework fighting its adopter.
+   * The seam is the capability; what to do with it is the adopter's policy.
+   * Reporting NEVER changes behavior — teardown proceeds either way — and a
+   * throwing reporter is its own bug (it is called inside the same try that was
+   * already swallowing).
+   */
+  readonly onFailure?: (failure: UnixSocketFailure) => void;
+}
+
+/** The site that failed — see {@link UnixSocketServerOptions.onFailure}. */
+export type UnixSocketFailureSite =
+  /** The `net.Server` itself emitted `error` after a successful bind. */
+  | "server"
+  /** A connection's socket emitted `error` (a reset peer, a broken pipe). */
+  | "socket"
+  /** Writing a frame to the socket threw. */
+  | "write"
+  /** Ending the socket during teardown threw. */
+  | "close"
+  /** A registered subscription cleanup rejected during teardown. */
+  | "subscription-cleanup"
+  /** An in-flight abort callback threw during teardown. */
+  | "abort";
+
+export interface UnixSocketFailure {
+  readonly at: UnixSocketFailureSite;
+  readonly error: unknown;
 }
 
 export interface UnixSocketServerHandle {
   readonly server: Server;
+  /**
+   * Resolves once the socket is accepting; REJECTS with the bind error.
+   *
+   * A `net.Server` reports a bind failure by emitting `error`, and an
+   * unhandled `error` on an EventEmitter is a thrown exception at the top of
+   * the event loop. The most likely failure for this transport — a stale socket
+   * file from an unclean shutdown (`EADDRINUSE`) — would otherwise take the
+   * process down from a callback no adopter could catch. The listeners are
+   * attached BEFORE `listen()`, so the failure is always claimed; this promise
+   * is how you read it. Ignoring it is safe (the rejection is pre-handled), but
+   * then a failed bind is silent.
+   */
+  listening(): Promise<void>;
   close(): Promise<void>;
 }
 
 export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketServerHandle {
   const liveConnections = new Set<ConnectionContext>();
   const transportId = options.transportId ?? "unix";
+  const report = (failure: UnixSocketFailure): void => options.onFailure?.(failure);
 
   const server = netCreateServer((socket) => {
     // Authenticate the crossing once per connection (ADR 61). Default
@@ -66,10 +131,14 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
     void authenticateIngress(
       { transportKind: "unix", credential: { kind: "none" } },
       options.authSource,
-      // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. A unix
-      // socket is host-local, so there is no peer address to attribute; the
-      // failure carries the transport kind and the refusal reason only.
-      (failure) => options.gateway.emitAdmissionFailure?.(failure),
+      {
+        // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. A unix
+        // socket is host-local, so there is no peer address to attribute; the
+        // failure carries the transport kind and the refusal reason only.
+        onRejected: (failure) => options.gateway.emitAdmissionFailure?.(failure),
+        // A hung AuthSource would otherwise hold this socket open forever.
+        ...(options.authnTimeoutMs !== undefined ? { timeoutMs: options.authnTimeoutMs } : {}),
+      },
     )
       .then(async (ingress) => {
         // ADR 84 §4 — per-connection admission. Fire `gateway:accept` AFTER
@@ -81,14 +150,22 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
           transportId,
           ...(ingress.identity !== undefined ? { identity: ingress.identity } : {}),
         });
-        const ctx = new ConnectionContext(socket, options.gateway, ingress.identity);
+        const ctx = new ConnectionContext(
+          socket,
+          options.gateway,
+          ingress.identity,
+          { ...(options.maxLineBytes !== undefined ? { maxLineBytes: options.maxLineBytes } : {}) },
+          report,
+        );
         liveConnections.add(ctx);
         socket.on("close", () => {
           liveConnections.delete(ctx);
           void ctx.close();
         });
-        socket.on("error", () => {
-          /* swallow — close handler does cleanup */
+        socket.on("error", (error) => {
+          // Non-fatal by design — the `close` handler does the cleanup. Reported
+          // rather than swallowed so a broken pipe is not invisible.
+          report({ at: "socket", error });
         });
       })
       .catch(() => {
@@ -99,10 +176,34 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
       });
   });
 
+  // Post-bind server errors are non-fatal to the process but must not be
+  // unhandled either — the one-shot bind listener below is removed on success,
+  // so this is what keeps the emitter claimed for the server's whole life.
+  server.on("error", (error) => report({ at: "server", error }));
+
+  // Claim the bind outcome BEFORE listening, so an `error` emitted during bind
+  // always has a listener and can never reach `uncaughtException`.
+  const bound = new Promise<void>((resolve, reject) => {
+    const onListening = (): void => {
+      server.removeListener("error", onBindError);
+      resolve();
+    };
+    const onBindError = (err: Error): void => {
+      server.removeListener("listening", onListening);
+      reject(err);
+    };
+    server.once("listening", onListening);
+    server.once("error", onBindError);
+  });
+  // Pre-handle it: an adopter who never calls `listening()` must not get an
+  // unhandled-rejection crash in place of the uncaught-exception one.
+  bound.catch(() => {});
+
   server.listen(options.path);
 
   return {
     server,
+    listening: () => bound,
     async close() {
       for (const ctx of liveConnections) await ctx.close();
       liveConnections.clear();
@@ -120,7 +221,7 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
 class ConnectionContext {
   private readonly subscriptions = new Map<string, { unsubscribe: () => Promise<void> }>();
   private readonly inFlight = new Map<JsonRpcId, () => void>();
-  private readonly decoder = new NdjsonDecoder();
+  private readonly decoder: NdjsonDecoder;
   private closed = false;
 
   constructor(
@@ -132,7 +233,10 @@ class ConnectionContext {
      * dispatch; never re-authenticated inward.
      */
     private readonly identity?: IngressIdentity,
+    options: NdjsonDecoderOptions = {},
+    private readonly report: (failure: UnixSocketFailure) => void = () => {},
   ) {
+    this.decoder = new NdjsonDecoder(options);
     socket.on("data", (chunk: Buffer) => {
       void this.handleData(chunk);
     });
@@ -143,6 +247,13 @@ class ConnectionContext {
     for (const result of this.decoder.push(chunk)) {
       if (!result.ok) {
         this.sendError(null, result.error);
+        // A fatal refusal means framing is lost (an oversized line). Report it,
+        // then close: there is no byte offset at which reading could safely
+        // resume, and a peer that overran the cap once will do it again.
+        if (result.fatal === true) {
+          void this.close();
+          return;
+        }
         continue;
       }
       const frame = result.frame;
@@ -203,8 +314,10 @@ class ConnectionContext {
     if (this.socket.destroyed) return;
     try {
       this.socket.write(encodeNdjson(frame));
-    } catch {
-      /* swallow */
+    } catch (error) {
+      // Best-effort by design (a dead peer must not fault the dispatch that
+      // wrote to it) — but reported, not silent.
+      this.report({ at: "write", error });
     }
   }
 
@@ -218,24 +331,25 @@ class ConnectionContext {
     for (const { unsubscribe } of this.subscriptions.values()) {
       try {
         await unsubscribe();
-      } catch {
-        /* swallow */
+      } catch (error) {
+        // One failing cleanup must not abandon the rest.
+        this.report({ at: "subscription-cleanup", error });
       }
     }
     this.subscriptions.clear();
     for (const abort of this.inFlight.values()) {
       try {
         abort();
-      } catch {
-        /* swallow */
+      } catch (error) {
+        this.report({ at: "abort", error });
       }
     }
     this.inFlight.clear();
     if (!this.socket.destroyed) {
       try {
         this.socket.end();
-      } catch {
-        /* swallow */
+      } catch (error) {
+        this.report({ at: "close", error });
       }
     }
   }

@@ -1,7 +1,9 @@
 export {
   unixSocketServer,
-  type UnixSocketServerOptions,
-  type UnixSocketServerHandle,
   type DispatchHost,
+  type UnixSocketFailure,
+  type UnixSocketFailureSite,
+  type UnixSocketServerHandle,
+  type UnixSocketServerOptions,
 } from "./server.js";
 export { unixSocketServerTransport, type UnixSocketServerTransportConfig } from "./transport.js";

@@ -81,6 +81,14 @@ export interface WebSocketServerOptions extends Omit<WebSecurityOptions, "csrf">
    */
   readonly authSource?: import("@agentick/spec").AuthSource;
   /**
+   * Wall-clock ceiling on the `authSource` call, in milliseconds. Defaults to
+   * `DEFAULT_INGRESS_AUTHN_TIMEOUT_MS` (10s); `Infinity` opts out. Exceeding it
+   * refuses the upgrade with `401` and destroys the socket — unbounded, a hung
+   * authenticator leaves the upgrade pending and the raw socket leaked, one per
+   * probe.
+   */
+  readonly authnTimeoutMs?: number;
+  /**
    * Accept the bearer token from the `?token=` query param. DEFAULT
    * FALSE (review finding): query strings land in proxy access logs,
    * browser history, and Referer headers — a leak vector for long-lived
@@ -138,9 +146,6 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     // Build the ingress context from the native WS-upgrade credential.
     // Bearer from the Authorization header; query token ONLY when the
     // adopter opted in (query strings leak into proxy logs / history).
-    // TODO(#146): bound this authn with a timeout — a hung AuthSource
-    // currently leaves the upgrade pending and leaks the socket (there is
-    // no wall-clock ceiling here or on the HTTP edge). Reject on timeout.
     const auth = req.headers.authorization;
     const bearer = auth?.startsWith("Bearer ") ? auth.slice(7) : undefined;
     const query = options.allowQueryToken
@@ -157,23 +162,29 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
         },
       },
       options.authSource,
-      // ADR 92 §Family 1.3 — a refused upgrade leaves an audit trace. The edge
-      // enriches with the peer address it alone knows; the credential never
-      // travels with it.
-      // TODO(ADR-92): the `security.checkAccess` origin/host refusal above is
-      // the other admission gate at this edge and deserves the same visibility
-      // (a second `IngressAdmissionFailureClass`).
-      (failure) =>
-        options.gateway.emitAdmissionFailure?.(
-          req.socket.remoteAddress !== undefined
-            ? { ...failure, remoteAddress: req.socket.remoteAddress }
-            : failure,
-        ),
+      {
+        // ADR 92 §Family 1.3 — a refused upgrade leaves an audit trace. The edge
+        // enriches with the peer address it alone knows; the credential never
+        // travels with it.
+        // TODO(ADR-92): the `security.checkAccess` origin/host refusal above is
+        // the other admission gate at this edge and deserves the same visibility
+        // (a second `IngressAdmissionFailureClass`).
+        onRejected: (failure) =>
+          options.gateway.emitAdmissionFailure?.(
+            req.socket.remoteAddress !== undefined
+              ? { ...failure, remoteAddress: req.socket.remoteAddress }
+              : failure,
+          ),
+        // Without a ceiling a hung AuthSource leaves this upgrade pending
+        // forever, and the raw socket below is never released.
+        ...(options.authnTimeoutMs !== undefined ? { timeoutMs: options.authnTimeoutMs } : {}),
+      },
     )
       .then((ctx) => finishUpgrade(ctx.identity))
       .catch(() => {
-        // Fail closed — a configured AuthSource that rejected. The
-        // no-AuthSource path never reaches here (helper resolves).
+        // Fail closed — a configured AuthSource that rejected, or one that blew
+        // its wall-clock ceiling. The no-AuthSource path never reaches here
+        // (the helper resolves).
         socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
         socket.destroy();
       });

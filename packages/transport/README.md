@@ -181,6 +181,15 @@ Two poles, and the helper enforces the boundary between them:
 
 The helper is **enrichment only** — it never authorizes. That is the `Authorizer` at dispatch, and keeping the two apart is what makes "who are you" testable without a policy. `staticTokenAuthSource` is the bundled reference implementation: a token-to-identity table, with a guard so inherited object members (`toString`, `constructor`) are not valid tokens.
 
+An `AuthSource` is adopter code that reaches the network, so the call is bounded: exceeding `timeoutMs` (default 10s, `Infinity` to opt out) refuses the crossing with `IngressAuthnTimeout` and reports it like any other refusal. The ceiling lives here rather than at each edge because the `await` does — an edge that passes no `timeoutMs` is still bounded, which is the point. A hung authenticator would otherwise hang an HTTP request and leak a WebSocket upgrade's socket, one per probe.
+
+```ts
+const enriched = await authenticateIngress({ transportKind: "http", credential }, authSource, {
+  onRejected: (failure) => host.emitAdmissionFailure?.(failure),
+  timeoutMs: 5_000,
+});
+```
+
 > [!IMPORTANT]
 > This seam is **server-side only**. `AuthSource` implementations and token material never project to a client.
 
@@ -289,18 +298,21 @@ runIngressAuthnConformance({
 | `DEFAULT_RECONNECT_POLICY` / `computeFullJitterBackoff`            | The shared reconnect backoff, exported for testing.           |
 | `ReconnectPolicy` / `ActiveSubscription` (types)                   | Policy shape and resubscribe bookkeeping.                     |
 | `BackpressurePolicy` / `BackpressureOptions` / `BackpressureError` | Per-stream backpressure types.                                |
+| `transportError(shape)`                                            | A rejection that is both an `Error` and a `TransportError`.   |
 
 ### `@agentick/transport/server`
 
-| Export                                                    | Purpose                                     |
-| --------------------------------------------------------- | ------------------------------------------- |
-| `dispatchRequest(host, req, sink, identity?)`             | The one JSON-RPC dispatcher.                |
-| `BaseConnectionContext`                                   | The abstract per-connection server adapter. |
-| `DispatchHost` / `DispatchSink` (types)                   | The dispatcher's two contracts.             |
-| `authenticateIngress(context, authSource?, onRejected?)`  | The ingress crossing. Enrichment only.      |
-| `resolveWebSecurity(options?)`                            | The shared HTTP-facing security policy.     |
-| `CSRF_HEADER` / `DEFAULT_BIND_HOST` / `isLoopbackAddress` | Companion constants and predicate.          |
-| `projectClientResult` / `projectClientNotification`       | The client-facing output bounders.          |
+| Export                                                     | Purpose                                       |
+| ---------------------------------------------------------- | --------------------------------------------- |
+| `dispatchRequest(host, req, sink, identity?)`              | The one JSON-RPC dispatcher.                  |
+| `BaseConnectionContext`                                    | The abstract per-connection server adapter.   |
+| `DispatchHost` / `DispatchSink` (types)                    | The dispatcher's two contracts.               |
+| `authenticateIngress(context, authSource?, options?)`      | The ingress crossing. Enrichment only.        |
+| `IngressAuthnOptions` (type)                               | `{ onRejected?, timeoutMs? }`.                |
+| `DEFAULT_INGRESS_AUTHN_TIMEOUT_MS` / `IngressAuthnTimeout` | The authn wall-clock ceiling and its refusal. |
+| `resolveWebSecurity(options?)`                             | The shared HTTP-facing security policy.       |
+| `CSRF_HEADER` / `DEFAULT_BIND_HOST` / `isLoopbackAddress`  | Companion constants and predicate.            |
+| `projectClientResult` / `projectClientNotification`        | The client-facing output bounders.            |
 
 ### `@agentick/transport/testing`
 
@@ -336,6 +348,8 @@ runIngressAuthnConformance({
 - `src/__tests__/wire-dispatch-seam.spec.ts` — a gateway wire hook firing exactly once around dispatch, self-scoping by operation, and authorization rejecting **before** the seam.
 - `src/__tests__/wire-declarative-auth.spec.ts` — verb-scope default, `required: false` skipping policy, additive roles, the anti-bypass rule that a role alone never reaches the verb, and `required: false` failing to waive a session's structural ceiling.
 - `src/__tests__/wire-lane-e2e.spec.ts` — against a real gateway and session: a granted principal round-tripping `timeline/compact`, gated discovery, an addressable-but-not-wire verb returning `MethodNotFound` even when granted, Forbidden for ungranted and anonymous callers, exact-beats-dynamic on a real registry, the same-principal rule denying cross-principal access, prototype-key bypass rejection, `allowAnonymous` admitting the `none` credential, and the full scope-refinement story — `initialize` narrowing claims, cover-aware glob intersection, re-initialize only narrowing further, and the session ceiling holding with no authorizer present.
+- Subscription teardown through `BaseConnectionContext` — `unregisterSubscription` running the registered cleanup rather than dropping the entry, so `sub/unsubscribe` releases the server-side stream — is verified in [@agentick/transport-in-process](../transport-in-process) (`src/__tests__/connection-teardown.spec.ts`), which drives it against a real gateway.
+- `src/__tests__/ingress-timeout.spec.ts` — the wall-clock ceiling: a never-settling `AuthSource` refused, the refusal an `Error` naming its ceiling and leaving an admission-failure trace with no credential material, the 10s default applied when a caller configures none, `Infinity` opting out, and a rejecting source still surfacing its own error.
 - `src/__tests__/authorize-seam.spec.ts` — a contextual scope flipping a policy deny to allow, and the structural ceiling denying regardless while the hook never fires.
 - `src/__tests__/session-principal.spec.ts` — the owning principal stamped from the edge onto both harness and record, a body-smuggled principal ignored, an unauthenticated create left unstamped, and the same-principal gate engaging on the stamped value.
 - `src/__tests__/wire-identity-hook.spec.ts` — a hook reading `ctx.identity` and overriding a smuggled principal, identity absent when unauthenticated, a handler reading the full structured identity, and a non-wire operation seeing none.

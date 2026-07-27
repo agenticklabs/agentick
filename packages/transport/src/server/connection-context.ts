@@ -76,25 +76,14 @@ export abstract class BaseConnectionContext {
           };
         }
       }
+      // `defaultSink()` — NOT a re-declaration of the same five callbacks. The
+      // inline copy that used to live here bypassed the public methods, so
+      // `sub/unsubscribe` deleted its registry entry without running the
+      // cleanup and the server-side drain loop leaked.
       return dispatchRequest(
         this.gateway,
         frame as JsonRpcRequest,
-        {
-          sendNotification: (n) =>
-            this.sendFrame({ jsonrpc: "2.0", method: n.method, params: n.params }),
-          registerSubscription: (subId, unsubscribe) => {
-            this.subscriptions.set(subId, { unsubscribe });
-          },
-          unregisterSubscription: (subId) => {
-            this.subscriptions.delete(subId);
-          },
-          registerInFlight: (id, abort) => {
-            this.inFlight.set(id, abort);
-          },
-          unregisterInFlight: (id) => {
-            this.inFlight.delete(id);
-          },
-        },
+        this.defaultSink(),
         this.identity,
       );
     }
@@ -155,8 +144,28 @@ export abstract class BaseConnectionContext {
   registerSubscription(subId: string, unsubscribe: () => Promise<void>): void {
     this.subscriptions.set(subId, { unsubscribe });
   }
+  /**
+   * Drop a subscription AND run its cleanup.
+   *
+   * Forgetting the entry is not releasing it: the cleanup is what stops the
+   * server-side drain loop and interrupts its bus fiber. `sub/unsubscribe`
+   * routes here, so a client that unsubscribed used to leave the server
+   * consuming its bus subscription for the life of the connection — the same
+   * leak as never registering it at all, just later.
+   *
+   * Best-effort and fire-and-forget: the wire method returns `null`
+   * immediately, and one failing cleanup must not take the connection with it
+   * (`close()` swallows the same way).
+   */
   unregisterSubscription(subId: string): void {
+    const entry = this.subscriptions.get(subId);
+    if (!entry) return;
     this.subscriptions.delete(subId);
+    void Promise.resolve()
+      .then(() => entry.unsubscribe())
+      .catch(() => {
+        /* swallow — teardown is best-effort */
+      });
   }
   registerInFlight(id: JsonRpcId, abort: () => void): void {
     this.inFlight.set(id, abort);

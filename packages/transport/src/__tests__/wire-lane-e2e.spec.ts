@@ -90,10 +90,8 @@ describe("wire lane e2e — real gateway + session, ingress identity, Authorizer
       options: {
         ...makeAppOptions(),
         // Construction-bound default compaction — the bare
-        // `timeline:compact` signal form resolves to this (ADR 51).
-        session: {
-          timeline: { compact: fromHandler({ handler: async ({ entries }) => entries }) },
-        },
+        // `timeline:compact` signal form resolves to this. Top-level slot.
+        timeline: { compact: fromHandler({ handler: async ({ entries }) => entries }) },
       } as never,
     } as never);
     await app.createSession({ sessionId: "s1" });

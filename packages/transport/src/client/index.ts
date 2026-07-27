@@ -11,3 +11,4 @@ export {
   type BackpressureOptions,
   type BackpressureError,
 } from "./multiplexed-stream.js";
+export { transportError } from "./transport-failure.js";

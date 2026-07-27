@@ -41,24 +41,10 @@ export function unixSocketServerTransport(
       if (handle) return; // idempotent — already bound
       const bound = unixSocketServer({ ...config, gateway: host, transportId: id });
       handle = bound;
-      // `unixSocketServer` calls `server.listen(path)` for us; wait for the
-      // socket to actually be accepting so a resolved `listen()` is honest.
-      await new Promise<void>((resolve, reject) => {
-        if (bound.server.listening) {
-          resolve();
-          return;
-        }
-        const onError = (err: Error): void => {
-          bound.server.removeListener("listening", onListening);
-          reject(err);
-        };
-        const onListening = (): void => {
-          bound.server.removeListener("error", onError);
-          resolve();
-        };
-        bound.server.once("listening", onListening);
-        bound.server.once("error", onError);
-      });
+      // `unixSocketServer` binds for us and claims the outcome before doing so;
+      // awaiting it here makes a resolved `listen()` honest and surfaces a bind
+      // failure (a stale socket file) as a rejection the gateway propagates.
+      await bound.listening();
     },
 
     async close(): Promise<void> {

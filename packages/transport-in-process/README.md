@@ -135,6 +135,8 @@ There is no separate server-push slot. Everything the server sends unprompted �
 
 Progress is the load-bearing case: a tool calling `ctx.progress(...)` mid-execution reaches the client's progress stream for the token the send declared.
 
+Frames travel the other way too. On the `gateway` path the server side is a real per-connection context — the same one the socket transports use — so an id-less frame the client emits (`notifications/cancelled`, which every aborted request sends) lands in that connection's in-flight registry and aborts the operation it names. Closing the client runs every cleanup the connection registered, so a server-side subscription does not outlive its subscriber. On the raw-`handler` path, pass `onNotification` to receive those frames; without it a stub server simply ignores them.
+
 ```ts
 import type { EventFrame } from "@agentick/spec";
 
@@ -216,17 +218,18 @@ The control transport knows nothing about audio or video. Pass a `MediaTransport
 
 ### `InProcessTransportOptions`
 
-| Option       | Purpose                                                                              |
-| ------------ | ------------------------------------------------------------------------------------ |
-| `gateway`    | The dispatch host to call. The common case; wiring is built for you                  |
-| `handler`    | Raw request handler instead of `gateway` — exactly one of the two, never both        |
-| `wireParity` | Round-trip every frame through JSON to catch non-serializable payloads (default off) |
-| `id`         | Transport id; defaults to an `in-process-N` counter                                  |
-| `media`      | A `MediaTransport` to delegate uplink / downlink to (default: no media plane)        |
+| Option           | Purpose                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `gateway`        | The dispatch host to call. The common case; wiring is built for you                                    |
+| `handler`        | Raw request handler instead of `gateway` — exactly one of the two, never both                          |
+| `onNotification` | Where client-originated notifications go on the `handler` path (the `gateway` path routes them itself) |
+| `wireParity`     | Round-trip every frame through JSON to catch non-serializable payloads (default off)                   |
+| `id`             | Transport id; defaults to an `in-process-N` counter                                                    |
+| `media`          | A `MediaTransport` to delegate uplink / downlink to (default: no media plane)                          |
 
 ### Capabilities
 
-`bidirectional: true` · `streamingRequest: true` · `binaryFrames: true` · `reconnectable: false` (nothing to reconnect to) · `media` reflects whether you passed one.
+`bidirectional: true` · `streamingRequest: true` · `reconnectable: false` (nothing to reconnect to) · `binaryFrames` reflects the mode — `true` by default (frames pass by reference), `false` under `wireParity` (JSON mangles a typed array) · `media` reflects whether you passed one.
 
 ## Patterns
 
@@ -244,8 +247,7 @@ The control transport knows nothing about audio or video. Pass a `MediaTransport
 
 ## Roadmap & known gaps
 
-- **Client-to-server notifications are dropped.** The transport only round-trips requests; a notification the client emits — including the `notifications/cancelled` that an `AbortSignal` produces — never reaches the handler. Aborting rejects the client's promise but does not stop server-side work. The socket transports at least put the frame on the wire; here it is discarded before it leaves the client.
-- **`wireParity` is JSON-only.** Default mode advertises `binaryFrames: true` and will happily carry a `Uint8Array`; parity mode will mangle it, exactly as a JSON wire would. That divergence is the point, but it means the two modes are not interchangeable for binary payloads.
+- **`wireParity` is JSON-only.** Parity mode mangles a `Uint8Array` exactly as a JSON wire would, so the two modes are not interchangeable for binary payloads. That divergence is the point — and `capabilities.binaryFrames` now reports it (`true` by default, `false` under parity) rather than claiming binary support in both.
 - **No runtime capability re-sync.** `gateway:capabilities:changed` is delivered, but the client does not refresh its own capability view from it — a subscriber has to act on the frame.
 - **`withHandshake` reports no extensions.** Its default `_extensions/list` reply is empty, so a stub can't exercise client-side extension discovery without an override.
 - **The media plane has no test in this package.** `media` delegation is exercised from [@agentick/live](../live), which owns the only implementation.
@@ -255,6 +257,9 @@ The control transport knows nothing about audio or video. Pass a `MediaTransport
 - `src/__tests__/smoke.spec.ts` — `gateway` XOR `handler` construction guard, connect / `ping` / close state transitions, typed `gateway().listApps()` + `app().listSessions()` + `session().abort()` params, RPC error surfacing as `TransportError { kind: "rpc" }`, pre-connect rejection, `wireParity: true` round-trip, and the client extension pipeline (request middleware order, namespace install, LIFO `onClose`).
 - `src/__tests__/transport-conformance.spec.ts` — the shared `ClientTransport` suite: state machine, RPC correlation, concurrent multiplexed RPCs, `notifications/cancelled` client emit, subscription id re-keying / routing / close / eviction, progress streams.
 - `src/__tests__/wire-conformance.spec.ts` — envelope round-trips through the validator, heterogeneous batches, empty-batch rejection.
+- `src/__tests__/cancellation-e2e.spec.ts` — an aborted request reaching the server: a parked wire method's registered cancel callback firing, the cancellation routed to the one request id it names while a sibling stays parked, and an unmatched cancellation leaving the pair usable.
+- `src/__tests__/connection-teardown.spec.ts` — client close releasing the server-side subscription's bus stream (the iterator closed, its producer fiber interrupted), and `sub/unsubscribe` releasing it rather than merely forgetting the registry entry.
+- `src/__tests__/wire-parity-capabilities.spec.ts` — `binaryFrames` matching observed behavior in both modes: `true` with a `Uint8Array` arriving intact, `false` with it arriving JSON-mangled, and no other capability differing between the modes.
 - `src/__tests__/session-send-e2e.spec.ts` — a real `session/send` across client → gateway → session → executor, `responseFormat` and `onBusy` threading, and a server-thrown `SessionNotFoundError` rehydrating as the same class on the client.
 - `src/__tests__/send-shortcut.spec.ts` — `client.send(id, input)` issues the identical frame as `client.session(id).send(input)`, and returns the canonical handle.
 - `src/__tests__/progress-signal-e2e.spec.ts` — a tool's `ctx.progress` during an in-flight send arriving on `client.transport.progress(token)`.

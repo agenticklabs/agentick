@@ -265,7 +265,6 @@ Security fields (shared, from [@agentick/transport](../transport)): `allowedOrig
 - **`maxPayload` is untuned.** The `ws` default of 100 MB stands, so a misbehaving client can send very large frames.
 - **No session affinity across reconnects.** `initialize` returns a `connectionId`, but the client does not carry it on reconnect, so a load balancer cannot sticky-route. Fine for single-node deployments; broken for clustered ones.
 - **No server-initiated broadcast.** The server tracks live sockets for teardown but does not fan a gateway-level `notify` out to connected clients. Notifications flow only within a dispatch — subscription events and progress.
-- **No wall-clock ceiling on authentication.** A hung `AuthSource` leaves the upgrade pending and leaks the socket rather than rejecting on a timeout.
 - **Heartbeat termination is unverified.** The server pings on an interval and terminates a socket that misses its pong; the miss branch has no test (it needs a client that deliberately ignores `ping`).
 - **Cursor-aware replay under retention pressure is unverified.** Reconnect is covered and the replay path is wired, but no test drives a subscription past a tight retention window to assert the `evicted` notification arrives.
 - **`extraSubprotocols` has no integration test.** The client offers them; nothing exercises a server that actually speaks a second dialect.
@@ -277,6 +276,7 @@ Security fields (shared, from [@agentick/transport](../transport)): `allowedOrig
 - `src/__tests__/reconnect.spec.ts` — a server bounce driving `reconnecting` → `open` with the wire working afterwards, explicit `close()` suppressing reconnect, and `enabled: false` going straight to `closed`.
 - `src/__tests__/security.spec.ts` — upgrades refused with no subprotocol and with an unrecognised one, accepted with `agentick-rpc-v1`; disallowed `Origin` refused and allowlisted accepted; no `Origin` admitted; and the default posture — cross-origin refused, same-origin admitted, spoofed non-loopback `Host` refused.
 - `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) — valid bearer stamping a principal, missing and invalid and prototype-key tokens refused at the edge, local pole with no `authSource`, two dispatches on one socket sharing the connection's identity, plus the admission-failure event: published on refusal, absent on admission, and carrying no credential material.
+- `src/__tests__/authn-timeout.spec.ts` — a never-answering `AuthSource` refusing the upgrade instead of leaving it pending, three refused probes leaving zero sockets held, and one that answers inside the ceiling still upgrading.
 - `src/__tests__/cancellation.spec.ts` — the client emitting `notifications/cancelled` with the matching `requestId` and `reason: "aborted"` when a signal fires mid-request, and the server tolerating a cancellation for an unknown id while staying responsive.
 - `src/__tests__/custom-ws-ctor.spec.ts` — the `ws` library passed as the `WebSocket` override, connecting and round-tripping.
 - `src/__tests__/wire-conformance.spec.ts` (`runWireConformance`) — envelope round-trips and batch handling through the codec.

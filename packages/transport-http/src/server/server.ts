@@ -92,10 +92,29 @@ export interface HttpServerOptions extends WebSecurityOptions {
    * Omitted = every request is anonymous (the local pole).
    */
   readonly authSource?: AuthSource;
+  /**
+   * Wall-clock ceiling on the `authSource` call, in milliseconds. Defaults to
+   * {@link DEFAULT_INGRESS_AUTHN_TIMEOUT_MS} (10s); `Infinity` opts out.
+   * Exceeding it refuses the request with `401` — an authenticator that cannot
+   * answer has not admitted the caller, and an unbounded one turns a hung
+   * dependency into a hung request.
+   */
+  readonly authnTimeoutMs?: number;
 }
 
 export interface HttpServerHandle {
   close(): Promise<void>;
+}
+
+/**
+ * The ingress posture, resolved once and threaded to every method handler —
+ * `POST`, the `GET` stream open, and `DELETE` all authenticate through the
+ * same pair, so they travel together rather than as two parallel parameters
+ * that a new handler can forget half of.
+ */
+interface IngressGate {
+  readonly authSource?: AuthSource;
+  readonly timeoutMs?: number;
 }
 
 const SESSION_ID_HEADER = "mcp-session-id";
@@ -105,6 +124,10 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
   const ownsServer = options.ownsServer ?? false;
   const heartbeatMs = options.heartbeatIntervalMs ?? 30_000;
   const security = resolveWebSecurity(options);
+  const ingress: IngressGate = {
+    ...(options.authSource !== undefined ? { authSource: options.authSource } : {}),
+    ...(options.authnTimeoutMs !== undefined ? { timeoutMs: options.authnTimeoutMs } : {}),
+  };
 
   // Per-session connection state, keyed by session id.
   const sessions = new Map<string, SessionConnection>();
@@ -169,7 +192,7 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
     const sessionId = (req.headers[SESSION_ID_HEADER] as string | undefined) ?? null;
 
     if (req.method === "POST") {
-      void handlePost(req, res, sessions, sessionId, options.gateway, options.authSource);
+      void handlePost(req, res, sessions, sessionId, options.gateway, ingress);
       return;
     }
     if (req.method === "GET") {
@@ -179,25 +202,11 @@ export function httpServer(options: HttpServerOptions): HttpServerHandle {
         res.end();
         return;
       }
-      void handleGet(
-        req,
-        res,
-        sessions,
-        sessionId,
-        heartbeatMs,
-        options.gateway,
-        options.authSource,
-      );
+      void handleGet(req, res, sessions, sessionId, heartbeatMs, options.gateway, ingress);
       return;
     }
     if (req.method === "DELETE") {
-      // TODO(#146): DELETE releases per-session fan-out state without an
-      // authn gate — a configured AuthSource should also govern who may
-      // tear down a session. ADR 61 slice 1 specifies POST + GET; wire
-      // DELETE through `authenticateHttpRequest` in a follow-up.
-      handleDelete(sessions, sessionId);
-      res.statusCode = 204;
-      res.end();
+      void handleDelete(req, res, sessions, sessionId, options.gateway, ingress);
       return;
     }
     res.statusCode = 405;
@@ -319,7 +328,7 @@ async function handlePost(
   sessions: Map<string, SessionConnection>,
   sessionIdHeader: string | null,
   gateway: DispatchHost,
-  authSource: AuthSource | undefined,
+  ingress: IngressGate,
 ): Promise<void> {
   // Authenticate THIS request first (ADR 61 — per-request, header-based,
   // independent of body). A configured AuthSource that rejects → 401.
@@ -327,7 +336,7 @@ async function handlePost(
   // into this request's dispatch calls and never stored on the session.
   const authResult = await authenticateHttpRequest(
     req,
-    authSource,
+    ingress,
     sessionIdHeader ?? undefined,
     gateway,
   );
@@ -468,14 +477,14 @@ async function handleGet(
   sessionIdHeader: string | null,
   heartbeatMs: number,
   gateway: DispatchHost,
-  authSource: AuthSource | undefined,
+  ingress: IngressGate,
 ): Promise<void> {
   // Authenticate at stream-open (ADR 61). The notification stream
   // dispatches no requests, but a configured AuthSource must still gate
   // who may open it — fail closed.
   const authResult = await authenticateHttpRequest(
     req,
-    authSource,
+    ingress,
     sessionIdHeader ?? undefined,
     gateway,
   );
@@ -504,15 +513,41 @@ async function handleGet(
 }
 
 // ============================================================================
-// DELETE handler
+// DELETE handler — authenticated session teardown
 // ============================================================================
 
-function handleDelete(sessions: Map<string, SessionConnection>, sessionId: string | null): void {
-  if (!sessionId) return;
-  const session = sessions.get(sessionId);
-  if (!session) return;
-  void session.close();
-  sessions.delete(sessionId);
+/**
+ * Release a session's server-side fan-out state (subscriptions, in-flight
+ * registry, notification stream).
+ *
+ * Authenticated like POST and the GET stream open (ADR 61): teardown is a
+ * mutation with a real blast radius, so a configured `AuthSource` governs who
+ * may perform it. A refused DELETE answers `401` and leaves the session
+ * untouched. No `AuthSource` → the local pole, admitted as ever.
+ */
+async function handleDelete(
+  req: IncomingMessage,
+  res: ServerResponse,
+  sessions: Map<string, SessionConnection>,
+  sessionId: string | null,
+  gateway: DispatchHost,
+  ingress: IngressGate,
+): Promise<void> {
+  const authResult = await authenticateHttpRequest(req, ingress, sessionId ?? undefined, gateway);
+  if (!authResult.ok) {
+    writeUnauthorized(res);
+    return;
+  }
+
+  if (sessionId) {
+    const session = sessions.get(sessionId);
+    if (session) {
+      void session.close();
+      sessions.delete(sessionId);
+    }
+  }
+  res.statusCode = 204;
+  res.end();
 }
 
 // ============================================================================
@@ -527,7 +562,7 @@ function handleDelete(sessions: Map<string, SessionConnection>, sessionId: strin
  */
 async function authenticateHttpRequest(
   req: IncomingMessage,
-  authSource: AuthSource | undefined,
+  ingress: IngressGate,
   connectionId: string | undefined,
   host: DispatchHost,
 ): Promise<{ ok: true; identity?: IngressIdentity } | { ok: false }> {
@@ -544,19 +579,23 @@ async function authenticateHttpRequest(
         },
         ...(connectionId !== undefined ? { connectionId } : {}),
       },
-      authSource,
-      // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. The
-      // edge enriches with the peer address it alone knows; the credential
-      // never travels with it.
-      // TODO(ADR-92): the web-security origin/host refusal ahead of authn is
-      // the other admission gate at this edge and deserves the same
-      // visibility (a second `IngressAdmissionFailureClass`).
-      (failure) =>
-        host.emitAdmissionFailure?.(
-          req.socket.remoteAddress !== undefined
-            ? { ...failure, remoteAddress: req.socket.remoteAddress }
-            : failure,
-        ),
+      ingress.authSource,
+      {
+        // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. The
+        // edge enriches with the peer address it alone knows; the credential
+        // never travels with it.
+        // TODO(ADR-92): the web-security origin/host refusal ahead of authn is
+        // the other admission gate at this edge and deserves the same
+        // visibility (a second `IngressAdmissionFailureClass`).
+        onRejected: (failure) =>
+          host.emitAdmissionFailure?.(
+            req.socket.remoteAddress !== undefined
+              ? { ...failure, remoteAddress: req.socket.remoteAddress }
+              : failure,
+          ),
+        // A hung AuthSource would otherwise hold this request open forever.
+        ...(ingress.timeoutMs !== undefined ? { timeoutMs: ingress.timeoutMs } : {}),
+      },
     );
     return ctx.identity !== undefined ? { ok: true, identity: ctx.identity } : { ok: true };
   } catch {

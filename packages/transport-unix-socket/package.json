@@ -77,6 +77,7 @@
     "@agentick/client-core": "workspace:*",
     "@agentick/gateway": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
+    "@agentick/utils": "workspace:*",
     "effect": "^3.22.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

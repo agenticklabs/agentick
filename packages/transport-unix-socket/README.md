@@ -67,14 +67,16 @@ await client.gateway().getApp("missing"); // rejects with AppNotFoundError { app
 import { unixSocketServer } from "@agentick/transport-unix-socket/server";
 
 const server = unixSocketServer({ path: "/tmp/myagent.sock", gateway });
-await new Promise<void>((resolve) => server.server.once("listening", () => resolve()));
+await server.listening(); // resolves when accepting; rejects with the bind error
 
 // ...later
 await server.close(); // unsubscribes live connections, then closes the net.Server
 ```
 
+The factory binds for you and claims the outcome before it does, so a bind failure is never an uncaught exception — `listening()` is how you read it. `unixSocketServerTransport` awaits the same promise, so a stale socket file (`EADDRINUSE`) surfaces as a rejected `gateway.listen()` rather than a dead process.
+
 > [!IMPORTANT]
-> The raw factory calls `server.listen(path)` for you and does not wait for it. Attach a `once("error")` listener before the next tick or a stale socket file (`EADDRINUSE`) surfaces as an uncaught exception. `unixSocketServerTransport` does that waiting for you — its `listen()` rejects on the bind error instead. Nothing unlinks a stale path: `fs.unlink` it yourself before rebinding after an unclean shutdown.
+> Nothing unlinks a stale path: `fs.unlink` it yourself before rebinding after an unclean shutdown.
 
 ## Wire format
 
@@ -84,6 +86,8 @@ Each frame is `JSON.stringify(frame) + "\n"`. Receivers split on `\n`, then pars
 socat - UNIX-CONNECT:/tmp/myagent.sock
 {"jsonrpc":"2.0","id":1,"method":"ping","params":{}}
 ```
+
+Framing is "read until newline", so both ends cap the bytes they will hold for a single line — `maxLineBytes`, 16 MiB by default. Past the cap the line is refused with a JSON-RPC error and the connection closes: the framing is already lost, and there is no offset at which reading could safely resume. A peer that withholds a newline forever therefore costs a bounded amount of memory, not an unbounded one.
 
 Multiplexing N in-flight RPCs plus M subscriptions on one socket works as it does everywhere else in agentick: `BaseClientTransport` correlates responses by JSON-RPC `id`, subscription events by `subscriptionId`, progress by `progressToken`. Passing a request an `AbortSignal` emits `notifications/cancelled` on the socket when it fires.
 
@@ -134,14 +138,15 @@ Incoming bytes buffer on the paused socket until the connection is wired up, so 
 | Export                              | Purpose                                       |
 | ----------------------------------- | --------------------------------------------- |
 | `unixSocket(options)`               | The `ClientTransport`                         |
-| `UnixSocketTransportOptions` (type) | `{ path, reconnect?, id? }`                   |
+| `UnixSocketTransportOptions` (type) | `{ path, reconnect?, id?, maxLineBytes? }`    |
 | `ReconnectPolicy` (type)            | Re-exported from the shared transport package |
 
-| Option      | Purpose                                                                                   |
-| ----------- | ----------------------------------------------------------------------------------------- |
-| `path`      | Absolute path to the socket file                                                          |
-| `reconnect` | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }` — exponential backoff, full jitter |
-| `id`        | Transport id; defaults to a `unix-N` counter                                              |
+| Option         | Purpose                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `path`         | Absolute path to the socket file                                                          |
+| `reconnect`    | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }` — exponential backoff, full jitter |
+| `id`           | Transport id; defaults to a `unix-N` counter                                              |
+| `maxLineBytes` | Cap on one inbound NDJSON line; defaults to 16 MiB                                        |
 
 Capabilities: `bidirectional: true` · `streamingRequest: true` · `reconnectable: true` · `binaryFrames: false` · `media: false`.
 
@@ -152,16 +157,21 @@ Capabilities: `bidirectional: true` · `streamingRequest: true` · `reconnectabl
 | `unixSocketServerTransport(config)`      | `ServerTransport` — the gateway injects the host at `listen` |
 | `unixSocketServer(options)`              | Raw factory — you supply the host, you get the `net.Server`  |
 | `UnixSocketServerTransportConfig` (type) | `UnixSocketServerOptions` minus `gateway`                    |
-| `UnixSocketServerOptions` (type)         | `{ path, gateway, transportId?, authSource? }`               |
-| `UnixSocketServerHandle` (type)          | `{ server, close() }`                                        |
+| `UnixSocketServerOptions` (type)         | `{ path, gateway, transportId?, authSource?, … }`            |
+| `UnixSocketServerHandle` (type)          | `{ server, listening(), close() }`                           |
+| `UnixSocketFailure` (type)               | `{ at, error }` — what `onFailure` receives                  |
+| `UnixSocketFailureSite` (type)           | Where a reported failure happened                            |
 | `DispatchHost` (type)                    | Re-exported: what `gateway` must satisfy                     |
 
-| Option        | Purpose                                                                          |
-| ------------- | -------------------------------------------------------------------------------- |
-| `path`        | Socket path to bind                                                              |
-| `gateway`     | The dispatch host (raw factory only — `ServerTransport` receives it at `listen`) |
-| `transportId` | Id threaded into each connection's admission info; defaults to `"unix"`          |
-| `authSource`  | Ingress authentication; omit for host-local trust                                |
+| Option           | Purpose                                                                           |
+| ---------------- | --------------------------------------------------------------------------------- |
+| `path`           | Socket path to bind                                                               |
+| `gateway`        | The dispatch host (raw factory only — `ServerTransport` receives it at `listen`)  |
+| `transportId`    | Id threaded into each connection's admission info; defaults to `"unix"`           |
+| `authSource`     | Ingress authentication; omit for host-local trust                                 |
+| `authnTimeoutMs` | Wall-clock ceiling on the `authSource` call; defaults to 10s, `Infinity` opts out |
+| `maxLineBytes`   | Cap on one inbound NDJSON line; defaults to 16 MiB                                |
+| `onFailure`      | Where otherwise-swallowed failures are reported; quiet by default                 |
 
 ## Patterns
 
@@ -179,9 +189,9 @@ Capabilities: `bidirectional: true` · `streamingRequest: true` · `reconnectabl
 
 - **No peer-credential enrichment.** Deriving a principal from the connecting uid (`SO_PEERCRED`) is the natural identity source for a host-local socket and isn't built. Today the crossing is `credential.kind: "none"`, so an `AuthSource` sees `none` rather than peer credentials.
 - **No socket-file lifecycle helper.** Unlinking a stale path after an unclean shutdown is the adopter's job; there is no `unlinkBeforeBind` option.
-- **No frame-size limit.** The NDJSON decoder buffers until it sees a newline, so a peer can push an unbounded line. Acceptable for host-local trust, but it is defense-in-depth this transport doesn't have.
 - **Reconnect isn't exercised against a daemon bounce.** The backoff and cursor-aware resubscribe machinery is the shared base's, tested there and by the WebSocket transport; this package has no server-restart test of its own.
 - **No broadcast fan-out.** The server tracks live connections for teardown only. A server-initiated notification to all connected clients, outside a dispatch, is unbuilt.
+- **Four of the six `onFailure` sites are unpinned.** A cleanup or abort that throws during teardown is verified; `write`, `close`, `socket`, and post-bind `server` errors are wired to the same seam but have no test — a Unix domain socket has no portable way to force them (there is no RST, and a write to a departed peer completes silently).
 - **Two decode paths ship without a test here.** The server aborts an in-flight dispatch on an inbound `notifications/cancelled`, and both ends decode a batch (a JSON array of frames) and answer a malformed line with a parse error instead of dropping the connection. All three are wired; none is pinned by a test in this package.
 
 ## Verified by
@@ -189,4 +199,7 @@ Capabilities: `bidirectional: true` · `streamingRequest: true` · `reconnectabl
 - `src/__tests__/smoke.spec.ts` — `ping` over a real socket against a real gateway, `listApps` reflecting `createApp`, a typed `AppNotFoundError` crossing the wire intact, concurrent multiplexed RPCs on one socket, clean `close()` transition.
 - `src/__tests__/transport-conformance.spec.ts` — the shared `ClientTransport` suite over a real `net.Server`: state machine, pre-connect rejection, RPC error mapping, concurrent multiplexed RPCs, `notifications/cancelled` emit, subscription id re-keying / routing / close / eviction, progress streams.
 - `src/__tests__/ingress-authn.spec.ts` — the ingress conformance suite for a host-local edge: local pole by default, fail-closed when a configured `AuthSource` rejects `none`, admitted-with-no-principal under `allowAnonymous`, and the `gateway:admission:failed` record on refusal (correct `failureClass` and transport kind, no credential material, nothing published on an admitted crossing).
+- `src/__tests__/listen-errors.spec.ts` — a bind onto an occupied path rejecting `listening()` with a typed `EADDRINUSE` error, never reaching `uncaughtException` even when the adopter ignores the outcome, a clean path still resolving, and `gateway.listen()` propagating the failure through the `ServerTransport`.
+- `src/__tests__/ndjson-frame-limit.spec.ts` — the frame cap: a line past it refused fatally, bytes counted across chunks and reset at each newline, multibyte text counted as bytes rather than characters, one refusal per oversized line then resynchronization at the next newline, a line exactly at the cap accepted, and the server reporting then closing the connection while normal frames still round-trip.
+- `src/__tests__/socket-failures.spec.ts` — a failed connect rejecting with a value that is both an `Error` (stack, `instanceof`) and a `TransportError` (`kind: "connection"`, `cause` preserved), and teardown failures reaching `onFailure` — a throwing subscription cleanup and a throwing in-flight abort — with teardown completing either way and silence as the default.
 - `src/__tests__/server-transport.spec.ts` — `ServerTransport` conformance plus a real gateway-owned bind: `gateway.listen()` accepts a client and `ping` round-trips, `gateway.close()` releases the path, a throwing `onBeforeGatewayAccept` drops the connection, and a permitting one fires exactly once with `transportId` set to `unix-socket:${path}`.

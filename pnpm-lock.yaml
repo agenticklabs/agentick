@@ -1886,6 +1886,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0

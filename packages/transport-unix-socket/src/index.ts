@@ -14,8 +14,17 @@ export {
 export {
   unixSocketServer,
   unixSocketServerTransport,
-  type UnixSocketServerOptions,
-  type UnixSocketServerHandle,
-  type UnixSocketServerTransportConfig,
   type DispatchHost,
+  type UnixSocketFailure,
+  type UnixSocketFailureSite,
+  type UnixSocketServerHandle,
+  type UnixSocketServerOptions,
+  type UnixSocketServerTransportConfig,
 } from "./server/index.js";
+export {
+  DEFAULT_MAX_LINE_BYTES,
+  NdjsonDecoder,
+  encodeNdjson,
+  type NdjsonDecoderOptions,
+  type NdjsonResult,
+} from "./shared/ndjson.js";
