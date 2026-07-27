@@ -977,6 +977,14 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       ).then((unsub) => {
         this.inboxUnsubscribe = unsub;
       });
+      // `ready` is a DERIVED promise assigned for later awaiting, and nothing
+      // guarantees a consumer attaches: a harness constructed and then never
+      // awaited (a test double, a standalone `define*` construction) has no
+      // `await x.ready` anywhere. A registration failure would surface as an
+      // unhandled rejection from a promise the process was never asked to
+      // observe. Mark the rejection handled; real consumers still see it —
+      // `.catch` returns a NEW promise and leaves this one's rejection intact.
+      this.ready.catch(() => {});
     } else {
       this.ready = Promise.resolve();
     }

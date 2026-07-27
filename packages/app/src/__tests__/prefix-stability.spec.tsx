@@ -7,7 +7,7 @@
  * across ticks is a cache correctness property, not a nicety. This suite
  * pins it end-to-end against the REAL React compiler + the canonical
  * projection (`@agentick/model`'s `defaultProject`) + a real loop
- * run — app-next is the only home where all three coexist (the ADR-27
+ * run — `@agentick/app` is the only home where all three coexist (the ADR-27
  * modularity rule: cross-harness integration tests live where their
  * dependencies live).
  *

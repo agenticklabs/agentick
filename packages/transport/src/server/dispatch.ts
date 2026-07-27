@@ -2,7 +2,7 @@
  * JSON-RPC frame → harness-method dispatch.
  *
  * Pure logic — no transport coupling. The same dispatcher serves
- * every `@agentick/transport-*-next` server adapter.
+ * every `@agentick/transport-*` server adapter.
  *
  * Post-#295 (Phase B/C) + #303 (streaming primitives):
  * dispatch is uniform across ALL framework methods except three
@@ -514,7 +514,7 @@ function buildTransportSlot(reqId: JsonRpcId, sink: DispatchSink): WireExtension
   return {
     // ADR 64 / #19-progress-wire: `ctx.progress` bus signals are bridged
     // to this reporter in `sessionWireExtension["session/send"]`
-    // (@agentick/gateway) — the send handler owns both the caller's
+    // (`@agentick/gateway`) — the send handler owns both the caller's
     // `_meta.progressToken` (→ this reporter) AND the executionId to
     // scope the signal subscription, so the stitch lives there, not in
     // this transport-generic slot builder. This slot just wraps each

@@ -4,8 +4,9 @@
  * Lets a user satisfy `ToolExecutorProtocol` without subclassing
  * `BaseHarness`. Bring a `dispatch(input)` callback (and optionally
  * `list` / `abort`), receive a `ToolExecutorFactory` ready to drop into
- * `createApp({ tools: ... })` (slot accepts factories alongside the
- * existing options shape).
+ * `createApp({ toolExecutor: ... })` — the EXECUTOR slot, which accepts a
+ * factory alongside the `ToolExecutorDefaults` options shape. (Not
+ * `createApp({ tools })`: that is the layered tool DECLARATION list.)
  *
  * ```ts
  * const myTools = defineToolExecutor({
@@ -22,7 +23,7 @@
  *
  * const app = await createApp(<Agent />, {
  *   model: openai("gpt-4o-mini"),
- *   tools: myTools,
+ *   toolExecutor: myTools,
  * });
  * ```
  *
@@ -159,7 +160,7 @@ export interface DefineToolExecutorInput {
 
 /**
  * Construct a `ToolExecutorFactory` from a callback bundle. Plug the
- * factory into `createApp({ tools: ... })` to share substrate, or
+ * factory into `createApp({ toolExecutor: ... })` to share substrate, or
  * invoke standalone for testing.
  */
 export function defineToolExecutor(spec: DefineToolExecutorInput): ToolExecutorFactory {

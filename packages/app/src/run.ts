@@ -138,6 +138,12 @@ export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): 
     events(): AsyncIterable<StreamEvent> {
       return {
         [Symbol.asyncIterator](): AsyncIterator<StreamEvent> {
+          // Derived from `handlePromise` and left un-`catch`ed. Minted only
+          // when a consumer has asked for the iterator, and the first `next()`
+          // awaits it — the `for await` that calls this always attaches. The
+          // rejection is ALSO already consumed on the `result` chain above, so
+          // it can never surface as unhandled even in the pathological
+          // "iterator taken, `next()` never called" case.
           const iterPromise = handlePromise.then((h) => h.events()[Symbol.asyncIterator]());
           return {
             async next(): Promise<IteratorResult<StreamEvent>> {

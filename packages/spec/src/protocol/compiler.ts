@@ -685,12 +685,18 @@ export interface CompilerFactoryDeps {
  * `defineCompiler(...)` so the parent harness can call the factory
  * with the shared substrate.
  *
+ * `deps` is OPTIONAL: a parent harness passes its substrate so the compiler's
+ * events flow on the shared bus/journal, while a STANDALONE caller (a test, a
+ * REPL, an adopter probing their callbacks before wiring an app) calls the
+ * factory bare and gets a private local substrate. Same convention as
+ * {@link ExecutorFactory}.
+ *
  * Marker symbol `compilerFactory` disambiguates a factory from a
  * pre-constructed instance.
  */
 export interface CompilerFactory {
   readonly compilerFactory: true;
-  (deps: CompilerFactoryDeps): CompilerProtocol;
+  (deps?: CompilerFactoryDeps): CompilerProtocol;
 }
 
 /** Type guard. */

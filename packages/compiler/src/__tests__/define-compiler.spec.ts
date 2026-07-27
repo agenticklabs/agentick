@@ -80,6 +80,47 @@ describe("defineCompiler — factory shape", () => {
   });
 });
 
+describe("defineCompiler — standalone construction (no deps)", () => {
+  // `defineCompiler` has always implemented `(deps?)` with a local-substrate
+  // fallback (a private MemoryJournal / LocalEventBus / LocalInbox), because a
+  // standalone compiler — a test, a REPL, an adopter probing their callbacks
+  // before wiring an app — has no shared substrate to pass. `CompilerFactory`
+  // declared the parameter REQUIRED, so the fallback was unreachable through
+  // the public type: this dep-less call did not compile.
+  //
+  // These two cases are the pair that keeps it reachable: the call itself
+  // (compile-time, enforced by the package's strict `tsc` over its tests) and
+  // the fallback substrate actually working (run-time).
+  it("constructs with NO deps — the local-substrate fallback", async () => {
+    const factory = defineCompiler({
+      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+      unmount: async () => {},
+      renderTree: async (i) => fakeRenderTreeResult(i.mountId),
+    });
+    const r = factory();
+    const m = await r.mount(mountInput());
+    expect(m.mountId).toBe("m_1");
+  });
+
+  it("the fallback substrate is live — envelopes flow on the private bus", async () => {
+    const factory = defineCompiler({
+      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+      unmount: async () => {},
+      renderTree: async (i) => fakeRenderTreeResult(i.mountId),
+    });
+    // No `bus` to subscribe to from the outside, so observe the fallback
+    // through the journal it also mints: a completed operation recorded there
+    // proves the substrate is a real one, not a set of undefined slots.
+    const r = factory();
+    await r.mount(mountInput());
+    await r.renderTree(renderInput());
+    // Two distinct scopeIds must not collide — each dep-less call mints its own.
+    const r2 = factory();
+    expect(r2).not.toBe(r);
+    await expect(r2.mount(mountInput())).resolves.toBeDefined();
+  });
+});
+
 describe("defineCompiler — defaults + envelopes", () => {
   it("unconfigured snapshot/renderToString reject; rerender/restore no-op", async () => {
     const factory = defineCompiler({

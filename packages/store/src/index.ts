@@ -26,9 +26,12 @@
  *     (durable log + materialized projection) storage + write-behind pump +
  *     compaction-target machine the timeline harness hand-rolled, generic over
  *     the entry type `T`. `View : CollectionStore :: LogView : LogStore`.
- *   - {@link runStoreConformance} — the shared conformance skeleton the
- *     per-store suites (`runTaskStoreConformance`, `runTimelineStoreConformance`)
- *     delegate their store-agnostic cases to.
+ *
+ * Plus, on the `@agentick/store/testing` subpath (NOT this barrel — test
+ * doubles and conformance suites never ship on the production entry point):
+ * `runStoreConformance`, the shared conformance skeleton the per-store suites
+ * (`runTaskStoreConformance`, `runTimelineStoreConformance`) delegate their
+ * store-agnostic cases to.
  *
  * The archetype **port** shapes (`CollectionStore`) live in `@agentick/spec`
  * (the cross-package contract); the defaults + conformance live here.

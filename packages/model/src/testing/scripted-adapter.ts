@@ -1,7 +1,7 @@
 /**
  * `scriptedAdapter` — the canonical scripted `LanguageModelAdapter`
  * double (Meszaros stub tier). Replaces the per-spec locals that had
- * accumulated in app-next / model-next tests.
+ * accumulated in `@agentick/app` / `@agentick/model` tests.
  *
  * Round trip: `prepareRequest` is identity (and records the input);
  * `send` returns the scripted text; `openStream` yields the scripted

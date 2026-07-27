@@ -23,10 +23,21 @@
  */
 
 import type { CompilerFactory, CompilerFactoryDeps } from "@agentick/spec";
+import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import { CompilerHarness, type CompilerHarnessOptions } from "./harness/compiler-harness.js";
 
 export function reactCompiler(options: CompilerHarnessOptions = {}): CompilerFactory {
-  const factory = (deps: CompilerFactoryDeps) =>
-    new CompilerHarness(deps.scopeId, deps.journal, deps.bus, deps.inbox, options);
+  // `deps` is optional per `CompilerFactory`: a parent harness passes its
+  // substrate (the normal path — that is the whole point of the factory form),
+  // while a STANDALONE caller gets a private local substrate. Same fallback as
+  // `defineCompiler` in `@agentick/compiler`.
+  const factory = (deps?: CompilerFactoryDeps) =>
+    new CompilerHarness(
+      deps?.scopeId ?? `react-compiler:${ulid()}`,
+      deps?.journal ?? new MemoryJournal(),
+      deps?.bus ?? new LocalEventBus(),
+      deps?.inbox ?? new LocalInbox(),
+      options,
+    );
   return Object.assign(factory, { compilerFactory: true as const });
 }

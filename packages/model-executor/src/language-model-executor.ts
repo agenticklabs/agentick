@@ -10,8 +10,8 @@
  *
  *   - `project` / `execute` / `executeStream` / `normalize` / `run` /
  *     `abort` envelope shapes + Operation construction
- *   - In-flight tracking (`inFlight: Map`, `aborted: Set`,
- *     `InFlightEntry`)
+ *   - In-flight tracking + abort bookkeeping, delegated to a composed
+ *     {@link ExecutorLifecycle}
  *   - The shared `executeStream` iterator queue + resolver + bus-emit
  *     plumbing
  *   - The `runBody` skeleton (project → execute → postProcess →
@@ -178,11 +178,6 @@ const STREAM_QUEUE_CAPACITY = 64;
  */
 const ProviderCallRef = FiberRef.unsafeMake<ProviderRequestCall | undefined>(undefined);
 
-// InFlightEntry shape lives in `executor-lifecycle.ts` as
-// `ExecutorInFlightEntry`. Re-aliased here for backward-compatibility
-// with internal references — same shape, single source of truth.
-type InFlightEntry = ExecutorInFlightEntry;
-
 // ============================================================================
 // BaseLanguageModelExecutor
 // ============================================================================
@@ -231,14 +226,8 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     return this.adapter.supportsStreaming ?? true;
   }
 
+  /** Shared in-flight + abort bookkeeping. See {@link ExecutorLifecycle}. */
   private readonly lifecycle = new ExecutorLifecycle();
-  // Backward-compat aliases for refs that haven't been renamed yet.
-  private get inFlight(): Map<string, InFlightEntry> {
-    return this.lifecycle.inFlight;
-  }
-  private get aborted(): Set<string> {
-    return this.lifecycle.aborted;
-  }
 
   /**
    * The command-ified provider call (ADR 89 §1). `model:generate` is the
@@ -321,18 +310,13 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         onStart: (fiber, input) => {
           const executionId = input.scope?.executionId;
           if (executionId === undefined) return;
-          const entry = this.inFlight.get(executionId);
+          const entry = this.lifecycle.get(executionId);
           if (entry) entry.fiber = fiber as Fiber.RuntimeFiber<unknown, unknown>;
         },
         onAbort: (reason, input) => {
           const executionId = input.scope?.executionId;
           if (executionId === undefined) return;
-          this.aborted.add(executionId);
-          const entry = this.inFlight.get(executionId);
-          if (entry) {
-            entry.abortReason = reason;
-            entry.abort?.abort(reason);
-          }
+          this.lifecycle.abortExecution(executionId, reason);
         },
       },
     });
@@ -821,7 +805,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       const op = call.op;
       const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
 
-      if (this.aborted.has(executionId)) {
+      if (this.lifecycle.isAborted(executionId)) {
         return yield* Effect.fail<ExecuteErrorChannel>(
           new ProviderAborted({ reason: "aborted prior to execute" }),
         );
@@ -831,8 +815,8 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       // feed this controller; Effect's fiber-interrupt path is layered
       // on top via Effect.tryPromise's built-in signal arg.
       const controller = new AbortController();
-      const entry: InFlightEntry = { executionId, abort: controller };
-      this.inFlight.set(executionId, entry);
+      const entry: ExecutorInFlightEntry = { executionId, abort: controller };
+      this.lifecycle.register(entry);
 
       try {
         // Force streaming when called from executeStream (sink non-null);
@@ -961,7 +945,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         yield* Stream.runDrain(finalStream).pipe(this.withExternalAbort(controller, input.signal));
         return this.reconstructRaw(accum, accum.modelSeen);
       } finally {
-        this.inFlight.delete(executionId);
+        this.lifecycle.unregister(executionId);
       }
     });
   }
@@ -1031,10 +1015,10 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     return Effect.gen(this, function* () {
       // Pre-execution abort short-circuit. Mid-stream aborts surface as
       // `ProviderAborted` from `executeBody` and are caught below.
-      if (this.aborted.has(executionId)) {
+      if (this.lifecycle.isAborted(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
           outcome: "canceled",
-          reason: this.inFlight.get(executionId)?.abortReason ?? "aborted",
+          reason: this.lifecycle.abortReasonFor(executionId) ?? "aborted",
         };
         return terminal;
       }

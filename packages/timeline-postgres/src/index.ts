@@ -8,7 +8,7 @@
  *
  * ```ts
  * import { Pool } from "pg";
- * import { createApp } from "agentick";
+ * import { createApp } from "@agentick/app";
  * import { postgresTimelineStore } from "@agentick/timeline-postgres";
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });

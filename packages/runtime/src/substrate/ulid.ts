@@ -1,9 +1,9 @@
 /**
  * Re-export of the canonical `ulid()` from `@agentick/utils` so
- * existing runtime-next consumers (LocalInbox, MemoryJournal) keep
- * their import path. The impl lives in utils-next to keep it
- * available to framework-substrate-agnostic packages (cluster-next,
- * adapter packages, transports) without depending on runtime-next.
+ * existing `@agentick/runtime` consumers (LocalInbox, MemoryJournal) keep
+ * their import path. The impl lives in `@agentick/utils` to keep it
+ * available to framework-substrate-agnostic packages (`@agentick/cluster`,
+ * adapter packages, transports) without depending on `@agentick/runtime`.
  */
 
 export { ulid } from "@agentick/utils";

@@ -11,7 +11,7 @@
  *
  * ```ts
  * import { Pool } from "pg";
- * import { createApp } from "agentick";
+ * import { createApp } from "@agentick/app";
  * import { postgresTaskStore } from "@agentick/tasks-store-postgres";
  *
  * const pool = new Pool({ connectionString: process.env.DATABASE_URL });

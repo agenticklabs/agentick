@@ -17,6 +17,12 @@
  *
  * These assertions are the invariant the rewrite must satisfy. When the loop
  * moves onto the Effect spine, THIS FILE MUST STAY GREEN UNCHANGED.
+ *
+ * ONE exception has since been ratified (2026-07-27): the two cancellation
+ * cases below no longer characterize the `signal`-abort / `abort()` divergence
+ * in the terminal `outcome` — that divergence was a bug, not an invariant, and
+ * both paths now report `canceled`. The cases still document the behavior they
+ * replaced. Everything else here is untouched characterization.
  */
 
 import { describe, expect, it } from "vitest";
@@ -421,14 +427,19 @@ describe("LoopExecutorHarness [characterization] — ADR 67 forward decision", (
 // ============================================================================
 
 describe("LoopExecutorHarness [characterization] — cancellation", () => {
-  it("a pre-aborted signal → 0 ticks, stopReason 'aborted', but outcome 'succeeded'", async () => {
-    // CHARACTERIZATION OF A SUBTLETY (preserve exactly; revisit separately):
-    // a `signal` abort sets `stopReason: "aborted"` and breaks, but does NOT
-    // populate the harness `aborted` map — and `wasAborted` (→ the "canceled"
-    // outcome) reads that map. So ONLY `loop.abort()` yields outcome
-    // "canceled"; a signal abort yields outcome "succeeded" with an "aborted"
-    // stop reason. This divergence is current behavior — the rewrite must keep
-    // it identical (whether it's a *desirable* behavior is a separate question).
+  it("a pre-aborted signal → 0 ticks, stopReason 'aborted', outcome 'canceled'", async () => {
+    // RATIFIED SEMANTICS (2026-07-27). Both cancellation entry points — a
+    // caller-supplied `signal` abort and `loop.abort()` — report
+    // `outcome: "canceled"`. The cancellation SOURCE is not part of the
+    // terminal contract; only the fact of cancellation is.
+    //
+    // This REPLACES a characterization of the prior divergence: `wasAborted`
+    // (the "canceled" discriminant) read ONLY the harness `aborted` map, which
+    // the signal path never populates — so a signal abort landed
+    // `outcome: "succeeded"` with `stopReason: "aborted"`, an
+    // internally-contradictory terminal that made every consumer's
+    // `outcome === "succeeded"` check wrong for half the abort paths. The
+    // discriminant now also honors the abort-derived `stopReason`.
     const controller = new AbortController();
     controller.abort();
     const { terminal } = await runChar({
@@ -436,7 +447,7 @@ describe("LoopExecutorHarness [characterization] — cancellation", () => {
       maxTicks: 5,
       signal: controller.signal,
     });
-    expect(terminal.outcome).toBe("succeeded");
+    expect(terminal.outcome).toBe("canceled");
     expect(terminal.result!.ticks).toBe(0);
     expect(terminal.result!.stopReason).toBe("aborted");
   });
@@ -552,9 +563,13 @@ describe("LoopExecutorHarness [characterization] — executor failure paths", ()
     expect(trace.terminal.result!.stopReason).toBe("executor_failed");
   });
 
-  it("a canceled executor terminal → stopReason 'aborted' (outcome still 'succeeded')", async () => {
+  it("a canceled executor terminal → stopReason 'aborted', outcome 'canceled'", async () => {
+    // Same ratified rule as the signal-abort case above: a cancellation the
+    // harness `aborted` map never saw (here it originates INSIDE the model
+    // executor) still lands a `canceled` terminal — the abort-derived
+    // `stopReason` is part of the discriminant.
     const trace = await runChar({ scripted: [failRun("canceled")], maxTicks: 5 });
-    expect(trace.terminal.outcome).toBe("succeeded");
+    expect(trace.terminal.outcome).toBe("canceled");
     expect(trace.terminal.result!.stopReason).toBe("aborted");
   });
 

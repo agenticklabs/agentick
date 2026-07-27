@@ -1,5 +1,5 @@
 /**
- * @agentick/tasks — TasksHarness.
+ * `@agentick/tasks` — TasksHarness.
  *
  * Substrate-level "long-running tool" primitive. Every managed
  * execution — slow shell commands, deploy steps, MCP server tasks
@@ -26,7 +26,7 @@ export { withTasks, type WithTasksOptions } from "./extension.js";
 // ADR 68 — record-as-source-of-truth durability. The CRUD store port +
 // bundled in-memory default + its conformance suite, and the default
 // in-process executor. A `@agentick/tasks-store-postgres` store and a
-// child-process executor conform to the SAME spec-next ports later.
+// child-process executor conform to the SAME `@agentick/spec` ports later.
 export { InMemoryTaskStore } from "./store.js";
 export { InProcessTaskExecutor } from "./executor.js";
 // ADR 68 Build B — the child-process (isolation) executor + its by-ref

@@ -11,7 +11,7 @@
  * This is the cross-harness proof: a REAL `SessionHarness` terminal + the
  * REAL per-session `TasksHarness` (wired with `buildElicit` by
  * `buildSessionBridges`) + the REAL `ElicitationHarness`. It lives here
- * because session-next is the package that depends on all three.
+ * because `@agentick/session` is the package that depends on all three.
  *
  * Covered:
  *   - the answer round-trips (`ctx.elicit.text` resolves with it);

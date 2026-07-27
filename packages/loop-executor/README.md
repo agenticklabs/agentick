@@ -215,7 +215,7 @@ terminal.result?.output; // partial output up to the abort is preserved
 A mid-flight abort tears the provider call down immediately, not at the next tick boundary. A `timeoutMs` expiry travels the same path and lands `outcome: "canceled"` with `stopReason: "timeout"`. A tick's tool calls dispatch concurrently by default, and results stay in **call order** regardless of completion order, so persistence and the model's next-tick view are deterministic.
 
 > [!NOTE]
-> `abort()` and `timeoutMs` produce `outcome: "canceled"`. A caller-supplied `signal` that aborts produces `outcome: "succeeded"` with `stopReason: "aborted"` — the two paths report differently, and the difference is pinned by tests rather than intended as API elegance. Read `stopReason`, not just `outcome`, if you care.
+> Every cancellation entry point reports the same way: `abort()`, `timeoutMs`, and a caller-supplied `signal` all land `outcome: "canceled"`, with `stopReason` naming which one fired (`"aborted"` / `"timeout"`). A signal that aborts only *after* the run finished naturally does not relabel the finished work — that run stays `"succeeded"`.
 
 ## Structured output
 
@@ -334,7 +334,6 @@ Every apply call is a no-op, on both the Promise facade and the `fx` twins. Noth
 - **The tree-declared model is resolved post-render.** A `<Model>` in the IR selects the executor for _that_ tick, but the render that declared it did not see it in its own render context. Closing that needs render → resolve → re-render convergence.
 - **`ExecutionRunResult.outputs`** is threaded through the type and never populated.
 - **No `ctx.log` in the tick body.** The log facet is threaded into the tool executor and the session but not the loop, so decisions like the structured-output strategy fallback are silent rather than warned.
-- **Signal-abort versus `abort()` asymmetry.** A caller `signal` abort yields `outcome: "succeeded"` with `stopReason: "aborted"`; `abort()` yields `outcome: "canceled"`. Pinned as current behaviour, not defended as correct.
 
 ## Verified by
 

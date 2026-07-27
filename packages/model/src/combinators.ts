@@ -15,8 +15,10 @@
  *   failures only on first pull) on transient errors; once a chunk has
  *   been observed, errors propagate — no partial-stream replay.
  * - `withFallback` engages the next adapter when the current one's
- *   call/open fails; NEVER on abort. Each adapter runs its OWN
- *   `buildParams` (params are not portable across providers).
+ *   call/open fails; NEVER on abort. Delegation starts at each adapter's OWN
+ *   `prepareRequest` — the native request is provider-specific, so it is
+ *   rebuilt per adapter, never handed over to `send` / `openStream` of a
+ *   different provider.
  * - Neither combinator retries/fails-over mid-stream.
  *
  * // TODO(trail-cost-routing): a `routeModel(picker, ...adapters)`

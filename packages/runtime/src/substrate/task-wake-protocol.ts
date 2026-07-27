@@ -12,7 +12,7 @@
  * (`session:{sessionId}` message type) and the provenance marker. The wake
  * CONTRACT types themselves — {@link TaskWakeOutcome}, {@link TaskWakePolicy},
  * {@link SendInput} — live in `@agentick/spec`; the payload composes
- * them here. `runtime-next` depends on `spec-next`, so composing spec types in
+ * them here. `@agentick/runtime` depends on `@agentick/spec`, so composing spec types in
  * a substrate wire payload is fine (the reverse — a runtime constant a spec
  * protocol referenced — would be the cycle the escalation module documents).
  *

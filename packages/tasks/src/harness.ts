@@ -414,7 +414,7 @@ export class TasksHarness
   // precedent because the seam does not support one.
   //
   // UNBLOCKERS (either lands this cleanly; both are out of this task's scope —
-  // one changes the public type, the other touches shared runtime-next hook
+  // one changes the public type, the other touches shared `@agentick/runtime` hook
   // semantics used by every harness, so both want explicit sign-off):
   //   1. Make `submit` async (`Promise<TaskHandle<T>>`). The ONLY way to host
   //      async before-hooks. Violates today's "public types unchanged"

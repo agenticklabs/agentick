@@ -20,7 +20,7 @@ export {
 } from "./model-facade.js";
 export { defineSession, type DefineSessionInput } from "./define-session.js";
 // E11 — the durable session registry / resume index. The `SessionStore` port +
-// record + query live in spec-next; the bundled in-memory default ships here
+// record + query live in `@agentick/spec`; the bundled in-memory default ships here
 // (its conformance suite ships from `./testing`). A
 // `@agentick/session-store-postgres` conforms to the SAME port later.
 export { InMemorySessionStore } from "./session-store.js";

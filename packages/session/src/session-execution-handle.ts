@@ -69,6 +69,9 @@ export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): 
   const { sessionId, executionId, spawnPath, resultPromise, abort } = args;
 
   let status: "running" | "completed" | "error" | "aborted" = "running";
+  // Status mirror only. Safe to leave un-`catch`ed: BOTH branches are supplied,
+  // so `resultPromise`'s rejection is consumed here, and neither branch can
+  // throw (one assignment each) — the derived promise cannot reject.
   resultPromise.then(
     () => {
       if (status === "running") status = "completed";

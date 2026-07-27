@@ -789,3 +789,57 @@ describe("onBusy: steer vs queue", () => {
     await session.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Cancellation parity (ratified 2026-07-27)
+// ---------------------------------------------------------------------------
+//
+// ONE rule for both cancellation entry points, at both layers. The loop reports
+// `outcome: "canceled"` whether the cancellation came from `abort()` or from a
+// caller-supplied `signal` (it no longer keys that discriminant off the
+// `abort()`-only bookkeeping map), and the session settles the caller's
+// `.result` the same way for both: a canceled terminal that CARRIES a result is
+// a real, settled turn, so it RESOLVES, with `SendResult.stopReason` naming the
+// cancellation. What a caller must NOT have to know is which entry point fired.
+
+describe("SessionHarness — cancellation parity", () => {
+  it("abort() on an in-flight execution RESOLVES with stopReason 'aborted'", async () => {
+    const { session } = await mkSession();
+    // The in-flight generation is torn down by the abort (`firstOutcome:
+    // "canceled"` models the executor observing the merged abort signal), so
+    // the loop breaks with an abort-derived stop reason.
+    const { exec, release } = gatedExec(["never delivered"], { firstOutcome: "canceled" });
+    await exec.ready;
+
+    const h = await session.send({
+      messages: [{ role: "user", content: "ABORT-ME" }],
+      modelExecutor: exec,
+      stream: false,
+    });
+    await h.abort("user stop");
+    release();
+
+    const result = await h.result;
+    expect(result.stopReason).toBe("aborted");
+    expect(result.response).toBe("");
+
+    await session.close();
+  });
+
+  it("a pre-aborted send `signal` RESOLVES with stopReason 'aborted' and 0 ticks", async () => {
+    const { session } = await mkSession();
+    const controller = new AbortController();
+    controller.abort();
+
+    const h = await session.send({
+      messages: [{ role: "user", content: "PRE-ABORTED" }],
+      signal: controller.signal,
+    });
+    const result = await h.result;
+    expect(result.stopReason).toBe("aborted");
+    expect(result.ticks).toBe(0); // no model call happened
+    expect(result.response).toBe("");
+
+    await session.close();
+  });
+});

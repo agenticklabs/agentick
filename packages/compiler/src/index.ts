@@ -49,7 +49,7 @@ export {
   rootScope,
 } from "./host/host-context.js";
 
-export type { CompilerContainer } from "./host/container.js";
+export type { CompilerContainer, CreateContainerInput } from "./host/container.js";
 export { createContainer } from "./host/container.js";
 
 // Layer B — Contributor protocol + collect walker
@@ -139,6 +139,10 @@ export { customBlockContributor } from "./collect/contributors/custom-block.js";
 export type { CustomProps } from "./collect/contributors/custom-block.js";
 export { contentPassthroughContributor } from "./collect/contributors/content-passthrough.js";
 export type { ContentProps } from "./collect/contributors/content-passthrough.js";
+// The standard semantic-HTML element set. A GROUP factory (one contributor per
+// tag would be dozens of exports), hence the plural — `createBuiltInRegistry`
+// registers it like every other built-in.
+export { semanticHtmlContributors } from "./collect/contributors/semantic-html.js";
 
 // Bridges — reference (production) impl
 export { InMemoryDataBridge } from "./bridges/in-memory-data-bridge.js";

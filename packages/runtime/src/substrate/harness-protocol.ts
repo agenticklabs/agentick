@@ -151,7 +151,11 @@ export function runHarnessStream<Item, Result>(
     result,
     abort: (reason) => {
       options?.onAbort?.(reason ?? "aborted");
-      void ready.then(({ fiber }) => run(Fiber.interrupt(fiber)));
+      // Derived from `ready` with NO consumer — nobody awaits an abort. Both
+      // links can reject (`ready` when setup itself failed; the interrupt run
+      // on a fiber-runtime failure), so catch here: aborting a stream that
+      // already failed to start is a no-op, not a new failure to report.
+      void ready.then(({ fiber }) => run(Fiber.interrupt(fiber))).catch(() => {});
     },
     [Symbol.asyncIterator](): AsyncIterator<Item> {
       return {

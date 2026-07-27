@@ -18,7 +18,7 @@
  * lineage hop, the interception outcome + interceptor — live in
  * `@agentick/spec` (`protocol/escalation.ts`), because the spec
  * `SessionHarnessProtocol.interceptEscalation` references them and
- * `runtime-next` depends on `spec-next` (a contract in runtime that the
+ * `@agentick/runtime` depends on `@agentick/spec` (a contract in runtime that the
  * spec protocol referenced would be a dependency cycle). We re-export
  * them here so existing `@agentick/runtime` importers are
  * unaffected.

@@ -353,17 +353,15 @@ The doubles are typed against the protocol interfaces, so a protocol change brea
 
 ## Roadmap & known gaps
 
-- **The `defineCompiler` factory can't be called without a substrate.** The implementation falls back to a local journal, bus, and inbox when `deps` is omitted, but the protocol types the factory parameter as required — so that fallback is unreachable through the public type, and every caller must pass a substrate. Either the type should widen or the fallback should go.
 - **Inbox dispatch is not wired.** A message delivered to a `defineCompiler` compiler fails with an explicit "not yet wired" error. The callback factory supports commands and lifecycle, not cluster-routed message dispatch.
 - **`builtInToolsProjection` advertises every tool source.** It does not filter to declarations exposed to the model; the executor filters downstream. An authored override component for filtering or suppressing tools isn't shipped.
 - **`ProjectionSources` carries only `tools`.** Resources, MCP servers, and other surfacing-capable keys have no default projection at this layer yet.
-- **`semanticHtmlContributors` and `CreateContainerInput` are not exported.** The semantic-HTML contributors are registered by `createBuiltInRegistry()` but can't be imported individually, and `createContainer`'s input type has no name at the package boundary.
 - **Lifecycle dispatch is serial.** Handlers are awaited one at a time for deterministic ordering. Parallel dispatch with a configurable join policy is unbuilt.
 - **`<format>` validates leniently.** A missing or malformed `formatter` prop passes through with the parent scope and produces no diagnostic, so the mistake is silent.
 
 ## Verified by
 
-- `src/__tests__/define-compiler.spec.ts` — the factory marker and shape, command delegation across mount → renderTree → unmount, the reject-versus-no-op defaults for every optional callback, and `compiler:command:*` envelope emission on the supplied bus. Its minimum-required input fixtures run through strict `tsc`, so a protocol change that adds a required field fails to compile here.
+- `src/__tests__/define-compiler.spec.ts` — the factory marker and shape, command delegation across mount → renderTree → unmount, the reject-versus-no-op defaults for every optional callback, `compiler:command:*` envelope emission on the supplied bus, and dep-less construction: `defineCompiler(handlers)` with no substrate mounts on its own local journal/bus/inbox, and two dep-less calls get distinct scopes. Its minimum-required input fixtures run through strict `tsc`, so a protocol change that adds a required field fails to compile here.
 - `src/__tests__/contributors.spec.ts` — the full `collect` path (walker → contributors → fold) asserting that props reach the spec value: `<tool>` forwarding `aliases`, `providerOptions`, and `annotations.executedBy`; id, description, and exposure defaulting with child text folded into the description; `provider-tool` folding onto `declarations.providerTools`; the model generation knobs; `mcp`, `resource`, and `output` field forwarding; and the drifted-prop regressions on `csv`, `custom`, and the media blocks.
 - `src/__tests__/fx-render-tree.spec.ts` — `fx.renderTree` returning a composable Effect rather than a Promise, the plain `renderTree()` as its facade, and both nesting into a single fiber tree.
 - `src/__tests__/telemetry-parity.spec.ts` — an interceptor on `compiler:mount` reaching the meter with its operation labels.

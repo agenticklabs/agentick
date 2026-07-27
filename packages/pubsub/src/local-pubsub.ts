@@ -112,7 +112,7 @@ export interface CreateLocalPubSubOptions<T> {
    * substrate's protocol bus via its own envelope translator.
    *
    * **Layering rationale.** Keeping the hook generic preserves
-   * pubsub-next's independence from spec-next's `EventBus` (which
+   * `@agentick/pubsub`'s independence from `@agentick/spec`'s `EventBus` (which
    * would invert the dep graph). Callers own the translation
    * (event → wire envelope, substrate emit, journaling, etc.) and
    * provide it as a closure.

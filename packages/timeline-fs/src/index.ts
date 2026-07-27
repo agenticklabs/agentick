@@ -7,7 +7,7 @@
  * durable in the file and survives `prune`.
  *
  * ```ts
- * import { createApp } from "agentick";
+ * import { createApp } from "@agentick/app";
  * import { fsTimelineStore } from "@agentick/timeline-fs";
  *
  * createApp(Agent, {

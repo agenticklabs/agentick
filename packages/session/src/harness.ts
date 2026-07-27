@@ -960,6 +960,9 @@ export class SessionHarness<P = unknown>
     if (this.constructionSignal !== undefined) {
       const sig = this.constructionSignal;
       const onAbort = (): void => {
+        // Fire-and-forget from an event listener (no consumer possible), but
+        // it cannot reject: `disposeChildren` catches EVERY per-child failure
+        // individually — see its body.
         void this.disposeChildren();
       };
       sig.addEventListener("abort", onAbort, { once: true });
@@ -1878,8 +1881,18 @@ export class SessionHarness<P = unknown>
       get: () => bridge.get(name) as T,
       // Fire-and-forget the async Operation; callers using this
       // sync surface expect "queue the mutation, move on."
+      //
+      // The rejection MUST be marked handled, not merely `void`ed: `set`'s
+      // failure channel is `SubstrateError` (a guard veto, a middleware
+      // failure, a store write failure all land there), and an un-handled
+      // rejection from a fire-and-forget promise nobody can await takes the
+      // process down. Swallowing is the contract of a SYNC setter — it has no
+      // channel to report on. An adopter who needs the outcome awaits
+      // `session.bridges.knobs.set(...)` directly instead of this handle.
+      // TODO(phase-3): route the swallowed cause to the harness log surface
+      // (`emitLog`) so a rejected knob write is at least observable.
       set: (value: T) => {
-        void bridge.set({ id: name, value: value as string | number | boolean });
+        void bridge.set({ id: name, value: value as string | number | boolean }).catch(() => {});
       },
       subscribe: (listener) => bridge.subscribe(name, listener),
     };
@@ -2559,7 +2572,9 @@ export class SessionHarness<P = unknown>
     this._currentHandle = handle;
     this._handleReservation?.resolve(handle);
     // Latch loop completion SYNCHRONOUSLY on settle — joins during the
-    // terminal window (endTurn/flush/resolve) must be refused.
+    // terminal window (endTurn/flush/resolve) must be refused. Safe to leave
+    // un-`catch`ed: both branches are supplied (so `runPromise`'s rejection is
+    // consumed) and neither can throw — the derived promise cannot reject.
     runPromise.then(
       () => {
         this._loopDone = true;
@@ -2571,7 +2586,7 @@ export class SessionHarness<P = unknown>
 
     // Resolve the result promise + emit the final `result` StreamEvent
     // when the loop terminates. Iterator closes after the result event.
-    void runPromise.then(
+    const settled = runPromise.then(
       async (terminal) => {
         // 4b — the loop has terminated, so no more tick-boundary drains will
         // run: whatever remains in the steer queue is UNDRAINED. On a normal
@@ -2622,7 +2637,24 @@ export class SessionHarness<P = unknown>
           return;
         }
         const result = terminal.result;
-        if (terminal.outcome === "succeeded" && result) {
+        // A CANCELED terminal that carries a result is a real, settled turn —
+        // the loop ran it to its abort point and reports what happened
+        // (`ticks`, partial `output`, `usage`, and a `stopReason` that already
+        // NAMES the cancellation: "aborted" / "timeout"). Resolve it, exactly
+        // as a natural end resolves; `SendResult.stopReason` is where a caller
+        // reads the cancellation. Only a terminal with NO result (nothing to
+        // report) rejects.
+        //
+        // This is the session-side half of the loop's ratified abort semantics
+        // (2026-07-27): the loop reports `canceled` for BOTH entry points (a
+        // caller `signal` abort AND `abort()`), so the session must not make the
+        // caller's `.result` settle differently depending on which one fired.
+        // Before the ruling, a signal abort reached here as `succeeded` (and
+        // resolved) while `abort()` reached here as `canceled` (and rejected) —
+        // the same divergence, one layer up. Note the ADR 49 boundary record
+        // above ALREADY treats this terminal as a settled turn (`outcome:
+        // "aborted"`, not a failure); resolving keeps the two in agreement.
+        if (result && (terminal.outcome === "succeeded" || terminal.outcome === "canceled")) {
           const response = result.output
             .filter((b): b is { type: "text"; text: string } => b.type === "text")
             .map((b) => b.text)
@@ -2680,6 +2712,18 @@ export class SessionHarness<P = unknown>
         close();
       },
     );
+    // Settle-path safety net. The `.then(onSettled, onFailed)` above consumes
+    // the loop's own rejection, but the DERIVED promise has no consumer: a
+    // throw from INSIDE either handler, before it settles `resultDeferred`,
+    // would leave the caller's `.result` pending forever while the throw
+    // escaped as an unhandled rejection. Route it to the one place that can
+    // still report it. Both calls are idempotent (a settled promise ignores a
+    // second settle; `close()` guards on `done`), so a handler that already
+    // finished its work is undisturbed.
+    void settled.catch((err: unknown) => {
+      resultDeferred.reject(err);
+      close();
+    });
 
     return handle;
   }

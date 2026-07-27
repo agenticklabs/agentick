@@ -1,5 +1,5 @@
 /**
- * `BaseClientTransport` — abstract base every `@agentick/transport-*-next`
+ * `BaseClientTransport` — abstract base every `@agentick/transport-*`
  * client transport subclasses.
  *
  * Owns:

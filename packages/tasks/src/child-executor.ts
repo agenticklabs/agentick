@@ -48,6 +48,8 @@ import type {
   TaskReport,
   TaskStatus,
   TaskWork,
+  TaskWorkContext,
+  TaskWorkVerbs,
 } from "@agentick/spec";
 import { isAgentickError, serializeAgentickError } from "@agentick/spec";
 
@@ -133,6 +135,21 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
     report: TaskReport,
     signal: AbortSignal,
     hooks?: TaskExecutorHooks,
+    // ADR 91 §2's `deriveCtx` is DECLARED-AND-UNUSED here, deliberately: it is a
+    // closure over the harness's live trunk+facets (`log` / `trace` / `metrics`
+    // / `run`), and a closure cannot cross a `fork()` boundary. The child
+    // reconstructs its own ctx instead — `worker.ts` calls `deriveContext`
+    // with a trunk built from the SERIALIZABLE `record.scope` (which carries
+    // the owning `sessionId`) plus deliberately degraded facets. Declaring the
+    // parameter keeps this executor's signature honest against
+    // `TaskExecutor.start`: the degradation is visible at the seam rather than
+    // looking like an arity oversight.
+    //
+    // TODO(phase-3): the missing half is `log` — see the matching
+    // `TODO(phase-3)` in `worker.ts`, which would bridge worker log frames back
+    // over IPC to the parent bus. That bridge, not this parameter, is what
+    // closes the gap.
+    _deriveCtx?: (verbs: TaskWorkVerbs) => TaskWorkContext,
   ): TaskExecution {
     // `serialization: "advanced"` (V8 structured clone) as the DEFAULT, not
     // fork's `"json"` default: task `input` + result are commonly

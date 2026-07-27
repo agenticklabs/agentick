@@ -10,7 +10,7 @@ import type { StreamAccumulatorView } from "../language-model-adapter.js";
  * the message aggregate, under the same id — the "Sources" footer surface.
  *
  * Adapters attach block-level `sources` only (see the four model-* adapters);
- * this is the model-next-owned roll-up they defer to. Typed against
+ * this is the `@agentick/model-owned` roll-up they defer to. Typed against
  * {@link StreamAccumulatorView} so a spec change breaks this stub at compile time.
  */
 function stubView(blocks: ContentBlock[]): StreamAccumulatorView {

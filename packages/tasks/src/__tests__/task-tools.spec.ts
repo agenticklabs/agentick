@@ -4,9 +4,9 @@
  *
  * Tests drive each tool's handler directly with a stub `ToolHandlerCtx`
  * carrying a real {@link TasksHarness} — no tool-executor in this
- * package's dep tree (keeping `tasks-next` ↔ `tool-executor-next`
+ * package's dep tree (keeping `@agentick/tasks` ↔ `@agentick/tool-executor`
  * acyclic; full end-to-end coverage already exists in
- * `tool-executor-next/__tests__/task-handle.spec.ts`).
+ * `@agentick/tool-executor/__tests__/task-handle.spec.ts`).
  */
 
 import { describe, expect, it } from "vitest";

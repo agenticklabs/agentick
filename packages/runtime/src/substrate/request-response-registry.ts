@@ -145,6 +145,10 @@ export class RequestResponseRegistry<TResp = unknown, TSnapshot = unknown> {
       ),
     );
 
+    // Derived, and deliberately NOT mark-handled: it is RETURNED, so the
+    // rejection is the caller's to observe (a timeout / `cancel()` rejects it).
+    // Marking it handled here would swallow a failure the caller asked for by
+    // registering the request.
     const promise = Effect.runPromiseExit(program).then((exit) => unwrapExit(exit));
 
     return { correlationId, promise };

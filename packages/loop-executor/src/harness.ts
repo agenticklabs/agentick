@@ -448,7 +448,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // `loop:run-execution` command's own `onBeforeLoopRunExecution`
       // hook (ADR 89 §4) — the session's forwarder, not a loop feed.
       yield* sink({ kind: "execution-start", tick: 0 });
-      const executionStartedAt = Date.now();
 
       // Default continuation policy: continue when the last tick
       // produced tool_use AND we have pending tool calls; stop
@@ -776,26 +775,46 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         ...(terminalCapture !== undefined ? { terminalCapture } : {}),
       };
 
-      const wasAborted = this.aborted.has(executionId);
+      // The cancellation discriminant. BOTH entry points land `canceled`: an
+      // `abort()` / timeout (which populates the `aborted` map) AND a
+      // caller-supplied `input.signal` abort or an executor-internal cancel
+      // (which never touch the map, and are observable only through the
+      // abort-derived `stopReason`). The cancellation SOURCE is not part of the
+      // terminal contract — only the fact of cancellation is. `stopReason` is
+      // never "aborted" on a path that isn't an abort, so this cannot
+      // false-positive a natural completion.
+      const wasAborted = this.aborted.has(executionId) || stopReason === "aborted";
+      const abortReason = this.aborted.get(executionId);
       const terminal: ExecutionTerminal = wasAborted
         ? {
             outcome: "canceled",
-            reason: this.aborted.get(executionId),
+            ...(abortReason !== undefined ? { reason: abortReason } : {}),
             result: runResult,
           }
         : { outcome: "succeeded", result: runResult };
 
-      // Emit execution-end + execution summary events. The
-      // `useOnExecutionEnd` projection rides `onAfterLoopRunExecution`
-      // (ADR 89 §4) — the session's forwarder, not a loop feed.
+      // Emit execution-end. The `useOnExecutionEnd` projection rides
+      // `onAfterLoopRunExecution` (ADR 89 §4) — the session's forwarder, not a
+      // loop feed.
       yield* sink({
         kind: "execution-end",
         tick: acc.ticks,
         stopReason,
         ...(wasAborted ? { aborted: true } : {}),
       });
-      // execution summary
-      void executionStartedAt;
+      // TODO(phase-3): emit the run-level SUMMARY event here — the twin of the
+      // per-tick `kind: "tick"` event this loop already emits (`stopReason` +
+      // `usage` + `durationMs`). Two of the three fields are in scope
+      // (`acc.ticks`, `acc.usage`, `stopReason`); the third needs a
+      // `Date.now()` captured next to the `execution-start` emit above (a dead
+      // capture sat there for exactly this and was removed with this note).
+      // Blocked only on a spec member: `LoopExecutionEvent` has no
+      // `kind: "execution"` case yet (`@agentick/spec`
+      // src/protocol/loop-executor.ts) — add one mirroring the `"tick"` case.
+      // Landing it FEEDS a seam that is already declared and currently starved:
+      // spec's `ExecutionEvent` StreamEvent (`type: "execution"`, carrying
+      // `durationMs` / `ticks` / `usage`) has NO producer anywhere in the tree,
+      // so adopters get per-tick durations but no per-execution duration.
 
       return terminal;
     }).pipe(
@@ -901,9 +920,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       //
       // TODO(adr-56-slice-1: adapter <Model> sugar) — the adopter face
       // (`<Model model={adapter}>` deriving {modelExecutor,target} from a
-      // live model-next adapter, then calling useModelRegistration)
+      // live `@agentick/model` adapter, then calling useModelRegistration)
       // lands in a binding package that deps BOTH compiler-react +
-      // model-next. Until then the ref is registered directly on the
+      // `@agentick/model`. Until then the ref is registered directly on the
       // ModelBridge. See ADR 56 §Deferred (1).
       // TODO(adr-56-slice-2: force-render activeModel) — reflecting the
       // IR-declared model back into the render-context `activeModel`
@@ -1522,13 +1541,12 @@ function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, 
 }
 
 /**
- * Merge the caller's optional `input.signal` with the per-execution
- * abort controller's signal into ONE composite (Stage 5 — structured
- * cancellation). The composite aborts when EITHER source fires; the
- * loop threads it to every in-flight edge so a `loop.abort()` OR an
- * external `input.signal` abort tears down the in-flight model call /
- * tool handler. Same pattern as the executor's `mergeSignals` (kept
- * local to avoid a runtime dep on the executor package for one helper).
+ * Fold one tick's `UsageStats` into the run-level accumulator. The three
+ * always-present counters add unconditionally; the optional ones
+ * (`reasoningTokens`, `cachedInputTokens`, `cacheCreationTokens`) stay
+ * `undefined` on the accumulator until some tick reports them, so a run
+ * against a provider that never reports them does not fabricate zeros.
+ * `add` of `undefined` (a tick with no usage) is a no-op.
  */
 function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
   if (!add) return;
