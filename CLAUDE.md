@@ -122,7 +122,7 @@ The framework provides **building blocks**, not opinions.
 | `<MCP>`                  | Connect to MCP servers (tools + progressive resource discovery)      |
 | `<Sandbox>`              | Sandboxed execution (provider-backed, tree-scoped tools)             |
 | ExecutionRunner          | Controls how compiled context reaches model and how tools execute    |
-| `audience: "user"` tools | Visibility flag: tool hidden from model, only reachable via dispatch |
+| `exposure: ["dispatch"]` tools | Visibility: tool hidden from model, only reachable via dispatch      |
 | `dispatch()`             | Invoke any tool by name/alias without model involvement (Procedure)  |
 
 #### Semantic Components (`packages/compiler-react/src/react/components/semantic.tsx`)
@@ -189,9 +189,9 @@ export const MyStatefulTool = createTool({
     return [{ type: "text", text: "Done" }];
   },
   render: () => (
-    <Section id="my-state" audience="model">
+    <Section id="my-state">
       <H2>Current State</H2>
-      <Json data={MyService.getState()} />
+      <json data={MyService.getState()} />
     </Section>
   ),
 });

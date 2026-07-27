@@ -230,7 +230,7 @@ export function semanticHtmlContributors(): readonly Contributor[] {
     // `block`; xml wraps in <div>/<span>; text uses block breaks.
     //
     // Note: `<section>` is intentionally NOT here — it's claimed by
-    // the agentick `<section id audience priority>` declaration
+    // the agentick `<section id title priority>` declaration
     // intrinsic. Adopters wanting an HTML-section-as-container use
     // `<div>` (or `<article>` for semantic richness).
     makeSemanticContributor("div", { semantic: "block" }),
