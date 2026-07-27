@@ -2779,6 +2779,19 @@ export class SessionHarness<P = unknown>
             ...omitUndefined({ aborted: loopEvent.aborted, error: loopEvent.error }),
           });
           return;
+        case "execution":
+          // Run-level summary. `ticks` mirrors the loop's final `tick` — the
+          // event fires once, at the terminal, so the two are the same count.
+          emit({
+            type: "execution",
+            tick: loopEvent.tick,
+            output: loopEvent.output,
+            usage: loopEvent.usage,
+            stopReason: loopEvent.stopReason,
+            ticks: loopEvent.tick,
+            durationMs: loopEvent.durationMs,
+          });
+          return;
         case "tool-dispatch-start":
           emit({
             type: "tool-dispatch-start",

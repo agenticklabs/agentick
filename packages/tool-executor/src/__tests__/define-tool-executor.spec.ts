@@ -314,3 +314,38 @@ describe("defineToolExecutor — abort + envelopes", () => {
     expect(phases).toContain("terminal");
   });
 });
+
+describe("defineToolExecutor — standalone construction (no deps)", () => {
+  // `defineToolExecutor` has always implemented `(deps?)` with a
+  // local-substrate fallback, but `ToolExecutorFactory` declared the parameter
+  // REQUIRED, so the fallback was unreachable through the public type (the
+  // `CompilerFactory` twin, cured the same way). The dep-less calls below are
+  // the compile-time half of the proof — the package's strict `tsc` over its
+  // tests fails if the parameter is ever re-narrowed.
+  it("constructs with NO deps — the local-substrate fallback dispatches", async () => {
+    const factory = defineToolExecutor({
+      dispatch: async (input) => ({
+        toolCallId: input.toolCallId,
+        name: input.name,
+        content: [{ type: "text", text: `ran:${input.name}` }],
+      }),
+    });
+    const exec = factory();
+    const result = await exec.dispatch(dispatchOf("calc", { a: 1 }));
+    expect(result.content[0]).toMatchObject({ type: "text", text: "ran:calc" });
+  });
+
+  it("two dep-less calls mint distinct executors on distinct scopes", async () => {
+    const factory = defineToolExecutor({
+      dispatch: async (input) => ({
+        toolCallId: input.toolCallId,
+        name: input.name,
+        content: [],
+      }),
+    });
+    const a = factory();
+    const b = factory();
+    expect(b).not.toBe(a);
+    await expect(b.dispatch(dispatchOf("noop", {}))).resolves.toBeDefined();
+  });
+});

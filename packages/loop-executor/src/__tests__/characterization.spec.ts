@@ -689,6 +689,35 @@ describe("LoopExecutorHarness [characterization] — event sequence", () => {
     expect(kinds.indexOf("tick-end")).toBeLessThan(kinds.indexOf("execution-end"));
   });
 
+  it("emits the run-level `execution` summary after execution-end, totals intact", async () => {
+    const t1: LanguageModelExecutionResult = {
+      specVersion: SPEC_VERSION,
+      output: [{ type: "text", text: "a" }],
+      stopReason: "tool_use",
+      usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
+      toolCalls: [{ id: "c1", name: "t", input: {} } as ToolCall],
+    };
+    const t2: LanguageModelExecutionResult = {
+      specVersion: SPEC_VERSION,
+      output: [{ type: "text", text: "b" }],
+      stopReason: "end",
+      usage: { inputTokens: 4, outputTokens: 5, totalTokens: 9 },
+    };
+    const trace = await runChar({ ticks: [t1, t2], maxTicks: 5 });
+    const kinds = trace.events.map((e) => e.kind);
+    // The summary is the execution twin of the per-tick `tick` event: it
+    // follows the `execution-end` boundary exactly as `tick` follows
+    // `tick-end`, and it carries the RUN totals, not a tick's slice.
+    expect(kinds.indexOf("execution-end")).toBeLessThan(kinds.indexOf("execution"));
+    const summary = trace.events.find((e) => e.kind === "execution");
+    if (summary?.kind !== "execution") throw new Error("no execution summary emitted");
+    expect(summary.tick).toBe(2);
+    expect(summary.stopReason).toBe("end");
+    expect(summary.usage).toEqual({ inputTokens: 5, outputTokens: 7, totalTokens: 12 });
+    expect(summary.durationMs).toBeGreaterThanOrEqual(0);
+    expect(summary.output).toEqual(trace.terminal.result!.output);
+  });
+
   it("a tool tick emits tool-dispatch-{start,end} around the dispatch", async () => {
     const trace = await runChar({ ticks: [toolUse("c1"), ended()], maxTicks: 5 });
     const kinds = trace.events.map((e) => e.kind);

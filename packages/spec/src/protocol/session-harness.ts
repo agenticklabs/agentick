@@ -468,7 +468,7 @@ export interface SessionExecutionHandle<T = unknown> {
  * constructed from substrate ALONE — it has no session access — so the send
  * capability is injected post-construction via {@link RunnerBindable.bindRunner}
  * (the `adoptTelemetry` late-bind precedent). Typing the capability as this
- * narrow function keeps the skills package free of a `session-next` edge: it
+ * narrow function keeps the skills package free of a `@agentick/session` edge: it
  * speaks only this spec type, never the concrete session.
  */
 export type SessionSendCapability<P = unknown> = (
@@ -983,12 +983,18 @@ export interface SessionHarnessFactoryDeps {
  * `defineSession(...)` so the App can call the factory at session
  * creation time with the shared substrate.
  *
+ * `deps` is OPTIONAL: a parent harness passes its substrate so the session's
+ * events flow on the shared bus/journal, while a STANDALONE caller (a test, a
+ * REPL, an adopter probing their callbacks before wiring an app) calls the
+ * factory bare and gets a private local substrate. Same convention as
+ * {@link ExecutorFactory}.
+ *
  * Marker symbol `sessionHarnessFactory` disambiguates a factory from a
  * pre-constructed instance.
  */
 export interface SessionHarnessFactory<P = unknown> {
   readonly sessionHarnessFactory: true;
-  (deps: SessionHarnessFactoryDeps): SessionHarnessProtocol<P>;
+  (deps?: SessionHarnessFactoryDeps): SessionHarnessProtocol<P>;
 }
 
 /** Type guard. */

@@ -6,7 +6,7 @@
  * DEDICATED session-namespace wire read, `session/list_tools` — the tool
  * executor's `tool:<sessionId>` inbox address does not fit the dynamic lane's
  * `<surface>:<sessionId>:<surface>` pattern, so a gateway-resident handler over
- * `sess.tools.list(query)` carries it (mirroring `session/timeline_history`).
+ * `sess.tools.list(query)` carries it (mirroring `session/set_client_tools`).
  * This drives that read through the REAL `GatewayHarness` + `inProcessTransport`
  * via the client `session.tools` handle (ADR 87).
  *

@@ -119,3 +119,39 @@ describe("defineSession — defaults", () => {
     await session.close();
   });
 });
+
+describe("defineSession — standalone construction (no deps)", () => {
+  // `defineSession` has always implemented `(deps?)` with a local-substrate
+  // fallback, but `SessionHarnessFactory` declared the parameter REQUIRED, so
+  // the fallback was unreachable through the public type (the
+  // `CompilerFactory` twin, cured the same way). The dep-less calls below are
+  // the compile-time half of the proof — the package's strict `tsc` over its
+  // tests fails if the parameter is ever re-narrowed.
+  it("constructs with NO deps — the local-substrate fallback answers send/snapshot", async () => {
+    const factory = defineSession({
+      send: async () => fakeHandle(),
+      snapshot: fakeSnapshot,
+      applyExecutorResult: okApply,
+      applyToolResults: okApply,
+      appendEntry: okApply,
+    });
+    const session = factory();
+    const sendResult = await session.send({ messages: [{ role: "user", content: "hi" }] });
+    expect(sendResult.executionId).toBe("e_x");
+    await expect(session.snapshot()).resolves.toMatchObject({ id: "s_test" });
+  });
+
+  it("two dep-less calls mint distinct sessions on distinct scopes", async () => {
+    const factory = defineSession({
+      send: async () => fakeHandle(),
+      snapshot: fakeSnapshot,
+      applyExecutorResult: okApply,
+      applyToolResults: okApply,
+      appendEntry: okApply,
+    });
+    const a = factory();
+    const b = factory();
+    expect(b).not.toBe(a);
+    expect(b.id).not.toBe(a.id);
+  });
+});

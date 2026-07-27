@@ -555,7 +555,7 @@ await createGateway({
 
 **Opt-in, and that asymmetry is deliberate.** Security defaults protect the operator, so they ship on. How large a payload an app's transcript should carry is the app developer's call, so this ships off with a good default you opt into.
 
-**Never the model path, never the store.** Truncation happens only on the copy heading to a client; the projector never mutates its input. A bounded block carries a machine-readable `block.metadata.bounded` marker (`{ truncated, originalBytes, retainedBytes, reason, hint }`) plus a human-readable suffix, both naming the durable store as where the full content survives — fetchable through the `session/timeline_history` wire read.
+**Never the model path, never the store.** Truncation happens only on the copy heading to a client; the projector never mutates its input. A bounded block carries a machine-readable `block.metadata.bounded` marker (`{ truncated, originalBytes, retainedBytes, reason, hint }`) plus a human-readable suffix, both naming the durable store as where the full content survives — fetchable through the grant-gated `timeline/history` read.
 
 ## Security defaults
 

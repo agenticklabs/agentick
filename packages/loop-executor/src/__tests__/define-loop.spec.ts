@@ -143,3 +143,32 @@ describe("defineLoop — envelopes", () => {
     expect(phases).toContain("terminal");
   });
 });
+
+describe("defineLoop — standalone construction (no deps)", () => {
+  // `defineLoop` has always implemented `(deps?)` with a local-substrate
+  // fallback, but `LoopExecutorFactory` declared the parameter REQUIRED, so
+  // the fallback was unreachable through the public type (the
+  // `CompilerFactory` twin, cured the same way). The dep-less calls below are
+  // the compile-time half of the proof — the package's strict `tsc` over its
+  // tests fails if the parameter is ever re-narrowed.
+  it("constructs with NO deps — the local-substrate fallback runs the execution", async () => {
+    const factory = defineLoop({
+      runExecution: async () => ({ outcome: "succeeded" }) as ExecutionTerminal,
+    });
+    const loop = factory();
+    const terminal = await loop.runExecution(fakeInput("e_depless"));
+    expect(terminal.outcome).toBe("succeeded");
+  });
+
+  it("two dep-less calls mint distinct loops on distinct scopes", async () => {
+    const factory = defineLoop({
+      runExecution: async () => ({ outcome: "succeeded" }) as ExecutionTerminal,
+    });
+    const a = factory();
+    const b = factory();
+    expect(b).not.toBe(a);
+    await expect(b.runExecution(fakeInput("e_depless_2"))).resolves.toMatchObject({
+      outcome: "succeeded",
+    });
+  });
+});

@@ -447,6 +447,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // The `useOnExecutionStart` lifecycle projection rides the
       // `loop:run-execution` command's own `onBeforeLoopRunExecution`
       // hook (ADR 89 §4) — the session's forwarder, not a loop feed.
+      const executionStartedAt = Date.now();
       yield* sink({ kind: "execution-start", tick: 0 });
 
       // Default continuation policy: continue when the last tick
@@ -802,19 +803,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         stopReason,
         ...(wasAborted ? { aborted: true } : {}),
       });
-      // TODO(phase-3): emit the run-level SUMMARY event here — the twin of the
-      // per-tick `kind: "tick"` event this loop already emits (`stopReason` +
-      // `usage` + `durationMs`). Two of the three fields are in scope
-      // (`acc.ticks`, `acc.usage`, `stopReason`); the third needs a
-      // `Date.now()` captured next to the `execution-start` emit above (a dead
-      // capture sat there for exactly this and was removed with this note).
-      // Blocked only on a spec member: `LoopExecutionEvent` has no
-      // `kind: "execution"` case yet (`@agentick/spec`
-      // src/protocol/loop-executor.ts) — add one mirroring the `"tick"` case.
-      // Landing it FEEDS a seam that is already declared and currently starved:
-      // spec's `ExecutionEvent` StreamEvent (`type: "execution"`, carrying
-      // `durationMs` / `ticks` / `usage`) has NO producer anywhere in the tree,
-      // so adopters get per-tick durations but no per-execution duration.
+      // Run-level SUMMARY — the execution twin of the per-tick `kind: "tick"`
+      // event, after the boundary event exactly as `"tick"` follows
+      // `"tick-end"`. Every terminal reaching this point carries a result
+      // (the failure path exits through `catchAll` below and emits no
+      // summary, as a failed tick emits no `"tick"`).
+      yield* sink({
+        kind: "execution",
+        tick: acc.ticks,
+        output: runResult.output,
+        stopReason,
+        usage: runResult.usage,
+        durationMs: Date.now() - executionStartedAt,
+      });
 
       return terminal;
     }).pipe(

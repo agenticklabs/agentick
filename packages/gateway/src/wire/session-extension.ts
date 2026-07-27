@@ -19,8 +19,6 @@ import {
   toClientToolRegistration,
   type ProtocolEvent,
   type SessionHarnessProtocol,
-  type SessionTimelineHistoryEntry,
-  type TimelineEntry,
   type ToolExecutorProtocol,
   type WireExtension,
 } from "@agentick/spec";
@@ -35,23 +33,6 @@ import { omitUndefined } from "@agentick/utils";
  */
 type SessionWithTools = SessionHarnessProtocol & {
   readonly toolExecutor: ToolExecutorProtocol;
-};
-
-/**
- * Structural view of the session's timeline seam. As with `toolExecutor` /
- * `elicitation`, the gateway does NOT depend on `@agentick/timeline` — it
- * narrows the session to the `timeline.history` member (augmented onto the
- * session by the timeline package) at the call site. `history` is the
- * `LogStore` cursored read; it may reject if the injected `TimelineStore` omits
- * the optional method (the rejection surfaces to the client as a wire error).
- */
-type SessionWithTimeline = SessionHarnessProtocol & {
-  readonly timeline: {
-    history(options?: {
-      readonly fromSeq?: number;
-      readonly limit?: number;
-    }): Promise<readonly { readonly seq: number; readonly entry: TimelineEntry }[]>;
-  };
 };
 
 function findSession(
@@ -194,7 +175,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       // (three-audiences-plan §F). `session.tools.list` is a sync View read; the
       // handler just projects the query and returns the wire-safe ToolInfo rows.
       // Gateway-resident + harness-agnostic (`tools` is on SessionHarnessProtocol),
-      // mirroring session/timeline_history — the tool executor's `tool:<sessionId>`
+      // mirroring session/set_client_tools — the tool executor's `tool:<sessionId>`
       // address does not fit the dynamic-command lane pattern.
       const sess = ctx.session ?? findSession(ctx, sessionId);
       const tools = sess.tools.list(exposure !== undefined ? { exposure } : undefined);
@@ -219,7 +200,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const sess = ctx.session ?? findSession(ctx, params.sessionId);
       // The elicitation slot on SessionHarnessProtocol is augmented in
       // by `@agentick/elicitation`. Gateway package intentionally
-      // does NOT depend on elicitation-next; cast to the augmented
+      // does NOT depend on @agentick/elicitation; cast to the augmented
       // shape at the call site. Every conforming session that speaks
       // this wire method has the slot.
       const sessElic = sess as SessionHarnessProtocol & {
@@ -273,43 +254,6 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         result: params.result,
       });
       return null;
-    },
-    // TODO(D-phase): SUPERSEDED by `timeline:history` (ADR 93 D2) — the harness's
-    // own declared read, projected by the dynamic lane as `timeline/history` and
-    // gated on the `timeline:history` scope. That is the door the client SDK now
-    // uses; this porcelain is a second wire door for one capability, under a
-    // second grant label (`session:timeline_history`). Delete it — and its
-    // `WireMethods` row + params types in @agentick/spec — in the slice that owns
-    // the spec deletion (out of D2's fence: additive spec changes only).
-    "session/timeline_history": async (params, ctx) => {
-      const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTimeline;
-      // Cursored, bounded read over `TimelineStore.history` (§6.3). The harness
-      // flushes its write-behind buffer before reading, so the page reflects
-      // every completed append.
-      const tagged = await sess.timeline.history({
-        ...(params.fromSeq !== undefined ? { fromSeq: params.fromSeq } : {}),
-        ...(params.limit !== undefined ? { limit: params.limit } : {}),
-      });
-      // Map each seq-tagged entry onto the wire row. `cursor` is co-located with
-      // `seq` ONLY where the server carries both (§6.4) — the bundled
-      // MemoryTimelineStore does not, so it is omitted here (honest gap, not a
-      // unification). A store that persists a bus cursor would populate it.
-      const entries: SessionTimelineHistoryEntry[] = tagged.map((t) => ({
-        seq: t.seq,
-        entry: t.entry,
-      }));
-      // A FULL page (length === requested limit) MAY have more — hand back the
-      // next cursor (`lastSeq + 1`, a valid `seq >= fromSeq` lower bound even
-      // when seqs are sparse). A short/uncapped page reached the tail.
-      const lastSeq = entries.length > 0 ? entries[entries.length - 1]!.seq : undefined;
-      const nextFromSeq =
-        params.limit !== undefined && entries.length === params.limit && lastSeq !== undefined
-          ? lastSeq + 1
-          : undefined;
-      return {
-        entries,
-        ...(nextFromSeq !== undefined ? { nextFromSeq } : {}),
-      };
     },
   },
 });

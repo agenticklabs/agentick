@@ -37,7 +37,7 @@
  * human-readable suffix on the preview text, both naming the durable
  * store as the place the full content survives. Nothing disappears
  * silently — the client is told content was bounded and how to get the
- * rest (cross-references the future `timeline_history` read).
+ * rest (cross-references the grant-gated `timeline/history` read).
  *
  * @see docs/proposals/v2/STATUS.md ROADMAP A3
  * @verifiedBy packages/spec/src/__tests__/tool-output-bound.spec.ts
@@ -77,7 +77,7 @@ export interface BoundedContentMarker {
   /** UTF-8 byte length of the retained preview (0 for stripped binary). */
   readonly retainedBytes: number;
   readonly reason: BoundedReason;
-  /** How to obtain the full content — the durable store / timeline_history. */
+  /** How to obtain the full content — the durable store / `timeline/history`. */
   readonly hint: string;
 }
 
@@ -165,7 +165,7 @@ function truncateUtf8(s: string, budget: number): { text: string; retained: numb
 
 const HINT =
   "Bounded at the client projection — full content survives in the durable timeline store " +
-  "(read via timeline_history).";
+  "(read via the timeline/history command).";
 
 function stamp(block: ContentBlock, marker: BoundedContentMarker): ContentBlock {
   return {

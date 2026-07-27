@@ -923,12 +923,18 @@ export interface ToolExecutorFactoryDeps {
  * substrate so the executor's events flow through the shared bus/journal
  * without manual wiring.
  *
+ * `deps` is OPTIONAL: a parent harness passes its substrate so the executor's
+ * events flow on the shared bus/journal, while a STANDALONE caller (a test, a
+ * REPL, an adopter probing their callbacks before wiring an app) calls the
+ * factory bare and gets a private local substrate. Same convention as
+ * {@link ExecutorFactory}.
+ *
  * Marker symbol `toolExecutorFactory` disambiguates a factory from a
  * pre-constructed instance.
  */
 export interface ToolExecutorFactory {
   readonly toolExecutorFactory: true;
-  (deps: ToolExecutorFactoryDeps): ToolExecutorProtocol;
+  (deps?: ToolExecutorFactoryDeps): ToolExecutorProtocol;
 }
 
 /** Type guard. */

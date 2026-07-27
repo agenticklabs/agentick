@@ -363,6 +363,19 @@ export type LoopExecutionEvent =
       readonly aborted?: boolean;
       readonly error?: { readonly message: string; readonly name: string };
     }
+  // Run-level SUMMARY — the execution twin of the per-tick `kind: "tick"`
+  // event, feeding the `ExecutionEvent` StreamEvent (`type: "execution"`).
+  // Emitted after `execution-end` on any terminal that CARRIES a result
+  // (succeeded or canceled-with-partial-work); a failed run has no summary,
+  // exactly as a failed tick emits no `"tick"`.
+  | {
+      readonly kind: "execution";
+      readonly tick: number;
+      readonly output: readonly ContentBlock[];
+      readonly stopReason: string;
+      readonly usage: UsageStats;
+      readonly durationMs: number;
+    }
   | {
       readonly kind: "tool-dispatch-start";
       readonly tick: number;
@@ -732,12 +745,18 @@ export interface LoopExecutorFactoryDeps {
  * (`AppHarness`) call this factory with their own substrate so the
  * loop's events flow through the shared bus/journal.
  *
+ * `deps` is OPTIONAL: a parent harness passes its substrate so the loop's
+ * events flow on the shared bus/journal, while a STANDALONE caller (a test, a
+ * REPL, an adopter probing their callbacks before wiring an app) calls the
+ * factory bare and gets a private local substrate. Same convention as
+ * {@link ExecutorFactory}.
+ *
  * Marker symbol `loopExecutorFactory` disambiguates a factory from a
  * pre-constructed instance.
  */
 export interface LoopExecutorFactory {
   readonly loopExecutorFactory: true;
-  (deps: LoopExecutorFactoryDeps): LoopExecutorProtocol;
+  (deps?: LoopExecutorFactoryDeps): LoopExecutorProtocol;
 }
 
 /** Type guard. */
