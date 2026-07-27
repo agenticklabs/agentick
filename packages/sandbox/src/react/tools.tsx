@@ -48,7 +48,7 @@ function activeSandbox(bridge: SandboxBridge | undefined): SandboxHarness | unde
 }
 
 /**
- * `<Bash />` — execute a shell command in the in-scope sandbox.
+ * `<Bash.Tool />` — execute a shell command in the in-scope sandbox.
  * Returns stdout (or stderr on non-zero exit) as a text block.
  */
 export const Bash = createTool({
@@ -82,7 +82,7 @@ export const Bash = createTool({
 });
 
 /**
- * `<ReadFile />` — read a file from the sandbox workspace.
+ * `<ReadFile.Tool />` — read a file from the sandbox workspace.
  */
 export const ReadFile = createTool({
   name: "read_file",
@@ -101,7 +101,7 @@ export const ReadFile = createTool({
 });
 
 /**
- * `<WriteFile />` — write a file to the sandbox workspace. Atomic.
+ * `<WriteFile.Tool />` — write a file to the sandbox workspace. Atomic.
  */
 export const WriteFile = createTool({
   name: "write_file",
@@ -121,7 +121,7 @@ export const WriteFile = createTool({
 });
 
 /**
- * `<EditFile />` — apply surgical edits to a file. Carries the full v1
+ * `<EditFile.Tool />` — apply surgical edits to a file. Carries the full v1
  * mode set (replace / delete / insert before|after|start|end / range),
  * mode detected by field presence. All edits resolve against the
  * original content and apply atomically.
