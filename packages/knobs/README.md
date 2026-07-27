@@ -1,414 +1,324 @@
 # @agentick/knobs
 
-`KnobsHarness` — **model-visible, model-settable reactive state**. The one
-primitive the model can both _read_ (rendered into its context) and _write_
-(via the `knob_set` tool), with per-value subscription so the UI, the agent
-tree, and the model all converge on the same cell.
+**A knob is the one cell the model can both read and write.** Registered knobs render into the model's context as a section; the `knob_set` tool lets the model change them. Every write runs a validation pipeline, lands as an audited operation, and fires per-value subscribers — so the render tree, the host process, and the model all converge on the same cell.
 
-This package is the flagship example of the v2 thesis that **React is a
-binding over a programmatic core.** There is no "React knobs" and "server
-knobs" — there is one `KnobsHarness` (get / set / register / dispatch /
-subscribe), and `useKnob` is a thin `useSyncExternalStore` binding over the
-exact same value cells. Everything `useKnob` can do, `session.knobs` /
-`bridges.knobs` can do from plain server code; the hook adds only the render
-lifecycle.
+That symmetry is the bet. There is no "React knobs" and no "server knobs": there is one cell set — get / set / register / dispatch / subscribe — and `useKnob` is a `useSyncExternalStore` binding over exactly those cells. Everything the hook can do, plain server code does through `session.knobs`; the hook adds only the render lifecycle.
 
-Private workspace package. Bundled into the `agentick` metapackage; not
-published independently.
+## Install
 
-## What it is
-
-A knob is a named reactive cell (`string | number | boolean`) plus an
-optional descriptor (type, group, bounds, options, validator). Three facts
-define the primitive:
-
-1. **Model-visible.** Registered knobs render into a `<Knobs />` section so
-   the model sees the current values as context.
-2. **Model-settable.** `<Knobs />` also declares a `knob_set` tool; the model
-   mutates knobs by calling it. Writes run a validation pipeline
-   (type → options → bounds → length/pattern → custom `validate`).
-3. **Reactive + subscribable.** Any write — from the model, from adopter
-   code, from a remote inbox message — fires per-id subscribers, so
-   `useKnob` re-renders and `session.knob(name).subscribe(...)` fires.
-
-`readOnly` knobs are model-**visible** but not model-**settable**: they
-render in the section (with a `read-only` hint) so the model can read the
-state, but `knob_set` rejects writes to them by name and skips them in group
-writes. Only application code mutates a read-only knob (via the `useKnob`
-setter or `harness.set`). This is how a verified gate keeps its state
-unforgeable by the model.
-
-`KnobsHarness extends BaseHarness<"knobs">`, so `set` / `register` /
-`dispatch` are declared commands (ADR 51): each write runs through
-`runOperation` — the terminal envelope IS the change-event audit trail — and
-each verb is inbox-addressable over the harness address (`knobs:{scopeId}`)
-with no extra routing code. Reads (`get` / `has` / `list` / `subscribe` /
-`subscribeAll`) are cheap synchronous Map reads, no envelopes.
-
-## Dual surface
-
-### Programmatic — the core
-
-The harness is reachable three ways, all the same instance:
-
-| Surface              | Where                                     | Shape                   |
-| -------------------- | ----------------------------------------- | ----------------------- |
-| `bridges.knobs`      | internal bridge plumbing / `useBridges()` | `KnobsHarnessProtocol`  |
-| `session.knobs`      | adopter / server-side code                | `KnobsHandle` (curated) |
-| `session.knob(name)` | per-knob access by reference              | `KnobHandle<T>`         |
-
-```ts
-// list / read / set / dispatch from plain server code — no React.
-session.knobs.list(); // readonly KnobDescriptor[] (descriptor + current value)
-session.knobs.get("verbosity"); // KnobPrimitive | undefined
-await session.knobs.set({ id: "verbosity", value: 3 }); // async Operation envelope
-
-// The knob_set validation pipeline, invoked directly (returns the same
-// ContentBlock[] the model would receive):
-await session.knobs.dispatch({ name: "verbosity", value: 3 });
-
-// subscribe to one knob, or to any change:
-const off = session.knobs.subscribe("verbosity", () => rerender());
-session.knobs.subscribeAll(() => refreshDashboard());
+```bash
+npm install @agentick/knobs
 ```
 
-Per-knob handle for reference-style access (sync setter — fires the async
-Operation fire-and-forget):
+Subpaths: `/react` (hook + components), `/client` (browser-side handle), `/testing` (stub + conformance suite).
 
-```ts
-const verbosity = session.knob<number>("verbosity");
-verbosity.get(); // 3
-verbosity.set(5); // queue the mutation, move on
-verbosity.subscribe(() => console.log("changed to", verbosity.get()));
-```
-
-### React — a binding over the core
-
-`useKnob` is `useSyncExternalStore` over `useBridges().knobs`. It registers a
-descriptor in `useEffect` (fire-and-forget the async `register` Operation),
-subscribes to the same per-id notifier, and returns `[value, setValue]` where
-`setValue` fires `knobs.set(...)`. Nothing the hook touches is React-only —
-it is the same harness the programmatic surface exposes.
+## Quick start
 
 ```tsx
-import { useKnob } from "@agentick/knobs/react";
+import { Section, System } from "@agentick/compiler-react";
+import { Knobs, useKnob } from "@agentick/knobs/react";
 
-function Agent() {
-  const [verbosity, setVerbosity] = useKnob("verbosity", 3, {
+export function Agent() {
+  const [verbosity] = useKnob("verbosity", 3, {
     description: "How much detail to include",
     min: 1,
     max: 5,
     group: "output",
   });
 
-  // Model-visible but NOT model-settable — only this component's setter
-  // (or session.knobs.set) can change it.
-  const [phase] = useKnob("phase", "planning", { readOnly: true });
-
   return (
     <>
+      <System>You are a helpful assistant.</System>
+      <Section id="style">Answer at verbosity level {verbosity} of 5.</Section>
       <Knobs />
-      <Section id="status">Current phase: {phase}</Section>
     </>
   );
 }
 ```
 
-## `<Knobs />` — the model surface
+`<Knobs />` renders both halves of the contract: a `<Section id="knobs">` listing every registered knob, and the `knob_set` tool declaration. The model reads the section, calls the tool, the cell changes, the component re-renders, and the next tick's context reflects the new value.
 
-`<Knobs />` renders the `knob_set` tool declaration **and** a
-`<Section id="knobs">` listing every non-`inline` knob, grouped by `group`.
-It returns `null` when no knobs are registered. Three modes:
+> [!NOTE]
+> `<Knobs />` returns `null` when nothing is registered. Drop it from the tree and `useKnob` still gives you a live, subscribable cell — it just stops being model-visible and model-settable.
 
-```tsx
-import { Knobs } from "@agentick/knobs/react";
+## What the model sees
 
-// 1. default — tool + auto-formatted section
-<Knobs />
+The formatter emits one line per knob — `id [semantic-type]: value — description` plus parenthesized hints — with `### group` headings and ungrouped knobs first:
 
-// 2. render prop — tool + your custom section over the grouped knobs
-<Knobs>{(groups) => <MyKnobTable groups={groups} />}</Knobs>
+```text
+Knobs are adjustable parameters you can modify using the knob_set tool.
 
-// 3. provider — <Knobs.Provider> + <Knobs.Controls /> + useKnobsContext()
-//    for full custom rendering. The knob_set tool registers unconditionally.
-<Knobs.Provider>
-  <Knobs.Controls renderKnob={(k) => <MyKnob knob={k} />} />
-</Knobs.Provider>
+mood [select]: "curious" — Agent mood (options: "curious", "decisive")
+
+### output
+verbose [toggle]: false — Verbose output
+verbosity [range]: 3 — How much detail to include (1 - 5)
 ```
 
-The model-facing formatter emits one line per knob —
-`name [semantic-type]: value — description` followed by parenthesized hints
-(options, range, `step`, `max N chars`, pattern, `required`, `resets after
-use`, `read-only`) — with `### group` headings. `knob_set` delegates
-validation + mutation to `harness.dispatch(...)`; there is no duplicate
-validation logic in the tool. Supplying `{ group }` instead of `{ name }`
-sets every settable knob in that group atomically after a shared type-check.
+The semantic type is derived, not declared: `boolean` → `toggle`, `number` with `min`/`max` → `range`, bare `number` → `number`, `string` with `options` → `select`, otherwise `text`. Hints cover `options`, the numeric range, `step`, `max N chars`, `pattern`, `required`, `resets after use`, and `read-only`.
 
-## API
+`inline: true` keeps a knob out of the listing (per-message collapse state and similar high-cardinality cells) while leaving it settable by name; the section notes that inline knobs exist.
 
-### `@agentick/knobs`
+## Validation is one pipeline
 
-- **`KnobsHarness`** — `BaseHarness<"knobs">` impl of `KnobsHarnessProtocol`.
-  Construct with `(scopeId, journal, bus, inbox, parentLayer?)`.
-  - Sync reads: `get(id)` · `has(id)` · `list()` · `subscribe(id, fn)` ·
-    `subscribeAll(fn)`.
-  - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
-    (`ChangeEvent<KnobPrimitive>`), the source the state-sync channel projects from.
-  - Async commands: `set({ id, value })` · `register({ id, descriptor })` ·
-    `dispatch(input)` (the `knob_set` pipeline → `ContentBlock[]`).
-  - Snapshot: `exportSnapshot()` / `importSnapshot(values)` round-trip the
-    value cells (descriptors are re-declared on remount, not snapshotted).
-  - State channel: `stateSnapshotFrame()` returns the current store as a
-    `snapshot` frame (late-join re-seed). Every `set` / defaulted `register`
-    fans a `delta` frame, and `importSnapshot` a fresh `snapshot` frame, onto
-    `KNOBS_STATE_CHANNEL_FQN` — see [State-sync channel](#state-sync-channel-adr-73).
-  - **Layer-aware resolution (ADR 34 cascade).** The optional `parentLayer`
-    is a read-only fallback `KnobsHarnessProtocol`: reads (`get` / `has` /
-    `list`) fall through to it when self has no entry, **self shadows parent
-    by id**, and writes (`set` / `register`) mutate **SELF ONLY** — the parent
-    is never touched. Critically, `exportSnapshot()` captures the **SELF layer
-    ONLY**: a session snapshot must not embed inherited (app-scoped) state,
-    which is snapshotted at the parent's own scope. Named `parentLayer` to
-    disambiguate from `BaseHarness.parent` (the ADR 31 harness-hierarchy
-    parent). **Absent everywhere today** — the session constructs its knobs
-    with no parent, so the chain is `[self]` and behavior is byte-identical to
-    a single layer; the seam lets a future **app tier** drop in as a session's
-    parent layer with no rewrite.
-- **`withKnobs(options?)`** — `SessionExtension` factory.
-  `WithKnobsOptions.initial` seeds values at construction (via
-  `importSnapshot`).
-- **`runKnobsHarnessConformance({ make })`** — protocol conformance suite;
-  any `KnobsHarnessProtocol` impl (a redis-backed variant, a stub) can be
-  driven through it to prove compliance.
-- **`knobsWireExtension`** — the wire extension that exposes the `knobs/set`
-  command over the gateway (the write half the `/client` handle calls).
-- **`KNOBS_STATE_CHANNEL`** (`"knobs-state"`) / **`KNOBS_STATE_CHANNEL_FQN`**
-  (`"session:channel:knobs-state"`) — the channel name and its fully-qualified
-  subscription topic. Plus `knobPointer(id)` (the RFC 6901 pointer for a knob),
-  `KnobsStateFrame` (`snapshot` | `delta`), and the frame subtypes.
-- **Type `KnobsHandle`** — the curated `session.knobs` surface (hides `id` /
-  `ready` / `close` / snapshot import-export / `register`).
+`knob_set` owns no validation logic of its own — it forwards to `dispatch`, which runs the checks in a fixed order and returns the content blocks the model receives either way:
 
-### `@agentick/knobs/react`
-
-- **`useKnob(id, initial, options?)`** → `readonly [T, (v: T) => void]`.
-  `UseKnobOptions`: `description`, `valueType`, `group`, `options`, `min`,
-  `max`, `step`, `maxLength`, `pattern`, `required`, `momentary`, `inline`,
-  `readOnly`, `validate`, `schema`.
-- **`Knobs`** (+ `Knobs.Provider`, `Knobs.Controls`) — the model surface.
-- **`useKnobsContext()` / `useKnobsContextOptional()`** — read the grouped
-  knob view inside `<Knobs.Provider>`.
-- Types: `KnobsProps`, `KnobsRenderFn`, `KnobsContextValue`, `KnobInfo`,
-  `KnobGroup`.
-
-### `@agentick/knobs/testing`
-
-- **`stubKnobsHarness(initial?)`** — a real `KnobsHarness` on its own
-  in-memory substrate (journal / bus / inbox); `initial` seeds values.
-
-### `@agentick/knobs/client`
-
-`session.knobs` is a `ClientHandle` — `list()`/`get(id)`/`subscribe(cb)` +
-`set(id, value)`. It depends on the generic `channelView` from
-`@agentick/client-core` — **not** on the knobs harness runtime — so a
-browser bundle never pulls the server harness in.
-
-**Render a slider straight off `list()` — 4 lines.** `list()` returns
-DESCRIPTORS+values, so the label, range, and step are right there; no second
-round-trip (friction #1):
+1. exactly one of `name` / `group`
+2. the knob exists
+3. it isn't read-only
+4. `typeof value` matches `valueType`
+5. the value is in `options`, when declared
+6. `min` / `max` for numbers
+7. `maxLength` / `pattern` for strings
+8. the custom `validate(value)` predicate
 
 ```ts
-import "@agentick/knobs/client"; // side-effect: types + registers the slot
-
-const knobs = client.session(id).knobs;
-knobs.subscribe(() => render(knobs.list())); // ← re-render on any change
-// each descriptor: { id, value, description?, min?, max?, step?, options?, … }
-const off = () => knobs.close();
+await session.knobs.dispatch({ name: "verbosity", value: 9 });
+// → [{ type: "text", text: 'Value for "verbosity" must be <= 5. Got 9.' }]
 ```
+
+Because it is the same entry point, calling `dispatch` from host code is indistinguishable from the model calling the tool — which is what makes it testable without a model in the loop.
+
+### Read-only knobs
+
+`readOnly` splits visible from settable. The knob renders in the section (tagged `read-only`) so the model can reason about it, but `knob_set` refuses it by name and skips it in group writes. Only application code mutates it:
 
 ```tsx
-// a render function that needs nothing but list():
-for (const k of knobs.list())
-  slider({ label: k.description ?? k.id, value: k.value, min: k.min, max: k.max });
+function BudgetStatus({ remaining }: { remaining: number }) {
+  const [, setRemaining] = useKnob("budgetRemaining", remaining, {
+    description: "Tokens left in this run",
+    readOnly: true,
+  });
+  useEffect(() => setRemaining(remaining), [remaining, setRemaining]);
+  return null;
+}
 ```
 
-**Set by id — one name, wire to server (friction #13).** `set(id, value)` is
-fire-and-observe: it issues `knobs/set` and resolves `void`; the new value
-returns as a `knobs-state` delta and re-folds the view (CQRS — no hand-patch):
+This is the mechanism [@agentick/gates](../gates) builds on: a verified gate registers its backing knob read-only, so the model cannot set itself past a failing check.
+
+### Group writes
+
+Tag related knobs with the same `group` and the model can flip them all at once. The batch type-checks the whole group before mutating anything, skips read-only members, and rejects when the members disagree on `valueType`:
 
 ```ts
-await knobs.set("verbosity", 3); // { sessionId, id: "verbosity", value: 3 } on the wire
+await session.knobs.dispatch({ group: "output", value: true });
+// → [{ type: "text", text: 'Set 2 knobs in group "output" to true: verbose, showSources.' }]
 ```
 
-- **The contract.** `list(): readonly WireKnobDescriptor[]` and
-  `get(id): WireKnobDescriptor | undefined` (Enumerable — reflects state from
-  BEFORE you connected); `subscribe(cb: () => void)` fires on change, `cb` takes
-  NO arguments (read via `list()`); `close()`; `set(id, value)`. Passes
-  `runClientHandleConformance` (core + Enumerable + the `set` write verb).
-- **`knobsHandle(client, sessionId)`** → `KnobsHandle` is the free factory the
-  slot registers; call it directly for the headless/composition case.
-- **`knobsStateView(client, sessionId)`** → `ChannelView<KnobsState>` remains as
-  the lower-level VALUES-only fold (`Record<id, value>`) for consumers that want
-  the raw store without descriptors.
-- Types: **`KnobsHandle`** (the contract above), **`KnobsState`**
-  (`Readonly<Record<string, KnobPrimitive>>`), **`KnobsClient`** (read surface —
-  `transport.subscribe`), **`KnobsCommandClient`** (command surface — `subscribe`
-  - `request`).
+### Momentary knobs
 
-**Two `session.knobs`, one noun — mind the vantage.** The CLIENT slot above
-(`client.session(id).knobs`, a `KnobsHandle` = the descriptor fold + a flat
-`set(id, value)`) is a read-replica of the SERVER `session.knobs` (the
-curated `KnobsHandle` owned by `@agentick/session` — per-knob
-`get(name)` / `set({ id, value })` / `subscribe(name, …)`, the authority). Same
-facet, CQRS split: the server holds truth and rich per-knob ops; the client
-holds a folded view and a fire-and-observe write. The per-knob handle
-(`session.knob(name)` → `KnobHandle<T>`) and the server `session.knobs` accessor
-are augmented onto `SessionHarnessProtocol` by `@agentick/session`, not this
-package.
+`momentary: true` makes a one-shot trigger: the model flips it, your tree reacts, and the value resets to its initial at the end of the execution — not the end of the tick, so it survives the tool round-trip that acts on it.
 
-See the generated typedoc for the exhaustive descriptor / input types.
+```tsx
+const [regenerate] = useKnob("regenerate", false, {
+  description: "Redraw the plan from scratch on this turn",
+  momentary: true,
+});
+```
 
-## Patterns
+## The programmatic surface
 
-**Momentary trigger.** `useKnob("regenerate", false, { momentary: true })`
-auto-resets to its initial value at execution end — a one-shot "do this once"
-signal the model can flip, consumed exactly once per execution.
+`session.knobs` is the same cell set without React. Reads are synchronous `Map` lookups; writes are operations with `requested → terminal` envelopes on the bus.
 
-**Read-only status projection.** Expose derived application state to the
-model without letting it write:
-`useKnob("budgetRemaining", 100, { readOnly: true })`. Only your setter
-mutates it; `knob_set` rejects the model's writes with an explanatory error
-block.
+```ts
+session.knobs.list(); // readonly KnobDescriptor[] — descriptor + current value
+session.knobs.get("verbosity"); // KnobPrimitive | undefined
+session.knobs.has("verbosity"); // boolean
 
-**Grouped batch dispatch.** Tag related knobs with the same `group`; the
-model calls `knob_set({ group: "output", value: true })` to flip them all at
-once. Group writes skip read-only members and type-check the group first.
+await session.knobs.set({ id: "verbosity", value: 3 }); // journaled write
+await session.knobs.dispatch({ name: "verbosity", value: 3 }); // + validation
 
-## State-sync channel (ADR 73)
+const off = session.knobs.subscribe("verbosity", () => rerender());
+session.knobs.subscribeAll(() => refreshDashboard());
+off();
+```
 
-Knob state reaches observers two ways. The coarse way is the harness
-snapshot (`exportSnapshot()` → the compiler's `SnapshotCapable` projection):
-the **whole store, re-sent**. The fine way is the **`knobs-state` channel** — an
-initial `snapshot` frame followed by RFC 6902 **JSON-Patch `delta` frames**, one
-op per knob that changed. A subscriber seeds from the snapshot and applies each
-delta with `applyJsonPatch` (`@agentick/utils`), re-rendering only the
-branch that moved.
+`session.knob(name)` is the same cell by reference, with a synchronous setter that fires the write and moves on:
 
-This is the native form of AG-UI's `StateSnapshot` / `StateDelta` pair: we adopt
-the snapshot+delta model on our own bus, and the AG-UI projection becomes a thin
-codec over this channel instead of a bespoke document diff. Crucially, **delta
-generation needs no diffing** — the harness already notifies per-id, so a changed
-knob _is_ a single `add`/`replace` op. Only the far side applies the patch.
+```ts
+const verbosity = session.knob<number>("verbosity");
+verbosity.get(); // 3
+verbosity.set(5); // queue the mutation
+verbosity.subscribe(() => console.log("now", verbosity.get()));
+```
 
-**The channel is a projection over the `onChange` notify seam (ADR 75), not a
-bespoke mechanism.** Each mutation emits a typed `ChangeEvent`
-(`{ key, value?, prev? }`) on a `ChangeNotifier` (`@agentick/pubsub`); the
-JSON-Patch channel is one subscriber that derives the op via `changeKind`. The
-mutation logic is ignorant of the projection, so additional projections (timeline
-`event` entries, AG-UI) attach to the same stream without touching it. The seam is
-exposed as `harness.onChange(listener)` — the push twin of the bare `subscribe`
-render-ping.
+Each verb is also inbox-addressable at `knobs:{scopeId}` — `knobs:set`, `knobs:register`, `knobs:dispatch` — so a remote actor mutating a knob runs the identical operation an in-process call would, with no extra routing code.
+
+### Composing writes with Effect
+
+A `KnobsHarness` instance exposes `fx`: the un-run Effect twins of the same three commands. Reach for it when you want several writes in one fiber tree instead of a chain of awaits; the Promise methods are the derived edge facade over these.
+
+```ts
+import { Effect } from "effect";
+import { stubKnobsHarness } from "@agentick/knobs/testing";
+
+const knobs = stubKnobsHarness();
+
+await Effect.runPromise(
+  Effect.gen(function* () {
+    yield* knobs.fx.set({ id: "verbosity", value: 5 });
+    yield* knobs.fx.set({ id: "tone", value: "terse" });
+  }),
+);
+```
+
+## Durable values
+
+Values are backed by a `Store` of `{ id, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory. Inject an adapter and knob values outlive the process — `hydrate()` loads the store back into the read cache.
+
+```ts
+import { withKnobs, createKnobStore } from "@agentick/knobs";
+
+const extension = withKnobs({
+  initial: { verbosity: 3 }, // seed at construction
+  store: createKnobStore(), // swap for a durable adapter
+});
+```
+
+Descriptors are never stored. They are re-declared by the tree on every mount, which is why `exportSnapshot()` / `importSnapshot()` round-trip values only.
+
+## State reaches clients as a patch stream
+
+Knob state leaves the session two ways. The coarse way is `exportSnapshot()` — the whole store, re-sent. The fine way is the `knobs-state` channel: one opening `snapshot` frame, then RFC 6902 JSON-Patch `delta` frames, one op per knob that changed.
+
+Delta generation needs no diffing. Every mutation already notifies per-id, so a changed knob _is_ a single `add` or `replace` op; only the far side applies a patch.
 
 ```ts
 import { KNOBS_STATE_CHANNEL_FQN, type KnobsStateFrame } from "@agentick/knobs";
 import { applyJsonPatch } from "@agentick/utils";
 
-// Subscribe to `session:channel:knobs-state`, seed once, then follow deltas:
-let store = harness.stateSnapshotFrame().values; //  late-join re-seed
-for await (const frame of framesFromBus /* KnobsStateFrame */) {
+let store = knobs.stateSnapshotFrame().values; // seed (or re-seed) from the current state
+
+for await (const frame of frames as AsyncIterable<KnobsStateFrame>) {
   store = frame.kind === "snapshot" ? frame.values : applyJsonPatch(store, frame.ops);
 }
 ```
 
-### Descriptors on the wire (friction #1)
+Frames carry a monotonic `version`; a gap means a dropped delta, so re-seed from `stateSnapshotFrame()`. Emission is fire-and-forget and bus-only — state frames are not journaled.
 
-The `snapshot` frame carries **descriptors, not just values** — each knob's id,
-current value, AND its declared metadata (label, type, bounds, options, group,
-`readOnly`, …). That is enough to render a _real_ control with zero extra
-round-trips:
+The snapshot frame carries **descriptors, not just values**: each knob's id, current value, and declared metadata. That is enough to render a real control with no second round-trip. `validate` and `schema` are stripped — a function and a live schema object can't cross a transport — and everything else passes through verbatim.
+
+## The client handle
+
+Importing `@agentick/knobs/client` registers `session.knobs` on the wire client. It folds the `knobs-state` channel, so `list()` reflects state from before you connected:
 
 ```ts
-// A number knob declared with bounds becomes a slider — straight off the frame:
-const { descriptors } = harness.stateSnapshotFrame();
-for (const d of descriptors) {
-  if (d.valueType === "number")
-    ui.slider({
-      id: d.id,
-      value: d.value,
-      min: d.min,
-      max: d.max,
-      step: d.step,
-      label: d.description,
-    });
+import "@agentick/knobs/client";
+
+const knobs = client.session(sessionId).knobs;
+
+knobs.subscribe(() => render(knobs.list())); // zero-arg store contract
+for (const k of knobs.list()) {
+  slider({ label: k.description ?? k.id, value: k.value, min: k.min, max: k.max });
 }
+
+await knobs.set("verbosity", 3); // fire-and-observe
+knobs.close();
 ```
 
-Descriptors are `WireKnobDescriptor` = the server's `KnobDescriptor` minus the
-two fields that cannot cross a transport (`validate` fn, `schema`) — no invented
-fields, just what the app declared. `values` stays on the frame unchanged, so a
-values-only fold is untouched (additive). The descriptor-aware client `list()`
-that _returns_ these (rather than bare values) is the B2 slice-3 handle refactor;
-this slice puts them on the wire.
+`set` issues `knobs/set` and resolves `void`. It does **not** patch the local view — the new value comes back as a delta on the same channel and re-folds it. One write path, one read path.
 
-Frames carry a monotonic `version`; a gap signals a dropped delta → re-seed via
-`stateSnapshotFrame()`. Emission is fire-and-forget and **bus-only** (unjournaled).
-The **client-side apply** lands as the [`/client` subpath](#agentickknobs-nextclient):
-`knobsStateView` / `knobsHandle` fold this channel on the far side. It is built on
-the generic per-channel `channelView` primitive in `@agentick/client-core` (shared
-with `task-status`, not knobs-bespoke) — the harness package only supplies the
-typed façade and the `reduce` that seeds from the `snapshot` frame and applies each
-`delta` with `applyJsonPatch`. Gates already project their boolean value through
-this channel (they write-through to knobs); `state` follows the same shape (see the
-`TODO(state-deltas)` trailheads).
+`knobs.use(middleware)` scopes a client middleware to the `knobs/*` verbs. `knobsHandle(client, sessionId)` is the same handle as a free factory when you'd rather compose than rely on the registered slot, and `knobsStateView(client, sessionId)` is the lower-level values-only fold (`Record<id, value>`) for consumers that don't want descriptors.
 
-## Status & roadmap
+> [!IMPORTANT]
+> Two things are named `session.knobs` and they are not the same object. The server-side one is the authority: per-knob `get(name)` / `set({ id, value })` / `dispatch` / `subscribe(name, …)`. The client-side one is a read replica plus a flat `set(id, value)`. Same noun, different vantage — a CQRS split, not a duplicated API.
 
-Extracted per ADR 26 Step 2, modularized per ADR 27. Green.
+## API
 
-- **`withKnobs()` wiring (ADR 26 Step 8) — pending.** The `SessionInstaller`
-  path is not yet the construction site: today the SessionHarness constructs
-  `KnobsHarness` directly in `session-bridges.ts`. When Step 8 lands,
-  `withKnobs()` becomes the default session extension and adopters override by
-  passing a configured `withKnobs({ ... })`. The extension factory here is
-  already correct; only the wiring point moves.
-- **Cross-process `validate` / `schema`.** The custom `validate` function and
-  `schema` are non-serializable; cluster-routed registrations drop them (a
-  remote node validates only the field-level constraints). Documented on the
-  descriptor, not yet re-hydrated remotely.
+### `@agentick/knobs`
+
+| Export                                             | Purpose                                                   |
+| -------------------------------------------------- | --------------------------------------------------------- |
+| `withKnobs(options?)`                              | Session extension: `initial` seed values, `store` backing |
+| `KnobsHarness`                                     | The implementation, for direct construction; carries `fx` |
+| `createKnobStore()`                                | The bundled in-memory value store                         |
+| `knobsWireExtension`                               | Serves `knobs/set` over the gateway                       |
+| `KNOBS_STATE_CHANNEL` / `KNOBS_STATE_CHANNEL_FQN`  | `"knobs-state"` and its bus topic                         |
+| `knobPointer(id)` / `toWireDescriptor(descriptor)` | RFC 6901 pointer for a knob; strip `validate`/`schema`    |
+| `KnobsHandle` (type)                               | What `session.knobs` exposes                              |
+| `KnobsStateFrame` (type) + frame subtypes          | The `snapshot` \| `delta` union on the channel            |
+| `WireKnobDescriptor` (type)                        | `KnobDescriptor` minus `validate` and `schema`            |
+| `KnobEntry` / `KnobStoreQuery` (types)             | The stored `{ id, value }` cell and its (empty) query     |
+
+### `session.knobs`
+
+| Method                | Returns                                                  |
+| --------------------- | -------------------------------------------------------- |
+| `list()`              | `readonly KnobDescriptor[]` — descriptors + values       |
+| `get(id)` / `has(id)` | Current value; whether a value exists                    |
+| `set(input)`          | `Promise<void>` — journaled write, no validation         |
+| `dispatch(input)`     | `Promise<readonly ContentBlock[]>` — the `knob_set` path |
+| `subscribe(id, fn)`   | Fires when that value changes                            |
+| `subscribeAll(fn)`    | Fires on any value or descriptor change                  |
+
+`session.knob(name)` returns a `KnobHandle<T>`: `name`, `get()`, `set(value)`, `subscribe(fn)`.
+
+On a `KnobsHarness` instance, additionally: `fx` (the Effect twins), `onChange(fn)` (typed `ChangeEvent` push), `stateSnapshotFrame()`, `exportSnapshot()` / `importSnapshot()`, and `hydrate()`.
+
+### `@agentick/knobs/react`
+
+| Export                                            | Purpose                                          |
+| ------------------------------------------------- | ------------------------------------------------ |
+| `useKnob(id, initial, options?)`                  | `readonly [T, (v: T) => void]`                   |
+| `Knobs`                                           | Section + `knob_set` tool; render prop supported |
+| `Knobs.Provider` / `Knobs.Controls`               | Full custom rendering                            |
+| `useKnobsContext()` / `useKnobsContextOptional()` | The grouped view inside `<Knobs.Provider>`       |
+
+`UseKnobOptions`: `description`, `valueType`, `group`, `options`, `min`, `max`, `step`, `maxLength`, `pattern`, `required`, `momentary`, `inline`, `readOnly`, `validate`, `schema`.
+
+Three rendering modes:
+
+```tsx
+<Knobs />                                            {/* section + tool */}
+<Knobs>{(groups) => <MyKnobTable groups={groups} />}</Knobs>  {/* your section + tool */}
+<Knobs.Provider>                                     {/* tool registers unconditionally */}
+  <Knobs.Controls renderKnob={(k) => <MyKnob knob={k} />} />
+</Knobs.Provider>
+```
+
+### `@agentick/knobs/client`
+
+| Export                              | Purpose                                                                      |
+| ----------------------------------- | ---------------------------------------------------------------------------- |
+| `session.knobs`                     | Registered on import: `list` / `get` / `subscribe` / `set` / `use` / `close` |
+| `knobsHandle(client, sessionId)`    | The same handle as a free factory                                            |
+| `knobsStateView(client, sessionId)` | Values-only fold (`Record<id, value>`)                                       |
+
+### `@agentick/knobs/testing`
+
+| Export                       | Purpose                                      |
+| ---------------------------- | -------------------------------------------- |
+| `stubKnobsHarness(initial?)` | A real harness instance on its own substrate |
+| `runKnobsHarnessConformance` | Certify an alternate implementation          |
+
+## Patterns
+
+**Gates.** [@agentick/gates](../gates) is knobs plus a continuation rule — a gate's value _is_ a knob value, and a verified gate's read-only backing knob is what makes its check unforgeable.
+
+**Rendering.** [@agentick/compiler-react](../compiler-react) owns `<Section>`, `<System>`, `createTool`, and the bridge context `useKnob` reads.
+
+**Shapes.** [@agentick/spec](../spec) owns `KnobDescriptor`, `KnobPrimitive`, `KnobsSetInput`, `KnobsDispatchInput`, and `KnobHandle`.
+
+**Client.** [@agentick/client-core](../client-core) owns `channelView`, the `ClientHandle` / `Enumerable` contracts, and the session sub-handle registry the `/client` subpath registers into.
+
+**Not model-visible?** Use [@agentick/state](../state) instead. Same shape, no descriptors, no tool — the adopter's private stash.
+
+## Roadmap & known gaps
+
+- **`validate` and `schema` don't cross a process boundary.** They are a function and a live schema object, so a cluster-routed registration drops them; a remote node validates only the declared field constraints. Not re-hydrated remotely.
+- **Layered resolution is present but unreachable.** `KnobsHarness` accepts a read-only parent layer — reads fall through, self shadows by id, writes and snapshots stay self-only — and it is tested, but nothing constructs a parent today. It exists so an app-scoped tier can drop in without a rewrite.
+- **`withKnobs()` is not the construction site yet.** Sessions construct their knobs directly; the extension factory is correct but the wiring point still moves.
+- **`knob_set` captures its dependency at render.** Sibling tools resolve their collaborator from the handler context at dispatch. This one still uses render-time capture, pending a change in where knobs is constructed.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` (18 tests) — Operation envelopes
-  (`set` / `register` / `dispatch` emit requested + terminal), inbox
-  addressability (`knobs:set` / `knobs:register` / `knobs:dispatch` over the
-  harness address), snapshot round-trip, read-only enforcement
-  (`dispatch` rejects `knob_set` by name + skips read-only in group writes),
-  and **layered resolution over a `parentLayer`** — `get` fall-through, self
-  shadows parent by id, `set` / `register` write self only, `list` union with
-  self-shadowing, and **`exportSnapshot` captures the self layer only** (never
-  inherited parent state).
-- `src/__tests__/state-channel.spec.ts` (7 tests) — the `knobs-state` channel:
-  `add` vs `replace` deltas, monotonic gap-free `version`, defaulted-`register`
-  emits / descriptor-only does not, `importSnapshot` → a `snapshot` frame,
-  `stateSnapshotFrame()` reads without advancing the version, RFC 6901 id
-  escaping round-trips, and the **money test** — a snapshot seed plus applied
-  deltas reconstruct `exportSnapshot()`.
-- `src/__tests__/descriptors-wire.spec.ts` (3 tests) — descriptors on the wire
-  (friction #1): the `snapshot` frame carries the declared metadata (id + value +
-  fields), STRIPS the non-serializable `validate`/`schema`, and the
-  `channelSnapshotPayload()` provider path returns the descriptor-carrying frame.
-- `src/__tests__/change-stream.spec.ts` (5 tests) — the `onChange` notify seam:
-  add (no prev) / update (with prev) on `set`, `add` on defaulted `register` /
-  none for descriptor-only, dispatch rides `applySet`, unsubscribe, and multiple
-  projections on one stream (the channel is a third, internal subscriber).
-- `src/__tests__/integration-with-compiler.spec.tsx` (10 tests) — `useKnob`
-  descriptor registration, momentary reset at execution end, `<Knobs />`
-  default rendering + render prop, and reactivity (external `set` re-renders
-  subscribed components) against the real `CompilerHarness`.
-- `src/conformance.ts` — `runKnobsHarnessConformance` exports the protocol
-  battery (sync + async surface, stable `list()` reference, per-id vs
-  wildcard subscription, `register` value preservation, `dispatch`
-  validation → content blocks) for adopter impls.
-
-@see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
-@see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)
+- `src/__tests__/harness.spec.ts` — operation envelopes for `set` / `register` / `dispatch`, inbox addressability over `knobs:{scopeId}`, snapshot round-trip (values only, descriptors re-declared), read-only enforcement by name and in group writes, and layered resolution over a parent (fall-through, self shadowing, self-only writes, self-only `exportSnapshot`).
+- `src/__tests__/integration-with-compiler.spec.tsx` — against the real compiler: descriptor registration and `valueType` inference, value preservation on re-registration, momentary reset at execution end, `<Knobs />` default rendering (including the formatter output and the `knob_set` declaration), inline knobs hidden, the render prop suppressing the default section, and re-render on an external `set`.
+- `src/__tests__/state-channel.spec.ts` — `add` vs `replace` deltas, monotonic gap-free `version`, defaulted `register` emitting while descriptor-only does not, `importSnapshot` emitting a fresh snapshot frame, `stateSnapshotFrame()` not advancing the version, RFC 6901 id escaping, and a snapshot seed plus applied deltas reconstructing the live store.
+- `src/__tests__/descriptors-wire.spec.ts` — the snapshot frame carries declared metadata, strips `validate`/`schema`, and the channel-snapshot provider path returns the descriptor-carrying frame.
+- `src/__tests__/change-stream.spec.ts` — the `onChange` seam: add vs update, defaulted register, dispatch riding the same write path, unsubscribe, and multiple projections on one stream.
+- `src/__tests__/store-backing.spec.ts` — every write path reaching the store, `hydrate()` repopulating and pinging subscribers as a merge, and export/import coexisting with the store.
+- `src/__tests__/fx-surface.spec.ts` — `fx.set` returns an un-run Effect, the plain method is the Promise facade, both drive the same command, twins nest in one `Effect.gen`, and `fx.dispatch` yields the `knob_set` blocks.
+- `src/__tests__/wire.spec.ts` — `knobs/set` resolves the session and calls `set({ id, value })`; an unresolved session id throws.
+- `src/client/__tests__/knobs-handle.spec.ts` + `knobs-handle.conformance.spec.ts` + `knobs-state-view.spec.ts` + `session-knobs.spec.ts` — the write request shape, `list()`/`get()` over descriptors, the snapshot-then-delta CQRS round-trip, the zero-arg `subscribe` contract, the values-only fold, and `session.knobs` self-assembling on the client session handle.
+- `src/conformance.ts` — `runKnobsHarnessConformance`: the sync and async surface, stable `list()` references, per-id vs wildcard subscription, `register` preserving an existing value, and `dispatch` validation producing content blocks.

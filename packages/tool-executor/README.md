@@ -1,991 +1,563 @@
 # @agentick/tool-executor
 
-**Reference implementation of `ToolExecutorProtocol`** from
-`@agentick/spec`.
+**One boundary turns tool calls into tool results.** Whether a call comes from the model, from host code, from a browser client, or across the inbox from another process, it funnels through the same pipeline — resolve, validate, guard, confirm, invoke, stamp, emit.
 
-The tool executor is the boundary that turns tool calls into tool
-results. It hosts the runtime's tool registry, validates inputs against
-declared schemas, runs the confirmation flow when required, invokes
-handlers (sync / async / Effect / `TaskHandle`-returning), threads abort
-and timeout, and emits the canonical phase-contract envelope sequence
-(`requested → before → terminal`) on `surface: "tool"`.
+That funnel is the bet. A tool call here is an **operation**, not a function call: it carries a stable id, a journaled `requested → before → terminal` envelope sequence, a provenance stamp naming the gate it entered through, and an interceptor fold that policy hangs off. Which is why dispatch is idempotent per tool-call id, cancellable from another process, and auditable after the fact — none of which `handlers[name](input)` can offer.
 
-Private workspace package. Bundled into the `agentick` metapackage; not
-published independently. The adopter-facing entry point is
-`createApp({ tools })` — you rarely construct the harness by hand.
+Most adopters never construct this. `createApp` builds one per session, and you reach it as [`session.tools`](#sessiontools--the-host-handle).
 
-## Mental model
+## Install
 
-One harness sits between everything that emits a tool call and the
-handler that services it. Whether the call comes from the model, from
-host code, from the compiler's per-tick tool set, or across the inbox
-from another cluster node, it funnels through the same
-validate → authorize → confirm → invoke → emit pipeline so the lifecycle,
-exposure rules, and event stream live in exactly one place.
+```bash
+npm install @agentick/tool-executor
+```
 
-### Two doors
+Subpaths: `/client` (browser-side handles), `/testing` (fixture + registration builder).
 
-One harness; two callers.
+## Quick start
 
-- **Model door** — the loop executor invokes `dispatch({ via: "model" })`
-  when the model emits a `tool_use` block.
-- **Host door** — the session harness invokes
-  `dispatch({ via: "dispatch" })` when application code calls
-  `session.dispatch(name, input)`.
+The `/testing` fixture is the shortest path to a live pipeline — it wires the substrate so you can dispatch immediately. In an app the wiring is `createApp`'s job and the same surfaces hang off `session`. Tools are authored with [@agentick/tool](../tool).
 
-Same validation, same confirmation flow, same interceptors. `via` is
-observable to middleware so policies can branch on door without
-inspecting private fields.
+```ts
+import { z } from "zod";
+import { createTool } from "@agentick/tool";
+import { createTestHarness, fakeRegistration } from "@agentick/tool-executor/testing";
 
-`dispatch` is a **declared command** (`tool:dispatch`, ADR 51/66) on BOTH
-executors — the same promotion `abort` got. Two consequences beyond the
-plain-method past:
+const add = createTool({
+  name: "add",
+  description: "Add two numbers",
+  inputSchema: z.object({ a: z.number(), b: z.number() }),
+  exposure: ["model", "dispatch"], // reachable from both doors
+  handlerRef: "h.add",
+  handler: ({ a, b }) => `${a + b}`, // a bare string is sugar for one text block
+});
 
-- **Provenance-stamped at the gate (ADR 51 §5/§6).** The public in-process
-  `dispatch` maps the DOOR to the operation's `origin`: `via: "model"` →
-  `origin: "model"` (a model-originated tool call — inside the process the
-  intentionally untrusted capability-policy subject), `via: "dispatch"` →
-  `origin: "host"` (a direct in-process call). The origin is stamped on
-  every dispatch envelope (`requested` / `before` / `terminal`) and trusted
-  downstream — it completes the journal as an authorization audit log (who,
-  via which gate, ran what). Inbox-delivered `tool:dispatch` messages are
-  stamped by their delivering gate (`origin: "inbox"`) instead, because
-  origin names the GATE, not the `via` the payload claims.
-- **Inbox/wire dispatch-by-name.** A `tool:dispatch` message (serializable
-  `DispatchInput` payload — `name` + `input` + `context`, no `signal`) to
-  the harness's `tool:{scopeId}` address routes through the command registry
-  via `BaseHarness.dispatchMessage`; `ask` returns the `DispatchResult`. No
-  hand-rolled inbox switch.
+const { harness } = await createTestHarness({
+  tools: [fakeRegistration({ declaration: add.declaration, handlerRef: "h.add" })],
+  // `handler` is optional on `createTool` — a handler-less tool is client-handled.
+  handlers: [{ handlerRef: "h.add", handler: add.handler!, validator: add.validator }],
+});
 
-The dispatch FLOW is byte-identical to the pre-command method — validation,
-before-dispatch lifecycle, ctx build (incl. `ctxExtensions`), abort-signal
-composition, task-mode Pattern A/B, confirmation, and timeout are unchanged.
-Only the declaration mechanism moved from a hand-built `Operation` +
-`runOperation` to `this.command({ name: "tool:dispatch", … })`.
+// The curated host handle — sync reads, async dispatch.
+harness.tools.list({ exposure: "model" }); // → ToolInfo[]
+await harness.tools.dispatch("add", { a: 1, b: 2 }); // → [{ type: "text", text: "3" }]
 
-### Exposure routing
+// The raw protocol call the loop makes on the model's behalf.
+const result = await harness.dispatch({
+  toolCallId: "c_1",
+  name: "add",
+  input: { a: 1, b: 2 },
+  context: { via: "model", sessionId: "s_1" },
+});
+result.content; // [{ type: "text", text: "3" }]
+result.executedBy; // "agentick" — executor-stamped, never handler-declarable
+```
 
-`ToolDeclaration.exposure` (a `ToolExposure[]` from
-`@agentick/spec`, values `"model" | "dispatch" | "runtime"`) decides
-which door is reachable:
+## Two doors, one pipeline
+
+`context.via` names the door. Both doors run the same validation, the same confirmation gate, the same interceptors — and the door is observable to middleware, so a policy branches on it without inspecting private fields.
+
+| Door              | Caller                                               | Journaled `origin` |
+| ----------------- | ---------------------------------------------------- | ------------------ |
+| `via: "model"`    | the loop, on a `tool_use` block                      | `model`            |
+| `via: "dispatch"` | host code — `session.tools.dispatch(name, input)`    | `host`             |
+| inbox message     | another process sends `tool:dispatch` to the address | `inbox`            |
+
+`origin` names the **gate the operation entered through**, not the `via` a payload claims — an inbox-delivered dispatch is stamped by its delivering gate no matter what its body says. That is what makes the journal usable as an authorization record: who, through which gate, ran what.
+
+`ToolDeclaration.exposure` decides which door reaches a tool; the wrong door is a `ToolPermissionError`.
 
 | `exposure`              | Reachable from             |
 | ----------------------- | -------------------------- |
 | `["model"]`             | model only                 |
 | `["dispatch"]`          | host only                  |
-| `["model", "dispatch"]` | both doors                 |
+| `["model", "dispatch"]` | both                       |
 | `["runtime"]`           | internal use; neither door |
 
-The harness enforces exposure at dispatch time (`ToolPermissionError`
-for the wrong door).
+> [!NOTE]
+> Dispatch is idempotent on `toolCallId`: the operation id is derived from it, so re-dispatching the same call replays the cached terminal instead of running a side-effecting tool twice.
 
-### `compileForTick` ordering — execution bindings serialize at the tail
+## `session.tools` — the host handle
 
-`compileForTick` resolves the per-tick, precedence-resolved model-visible
-set (highest-precedence binding wins per name: `runtime < gateway < app <
-session < execution < client < compiler`). It ALSO carries a **serialization
-guarantee**: **execution-scoped winners are stably partitioned to the TAIL**,
-after every non-execution winner (both keep insertion order otherwise).
-
-This is the prefix-cache guarantee (three-audiences-plan §B2). Tools
-serialize at the head of the provider prompt, so a per-execution tool binding
-(`SendInput.tools`, and the structured-output terminal tool the loop appends
-_after_ this projection) is a prefix perturbation. Keeping the cache-stable
-tree/compiler/session tools at the head and the per-execution bindings at the
-tail means an Anthropic cache breakpoint on the stable prefix keeps hitting —
-only the tail is new.
-
-> **Verified by** `__tests__/layered-tools.spec.ts` ("execution bindings
-> serialize at the tail").
-
-### Dispatch aliases
-
-`ToolDeclaration.aliases` (a `readonly string[]`) gives a tool alternate dispatch
-names. The registry resolves a dispatch by **exact `name` first**, then falls
-back to an alias→name index built at register time, so
-`session.tools.dispatch("ls", …)` reaches a tool named `list_directory` that
-declares `aliases: ["ls", "dir"]`. Exact-name lookup always wins, so an alias can
-never shadow a real tool. Aliases are dispatch names — they live on the
-declaration, not the annotations — and are surfaced on `createTool({ aliases })`.
-
-## `session.tools` — the host handle (three-audiences §F)
-
-Tools were the one session collection without a curated handle: the raw
-`session.toolExecutor` (the full protocol) plus a `session.dispatch(name, input)`
-sugar. Both are replaced by **`session.tools`**, which reads exactly like the
-sibling handles (`session.knobs` / `session.state`):
+The curated projection over the registry, shaped like its sibling handles. Reads are **sync** (an in-memory registry with a sync read surface holds a View), dispatch is async and carries host-door provenance.
 
 ```ts
-session.tools.list({ exposure: "model" }); // sync View — ToolInfo[] (precedence-resolved)
-session.tools.get("resource_read")?.info; // per-tool handle + wire-safe projection
-await session.tools.get("resource_read")?.dispatch({ uri });
-await session.tools.dispatch("resource_read", { uri }); // host door, via: "dispatch"
-session.tools.has("resource_read");
+session.tools.list({ exposure: "model" }); // ToolInfo[], precedence-resolved
+session.tools.get("read_file")?.info; // per-tool handle + wire-safe projection
+await session.tools.get("read_file")?.dispatch({ path: "notes.md" });
+await session.tools.dispatch("read_file", { path: "notes.md" }); // host door
+session.tools.has("ls"); // name, then alias
 const off = session.tools.subscribeAll(() => rerender()); // registry topology
 ```
 
-- **Sync reads** — `list`/`get`/`has`. An in-memory registry with a sync read
-  surface holds a View (the data-layer rule), so these never return a Promise.
-  `list` rides `compileForTick` (one `ToolInfo` per name, precedence-resolved,
-  optional `exposure` filter).
-- **`ToolInfo` is the wire-safe projection** — `name`, `description`, `exposure`,
-  `aliases?`, `annotations?`, `hasInputSchema`. NOT the live `StandardSchemaV1`
-  validator; power users who need it keep `session.toolExecutor`.
-- **`dispatch`** carries the same `via: "dispatch"` journaling/provenance the
-  removed `session.dispatch` had — it IS the host door now.
-- **`subscribe(name, fn)` / `subscribeAll(fn)`** ride the registry's
-  change-notification, fired only from the registration-mutation paths
-  (`add`/`remove`/`removeWhere`/`replaceCompilerSlice`/`clear`) — never the hot
-  dispatch read path.
+`ToolInfo` is the wire-safe row — `name`, `description`, `exposure`, `aliases?`, `annotations?`, `hasInputSchema`. The live `StandardSchemaV1` validator never crosses; power users who need it keep `session.toolExecutor`.
 
-> **Verified by** `src/__tests__/tools-handle.spec.ts` (the View + dispatch +
-> subscribe unit) and `../session/src/__tests__/extended-surface.spec.ts`
-> (`session.tools` end-to-end through the real harness).
+Subscriptions fire only from registration mutations (`register` / `unregister` / `removeBoundTools` / `replaceCompilerTools`), never from the hot dispatch read path — so subscribing costs nothing per call.
 
-## Quick start
+**Aliases.** `ToolDeclaration.aliases` gives a tool alternate dispatch names. Lookup is exact-name first, then an alias index built at register time, so `dispatch("ls", …)` reaches `list_directory` and an alias can never shadow a real tool.
 
-Most adopters never touch this package directly — they hand a tool set
-to `createApp` and the AppHarness constructs the executor on the shared
-substrate. For a fully custom executor (remote tool service, alternate
-registry storage), use the callback factory `defineToolExecutor`:
+## Handler results — one currency, two failure channels
+
+A handler returns a `string` (sugar for one text block), a `ContentBlock[]`, or an envelope. The three shapes are type-discriminable, so a wrong-shape return is a compile error rather than a silent reinterpretation.
 
 ```ts
-import { createApp } from "@agentick/app";
-import { defineToolExecutor } from "@agentick/tool-executor";
+import { createTool } from "@agentick/tool";
+import { z } from "zod";
 
-const tools = defineToolExecutor({
-  async dispatch(input) {
-    const result = await remoteToolService.run(input.name, input.input);
+const readFile = createTool({
+  name: "read_file",
+  description: "Read a file",
+  inputSchema: z.object({ path: z.string() }),
+  outputSchema: z.object({ bytes: z.number() }),
+  handler: async ({ path }) => {
+    const found = await stat(path);
+    if (!found) {
+      // SOFT error: the dispatch RESOLVES with isError, the model reasons about it.
+      return { content: `no such file: ${path}`, isError: true };
+    }
     return {
-      toolCallId: input.toolCallId,
-      name: input.name,
-      succeeded: true,
-      content: [{ type: "text", text: result.text }],
+      content: await read(path), // display half
+      structuredContent: { bytes: found.size }, // validated against outputSchema
+      metadata: { path }, // free-form, rides DispatchResult
     };
   },
 });
-
-const app = await createApp(<Agent />, { model, tools });
 ```
 
-`defineToolExecutor` returns a `ToolExecutorFactory` (a callable tagged
-with `toolExecutorFactory: true`). `dispatch` is required; `list` /
-`register` / `unregister` / `abort` / `compileForTick` /
-`replaceCompilerTools` / `removeBoundTools` are optional — when omitted
-they fall through to a bundled `InMemoryToolRegistry`. The MVP factory
-does **not** replicate the validation pipeline or confirmation flow;
-subclass `ToolExecutorHarness` if you need those.
+- **Soft error** — `isError: true`. The handler ran; the result is error-flavoured but usable. The dispatch resolves.
+- **Hard failure** — the handler throws. The dispatch **rejects** with a typed `ToolExecutorError`; no `DispatchResult` is produced.
+- **`structuredContent`** is validated against the tool's `outputSchema` when both are present. A failure is a hard `ToolValidationError`, mirroring the input path. No `outputSchema` or no `structuredContent` ⇒ skipped.
 
-### Constructing the reference harness directly
+`executedBy` and `durationMs` are stamped by the executor after the handler returns. An envelope that smuggles either — top-level or inside `metadata` — has them ignored; provenance is not handler-declarable. A layer that routes a tool elsewhere declares provenance once on the declaration instead: an MCP-backed tool carries `annotations.executedBy: "mcp:<serverId>"` so its result is attributed to that server, and plain local tools default to `"agentick"`.
 
-`ToolExecutorHarness` is a `BaseHarness<"tool">` — it needs a substrate
-(journal / bus / inbox) and its construction options:
+Handlers may be sync, `async`, Effect-returning, or return a `TaskHandle` (see [task modes](#long-running-tools--task-modes)).
 
-```ts
-import {
-  ToolExecutorHarness,
-  InMemoryHandlerResolver,
-  fromStandardSchema,
-} from "@agentick/tool-executor";
-import { z } from "zod";
+## The handler `ctx`
 
-const resolver = new InMemoryHandlerResolver();
-resolver.register(
-  "h.calc_add",
-  async ({ a, b }) => [{ type: "text", text: String(a + b) }],
-  fromStandardSchema(z.object({ a: z.number(), b: z.number() })),
-);
-
-const exec = new ToolExecutorHarness(scopeId, journal, bus, inbox, {
-  handlerResolver: resolver, // required — resolves handlerRef → handler + validator
-  elicitation, // required — backs the confirmation gate + ctx.elicit
-  // optional: tasks, resources, channelPublisher, initialTools,
-  //           defaultTimeoutMs, defaultConfirmationTimeoutMs
-  initialTools: [
-    { declaration: calcAddDeclaration, handlerRef: "h.calc_add", binding: { scope: "runtime" } },
-  ],
-});
-await exec.ready;
-
-const result = await exec.dispatch({
-  toolCallId: "c_1",
-  name: "calc_add",
-  input: { a: 1, b: 2 },
-  context: { via: "dispatch", sessionId: "s_1" },
-});
-// → { toolCallId: "c_1", name: "calc_add", succeeded: true,
-//     content: [{ type: "text", text: "3" }], executedBy: "agentick", durationMs: … }
-```
-
-To skip the substrate boilerplate in tests, use `createTestHarness` from
-the `/testing` subpath (see [Testing](#testing)).
-
-## Tool handler ctx surface
-
-Tool handlers receive a unified `ToolHandlerCtx` (per ADR 43) — the same
-shape whether invoked in-process by this executor OR by an MCP-server
-projection. Adopter code is portable across transports.
+Handlers run at **dispatch**, separate from render. Everything session- or app-scoped arrives on `ctx`, resolved fresh from the live bridge — no stale render capture. The shape is identical whether the call arrives in-process or through an MCP-server projection, so handler code is portable across transports.
 
 ```ts
 import type { ToolHandler } from "@agentick/tool-executor";
 
 const handler: ToolHandler = async (input, { ctx, use }) => {
-  // Universal fields — every transport populates these
-  ctx.toolCallId; // string
-  ctx.signal; // AbortSignal (fires on caller abort / timeout / inbox abort)
-  ctx.transport; // "in-process" (here) or "mcp" (MCP-server projection)
-  ctx.task; // "auto" | "ref" | "inline" — resolved task mode for this dispatch
-  ctx.setState("last", input); // stateful-tool render pattern
-  ctx.emit(seed); // publish a channel seed (routed when a publisher is wired)
+  ctx.toolCallId; // stable id — also the dispatch's idempotency key
+  ctx.signal; // fires on caller abort, timeout, or inbox abort
+  ctx.transport; // "in-process" here; "mcp" under an MCP-server projection
+  ctx.task; // "auto" | "ref" | "inline" — resolved task mode for this call
+  ctx.sessionId; // work-path identity, derived from the dispatching crossing
+  ctx.setState("last", input); // readable from a tool's render()
+  ctx.emit({ name: "session:channel:my_channel", payload: input });
 
-  // Sugar surfaces — cross-transport portable
-  await ctx.elicit?.text("Your name?"); // Elicit sugar (= session.elicit + MCP ctx.elicit)
-  const task = ctx.tasks?.submit(runLongJob); // Tasks raw protocol
-  await ctx.resource?.read(uri); // Resources read-projection (ADR 62)
+  // Out-of-band diagnostics + liveness. Each emits ONE bus event, fire-and-forget.
+  ctx.log("info", { step: "started" }, "my-tool");
+  ctx.log.warning({ retrying: true }); // RFC-5424 severities as methods
+  ctx.progress("job-1", { progress: 3, total: 10, message: "reading" });
 
-  // Raw protocol access (power users)
-  await ctx.elicitation?.elicit({ message, schema }); // raw ElicitationHarness
+  // A real, journaled, guard-reachable operation — without registering a command.
+  const rows = await ctx.run("retrieval", () => search(input));
 
-  // Runtime signals — out-of-band diagnostics + liveness (ADR 64)
-  ctx.log("info", { step: "started" }, "my-tool"); // → tool:signal:log bus event
-  ctx.progress("job-1", { progress: 3, total: 10, message: "…" }); // → tool:signal:progress
+  // Substrate sugar — same spelling in-process and over MCP.
+  await ctx.elicit?.text("Which branch?");
+  await ctx.resource?.read("file:///notes.md");
+  const handle = ctx.tasks?.submit(() => longJob());
 
-  // MCP-specific extras — undefined unless transport === "mcp"
-  ctx.mcp?.connectionId;
-  ctx.mcp?.clientCapabilities;
+  use.theme; // `use` is the render-captured escape hatch — tree-positional context only
 
-  return [{ type: "text", text: "ok" }];
+  return { content: "ok", structuredContent: { rows: rows.length } };
 };
 ```
 
-In-process ctx is built once per dispatch in the executor. The
-`ctx.elicit` sugar is constructed via `buildSessionElicit({ harness:
-this.elicitation })` (see `@agentick/elicitation`); identical
-factory + interface to the session-level `session.elicit`.
+`ctx.log` / `ctx.progress` are **always present**, never optional, and structurally bus-only — they are never journaled, so diagnostic volume cannot bloat the recovery spine. They are not sent to any wire directly either: projections subscribe and forward (an MCP server to `notifications/message` and `notifications/progress`, the agentick client to its log stream). Emit once, receive everywhere. A dying bus never blocks or fails the dispatch.
 
-`use` is the second arg's `use` field — render-time deps captured by the
-compiler when the tool was declared via `<Tool use={() => ({…})}>`,
-merged over the registration's `useDeps`. `use` is reserved for
-genuinely **tree-positional** context; app-/session-scoped harnesses
-belong on `ctx` (see below).
+`ctx.run(name, fn)` sits deliberately between `ctx.trace` (a span, no journal) and a registered command (typed hooks, addressability): a journaled operation, parented under the dispatch, reachable by guards and string-keyed hooks, minted inline. It is **not** a memoized checkpoint — re-invoking re-runs `fn`. When `RunOptions` is too small, `ctx.runner.runOperation(op, body)` is the primitive undiluted, exposed as a run-only view.
 
-### `ctxExtensions` — the dispatch-resolved extension seam (ADR 66)
+### Optional slots — `ctxExtensions`
 
-Optional harnesses that not every deployment mounts (e.g. sandbox) reach
-tool handlers as **typed `ctx` slots**, resolved at dispatch from the
-live bridge rather than captured at render. The mechanism is one generic
-construction option:
+Capabilities that not every deployment mounts — a sandbox, say — reach handlers as typed `ctx` slots. The executor takes one opaque bag and spreads it; it imports no optional package and inspects no value.
 
 ```ts
-new ToolExecutorHarness(id, journal, bus, inbox, {
+new ToolExecutorHarness(scopeId, journal, bus, inbox, {
   handlerResolver,
   elicitation,
-  // Opaque record spread onto every handler's ctx. The executor NEVER
-  // imports or inspects the values.
-  ctxExtensions: { sandbox: theSandboxBridge },
+  ctxExtensions: { sandbox: theSandboxBridge }, // → every handler's ctx.sandbox
 });
 ```
 
-Every key becomes a top-level `ctx.<key>`. The executor treats the
-record as an opaque `Readonly<Record<string, unknown>>`:
-
-- **The type** of `ctx.sandbox` comes from a `declare module
-"@agentick/spec"` augmentation of `ToolHandlerCtxExtensions` in
-  the owning harness package (`@agentick/sandbox`). Spec seeds an
-  empty `ToolHandlerCtxExtensions {}`; each optional harness adds its own
-  slot. This executor hardcodes none.
-- **The value** is filled by the wiring layer (the AppHarness), which
-  resolves the registered namespace and threads it here. Because the
-  reference points at the live bridge, reads inside a handler
-  (`ctx.sandbox.get("primary")`) hit current harness state — no stale
-  render capture.
-- **Universal fields always win.** The record is spread FIRST, so a
-  colliding key can never shadow `toolCallId`, `transport`, etc.
-
-This is what lets an optional harness be dispatch-resolved on `ctx`
-**without this package depending on it** —
-`@agentick/tool-executor` imports no sandbox (or any other optional
-harness); the layering stays clean.
-
-### `ctx.log` / `ctx.progress` — the runtime signal family (ADR 64)
-
-`log` and `progress` are **universal, always-present** slots (like `emit`
-/ `setState`) — not optional. Each call emits exactly ONE discrete bus
-event (`tool:signal:log` / `tool:signal:progress`, phase `terminal`,
-scoped to the dispatch's `{ sessionId, executionId, tickId }`) via
-`BaseHarness.emitLog` / `emitProgress`. The emit is **fire-and-forget**
-(launched with `Effect.runFork`) — never awaited, never throws into the
-handler, never a control path.
-
-Signals are **not sent to any wire directly**. Projections subscribe to
-the bus and forward: the MCP-server projection → `notifications/message`
-
-- `notifications/progress`; the agentick client → `subscribe` / `onLog`
-  (see `@agentick/client`). Emit once (framework), receive everywhere.
-  Signals are structurally **bus-only** — never journaled — so diagnostic
-  spam can't bloat the recovery spine.
-
-## Task modes — `TaskHandle`-returning handlers
-
-When a handler returns a `TaskHandle` (from `ctx.tasks!.submit(...)`),
-the executor branches on the tool's `annotations.taskSupport` combined
-with the caller's `DispatchInput.task` option (default `"auto"`):
-
-- **Pattern A (await transparently)** — the executor awaits
-  `handle.result` and returns its content blocks. The model never sees a
-  task id. This is the default for host dispatch and for any
-  `taskSupport !== "required"` tool.
-- **Pattern B (return a task-ref)** — the executor returns immediately
-  with a first-class `{ type: "task_ref", taskId, status, … }` content
-  block. Reached when `task === "ref"`, or when `task === "auto"` on the
-  model door for a `taskSupport: "required"` tool. The model then manages
-  the task via the `task_*` tools (see `@agentick/tasks`).
-
-Contradictory overrides are rejected **before the handler runs** with
-`ToolTaskModeConflictError`: `"ref"` against `taskSupport: "unsupported"`,
-and `"inline"` against `taskSupport: "required"`. On Pattern A, a
-dispatch abort cancels the in-flight task rather than orphaning it.
-
-## Confirmation flow
-
-Tools whose `annotations.requiresConfirmation` is truthy route through the
-`ElicitationHarness` before the handler runs. The annotation is a **seam, not a
-flag**:
+The **type** of `ctx.sandbox` comes from a `declare module "@agentick/spec"` augmentation of `ToolHandlerCtxExtensions` in the owning package; the **value** is threaded by the wiring layer and points at the live bridge. Guard optional slots with `?`:
 
 ```ts
-requiresConfirmation?: boolean | ((input, ctx) => boolean | Promise<boolean>);
+const sandbox = ctx.sandbox?.get("primary");
+const out = await sandbox?.exec({ command: "ls -la" });
 ```
 
-`true` always confirms; a **predicate** confirms conditionally on the validated
-input + tool ctx (e.g. confirm only when `input.amount > 100`, or when the path
-is outside a scratch dir). The predicate is evaluated at the gate and may be
-async. (Over-the-wire tool declarations use the `boolean` form — a function can't
-serialize; the predicate is a server-declared-tool affordance.)
+Universal fields always win: the bag is spread first, so a colliding key can never shadow `toolCallId`, `signal`, `transport`, or the rest.
 
-The wire envelope is the standard elicitation shape
-(`session:channel:elicitation`, `hints.kind === "tool_confirmation"`); the reply
-is validated against the internal `TOOL_CONFIRMATION_REPLY_SCHEMA`. Approval
-requires `accepted` + `reply.approved === true` — every other outcome (declined,
-cancelled, aborted, schema-violation, accepted-with-`approved:false`) becomes a
-denial-shaped `DispatchResult` (`succeeded: false`). A `reply.always === true`
-marks the tool session-allowed so subsequent calls skip the gate; a
-`reply.modifiedArguments` payload is re-validated before the handler runs.
-Timeout surfaces as `ToolConfirmationTimeoutError`.
+## Confirmation
 
-> **Not a security boundary.** `requiresConfirmation` predicates, `guardDispatch`,
-> and tool exposure/allowlists (`ToolDeclaration.exposure`) are POLICY seams — they
-> shape what the model is offered and when a human approves a call, not what a
-> payload can ultimately do. A call that clears the gate runs its handler with the
-> host process's full permissions; string- or command-level inspection inside a
-> predicate is advisory UX, not containment (a motivated payload that reaches
-> execution executes regardless — pipes, base64, and heredocs defeat textual
-> filtering). The security boundary is OS-level: it lives in the sandbox provider
-> (`@agentick/sandbox`), not here. Never rely on string/command filtering for
-> safety — use these seams to shape UX and require approval, and put the actual
-> confinement in the sandbox.
-
-### Dialog seams — `confirmationMessage` + `confirmationPreview`
-
-Two annotations shape WHAT the confirm dialog shows. They are evaluated **into
-the existing elicit request's `message` / `metadata` slots** — no separate
-dialog machinery:
+`annotations.requiresConfirmation` routes a call through the elicitation gate before the handler runs. It is a seam, not a flag — `true` always confirms, a predicate decides per call on the **validated** input.
 
 ```ts
-confirmationMessage?: string | ((input, ctx) => string | Promise<string>);
-confirmationPreview?: (input, ctx) => Promise<Record<string, unknown>>;
+const transfer = createTool({
+  name: "transfer",
+  description: "Move money between accounts",
+  inputSchema: z.object({ amount: z.number(), payee: z.string() }),
+  annotations: { requiresConfirmation: (i) => (i as Args).amount > 100 },
+  confirmationMessage: (i) => `Send $${i.amount} to ${i.payee}?`,
+  confirmationPreview: async (i) => ({ fee: await quoteFee(i.amount) }),
+  handler: async (i) => `sent $${i.amount}`,
+});
 ```
 
-- **`confirmationMessage`** — the human-legible prompt. A static `string`, or a
-  per-call function on the **validated input** + dispatch `ctx` (sync or async):
-  `confirmationMessage: (i) => \`Send $${i.amount} to ${i.payee}?\``. Its result
-becomes the elicitation request's `message`. Unset ⇒ the default
-`Approve tool "<name>"?`. (Over-the-wire declarations use the `string` form — a
-  function can't serialize.)
-- **`confirmationPreview`** — async preview metadata for the dialog (a rendered
-  diff for a write/edit tool, a cost breakdown for a payment). Awaited at the
-  gate and merged under `metadata.preview`, leaving the existing `toolUseId` /
-  `toolName` / `arguments` keys intact, so the client dialog can render a rich
-  preview without a bespoke channel.
+- **`confirmationMessage`** — static string or a per-call function (sync or async) over the validated input + ctx. Becomes the elicitation `message`; unset falls back to `Approve tool "<name>"?`.
+- **`confirmationPreview`** — awaited at the gate and merged under `metadata.preview`, leaving `toolUseId` / `toolName` / `arguments` intact, so a client renders a diff or a cost breakdown without a bespoke channel.
 
-Both are typed to the tool's input on `createTool` (`(input: TInput, ctx) => …`)
-and erased to `unknown` on the serialized declaration — the same
-typed-on-`createTool` / erased-on-declaration pattern as `handler` and the
-`requiresConfirmation` predicate.
+The wire envelope is an ordinary elicitation with `hints.kind === "tool_confirmation"`. Approval requires `accepted` **and** `reply.approved === true`; every other outcome — declined, cancelled, aborted, schema violation, accepted-with-`approved: false` — becomes a denial-shaped result (`isError: true`, `executedBy: "agentick"` because the tool never ran). `reply.always` marks the tool session-allowed so later calls skip the gate; `reply.modifiedArguments` is re-validated before the handler runs. A wait past the bound is `ToolConfirmationTimeoutError`.
 
-## Tool-call presentation
+> [!WARNING]
+> **Not a security boundary.** `requiresConfirmation`, `guardDispatch`, and `exposure` are policy seams — they shape what the model is offered and when a human approves. A call that clears the gate runs with the host process's full permissions, and inspecting command strings inside a predicate is advisory UX, not containment (pipes, base64, and heredocs defeat textual filtering). The confinement boundary is OS-level and lives in the sandbox provider.
 
-"What is this call doing?" has **two axes** — _identity_ (what the tool is) and
-_activity_ (what this call does) — from up to four sources. The executor surfaces
-them as **four DISTINCT fields, never collapsed**, and carries the result on
-`DispatchResult.presentation`. The framework presumes **no** precedence — a
-client composes identity from `title ?? name` and activity from
-`narration ?? summary`, or shows them separately, or badges the model's words.
-Presentation is for host/UI display only — never sent to the model as an argument.
+## Abort, timeout
+
+`abort({ toolCallId, reason? })` fires the matching `AbortController`; the dispatch rejects with `ToolAbortedError`. Aborting an unknown id is a safe no-op.
 
 ```ts
-interface ToolPresentation {
-  name: string; // the raw tool id (write_file) — always set; client falls back to it
-  title?: string; // annotations.title — humanized IDENTITY ("Write File"), when set
-  summary?: string; // annotations.displaySummary resolved — author's ACTIVITY, when set
-  narration?: string; // the model's own `_summary` — the model's ACTIVITY, when it filled it in
-}
+await tools.abort({ toolCallId: "c_1" }); // in-process
 ```
 
-- **`name`** — the raw tool id, always present, for keys/logic and as the client's
-  identity fallback.
-- **`annotations.title`** — a humanized display name (`"Write file"` vs
-  `write_file`). The IDENTITY axis.
-- **`annotations.displaySummary`** — the author's per-call activity summary. A
-  **seam**: a static `string` OR a function on the **validated input** + dispatch
-  `ctx` (sync or async), e.g. `displaySummary: (i) => \`Searching for ${i.query}\``.
-Typed to the tool's input on `createTool`, erased on the declaration (same
-pattern as `confirmationMessage`). Resolved **independently** of the model
-  narration — both are surfaced, so the client sees the author's take and the
-  model's take side by side.
-- **`_summary` model narration** — see below. The model's own words for the
-  activity axis, distinct from the author's `summary`.
+It is a **declared command** (`tool:abort`), not a plain method — on the reference implementation and on `defineToolExecutor` executors alike. So an external actor (a session on user-escape, another cluster node) cancels a call by sending `{ type: "tool:abort", payload: { toolCallId } }` to the executor's `tool:{scopeId}` address; the command registry routes it, no hand-rolled inbox switch. The handler fires the controller synchronously and journaling wraps it, so cancellation is never deferred by the phase contract.
 
-### `_summary` — model self-narration (the reserved field)
+Timeout precedence, highest first: `DispatchInput.timeoutMs` → `annotations.timeout` → the construction-time `defaultTimeoutMs`. A trip aborts the call with `ToolTimeoutError`. Confirmation waits have their own ladder: `annotations.confirmationTimeoutMs` → `DispatchInput.confirmationTimeoutMs` → `defaultConfirmationTimeoutMs`.
 
-`TOOL_NARRATION_FIELD` (`"_summary"`, exported from `@agentick/spec`) is a
-**reserved** optional `string` property the model projector injects into **every
-model-facing tool schema** (`buildTools`, `@agentick/model`). It lets the
-model say, in one short first-person sentence, what a call is doing — the
-sentence that lights the `useOnToolStart` spinner ("Searching the docs for retry
-config").
+## Long-running tools — task modes
 
-The executor **strips `_summary` from the raw model input BEFORE schema
-validation** (a shallow copy — the caller's object is never mutated), so it:
+A handler that returns a `TaskHandle` (from `ctx.tasks!.submit(...)`) resolves one of two ways, from the tool's `annotations.taskSupport` combined with the caller's `DispatchInput.task` (default `"auto"`).
 
-- never reaches the author's schema (the tool's real fields validate cleanly),
-- never reaches the **handler**,
-- never lands in the persisted **`tool_result`**.
+- **Pattern A — await transparently.** The executor awaits `handle.result` and returns its blocks. The model never sees a task id. Aborting the dispatch cancels the in-flight task rather than orphaning it.
+- **Pattern B — return a ref.** The executor returns immediately with a `{ type: "task_ref", taskId, status, … }` block. The model then drives the task through the `task_*` tools.
 
-Stripping is **model-door only** — host `session.dispatch(...)` inputs pass
-through untouched. A tool whose own schema already declares a `_summary` property
-opts out implicitly (the injector never clobbers an author field); a tool can
-also opt out explicitly with `annotations.narrate: false`.
+| `task` \ `taskSupport` | `"unsupported"`             | `"supported"` | `"required"`                |
+| ---------------------- | --------------------------- | ------------- | --------------------------- |
+| `"ref"`                | `ToolTaskModeConflictError` | Pattern B     | Pattern B                   |
+| `"inline"`             | Pattern A                   | Pattern A     | `ToolTaskModeConflictError` |
+| `"auto"` (host door)   | Pattern A                   | Pattern A     | Pattern A                   |
+| `"auto"` (model door)  | Pattern A                   | Pattern A     | Pattern B                   |
 
-**Surfacing.** The eager narration rides the **`tool-start` lifecycle event**
-(`LifecycleToolStart.narration`) so the spinner lights up the instant dispatch
-begins — before the handler resolves. The fully precedence-resolved
-`ToolPresentation` (which folds `displaySummary`/`title`, known only after
-validation) rides `DispatchResult.presentation` and the **`tool-end` lifecycle
-event** (`LifecycleToolEnd.presentation`). Both reuse existing events — no new
-channel.
+Conflicts are rejected **before the handler runs**, so a handler never observes a contradictory combination.
 
-### ⚠️ Token cost + the off-switch
+## Layered registration
 
-Injecting `_summary` into every tool schema AND having the model emit an extra
-sentence per call is **real input and output token cost on every tool-using
-tick**. Narration defaults **ON**; disable it app-wide when the cost isn't worth
-the live narration:
+The same tool name can be registered from several seams at once — one entry per binding slot. `compileForTick` resolves the per-tick model-visible set: filter first, then highest-precedence binding wins per name.
+
+| Rank (low → high) | Binding                         |
+| ----------------- | ------------------------------- |
+| `runtime`         | ad-hoc / fixture registrations  |
+| `gateway`         | process-wide config             |
+| `app`             | `createApp({ tools })`          |
+| `session`         | `createSession({ tools })`      |
+| `execution`       | `SendInput.tools`               |
+| `client`          | a browser client's declared set |
+| `compiler`        | the rendered tree               |
+
+An `extension` binding takes the rank of the level it was installed at. `PRECEDENCE_RANK`, `precedenceOf`, `bindingKey`, and `sameBindingKey` are exported as data, not buried in a switch.
+
+Filtering happens **before** precedence, so a high-rank registration that fails the filter cannot shadow a lower-rank one that passes.
+
+> [!IMPORTANT]
+> `compileForTick` also carries a serialization guarantee: **execution-scoped winners are stably partitioned to the tail**, after every non-execution winner. Tools serialize at the head of the provider prompt, so a per-execution binding would otherwise perturb the prefix. Keeping the stable tree/session tools at the head means a cache breakpoint on that prefix keeps hitting — only the tail is new.
+
+Registration is idempotent per binding slot on identical shape; a _different_ shape in the same slot is `ToolAlreadyRegistered`. Same name, different binding, just adds a sibling.
+
+**Scoped bindings.** `withScope` composes register-each + cleanup around an async body — the cleanup runs on return, throw, or abort:
 
 ```ts
-createApp(Agent, { model, narrate: false }); // app-wide off
-createApp(Agent, { model, session: { narrate: false } }); // session default off
-app.createSession({ narrate: false }); // per-session
-createTool({ name, /* … */ narrate: false }); // opt a single tool out
+import { withScope } from "@agentick/tool-executor";
+
+const out = await withScope(
+  toolExecutor,
+  { scope: "execution", executionId },
+  input.tools ?? [],
+  () => loop.runExecution(executionId),
+);
 ```
 
-The switch threads `createApp/createSession({ narrate }) → SessionHarness →
-loop.runExecution → ProjectInput.narrate → buildTools`, gating the schema
-injection at the projection site.
+## Guards, middleware, hooks
 
-## Execution provenance (`executedBy`)
+Three seams, three jobs:
 
-Every `DispatchResult` is stamped with `executedBy` — WHO ran the tool — the one
-provenance axis a client switches on (see `ToolExecutor` in `@agentick/spec`):
+```ts
+import { Effect } from "effect";
 
-- **Server-handled path** (declaration has a `handlerRef`): stamped
-  `annotations.executedBy ?? "agentick"`. A harness that routes the tool
-  elsewhere declares provenance ONCE on the declaration — e.g. `mcpDeclaration`
-  stamps `annotations.executedBy: "mcp:<serverId>"`, so an MCP tool's result is
-  attributed to its server rather than to the framework. Plain local tools carry
-  no `executedBy` annotation and default to `"agentick"`.
-- **Client-handled path** (no `handlerRef`): stamped a hardcoded `"client"` — it
-  NEVER reads `annotations.executedBy`.
+// Admission — decide whether the dispatch runs at all. Effect-native: the
+// verdict is decided in-fiber, before the body.
+const off = tools.guardDispatch((input) =>
+  Effect.succeed(
+    input.name === "rm_rf"
+      ? { kind: "veto" as const, reason: "blocked" }
+      : { kind: "proceed" as const },
+  ),
+);
 
-**Security.** `executedBy` is server-authoritative and never wire-settable: it is
-absent from `ClientToolAnnotations`, and `toClientToolRegistration` strips it at
-the wire fold. Because client-declared tools have no `handlerRef`, they can only
-ever reach the client-handled stamp site (hardcoded `"client"`), so a client can
-never spoof provider/MCP provenance even if a raw payload smuggles the field.
+// Wrapping — see input and result, add timing/retry/logging.
+tools.fx.use((input, next) => next(input));
+```
+
+`guardDispatch` returns a verdict: `proceed` (or void), `veto` (terminal `vetoed`), `replace` (short-circuit with a supplied result), `defer`. Multiple guards compose by compose-order — outermost decides first. It is the tool-typed name for the universal guard seam; it decides **op admission**, distinct from the loop-continuation `gate`.
+
+Because `dispatch` is a declared command, it also mints typed lifecycle hooks registered at any scope that folds down to it (`createApp({ hooks })`, `createSession({ hooks })`):
+
+| Hook                   | Fires         | Receives / returns                                                                       |
+| ---------------------- | ------------- | ---------------------------------------------------------------------------------------- |
+| `onBeforeToolDispatch` | pre-dispatch  | `DispatchInput` — transform the call, or throw to veto it                                |
+| `onAfterToolDispatch`  | post-dispatch | the full `DispatchResult` — so an after-hook cannot silently strip `isError` or metadata |
+
+### The Effect edge
+
+`.fx` is the composable twin of the Promise surface — reach for it when you want a tool call inside one fiber tree rather than at a `runPromise` root.
+
+```ts
+import { Effect } from "effect";
+
+const program = Effect.gen(function* () {
+  yield* tools.fx.replaceCompilerTools({ mountId, registrations });
+  const decls = yield* tools.fx.compileForTick({ exposure: "model" });
+  const res = yield* tools.fx.dispatch(dispatchInput);
+  return { decls, res };
+});
+```
+
+The twin preserves the door → origin mapping, and typed failures (a bad compiler-slice binding, for instance) land catchable on the error channel rather than crashing the fiber. `dispatch()` / `compileForTick()` / `replaceCompilerTools()` are the derived facades.
 
 ## Client-handled tools
 
-A tool whose declaration has **no `handlerRef`** is _client-handled_: there is no
-server-side handler, and the executor either relays the call to the client for
-execution or resolves it with a canned result — driven entirely by annotations.
-(A `handlerRef` that is _present but unresolvable_ is still a hard
-`ToolHandlerMissing` — a real missing-handler bug, not a client tool.) A
-client-handled call still validates its input against the declaration's
-`inputSchema` and still runs the confirmation gate.
-
-Two modes, chosen by `annotations.requiresResponse`:
-
-- **`requiresResponse: true` — client-in-the-loop.** The dispatch **suspends**
-  and relays the call to the client via the executor's own request/response seam
-  (`this.request(TOOL_CALL_CHANNEL, { toolCallId, name, input })`, the same
-  Deferred-keyed-by-`correlationId` machinery the confirmation gate uses). The
-  client executes the tool (renders UI, runs browser code, …) and relays a
-  `ContentBlock[]` result back; the dispatch resumes with it (`executedBy:
-"client"`). Timeout is bounded by `annotations.responseTimeoutMs` (or
-  per-dispatch `responseTimeoutMs`); on timeout the executor falls back to
-  `defaultResult` if one is set, else fails with `ToolCallTimeoutError`.
-- **`requiresResponse` falsy (default) — fire-and-forget.** The dispatch resolves
-  _immediately_ with `annotations.defaultResult` (or a default
-  `[{ type: "text", text: "executed successfully" }]`) and emits a one-way
-  notification (`this.notifyChannel(TOOL_CALL_CHANNEL, …)` — a `requestType: "notify"`
-  envelope with no `correlationId`, the fire-and-forget twin of `request`) so the
-  client's tool router still runs/renders the tool. Suits render-only tools that
-  the model doesn't need a real result from.
-
-`defaultResult` is a **seam**, not just a static value:
+A declaration with **no `handlerRef`** is client-handled: there is no server handler, and the executor either relays the call to a client or resolves it with a computed default. Input is still validated and the confirmation gate still runs. (A `handlerRef` that is present but unresolvable stays a hard `ToolHandlerMissing` — that is a bug, not a client tool.)
 
 ```ts
-defaultResult?:
-  | readonly ContentBlock[]
-  | ((input, ctx) => readonly ContentBlock[] | Promise<readonly ContentBlock[]>);
-```
-
-Static blocks OR a per-call function on the **validated input** + `ctx` (sync or
-async), evaluated at the resolve site. Both the fire-and-forget resolve AND the
-`requiresResponse: true` timeout fallback evaluate it, so a client tool can
-compute a call-specific default (e.g. echo the requested id) rather than a fixed
-block. Typed to the tool's input on `createTool`, erased on the declaration.
-
-Either way the result re-enters the loop through the unchanged
-`DispatchResult → LoopToolResult → tool_result` timeline path. `createTool`'s
-`handler` is optional — a handler-less `createTool` is the server-side way to
-declare a client tool; the wire path (registering a raw declaration) converges on
-the same handler-less shape. `TOOL_CALL_CHANNEL`, `ToolCallRequestPayload`, and
-`TOOL_CALL_REQUEST_SCHEMA` are exported as the wire contract the client router
-(and the `session/respond_to_tool_call` wire method) build on.
-
-### The wire: declaring + answering client tools (stage 2)
-
-A remote client DECLARES its full client-tool set into a live session and relays
-each tool's result back over two session-namespace wire methods (typed in
-`WireMethods`; handlers in `@agentick/gateway`'s `sessionWireExtension`,
-mirroring `session/respond_to_elicitation`):
-
-| Wire method                    | Params                                                  | Effect                                                                                                                                                                                      |
-| ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session/set_client_tools`     | `{ sessionId, declarations: ClientToolDeclaration[] }`  | Clears the `{ scope: "client", sessionId }` slice, then folds each declaration into a client-handled `ToolRegistration` and `register`s it. Returns `{ count }`. A whole-slice **replace**. |
-| `session/respond_to_tool_call` | `{ sessionId, correlationId, result: ToolResultInput }` | Calls `respondToToolCall` — lands the result into the request/response registry, resuming the suspended dispatch.                                                                           |
-
-**Declarative slice-replace — the wire twin of `replaceCompilerTools`.** A
-client is a declarative tool SOURCE that owns a slice, exactly like the
-compiler. It DECLARES its entire set; the framework replaces the client slice
-wholesale. One verb subsumes register (a tool present in the set), unregister (a
-tool absent from it), and idempotency (the set IS the truth — a replace, not an
-accumulate). Reconnect = re-declare; drift-free by construction.
-
-- **Its own binding — `{ scope: "client", sessionId }`.** The client slice is
-  held DISTINCT from `{ scope: "session" }` (which holds the app's
-  `createSession({ tools })`), exactly as the compiler owns `{ scope:
-"compiler", mountId }`. So clearing-and-reinstalling the client slice on
-  every `set_client_tools` NEVER clobbers app tools. Session-lifetime: the
-  session-close cleanup reaps the client slice alongside the session slice.
-- **Precedence.** `client` sits just below `compiler` and above the static
-  config seams (runtime / gateway / app / session / execution) — a live client's
-  current declaration outranks static session config, but the in-process rendered
-  tree stays authoritative. Tunable in `PRECEDENCE_RANK`. See the `ToolBinding`
-  docblock in `@agentick/spec`.
-- **The whole-slice clear.** `set_client_tools` calls
-  `removeBoundTools({ binding: { scope: "client", sessionId } })` (the bulk
-  binding sweep) to drop the prior set, then registers the new declarations.
-  Re-declaring a same-name tool with a changed shape swaps cleanly — the clear
-  happens before the re-add, so the registry's `ToolAlreadyRegistered` collision
-  guard never fires.
-
-> **Multi-client caveat.** The client slice is keyed by `sessionId`, not by
-> connection — every client on a session shares ONE slice, so concurrent
-> `set_client_tools` calls are last-write-wins over the whole set. Coordinating
-> which client owns the tools (and handling unsupported-tool fallbacks) is the
-> APP's concern; the framework presumes nothing. Per-connection sub-slices are a
-> future extension.
-
-**`ClientToolDeclaration` — the serializable wire slice.** A wire client cannot
-send a live validator (a function does not serialize), so the declaration carries
-its input schema as a **raw JSON Schema object**, NOT a `StandardSchemaV1`:
-
-```ts
-interface ClientToolDeclaration {
-  name: string;
-  description: string;
-  inputSchema: JsonSchema; // raw JSON Schema — NOT a StandardSchema validator
-  annotations?: ClientToolAnnotations; // serializable subset (title, requiresResponse,
-  // static defaultResult / confirmationMessage, …)
-  aliases?: readonly string[];
-  // NO handlerRef ⇒ client-handled.
-}
-```
-
-`toClientToolRegistration(declaration, binding)` (exported from `@agentick/spec`)
-is the single adapter that performs both firewall crossings: it wraps
-`inputSchema` into a validator via `jsonSchema(...)` (the executor validates the
-dispatch input against it; the projector re-emits it to the model via
-`toJsonSchema()`), and **omits `handlerRef`** so the registration is
-client-handled. `exposure` is `["model"]`; the gateway passes a
-`{ scope: "client", sessionId }` binding so the tool lives in the client slice —
-reaped on session close, replaced wholesale on the next `set_client_tools`, and
-distinct from the app's `{ scope: "session" }` tools.
-
-Callable annotation seams (`requiresConfirmation` predicate, function-form
-`confirmationMessage` / `displaySummary` / `defaultResult`, `confirmationPreview`)
-are server-only and simply **absent** over the wire — a wire client uses the
-static forms (`ClientToolAnnotations`).
-
-**`respondToToolCall` reuses the elicitation suspend-resume — no new machinery.**
-It is byte-for-byte the inbox route `ElicitationHarness.respond` uses: send a
-`request-response` envelope to the executor's own address keyed by the dispatch's
-`correlationId`; `BaseHarness.dispatchMessage` auto-intercepts it before
-`handleMessage` and calls `requests.resolve(correlationId, result)`, unblocking
-the `this.request(TOOL_CALL_CHANNEL, …)` the client-handled dispatch is suspended
-on. Idempotent — an unknown / already-resolved `correlationId` is a silent no-op.
-
-**Snapshot-first: connect mid-call, still answer it (§6.1).** `tool_call` is a
-snapshot-first channel — the executor is a `ChannelSnapshotProvider`. A client
-that opens the channel _while a `requiresResponse` call is already suspended_
-gets it in frame one, so a reconnecting client can still answer a call relayed
-before it joined (previously: the call hung until timeout).
-
-```ts
-// A model tick relays a client tool; the client is offline. Then it connects:
-const sub = client.transport.subscribe(
-  { kind: "session", id: sessionId },
-  { surface: "session", name: { exact: TOOL_CALL_CHANNEL_FQN } },
-);
-const { envelope } = (await sub[Symbol.asyncIterator]().next()).value;
-// envelope.payload = { kind: "snapshot", requests: [{ correlationId, replyTo, payload }] }
-for (const call of envelope.payload.requests) {
-  await respondToToolCall(client, sessionId, call.correlationId, await run(call.payload));
-}
-// …or just: client.session(sessionId).clientToolCalls.list() (the snapshot, folded).
-```
-
-The opening frame is a `ToolCallSnapshotFrame` mirroring the live relay delta;
-fire-and-forget notifies register nothing, so they never appear (there is
-nothing to answer). It carries no top-level `toolCallId`/`name`, so today's
-per-call fold skips it; live relays follow on the same stream.
-
-**Client side.** `@agentick/tool-executor/client` contributes ONE handle,
-`session.clientToolCalls`, on the `ClientHandle` contract — the pending-call feed
-PLUS the folded control verbs (`.set`/`.route`/`.confirm`/`.respond`). Bundled
-into `@agentick/client`; self-assembles on import.
-
-**Declare your tool set — 3 lines.** `.set(...)` is a whole-slice REPLACE (the
-set IS the truth; reconnect = re-declare, drift-free):
-
-```ts
-import "@agentick/tool-executor/client";
-
-const calls = client.session(id).clientToolCalls;
-const { count } = await calls.set([toolA, toolB]); // → session/set_client_tools
-await calls.set([toolB, toolC]); // A gone, C added   ·   await calls.set([]); // clear
-```
-
-**Route calls to handlers — dispatch → auto-respond.** `.route(handlers, opts?)`
-runs each inbound call through `handlers[name]` (or `opts.onUnknown`) and relays
-the result; a throw is answered with an error result — a suspended call is never
-left hanging. Returns an `Unsubscribe`:
-
-```ts
-const stop = calls.route({
-  open_file: async ({ path }) => read(path),
-  get_weather: async ({ city }) => `sunny in ${city}`,
+// Server side: a handler-less createTool IS the client-tool declaration.
+const openFile = createTool({
+  name: "open_file",
+  description: "Open a file in the user's editor",
+  inputSchema: z.object({ path: z.string() }),
+  annotations: { requiresResponse: true, responseTimeoutMs: 30_000 },
+  defaultResult: (i) => [{ type: "text", text: `could not open ${i.path}` }],
 });
 ```
 
-**Confirm dangerous tools — one line.** `.confirm(policy)` answers
-`tool_confirmation` elicitations (`"approve"` / `"deny"` / a predicate over
-`{ toolName, toolUseId, arguments, message, preview }`):
+| `annotations.requiresResponse` | Behaviour                                                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `true`                         | The dispatch **suspends**, relays the call, and resumes with the client's result (`executedBy: "client"`). On timeout it falls back to `defaultResult`, else `ToolCallTimeoutError`. |
+| falsy (default)                | Resolves **immediately** with `defaultResult` (or a canned success block) and emits a one-way notification so the client still runs/renders the tool.                                |
 
-```ts
-calls.confirm("approve"); // trust everything (dev)
-calls.confirm((req) => !req.toolName?.startsWith("rm")); // predicate
-```
+`defaultResult` is a seam like the confirmation ones: static blocks or a per-call function on the validated input + ctx, evaluated at the resolve site — so a client tool can compute a call-specific fallback. Either way the result re-enters the loop through the unchanged `DispatchResult → tool_result` path.
 
-- **The contract.** `list(): readonly ClientToolCallHandle[]` /
-  `get(correlationId)` (Enumerable — the PENDING correlated calls, snapshot-first
-  so a client connecting mid-call sees the outstanding one); each listed item
-  carries a typed `.respond(result)`. `subscribe(cb: () => void)` fires on change
-  (`cb` takes NO arguments). `respond(correlationId, result)` is the Respondable
-  by-id verb (rejects an unknown/answered id). `close()`. Passes
-  `runClientHandleConformance` (core + Enumerable + Respondable + the mid-call
-  listed-item round-trip + the `set` write verb).
-- **Fire-and-forget** calls (non-`requiresResponse`, NO `correlationId`) are NOT
-  pending — they don't enter `list()`; `.route` still dispatches their handler
-  (via an internal frame tap) but skips the reply.
-- **`respondToToolCall(client, sessionId, correlationId, result)`** is the free
-  by-id escape hatch (twin of `respondToElicitation`) — the unguarded raw-wire
-  reply, for code holding a bare `correlationId` outside the pending set.
-- **The once-loose slots are GONE** — `session.setClientTools` /
-  `.routeClientTools` / `.confirmClientTools` / `.respondToToolCall` are folded
-  onto the handle as `.set` / `.route` / `.confirm` / `.respond` (pre-1.0, no
-  deprecation).
+`executedBy` on this path is a hardcoded `"client"` — it never reads `annotations.executedBy`, which is absent from the wire annotation subset and stripped at the fold. A client cannot spoof provider or MCP provenance even with a raw payload.
 
-### `session.tools` — the tool-registry client handle (three-audiences §F)
+### The browser side — `@agentick/tool-executor/client`
 
-`@agentick/tool-executor/client` contributes a SECOND, distinct handle:
-`session.tools`, the client twin of the server `session.tools` — the tool
-**registry** projection (`clientToolCalls` is the inbound client-tool-call
-_feed_; different slot, different concern, they never collide):
+Importing the subpath self-assembles two handles on the session. `clientToolCalls` is the inbound call feed; `tools` is the registry projection. Different slot, different concern.
 
 ```ts
 import "@agentick/tool-executor/client";
 
-const tools = client.session(id).tools;
-await tools.refresh({ exposure: "model" }); // → session/list_tools
-tools.list(); // Enumerable<ToolInfo> snapshot
-tools.get("resource_read"); // by name
-await tools.dispatch("resource_read", { uri }); // → session/dispatch → content blocks
+const calls = client.session(sessionId).clientToolCalls;
+
+// Declare this client's tool set — a whole-slice REPLACE. Reconnect = re-declare.
+await calls.set([openFileDecl, getWeatherDecl]);
+
+// Route inbound calls to handlers and auto-respond.
+const stop = calls.route({
+  open_file: (input) => read((input as { path: string }).path),
+  get_weather: (input) => `sunny in ${(input as { city: string }).city}`,
+});
+
+// Answer confirmation prompts.
+calls.confirm((req) => !req.toolName?.startsWith("rm"));
 ```
 
-RPC-backed (no `tools-state` channel yet, like `gates`): `list()`/`get()` read a
-local snapshot seeded by an eager `session/list_tools` poll; `refresh()`
-re-polls; `dispatch(name, input)` rides the existing `session/dispatch` method
-and does NOT re-poll (dispatch doesn't mutate topology). `session/list_tools` is
-a DEDICATED session-namespace wire read (not the dynamic lane — the executor's
-`tool:<sessionId>` inbox address doesn't fit the lane pattern).
+`route` answers a throwing handler with an error result — a suspended call is never left hanging. Fire-and-forget relays carry no correlation id, so they never enter `list()`, but `route` still dispatches their handler.
 
-> **Verified by** `src/client/__tests__/tools-handle.spec.ts` (per-verb wire
-> shapes), `src/client/__tests__/session-tools.spec.ts` (ADR-87 self-assembly +
-> no `clientToolCalls` collision), and
-> `../transport-in-process/src/__tests__/tools-e2e.spec.ts` (full-stack
-> `session/list_tools` round-trip).
+The pending set is snapshot-first: the executor publishes every outstanding `requiresResponse` call as the channel's opening frame, so a client that connects **mid-call** finds it in `list()` and can answer it, instead of the call hanging until timeout.
 
-**Verified by** `src/__tests__/client-tool-router.spec.ts` (router: correlated
-relay → respond, unknown → error, throw → error, custom `onUnknown`,
-fire-and-forget → no respond), `src/__tests__/client-tool-confirm.spec.ts`
-(policy approve/deny/predicate), and
-`src/client/__tests__/client-tool-calls.conformance.spec.ts` (the ClientHandle
-contract).
+```ts
+calls.list(); // pending calls, each with a bound .respond(result)
+calls.get(correlationId);
+await calls.respond(correlationId, "done"); // by-id; rejects unknown/answered ids
+calls.subscribe(() => rerender()); // zero-arg store contract
+```
 
-## Abort
+`respondToToolCall(client, sessionId, correlationId, result)` is the free by-id escape hatch for code holding a bare correlation id outside the pending set.
 
-`abort({ toolCallId, reason? })` cancels an in-flight dispatch — the
-matching `AbortController` fires and the dispatch rejects with
-`ToolAbortedError`. It is a **declared command** (`tool:abort`, ADR 51),
-not a plain method, on BOTH the reference `ToolExecutorHarness` AND the
-`defineToolExecutor` `CallbackToolExecutor`. Three consequences:
+The registry projection is RPC-backed — there is no tools delta channel, so `list()`/`get()` read a snapshot seeded by an eager poll and `refresh()` re-polls:
 
-- **In-process** — `await tools.abort({ toolCallId })` works as before.
-- **Inbox-abortable** — an external actor (the session on user-escape, or
-  another cluster node) cancels a dispatch by `send`-ing the generic
-  command-invocation shape (`type: "tool:abort"`, `payload: AbortInput`)
-  to the harness's `tool:{scopeId}` address; `BaseHarness.dispatchMessage`
-  auto-routes it through the command registry — no hand-rolled inbox
-  switch. This closes the gap where a `defineToolExecutor` executor could
-  not be inbox-aborted (its `handleMessage` used to reject every message).
-- **Immediate** — the command handler fires `controller.abort`
-  synchronously; the command wrapper adds journaling AROUND that, never
-  latency, so cancellation is not deferred by the phase contract.
+```ts
+const tools = client.session(sessionId).tools;
+await tools.refresh({ exposure: "model" });
+tools.list(); // ToolInfo[]
+await tools.dispatch("read_file", { path: "notes.md" }); // host door, over the wire
+```
 
-Aborting an unknown `toolCallId` is a safe no-op.
+The two wire methods behind all of this:
 
-## API
+| Wire method                    | Params                                 | Effect                                                                                              |
+| ------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `session/set_client_tools`     | `{ sessionId, declarations }`          | Clears the `{ scope: "client", sessionId }` slice, then registers the new set. Returns `{ count }`. |
+| `session/respond_to_tool_call` | `{ sessionId, correlationId, result }` | Resumes the suspended dispatch. Idempotent — an unknown or answered id is a silent no-op.           |
 
-Exhaustive detail is in the generated typedoc. Key exports from the
-package root:
+The client slice is its own binding, held distinct from `{ scope: "session" }`, so replacing it never clobbers app-declared tools, and session close reaps it.
 
-| Export                                       | What                                                                                                           |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `ToolExecutorHarness`                        | `BaseHarness<"tool">` reference impl of `ToolExecutorProtocol`                                                 |
-| `defineToolExecutor`                         | Callback-style `ToolExecutorFactory` factory (bring a `dispatch` callback)                                     |
-| `InMemoryToolRegistry`                       | Multi-binding registry with per-tick precedence resolution                                                     |
-| `InMemoryHandlerResolver`                    | `handlerRef → { handler, validator }` lookup table                                                             |
-| `withScope`                                  | Bind declarations to a scope for the duration of an async body; cleanup in `finally`                           |
-| `permissiveValidator` / `fromStandardSchema` | Validators — accept-anything, and a Standard Schema v1 adapter (Zod/Valibot/…)                                 |
-| `respondToToolCall` (method)                 | Land a client's relayed tool-call result — resumes a suspended client dispatch (mirrors `elicitation.respond`) |
-| `@agentick/tool-executor/client`             | Client `SessionHandle` verbs `setClientTools` / `respondToToolCall` (stage 2 write side)                       |
+> [!NOTE]
+> The client slice is keyed by `sessionId`, not by connection — every client on a session shares one slice, so concurrent `set` calls are last-write-wins over the whole set. Coordinating which client owns the tools is the app's concern.
 
-`toClientToolRegistration` + the `ClientToolDeclaration` / `ClientToolAnnotations`
-types + the `session/set_client_tools` / `session/respond_to_tool_call` wire
-params live in `@agentick/spec` (the shared contract), not this package.
+## Presentation and model narration
 
-Types: `ToolExecutorHarnessOptions`, `HandlerResolver`, `HandlerEntry`,
-`HandlerChannelSeed`, `ToolHandler`, `ToolHandlerCtx`, `Validator`,
-`ValidatorResult` (the handler + validator types are re-exported from
-`@agentick/spec`, where they live so the authoring layer can consume
-them without depending on this runtime package).
+"What is this call doing?" has two axes — **identity** and **activity** — from up to four sources. The executor surfaces them as four distinct fields on `DispatchResult.presentation` and collapses none of them; a client composes identity from `title ?? name` and activity from `narration ?? summary`, or shows them separately.
 
-The registry also exports the precedence ladder as data —
-`PRECEDENCE_RANK`, `precedenceOf`, `bindingKey`, `sameBindingKey` — from
-`./registry.js`. Precedence (low → high): `runtime < gateway < app <
-session < execution < compiler`; an `extension` binding takes the rank
-of the level at which it was installed.
+| Field       | Source                                          | Axis                        |
+| ----------- | ----------------------------------------------- | --------------------------- |
+| `name`      | the raw tool id — always set                    | identity (fallback)         |
+| `title`     | `annotations.title` (`"Write file"`)            | identity                    |
+| `summary`   | `annotations.displaySummary`, resolved per call | activity, the author's take |
+| `narration` | the model's own `_summary`                      | activity, the model's take  |
 
-### Command lifecycle hooks (ADR 80)
+`displaySummary` is a seam like the confirmation ones — a static string or a per-call function on the validated input + ctx.
 
-`dispatch` is a `command("tool:dispatch", …)`, so it participates in the
-framework-wide command-lifecycle hook surface. This package contributes the one
-`CommandRegistry` augmentation for the verb (`harness.ts`), which mints two
-typed hooks on `CommandHooks`:
+`_summary` is a **reserved** optional field the model projector injects into every model-facing tool schema, letting the model say in one sentence what a call is doing — the sentence that lights a spinner. The executor **strips it from the raw input before validation** (shallow copy; the caller's object is never mutated), so it never reaches the author's schema, the handler, or the persisted `tool_result`. Stripping is model-door only. A tool whose own schema declares `_summary` opts out implicitly; `narrate: false` opts out explicitly.
 
-| Hook                   | Fires         | Receives / returns                                                                                                                             |
-| ---------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onBeforeToolDispatch` | pre-dispatch  | `DispatchInput` — transform the call, or `throw` to veto it                                                                                    |
-| `onAfterToolDispatch`  | post-dispatch | `DispatchResult` — transform the **full** result (not bare `content`), so an after-hook can't strip `isError` / `structuredContent` / metadata |
+> [!WARNING]
+> Injecting `_summary` into every tool schema and having the model emit a sentence per call is real input **and** output token cost on every tool-using tick. It defaults on; turn it off where the narration isn't worth it:
+>
+> ```ts
+> const app = await createApp(Agent, { model, compiler, narrate: false }); // app-wide
+> await app.createSession({ narrate: false }); // per session
+> createTool({ name, description, narrate: false }); // per tool
+> ```
 
-Register them at any scope that folds down to the dispatch (`createApp({ hooks })`
-or `createSession({ hooks })`; composed app-outer). **Distinct from
-`guardDispatch`** — the dispatch **guard** (ADR 83; renamed from the old
-`onBeforeDispatch` verdict handler), which decides whether a dispatch proceeds
-(`proceed` / `veto` / `replace` / `defer`) at the validate → authorize → confirm
-gate; the lifecycle hooks transform its input/output. `guardDispatch(handler)` is
-the tool-typed name for the universal `BaseHarness.guardEffect(...)` seam — an
-op-admission guard, NOT the `gate` package (loop continuation): _guard :
-operation :: gate : loop_. Mechanism, naming, and the construction-fold cascade:
-[runtime README — Command lifecycle hooks](../runtime/README.md#command-lifecycle-hooks-adr-80--82--83).
+## Custom executors
+
+`defineToolExecutor` satisfies the protocol from a callback bundle, for a remote tool service or alternate registry storage.
+
+```ts
+import { defineToolExecutor } from "@agentick/tool-executor";
+
+const toolExecutor = defineToolExecutor({
+  async dispatch(input) {
+    const out = await remoteToolService.run(input.name, input.input);
+    return {
+      toolCallId: input.toolCallId,
+      name: input.name,
+      content: [{ type: "text", text: out.text }],
+      // isError: true for a soft/domain error; throw for a hard failure.
+    };
+  },
+});
+
+const app = await createApp(Agent, { model, compiler, toolExecutor });
+```
+
+> [!NOTE]
+> The factory goes in the `toolExecutor` slot — that slot configures the **executor**. `createApp({ tools })` is the layered tool **declaration** list, a different thing.
+
+`dispatch` is required. `list` / `register` / `unregister` / `abort` / `compileForTick` / `replaceCompilerTools` / `removeBoundTools` are optional and fall through to a bundled `InMemoryToolRegistry`. The substrate phase contract, the `tool:dispatch` / `tool:abort` command declarations, and door → origin provenance apply identically. The validation pipeline and confirmation gate are **not** replicated — subclass `ToolExecutorHarness` if you need those.
 
 ## Testing
 
-`/testing` subpath (`@agentick/tool-executor/testing`):
-
-- `createTestHarness({ tools?, handlers?, elicitation?, tasks?,
-ctxExtensions?, … })` — wires an in-memory substrate (journal / bus /
-  inbox), a real `ElicitationHarness` and `TasksHarness` on the **same**
-  substrate (so bus subscriptions see envelopes from all three), and a
-  `ToolExecutorHarness`. Pass `ctxExtensions` to exercise the ADR-66
-  extension seam (e.g. a stub `ctx.sandbox`). Returns the bundle
-  (`harness`, `journal`, `bus`, `inbox`, `resolver`, `elicitation`,
-  `tasks`), all `ready`.
-- `fakeRegistration({ declaration, handlerRef?, useDeps?, binding? })` —
-  build a `ToolRegistration` with sensible defaults (`binding` defaults
-  to `{ scope: "runtime" }`).
-
 ```ts
-import { createTestHarness } from "@agentick/tool-executor/testing";
+import { createTestHarness, fakeRegistration } from "@agentick/tool-executor/testing";
 
-const { harness } = await createTestHarness({
-  tools: [{ declaration, handlerRef: "h.echo", binding: { scope: "runtime" } }],
-  handlers: [
-    { handlerRef: "h.echo", handler: async (i) => [{ type: "text", text: JSON.stringify(i) }] },
-  ],
-});
-
-const res = await harness.dispatch({
-  toolCallId: "c_1",
-  name: "echo",
-  input: { hi: true },
-  context: { via: "dispatch" },
+const { harness, bus, journal, elicitation, tasks } = await createTestHarness({
+  tools: [fakeRegistration({ declaration, handlerRef: "h.echo" })],
+  handlers: [{ handlerRef: "h.echo", handler: (i) => JSON.stringify(i) }],
+  ctxExtensions: { sandbox: stubSandbox }, // exercise an optional ctx slot
 });
 ```
 
-## Conformance
+`createTestHarness` wires an in-memory substrate plus a real elicitation and tasks harness instance on the **same** substrate — so a bus subscription sees envelopes from all three and a test can answer its own confirmation prompts. Everything is `ready` when it resolves. `fakeRegistration` fills the registration defaults (`binding` defaults to `{ scope: "runtime" }`).
 
-The reference implementation is driven through
-`runToolExecutorConformance` from `@agentick/spec-conformance`
-(package root — there is no `/tool-executor` subpath export). See
-`src/__tests__/conformance.spec.ts` for the factory that translates
-fixture behaviors into concrete handlers.
+The reference implementation is additionally driven through the shared `runToolExecutorConformance` suite.
+
+## API
+
+### `@agentick/tool-executor`
+
+| Export                                                               | Purpose                                                                   |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `ToolExecutorHarness`                                                | The reference implementation, for direct construction                     |
+| `defineToolExecutor`                                                 | Callback-style factory — bring a `dispatch` callback                      |
+| `InMemoryToolRegistry`                                               | Multi-binding registry with per-tick precedence resolution                |
+| `InMemoryHandlerResolver`                                            | `handlerRef → { handler, validator }` lookup table                        |
+| `createToolsHandle` / `toToolInfo`                                   | The `session.tools` factory and its wire-safe projection                  |
+| `withScope`                                                          | Bind declarations for the duration of an async body; cleanup in `finally` |
+| `permissiveValidator` / `fromStandardSchema`                         | Accept-anything, and a Standard Schema v1 adapter (Zod, Valibot, …)       |
+| `viaToOrigin`                                                        | The door → operation-origin mapping, as data                              |
+| `TOOL_CALL_CHANNEL` / `..._FQN` / `..._REQUEST_SCHEMA`               | The client-tool wire contract                                             |
+| `PRECEDENCE_RANK` / `precedenceOf` / `bindingKey` / `sameBindingKey` | The precedence ladder, as data (from `./registry.js`)                     |
+
+Types: `ToolExecutorHarnessOptions`, `HandlerResolver`, `HandlerEntry`, `HandlerChannelSeed`, `ToolHandler`, `ToolHandlerCtx`, `Validator`, `ValidatorResult`, `PendingToolCall`, `ToolCallRequestPayload`, `ToolCallResponse`, `ToolCallSnapshotFrame`. The handler and validator types live in [@agentick/spec](../spec) so the authoring layer consumes them without depending on this runtime package; they are re-exported here.
+
+### Construction options
+
+| Option                                              | Purpose                                                    |
+| --------------------------------------------------- | ---------------------------------------------------------- |
+| `handlerResolver` (required)                        | Resolves `handlerRef` to a handler + validator             |
+| `elicitation` (required)                            | Backs the confirmation gate and `ctx.elicit`               |
+| `tasks` / `resources`                               | Surface `ctx.tasks` / `ctx.resource`                       |
+| `initialTools`                                      | Registered synchronously, before the inbox accepts traffic |
+| `defaultTimeoutMs` / `defaultConfirmationTimeoutMs` | Fallback wait bounds                                       |
+| `ctxExtensions`                                     | Opaque bag spread onto every handler's `ctx`               |
+| `channelPublisher`                                  | Routes `ctx.emit(seed)` to the session channel bus         |
+| `telemetryProvider` / `defaultMetricLabels`         | Light `ctx.trace` / `ctx.metrics`                          |
+| `inheritedInterceptors` / `interceptorParent`       | Fold ancestor guards, middleware, and hooks onto dispatch  |
+
+### Typed errors
+
+`ToolNotFoundError` · `ToolPermissionError` · `ToolHandlerMissing` · `ToolValidationError` · `ToolHandlerError` · `ToolAbortedError` · `ToolTimeoutError` · `ToolConfirmationTimeoutError` · `ToolCallTimeoutError` · `ToolTaskModeConflictError` · `ToolAlreadyRegistered`. All from [@agentick/spec](../spec); all hard failures reject the dispatch.
+
+### `@agentick/tool-executor/client`
+
+| Export                    | Purpose                                                                     |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `session.clientToolCalls` | Registered on import: pending-call feed + `set`/`route`/`confirm`/`respond` |
+| `session.tools`           | Registered on import: registry projection + `dispatch`/`refresh`            |
+| `clientToolCallsHandle`   | The headless factory behind the feed                                        |
+| `toolsHandle`             | The headless factory behind the registry projection                         |
+| `respondToToolCall`       | By-id reply escape hatch                                                    |
+
+Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `ClientToolHandler`, `RouteClientToolsOptions`, `ToolsClientHandle`, `ConfirmPolicy`, `ConfirmRequest`.
+
+### `@agentick/tool-executor/testing`
+
+`createTestHarness` (the bundle above) and `fakeRegistration` — see [Testing](#testing).
+
+## Patterns
+
+**Authoring.** [@agentick/tool](../tool) owns `createTool` and the tool catalog; [@agentick/compiler-react](../compiler-react) adds the `<Tool>` component and captures `use:` deps at render for the `deps` bag.
+
+**Shapes.** [@agentick/spec](../spec) owns `ToolDeclaration`, `ToolAnnotations`, `DispatchInput`/`DispatchResult`, the result currency and its `normalizeToolResult`, `ToolsHandle`, and the client-tool wire types including `toClientToolRegistration`.
+
+**Long-running work.** [@agentick/tasks](../tasks) owns `TaskHandle` and the `task_*` model tools that drive Pattern B refs.
+
+**Confirmation transport.** [@agentick/elicitation](../elicitation) owns the gate's request/response channel and the `ctx.elicit` sugar.
+
+**Wire.** [@agentick/gateway](../gateway) serves `session/set_client_tools`, `session/respond_to_tool_call`, `session/list_tools`, and `session/dispatch`.
+
+## Roadmap & known gaps
+
+- **Callback-executor inbox surface.** `tool:abort` and `tool:dispatch` auto-route on a `defineToolExecutor` executor via the command registry. Any _other_ inbox message type still lands on `HandlerError` — declare it as a command to wire it.
+- **`taskSupport: "supported"` negotiation.** The `"supported"` branch resolves conservatively (Pattern A outside the model-required path). Per-call capability negotiation isn't built.
+- **Custom-registry parity.** `defineToolExecutor` replicates storage callbacks but not the validation pipeline or confirmation gate; those need a subclass.
+- **Per-connection client slices.** The client tool slice is keyed by session, so multiple clients on one session are last-write-wins. Sub-slices keyed by connection are a future extension.
+- **Snapshot fold granularity.** The opening `tool_call` snapshot frame carries no top-level `toolCallId`/`name`, so a hand-rolled per-call fold that keys on those skips it; the bundled client handle consumes it correctly.
 
 ## Verified by
 
-- `src/__tests__/conformance.spec.ts` — drives the shared
-  `runToolExecutorConformance` suite against `ToolExecutorHarness`.
-- `src/__tests__/harness.spec.ts` — registry + dispatch happy path,
-  abort (direct `abort()`, caller-signal, timeout, unknown-id no-op, AND
-  inbox `tool:abort` command routing), handler errors, exposure
-  enforcement, AND — for `dispatch` as a declared command — provenance
-  (`via: "model"` stamps `origin: "model"`, `via: "dispatch"` stamps
-  `origin: "host"`, asserted on the journaled `requested` envelope) plus
-  inbox dispatch-by-name (a `tool:dispatch` message invokes the tool and
-  returns its `DispatchResult`).
-- `src/__tests__/client-tools.spec.ts` — client-handled dispatch
-  (`requiresResponse` suspend/relay, fire-and-forget, timeout fallback) AND
-  the stage-2 wire seam: `respondToToolCall` resuming a suspended dispatch
-  (through the elicitation inbox auto-intercept, unknown-id no-op) + a client
-  tool registered via `toClientToolRegistration` entering `compileForTick` and
-  dispatching through the client path.
-- `../transport-in-process/src/__tests__/client-tools.spec.ts` — the client
-  verbs (`session.clientToolCalls.set` → `session/set_client_tools`,
-  `respondToToolCall(...)` → `session/respond_to_tool_call`) issue the right
-  wire methods with the right params.
-- `../transport-in-process/src/__tests__/client-tools-e2e.spec.ts` — the
-  stage-2 GATEWAY-handler semantics over the real wire: `set_client_tools`
-  declarative slice-replace (`[A,B]` then `[B,C]` ⇒ `compileForTick` shows
-  exactly `{B,C}`; empty set clears the slice) + the app-tools-not-clobbered
-  guarantee (a `createSession({ tools })` tool survives client-slice replaces,
-  proving `{ scope: "client" }` and `{ scope: "session" }` are distinct).
-- `../spec/src/__tests__/client-tool-declaration.spec.ts` —
-  `toClientToolRegistration` (JSON-Schema wrap round-trips, `handlerRef`
-  omission, client binding, annotation/alias passthrough).
-- `src/__tests__/pending-snapshot.spec.ts` — snapshot-first (§6.1): the executor
-  is a `ChannelSnapshotProvider` for `tool_call`; a mid-call
-  `channelSnapshotPayload()` carries the suspended `requiresResponse` call
-  mirroring the live relay; fire-and-forget leaves nothing pending; an answered
-  call drops from the frame. (4 tests)
-- `src/__tests__/confirmation.spec.ts` — the confirmation gate
-  (approve / deny / always / modifiedArguments / timeout).
-- `src/__tests__/confirmation-seams.spec.ts` — the restored v1 seams:
-  `confirmationMessage` (string + sync/async function → elicit `message`,
-  default-prompt regression), `confirmationPreview` (→ `metadata.preview`,
-  existing keys intact), callable `defaultResult` (fire-and-forget +
-  `requiresResponse` timeout fallback), and dispatch-by-alias resolution.
-- `src/__tests__/narration-strip.spec.ts` — tool-call presentation (Pass
-  B): `_summary` stripped pre-validation (never reaches the handler or the
-  result), the caller's object not mutated, model-door-only stripping, and
-  the four distinct presentation fields (`name`/`title`/`summary`/`narration`) on
-  `DispatchResult.presentation` (string + per-call-function `displaySummary`).
-- `src/__tests__/dispatch-task-mode-matrix.spec.ts` — Pattern A vs B and
-  the `ToolTaskModeConflictError` pre-flight matrix.
-- `src/__tests__/task-handle.spec.ts` — `ctx.tasks` wiring, await-vs-ref,
-  abort propagation into the in-flight task.
-- `src/__tests__/ctx-extensions.spec.ts` — the ADR-66 `ctxExtensions`
-  seam: opaque values spread onto `ctx`, freshness (live-object reads,
-  not render capture), absence, and universal-field collision safety.
-- `src/__tests__/signals.spec.ts` + `signal-fire-and-forget.spec.ts` —
-  `ctx.log` / `ctx.progress` emit shape + scope, and that a dying bus
-  never blocks or fails the dispatch.
-- `src/__tests__/registry.spec.ts` + `layered-tools.spec.ts` —
-  multi-binding storage, precedence resolution, idempotency.
-- `src/__tests__/middleware-and-hooks.spec.ts` — `use(middleware)` +
-  `guardDispatch(handler)` verdicts (guard admission, ADR 83).
-- `src/__tests__/command-hooks-augmentation.spec.ts` — the `tool:dispatch`
-  `CommandRegistry` augmentation mints `onBeforeToolDispatch` (← `DispatchInput`)
-  / `onAfterToolDispatch` (← `DispatchResult`), and the type-level names agree
-  with runtime `deriveHookNames` (lockstep).
-- `src/__tests__/define-tool-executor.spec.ts` — the callback factory,
-  including inbox `tool:abort` command routing cancelling an in-flight
-  dispatch with `ToolAbortedError` (the #31 gap: `CallbackToolExecutor` is
-  now inbox-abortable), plus `dispatch`-as-command parity on the callback
-  executor (model/host provenance stamping + inbox dispatch-by-name). Plus
-  `with-scope.spec.ts`, `validator.spec.ts`, `handler-resolver.spec.ts` —
-  scope helper, validators, resolver.
-
-## Status & roadmap
-
-🚧 In active development as part of v2 (`feat/v2`). The core surface —
-registry, dispatch (both doors), validation, confirmation gate, abort +
-timeout, task-mode branching, lifecycle handlers, runtime signals — has
-landed and passes conformance.
-
-Known gaps / deferred:
-
-- **`defineToolExecutor` custom inbox message types** — `abort`
-  (`tool:abort`) auto-routes on both executors via the command registry
-  (see [Abort](#abort)), so a callback executor IS inbox-abortable. Any
-  OTHER inbox message type still routes to `HandlerError` on the callback
-  executor — declare it as a command (or add an `onMessage` handler) to
-  wire it.
-- **`taskSupport: "supported"` capability negotiation** — the "supported"
-  branch of the task-mode matrix is resolved conservatively (Pattern A
-  outside the model-required path). Phase C (#174) refines it.
-- **Custom-registry factory parity** — `defineToolExecutor` replicates
-  storage callbacks but not the validation / confirmation pipeline;
-  those require subclassing `ToolExecutorHarness`.
-
-## See also
-
-- `@agentick/spec` — the protocol definition
-  (`protocol/tool-executor.ts`, `data/tool-handler.ts`,
-  `data/declarations.ts`).
-- `@agentick/compiler-react` — produces `ToolDeclaration[]` and
-  captures `use:` deps at render time; the tool executor consumes them.
-- `@agentick/tasks` — the `TaskHandle` primitive and the
-  `task_*` model tools that manage Pattern B refs.
-- `docs/proposals/v2/blueprint/07-tool-executor.md` — full design.
+- `src/__tests__/conformance.spec.ts` — drives the shared `runToolExecutorConformance` suite.
+- `src/__tests__/harness.spec.ts` — dispatch happy path with validated input and `use` deps, idempotency (a repeat `toolCallId` replays the terminal, the tool runs once), the error paths (`ToolNotFoundError`, wrong door, missing handler, validation, handler throw), abort by call, by caller signal, by timeout, by inbox `tool:abort`, unknown-id no-op, registry surface + exposure filter, `setState`/`getState`, door → origin stamping on the journaled envelope, inbox dispatch-by-name, `replaceCompilerTools` atomicity, and `compileForTick` precedence.
+- `src/__tests__/tool-result-currency.spec.ts` — string / array / envelope currency, `isError` (soft, resolves) vs throw (hard, rejects), `structuredContent` × `outputSchema` validation, and that a smuggled `executedBy`/`durationMs` is ignored top-level and inside `metadata`.
+- `src/__tests__/registry.spec.ts` + `layered-tools.spec.ts` — multi-binding storage, idempotency and shape-conflict, every precedence rung, filter-before-precedence, `replaceCompilerSlice`, `removeWhere`, and the execution-tail serialization guarantee.
+- `src/__tests__/tools-handle.spec.ts` — `session.tools`: `ToolInfo` projection, exposure filter, name-then-alias `get`/`has`, canonical-name dispatch binding, and the two subscription shapes.
+- `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
+- `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
+- `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, the client handle contract, and the registry projection (eager poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
+- `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.
+- `src/__tests__/ctx-extensions.spec.ts` + `ctx-run.spec.ts` + `ctx-trunk-derivation.spec.ts` + `signals.spec.ts` + `signal-fire-and-forget.spec.ts` — opaque extension slots (freshness, absence, universal-field collision safety); `ctx.run` minting a journaled op parented under the dispatch, hook-observable and guard-vetoable, plus `ctx.runner` as a run-only view; the dispatch ctx carrying the crossing's real work-path ids; and `ctx.log` / `ctx.progress` emit shape, scope, and survival of a dying bus.
+- `src/__tests__/middleware-and-hooks.spec.ts` + `command-hooks-augmentation.spec.ts` + `fx-dispatch.spec.ts` — middleware wrapping and compose order, `guardDispatch` verdicts, unsubscribe, the typed hook names agreeing with the runtime derivation, and the `.fx` twins (composable Effects, Promise facades, door → origin preservation, single-fiber nesting, catchable binding mismatch).
+- `src/__tests__/define-tool-executor.spec.ts` + `with-scope.spec.ts` + `validator.spec.ts` + `handler-resolver.spec.ts` — the callback factory (marker, default and custom registry callbacks, inbox `tool:abort`, dispatch-as-command parity, bus envelopes), scoped binding cleanup on return and throw, the validators, and the resolver.

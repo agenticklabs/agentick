@@ -1,93 +1,207 @@
 # @agentick/client
 
-**The batteries-included agentick client — the default.**
+**Installing a capability on the server shouldn't mean wiring it on the client.**
+This package is the proof: one import, and every built-in capability's client
+surface is already sitting on the session handle, typed.
 
-Re-exports everything from [`@agentick/client-core`](../client-core) (the
-lean, harness-agnostic core) **and** side-effect-imports every built-in
-`/client` subpath, so their session sub-handles ([ADR 87](../../docs/proposals/v2/blueprint/87-client-sub-handles.md))
-self-assemble on the client `SessionHandle` with **no per-harness imports**:
+It carries no logic of its own. It re-exports
+[@agentick/client-core](../client-core) and side-effect-imports every built-in
+`/client` subpath, so each one types its slot and registers its factory. Ten
+imports and one `export *` — that is the entire source file. The interesting
+property is that a first-party capability and one you write are assembled by
+exactly the same mechanism.
+
+## Install
+
+```bash
+npm install @agentick/client
+```
+
+You still pick a transport:
+[@agentick/transport-websocket](../transport-websocket),
+[@agentick/transport-http](../transport-http),
+[@agentick/transport-unix-socket](../transport-unix-socket), or
+[@agentick/transport-in-process](../transport-in-process).
+
+## Quick start
 
 ```ts
 import { createClient } from "@agentick/client";
+import { websocket } from "@agentick/transport-websocket/client";
 
-const client = await createClient({ transport });
-const session = client.session(id);
-
-// Every sub-handle is a ClientHandle: list() / get(id) / subscribe(cb) + verbs.
-session.tasks.list(); // TaskInfo[]                      — @agentick/tasks/client
-session.knobs.list(); // WireKnobDescriptor[] (+values)  — @agentick/knobs/client
-await session.knobs.set("temperature", 0.7);
-session.timeline.list(); // TimelineEntry[]              — @agentick/timeline/client
-session.elicitations.subscribe(() => {
-  // pending asks  — @agentick/elicitation/client
-  for (const e of session.elicitations.list()) void e.accept({});
+const client = await createClient({
+  transport: websocket({ url: "wss://example.com/agentick" }),
 });
+await client.connect();
 
-// Client-handled tools — @agentick/tool-executor/client
-// A client is a declarative tool SOURCE: declare the FULL set; the framework
-// replaces the client slice wholesale (the wire twin of replaceCompilerTools).
-const calls = session.clientToolCalls;
-await calls.set([{ name, description, inputSchema }]); // whole-slice replace, no handler
-calls.route({ open_file: async ({ path }) => read(path) }); // dispatch → auto-respond
-calls.confirm("approve"); // policy over tool_confirmation asks
+const session = client.session("sess-123");
+
+// Every slot below exists because of the single import above.
+session.timeline.subscribe(() => render(session.timeline.list()));
+session.tasks.subscribe(() => showQueue(session.tasks.list()));
+await session.knobs.set("temperature", 0.7);
+
+const run = session.send({ messages: [{ role: "user", content: "start the migration" }] });
+await run.result;
 ```
 
-That's the whole package: three side-effect imports + `export * from
-"@agentick/client-core"`. It carries no logic of its own.
+`createClient`, the gateway / app / session handles, `client.use`, `client.hook`,
+the fold kit, the extension surface — all of it is
+[@agentick/client-core](../client-core)'s, re-exported unchanged. Read that
+README for the client API itself; this one covers what the bundle adds.
 
-## Tool results may be truncated on the wire (ROADMAP A3)
+## What the import lights up
 
-Content a client receives — folded timeline entries (`session.timeline` /
-`timelineView`), `session.send` results, and progress/subscription
-notifications — **can be truncated at the gateway** so a multi-megabyte tool
-result never floods the browser. This is **opt-in and OFF by default** (output
-shaping is app-UX policy, not a framework default — unlike security defaults,
-which protect the operator and ship on); a deployment turns it on with
-`createGateway({ truncateToolResults: true })` (see the gateway README). Only
-oversized _tool output_ is affected (a `tool_result` block's inline text/data
-over the threshold); ordinary messages and small results pass through untouched.
-A truncated block carries `block.metadata.bounded` (`{ truncated: true,
-originalBytes, retainedBytes, reason, hint }`) — check it when rendering to show
-a "truncated — N bytes" affordance. The full content is never lost: it lives in
-the durable timeline store server-side (reachable via a future
-`timeline_history` read).
+Every slot is a `ClientHandle`: `subscribe(cb)` fires on change with no
+arguments, `list()` reads the current snapshot, and each carries its own verbs.
+That uniformity is what makes `useSyncExternalStore` — and therefore
+[@agentick/client-react](../client-react)'s `useHandle` — work on all of them
+without a per-slot adapter.
 
-## Core vs bundle
+| Slot                      | `list()` yields           | Verbs                                                              | From                              |
+| ------------------------- | ------------------------- | ------------------------------------------------------------------ | --------------------------------- |
+| `session.timeline`        | timeline entries          | `seed` · `prepend` · `append` · `clear` · `loadOlder` · `view`     | [timeline](../timeline)           |
+| `session.tasks`           | task records              | `cancel`                                                           | [tasks](../tasks)                 |
+| `session.knobs`           | knob descriptors          | `set` · `use`                                                      | [knobs](../knobs)                 |
+| `session.elicitations`    | pending asks (as handles) | `respond` + per-ask `accept` / `decline` / `cancel`                | [elicitation](../elicitation)     |
+| `session.clientToolCalls` | pending client calls      | `set` · `route` · `confirm` · `respond`                            | [tool-executor](../tool-executor) |
+| `session.tools`           | tool descriptors          | `dispatch` · `refresh`                                             | [tool-executor](../tool-executor) |
+| `session.gates`           | gate records              | `clear` · `defer` · `override` · `refresh`                         | [gates](../gates)                 |
+| `session.skills`          | skills                    | `search` · `register` · `update` · `remove` · `refresh`            | [skills](../skills)               |
+| `session.prompts`         | prompt declarations       | `render` · `invoke` · `register` · `update` · `remove` · `refresh` | [prompts](../prompts)             |
+| `session.resources`       | resource descriptors      | `listTemplates` · `read` · `refresh`                               | [resources](../resources)         |
+| `session.state`           | key/value rows            | `set` · `delete` · `refresh`                                       | [state](../state)                 |
 
-| Package                 | What                                                                    |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `@agentick/client`      | **This package.** Batteries-included — core + every built-in `/client`. |
-| `@agentick/client-core` | The lean, harness-agnostic core. Opt in to built-ins per-harness.       |
+Slots are lazy, cached getters — a slot's subscription or first poll happens on
+first property access, not when you build the handle. Touch none and you pay for
+none.
 
-Use **this package** for the default experience (everything works). Drop to
-`@agentick/client-core` when you want minimal imports and will add only the
-`/client` subpaths you need. The full client API — `createClient`, the
-`GatewayHandle` / `AppHandle` / `SessionHandle` surface, `channelView`, the
-sub-handle registry, hooks — is documented in the
-[`@agentick/client-core` README](../client-core).
-
-This is the client twin of how the public `agentick` metapackage bundles the
-server built-ins (ADR 27 — bundled, not privileged). At the v2 cut these become
-`@agentick/client` (this bundle) + `@agentick/client-core`.
-
-## Adding a built-in to the bundle
-
-A new built-in harness that ships a `/client` subpath (a `register.ts` that
-augments `SessionHandleExtensions` + calls `registerSessionHandleExtension`)
-becomes automatic here by adding one line to `src/index.ts`:
+### Reading and steering a conversation
 
 ```ts
-import "@agentick/<harness>-next/client";
+const session = client.session(id);
+
+// The timeline handle IS your state, or feeds it — both are first-class.
+session.timeline.subscribe(() => render(session.timeline.list()));
+
+onScrollTop(async () => {
+  const { done } = await session.timeline.loadOlder(50); // pages durable history at the head
+  if (done) detachScrollHandler();
+});
+
+// A second concurrent projection over the SAME wire subscription.
+const modelOnly = session.timeline.view({ filter: (e) => e.visibility === "model" });
 ```
 
-## Status
+### Answering the server
 
-🚧 In active development as part of v2 (`feat/v2`). Interim stand-in for the
-public `agentick/client` metapackage entry until the v2 cut.
+Two slots are request-shaped: the server asks, the client replies. Both list
+their pending items — including ones that arrived before this client connected —
+so a page reload doesn't strand a dialog.
+
+```ts
+// Elicitations: a listed ask carries its own reply verbs.
+session.elicitations.subscribe(() => {
+  for (const ask of session.elicitations.list()) {
+    void ask.accept({ approved: true });
+  }
+});
+
+// Client-handled tools: declare the FULL set, then route.
+await session.clientToolCalls.set([
+  { name: "open_file", description: "Open a file in the editor", inputSchema },
+]);
+session.clientToolCalls.route({
+  open_file: async (input) => {
+    const { path } = input as { path: string };
+    return [{ type: "text", text: await readFile(path) }];
+  },
+});
+session.clientToolCalls.confirm("approve"); // blanket policy for confirmation asks
+```
+
+`set` is a whole-slice replace: the declaration array _is_ the truth for this
+client's tools, so a tool absent from it is unregistered. `route` dispatches each
+inbound call to your handler and relays the result; a handler that throws is
+answered with an error result, so a suspended call is never left hanging.
+
+## Bundle or core
+
+| Package                                 | What                                                                    |
+| --------------------------------------- | ----------------------------------------------------------------------- |
+| `@agentick/client`                      | **This package.** Core plus every built-in `/client` subpath, imported. |
+| [@agentick/client-core](../client-core) | The core alone. Add the `/client` subpaths you want.                    |
+
+Use this one unless you're bundle-size sensitive or genuinely need only two
+capabilities. Dropping to the core costs you one `import "@agentick/x/client"`
+line per capability and nothing else — the slot mechanism is identical.
+
+## Adding your own capability
+
+A capability that ships a `/client` subpath joins this bundle by adding one line
+to `src/index.ts`:
+
+```ts
+import "@agentick/<name>/client";
+```
+
+That subpath does two things — augments `SessionHandleExtensions` to type the
+slot, and calls `registerSessionHandleExtension` to register the factory. Nothing
+in this package or in the core knows the slot's name. Your own package can do the
+same without touching either; see
+[@agentick/client-core](../client-core#sub-handles-install-to-appear).
+
+## Tool results may be truncated on the wire
+
+Content a client receives — folded timeline entries, `send` results, subscription
+notifications — **can be truncated at the gateway** so a multi-megabyte tool
+result never floods a browser. It is opt-in and off by default; output shaping is
+application policy, not a framework default. A deployment turns it on with
+`createGateway({ truncateToolResults: true })` (see [gateway](../gateway)).
+
+Only oversized _tool output_ is affected — a `tool_result` block whose inline text
+or data exceeds the threshold. Ordinary messages and small results pass through
+untouched. A truncated block carries `block.metadata.bounded`:
+
+```ts
+import { BOUNDED_METADATA_KEY, type BoundedContentMarker } from "@agentick/spec";
+
+const marker = block.metadata?.[BOUNDED_METADATA_KEY] as BoundedContentMarker | undefined;
+if (marker?.truncated) {
+  show(`truncated — ${marker.retainedBytes} of ${marker.originalBytes} bytes · ${marker.hint}`);
+}
+```
+
+The full content is never lost: it lives in the durable timeline store on the
+server, reachable through `session.timeline.loadOlder()`.
+
+## Roadmap & known gaps
+
+- **All-or-nothing bundling.** Importing this package registers all eleven slots
+  and pulls in all eleven capability packages. There is no subset bundle; a
+  tree-shaking build cannot drop a slot you never touch, because registration is
+  a side effect of the import. Use the core directly if that matters.
+- **RPC-backed slots poll rather than subscribe.** `gates`, `tools`, `skills`,
+  `prompts`, `resources`, and `state` refresh on construction and after their own
+  mutations. A change made by another client, or server-side, is not pushed —
+  call `refresh()`. The fold-backed slots (`timeline`, `tasks`, `knobs`,
+  `elicitations`, `clientToolCalls`) are live.
+- **No bundle-level integration coverage.** The tests here prove the slots
+  register and self-assemble; each slot's behavior is proven in its own package,
+  and no test drives several of them against one live gateway at once.
 
 ## Verified by
 
-- `src/__tests__/bundle.spec.ts` — importing the bundle registers every built-in
-  slot; a session handle self-assembles `.tasks` / `.knobs` / `.elicitations`
-  / `.clientToolCalls` / `.timeline` (each a `ClientHandle`) with no per-harness
-  imports.
+- `src/__tests__/bundle.spec.ts` — importing the bundle registers all eleven
+  built-in slots, and a session handle self-assembles every one of them with no
+  per-capability imports (each asserted down to its read and write members).
+- `src/__tests__/wire-proxy-middleware-e2e.spec.ts` — end-to-end over a real
+  client and transport: a wire method with no client code written for it is typed
+  and round-trips; one `client.use` middleware is observed on both that
+  synthesized method and `session.knobs.set`; `session.knobs.use` scopes to the
+  `knobs/*` namespace and unsubscribing restores.
+- Each slot's own behavior is covered in its package — see the "From" column
+  above; the shared handle contract is certified by `runClientHandleConformance`
+  from [@agentick/client-core](../client-core)`/testing`, which `timeline`,
+  `tasks`, `knobs`, `elicitation`, and `tool-executor` each run against their
+  handle.

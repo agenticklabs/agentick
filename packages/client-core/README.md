@@ -1,588 +1,36 @@
 # @agentick/client-core
 
-Canonical TypeScript implementation of the agentick `ClientProtocol`.
+**The client is a proxy, not a second copy of the truth.** Every method on it is
+either a typed wire call or a fold over the server's event stream — nothing in
+between, and no framework-owned cache underneath.
 
-Runs in **Node 22+, browsers, Bun, Deno, and edge runtimes** — zero DOM
-assumptions, zero platform-specific imports. The client is a thin proxy
-over the same harness protocols the server exposes in-process, so
-adopters write the same code regardless of whether they're talking to a
-gateway in the same process or across the wire.
+That is the bet the whole package makes. A read surface is a fold, so it can never
+drift from the server. A write is a derived wire command, so one middleware covers
+every verb — including verbs that don't exist yet. And because a read surface is
+just `subscribe(cb)` + `list()`, it drops into `useSyncExternalStore` with no
+adapter, in any framework or none.
 
-## What this package is
+`ClientProtocol` — the interface this package implements — lives in
+[@agentick/spec](../spec). Applications depend on that interface; this is the
+canonical implementation of it. The JSON-RPC wire underneath is language-agnostic,
+so a Python or Rust client speaks it without touching this package.
 
-`ClientProtocol` is **the TypeScript contract** that lives in
-`@agentick/spec/client`. **Multiple implementations can conform**:
+## Install
 
-- `@agentick/client-core` (this package) — the canonical impl
-- a test mock implementing the same interface
-- a future Worker-thread proxy that runs the real client in a Worker
-  and surfaces the protocol on the main thread
-- adopters who need bespoke shapes for their environment
-
-Applications that consume a `ClientProtocol` (a TUI, a web app, a CLI)
-do not depend on this package's internals — they depend on the
-interface in spec.
-
-The wire that crosses the network is defined in
-`@agentick/spec/wire` (JSON-RPC 2.0, MCP-aligned). Non-TypeScript
-clients (Python, Go, Rust, Swift) speak that wire directly without
-touching this package.
-
-## Architecture
-
+```bash
+npm install @agentick/client-core
 ```
-                    ┌────────────────────────────────┐
-                    │ Application (TUI, web, CLI…)   │
-                    └───────────────┬────────────────┘
-                                    │ uses
-                                    ▼
-                    ┌────────────────────────────────┐
-                    │ ClientProtocol (in spec/client)│
-                    │   ──── implemented by ────     │
-                    │ @agentick/client-core          │   ← this package
-                    └───────────────┬────────────────┘
-                                    │ uses
-                                    ▼
-                    ┌────────────────────────────────┐
-                    │ ClientTransport (in spec/client)│
-                    │   ──── implemented by ────     │
-                    │ @agentick/transport-*-next     │
-                    └───────────────┬────────────────┘
-                                    │
-                                    ▼
-                    ┌────────────────────────────────┐
-                    │ JSON-RPC 2.0 wire              │
-                    │ (in spec/wire)                 │
-                    └────────────────────────────────┘
-```
+
+Subpaths: `.` (the client) and `/testing` (handle conformance suite + spy
+transport).
+
+A transport ships separately — pick one:
+[@agentick/transport-websocket](../transport-websocket),
+[@agentick/transport-http](../transport-http),
+[@agentick/transport-unix-socket](../transport-unix-socket), or
+[@agentick/transport-in-process](../transport-in-process) for same-process calls.
 
 ## Quick start
-
-```ts
-import { createClient } from "@agentick/client-core";
-import { inProcessTransport } from "@agentick/transport-in-process";
-// or: import { websocket } from "@agentick/transport-websocket/client";
-
-const client = await createClient({
-  transport: inProcessTransport({ handler: myHandler }),
-});
-
-await client.connect();
-
-// Flat shortcut for the 90% case. `send()` returns the handle synchronously
-// (events via `.events()` + `.result`) — no await here; you await `.result`.
-const handle = client.send("sess-123", {
-  messages: [{ role: "user", content: "hello" }],
-});
-
-// Observe events one at a time via `.events()`:
-for await (const event of handle.events()) {
-  console.log(event);
-}
-
-const finalResult = await handle.result;
-
-await client.close();
-```
-
-## Everything hangs off one `client`
-
-No context objects, no emitter strings, no hand-rolled queries — the whole
-surface is discoverable on the client instance, and each streaming call
-exposes its event stream via `.events()`:
-
-```ts
-// Run + stream, all on the handle:
-const handle = client.send(sessionId, { messages });
-for await (const event of handle.events()) render(event); // ← the event stream
-await handle.result; //   ← …and the final result
-
-// Observe, uniformly — all return an Unsubscribe:
-client.onStateChange((s) => setBadge(s)); // connection state
-client.onCapabilitiesChange((c) => gate(c)); // feature flags, live across reconnect
-
-// Signals + channels are PRE-SCOPED on the handle — no repeating { kind, id }:
-client.session(id).onLog((e) => log(e.level, e.data));
-client.session(id).onProgress((e) => bar(e.progress, e.total));
-client.session(id).channelView("task-status"); // zero-config: latest frame wins
-// …the generic client.onLog(scope, cb) stays as the escape hatch for a
-// scope you don't hold a handle for.
-
-// Intercept outbound requests by method, typed off the wire. The hook
-// mirrors the session op it initiates — `onBeforeSessionSend`, no prefix:
-client.hook({
-  onBeforeSessionSend: (params) => ({ ...params }), // or throw to abort
-  onAfterSessionSend: (result) => result,
-});
-
-// Resource handles mirror the server harnesses 1:1:
-client.gateway().listApps();
-client.app(appId).createSession();
-client.session(id).dispatch("tool", input);
-```
-
-Prefer free functions (tree-shaking, or code typed against bare `ClientProtocol`)?
-`onLog` / `onProgress` also ship as `onLog(client, scope, cb)` — the instance
-methods just delegate. Same types, your call.
-
-## API surface
-
-### `createClient(options): Promise<Client>`
-
-```ts
-interface CreateClientOptions {
-  transport: ClientTransport;
-  extensions?: readonly ClientExtension[];
-  id?: string;
-  // Client-LOCAL lifetime observers, registered at construction:
-  onStateChange?: (state: ClientState) => void;
-  onCapabilitiesChange?: (caps: ClientCapabilities) => void;
-}
-```
-
-Returns a `Client` (= `ClientProtocol` widened with any extension-registered namespaces via `ClientNamespaces` declaration merging).
-
-`onStateChange` / `onCapabilitiesChange` are convenience shorthands for
-`client.onStateChange(fn)` / `client.onCapabilitiesChange(fn)` — wire a status
-badge or feature-gate at construction without threading the instance. They live
-for the client's lifetime. (Signal receivers `onLog` / `onProgress` are NOT
-client-config options: they are scoped, so they belong on the resource handles —
-`client.session(id).onLog(cb)`.)
-
-### Resource handles
-
-- `client.gateway()` → `GatewayHandle` (`listApps`, `getApp`, `events`)
-- `client.app(id)` → `AppHandle` (`createSession`, `listSessions`, `runOnce`, `events`)
-- `client.session(id)` → `SessionHandle` (`send`, `dispatch`, `abort`, `queue`, `snapshot`, `events`)
-
-Shapes mirror the in-process `GatewayHarnessProtocol` / `AppHarnessProtocol` / `SessionHarnessProtocol`.
-
-Every handle also carries the subscription surface **pre-scoped to its scope** —
-`onLog(handler, opts?)`, `onProgress(handler, opts?)`, `channelView(channel, config?)`
-— so `client.session(id).onLog(cb)` scopes to `{ kind: "session", id }` for you.
-This is the 90% form. The generic `client.onLog(scope, cb)` / `client.channelView(scope, …)`
-are the escape hatch for a scope you don't hold a handle for.
-
-### Runtime signals — `onLog` / `onProgress` (ADR 64)
-
-Tools and harnesses emit `log` / `progress` signals as bus events; the
-gateway projects matching events to subscribed clients over the
-existing `subscribe` channel. `onLog` / `onProgress` build the
-cross-surface wildcard query and map each envelope to its decoded
-payload plus origin scope, so app code doesn't hand-roll it.
-
-**Three surfaces, same types — the pre-scoped handle form is the 90%:**
-
-```ts
-// (a) PRE-SCOPED on the handle — the 90%: no repeating { kind, id }:
-const off = client.session(sessionId).onLog((e) => {
-  // e: { level, data, logger?, scope }
-  console.log(e.level, e.data);
-});
-client.session(sessionId).onProgress((e) => {
-  // e: { token, progress, total?, message?, scope }
-});
-off(); // closes the underlying subscription
-// …also client.app(id).onLog(cb) and client.gateway().onProgress(cb).
-
-// (b) generic instance method — the escape hatch for a scope you don't
-//     hold a handle for; you pass the scope explicitly:
-client.onLog({ kind: "session", id: sessionId }, (e) => console.log(e.level, e.data));
-
-// (c) free function — same call, tree-shakeable, works against any
-//     ClientProtocol impl (the instance methods just delegate to this):
-import { onLog, onProgress } from "@agentick/client-core";
-onLog(client, { kind: "session", id: sessionId }, (e) => console.log(e.level, e.data));
-```
-
-The handle method is `client.session(id).onLog(handler, opts?)`; it bakes the
-scope in and delegates to `onLog(client, scope, handler, opts?)`. Use whichever
-fits; all three share the exact same types.
-
-A `useLog` React hook is deferred until a `client-react` surface exists
-(see `TODO(#19-react)` in `src/signals.ts`); `onLog` is the framework-
-agnostic primitive it will wrap.
-
-### Channel reads — `channelStream` (primitive) + `channelView` (fold, ADR 33)
-
-The **ground-floor** read primitive is `channelStream(client, scope, channel)` —
-a channel's ordered stream of frame payloads (snapshot-first then deltas). It
-materializes nothing, so it is the general construct for any state shape (a
-value, a large collection, a paginated feed, a request/event channel). Consume
-it via `for await` or `stream.onChange(cb)`:
-
-```ts
-import { channelStream } from "@agentick/client-core";
-for await (const item of channelStream(client, scope, "feed")) window.push(item); // your structure
-```
-
-`channelView` is the **opt-in fold** over that stream — the K8s watch-list model,
-materializing frames into a `T`. Three surfaces, same types — the pre-scoped
-handle form is the 90%:
-
-```ts
-import { channelView, type ChannelView } from "@agentick/client-core";
-
-// (a) PRE-SCOPED + ZERO-CONFIG — the 90%. No scope, no config: the default
-//     fold is last-frame-payload-wins, so the view holds the latest frame
-//     payload (undefined before the first frame):
-const status = client.session(sessionId).channelView("task-status");
-status.get(); // the whole latest task-status object, or undefined
-
-// (b) pre-scoped WITH an explicit reducer — for snapshot+delta channels:
-const view: ChannelView<Store> = client.session(sessionId).channelView("knobs-state", {
-  initial: {}, // value get() returns until the first frame folds in
-  reduce: (state, frame) => (frame.kind === "snapshot" ? seed(frame) : fold(state, frame)),
-});
-
-// (c) generic instance method / free function — the escape hatch, scope explicit:
-const view2 = client.channelView(scope, "knobs-state", { initial: {}, reduce });
-const view3 = channelView<Store, Frame>(client, scope, "knobs-state", { initial: {}, reduce });
-
-view.subscribe((state) => render(state)); // STATE feed (also useSyncExternalStore w/ get)
-view.onChange((frame) => react(frame)); // CHANGE feed — each frame it folds
-view.get(); // current folded state (sync)
-view.status; // "loading" | "live" | "closed"
-view.close(); // tears down the subscription
-```
-
-**`config` is OPTIONAL everywhere.** Omitted, the default fold is
-**last-frame-payload-wins** (`initial = undefined`, `reduce = (_prev, frame) => frame`).
-That suits **full-object-per-frame** channels like `task-status`, where every
-frame carries the whole object. **Snapshot+delta** channels like `knobs-state`
-still need an explicit `reduce` — which is exactly why the typed façades
-(`knobsStateView`) supply one.
-
-The handle method `client.session(id).channelView(channel, config?)` bakes the
-scope in and delegates to `channelView(client, scope, channel, config?)`. All
-three share the same `ChannelView` / `ChannelViewConfig` types (defined in
-`@agentick/spec`, re-exported here).
-
-The subscription **opens with a snapshot frame**, then streams deltas on the
-**same** ordered stream — so there is **no baseline pull and no cursor**. The
-snapshot is simply frame one, which makes snapshot↔stream ordering correct by
-construction (no race to reconcile). `channelView` folds every frame onto held
-state via `reduce` and exposes it through the `useSyncExternalStore` contract
-(`get()` + `subscribe()`), so a future `client-react` `useChannel(view)` hook
-is a one-liner. `close()` tears down; a malformed frame is skipped rather than
-tearing down the stream.
-
-The primitive stays **dumb** — it does not know what a snapshot is.
-`reduce(state, frame)` handles whatever the producer sends: a snapshot-kind
-frame seeds, a delta-kind frame folds. That is the producer's + reducer's
-concern, which is why the same `channelView` covers both snapshot+delta
-channels (`knobs-state`) and full-object-per-item channels (`task-status`).
-
-It is knobs/tasks-**agnostic**: typed façades (`knobsStateView`,
-`taskStatusView`, `collectionView`) live in their own **harness** packages
-(e.g. `@agentick/knobs/client`) and supply `reduce` — they do not live
-here. Config: `ChannelViewConfig<T, F>` = `{ initial: T; reduce: (state, frame) => T }`.
-
-**Layering:** the typed façades (`knobsStateView` / `taskStatusView`) are the
-**sugar on top** — they hide the channel name, frame kinds, and reducer.
-`channelView` is the **generic escape hatch** beneath them, shipped as **both**
-`client.channelView(…)` (instance method) and `channelView(client, …)` (free
-function). Reach for the façade for a known resource; drop to `channelView` for
-a bespoke channel.
-
-### Session sub-handles — install-to-appear (ADR 87)
-
-A harness's typed façade doesn't have to be summoned by hand. The client
-`SessionHandle` is the **client twin of the server's `HookBridges`**: harness
-`/client` packages augment it with a named slot and register a factory, so
-`client.session(id).tasks` / `.knobs` / `.elicitations` **self-assemble** the
-moment you import the subpath — no client-core wiring, no manual
-`taskStatusView(client, id)`. Client-core itself knows about **none** of them —
-even elicitation, which used to be hardcoded here, is now a registrant
-contributed by `@agentick/elicitation/client`.
-
-```ts
-import { createClient } from "@agentick/client-core";
-import "@agentick/tasks/client"; // types `.tasks` + registers its factory
-import "@agentick/knobs/client"; // types `.knobs`
-import "@agentick/elicitation/client"; // types `.elicitations` (stream + `.respond`)
-
-const client = await createClient({ transport });
-const session = client.session(id);
-
-// Non-optional slots — install-to-appear, not `?.`:
-session.knobs.subscribe((knobs) => render(knobs)); // STATE feed — the folded value
-await session.knobs.set("temperature", 0.7); // knobs adds the write half
-session.tasks.onChange((task) => notify(task)); // CHANGE feed — the frame that changed
-session.elicitations.onChange((e) => e.accept({ ok: true })); // same read surface, a stream
-```
-
-> **Two feeds, one rule, everywhere.** Every channel read bottoms out in
-> `channelStream` (the frame stream — general, materializes nothing). The opt-in
-> `channelView` fold adds two feeds: `subscribe((state) => …)` (the folded STATE —
-> also the `useSyncExternalStore` contract with `get()`) and `onChange((frame) => …)`
-> (the CHANGE — each frame it folds). `status` reports readiness
-> (`"loading" | "live" | "closed"`). Stateful channels are views (`session.knobs`,
-> `session.tasks`); a request/event channel like `session.elicitations` skips the
-> fold and IS a `channelStream` — same `onChange`, no divergent API. Writes are
-> per-domain commands (`knobs.set`, `e.accept`, …).
-
-> Don't want the manual imports? **`@agentick/client`** is the
-> batteries-included bundle — it re-exports this package AND side-effect-imports
-> every built-in `/client` subpath, so `import { createClient } from
-"@agentick/client"` lights up all built-in slots automatically (the client
-> twin of how the `agentick` metapackage bundles server built-ins; becomes
-> `@agentick/client` at the v2 cut). This package (`client-core-next`) stays lean
-> for adopters who want to opt in per-harness.
-
-The seam is `spec/client`'s empty `SessionHandleExtensions` interface (the
-twin of the empty `HookBridges` seed) + `registerSessionHandleExtension(name,
-(client, sessionId) => sub)` in client-core. `makeSessionHandle` spreads every
-registered factory as a **lazy, cached getter** that never shadows a real
-handle member — so the slot costs nothing until first touched, and installing a
-harness package is the _only_ thing that makes its slot exist. A slot may be a
-folded view (`.tasks` / `.knobs` — a `ChannelView` + write command) or a raw
-stream (`.elicitations` — a `ChannelStream` + `.respond`), but every slot is a
-property, never a method. Same law as the server bridges (ADR 27): built-in vs optional is a
-packaging concern, not an architectural one — the registration path is
-identical, and client-core depends on **no** harness (no cycle).
-
-To publish your own sub-handle, mirror `tasks-next/client/register.ts`:
-
-```ts
-import { registerSessionHandleExtension } from "@agentick/client-core";
-import { myView, type MyView } from "./my-view.js";
-
-declare module "@agentick/spec" {
-  interface SessionHandleExtensions {
-    readonly mine: MyView;
-  }
-}
-registerSessionHandleExtension("mine", (client, sessionId) => myView(client, sessionId));
-```
-
-### The unified handle contract (B2 — `ClientHandle`)
-
-The five sub-handles were built across four separate passes with no cross-cutting
-owner, and it shows. B2 (`docs/proposals/v2/client-handles.md`) defines the one
-contract they all converge to. **Slice 1 (this) ships the contract types + the
-conformance suite only — no handle is refactored yet** (slices 3+); the types are
-the standard the refactors aim at.
-
-**The contract** (`src/handle-contract.ts`, re-exported from the index):
-
-```ts
-// MANDATORY CORE — every handle. Thin on purpose (the store.md lesson).
-interface ClientHandle {
-  subscribe(cb: () => void): Unsubscribe; // THE store contract: fires on change,
-  // cb takes NO args, read via list().
-  // Zero-adapter useSyncExternalStore.
-  close?(): void; // where the handle owns a subscription
-}
-
-// CAPABILITY PROFILES — declared (typed) + feature-detected (isEnumerable/…):
-interface Enumerable<T, Id = string> {
-  // current STATE, incl. pre-connection
-  list(): readonly T[];
-  get(id: Id): T | undefined;
-}
-interface Respondable<In> {
-  // correlated reply-by-id
-  respond(id: string, input: In): Promise<void>;
-}
-```
-
-Plus `isClientHandle` / `isEnumerable` / `isRespondable` — the runtime
-feature-detectors (the `isSnapshotCapable` precedent). `Streamable` was
-**removed**: no session-lifetime handle is `AsyncIterable` — _iterate BOUNDED
-things, observe UNBOUNDED things_. These are **plain structural** interfaces:
-no branding, no registration — **satisfying the shape IS conforming, and a
-handle may carry anything else** (contracts are floors, not ceilings). User data
-rides our bags untouched; the only fields the framework ever strips are its own
-reserved security fields, by name.
-
-**The conformance suite** — `runClientHandleConformance` from
-`@agentick/client-core/testing` (the client twin of `runStoreConformance`).
-A thin mandatory core + profile cases that run iff declared:
-
-| Group                          | Cases                                                                                                                                                     |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Core (always)**              | `subscribe` fires on change; the callback receives **no args**; the returned `Unsubscribe` stops it; `close()` (when present) tears down.                 |
-| **Enumerable (iff declared)**  | `list()` reflects **pre-connection** state (the mid-ask shape — the caller supplies a "seed then connect" closure); `get(id)` + unknown-id → `undefined`. |
-| **Respondable (iff declared)** | `respond` routes by id; an unknown id rejects; double-respond is defined (settles, never hangs).                                                          |
-| **Write verbs**                | every declared verb hits its wire method with correctly bound addressing (spy transport, `spyClientTransport`).                                           |
-
-It asserts required members **behave** — never exact shape / no-extra-keys. The
-suite is proven against a minimal fake handle in
-`src/__tests__/handle-conformance.spec.ts`.
-
-**AS-IS migration table** (honest assessment against the target contract; slices
-3+ close the gaps — this slice changes none of it):
-
-| Handle                    | Core `subscribe(cb)`                                                                                         | `close?()`         | Enumerable                                                                             | Respondable                                                                 | Write verb → wire                              | Gap to close (slices 3+)                                                                                          |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `session.knobs`           | ~ has `subscribe((state)=>…)` — passes state, not zero-arg; also carries `onChange` (the dual-feed artifact) | ✓                  | ✗ — `get()` returns the whole map, no `list()`/`get(id)`; values only (no descriptors) | n/a                                                                         | `set` → `knobs/set` ✓                          | subscribe → zero-arg; add `list`/`get(id)`; descriptors on wire (#1); `key`→`id` (#13); drop `onChange`           |
-| `session.tasks`           | ~ same as knobs (state-passing + `onChange`)                                                                 | ✓                  | ✗ — `get()` = whole `TaskStatusMap`, no `list`/`get(id)` (closest to correct)          | n/a                                                                         | `cancel` → `tasks/cancel` ✓                    | subscribe → zero-arg; add `list`/`get(id)`                                                                        |
-| `session.elicitations`    | ✗ — `ChannelStream`: `AsyncIterable` + `onChange(frame)`, no `subscribe(cb)`                                 | ✓                  | ✗ — live-only (mid-ask client sees nothing)                                            | ~ has `respond(input)` — id is **inside** `input`, not `respond(id, input)` | `respond` → `session/respond_to_elicitation` ✓ | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list` (§6.1); `respond(id, input)` shape |
-| `session.clientToolCalls` | ✗ — `ChannelStream` (`AsyncIterable` + `onChange`)                                                           | ✓                  | ✗ — live-only                                                                          | ✓ — `respond(correlationId, result)` already matches `respond(id, input)`   | `respond` → `session/respond_to_tool_call` ✓   | add `subscribe(cb)`; drop `AsyncIterable`; server pending enumeration + `list`; verb-naming for route/confirm     |
-| `session.timeline`        | ✗ — not a sub-handle; a free `timelineView(client, id, …)` factory                                           | (view has `close`) | ✗ — no wire history path                                                               | n/a                                                                         | none (local view mutations)                    | become a registered sub-handle; `session/timeline_history` wire read (#2); Cursor-vs-seq (§6.4)                   |
-
-Legend: ✓ conforms · ~ partial/shape-mismatch · ✗ absent. None of the handles is
-`Enumerable` today (the live-only defect); every one carries a working write verb
-over the wire; the elicitation/tool-call read surface is still the removed
-`AsyncIterable`/`Streamable` identity.
-
-### Capabilities + server info
-
-`client.connect()` runs a two-step handshake — `initialize` (protocol version + framework flags + server info) then `_extensions/list` (wire-extension enumeration for feature-gating). Both populate `client.capabilities` and `client.serverInfo`.
-
-```ts
-await client.connect();
-
-// Framework flags advertised by the server:
-if (client.capabilities.framework.progress) {
-  // server supports notifications/progress
-}
-
-// Feature-gate on wire-extension methods:
-if (client.capabilities.hasMethod("mcpClients/reauthenticate")) {
-  showConnectButton();
-}
-if (client.capabilities.hasNamespace("crm")) {
-  mountCrmAdminPanel();
-}
-
-// Full enumeration for admin UIs:
-for (const ext of client.capabilities.extensions) {
-  console.log(`${ext.name} v${ext.version} — ${ext.methods.join(", ")}`);
-}
-
-// Server identity:
-console.log(client.serverInfo?.name, client.serverInfo?.version);
-```
-
-**Timing.** Before `connect()` returns: capabilities empty, `serverInfo` undefined. After successful connect: populated. On disconnect / reconnect: cleared, then repopulated on the next successful connect. Extension sets are per-connection.
-
-**Graceful degradation.** If the server returns `MethodNotFound` for either `initialize` or `_extensions/list` (older-server transitional compat), that RPC's result is skipped and connect proceeds — leaving that portion of `capabilities` empty. Every other error surfaces as a rejected `connect()`.
-
-**Type-augmentable slots.** `capabilities.framework` (aka `ServerCapabilities`) is declaration-merge extensible for adopters that want typed boolean flags. `capabilities.ext` (aka `ClientCapabilityExtensions`) is an empty-seed slot reserved for future richer per-extension typed metadata — declaration-merge into it to add typed slots as adopters/extensions add per-extension metadata blobs to `_extensions/list` responses.
-
-**Reactive to server changes (#311).** The client subscribes to `notifications/capabilities/changed` at connect time. When the server emits it (currently manual via `gateway.notify(...)`, #308 will wire dynamic install/uninstall to fire it automatically), the client refetches `_extensions/list` and swaps the capability snapshot. Adopters observe via `onCapabilitiesChange`:
-
-```ts
-const unsub = client.onCapabilitiesChange((caps) => {
-  // Fires on: initial handshake, post-reconnect handshake,
-  // notifications/capabilities/changed refetch, and wire drop
-  // (empty snapshot). Same payload as reading client.capabilities
-  // at the moment it fires.
-  refreshFeatureGates(caps);
-});
-```
-
-**Synchronizing on "capabilities settled."** `client.whenReady()` awaits every currently in-flight capability-syncing operation — post-reconnect handshake AND refetches from `notifications/capabilities/changed`. Adopters wanting to gate on a fresh snapshot use it directly:
-
-```ts
-gateway.notify({ method: "notifications/capabilities/changed", params: {} });
-await client.whenReady();
-// client.capabilities now reflects the fresh server view
-```
-
-### Extensions
-
-```ts
-import type { ClientExtension } from "@agentick/spec";
-
-const retry: ClientExtension = {
-  name: "retry",
-  async request(req, next) {
-    for (let i = 0; i < 3; i++) {
-      try {
-        return await next(req);
-      } catch (e) {
-        if (i === 2) throw e;
-      }
-    }
-    throw new Error("unreachable");
-  },
-};
-
-const client = await createClient({ transport, extensions: [retry] });
-```
-
-Three surfaces:
-
-- **`request` / `subscribe` middleware** — chain of responsibility wrapping wire calls. Promise-native; outer→inner composition (first in array = outermost). Use `effectMiddleware()` for an Effect-flavored alternative.
-- **Lifecycle handlers** — `connection:lost`, `auth:expired`, `subscription:evicted`, `rpc:error`. Per-event merge rules (`observer` / `first-non-null-wins` / `any-reconnect-wins`).
-- **`install(installer)`** — bus subscriber + namespace registration + onClose handlers.
-
-Adopters extending the public surface:
-
-```ts
-declare module "@agentick/spec" {
-  interface ClientNamespaces {
-    offline: { pending(): Promise<Request[]>; flush(): Promise<void> };
-  }
-}
-```
-
-### `effectMiddleware(mw)`
-
-Opt-in adapter for adopters who prefer the Effect-native signature
-(`(input, next) => Effect.Effect<Result, Error, never>`). The canonical
-middleware shape is Promise-based because most adopters write trivial
-wrappers.
-
-### Client hooks — `client.hook` / `client.hooks`
-
-Intercept outbound wire requests by method, symmetric with the server's
-`harness.hook` / `harness.hooks` (ADR 83). A **before-hook** transforms the
-request `params` (or throws to abort the request before it leaves); an
-**after-hook** transforms the `result` the caller sees. Hooks are read **live**
-per request — register or remove them any time — and when none are registered
-the request path is zero-overhead.
-
-The names are typed off `WireMethods`, and the client hook **mirrors the
-session op it initiates**: the client is the side that INITIATES the send the
-session executes, so `session/send` → `onBeforeSessionSend` — the same name as
-the session's op hook, because it IS that send observed from the initiating end.
-No `wire:` prefix here. The `Wire*` qualifier lives on the GATEWAY's
-wire-dispatch boundary, where the inbound `wire:session/send` op and the folded
-`session:send` op collide under live inheritance and must stay distinguishable;
-the client has no such collision.
-
-Two surfaces, both returning an `Unsubscribe`:
-
-```ts
-import { createClient } from "@agentick/client-core";
-
-const client = await createClient({ transport });
-
-// 1. Batch config — register several at once:
-const off = client.hook({
-  // before: `throw` to abort, return reshaped params to transform, or
-  // return nothing to pass them through unchanged. `params` is typed as
-  // WireParams<"session/send">.
-  onBeforeSessionSend: (params, ctx) => {
-    if (overBudget()) throw new Error("client budget exceeded"); // request never leaves
-    return params; // (or a reshaped copy)
-  },
-  // after: observe or transform the result the caller receives
-  onAfterSessionSend: (result, ctx) => {
-    metrics.record(ctx.method);
-    return result; // (or a reshaped copy)
-  },
-});
-off(); // remove them all
-
-// 2. Per-method proxy — one registrar, live:
-const stop = client.hooks.onBeforeAppRunOnce((params, ctx) => {
-  audit(ctx.method); // ctx.method === "app/run_once"
-  return params;
-});
-```
-
-The hook context is `{ method, signal }` (`method` is the wire method being
-called; `signal` the request's `AbortSignal`). `client.hook(config)` and every
-`client.hooks.on…` registrar return an `Unsubscribe`.
-
-## Patterns
-
-### Talk to a remote gateway over WebSocket
 
 ```ts
 import { createClient } from "@agentick/client-core";
@@ -592,172 +40,659 @@ const client = await createClient({
   transport: websocket({ url: "wss://example.com/agentick" }),
 });
 
-await client.connect(); // runs the handshake, populates capabilities
+await client.connect(); // opens the wire, runs the handshake
 
-// The transport reconnects with exponential backoff + full jitter on a
-// drop; the client re-runs the handshake and swaps the capability
-// snapshot, so feature gates stay live across reconnects.
-client.onCapabilitiesChange((caps) => refreshFeatureGates(caps));
-
-await client.send("sess-123", {
-  messages: [{ role: "user", content: "hello" }],
-}).result;
-```
-
-On a runtime without a global `WebSocket` (Node 18/20, or when you need
-custom upgrade headers) pass the constructor explicitly:
-
-```ts
-websocket({ url, WebSocket: (await import("ws")).WebSocket });
-```
-
-> **Multi-transport `selector()` and multi-tab multiplexing are declared
-> in ADR 33 but not yet shipped** — see [Roadmap & known gaps](#roadmap--known-gaps)
-> and the [Development plan](#development-plan) (phases 33.D / 33.G).
-> The `createClient({ transport })` seam is the extension point either
-> will slot into with no application-code change.
-
-### Scope escalation — the same subscription, wider
-
-The pre-scoped handle methods are the 90%; the tiers below them exist for when
-you need a wider net or don't hold the handle:
-
-```ts
-client.session(id).onLog(cb); // this session
-client.app(appId).onLog(cb); // every session under an app — one subscription
-client.gateway().onLog(cb); // deployment-wide
-
-// don't hold a handle? pass the scope. Same call, same types:
-client.onLog({ kind: "session", id }, cb);
-
-// resume from a persisted cursor after a reconnect gap:
-client.session(id).onProgress(render, { fromCursor: savedCursor });
-```
-
-### channelView — three levels of control
-
-```ts
-// (1) zero-config: full-object-per-frame channel, latest wins
-const status = client.session(id).channelView<TaskStatus>("task-status");
-status.get(); // TaskStatus | undefined
-
-// (2) custom fold: derive whatever state you want from snapshot + deltas
-const online = client.session(id).channelView<Set<string>, PresenceFrame>("presence", {
-  initial: new Set(),
-  reduce: (set, frame) =>
-    frame.kind === "snapshot"
-      ? new Set(frame.ids)
-      : frame.op === "join"
-        ? new Set(set).add(frame.id)
-        : (set.delete(frame.id), set),
+// `send` returns the run handle SYNCHRONOUSLY — you await `.result`, not `send`.
+const run = client.send("sess-123", {
+  messages: [{ role: "user", content: "summarize the last build failure" }],
 });
 
-// (3) typed façade — zero config AND the correct fold, from the harness package
-import { knobsStateView } from "@agentick/knobs/client";
-const knobs = knobsStateView(client, id); // snapshot+delta handled for you
+for await (const ev of run.events()) {
+  if (ev.type === "content-delta") process.stdout.write(ev.delta);
+  if (ev.type === "tool-dispatch") console.log(`\n[${ev.name}] ${ev.durationMs}ms`);
+}
+
+const { response, usage, stopReason } = await run.result;
+console.log(stopReason, usage.totalTokens);
+
+await client.close();
 ```
 
-All three return the same `useSyncExternalStore` contract (`get()` / `subscribe()`
-/ `close()`), so a React binding is one `useSyncExternalStore` call over any of them.
+`run.abort(reason?)` issues `session/abort` and closes the progress stream.
 
-### Cross-cutting request policy with client hooks
+## One client, one surface
 
-Hooks are method-scoped, typed off the wire, mirror the session op they
-initiate (`onBeforeSessionSend`, no prefix), and are live — add or remove them
-any time; an empty registry is zero-overhead:
+There are no context objects, no emitter strings, and no hand-rolled queries.
+Everything is reachable from the instance you already hold.
 
 ```ts
-// gate sends on a local budget, observe/reshape results. ctx is { method, signal }:
-const off = client.hook({
-  onBeforeSessionSend: (params) => {
-    if (overBudget()) throw new Error("client budget exceeded"); // never leaves
-    return params; // or a reshaped copy
+// Resource handles mirror the server's own gateway / app / session shapes:
+await client.gateway().listApps();
+await client.app("support-bot").createSession();
+await client.session("sess-123").dispatch("search", { q: "flaky test" });
+
+// Observers, all returning an Unsubscribe:
+client.onStateChange((s) => setBadge(s));
+client.onCapabilitiesChange((caps) => refreshFeatureGates(caps));
+
+// Subscriptions are PRE-SCOPED on a handle — no repeating `{ kind, id }`:
+client.session("sess-123").onLog((e) => log(e.level, e.data));
+client.session("sess-123").onProgress((e) => bar(e.progress, e.total));
+
+// One middleware seam wraps every outbound wire call:
+client.use(async (params, next, ctx) => {
+  console.time(ctx.method);
+  try {
+    return await next(params);
+  } finally {
+    console.timeEnd(ctx.method);
+  }
+});
+```
+
+### Handles nest
+
+```ts
+const app = client.gateway().app("support-bot"); // GatewayHandle → AppHandle
+const session = app.session("sess-123"); // AppHandle → SessionHandle
+```
+
+`client.app(id)` and `client.session(id)` are the direct forms — nesting is for
+when you're walking down from a listing.
+
+| Handle               | Verbs                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------ |
+| `client.gateway()`   | `listApps` · `getApp` · `app(id)` · `events`                                                     |
+| `client.app(id)`     | `createSession` · `getSession` · `listSessions` · `runOnce` · `close` · `session(id)` · `events` |
+| `client.session(id)` | `send` · `dispatch` · `abort` · `snapshot` · `rebind` · `close` · `events`                       |
+
+Every handle also carries `onLog`, `onProgress`, and `channelView` pre-bound to
+its own scope. The generic `client.onLog(scope, cb)` stays available for a scope
+you don't hold a handle for.
+
+## Sub-handles install to appear
+
+The session handle is assembled, not hardcoded. Each capability package ships a
+`/client` subpath that types a named slot and registers a factory; importing it is
+the only thing that makes the slot exist. Client-core knows about none of them by
+name and depends on none of them.
+
+```ts
+import { createClient } from "@agentick/client-core";
+import "@agentick/knobs/client"; // types + registers `session.knobs`
+import "@agentick/tasks/client"; // `session.tasks`
+import "@agentick/elicitation/client"; // `session.elicitations`
+
+const client = await createClient({ transport });
+const session = client.session("sess-123");
+
+// Not optional chaining — the slot exists because the import does.
+session.knobs.subscribe(() => render(session.knobs.list()));
+await session.knobs.set("temperature", 0.7);
+
+session.elicitations.subscribe(() => {
+  for (const ask of session.elicitations.list()) void ask.accept({ ok: true });
+});
+```
+
+> [!TIP]
+> Don't want the manual imports? [@agentick/client](../client) is the bundle —
+> it re-exports this package and side-effect-imports every built-in `/client`
+> subpath, so every slot lights up from one import. This package stays lean for
+> adopters who opt in per capability.
+
+Slots are lazy, cached getters that never shadow a real handle member, so a slot
+costs nothing until first touched. To publish your own:
+
+```ts
+import { registerSessionHandleExtension } from "@agentick/client-core";
+
+declare module "@agentick/spec" {
+  interface SessionHandleExtensions {
+    readonly mine: { list(): readonly string[] };
+  }
+}
+
+registerSessionHandleExtension("mine", (client, sessionId) => makeMine(client, sessionId));
+```
+
+### Every sub-handle answers the same three questions
+
+A handle is nouns plus verbs over one server resource. The read core is one
+method; the rest are declared capability profiles.
+
+```ts
+import { isEnumerable, isRespondable, type ClientHandle } from "@agentick/client-core";
+
+// CORE — every handle. `cb` takes NO arguments; you read via the handle.
+declare const handle: ClientHandle;
+const off = handle.subscribe(() => rerender());
+off();
+handle.close?.();
+
+// PROFILES — declared in the type, feature-detectable at runtime:
+if (isEnumerable<{ id: string }>(handle)) {
+  handle.list(); // current state, INCLUDING what happened before you connected
+  handle.get("id-1");
+}
+if (isRespondable<{ ok: boolean }>(handle)) {
+  await handle.respond("correlation-1", { ok: true });
+}
+```
+
+That zero-argument `subscribe` is why a handle needs no React adapter:
+`useSyncExternalStore(handle.subscribe, handle.list, handle.list)` is the whole
+binding, which is exactly what [@agentick/client-react](../client-react) ships.
+
+These are plain structural interfaces — no branding, no registration. Satisfying
+the shape is conforming, and a handle may carry anything else it likes. Prove
+yours with the suite from `/testing`:
+
+```ts
+import { runClientHandleConformance, spyClientTransport } from "@agentick/client-core/testing";
+
+runClientHandleConformance({
+  label: "myHandle",
+  setup: () => {
+    const spy = spyClientTransport();
+    const handle = myHandle(spy, "s1");
+    return { handle, change: () => spy.emit("my-channel", { id: "a" }) };
   },
+  writeVerbs: [
+    {
+      verb: "set",
+      method: "mine/set",
+      boundAddress: { sessionId: "s1" },
+      run: async () => {
+        const spy = spyClientTransport();
+        await myHandle(spy, "s1").set("x");
+        return spy.lastRequest()!;
+      },
+    },
+  ],
+});
+```
+
+The core cases always run: `subscribe` fires on change, the callback receives no
+arguments, the returned unsubscribe stops it, `close()` tears down, and the read
+members survive destructuring (no `this`-dependence). The `enumerable` and
+`respondable` probes are optional — supply one and its cases run, including the
+one that matters most: `list()` must reflect state that existed **before** you
+connected.
+
+## Namespaces you never wrote
+
+A session-scoped wire method needs no client code at all. Declare the row and the
+gateway handler; the typed client method falls out.
+
+```ts
+declare module "@agentick/spec" {
+  interface WireMethods {
+    "billing/approve": {
+      params: { sessionId: string; invoiceId: string };
+      result: { approved: boolean };
+    };
+  }
+}
+
+// No `billing` client code exists anywhere. This is typed and round-trips:
+const { approved } = await client.session("sess-123").billing.approve({ invoiceId: "inv-1" });
+```
+
+The session handle synthesizes the namespace on first access and issues
+`billing/approve` with `sessionId` bound. A typo can't compile — the mapped type
+is the guard — and an unknown method is rejected by the server. Registered
+sub-handles win over synthesis for their own namespace, so nothing is shadowed.
+
+## One interception seam
+
+`client.use(middleware)` is the only interception path. It wraps every derived
+wire method — the ones you wrote, the ones a sub-handle wrote, and the ones that
+don't exist yet.
+
+```ts
+const off = client.use(async (params, next, ctx) => {
+  // ctx: { method, sessionId?, signal? }
+  if (ctx.method.startsWith("session/") && overBudget()) {
+    throw new Error("client budget exceeded"); // request never leaves
+  }
+  const result = await next(params);
+  metrics.record(ctx.method);
+  return result;
+});
+off(); // leased — remove it any time
+```
+
+An empty registry fast-paths straight to the transport, so the seam costs nothing
+until you use it.
+
+Per-namespace scoping is sugar on the same seam — `session.knobs.use(mw)` wraps
+your middleware to fire only for `knobs/*`, then registers it here.
+
+### Hooks are the before/after shape of it
+
+When you want to reshape params or a result for one method, `client.hook` is less
+ceremony than an around-middleware. Names are derived from the wire method and
+mirror the session op the call initiates — `session/send` → `onBeforeSessionSend`.
+
+```ts
+const off = client.hook({
+  // Return reshaped params, return nothing to pass through, or throw to abort.
+  onBeforeSessionSend: (params) => ({ ...params, maxTicks: params.maxTicks ?? 8 }),
   onAfterSessionSend: (result, ctx) => {
-    metrics.timing(ctx.method, result); // observe, or reshape the result
+    metrics.timing(ctx.method, result.result.usage.totalTokens);
     return result;
   },
 });
-client.hooks.onBeforeAppRunOnce((p) => ({ ...p, idempotencyKey: p.idempotencyKey ?? ulid() }));
-off(); // remove the batch
+off(); // removes every hook in the config
+
+// Or one at a time, live:
+const stop = client.hooks.onBeforeAppRunOnce((params, ctx) => {
+  audit(ctx.method); // "app/run_once"
+  return params;
+});
 ```
 
-### Consuming the execution stream
+Hooks are method-scoped and read live — register or remove them at any point.
+Both surfaces return an `Unsubscribe`; the hook context is `{ method, signal? }`.
 
-`events()` yields typed `StreamEvent`s; `.result` assembles the final answer
-independently; `.abort()` cancels in flight:
+## Typed errors survive the wire
+
+A server-thrown framework error arrives on the client as the same class it was
+thrown as — the client rehydrates it above the extension pipeline, before your
+`catch` block sees it.
 
 ```ts
-const handle = client.send(id, { messages });
+import { SessionNotFoundError } from "@agentick/spec";
 
-for await (const ev of handle.events()) {
-  if (ev.type === "content-delta") ui.append(ev.delta);
-  if (ev.type === "tool-call") ui.showToolCall(ev);
-  if (cancelled) await handle.abort(); // structured cancel
+try {
+  await client.session("nope").snapshot();
+} catch (e) {
+  if (e instanceof SessionNotFoundError) {
+    console.log(e.sessionId); // fields round-trip, not just the message
+  }
 }
-
-const { response, usage, stopReason } = await handle.result;
-if (stopReason === "aborted") ui.markCancelled();
 ```
 
-### One handle, the whole session
+An unrecognized error tag degrades to `UnknownAgentickError` with its payload
+intact — never silent data loss. Protocol-level failures (method not found, parse
+errors) carry no tag and pass through as the raw JSON-RPC envelope, which is what
+extensions like retry classify on.
 
-The scoped subscriptions, the channel views, and `send` all hang off the one
-session handle — reach for it once:
+## Capabilities and server identity
+
+`connect()` runs a two-step handshake — `initialize` for protocol version,
+framework flags, and server info, then `_extensions/list` for wire-extension
+enumeration. Both land on `client.capabilities` and `client.serverInfo`.
+
+```ts
+await client.connect();
+
+if (client.capabilities.framework.progress) enableProgressBars();
+if (client.capabilities.hasMethod("mcpClients/reauthenticate")) showConnectButton();
+if (client.capabilities.hasNamespace("billing")) mountBillingPanel();
+
+for (const ext of client.capabilities.extensions) {
+  console.log(`${ext.name} v${ext.version} — ${ext.methods.join(", ")}`);
+}
+
+console.log(client.serverInfo?.name, client.serverInfo?.version);
+```
+
+The snapshot is empty before `connect()` and after the wire drops, and is swapped
+atomically per handshake — subscribers never observe a half-populated
+intermediate. Extension sets are per-connection: a reconnect clears the snapshot,
+re-runs the handshake against whoever answered, and fires `onCapabilitiesChange`
+with the fresh view. `whenReady()` awaits an in-flight post-reconnect handshake.
+
+> [!NOTE]
+> If the server answers `MethodNotFound` for `_extensions/list`, that half is
+> skipped and `connect()` still resolves with the framework flags. Any other
+> error, and a failing `initialize`, rejects `connect()`.
+
+`capabilities.framework` is declaration-merge extensible if you want typed flags
+of your own.
+
+## Runtime signals
+
+Tools and session capabilities emit `log` and `progress` as bus events; the
+gateway projects the matching ones to subscribed clients over the same
+subscription channel everything else uses. `onLog` / `onProgress` build the
+cross-surface query and decode each envelope for you.
+
+```ts
+// Pre-scoped on a handle — the common case:
+const off = client.session(id).onLog((e) => console.log(e.level, e.data, e.scope));
+client.session(id).onProgress((e) => bar(e.progress, e.total));
+off(); // closes the underlying subscription
+
+// Scope escalation — the same call, a wider net, still ONE subscription:
+client.app(appId).onLog(cb); // every session under an app
+client.gateway().onLog(cb); // deployment-wide
+
+// Resume after a reconnect gap:
+client.session(id).onProgress(render, { fromCursor: savedCursor });
+```
+
+Three spellings, identical types: the pre-scoped handle method, the generic
+`client.onLog(scope, cb)` for a scope you don't hold a handle for, and the
+tree-shakeable free function `onLog(client, scope, cb)` the other two delegate to.
+
+## The fold kit
+
+Under every read surface is one ground-floor primitive and one fold over it. Reach
+for these when you're composing something the bundled handles don't cover.
+
+**`eventStream` / `channelStream` — materialize nothing.** An ordered stream of
+frame payloads. Single-consumer, like the transport subscription it wraps.
+
+```ts
+import { channelStream } from "@agentick/client-core";
+
+const feed = channelStream<{ id: string }>(client, { kind: "session", id }, "feed");
+for await (const item of feed) window.push(item); // your structure, your rules
+feed.close();
+```
+
+**`eventView` / `channelView` — the opt-in fold.** The watch-list model: the
+stream opens with a snapshot frame and continues with deltas on the _same_ ordered
+stream, so there is no baseline pull, no cursor, and no snapshot-versus-stream race
+to reconcile. `reduce` folds every frame onto held state.
+
+```ts
+import { channelView } from "@agentick/client-core";
+
+// Zero-config: the default fold is last-frame-wins. Right for channels where
+// every frame carries the whole object.
+const status = client.session(id).channelView<TaskStatus>("task-status");
+status.get(); // TaskStatus | undefined
+
+// Explicit reduce: for snapshot+delta channels.
+const online = channelView<Set<string>, PresenceFrame>(client, scope, "presence", {
+  initial: new Set(),
+  reduce: (set, frame) =>
+    frame.kind === "snapshot" ? new Set(frame.ids) : new Set(set).add(frame.id),
+});
+
+online.subscribe((state) => render(state)); // STATE feed — the folded value
+online.onChange((frame) => audit(frame)); // CHANGE feed — each frame it folds
+online.get(); // sync read
+online.status; // "loading" | "live" | "closed"
+online.close();
+```
+
+The primitive stays dumb — it doesn't know what a snapshot is. `reduce` decides,
+which is why one `channelView` covers both full-object channels and snapshot+delta
+channels. A malformed frame is skipped rather than tearing the stream down, and a
+throwing listener can't starve its siblings.
+
+**`filteredView` — many projections, one subscription.** A handle _is_ its default
+view; `filteredView` mints additional ones over the same source. Each re-derives
+from the source on every change and closes independently; the shared subscription
+survives until the source closes.
+
+```ts
+import { filteredView } from "@agentick/client-core";
+
+const errors = filteredView(handle, { filter: (e) => e.level === "error" });
+errors.subscribe(() => render(errors.list()));
+errors.close(); // detaches only this projection
+```
+
+`list()` is memoized between changes — a fresh array per call would render-loop a
+`useSyncExternalStore` consumer, so the projection is cached and invalidated on
+the next source change.
+
+**`liveStore`** is the fan-out core all of them share: one held state, the two
+feeds, the store contract, and an imperative `set` seam for owners that mutate
+locally as well as fold.
+
+> [!NOTE]
+> These are the extension-author tier. An application reads state through a
+> handle's `list()` / `subscribe()` / `view()`, not by wiring a `channelView`
+> itself. Typed façades — `session.knobs`, `session.tasks` — supply the channel
+> name and the reducer so you never see either.
+
+## Extensions
+
+An extension wraps the wire and installs into the client's lifecycle.
+
+```ts
+import type { ClientExtension } from "@agentick/spec";
+
+const retry: ClientExtension = {
+  name: "retry",
+  async request(req, next) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await next(req);
+      } catch (e) {
+        if (attempt === 2) throw e;
+      }
+    }
+  },
+};
+
+const client = await createClient({ transport, extensions: [retry] });
+```
+
+Three surfaces:
+
+- **`request` / `subscribe` middleware** — chain of responsibility around wire
+  calls. Promise-native, outer→inner (first in the array is outermost). Prefer
+  `client.use` for application policy; extensions are for packaged behavior.
+- **Lifecycle handlers** — `connection:lost`, `auth:expired`,
+  `subscription:evicted`, `rpc:error`, merged per event by declared rule
+  (`observer`, `first-non-null-wins`, `any-reconnect-wins`).
+- **`install(installer)`** — register a namespace, subscribe the client bus, add
+  `onClose` handlers (which run LIFO at `close()`).
+
+A registered namespace appears on the client, typed by declaration merging:
+
+```ts
+declare module "@agentick/spec" {
+  interface ClientNamespaces {
+    offline: { pending(): Promise<unknown[]>; flush(): Promise<void> };
+  }
+}
+```
+
+`effectMiddleware(mw)` adapts an Effect-native middleware
+(`(input, next) => Effect<Result, Error, never>`) into the Promise pipeline; it
+interleaves with Promise-native middleware in the same outer→inner order. The
+canonical shape is Promise-based because most middleware is a trivial wrapper.
+
+Prebuilt extensions live in [@agentick/client-extensions](../client-extensions).
+
+## Client events
+
+`client.events()` is a live stream of events _about the client itself_ — a
+separate emitter from both the wire and the observability bus.
+
+```ts
+const stream = client.events({ surface: "connection" });
+for await (const ev of stream) {
+  if (ev.surface === "connection") console.log(ev.from, "→", ev.to);
+}
+await stream.close(); // ends every active iterator, releases the subscription
+```
+
+Each call yields an independent stream with its own subscription, so concurrent
+iterators don't interfere. `filter.surface` and `filter.phase` accept a single
+value or an array and are AND-ed. The stream is live-only: `cursor` advances
+monotonically as events are yielded, but there is no replay buffer, so
+`fromCursor` is accepted and ignored.
+
+## API
+
+### `createClient(options)`
+
+| Option                 | Purpose                                                   |
+| ---------------------- | --------------------------------------------------------- |
+| `transport`            | Required. Any `ClientTransport`.                          |
+| `extensions`           | Extensions in outer→inner order.                          |
+| `id`                   | Client identity; defaults to a generated one.             |
+| `onStateChange`        | Shorthand for `client.onStateChange(fn)` at construction. |
+| `onCapabilitiesChange` | Shorthand for `client.onCapabilitiesChange(fn)`.          |
+
+Resolves to a `Client` — `ClientProtocol` widened with any namespaces registered
+through `ClientNamespaces` declaration merging. The client does **not**
+auto-connect; call `connect()` when you want the wire open.
+
+### `client`
+
+| Member                                  | Purpose                                            |
+| --------------------------------------- | -------------------------------------------------- |
+| `connect()` / `close()`                 | Open the wire + handshake; tear everything down    |
+| `state` / `onStateChange(fn)`           | Connection state, and transitions                  |
+| `capabilities` / `serverInfo`           | What the connected gateway supports, and who it is |
+| `onCapabilitiesChange(fn)`              | Fires on every capability-snapshot swap            |
+| `whenReady()`                           | Await an in-flight post-reconnect handshake        |
+| `request(method, params, signal?)`      | Typed JSON-RPC dispatch                            |
+| `use(middleware)`                       | The interception seam; returns an `Unsubscribe`    |
+| `hook(config)` / `hooks.on…(fn)`        | Method-scoped before/after sugar over `use`        |
+| `gateway()` / `app(id)` / `session(id)` | Resource handles                                   |
+| `send(sessionId, input)`                | Shortcut for `session(id).send(input)`             |
+| `onLog` / `onProgress`                  | Generic scoped signal subscriptions                |
+| `channelView(scope, channel, config?)`  | Generic channel fold                               |
+| `events(filter?)`                       | Live stream of client-lifecycle events             |
+| `transport` / `id`                      | The wrapped transport; this client's identity      |
+
+### Exports
+
+| Export                                                                 | Purpose                                             |
+| ---------------------------------------------------------------------- | --------------------------------------------------- |
+| `createClient`                                                         | Build a client                                      |
+| `ClientHandle` / `Enumerable` / `Respondable`                          | The handle contract and its capability profiles     |
+| `isClientHandle` / `isEnumerable` / `isRespondable`                    | Runtime feature detection for the above             |
+| `registerSessionHandleExtension` / `registeredSessionHandleExtensions` | Publish + introspect session slots                  |
+| `makeGatewayHandle` / `makeAppHandle` / `makeSessionHandle`            | Handle factories, for building a client of your own |
+| `onLog` / `onProgress`                                                 | Tree-shakeable signal subscriptions                 |
+| `channelStream` / `channelView`                                        | Channel-pinned stream and fold                      |
+| `eventStream` / `eventView`                                            | The generic stream and fold beneath them            |
+| `liveStore` / `filteredView`                                           | Fan-out core; shared-subscription projections       |
+| `composeRequest` / `composeSubscribe`                                  | The middleware composers                            |
+| `effectMiddleware`                                                     | Effect ↔ Promise middleware adapter                 |
+| `ClientHandlerRegistry`                                                | Lifecycle-handler merge rules                       |
+| `commandForMethod`                                                     | Wire method → hook command name                     |
+
+Protocol types (`Client`, `ClientProtocol`, `ClientTransport`, `ClientExtension`,
+`ClientState`, `TransportError`, …) are re-exported for one-import ergonomics;
+[@agentick/spec](../spec) is their canonical home.
+
+### `@agentick/client-core/testing`
+
+| Export                       | Purpose                                                        |
+| ---------------------------- | -------------------------------------------------------------- |
+| `runClientHandleConformance` | The executable handle contract — core + declared profiles      |
+| `spyClientTransport`         | Records `request` calls; drives a push-controlled subscription |
+
+## Patterns
+
+**Reconnect without losing your feature gates.** A transport that reconnects on
+its own (the [WebSocket one](../transport-websocket) does) drives the client back
+through the handshake, which swaps the capability snapshot. Gates stay live if you
+subscribe rather than read once.
+
+```ts
+client.onCapabilitiesChange((caps) => refreshFeatureGates(caps));
+```
+
+On a runtime with no global `WebSocket`, or when you need custom upgrade headers,
+pass the constructor: `websocket({ url, WebSocket: (await import("ws")).WebSocket })`.
+
+**One handle, the whole session.** The scoped subscriptions, the sub-handles, and
+`send` all hang off the same object — reach for it once.
 
 ```ts
 const s = client.session(id);
 s.onLog(logPanel.add);
-const status = s.channelView("task-status"); // zero-config view — stays on the handle
-const handle = s.send({ messages });
+s.knobs.subscribe(() => renderKnobs(s.knobs.list()));
+const run = s.send({ messages });
 ```
 
-## Status
+**Bind a UI with no adapter.** Any handle is already a store:
 
-Phase 33.B of the v2 implementation plan — see `docs/proposals/v2/STATUS.md` and `docs/proposals/v2/blueprint/33-client-and-transports.md`.
+```ts
+const unsub = session.tasks.subscribe(() => render(session.tasks.list()));
+```
 
-## Verified by
+In React that same pair is [@agentick/client-react](../client-react)'s
+`useHandle(session.tasks)`.
 
-Every claim in this README has a corresponding test, or appears below
-under "Roadmap & known gaps" with an explicit marker.
-
-| Concern                                                                                                                                                                                                        | Test file                                                     |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `createClient`, `connect`, `close`, request dispatch                                                                                                                                                           | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `request` middleware composition (outer→inner)                                                                                                                                                       | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| Extension `install()` namespace registration                                                                                                                                                                   | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `onClose` handler LIFO order                                                                                                                                                                                   | `../transport-in-process/src/__tests__/smoke.spec.ts`         |
-| `ClientHandlerRegistry` per-event merge kinds (`observer` / `first-non-null-wins` / `any-reconnect-wins`)                                                                                                      | `src/__tests__/handler-registry.spec.ts`                      |
-| `effectMiddleware` Effect↔Promise adapter, error propagation, interleave with Promise middleware                                                                                                               | `src/__tests__/effect-middleware.spec.ts`                     |
-| `client.send(sessionId, input)` shortcut shape equivalence with `client.session(id).send(input)`                                                                                                               | `../transport-in-process/src/__tests__/send-shortcut.spec.ts` |
-| `onLog` / `onProgress` cross-surface query + envelope→payload mapping + unsubscribe closes stream, AND `client.onLog`/`client.onProgress` instance-method delegation (ADR 64)                                  | `src/__tests__/signals.spec.ts`                               |
-| `channelView` snapshot-seed + delta-fold, `useSyncExternalStore` contract, `close()` teardown, malformed-frame isolation, AND `client.channelView` instance-method delegation (ADR 33)                         | `src/__tests__/channel-view.spec.ts`                          |
-| Client hooks — `onBefore<Method>` param transform + abort, `onAfter<Method>` result transform, method-scoping, `client.hook`/`client.hooks` register + unsubscribe, empty-registry fast-path (ADR 83)          | `src/__tests__/hooks.spec.ts`                                 |
-| Pre-scoped handle `onLog` / `onProgress` bake the session / app / gateway scope (asserted on `transport.subscribe`); pre-scoped zero-config `channelView` yields a last-frame-wins view                        | `src/__tests__/handle-subscriptions.spec.ts`                  |
-| `channelView` zero-config default fold (no config → view = latest frame payload, `undefined` before first frame)                                                                                               | `src/__tests__/handle-subscriptions.spec.ts`                  |
-| `createClient({ onStateChange, onCapabilitiesChange })` client-LOCAL observers fire on state / capability changes                                                                                              | `src/__tests__/handle-subscriptions.spec.ts`                  |
-| `ClientHandle` contract + `Enumerable`/`Respondable` profiles + `isClientHandle`/`isEnumerable`/`isRespondable` feature-detection; `runClientHandleConformance` core + profile + write-verb cases (B2 slice 1) | `src/__tests__/handle-conformance.spec.ts`                    |
+**Same code in-process and remote.** The handle shapes mirror the server's own, so
+swapping [@agentick/transport-in-process](../transport-in-process) for a network
+transport changes the `createClient` call and nothing else.
 
 ## Roadmap & known gaps
 
-- **`client.events()` bus → AsyncIterable adapter** — type surface ships; the iterator emits no events until client event surfaces register on the bus `EventSurface` union. `onStateChange` works end-to-end today.
-- **Auth surface seed** — `client.auth` is a stub (returns `null` / no-op). ADR 34 fills the full subsystem (OAuth 2.1, JWT with JWKS rotation, DPoP, RBAC/ABAC/ReBAC).
-- **`composeSubscribe` is exported but unused by the client itself** — subscriptions flow through the transport directly today. Wire it in when subscription middleware lands a real use case.
-- **`selector()` not yet implemented in this package** — declared in ADR 33 rev-3; lands alongside the second transport (HTTP, Phase 33.D).
-- **Multi-impl `ClientProtocol` conformance suite** — `runClientConformance(factory)` shape declared in ADR 33; not yet shipped. Any TS impl claiming to be a client should pass this. Deferred until a second impl exists (test mock or Worker-thread proxy).
-- **Cross-runtime verification** — "runs in Node 22+, browsers, Bun, Deno, edge runtimes" — tested only against Node 24 today. Browser smoke via headless / Bun / Deno / edge runtimes deferred to integration-test CI.
-- **Handle-contract convergence (B2 slices 3+)** — the `ClientHandle` contract + `runClientHandleConformance` ship (slice 1), but NO existing handle is refactored onto them yet. The AS-IS migration table above is the honest gap list; slice 2 lands the server prerequisites (pending enumeration, knob descriptors on the wire, `session/timeline_history`), slice 3 converges each handle (one commit per handle, conformance green each), slice 4 re-homes `timelineView` under `session.timeline`, slice 5 adds the React bindings. `runClientHandleConformance` is proven only against the minimal fake handle today.
+- **`client.auth` is a seed.** `current()` returns `null`, `onChange` is a no-op,
+  `reauthenticate()` resolves without doing anything. Only `signOut()` reaches the
+  wire. The full surface (OAuth 2.1, JWT with JWKS rotation, DPoP, RBAC) is not
+  built.
+- **Capability-change push isn't wired.** Capabilities refresh on connect and on
+  reconnect. A `notifications/capabilities/changed` subscription that refetches
+  mid-connection is declared in the protocol but not implemented here, so today a
+  server-side extension-set change is observed only after a reconnect.
+- **`client.events()` has one live source.** Only the `connection` surface emits.
+  `request` / `subscription` / `auth` / `wire` / `extension` have no emit sites
+  yet, so a filter on them yields nothing.
+- **`composeSubscribe` is exported but unused by this client.** Subscriptions go
+  straight to the transport; subscribe middleware composes correctly but nothing
+  invokes the composed chain.
+- **No multi-transport selector.** One transport per client. Failover and
+  multi-tab multiplexing would slot into the `createClient({ transport })` seam
+  with no application change, but neither exists.
+- **No `ClientProtocol` conformance suite.** `runClientHandleConformance` certifies
+  a _handle_; there is no equivalent certifying an alternate implementation of the
+  whole protocol. Deferred until a second implementation exists.
+- **Cross-runtime is claimed, not tested.** The code has no DOM or Node-specific
+  imports, but CI exercises Node only. Browser, Bun, Deno, and edge runtimes are
+  unverified.
+- **The fold kit isn't behind its own subpath.** `channelView`, `eventView`,
+  `liveStore`, and friends sit on the main barrel next to the application surface,
+  which under-signals that they're the extension-author tier.
 
-## Development plan
+## Verified by
 
-| Phase       | What lands                                                                                      |
-| ----------- | ----------------------------------------------------------------------------------------------- |
-| 33.B (done) | This package + in-process transport + `ClientProtocol` in spec                                  |
-| 33.C (done) | WebSocket transport                                                                             |
-| 33.D        | Streamable HTTP transport                                                                       |
-| 33.E        | Unix socket transport                                                                           |
-| 33.F        | `@agentick/client-extensions` bundle with `/retry`, `/telemetry`, `/cache`, `/offline` subpaths |
-| 33.G        | Multiplexer (`@agentick/transport-multiplexer`)                                                 |
-| 33.H        | Devtools + mock                                                                                 |
-| 33.I        | MCP-bilingual (`@agentick/mcp-surface`, `@agentick/transport-mcp-client`)                       |
-| ADR 34      | Auth subsystem fills `client.auth`                                                              |
+- `src/__tests__/capabilities.spec.ts` — handshake populates capabilities and
+  `serverInfo`, `MethodNotFound` degradation on `_extensions/list`, rejection when
+  `initialize` fails, clearing on drop, re-handshake on reconnect (and _not_ on the
+  initial open), best-effort failure of the post-reconnect handshake.
+- `src/__tests__/hooks.spec.ts` — `onBeforeSessionSend` param transform and abort,
+  `onAfterSessionSend` result transform, method scoping, `hook` batch and `hooks`
+  proxy registration plus unsubscribe, empty-registry fast path, and the
+  `session/send` → `SessionSend` name derivation.
+- `src/__tests__/handle-conformance.spec.ts` — `runClientHandleConformance` proven
+  against a fake handle; `isClientHandle` / `isEnumerable` / `isRespondable`
+  duck-typing, including a bare store that is a handle but not enumerable.
+- `src/__tests__/signals.spec.ts` — cross-surface log/progress queries,
+  envelope→payload+scope mapping, `fromCursor` forwarding, unsubscribe closing the
+  stream, and the instance methods delegating to the free functions.
+- `src/__tests__/handle-subscriptions.spec.ts` — pre-scoped `onLog` / `onProgress`
+  baking the session / app / gateway scope, zero-config `channelView` on a handle,
+  and the `createClient` construction-time observers.
+- `src/__tests__/channel-view.spec.ts` + `channel-stream.spec.ts` +
+  `event-view.spec.ts` — snapshot seed then delta fold, the state and change feeds,
+  `status` transitions, `close()` teardown, malformed-frame isolation, listener
+  fault isolation, arbitrary query + `fromCursor` pass-through, and payload-only
+  iteration.
+- `src/__tests__/view-source.spec.ts` — independent per-view filters, independent
+  close, referential stability of `list()`, and that a projection opens no second
+  upstream subscription.
+- `src/__tests__/wire-errors.spec.ts` — typed error rehydration across the wire,
+  field round-trip, unknown-tag degradation, and pass-through of protocol-level and
+  non-object rejections.
+- `src/__tests__/events.spec.ts` — connection events, surface filtering,
+  `close()` ending iterators, concurrent independent iterators, monotonic cursor.
+- `src/__tests__/handler-registry.spec.ts` + `effect-middleware.spec.ts` +
+  `session-handle-extensions.spec.ts` — lifecycle merge rules, the Effect adapter's
+  error propagation and interleaving, and lazy cached slots that never shadow a
+  real member.
+- [@agentick/transport-in-process](../transport-in-process) —
+  `smoke.spec.ts` (connect, dispatch, extension middleware order, namespace
+  registration, LIFO `onClose`) and `send-shortcut.spec.ts` (`client.send` emits
+  the same RPC as `session(id).send`).
+- [@agentick/client](../client) — `wire-proxy-middleware-e2e.spec.ts` covers the
+  synthesized namespace round-trip end-to-end and `client.use` observing both a
+  synthesized method and a sub-handle's verb.

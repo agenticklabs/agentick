@@ -1,339 +1,256 @@
 # @agentick/gates
 
-**Gates — knob-backed continuation conditions.** A gate blocks loop
-completion until it is cleared, giving an agent a checkpoint the run cannot
-skip: "don't finish until the model has attested X," or "don't finish while
-the typecheck is failing." Gates are a **pattern over knobs**, not a new
-subsystem — a gate's value IS a knob value, so everything the knobs primitive
-gives you (model-visible state, per-value subscription, snapshot/restore)
-comes for free.
+**A gate is a condition the run cannot finish without facing.** When the loop would otherwise stop, an engaged gate holds it open for another tick and puts its instructions in front of the model: "don't finish until you've summarized the findings," "don't finish while the typecheck is red."
 
-This package is the second demonstration of the v2 thesis that **React is a
-binding over a programmatic core** (knobs was the first). There is no "React
-gate" and "server gate" — there is one `GatesController` holding the registry
-and the verification wiring, and `useGate` is a thin binding over it. Every
-gate a tree declares via `useGate` and every gate declared programmatically
-via `session.gates.register(...)` lands in the **same** controller registry,
-evaluated by the **same** tick-end wiring. `session.gates.list()` shows all of
-them.
+The bet is that this needs no state of its own. A gate's value _is_ a knob value — so model visibility, per-value subscription, snapshot/restore, and the read-only enforcement that makes a check unforgeable all come from [@agentick/knobs](../knobs) unchanged. What this package adds is a registry, a tick-end evaluation pass, and a rule about when to hold the loop.
 
-Private workspace package. Bundled into the `agentick` metapackage; not
-published independently.
+> [!NOTE]
+> In this codebase `gate` means loop continuation — should the agent keep going. Admission of an individual operation is a different concept with a different name.
 
-## What it is
+## Install
 
-A gate has a `description`, model-facing `instructions` (rendered while the
-gate is engaged), and one predicate. Two species, discriminated by which
-predicate you supply:
+```bash
+npm install @agentick/gates
+```
 
-- **Latch gates** (`activateWhen`) — **edge-triggered, model-cleared.** The
-  arming predicate is consulted only while the gate is `inactive`; once it
-  fires, the gate flips to `active` and stays engaged until the **model**
-  clears it (`knob_set`) or the **host** calls `clear()`. Use when the
-  condition is not checkable in code and the model must attest ("confirm you
-  have summarized the findings before finishing").
+Subpaths: `/react` (hook + provider), `/client` (browser-side handle), `/testing` (fake controller + loop spy).
 
-- **Verified gates** (`satisfied`) — **level-triggered, code-cleared.** The
-  predicate is evaluated at the end of **every** tick: the gate engages
-  whenever it returns `false` and clears automatically the moment it returns
-  `true`, re-engaging if a later tick regresses. Use for invariants code can
-  check ("the typecheck must pass," "a validated submission must exist"). An
-  optional `activateWhen` **arms** the obligation so it only applies once
-  something made it relevant.
-
-Values are the three-state `GateValue`: `"inactive" | "active" | "deferred"`
-(verified gates use only `inactive`/`active`).
-
-### The unforgeable guarantee
-
-A verified gate registers its backing knob **read-only**. The model can
-_read_ the gate's state in the `<Knobs />` section but `knob_set` **rejects**
-writes to it — the predicate is the only authority. The model cannot knob
-itself past a failing check. This is not advisory; it is enforced by the same
-validation pipeline that guards every read-only knob, and it is covered by an
-adversarial test (`gate.spec.tsx`, `controller.spec.ts`).
-
-### Fail-closed
-
-A verified predicate that **throws** is treated as **unsatisfied** — the gate
-engages. The lifecycle store isolates handler errors (logs, does not
-propagate), so without fail-closed a broken verifier would silently let the
-loop complete unverified. Fail-closed makes a broken check block, not pass.
-
-## Quick start — React (`useGate`)
+## Quick start
 
 ```tsx
-import { useGate, gate } from "@agentick/gates/react";
+import { System } from "@agentick/compiler-react";
+import { gate, useGate } from "@agentick/gates/react";
 
 const typecheckGate = gate({
   description: "Typecheck must pass after edits",
-  instructions: "GATE: run the typecheck and fix errors before finishing.",
+  instructions: "Run the typecheck and fix every error before you finish.",
   activateWhen: (r) => r.toolResults.some((t) => t.toolName === "edit_file"),
-  satisfied: async (r) => (await runTypecheck()).ok,
+  satisfied: async () => (await runTypecheck()).ok,
 });
 
-function Agent() {
+export function Agent() {
   const { element } = useGate("typecheck", typecheckGate);
+
   return (
     <>
       <System>You are a coding agent.</System>
-      {/* Render last — the model sees the instructions right before its reply */}
+      {/* Render last — the instructions land right before the model replies. */}
       {element}
     </>
   );
 }
 ```
 
-`useGate` returns `{ active, deferred, engaged, clear, defer, element }`.
-`element` is a `<section>` rendered only while the gate is `active`.
+`element` is a section rendered only while the gate is engaged; the rest of the time it's `null`. The hook also returns `{ active, deferred, engaged, clear, defer }`.
 
-## Quick start — programmatic (`session.gates`)
+`gate()` is a plain descriptor factory — pure data, no compiler involved — so declare gates at module scope and pass them in.
 
-Everything `useGate` does from the tree, host/adopter code does from the
-session. Same controller, same registry, same wiring:
+## Two species
+
+Which predicate you supply picks the species.
+
+### Latch — edge-triggered, model-cleared
+
+`activateWhen` is consulted **only while the gate is inactive**. The first tick it returns `true`, the gate engages and stays engaged until the model clears it with `knob_set`, or host code calls `clear()`. Reach for this when the condition isn't checkable in code and the model has to attest to it.
 
 ```ts
-// Register a latch gate that must be attested before the run finishes.
-const handle = session.gates.register("summary", {
+import { gate } from "@agentick/gates";
+
+const summaryGate = gate({
   description: "Await summary",
-  instructions: "Summarize the findings before completing.",
+  instructions: "Summarize what you found before you finish.",
   activateWhen: (r) => r.toolResults.length > 0,
 });
-
-session.gates.list(); // → [{ name: "summary", value, verified, description }, …]
-session.gates.has("summary"); // → true
-session.gate("summary")?.value; // → "inactive" | "active" | "deferred"
-
-await handle.clear(); // host-side release (equivalent to the model clearing a latch)
 ```
 
-A tree-declared `useGate` gate and a programmatic gate both appear in
-`session.gates.list()` — one registry.
+The backing knob is a three-state select — `inactive` / `active` / `deferred` — so the model can also _defer_: acknowledge the gate and postpone it. A deferred gate that would let the run end flips back to `active` first, which is what stops "I'll do it later" from becoming "never."
 
-**Grammar (three-audiences-plan G-prep).** `session.gates` carries the full
-sibling family grammar — sync reads (`get` / `has` / `list`), per-name and
-wildcard subscription (`subscribe(name, fn)` / `subscribeAll(fn)`), and
-**async, journaled** mutations. `clear` / `defer` / `override` now return
-`Promise<void>` and route through the `gates:clear` / `gates:defer` /
-`gates:override` commands (audited Operations) — the same contract as
-`knobs.set` / `state.set`, and the same path the wire and client handles take.
-A host-side release therefore journals just like a wire one. (The React
-`useGate` surface stays fire-and-forget `() => void` — the gate value re-reads
-reactively off the backing knob when the transition lands.)
+### Verified — level-triggered, code-cleared
 
-### Host `.override()` — the trusted-host escape (verified gates)
+`satisfied` runs at the end of **every** tick. `false` engages the gate; `true` clears it — including re-engaging if a later tick regresses. Reach for this when code can check the invariant.
 
-Verified gates are code-cleared and read-only to the model. A **host**
-override is legitimate (the host is trusted) but is an **explicit, audited**
-escape — never a silent setter that reopens the read-only protection:
+```ts
+const submissionGate = gate({
+  description: "A validated submission must exist",
+  instructions: "Call submit_answer with a valid payload before finishing.",
+  satisfied: (r) => r.toolResults.some((t) => t.toolName === "submit_answer" && t.succeeded),
+});
+```
+
+Add `activateWhen` to a verified gate and it becomes an **arming** predicate: while unarmed the gate is dormant — the invariant isn't evaluated and can't block. Arming is sticky, and verification takes over on the same tick. That's how "once files were edited, the typecheck must pass" avoids blocking a turn that edited nothing.
+
+## Two guarantees worth the whole package
+
+**The model cannot forge its way past a verified gate.** A verified gate registers its backing knob **read-only**: the model reads the gate's state in the knobs section but `knob_set` refuses to write it. The predicate is the only authority. This is enforced by the same validation pipeline that protects every read-only knob, and it is covered by an adversarial test that drives the model's dispatch path directly.
+
+**A broken check blocks, it does not pass.** A verified predicate that throws is treated as **unsatisfied** and the gate engages. Lifecycle handler errors are isolated rather than propagated, so without fail-closed a crashing verifier would quietly let the run complete unverified.
+
+## The programmatic surface
+
+Everything `useGate` does from the tree, host code does from the session — same registry, same evaluation pass. A tree-declared gate and a programmatic one both appear in `session.gates.list()`.
+
+```ts
+const handle = session.gates.register("summary", summaryGate);
+
+session.gates.list(); // [{ name, value, verified, description }, …]
+session.gates.has("summary"); // true
+session.gate("summary")?.value; // "inactive" | "active" | "deferred"
+session.gates.subscribe("summary", () => rerender());
+session.gates.subscribeAll(() => refreshDashboard());
+
+await handle.clear(); // host-side release
+```
+
+`clear` / `defer` / `override` are async and journaled: they route through the `gates:clear` / `gates:defer` / `gates:override` commands, so a host-side release is an audited operation exactly like a wire one. (The React surface stays fire-and-forget — `useGate`'s `clear` returns `void` and the value re-reads reactively off the backing knob when the transition lands.)
+
+### The host override
+
+Verified gates are code-cleared and read-only to the model. A host override is legitimate — the host is trusted — but it is an **explicit, audited** escape, never a silent setter that reopens the read-only protection:
 
 ```ts
 const g = session.gate("typecheck");
 await g?.override("inactive", "manual unblock: known-flaky check");
 ```
 
-`override()` sets the value **and** emits a `session:gate:override` audit
-event on the session bus (traceable via `app.events()`); it **throws** on a
-latch gate (use `clear()` there). It is reachable only from host code — the
-model's `knob_set` path stays refused by the read-only knob.
+`override()` applies the value _and_ emits a `gate:override` audit record stamped with its origin — `"host"` for an in-process call, `"wire"` for one that arrived over the wire. It throws on a latch gate; use `clear()` there.
 
-## How the two front-ends converge (architecture)
+## How the two front-ends converge
 
 ```
               gate() descriptor  (pure data — no compiler)
                        │
         ┌──────────────┴───────────────┐
    useGate (React)              session.gates (programmatic)
-        │  register / read              │  register / get / list / clear
+        │  register / read             │  register / get / list / clear
         └──────────────┬───────────────┘
-                 GatesController         ← ONE registry, ONE wiring
-                 (knobs · loop)
+                GatesController          ← ONE registry, ONE evaluation pass
+                  (knobs · loop)
 ```
 
-The `GatesController` (in the compiler-agnostic package root) holds the gate
-registry and the `handleTickEnd` pass that arms, evaluates, fails closed,
-auto-clears, and drives loop continuation. It takes its collaborators
-**injected**:
+`GatesController` holds the registry and the tick-end pass that arms, evaluates, fails closed, auto-clears, and holds the loop. It takes its collaborators injected — a knobs surface for the backing cell, a loop-control seam to hold continuation, an audit sink for overrides — so it depends on no framework and no React.
 
-- `knobs` — register/set/get/subscribe the backing knob.
-- `loopControl` — block/continue the loop.
-- `audit` — sink for the `.override()` escape.
+**Evaluation is driven, not subscribed.** The session's continuation decision calls `handleTickEnd(result)` once per tick with the settled tick result, after the tree has settled. A blocking gate calls `continueAfterTick` on the loop seam; the session folds that hold into its decision. There is no per-mount tick-end subscription and no runtime component to render — which is exactly why programmatic-only gates evaluate identically to tree-declared ones. `useGate` is registration-only: register on mount, unregister on unmount, reflect the value.
 
-**Evaluation is driven, not subscribed (ADR 67).** The session's continuation
-decision — `session.notifyLifecycle` — calls `controller.handleTickEnd(result)`
-once per tick with the settled `TickResult` (executed tool results +
-`shouldContinue`), AFTER the compiler tick-end has settled the tree. A
-blocking gate calls `continueAfterTick` on the injected loop seam; the session
-drains it and folds the hold into its `TickEndForwardDecision`. There is **no**
-per-mount tick-end subscription and **no** `<GatesRuntime />` — the compiler
-owns no gate wiring, and programmatic-only gates evaluate identically to
-tree-declared ones (both live in the same session-owned controller). `useGate`
-is therefore **registration-only**: register on mount, unregister on unmount,
-reflect the knob value.
-
-Gates **is** a harness now (`GatesHarness`, so wire clients can reach it — see
-[Over the wire](#over-the-wire)), but it still deliberately owns **no
-independent state**: a gate's value IS a knob value, snapshot-captured by
-`KnobsHarness`. So gates gets **no `HookBridges` harness slot** and is **not
-snapshot-captured** — the harness is a pure verb surface. The `GatesHarness`
-constructs and OWNS the one `GatesController`; the session staples that
-controller onto `bridges.gates`, and the controller rides the existing
-`BridgeContext` — a compiler-react React context — as a runtime transport
-property, which is how `session.gates` and every `useGate` resolve the same
-instance.
+A gate holds the loop open the same way steering does, under the loop's `maxTicks` cap. It forces continuation; it cannot run forever.
 
 ## Over the wire
 
-A `GatesHarness` (the ADR 27 per-harness command surface) wraps the controller
-with four `exposure: "wire"` commands, routed to wire clients by the generic
-dynamic-command lane (no per-verb gateway plumbing — the gateway's
-`SESSION_SURFACES` simply lists `gates`):
+`GatesHarness` wraps the controller with four commands, routed to wire clients by the generic dynamic-command lane:
 
-- `gates:list` → `GateInfo[]` (read)
-- `gates:clear` `{ name }`
-- `gates:defer` `{ name, reason? }`
-- `gates:override` `{ name, value, reason }` — the verified-gate audited
-  escape. The command stamps `origin: "wire"` on the `GateOverrideAudit`; the
-  verified-only rule and the latch-gate throw stay in the controller.
+| Command          | Payload                   |
+| ---------------- | ------------------------- |
+| `gates:list`     | → `GateInfo[]`            |
+| `gates:clear`    | `{ name }`                |
+| `gates:defer`    | `{ name, reason? }`       |
+| `gates:override` | `{ name, value, reason }` |
 
-Each command delegates straight to the one owned controller; a verb naming a
-missing gate rejects with a typed `GateNotFound`. Deny-by-default holds: an
-undeclared/non-`wire` verb is indistinguishable from an absent method
-(`MethodNotFound`).
+Each delegates straight to the one owned controller. A verb naming a missing gate rejects with a typed `GateNotFound` rather than returning null, and deny-by-default holds — an undeclared verb is indistinguishable from an absent method.
 
-The client twin (ADR 87) is `@agentick/gates/client`, which registers
-`session.gates` on the client `SessionHandle`:
+Importing `@agentick/gates/client` registers `session.gates` on the wire client:
 
 ```ts
-import "@agentick/gates/client"; // (bundled in @agentick/client)
+import "@agentick/gates/client";
 
-const gates = client.session(id).gates;
-await gates.refresh(); // poll gates/list
-gates.list(); // → readonly GateInfo[] (Enumerable — sync snapshot)
+const gates = client.session(sessionId).gates;
+
+gates.subscribe(() => render(gates.list())); // zero-arg store contract
+gates.list(); // readonly GateInfo[]
+gates.get("summary"); // GateInfo | undefined
+
 await gates.clear("summary");
+await gates.defer("summary", "after the next tool call");
 await gates.override("typecheck", "inactive", "manual unblock");
+await gates.refresh(); // force a re-poll
+gates.close();
 ```
 
-Unlike `knobs`/`tasks`, the gates client handle is **RPC-backed, not
-channel-backed** — there is no `gates-state` delta channel yet (see the known
-gap below). `list()`/`get()` read a local snapshot seeded by an eager
-`gates/list` poll and re-polled after every mutation (fire-and-refetch, the RPC
-analog of the channel handles' fire-and-observe CQRS).
-
-### Layer-aware resolution (app tier — a future layer the seam enables)
-
-The controller optionally resolves over an ordered `[parent, self]` layer
-chain (ADR 34 cascade). A `parent` `GatesParentLayer` supplies **inherited**
-gates: `get` / `list` unify across the chain with **self shadowing parent by
-name**, and this controller's tick-end pass evaluates self gates **and** the
-inherited ones (the parent owns no tick-end source of its own — a child layer
-drives it, against the child's tick, in the parent's own knob + loop layer).
-Shadowed names are evaluated once, by the effective (self) gate.
-
-Today the parent is **absent everywhere** — no app tier exists yet, so the
-session constructs its controller with `parent: undefined` and the chain is
-just `[self]` (behavior byte-identical to no chain). The seam is present,
-unused: a future **app-scoped** gate layer drops in as the session
-controller's `parent` with no rewrite, and app-declared gates then evaluate
-through each session's tick automatically.
+**RPC-backed, not channel-backed.** The read side is a poll: an eager `gates/list` seeds the local snapshot and every mutation re-fetches it. `list()` and `get()` read that snapshot synchronously, so the handle drops straight into `useSyncExternalStore`. `gatesHandle(client, sessionId)` is the same handle as a free factory.
 
 ## API
 
-### Root (`@agentick/gates`) — compiler-agnostic
+### `@agentick/gates`
 
-- `gate(descriptor)` — trivial descriptor factory (declare at module scope).
-- `isVerifiedGate(descriptor)`, `GATE_OPTIONS`, `VERIFIED_GATE_OPTIONS`.
-- Types: `GateDescriptor`, `LatchGateDescriptor`, `VerifiedGateDescriptor`,
-  `GateValue`.
-- `GatesController` + `GatesControllerDeps`, `GatesParentLayer`, `GateKnobs`,
-  `LoopControlSeam`, `GateOverrideAudit`, `GateOverrideOrigin`, `GateInfo`,
-  `GateHandle`, `GatesHandle`.
-- `GatesHarness` (the slim wire command surface owning the controller) +
-  `GatesHarnessDeps`, `GatesClearInput`, `GatesDeferInput`, `GatesOverrideInput`.
+| Export                                                                            | Purpose                                            |
+| --------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `gate(descriptor)`                                                                | Descriptor factory — declare at module scope       |
+| `isVerifiedGate(descriptor)`                                                      | Discriminate the two species at runtime            |
+| `GATE_OPTIONS` / `VERIFIED_GATE_OPTIONS`                                          | The knob `options` each species registers          |
+| `GatesController`                                                                 | The registry + tick-end pass                       |
+| `GatesHarness`                                                                    | The wire command surface; owns the one controller  |
+| `GateDescriptor` / `LatchGateDescriptor` / `VerifiedGateDescriptor` / `GateValue` | Descriptor shapes                                  |
+| `GateInfo` / `GateHandle` / `GatesHandle`                                         | Read row, per-gate handle, curated session surface |
+| `GatesControllerDeps` / `GateKnobs` / `LoopControlSeam` / `GatesParentLayer`      | The injected seams                                 |
+| `GateOverrideAudit` / `GateOverrideOrigin`                                        | The override audit record and its origin           |
+| `GatesClearInput` / `GatesDeferInput` / `GatesOverrideInput`                      | Wire command inputs                                |
 
-### `/react`
+### `session.gates` and `session.gate(name)`
 
-- `useGate(name, descriptor): GateState` — the React front-end.
-- `useGates(): GatesHandle` — the in-scope gates surface (the SAME curated
-  shape `session.gates` exposes: `register`/`get`/`list`/`clear`). Mirrors
-  `useKnob` → `session.knobs`. The raw `GatesController` is intentionally
-  **not** returned — `Controller` is an internal impl surface, not a public v2
-  noun (the vocabulary is Harness/Bridge/Handle/Store).
-- `<GatesProvider>`, `GatesContext` — controller resolution (rarely needed
-  directly; the session transports its controller on the bridge bundle).
+| Method                                                 | Returns                                          |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| `gates.register(name, descriptor)`                     | `GateHandle` — idempotent, last writer wins      |
+| `gates.get(name)` / `gates.has(name)`                  | The handle; whether one is registered            |
+| `gates.list()`                                         | `readonly GateInfo[]` — every gate, both origins |
+| `gates.clear(name)`                                    | `Promise<void>` — journaled release              |
+| `gates.subscribe(name, fn)` / `gates.subscribeAll(fn)` | Transitions plus register/unregister             |
 
-### `/testing`
+A `GateHandle` carries `name`, `descriptor`, `verified`, `value`, `engaged`, `clear()`, `defer()`, `override(value, reason?)`, and `subscribe(fn)`.
 
-- `fakeGatesController(knobs?)` — a working controller over stub knobs + a spy
-  loop-control seam + a recorded audit sink; `.tick(result)` drives the shared
-  wiring with no live mount.
-- `spyLoopControl()` — a `LoopControlSeam` that records continue/stop calls.
+### `@agentick/gates/react`
 
-### Session surface (augmented onto `SessionHarnessProtocol`)
+| Export                           | Purpose                                                        |
+| -------------------------------- | -------------------------------------------------------------- |
+| `useGate(name, descriptor)`      | `{ active, deferred, engaged, clear, defer, element }`         |
+| `useGates()`                     | The in-scope `GatesHandle` — the same shape as `session.gates` |
+| `GatesProvider` / `GatesContext` | Supply a controller explicitly; rarely needed                  |
 
-- `session.gates` — `GatesHandle` (`register`/`get`/`list`/`clear`).
-- `session.gate(name)` — `GateHandle | undefined`.
+The descriptor and controller types are re-exported here too, so a React-only file can import everything from one subpath.
 
-### `/client` (ADR 87 — the client `SessionHandle` twin)
+### `@agentick/gates/client`
 
-- `session.gates` (client) — `GatesClientHandle`: `Enumerable<GateInfo>`
-  (`list`/`get` over the polled snapshot) + `subscribe`/`close` + the
-  `clear`/`defer`/`override` wire verbs + `refresh` (force a `gates/list` poll).
-  RPC-backed (no `gates-state` channel yet).
-- `gatesHandle(client, sessionId)` — the factory (registered on import).
+| Export                           | Purpose                                                                                                   |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `session.gates`                  | Registered on import: `list` / `get` / `clear` / `defer` / `override` / `refresh` / `subscribe` / `close` |
+| `gatesHandle(client, sessionId)` | The same handle as a free factory                                                                         |
+| `GatesClientHandle` (type)       | The handle contract                                                                                       |
+
+### `@agentick/gates/testing`
+
+| Export                        | Purpose                                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `fakeGatesController(knobs?)` | A working controller over stub knobs, a spy loop seam, and a recorded audit sink; `.tick(result)` drives the pass with no mount |
+| `spyLoopControl()`            | A `LoopControlSeam` that records continue/stop calls                                                                            |
+
+```ts
+import { fakeGatesController } from "@agentick/gates/testing";
+
+const { controller, loop, audits, tick } = fakeGatesController();
+controller.register("summary", summaryGate);
+
+await tick(tickResultWhere({ shouldContinue: false }));
+expect(loop.continueCalls).toContain("gate:summary");
+```
+
+## Patterns
+
+**Knobs.** [@agentick/knobs](../knobs) owns the cell a gate's value lives in, the `knob_set` tool the model clears a latch with, and the read-only enforcement that makes a verified gate unforgeable.
+
+**Rendering.** [@agentick/compiler-react](../compiler-react) owns the bridge context `useGate` reads and the section primitives `element` compiles to.
+
+**Shapes.** [@agentick/spec](../spec) owns `TickResult` (what a predicate is handed) and `GateNotFound`.
+
+**Client.** [@agentick/client-core](../client-core) owns the `ClientHandle` / `Enumerable` contracts and the session sub-handle registry the `/client` subpath registers into.
+
+## Roadmap & known gaps
+
+- **No delta channel for gates.** The client handle polls. A gate's boolean value already reaches clients as a knob JSON-Patch delta, but gate-specific detail — why it engaged, how often, predicate metadata — is not projected. When a `gates-state` channel lands, `list()` gains a live view with no API change.
+- **The inherited-gate layer is present but unreachable.** `GatesController` accepts a parent layer: reads unify across the chain with self shadowing by name, and a child's tick drives the parent's own gates in the parent's knob and loop layer. It is tested, but nothing constructs a parent today. It exists so an app-scoped gate tier drops in without a rewrite.
+- **`defer` carries a `reason` that goes nowhere.** The wire shape accepts one for parity with `override`; a latch defer emits no audit, so it is accepted and dropped.
 
 ## Verified by
 
-Every claim above is exercised by a test:
-
-| Claim                                                                                                                  | Test                                               |
-| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| Latch arms on trigger, blocks the loop, `clear()` releases                                                             | `controller.spec.ts`, `gate.spec.tsx`              |
-| Latch does not re-arm once engaged; `deferred` un-defers when blocking                                                 | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified engages when unsatisfied, auto-clears on pass, re-engages on regression                                       | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified arming scope stays dormant until triggered                                                                    | `controller.spec.ts`, `gate.spec.tsx`              |
-| Fail-closed: a throwing predicate engages the gate                                                                     | `controller.spec.ts`, `gate.spec.tsx`              |
-| Verified knob is read-only — the model's `knob_set` dispatch is refused (adversarial)                                  | `controller.spec.ts`, `gate.spec.tsx`              |
-| `.override()` releases a verified gate AND emits an audit envelope; rejects on latch; not a model path                 | `controller.spec.ts`                               |
-| Host `clear`/`defer`/`override` are async + journaled (route through `gates:*`); the raw transition is the shared body | `controller.spec.ts`, `__tests__/harness.spec.ts`  |
-| Async verified predicates are awaited                                                                                  | `gate.spec.tsx`                                    |
-| Layer chain: `list`/`get` unify over a parent, self shadows parent by name                                             | `controller.spec.ts`                               |
-| An inherited (parent) gate still evaluates against the child's tick (parent's own knob + loop)                         | `controller.spec.ts`                               |
-| A self gate shadows a same-named parent gate during evaluation (parent skipped)                                        | `controller.spec.ts`                               |
-| Unified registry: tree-declared + programmatic gates both in `session.gates.list()`                                    | `session/__tests__/gates-integration.spec.tsx`     |
-| Single construction site: `useGate`'s controller IS `session.gates` (reference equality)                               | `session/__tests__/gates-integration.spec.tsx`     |
-| `useGate` (registration-only) → controller evaluates: arm/verify/block/defer/clear/read-only                           | `gate.spec.tsx`                                    |
-| Real execution: `session.notifyLifecycle` evaluates both gates AND they HOLD the loop to `maxTicks`                    | `session/__tests__/gates-integration.spec.tsx`     |
-| `GatesHarness` commands delegate to the ONE owned controller; inbox address is `gates:<sid>:gates`                     | `__tests__/harness.spec.ts`                        |
-| `gates:override` audit stamps `origin` (`host` via method, `wire` over the inbox); missing gate throws                 | `__tests__/harness.spec.ts`                        |
-| The four verbs enumerate via `gates:commands`, all `exposure: "wire"`                                                  | `__tests__/harness.spec.ts`                        |
-| Full-stack: `gates/list`/`clear`/`defer`/`override` round-trip the dynamic lane; deny-by-default holds                 | `transport-in-process/__tests__/gates-e2e.spec.ts` |
-| Client handle: each verb issues the right `gates/*` request; `list()` reflects the poll                                | `client/__tests__/gates-handle.spec.ts`            |
-| ADR 87: `session.gates` self-assembles on the client `SessionHandle`                                                   | `client/__tests__/session-gates.spec.ts`           |
-
-## Status & roadmap
-
-Shipping. The core wiring, both front-ends, the read-only guarantee, the
-host override, and the unified registry are complete and tested.
-
-Gates evaluate session-side (ADR 67): `session.notifyLifecycle` drives
-`controller.handleTickEnd` with the settled `TickResult` and folds a gate's
-hold into the loop's continuation decision. No `<GatesRuntime />`, no per-mount
-tick-end subscription — tree-declared and programmatic gates evaluate
-identically. A gate is a **continue-forcer**: it holds the loop open exactly as
-steering does, under the loop's `maxTicks` hard cap.
-
-Known gaps / trailheads:
-
-- **App-tier gate layer** (`GatesParentLayer`) is a present-but-unused seam —
-  no app-scoped controller exists yet, so the session constructs its controller
-  with `parent: undefined`. A future app layer drops in as the session
-  controller's `parent` with no rewrite.
-- **No `gates-state` delta channel.** The client gates handle is RPC-backed
-  (poll `gates/list`, re-poll after each mutation) — there is no reactive
-  client mirror yet. Gate boolean values already reach clients as knob
-  JSON-Patch deltas (the knobs-state channel), but gate-specific info
-  (open/closed reason, hit counts, predicate metadata — the documented gap in
-  `controller.ts` `transition()`) is not projected. A `gates-state`
-  snapshot+delta channel rides the store fan-out later; when it lands, the
-  client handle's `list()` gains a live view without an API change.
+- `src/__tests__/controller.spec.ts` — a latch arming on the trigger tick, holding the loop, and releasing on `clear()`; no re-arming once engaged; `deferred` un-deferring when it would block; a verified gate engaging, auto-clearing, and re-engaging on regression; the arming scope keeping a verified gate dormant; fail-closed on a throwing predicate; the read-only backing knob refusing the model's dispatch (adversarial); `override()` releasing a verified gate and emitting the audit while rejecting on a latch; and `list()`/`get()` unifying over a parent layer with self shadowing, including inherited evaluation against the child's tick.
+- `src/__tests__/gate.spec.tsx` — the same behaviors through `useGate` against the real compiler: activation and non-activation, no re-activation once engaged, forcing continuation only when the loop would stop, un-deferring, the section rendered with title and instructions only while active, the registered knob descriptor (group, three-state options; two-state and read-only for verified), async predicates awaited, `defer()` a no-op on verified gates, the `knob_set` pipeline refusing a verified gate's knob, and arming keeping a gate dormant then verifying the same tick.
+- `src/__tests__/harness.spec.ts` — the dynamic-lane inbox address, each command delegating to the one owned controller, `gates:override` stamping `origin: "host"` for a method call and `"wire"` over the inbox, a typed rejection when the named gate is missing, and all four verbs enumerating as `exposure: "wire"`.
+- `src/client/__tests__/gates-handle.spec.ts` + `session-gates.spec.ts` — `list()`/`get()` reflecting the eager poll, each verb's request shape and its re-poll, the zero-arg `subscribe` contract, and `session.gates` self-assembling on the client session handle.
+- [@agentick/session](../session) `src/__tests__/gates-integration.spec.tsx` — tree-declared and programmatic gates sharing one registry and one controller instance, and a real execution where both hold the loop to `maxTicks`.
+- [@agentick/transport-in-process](../transport-in-process) `src/__tests__/gates-e2e.spec.ts` — `gates/list`, `clear`, `defer`, and `override` round-tripping the real gateway and dynamic lane, with deny-by-default preserved.

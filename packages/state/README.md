@@ -1,253 +1,207 @@
 # @agentick/state
 
-`StateHarness` — **session-internal reactive key/value storage**. Arbitrary
-adopter state, keyed by string, that survives re-mounts and hibernate-resume,
-with per-key subscription. The v2 analog of v1's `useComState`.
+**State is the half of session storage the model never sees.** A string-keyed cell set that survives component remounts and session resume, with per-key subscription — a filter set, a cursor, a cached fetch result, anything your code needs to remember and the model has no business reading.
 
-The one thing to hold onto: **state is NOT model-visible.** Unlike knobs,
-nothing here renders into the model's context and the `knob_set` tool does not
-reach it. State is the adopter's private stash — component-local scratch, a
-counter, a cached fetch result — parallel to the timeline, owned entirely by
-your code.
+That exclusion is the design, not an omission. Nothing here renders into context and no tool reaches it, so a value you put in state cannot be leaked into a prompt by accident or overwritten by a model that decided it knew better. When you _do_ want the model in the loop, that's [@agentick/knobs](../knobs) — same shape, opposite policy.
 
-Private workspace package. Bundled into the `agentick` metapackage; not
-published independently.
+## Install
 
-## What it is
+```bash
+npm install @agentick/state
+```
 
-A store-backed key/value cell set behind the full harness contract — the
-near-identical twin of knobs, minus the model-facing descriptors. Two surfaces:
-
-- **Sync reads** — `get(key)` · `has(key)` · `list()` · `subscribe(key, fn)`
-  · `subscribeAll(fn)`. Served from a synchronous read cache; no envelopes.
-- **Async writes** — `set({ key, value })` · `delete({ key })`. Declared
-  commands (ADR 51): each runs through `runOperation`, so the terminal
-  envelope IS the change-event audit trail, and both verbs are
-  inbox-addressable over the harness address (`state:set` / `state:delete`
-  on `state:{scopeId}`) with no routing code.
-
-`StateHarness extends BaseHarness<"state">`. Values are `unknown` — the
-harness stores whatever you give it and does no validation. Writes fire
-per-key subscribers (a delete fires the key's subscribers too), so
-`useSessionState` re-renders and `session.state.subscribe(key, ...)` fires.
-
-`exportSnapshot()` / `importSnapshot()` round-trip the entries;
-`SnapshotHarness` drives them for hibernate/resume. Because values are
-`unknown` and stored as-is, snapshot durability is bounded by JSON
-serializability — the same rule the rest of the substrate follows.
-
-### Store-backed (data-layer plan §3.5)
-
-State is store-derived AND store-persisted, exactly like knobs. A durable
-`Store<StateEntry>` of `{ key, value }` cells is the authority; a
-synchronous `View` is its read cache, so the sync surface never
-touches the async store. Every mutation **writes through** the view (sync
-cache first, durable store off the critical path); `hydrate()` reloads the
-store into the projection on resume. The default store is a fresh in-memory
-`createStateStore()` (`:memory:`, lost on exit); inject a durable adapter via
-`new StateHarness(..., { store })` or `withState({ store })` to survive restart.
-
-The `View` internalizes both the write-through cache and the notify seams (the
-per-key render pings and the typed change stream). State is session-internal with
-no client-facing channel, so nothing routes the change stream to the wire; it
-stays harness-level.
-
-One state-only wrinkle vs knobs: values are `unknown`, so a `set(key, undefined)`
-stores a **present** key whose value is `undefined`. Presence is a key-membership
-fact (`has` → `hasSync`), never a `value !== undefined` check, all the way down
-to the store cell — `undefined`-valued cells round-trip through write-through,
-`hydrate()`, and export/import intact.
-
-## Contrast with knobs
-
-|                          | `@agentick/state`       | `@agentick/knobs`                 |
-| ------------------------ | ----------------------- | --------------------------------- |
-| Model can read           | no                      | yes (rendered in `<Knobs />`)     |
-| Model can write          | no                      | yes (`knob_set` tool)             |
-| Value type               | `unknown` (arbitrary)   | `string \| number \| boolean`     |
-| Descriptors / validation | none                    | type, bounds, options, `validate` |
-| Purpose                  | adopter's private stash | model-facing tunable parameters   |
-
-Reach for state when the model has no business seeing or setting the value.
-Reach for knobs when it should.
+Subpaths: `/react` (hook), `/client` (browser-side handle), `/testing` (stub + conformance suite).
 
 ## Quick start
 
-### Programmatic
-
-```ts
-// From adopter / server-side code — no React.
-await session.state.set({ key: "draftCount", value: 0 });
-session.state.get("draftCount"); // 0
-session.state.has("draftCount"); // true
-session.state.list(); // [{ key: "draftCount", value: 0 }]
-
-const off = session.state.subscribe("draftCount", () => rerender());
-await session.state.delete({ key: "draftCount" }); // fires the subscriber
-```
-
-### React
-
-`useSessionState` is a `useSyncExternalStore` binding over
-`useBridges().state` — the same harness the programmatic surface exposes. It
-seeds the initial value with a fire-and-forget `set` in `useEffect` (only when
-the key is absent), subscribes to the per-key notifier, and returns
-`[value, setValue]`.
-
 ```tsx
+import { Section } from "@agentick/compiler-react";
 import { useSessionState } from "@agentick/state/react";
 
-function Draft() {
-  const [count, setCount] = useSessionState("draftCount", 0);
-  return <Section id="draft">Revisions so far: {count}</Section>;
+export function DraftStatus() {
+  const [revisions, setRevisions] = useSessionState("draft.revisions", 0);
+
+  return (
+    <Section id="draft">
+      {revisions === 0 ? "No draft yet." : `Draft revised ${revisions} times.`}
+    </Section>
+  );
 }
 ```
 
-Because the value lives on the harness (not in a `useState` cell), it survives
-an unmount → remount of the component and a hibernate → resume of the session.
+`useSessionState` is a `useSyncExternalStore` binding over the session's cells, not a `useState` cell. Unmount the component, remount it, resume the session in another process — the value is still there. It seeds `initial` with a fire-and-forget write only when the key is absent, so a remount never clobbers what's already stored.
+
+## Choosing between state and knobs
+
+|                 | `@agentick/state`   | `@agentick/knobs`                 |
+| --------------- | ------------------- | --------------------------------- |
+| Model can read  | no                  | yes — rendered by `<Knobs />`     |
+| Model can write | no                  | yes — the `knob_set` tool         |
+| Value type      | `unknown`           | `string \| number \| boolean`     |
+| Descriptors     | none                | type, bounds, options, `validate` |
+| Purpose         | the adopter's stash | model-facing tunable parameters   |
+
+Everything else is shared: both are cells behind an audited write path, both are store-backed, both ship a client handle.
+
+## The programmatic surface
+
+`session.state` is the same cell set without React. Reads are synchronous; writes are operations with `requested → terminal` envelopes on the bus.
+
+```ts
+await session.state.set({ key: "draft.revisions", value: 3 });
+
+session.state.get("draft.revisions"); // 3 (typed unknown — narrow at the call site)
+session.state.has("draft.revisions"); // true
+session.state.list(); // readonly StateListEntry[] — [{ key, value }, …]
+
+const off = session.state.subscribe("draft.revisions", () => rerender());
+session.state.subscribeAll(() => refreshDashboard());
+
+await session.state.delete({ key: "draft.revisions" }); // fires the subscriber too
+off();
+```
+
+Both verbs are inbox-addressable at `state:{scopeId}` — `state:set` and `state:delete` — so a message from outside the process runs the identical operation an in-process call would.
+
+> [!IMPORTANT]
+> `get` cannot distinguish "absent" from "present, holding `undefined`" — like `Map.get`. Presence is a `has()` question, and `has()` is a key-membership check all the way down to the stored cell. An `undefined`-valued key survives write-through, `hydrate()`, and export/import as a _present_ key.
+
+That distinction is why `useSessionState` checks `has()` before seeding, instead of testing the value it reads back.
+
+## Host code and the render tree meet on a key
+
+Anything holding the session writes the cell; anything in the tree reading the same key re-renders. That is the cheapest route from a server-side result into the model's context — no props to thread, no provider to mount.
+
+```tsx
+import { Section } from "@agentick/compiler-react";
+import { useSessionState } from "@agentick/state/react";
+import type { SessionHarnessProtocol } from "@agentick/spec";
+
+// An HTTP route, a queue worker, a tool handler — anywhere the session is in hand.
+async function recordSearch(session: SessionHarnessProtocol, hits: number) {
+  await session.state.set({ key: "search.lastHits", value: hits });
+}
+
+function SearchStatus() {
+  const [lastHits] = useSessionState<number | null>("search.lastHits", null);
+  if (lastHits === null) return null;
+  return <Section id="search-status">Last search returned {lastHits} hits.</Section>;
+}
+```
+
+Two components reading the same key share one cell for the same reason — write in one, the other re-renders.
+
+## Durable values
+
+Values are backed by a `Store` of `{ key, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory. Inject an adapter and state outlives the process — `hydrate()` merges the store back into the read cache.
+
+```ts
+import { withState, createStateStore } from "@agentick/state";
+
+const extension = withState({
+  initial: { "draft.revisions": 0 }, // seed at construction
+  store: createStateStore(), // swap for a durable adapter
+});
+```
+
+`exportSnapshot()` / `importSnapshot()` round-trip the entries for hibernate and resume. `importSnapshot` is a wholesale replace: keys absent from the incoming record are dropped from both the cache and the store.
+
+> [!WARNING]
+> Values are stored as-is with no serialization contract. A function, a class instance, or a live handle is fine in-process and gone after a real snapshot round-trip. If it has to survive a restart, keep it JSON-shaped.
+
+## Over the wire
+
+Four verbs project onto the dynamic-command lane, deny-by-default like every sibling: `state/get`, `state/list`, `state/set`, `state/delete`. Importing `@agentick/state/client` registers `session.state` on the wire client:
+
+```ts
+import "@agentick/state/client";
+
+const state = client.session(sessionId).state;
+
+state.subscribe(() => render(state.list())); // zero-arg store contract
+state.list(); // readonly StateListEntry[]
+state.get("cursor"); // { key, value } | undefined — the row, not the bare value
+
+await state.set("cursor", 4);
+await state.delete("draft");
+await state.refresh(); // force a re-poll
+state.close();
+```
+
+**RPC-backed, not channel-backed.** There is no delta channel for state — it isn't model-visible, so nothing was already fanning its changes out. The read side is a poll: an eager `state/list` seeds the local snapshot and every mutation re-fetches it. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop straight into `useSyncExternalStore`.
+
+`stateHandle(client, sessionId)` is the same handle as a free factory when you'd rather compose than rely on the registered slot.
 
 ## API
 
 ### `@agentick/state`
 
-- **`StateHarness`** — `BaseHarness<"state">` impl of `StateHarnessProtocol`.
-  Construct with `(scopeId, journal, bus, inbox, options?)`;
-  `StateHarnessOptions.store` overrides the durable value store (defaults to a
-  fresh in-memory `createStateStore()`).
-  - Sync reads: `get(key)` · `has(key)` · `list()` · `subscribe(key, fn)` ·
-    `subscribeAll(fn)`. `list()` returns `{ key, value }` entries (the sibling
-    projection depth — knobs descriptors, skills records), not bare keys.
-  - Notify seam (ADR 75): `onChange(fn)` — typed push carrying the delta
-    (`ChangeEvent<unknown>`): `set` → add/update, `delete` → remove. The push
-    twin of the bare `subscribe` render-ping; the source a future `state`
-    snapshot+delta channel projects from.
-  - Async commands: `set({ key, value })` · `delete({ key })`.
-- **Wire surface (`exposure: "wire"`, deny-by-default).** All four verbs
-  project onto the dynamic-command lane so a client `session.state` handle can
-  read AND mutate (three-audiences-plan G-prep — state had no read command and
-  its mutations were exposure-less, so nothing was wire-reachable): `state/get`
-  (`{ key }` → value) · `state/list` (→ `{ key, value }` entries) · `state/set`
-  · `state/delete`. The `WireMethods` rows live in a type-only `wire-augment.ts`
-  split (the `export {}` guard is load-bearing) so a future client subpath types
-  them without pulling server-bridge code.
-  - Snapshot: `exportSnapshot()` / `importSnapshot(values)`.
-  - Store: `hydrate()` reloads the durable store into the sync projection
-    (resume seam; not wired into session resume — `importSnapshot` owns that).
-- **`createStateStore()`** — the bundled in-memory default value store
-  (`CollectionStore<StateEntry, StateStoreQuery>`); single source of the default
-  store config. **Types `StateEntry`** (`{ key, value }` cell) / **`StateStoreQuery`**
-  (empty — state has no scoped read).
-- **`withState(options?)`** — `SessionExtension` factory.
-  `WithStateOptions.initial` seeds entries at construction (via
-  `importSnapshot`); `WithStateOptions.store` threads a durable store through.
-  Adopters wanting a custom backend (e.g. redis-backed) pass their own
-  configured `withState({ ... })`.
-- **`runStateHarnessConformance({ make })`** — protocol conformance suite for
-  alternative impls.
-- **Type `StateHandle`** — the curated `session.state` surface (hides `id` /
-  `ready` / `close` / snapshot import-export).
+| Export                                   | Purpose                                                    |
+| ---------------------------------------- | ---------------------------------------------------------- |
+| `withState(options?)`                    | Session extension: `initial` seed entries, `store` backing |
+| `StateHarness` / `StateHarnessOptions`   | The implementation, for direct construction                |
+| `createStateStore()`                     | The bundled in-memory value store                          |
+| `StateHandle` (type)                     | What `session.state` exposes                               |
+| `StateEntry` / `StateStoreQuery` (types) | The stored `{ key, value }` cell and its (empty) query     |
+
+### `session.state`
+
+| Method                | Returns                                          |
+| --------------------- | ------------------------------------------------ |
+| `get(key)`            | `unknown` — the value, or `undefined`            |
+| `has(key)`            | `boolean` — key membership, independent of value |
+| `list()`              | `readonly StateListEntry[]` — `{ key, value }`   |
+| `set({ key, value })` | `Promise<void>` — journaled write                |
+| `delete({ key })`     | `Promise<void>` — journaled removal              |
+| `subscribe(key, fn)`  | Fires when that key changes, deletes included    |
+| `subscribeAll(fn)`    | Fires on any entry change                        |
+
+On a `StateHarness` instance, additionally: `onChange(fn)` (typed `ChangeEvent` push — `set` yields add/update, `delete` yields remove), `exportSnapshot()` / `importSnapshot()`, and `hydrate()`.
 
 ### `@agentick/state/react`
 
-- **`useSessionState<T>(key, initial)`** → `readonly [T, (v: T) => void]`.
+| Export                             | Purpose                        |
+| ---------------------------------- | ------------------------------ |
+| `useSessionState<T>(key, initial)` | `readonly [T, (v: T) => void]` |
+
+### `@agentick/state/client`
+
+| Export                           | Purpose                                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `session.state`                  | Registered on import: `list` / `get` / `set` / `delete` / `refresh` / `subscribe` / `close` |
+| `stateHandle(client, sessionId)` | The same handle as a free factory                                                           |
+| `StateClientHandle` (type)       | The handle contract                                                                         |
 
 ### `@agentick/state/testing`
 
-- **`stubStateHarness(initial?)`** — a real `StateHarness` on its own
-  in-memory substrate; `initial` seeds entries.
-
-The top-level `session.state` accessor is owned by
-`@agentick/session` (which augments `SessionHarnessProtocol`), not by
-this package.
+| Export                       | Purpose                                      |
+| ---------------------------- | -------------------------------------------- |
+| `stubStateHarness(initial?)` | A real harness instance on its own substrate |
+| `runStateHarnessConformance` | Certify an alternate implementation          |
 
 ## Patterns
 
-**Component-local scratch that outlives a remount.** Any value a component
-would keep in `useState` but wants to preserve across unmount/remount or
-hibernate/resume: `useSessionState("filters", defaultFilters)`.
+**Model-visible instead?** [@agentick/knobs](../knobs) is this package plus descriptors, a validation pipeline, and a tool the model calls.
 
-**Cross-component shared state.** Two components reading the same key share
-one cell — write in one, the other re-renders. No context provider needed;
-the harness is the store.
+**Rendering.** [@agentick/compiler-react](../compiler-react) owns `<Section>`, `createTool`, and the bridge context `useSessionState` reads.
 
-**Programmatic drive from tool handlers.** A tool handler holding the session
-can `session.state.set(...)` to stash a result the JSX tree then reads via
-`useSessionState` — server logic and render tree meeting on one key.
+**Shapes.** [@agentick/spec](../spec) owns `StateListEntry`, `StateSetInput`, `StateDeleteInput`, and the `Store` seam a durable adapter implements.
 
-## `/client` — the client-side handle (ADR 87)
+**Client.** [@agentick/client-core](../client-core) owns the `ClientHandle` / `Enumerable` contracts and the session sub-handle registry the `/client` subpath registers into.
 
-`@agentick/state/client` projects `session.state` to the wire client, per
-the symmetry law (a harness that ships a session handle ships the matching
-client handle). Importing the subpath self-assembles `client.session(id).state`:
+## Roadmap & known gaps
 
-```ts
-import { createClient } from "@agentick/client"; // bundles this subpath
-const session = client.session(id);
-session.state.list(); // readonly StateListEntry[] (Enumerable)
-session.state.get("cursor"); // { key, value } | undefined
-await session.state.set("cursor", 4);
-await session.state.delete("draft");
-session.subscribe(() => render()); // zero-arg store contract
-```
-
-**RPC-backed, not channel-backed.** There is no `state-state` delta channel
-(state is the adopter stash, not model-visible; a reactive mirror rides the
-client channel-consumer primitive later). The read side is a poll:
-`list()`/`get()` read a local snapshot seeded by an eager `state/list` fetch and
-re-fetched after each mutation (fire-and-refetch); `refresh()` forces a re-poll.
-The verbs ride the `state/*` dynamic-lane commands. Depends only on
-`@agentick/client-core` + spec types — never the server harness — so it
-stays out of a browser bundle.
-
-## Status & roadmap
-
-Extracted per ADR 26 Step 3a, modularized per ADR 27. Green.
-
-- **`withState()` wiring (ADR 26 Step 8) — pending.** As with knobs, the
-  `SessionInstaller` path is not yet the construction site: today the
-  SessionHarness constructs `StateHarness` directly in `session-bridges.ts`.
-  When Step 8 lands, `withState()` becomes the default session extension and
-  adopters override by passing a configured `withState({ ... })`.
-- **Snapshot durability.** Values are stored as `unknown` and round-tripped
-  as-is; cross-process / cross-restart durability is bounded by JSON
-  serializability — non-serializable values (functions, class instances)
-  don't survive a real snapshot.
+- **No live client mirror.** The client handle polls. State has no snapshot-plus-delta channel, so a UI bound to it updates after its own mutations, not when the session mutates a key on its own. The wire codec for such a channel has to encode a present-but-`undefined` value explicitly, or the key vanishes on apply.
+- **No model-facing tools.** There are deliberately no `state_get` / `state_set` tools. Whether session state should ever get a model surface — and how that would relate to knobs — is an open policy question, not a missing feature.
+- **`hydrate()` is not the resume path.** `importSnapshot` still owns session resume; `hydrate()` is tested and reachable but nothing calls it during restore yet.
+- **`withState()` is not the construction site yet.** Sessions construct their state directly; the extension factory is correct but the wiring point still moves.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` (5 tests) — sync surface (`get` / `has` /
-  `list`), async commands (`set` / `delete`) through the Operation envelope,
-  per-key + wildcard subscription fan, and snapshot round-trip firing
-  subscribers on changed keys.
-- `src/__tests__/store-backing.spec.ts` (12 tests) — the storification contract:
-  every `set` / `delete` / `importSnapshot` dual-writes (projection + store),
-  `hydrate()` rebuilds the projection from a pre-seeded store and pings
-  subscribers (merge, not clear-first), `import`/`export` coexist with the
-  store, and the `undefined`-value round-trip (write-through, `hydrate`,
-  export/import all keep an `undefined`-valued cell present).
-- `src/__tests__/change-stream.spec.ts` (4 tests) — the `onChange` notify seam:
-  add (no prev) / update (with prev) on `set`, `remove` (value omitted) on
-  `delete` / no-op delete emits nothing, the `existed`-not-`prev!==undefined`
-  discriminator (`set(undefined)` then `set(value)` = add→update), and
-  unsubscribe / multiple projections on one stream.
-- `src/__tests__/integration-with-compiler.spec.tsx` (4 tests) —
-  `useSessionState` initial registration, non-overwrite on re-mount,
-  persistence across unmount → remount when the bridge is reused, and
-  reactivity to external `set` against the real `CompilerHarness`.
-- `src/conformance.ts` — `runStateHarnessConformance` exports the protocol
-  battery for adopter impls (`list()` returns `{ key, value }` entries).
-- `@agentick/transport-in-process` `src/__tests__/wire-reads-e2e.spec.ts` —
-  `state/get` + `state/list` + `state/set` round-trip over the real gateway +
-  dynamic lane, `commands/list` enumerates them, deny-by-default preserved.
-- `src/client/__tests__/state-handle.spec.ts` (5 tests) — the client handle: the
-  eager `state/list` poll seeds `list()`/`get()`, each verb's wire request shape
-  (`set`/`delete`/`refresh`), fire-and-refetch (a mutation triggers a follow-up
-  `state/list`), and the zero-arg `subscribe(cb)` store contract.
-- `src/client/__tests__/session-state.spec.ts` (2 tests) — ADR 87 self-assembly:
-  importing `@agentick/state/client` makes `client.session(id).state`
-  resolve via `registerSessionHandleExtension`, polling a snapshot and issuing
-  `state/set` over the transport.
-
-@see [`docs/proposals/v2/blueprint/26-harness-api-shape.md`](../../docs/proposals/v2/blueprint/26-harness-api-shape.md)
-@see [`docs/proposals/v2/blueprint/27-modular-built-ins.md`](../../docs/proposals/v2/blueprint/27-modular-built-ins.md)
-@see [`docs/proposals/v2/blueprint/51-invocation-and-authorization.md`](../../docs/proposals/v2/blueprint/51-invocation-and-authorization.md)
+- `src/__tests__/harness.spec.ts` — `set` and `delete` emitting `requested → terminal` envelopes, inbox addressability for both verbs, the sync read surface, and snapshot round-trip.
+- `src/__tests__/store-backing.spec.ts` — every `set` / `delete` / `importSnapshot` reaching the store, upsert on re-set, `hydrate()` rebuilding the read cache as a merge and pinging subscribers, `importSnapshot` dropping absent keys from both tiers, and the `undefined`-value round-trip staying a present key through write-through, hydrate, and export/import.
+- `src/__tests__/change-stream.spec.ts` — the `onChange` seam: add vs update on `set`, remove on `delete`, nothing for a no-op delete, the presence-based discriminator (`set(undefined)` then `set(value)` reads as add then update), unsubscribe, and multiple projections on one stream.
+- `src/__tests__/integration-with-compiler.spec.tsx` — against the real compiler: `useSessionState` seeding on first render, not overwriting an existing value on remount, surviving unmount → remount, and re-rendering on an external `set`.
+- `src/client/__tests__/state-handle.spec.ts` + `session-state.spec.ts` — the eager `state/list` poll seeding `list()`/`get()`, each verb's request shape, fire-and-refetch after a mutation, `refresh()` resolving the fresh snapshot, the zero-arg `subscribe` contract, and `session.state` self-assembling on the client session handle.
+- `src/conformance.ts` — `runStateHarnessConformance`: the protocol battery, including `list()` returning `{ key, value }` entries.
+- [@agentick/transport-in-process](../transport-in-process) `src/__tests__/wire-reads-e2e.spec.ts` — `state/get`, `state/list`, and `state/set` round-tripping the real gateway and dynamic lane, enumerating via `commands/list`, with deny-by-default preserved.

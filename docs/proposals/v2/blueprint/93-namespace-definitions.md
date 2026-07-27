@@ -49,6 +49,14 @@ is the op layer; write mediation is decoration.
 | knobs / state / credentials | `defineKnobs/State/Credentials({ store? })` | store-backed | thin members; conforming costs nothing |
 | resources | `defineResources({ hydrate? })` | none | tree-mounted declarations stay tree concerns; per-URI resolvers stay subject seams |
 
+| sandbox | `defineSandbox({ provider, bootstrap?, hooks?, guards? })` | `bootstrap(ctx)` — imperative | the ENVIRONMENT-namespace genesis verb: no store slot (not store-bearing), no hydrate; `ctx.sandbox` is the live handle (eve's bootstrap idiom, landed). Fork semantics (re-bootstrap vs provider clone) = open D-phase question. |
+
+**The genesis seam has two verbs, by namespace nature:** DATA
+namespaces `hydrate(ctx) ⇒ records` (source-agnostic catch-up);
+ENVIRONMENT namespaces `bootstrap(ctx) ⇒ void` (imperative setup
+against the live capability). One slot family, two named verbs —
+forcing either through the other's shape is false symmetry.
+
 **Non-members (do not force):** gates (tree/loop concern, no store),
 model/executors/compiler (first-class slots, no storage semantics).
 
