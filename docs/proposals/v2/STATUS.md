@@ -1784,6 +1784,47 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-27 (13th) — node10 consumers cannot import ANY subpath
+
+The first real server consumer (`apps/assistant-api` in nx-knowify, a Nest app on
+`"moduleResolution": "node"`) failed to build with **47 errors, 37 of them one
+cause**: node10 resolution ignores `exports` maps entirely, and our packages ship
+only `dist/` plus `exports`, with **no `typesVersions` fallback**. So every
+subpath import fails to resolve — `@agentick/transport-http/fetch`,
+`@agentick/transport-websocket/server`, `@agentick/app/react`,
+`@agentick/timeline/react`, `@agentick/knobs/react`, `@agentick/gates/react`,
+`@agentick/skills/hydrators/node`. Proven by trace:
+
+```
+======== Resolving module '@agentick/mcp/server' from '/tmp/probe.ts'. ========
+Loading module '@agentick/mcp/server' from 'node_modules' folder, target file types: TypeScript, Declaration.
+======== Module name '@agentick/mcp/server' was not resolved. ========
+```
+
+The failure is worse than it looks, because 27 of those 37 present as
+`Module '"@agentick/mcp/server"' has no exported member 'McpRequestContext'` —
+members that demonstrably ARE in the published `dist/server/index.d.ts`. An
+adopter reading that error hunts for an API that was removed, not a resolution
+setting. Runtime is fine throughout: Node honors `exports` regardless of what
+TypeScript is configured to do. This is purely a types gap.
+
+`moduleResolution: "node"` is still the default in large established monorepos
+and cannot be flipped without a migration, so "tell them to upgrade" is the
+Vercel violation — the consumer would be opting into correctness. Fixing it costs
+us a generated manifest field. **Every package's `publishConfig` now carries
+`typesVersions` derived from its own `exports` map**, with a `scripts/` generator
+(idempotent, no hand-maintained list) and an anti-rot sweep in spec-conformance
+asserting every published subpath has an entry pointing at a `.d.ts` under
+`dist/`.
+
+For the record, the other 10 errors in that build are the CONSUMER's and were
+misattributed to us at first glance: three duplicate-`typeorm`-instance
+assignability failures, four implicit-`any` parameters, one `import.meta` under
+`module: CommonJS` (their own skills-root lookup, not something the framework
+asks for), and one `'submit.Tool' cannot be used as a JSX component` — which is
+two `@types/react` in their tree (18.3.31 and 19.2.17), not a framework typing
+defect. Worth stating plainly so the next person does not chase a phantom.
+
 ### 2026-07-27 (12th) — next.20: the browser-safe client door
 
 **LAW: a barrel is single-environment.** No barrel may re-export both a
