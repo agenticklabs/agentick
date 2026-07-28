@@ -193,6 +193,22 @@
   intents:
     - catalog-handles-fill-in
     - tool-confirmation-reader
+"@agentick/transport-http@1.0.0-next.20":
+  dir: packages/transport-http
+  intents:
+    - browser-safe-client-door
+"@agentick/transport-in-process@1.0.0-next.20":
+  dir: packages/transport-in-process
+  intents:
+    - browser-safe-client-door
+"@agentick/transport-unix-socket@1.0.0-next.20":
+  dir: packages/transport-unix-socket
+  intents:
+    - browser-safe-client-door
+"@agentick/transport-websocket@1.0.0-next.20":
+  dir: packages/transport-websocket
+  intents:
+    - browser-safe-client-door
 "@agentick/transport@1.0.0-next.13":
   dir: packages/transport
   intents:
@@ -201,3 +217,7 @@
   dir: packages/transport
   intents:
     - progress-completion-marker
+"@agentick/transport@1.0.0-next.20":
+  dir: packages/transport
+  intents:
+    - browser-safe-client-door

@@ -1,5 +1,29 @@
 # @agentick/session
 
+## 1.0.0-next.20
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.20
+  - @agentick/compiler-react@1.0.0-next.20
+  - @agentick/elicitation@1.0.0-next.20
+  - @agentick/gates@1.0.0-next.20
+  - @agentick/knobs@1.0.0-next.20
+  - @agentick/loop-executor@1.0.0-next.20
+  - @agentick/model@1.0.0-next.20
+  - @agentick/model-executor@1.0.0-next.20
+  - @agentick/pubsub@1.0.0-next.20
+  - @agentick/resources@1.0.0-next.20
+  - @agentick/runtime@1.0.0-next.20
+  - @agentick/spec@1.0.0-next.20
+  - @agentick/state@1.0.0-next.20
+  - @agentick/store@1.0.0-next.20
+  - @agentick/tasks@1.0.0-next.20
+  - @agentick/timeline@1.0.0-next.20
+  - @agentick/tool-executor@1.0.0-next.20
+  - @agentick/utils@1.0.0-next.20
+
 ## 1.0.0-next.19
 
 ### Patch Changes

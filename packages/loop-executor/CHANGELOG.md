@@ -1,5 +1,14 @@
 # @agentick/loop-executor
 
+## 1.0.0-next.20
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/runtime@1.0.0-next.20
+  - @agentick/spec@1.0.0-next.20
+  - @agentick/utils@1.0.0-next.20
+
 ## 1.0.0-next.19
 
 ### Patch Changes
