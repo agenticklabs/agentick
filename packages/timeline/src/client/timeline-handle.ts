@@ -13,10 +13,11 @@
  *     verbs, Q2 RESOLVED): `seed` (replace the window — the hydration line),
  *     `prepend` (older history at the HEAD), `append` (optimistic/manual at the
  *     TAIL), `clear` (reset to empty).
- *   - READ RPC — `history({ fromSeq, limit })` over the grant-gated
+ *   - READ RPC — `history({ fromSeq, toSeq, limit })` over the grant-gated
  *     `timeline/history` command (ADR 93): one cursored page of durable history,
  *     seq-tagged, no view mutation. `loadOlder(limit?)` is its stateful sugar —
- *     it tracks the cursor and splices each page at the HEAD.
+ *     it opens on the log's TAIL, walks BACKWARD by `toSeq`, and splices each
+ *     page at the HEAD.
  *
  * ## Two postures (both first-class — §5b)
  *
@@ -27,13 +28,22 @@
  *   `subscribe(() => myStore.ingest(handle.list().map(toMyMessage)))`. Our window
  *   is optional; your shape is the truth (the no-client-cache bright line).
  *
+ * ## Scroll-back is TAIL-ANCHORED
+ *
+ * `loadOlder` is the scroll-up affordance, so it reads the way scroll-up moves:
+ * the first call takes the log's LAST `limit` entries (a bare `limit` is the
+ * port's tail read), and each later call carries the previous page's `nextToSeq`
+ * to take the `limit` entries BELOW it. Every page prepends at the HEAD, so page
+ * two lands above page one and the window accumulates in log order without the
+ * app holding a mirrored copy or re-seeding.
+ *
  * ## Cursor-vs-seq (friction #3 — honest, NOT unified)
  *
- * The read is FORWARD-cursored by `seq` (the `LogStore` ordering identity), while
- * the live tail folds bus-`Cursor`-ordered
- * append events — two numbering systems this arc deliberately does not merge. So
- * `loadOlder` pages forward from the log's start and prepends each page; an app
- * doing true infinite-scroll-up reconciles final ordering itself (it holds the
+ * Durable history is ordered by `seq` (the `LogStore` ordering identity) while
+ * the live tail folds bus-`Cursor`-ordered append events — two numbering systems
+ * this arc deliberately does not merge. Scroll-back grows the head and the fold
+ * appends at the tail, so the two never fight; an app that needs an exact
+ * interleaving at the seam reconciles it itself (it holds the
  * `message.metadata.clientId`). The framework gives the window + the splices +
  * the paged read; the app owns the cache and the reconciliation.
  *
@@ -49,6 +59,7 @@ import {
   type FilteredView,
 } from "@agentick/client-core";
 import type { ClientTransport, TimelineEntry, Unsubscribe } from "@agentick/spec";
+import { omitUndefined } from "@agentick/utils";
 
 // Types the `timeline/history` wire row for `transport.request` — type-only, so
 // the client bundle pulls no harness runtime.
@@ -77,7 +88,7 @@ export interface TimelineViewOpts {
 export interface LoadOlderResult {
   /** The older entries just read (and prepended). Empty when nothing remained. */
   readonly entries: readonly TimelineEntry[];
-  /** `true` once the read reached the tail of the durable log (no more pages). */
+  /** `true` once the read reached the HEAD of the durable log (no older pages). */
   readonly done: boolean;
 }
 
@@ -101,19 +112,22 @@ export interface TimelineHandle extends ClientHandle, Enumerable<TimelineEntry> 
   clear(): void;
   /**
    * Read ONE cursored page of durable history over the grant-gated
-   * `timeline/history` command — seq-tagged rows plus the `nextFromSeq` cursor to
-   * continue with (absent at the log's tail). Stateless and view-neutral: it
-   * splices nothing, so an app whose message model is the truth (Posture B) pages
-   * straight into its own store.
+   * `timeline/history` command — seq-tagged rows plus the cursor that continues
+   * the direction you asked in (`nextFromSeq` forward, `nextToSeq` backward;
+   * absent once the log runs out that way). `{ limit: n }` alone is the log's
+   * LAST `n`. Stateless and view-neutral: it splices nothing, so an app whose
+   * message model is the truth (Posture B) pages straight into its own store.
    *
    * Requires a grant on the `timeline:history` scope, and reads only the session
    * this handle is bound to (the same-principal target rule).
    */
   history(options?: TimelineHistoryInput): Promise<TimelineHistoryPage>;
   /**
-   * Scroll-back sugar over {@link history}: read the next page and splice it at
-   * the HEAD of the window. Tracks its own `nextFromSeq` cursor across calls;
-   * resolves `{ entries, done }`. A no-op once `done`.
+   * Scroll-back sugar over {@link history}: read the next OLDER page and splice
+   * it at the HEAD of the window. The first call reads the log's last `limit`
+   * entries; each later call walks down by the previous page's `nextToSeq`.
+   * Resolves `{ entries, done }`, and is a no-op once `done` (the log's head).
+   * Omitting `limit` reads everything older in one page.
    */
   loadOlder(limit?: number): Promise<LoadOlderResult>;
   /**
@@ -141,9 +155,10 @@ export function timelineHandle(
 ): TimelineHandle {
   const view = timelineView(client, sessionId, options);
 
-  // The history read cursor — advances with each `loadOlder`; `done` latches
-  // once a page returns no `nextFromSeq` (the log tail).
-  let fromSeq: number | undefined;
+  // The scroll-back cursor — walks DOWN with each `loadOlder` (the first call
+  // sends no bound, which reads the log's tail); `done` latches once a page
+  // returns no `nextToSeq` (the log's head).
+  let toSeq: number | undefined;
   let done = false;
 
   // Minted views (B2 slice 4). Each is a filtered projection over the SAME
@@ -190,20 +205,24 @@ export function timelineHandle(
     history: async (options) =>
       (await client.transport.request("timeline/history", {
         sessionId,
-        ...(options?.fromSeq !== undefined ? { fromSeq: options.fromSeq } : {}),
-        ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+        ...omitUndefined({
+          fromSeq: options?.fromSeq,
+          toSeq: options?.toSeq,
+          limit: options?.limit,
+        }),
       })) ?? { entries: [] },
     loadOlder: async (limit) => {
       if (done) return { entries: [], done: true };
+      // No `fromSeq`, ever: the absent lower bound is what anchors `limit` at
+      // the log's tail, and `toSeq` walks that anchor down page by page.
       const res = await client.transport.request("timeline/history", {
         sessionId,
-        ...(fromSeq !== undefined ? { fromSeq } : {}),
-        ...(limit !== undefined ? { limit } : {}),
+        ...omitUndefined({ toSeq, limit }),
       });
       const page = res?.entries?.map((e) => e.entry) ?? [];
-      fromSeq = res?.nextFromSeq;
-      // The tail latch: no next cursor means the page reached the log's end.
-      done = res?.nextFromSeq === undefined;
+      toSeq = res?.nextToSeq;
+      // The head latch: no next cursor means the page reached the log's start.
+      done = res?.nextToSeq === undefined;
       if (page.length > 0) view.prepend(page);
       return { entries: page, done };
     },

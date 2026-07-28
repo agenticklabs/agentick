@@ -101,6 +101,51 @@ describe("MemoryLog", () => {
     it("returns [] for an unknown log key", async () => {
       expect(await new MemoryLog<Row>().history("nope", undefined, stubStoreCtx())).toEqual([]);
     });
+
+    it("bounds above with toSeq (inclusive) and composes with fromSeq", async () => {
+      const log = new MemoryLog<Row>();
+      const seqs = await log.append("l1", [row("a"), row("b"), row("c"), row("d")], stubStoreCtx());
+      const through = await log.history("l1", { toSeq: seqs[2]! }, stubStoreCtx());
+      expect(through.map((t) => t.entry.id)).toEqual(["a", "b", "c"]);
+      const window = await log.history(
+        "l1",
+        { fromSeq: seqs[1]!, toSeq: seqs[2]! },
+        stubStoreCtx(),
+      );
+      expect(window.map((t) => t.entry.id)).toEqual(["b", "c"]);
+      // An upper bound below the log's floor selects nothing.
+      expect(await log.history("l1", { toSeq: seqs[0]! - 1 }, stubStoreCtx())).toEqual([]);
+    });
+
+    it("anchors `limit` at the TAIL when fromSeq is absent — the last n, ascending", async () => {
+      const log = new MemoryLog<Row>();
+      const seqs = await log.append("l1", [row("a"), row("b"), row("c"), row("d")], stubStoreCtx());
+      // The read every chat UI opens on: the newest n, still in seq order.
+      const tail = await log.history("l1", { limit: 2 }, stubStoreCtx());
+      expect(tail.map((t) => t.entry.id)).toEqual(["c", "d"]);
+      expect(tail.map((t) => t.seq)).toEqual([seqs[2], seqs[3]]);
+      // Backward paging: the n ending at an upper bound.
+      const older = await log.history("l1", { toSeq: seqs[2]! - 1, limit: 2 }, stubStoreCtx());
+      expect(older.map((t) => t.entry.id)).toEqual(["a", "b"]);
+      // A limit wider than the window is not padded.
+      expect(
+        (await log.history("l1", { limit: 99 }, stubStoreCtx())).map((t) => t.entry.id),
+      ).toEqual(["a", "b", "c", "d"]);
+      // fromSeq present ⇒ forward anchor (unchanged).
+      const head = await log.history("l1", { fromSeq: 0, limit: 2 }, stubStoreCtx());
+      expect(head.map((t) => t.entry.id)).toEqual(["a", "b"]);
+    });
+
+    it("the seam query carries the window too — { limit } projects the tail", async () => {
+      const log = new MemoryLog<Row>();
+      await log.append("l1", [row("a"), row("b"), row("c")], stubStoreCtx());
+      expect(
+        (await log.query({ logKey: "l1", limit: 2 }, stubStoreCtx())).map((r) => r.id),
+      ).toEqual(["b", "c"]);
+      expect(
+        (await log.query({ logKey: "l1", toSeq: 1 }, stubStoreCtx())).map((r) => r.id),
+      ).toEqual(["a", "b"]);
+    });
   });
 
   describe("prune()", () => {

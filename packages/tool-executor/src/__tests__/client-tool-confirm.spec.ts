@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import type {
+  ClientElicitationHandle,
   Cursor,
   EventFrame,
   ProtocolEvent,
@@ -25,7 +26,8 @@ import type { ElicitationClient } from "@agentick/elicitation/client";
 import { ELICITATION_CHANNEL_FQN } from "@agentick/elicitation";
 import { waitFor } from "@agentick/utils/testing";
 
-import { confirmClientTools } from "../client/confirm.js";
+import { TOOL_CONFIRMATION_KIND } from "../confirmation-schema.js";
+import { confirmClientTools, toolConfirmation } from "../client/confirm.js";
 
 interface PushStream extends SubscriptionStream {
   emit(payload: unknown, correlationId: string): void;
@@ -169,6 +171,75 @@ describe("confirmClientTools — predicate policy", () => {
       preview: { diff: "+1" },
     });
     unsub();
+  });
+});
+
+describe("toolConfirmation — the narrowing reader", () => {
+  /**
+   * A REAL `ClientElicitationHandle` — the value `session.elicitations.list()`
+   * yields. Passing it to `toolConfirmation` with no cast is the assignability
+   * claim (enforced by `tsc`, not by an assertion).
+   */
+  function listedElicitation(fields: {
+    readonly message: string;
+    readonly hints?: Readonly<Record<string, unknown>>;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }): ClientElicitationHandle {
+    return {
+      correlationId: "corr:1",
+      replyTo: "inbox:x",
+      mode: "form",
+      receivedAt: 0,
+      ...fields,
+      accept: async () => undefined,
+      decline: async () => undefined,
+      cancel: async () => undefined,
+    };
+  }
+
+  it("returns undefined when the elicitation is not a tool confirmation", () => {
+    expect(
+      toolConfirmation(
+        listedElicitation({ message: "What is your name?", hints: { kind: "mcp_elicitation" } }),
+      ),
+    ).toBeUndefined();
+    expect(toolConfirmation(listedElicitation({ message: "no hints at all" }))).toBeUndefined();
+  });
+
+  it("maps a confirmation to the full ConfirmRequest — preview INCLUDED", () => {
+    const req = toolConfirmation(
+      listedElicitation({
+        message: 'Approve tool "write_file"?',
+        hints: { kind: TOOL_CONFIRMATION_KIND },
+        metadata: {
+          toolUseId: "tc-9",
+          toolName: "write_file",
+          arguments: { path: "/tmp/x" },
+          preview: { diff: "+1 line" },
+        },
+      }),
+    );
+
+    expect(req).toEqual({
+      toolName: "write_file",
+      toolUseId: "tc-9",
+      arguments: { path: "/tmp/x" },
+      message: 'Approve tool "write_file"?',
+      preview: { diff: "+1 line" },
+    });
+  });
+
+  it("omits absent fields rather than materializing them as undefined", () => {
+    const req = toolConfirmation(
+      listedElicitation({
+        message: "Approve?",
+        hints: { kind: TOOL_CONFIRMATION_KIND },
+        metadata: { toolName: "echo" },
+      }),
+    );
+
+    expect(req).toEqual({ toolName: "echo", message: "Approve?" });
+    expect(Object.keys(req!)).toEqual(["toolName", "message"]);
   });
 });
 

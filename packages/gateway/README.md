@@ -276,7 +276,7 @@ const gateway = await createGateway({
 });
 ```
 
-Then the client pages its own session's log — `client.session(id).timeline.history({ fromSeq, limit })` or the cursor-tracking `loadOlder()`:
+Then the client pages its own session's log — `client.session(id).timeline.history({ fromSeq, toSeq, limit })` or the tail-anchored `loadOlder()`:
 
 - **`"acme/viewer"`** reads. `timeline:history` covers exactly the read.
 - **A principal granted `timeline:compact`** does not. A sibling-verb grant never leaks the read.
@@ -294,7 +294,7 @@ defineTimeline({
   store,
   guards: {
     history: (input, ctx) =>
-      withinRetention(ctx.sessionId, input.fromSeq)
+      withinRetention(ctx.sessionId, input.fromSeq ?? input.toSeq)
         ? undefined // proceed
         : { kind: "veto", reason: "outside the retention window" },
     // Cap the page a client can demand, whatever it asks for.

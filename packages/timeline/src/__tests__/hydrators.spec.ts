@@ -155,8 +155,10 @@ describe("hydrateTail — the BOUNDED-MEMORY proof (ADR 93 D1 gate)", () => {
     // 3. Every store touch was a cursored `history`, and every one carried a
     //    finite `limit`: no call could ever transfer the whole log.
     expect(new Set(spy.calls)).toEqual(new Set(["history"]));
-    expect(spy.historyLimits.length).toBeGreaterThan(0);
-    expect(spy.historyLimits.every((l) => typeof l === "number" && l > 0)).toBe(true);
+    // …and it took exactly ONE: "the last k" is expressible at the port, so
+    // there is no forward seek to pay for.
+    expect(spy.calls).toEqual(["history"]);
+    expect(spy.historyLimits).toEqual([k]);
     // 4. Peak transfer is the paging window, NOT N — the memory claim, measured.
     const window = Math.max(...(spy.historyLimits as number[]));
     expect(spy.peakTransfer()).toBeLessThanOrEqual(window);

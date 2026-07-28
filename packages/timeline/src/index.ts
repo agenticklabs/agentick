@@ -57,6 +57,7 @@ export { MemoryTimelineStore } from "./store.js";
 // `-postgres`, adopter-written) get the port + entry + seq-tag types from
 // the same package as the harness they back — one dep, not two.
 export type {
+  LogHistoryOptions,
   LogMutation,
   LogQuery,
   SeqTagged,

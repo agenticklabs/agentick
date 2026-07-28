@@ -139,12 +139,18 @@ describe("defineTimelineStore — the port's inline constructor", () => {
       history: (key, options) => {
         calls.push("history");
         const list = logs.get(key) ?? [];
-        const from = options?.fromSeq ?? 0;
-        const end = options?.limit !== undefined ? from + options.limit : list.length;
-        const out: SeqTagged<TimelineEntry>[] = [];
-        for (let i = from; i < Math.min(end, list.length); i++) {
-          out.push({ seq: i, entry: list[i]! });
+        // seq === position in this fixture, so the window maps straight to
+        // indices. Both bounds inclusive; `limit` truncates at the anchor end.
+        const { fromSeq, toSeq, limit } = options ?? {};
+        let start = Math.max(fromSeq ?? 0, 0);
+        let end = Math.min(toSeq !== undefined ? toSeq + 1 : list.length, list.length);
+        if (end < start) end = start;
+        if (limit !== undefined) {
+          if (fromSeq !== undefined) end = Math.min(start + limit, end);
+          else start = Math.max(end - limit, start);
         }
+        const out: SeqTagged<TimelineEntry>[] = [];
+        for (let i = start; i < end; i++) out.push({ seq: i, entry: list[i]! });
         return Promise.resolve(out);
       },
     });
@@ -235,11 +241,16 @@ runTimelineStoreConformance({
       history: (key, options) => {
         const r = logs.get(key);
         if (r === undefined) return Promise.resolve([]);
-        const start = Math.max((options?.fromSeq ?? 0) - r.baseSeq, 0);
-        const end =
-          options?.limit !== undefined
-            ? Math.min(start + options.limit, r.entries.length)
-            : r.entries.length;
+        const { fromSeq, toSeq, limit } = options ?? {};
+        const clamp = (i: number): number => Math.max(0, Math.min(i, r.entries.length));
+        let start = clamp((fromSeq ?? r.baseSeq) - r.baseSeq);
+        let end = toSeq !== undefined ? clamp(toSeq - r.baseSeq + 1) : r.entries.length;
+        if (end < start) end = start;
+        if (limit !== undefined) {
+          // The anchor rule: forward from `fromSeq`, else backward from the top.
+          if (fromSeq !== undefined) end = Math.min(start + limit, end);
+          else start = Math.max(end - limit, start);
+        }
         const out: SeqTagged<TimelineEntry>[] = [];
         for (let i = start; i < end; i++) out.push({ seq: r.baseSeq + i, entry: r.entries[i]! });
         return Promise.resolve(out);

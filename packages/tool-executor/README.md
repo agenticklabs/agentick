@@ -373,6 +373,21 @@ const stop = calls.route({
 calls.confirm((req) => !req.toolName?.startsWith("rm"));
 ```
 
+A UI that draws its **own** confirmation dialog reads the request off `session.elicitations` with `toolConfirmation(elic)` instead of handing the decision to `confirm(policy)`. It is the same reader `confirm` uses, so a dialog gets every field the gate stamped — including the `confirmationPreview` — and `undefined` narrows away everything that is not a confirmation:
+
+```ts
+import { toolConfirmation } from "@agentick/tool-executor/client";
+
+for (const elic of session.elicitations.list()) {
+  const req = toolConfirmation(elic);
+  if (!req) continue; // an MCP ask, a sandbox permission — not ours
+  const ok = await showDialog(req.toolName, req.arguments, req.message, req.preview);
+  await (ok ? elic.accept({ approved: true }) : elic.decline());
+}
+```
+
+Do not run this **and** `confirm(policy)` — both answer the same correlation id.
+
 `route` answers a throwing handler with an error result — a suspended call is never left hanging. Fire-and-forget relays carry no correlation id, so they never enter `list()`, but `route` still dispatches their handler.
 
 The pending set is snapshot-first: the executor publishes every outstanding `requiresResponse` call as the channel's opening frame, so a client that connects **mid-call** finds it in `list()` and can answer it, instead of the call hanging until timeout.
@@ -386,14 +401,17 @@ calls.subscribe(() => rerender()); // zero-arg store contract
 
 `respondToToolCall(client, sessionId, correlationId, result)` is the free by-id escape hatch for code holding a bare correlation id outside the pending set.
 
-The registry projection is RPC-backed — there is no tools delta channel, so `list()`/`get()` read a snapshot seeded by an eager poll and `refresh()` re-polls:
+The registry projection is RPC-backed — there is no tools delta channel, so `list()`/`get()` read a snapshot seeded by an eager poll:
 
 ```ts
 const tools = client.session(sessionId).tools;
-await tools.refresh({ exposure: "model" });
-tools.list(); // ToolInfo[]
+tools.subscribe(() => renderPalette(tools.list())); // fires when the seed lands
+tools.list(); // ToolInfo[] — empty for one round-trip, then filled
+await tools.refresh({ exposure: "model" }); // re-poll on demand
 await tools.dispatch("read_file", { path: "notes.md" }); // host door, over the wire
 ```
+
+The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it.
 
 The two wire methods behind all of this:
 
@@ -519,6 +537,7 @@ Types: `ToolExecutorHarnessOptions`, `HandlerResolver`, `HandlerEntry`, `Handler
 | `session.tools`           | Registered on import: registry projection + `dispatch`/`refresh`            |
 | `clientToolCallsHandle`   | The headless factory behind the feed                                        |
 | `toolsHandle`             | The headless factory behind the registry projection                         |
+| `toolConfirmation`        | Reads an elicitation as a `ConfirmRequest`; `undefined` if it isn't one     |
 | `respondToToolCall`       | By-id reply escape hatch                                                    |
 
 Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `ClientToolHandler`, `RouteClientToolsOptions`, `ToolsClientHandle`, `ConfirmPolicy`, `ConfirmRequest`.
@@ -556,7 +575,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/tools-handle.spec.ts` — `session.tools`: `ToolInfo` projection, exposure filter, name-then-alias `get`/`has`, canonical-name dispatch binding, and the two subscription shapes.
 - `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
-- `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, the client handle contract, and the registry projection (eager poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
+- `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.
 - `src/__tests__/ctx-extensions.spec.ts` + `ctx-run.spec.ts` + `ctx-trunk-derivation.spec.ts` + `signals.spec.ts` + `signal-fire-and-forget.spec.ts` — opaque extension slots (freshness, absence, universal-field collision safety); `ctx.run` minting a journaled op parented under the dispatch, hook-observable and guard-vetoable, plus `ctx.runner` as a run-only view; the dispatch ctx carrying the crossing's real work-path ids; and `ctx.log` / `ctx.progress` emit shape, scope, and survival of a dying bus.
 - `src/__tests__/middleware-and-hooks.spec.ts` + `command-hooks-augmentation.spec.ts` + `fx-dispatch.spec.ts` — middleware wrapping and compose order, `guardDispatch` verdicts, unsubscribe, the typed hook names agreeing with the runtime derivation, and the `.fx` twins (composable Effects, Promise facades, door → origin preservation, single-fiber nesting, catchable binding mismatch).

@@ -51,6 +51,7 @@
 import type { Pool as PgPool } from "pg";
 
 import type {
+  LogHistoryOptions,
   LogMutation,
   LogQuery,
   SeqTagged,
@@ -225,22 +226,27 @@ class PostgresTimelineStore implements TimelineStore {
 
   async history(
     sessionId: string,
-    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    options: LogHistoryOptions | undefined,
     _ctx: StoreCtx,
   ): Promise<readonly SeqTagged<TimelineEntry>[]> {
-    const fromSeq = options?.fromSeq ?? 0;
-    const values: unknown[] = [sessionId, fromSeq];
+    const { fromSeq, toSeq, limit } = options ?? {};
+    const values: unknown[] = [sessionId];
+    const where = [`${this.q.sessionId} = $1`];
+    if (fromSeq !== undefined) where.push(`${this.q.seq} >= $${values.push(fromSeq)}`);
+    if (toSeq !== undefined) where.push(`${this.q.seq} <= $${values.push(toSeq)}`);
+    // The anchor rule: `fromSeq` present ⇒ the FIRST `limit` rows (ASC);
+    // absent ⇒ the LAST `limit` (the reverse slice: DESC + LIMIT, rows
+    // re-ascended below — the port always returns ascending seq).
+    const backward = limit !== undefined && fromSeq === undefined;
     let text =
       `SELECT ${this.q.seq}, ${this.q.payload}, ${this.q.schemaVer} FROM ${this.q.table}` +
-      ` WHERE ${this.q.sessionId} = $1 AND ${this.q.seq} >= $2 ORDER BY ${this.q.seq}`;
-    if (options?.limit !== undefined) {
-      values.push(options.limit);
-      text += ` LIMIT $3`;
-    }
+      ` WHERE ${where.join(" AND ")} ORDER BY ${this.q.seq}${backward ? " DESC" : ""}`;
+    if (limit !== undefined) text += ` LIMIT $${values.push(limit)}`;
     const rows = await this.run({ text, values });
-    return rows.map(
+    const tagged = rows.map(
       (r): SeqTagged<TimelineEntry> => ({ seq: this.toSeq(r), entry: this.toEntry(r) }),
     );
+    return backward ? tagged.reverse() : tagged;
   }
 
   async append(
@@ -303,11 +309,13 @@ class PostgresTimelineStore implements TimelineStore {
   }
 
   // ── Store seam — required now `LogStore extends Store`. `query` projects a log
-  // window (a `WHERE session_id = … AND seq >= …` SELECT via {@link history},
-  // `seq` tags dropped); `mutate` appends. `logKey` is the `sessionId`.
+  // window (a bounded `WHERE session_id = … AND seq BETWEEN …` SELECT via
+  // {@link history}, `seq` tags dropped); `mutate` appends. `logKey` is the
+  // `sessionId`.
   async query(q: LogQuery | undefined, ctx: StoreCtx): Promise<readonly TimelineEntry[]> {
     if (q === undefined) return [];
-    const tagged = await this.history(q.logKey, { fromSeq: q.fromSeq, limit: q.limit }, ctx);
+    const { logKey, ...window } = q;
+    const tagged = await this.history(logKey, window, ctx);
     return tagged.map((t) => t.entry);
   }
 

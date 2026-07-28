@@ -23,16 +23,8 @@
  * @verifiedBy packages/timeline/src/__tests__/hydrators.spec.ts
  */
 
-import type { SeqTagged, StoreCtx, TimelineEntry, TimelineStore } from "@agentick/spec";
+import type { TimelineStore } from "@agentick/spec";
 import type { TimelineHydrator } from "./definition.js";
-
-/**
- * Paging window {@link hydrateTail} reads the log with. The tail size and the
- * transfer window are DIFFERENT concerns: a `hydrateTail(3)` over a 100k-entry
- * log should not make 33k round-trips. The window floors at this value so the
- * seek cost stays sane while memory stays bounded (window + n, never the log).
- */
-const TAIL_PAGE_FLOOR = 256;
 
 /**
  * The DEFAULT hydrator when a `store` is configured (ADR 93) — the full ordered
@@ -66,12 +58,10 @@ export function hydrateFromStore<
  * `MemoryLog`) already has it. The fallback logs at `debug` so the lost bound is
  * visible rather than silent.
  *
- * **Seek cost.** The LOG port is forward-cursored by design (`fromSeq` + `limit`
- * — an opaque, gap-tolerant `seq` space has no expressible "last n"), so
- * locating the tail is a forward walk: `ceil(N / page)` round-trips. An adapter
- * that can do better in one query should ship its own hydrator — one line,
- * `(ctx) => lastN(ctx.sessionId, n)` — which is exactly why genesis is a
- * function seam and not a config enum.
+ * **Seek cost is ONE round-trip.** "The last `n`" is expressible at the port
+ * (`{ limit: n }` with no lower bound — the anchor rule), so this is a single
+ * `history` call whose window IS the tail; the adapter does the reverse slice
+ * (`ORDER BY seq DESC LIMIT n`). No forward walk, no `ceil(N / page)`.
  *
  * **Semantics.** A tail opens the session on a SUFFIX of the log with no summary
  * of what precedes it — compaction is a projection concern, not a genesis one.
@@ -96,36 +86,9 @@ export function hydrateTail<TStore extends TimelineStore = TimelineStore>(
       const all = await store.read(logKey, ctx);
       return all.length > n ? all.slice(all.length - n) : all;
     }
-    return tailWindow(store.history.bind(store), logKey, n, ctx);
+    // The tail read: a `limit` with NO lower bound anchors the window at the
+    // log's end, so the store hands back exactly the last `n`, ascending.
+    const window = await store.history(logKey, { limit: n }, ctx);
+    return window.map((t) => t.entry);
   };
-}
-
-/**
- * Read the last `n` entries using ONLY the port's forward-cursored `history`.
- *
- * Pages forward from the log's start, keeping a rolling buffer of the last `n`
- * seq-tagged entries. Terminates on the first EMPTY page — deliberately not on
- * a short page, so a store that under-fills a window mid-log (legal: the port
- * says "at most `limit`") is never truncated. Peak memory is `page + n`.
- */
-async function tailWindow(
-  history: NonNullable<TimelineStore["history"]>,
-  logKey: string,
-  n: number,
-  ctx: StoreCtx,
-): Promise<readonly TimelineEntry[]> {
-  const page = Math.max(n, TAIL_PAGE_FLOOR);
-  let buffer: SeqTagged<TimelineEntry>[] = [];
-  let fromSeq = 0;
-  for (;;) {
-    const window = await history(logKey, { fromSeq, limit: page }, ctx);
-    if (window.length === 0) break;
-    // Keep only the rolling tail — the bound that makes this hydrator bounded.
-    buffer =
-      buffer.length === 0 && window.length <= n ? [...window] : [...buffer, ...window].slice(-n);
-    // `seq` is strictly increasing and never reused, so `last + 1` is a safe
-    // next cursor whether or not the space is contiguous.
-    fromSeq = window[window.length - 1]!.seq + 1;
-  }
-  return buffer.map((t) => t.entry);
 }

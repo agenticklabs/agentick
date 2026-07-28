@@ -141,21 +141,21 @@ const store = defineTimelineStore({
   read: (logKey) => selectEntries(logKey),
   keys: () => selectDistinctKeys(),
   delete: (logKey) => deleteLog(logKey),
-  history: (logKey, o) => selectEntriesFrom(logKey, o?.fromSeq, o?.limit),
+  history: (logKey, o) => selectEntryWindow(logKey, o), // { fromSeq?, toSeq?, limit? }
 });
 ```
 
 ### The verbs
 
-| Verb                            | Required | Contract                                                                                        |
-| ------------------------------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `append(logKey, entries, ctx)`  | yes      | The **only write**. Returns one `seq` per entry, in input order. `[]` in, `[]` out              |
-| `read(logKey, ctx)`             | yes      | Full ordered read — the hydration fold input. `[]` for an unseen key. A defensive copy          |
-| `keys(ctx)`                     | yes      | Every key holding entries. Order unspecified; a pruned-empty key is not listed                  |
-| `delete(logKey, ctx)`           | yes      | Ends the log. Idempotent; `true` when entries were removed. A later append starts a fresh `seq` |
-| `history(logKey, options, ctx)` | no       | Seq-tagged window: `seq >= fromSeq`, at most `limit`. Powers paging, replay, and scroll-back    |
-| `prune(logKey, before, ctx)`    | no       | Retention / erasure: drop entries with absolute `seq < before.seq`. Never called by compaction  |
-| `query` / `mutate`              | derived  | The generic `Store` seam — a log window and the append arm. Delegate to `history` and `append`  |
+| Verb                            | Required | Contract                                                                                                                                                                                     |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `append(logKey, entries, ctx)`  | yes      | The **only write**. Returns one `seq` per entry, in input order. `[]` in, `[]` out                                                                                                           |
+| `read(logKey, ctx)`             | yes      | Full ordered read — the hydration fold input. `[]` for an unseen key. A defensive copy                                                                                                       |
+| `keys(ctx)`                     | yes      | Every key holding entries. Order unspecified; a pruned-empty key is not listed                                                                                                               |
+| `delete(logKey, ctx)`           | yes      | Ends the log. Idempotent; `true` when entries were removed. A later append starts a fresh `seq`                                                                                              |
+| `history(logKey, options, ctx)` | no       | Seq-tagged window `{ fromSeq?, toSeq?, limit? }`, ascending; a bare `limit` becomes the reverse slice `ORDER BY seq DESC LIMIT n`. Powers paging in both directions, replay, and scroll-back |
+| `prune(logKey, before, ctx)`    | no       | Retention / erasure: drop entries with absolute `seq < before.seq`. Never called by compaction                                                                                               |
+| `query` / `mutate`              | derived  | The generic `Store` seam — a log window and the append arm. Delegate to `history` and `append`                                                                                               |
 
 Three rules the types cannot enforce:
 
@@ -203,7 +203,7 @@ The `skip` flag is what keeps a backend-gated suite honest: absent a connection 
 
 **One round-trip per flush.** The timeline's write-behind pump hands `append` a batch, and the adapter emits one multi-row `INSERT ... VALUES (…),(…) RETURNING seq`. Not one statement per entry.
 
-**Reads are cold.** Hydration is one `SELECT` per session open, over the `(session_id, seq)` primary key. `history({ fromSeq, limit })` is a bounded range scan on the same index.
+**Reads are cold.** Hydration is one `SELECT` per session open, over the `(session_id, seq)` primary key. `history({ fromSeq, toSeq, limit })` is a bounded range scan on the same index — including the tail read, which the index serves backward at the same cost.
 
 **The default codec is nearly free.** The driver serializes the entry to `jsonb` and parses it back; nothing walks the entry in JavaScript.
 
@@ -246,10 +246,11 @@ The `skip` flag is what keeps a backend-gated suite honest: absent a connection 
 
 - **`StoreCtx` is accepted and ignored.** No write is deduped on `ctx.opId`, and no read is scoped by `ctx.principal` — tenancy today means a `sql` override or a separate table.
 - **No `history` override.** The `sql` bag covers `append` / `read` / `keys` / `delete` / `prune`; the cursored read is always generated SQL, so a partitioned or tenant-scoped `history` needs a custom `QueryExecutor` that rewrites the statement.
-- **Full-table hydration.** `read` loads a session's whole log; there is no paged or lazy tail on the hydration path. `history({ fromSeq, limit })` covers cursored reads once a session is open.
+- **Full-table hydration.** `read` loads a session's whole log; there is no paged or lazy tail on the hydration path. `history({ fromSeq, toSeq, limit })` covers cursored reads once a session is open, and `hydrateTail(n)` opens on the log's last `n` in one query.
 - **Entry-shape migration is manual.** `schema_ver` is written and handed to `codec.decode`, so schema-on-read is expressible — but there is no migration-function registry to declare one per version.
 - **No transaction handle.** Every operation is one autocommit statement against the executor; you cannot enlist an append in a surrounding transaction.
 
 ## Verified by
 
-- `src/__tests__/conformance.spec.ts` — the shared `runTimelineStoreConformance` suite against a **real Postgres** (real IDENTITY, real `jsonb`), gated on a `TIMELINE_PG_URL` connection string and registering as skipped without one: append ordering, one strictly-increasing `seq` per entry, empty-append no-op, `history` paging by `fromSeq` / `limit` with prune-stable tags, per-session isolation, defensive-copy `read`, enumeration, idempotent `delete`, and a stable non-empty `backend`. Each case gets a fresh uniquely-named table via `migrate: "create-if-absent"`; `afterAll` drops them. Validated against Postgres 16.
+- `src/__tests__/conformance.spec.ts` — the shared `runTimelineStoreConformance` suite against a **real Postgres** (real IDENTITY, real `jsonb`), gated on a `TIMELINE_PG_URL` connection string and registering as skipped without one: append ordering, one strictly-increasing `seq` per entry, empty-append no-op, `history` paging by `fromSeq` / `limit` with prune-stable tags, the inclusive `toSeq` bound and the tail anchor, per-session isolation, defensive-copy `read`, enumeration, idempotent `delete`, and a stable non-empty `backend`. Each case gets a fresh uniquely-named table via `migrate: "create-if-absent"`; `afterAll` drops them. Validated against Postgres 16.
+- `src/__tests__/history-window.spec.ts` — the generated SQL for the seq window, with a spy executor and no server: `toSeq` becomes an inclusive `<=` predicate, a forward page keeps `ORDER BY seq` with its `LIMIT`, and a tail-anchored read (`limit`, no `fromSeq`) becomes the reverse slice `ORDER BY seq DESC LIMIT n` whose rows are re-ascended before they leave the adapter. Green without `TIMELINE_PG_URL`, which is exactly where the conformance suite above cannot help.

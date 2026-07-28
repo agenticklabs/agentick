@@ -35,7 +35,14 @@
  * @verifiedBy packages/store/src/__tests__/memory-log.spec.ts
  */
 
-import type { LogMutation, LogQuery, LogStore, SeqTagged, StoreCtx } from "@agentick/spec";
+import type {
+  LogHistoryOptions,
+  LogMutation,
+  LogQuery,
+  LogStore,
+  SeqTagged,
+  StoreCtx,
+} from "@agentick/spec";
 
 /** Per-log record: the live entries plus the `seq` of `entries[0]`. */
 interface LogWindow<T> {
@@ -72,18 +79,24 @@ export class MemoryLog<T> implements LogStore<T> {
 
   history(
     logKey: string,
-    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    options: LogHistoryOptions | undefined,
     _ctx: StoreCtx,
   ): Promise<readonly SeqTagged<T>[]> {
     const rec = this.logs.get(logKey);
     if (!rec) return Promise.resolve([]);
-    const fromSeq = options?.fromSeq ?? 0;
-    // seq = baseSeq + index; slice from the first index at/after fromSeq.
-    const start = Math.max(fromSeq - rec.baseSeq, 0);
-    const end =
-      options?.limit !== undefined
-        ? Math.min(start + options.limit, rec.entries.length)
-        : rec.entries.length;
+    const { fromSeq, toSeq, limit } = options ?? {};
+    // seq = baseSeq + index, so a seq bound maps to an index by subtracting
+    // baseSeq. Both bounds are inclusive; clamp into [0, length].
+    const clamp = (i: number): number => Math.max(0, Math.min(i, rec.entries.length));
+    let start = clamp((fromSeq ?? rec.baseSeq) - rec.baseSeq);
+    let end = toSeq !== undefined ? clamp(toSeq - rec.baseSeq + 1) : rec.entries.length;
+    if (end < start) end = start;
+    if (limit !== undefined) {
+      // The anchor rule: `fromSeq` present ⇒ truncate at the far end (forward);
+      // absent ⇒ truncate at the near end (backward — the last `limit`).
+      if (fromSeq !== undefined) end = Math.min(start + limit, end);
+      else start = Math.max(end - limit, start);
+    }
     const out: SeqTagged<T>[] = [];
     for (let i = start; i < end; i++) {
       out.push({ seq: rec.baseSeq + i, entry: rec.entries[i]! });
@@ -137,13 +150,15 @@ export class MemoryLog<T> implements LogStore<T> {
 
   /**
    * The seam READ — a projection of a log window shaped by a {@link LogQuery}.
-   * `{ logKey }` alone projects the whole log; `fromSeq` / `limit` project a
-   * cursored window. Delegates to {@link history} and drops the `seq` tags (the
-   * seam returns bare entries). An `undefined` query identifies no log → `[]`.
+   * `{ logKey }` alone projects the whole log; `fromSeq` / `toSeq` / `limit`
+   * project a cursored window (`{ limit: n }` the log's last `n` — the anchor
+   * rule). Delegates to {@link history} and drops the `seq` tags (the seam
+   * returns bare entries). An `undefined` query identifies no log → `[]`.
    */
   async query(q: LogQuery | undefined, ctx: StoreCtx): Promise<readonly T[]> {
     if (q === undefined) return [];
-    const tagged = await this.history(q.logKey, { fromSeq: q.fromSeq, limit: q.limit }, ctx);
+    const { logKey, ...window } = q;
+    const tagged = await this.history(logKey, window, ctx);
     return tagged.map((t) => t.entry);
   }
 

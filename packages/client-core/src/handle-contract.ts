@@ -93,6 +93,13 @@ export interface ClientHandle {
  * Note `iterate BOUNDED, observe UNBOUNDED` (principle #3): `list()` is a
  * bounded synchronous snapshot; ongoing change arrives through
  * {@link ClientHandle.subscribe}, never by making the handle `AsyncIterable`.
+ *
+ * A handle whose state arrives over the wire seeds itself and NOTIFIES when the
+ * seed lands, so `list()` may be empty for one round-trip after construction and
+ * `subscribe` fires when it fills. Bind both — render what `list()` gives you,
+ * re-render on change — and there is nothing to await and no boot-time fetch to
+ * issue. `refresh()`, where a handle has one, is for invalidating state you
+ * already have.
  */
 export interface Enumerable<T, Id = string> {
   /** The current state as a bounded snapshot — includes pre-connection items. */

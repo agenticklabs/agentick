@@ -66,44 +66,54 @@ export interface SeqTagged<T> {
 }
 
 /**
- * The LOG profile's QUERY vocabulary — identifies a log plus an optional cursor
- * window over it. The seam projection of the archetype's `read`/`history` sugar:
- * `{ logKey }` alone projects the whole log (a {@link LogStore.read}); adding
- * `fromSeq` / `limit` projects a cursored window (a {@link LogStore.history}
- * slice with its `seq` tags dropped — the seam returns bare entries). Its fields
- * are exactly the `read`/`history` parameters, hoisted into one serializable
- * description. A `Store.query` of `undefined` identifies no log and projects
- * nothing (`[]`) — a partitioned log has no "return all" without a `logKey`.
+ * The seq WINDOW over a log — the parameters of a cursored read
+ * ({@link LogStore.history}) and, with a `logKey`, of the seam query
+ * ({@link LogQuery}). One declaration, so the shape cannot drift between the
+ * store port, the harness face, and the wire payload above them.
+ *
+ * ## The ANCHOR rule — which end `limit` truncates from
+ *
+ * The window is `seq >= fromSeq` ∧ `seq <= toSeq` (each bound optional and
+ * inclusive). `limit` then caps it **from the anchor end**:
+ *
+ *   - `fromSeq` present → the window is anchored at its LOWER bound and `limit`
+ *     keeps the FIRST `limit` entries (forward paging: `fromSeq: last + 1`).
+ *   - `fromSeq` absent → the window is anchored at its UPPER bound (`toSeq`, or
+ *     the log's tail when that is absent too) and `limit` keeps the LAST
+ *     `limit` entries (backward paging: `toSeq: first - 1`).
+ *
+ * So `{ limit: 20 }` is **the newest 20** — the read every chat UI opens on —
+ * `{ fromSeq: 0, limit: 20 }` is the oldest 20, and `{ toSeq: 40, limit: 20 }`
+ * is the 20 ending at seq 40. Omitting `limit` projects the whole window and the
+ * anchor is moot.
+ *
+ * Results are **always seq-ASCENDING**, whichever end anchored them: the anchor
+ * chooses the slice, never the order. An adapter's reverse slice
+ * (`ORDER BY seq DESC LIMIT n`) therefore reverses its rows before returning.
  */
-export interface LogQuery {
+export interface LogHistoryOptions {
+  /** Inclusive lower bound — entries with absolute `seq >= fromSeq`. Omit → from the start. */
+  readonly fromSeq?: number;
+  /** Inclusive upper bound — entries with absolute `seq <= toSeq`. Omit → through the tail. */
+  readonly toSeq?: number;
+  /** Cap on the entries projected, taken from the anchor end (see the anchor rule). Omit → no cap. */
+  readonly limit?: number;
+}
+
+/**
+ * The LOG profile's QUERY vocabulary — identifies a log plus an optional
+ * {@link LogHistoryOptions} window over it. The seam projection of the
+ * archetype's `read`/`history` sugar: `{ logKey }` alone projects the whole log
+ * (a {@link LogStore.read}); adding a window projects a cursored slice (a
+ * {@link LogStore.history} with its `seq` tags dropped — the seam returns bare
+ * entries). Its fields are exactly the `read`/`history` parameters, hoisted into
+ * one serializable description. A `Store.query` of `undefined` identifies no log
+ * and projects nothing (`[]`) — a partitioned log has no "return all" without a
+ * `logKey`.
+ */
+export interface LogQuery extends LogHistoryOptions {
   /** The log to project (timeline's `logKey` is the `sessionId`). */
   readonly logKey: string;
-  /** Cursored lower bound — entries with absolute `seq >= fromSeq`. Omit → from the start. */
-  readonly fromSeq?: number;
-  /** Cap on the number of entries projected. Omit → no cap. */
-  readonly limit?: number;
-  // TODO(tail-read): THE LAST N ENTRIES OF A LOG ARE NOT EXPRESSIBLE. This
-  // query is forward-from-a-lower-bound only — no `toSeq`, no
-  // `direction: "backward"` — and the same shape is mirrored at every layer
-  // above (`TimelineHistoryInput`, the `timeline/history` command, the client
-  // handle's `loadOlder`). So "open this thread on its most recent 20
-  // messages", which is what every chat UI wants first, has no expression
-  // anywhere in the framework.
-  //
-  // What it costs downstream, measured on the first real consumer (knowify's
-  // assistant, nx-knowify libs/ernesto-client + k-assistant-v3): the client
-  // pages FORWARD from the head accumulating up to 25 pages to find the tail,
-  // holds its own mirrored copy of the window to do it, re-seeds the handle's
-  // window from that copy (so live appends are clobbered), and its scroll-UP
-  // affordance loads NEWER entries. Every one of those is a bandaid over this
-  // one absence, and no client can do better while it stands.
-  //
-  // The seam: `toSeq` (an upper bound, symmetric with `fromSeq`) or an
-  // explicit `direction`. `toSeq` is the smaller change and composes with the
-  // existing cursor. Brownfield `Store` adapters must then implement a reverse
-  // slice, which is exactly why this belongs here rather than being re-solved
-  // per adapter. Pairs with the client handle becoming a true tail-anchored
-  // pager.
 }
 
 /**
@@ -158,17 +168,18 @@ export interface LogStore<T> extends Store<T, LogQuery, LogMutation<T>> {
 
   /**
    * OPTIONAL cursored read (#187) — the additive extension the frozen `seq`
-   * contract exists for. Returns seq-tagged entries with absolute
-   * `seq >= fromSeq`, in seq order, at most `limit`. Omitting both options
-   * reads everything (a seq-tagged {@link read}).
+   * contract exists for. Returns the {@link LogHistoryOptions} window as
+   * seq-tagged entries in ASCENDING seq order, at most `limit` of them taken
+   * from the anchor end. Omitting the options entirely reads everything (a
+   * seq-tagged {@link read}); `{ limit: n }` alone reads the log's LAST `n`.
    *
-   * Powers history paging, replay/eval, resume-UI reads, and partial
-   * rehydration. Stores that skip it degrade gracefully — consumers fall back
-   * to {@link read} (full read, no seqs).
+   * Powers history paging in both directions, replay/eval, resume-UI reads, and
+   * partial rehydration. Stores that skip it degrade gracefully — consumers fall
+   * back to {@link read} (full read, no seqs).
    */
   history?(
     logKey: string,
-    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    options: LogHistoryOptions | undefined,
     ctx: StoreCtx,
   ): Promise<readonly SeqTagged<T>[]>;
 

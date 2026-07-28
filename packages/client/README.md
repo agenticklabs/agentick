@@ -1,8 +1,13 @@
 # @agentick/client
 
-**Installing a capability on the server shouldn't mean wiring it on the client.**
-This package is the proof: one import, and every built-in capability's client
-surface is already sitting on the session handle, typed.
+**This is the client to install.** Every built-in capability's client surface —
+timeline, tools, tasks, knobs, elicitations, skills, prompts, resources, state,
+gates — is already on the session handle, typed, with nothing to register. Reach
+for [@agentick/client-core](../client-core) only when you are trimming a bundle
+and will register the capabilities you use yourself.
+
+Installing a capability on the server shouldn't mean wiring it on the client, and
+this package is the proof: one import, and the whole surface is there.
 
 It carries no logic of its own. It re-exports
 [@agentick/client-core](../client-core) and side-effect-imports every built-in
@@ -85,7 +90,7 @@ const session = client.session(id);
 session.timeline.subscribe(() => render(session.timeline.list()));
 
 onScrollTop(async () => {
-  const { done } = await session.timeline.loadOlder(50); // pages durable history at the head
+  const { done } = await session.timeline.loadOlder(50); // tail-anchored, spliced at the head
   if (done) detachScrollHandler();
 });
 
@@ -135,6 +140,10 @@ answered with an error result, so a suspended call is never left hanging.
 Use this one unless you're bundle-size sensitive or genuinely need only two
 capabilities. Dropping to the core costs you one `import "@agentick/x/client"`
 line per capability and nothing else — the slot mechanism is identical.
+
+If you do drop to the core and forget a line, reading the slot throws and names
+the import to add — so on this bundle that throw can only mean an _optional_
+capability (`@agentick/live/client`) you meant to add.
 
 ## Adding your own capability
 
@@ -195,6 +204,11 @@ server, reachable through `session.timeline.loadOlder()`.
 - `src/__tests__/bundle.spec.ts` — importing the bundle registers all eleven
   built-in slots, and a session handle self-assembles every one of them with no
   per-capability imports (each asserted down to its read and write members).
+- `src/__tests__/sub-handle-dictionary-anti-rot.spec.ts` — client-core's slot →
+  `/client` specifier dictionary agrees with the live registry in both
+  directions, so a renamed or removed slot, a wrong specifier, or a new built-in
+  that forgot its entry fails here rather than degrading into a confusing wire
+  error for an adopter.
 - `src/__tests__/wire-proxy-middleware-e2e.spec.ts` — end-to-end over a real
   client and transport: a wire method with no client code written for it is typed
   and round-trips; one `client.use` middleware is observed on both that

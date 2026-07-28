@@ -92,7 +92,7 @@ const store = defineTimelineStore({
   read: (logKey) => selectEntries(logKey),
   keys: () => selectDistinctKeys(),
   delete: (logKey) => deleteLog(logKey),
-  history: (logKey, o) => selectEntriesFrom(logKey, o?.fromSeq, o?.limit),
+  history: (logKey, o) => selectEntryWindow(logKey, o), // { fromSeq?, toSeq?, limit? }
 });
 ```
 
@@ -100,15 +100,15 @@ const store = defineTimelineStore({
 
 ### The verbs
 
-| Verb                            | Required | Contract                                                                                                |
-| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------- |
-| `append(logKey, entries, ctx)`  | yes      | The **only write**. Returns one `seq` per entry, in input order. `[]` in, `[]` out                      |
-| `read(logKey, ctx)`             | yes      | Full ordered read — the hydration fold input. `[]` for an unseen key. A **defensive copy**              |
-| `keys(ctx)`                     | yes      | Every key holding entries. Order unspecified; a pruned-empty key is not listed                          |
-| `delete(logKey, ctx)`           | yes      | Ends the log. Idempotent; `true` when entries were removed. Next append starts a fresh `seq`            |
-| `history(logKey, options, ctx)` | no       | Seq-tagged window: `seq >= fromSeq`, at most `limit`. Powers paging, replay, scroll-back                |
-| `prune(logKey, before, ctx)`    | no       | Retention / erasure: drop entries with absolute `seq < before.seq`. Never called by compaction          |
-| `query` / `mutate`              | derived  | The generic `Store` seam. `defineTimelineStore` derives both; a class delegates to `history` / `append` |
+| Verb                            | Required | Contract                                                                                                                                               |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `append(logKey, entries, ctx)`  | yes      | The **only write**. Returns one `seq` per entry, in input order. `[]` in, `[]` out                                                                     |
+| `read(logKey, ctx)`             | yes      | Full ordered read — the hydration fold input. `[]` for an unseen key. A **defensive copy**                                                             |
+| `keys(ctx)`                     | yes      | Every key holding entries. Order unspecified; a pruned-empty key is not listed                                                                         |
+| `delete(logKey, ctx)`           | yes      | Ends the log. Idempotent; `true` when entries were removed. Next append starts a fresh `seq`                                                           |
+| `history(logKey, options, ctx)` | no       | Seq-tagged window `{ fromSeq?, toSeq?, limit? }`, ascending; a bare `limit` is the log's last n. Powers paging in both directions, replay, scroll-back |
+| `prune(logKey, before, ctx)`    | no       | Retention / erasure: drop entries with absolute `seq < before.seq`. Never called by compaction                                                         |
+| `query` / `mutate`              | derived  | The generic `Store` seam. `defineTimelineStore` derives both; a class delegates to `history` / `append`                                                |
 
 Three rules the types cannot enforce, and the ones an adapter gets wrong:
 
@@ -162,7 +162,7 @@ Write the suite first, watch it fail, then implement. Anything it cannot reach �
 
 **Backups.** A `.jsonl` plus its optional `.hwm` is the complete state of one session. Copy the directory; there is no index to rebuild.
 
-**Sizing.** Every `read` re-parses the whole file. That is the right trade for the local pole — small transcripts, cheap syscalls — and the wrong one for a session with tens of thousands of entries. `history({ fromSeq, limit })` bounds a paged read, but it still parses the file to satisfy it; a SQL adapter is the answer past that point.
+**Sizing.** Every `read` re-parses the whole file. That is the right trade for the local pole — small transcripts, cheap syscalls — and the wrong one for a session with tens of thousands of entries. `history({ fromSeq, toSeq, limit })` bounds a paged read — including the tail read a chat UI opens on — but it still parses the file to satisfy it; a SQL adapter is the answer past that point.
 
 **Concurrency.** One process per session. The in-process mutex serializes calls within a process; it does not coordinate two processes over an NFS mount.
 
@@ -193,5 +193,5 @@ Write the suite first, watch it fail, then implement. Anything it cannot reach �
 
 ## Verified by
 
-- `src/__tests__/conformance.spec.ts` — the shared `runTimelineStoreConformance` suite against a real temp directory (`mkdtemp`, `afterEach` cleanup): append ordering, one strictly-increasing `seq` per entry, empty-append no-op, `history` paging by `fromSeq` / `limit` with prune-stable tags, per-session isolation, defensive-copy `read`, enumeration of non-empty sessions, idempotent `delete`, and a stable non-empty `backend`. Green in any environment — no external dependency.
+- `src/__tests__/conformance.spec.ts` — the shared `runTimelineStoreConformance` suite against a real temp directory (`mkdtemp`, `afterEach` cleanup): append ordering, one strictly-increasing `seq` per entry, empty-append no-op, `history` paging by `fromSeq` / `limit` with prune-stable tags, the inclusive `toSeq` bound and the tail anchor (a bare `limit` reads the last n, ascending), per-session isolation, defensive-copy `read`, enumeration of non-empty sessions, idempotent `delete`, and a stable non-empty `backend`. Green in any environment — no external dependency.
 - `src/__tests__/restart.spec.ts` — restart durability, which the shared suite cannot reach: a brand-new store over the same directory (cold cursor) continues `seq` past prune-erased entries instead of restarting at `0`, a `history({ fromSeq })` cursor held across the restart still finds the new entry at its true `seq`, `delete` after a prune-to-empty ends the session so a later append restarts at `0`, and `keys()` never enumerates the `.hwm` sidecar.

@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { Skill, WireMethod, WireParams } from "@agentick/spec";
-import { waitFor } from "@agentick/utils/testing";
+import { waitFor, waitForStable } from "@agentick/utils/testing";
 
 import { skillsHandle } from "../skills-handle.js";
 
@@ -48,6 +48,59 @@ function fakeCommandClient(captured: Captured[], rows: () => readonly Skill[]) {
     },
   };
 }
+
+/**
+ * Fake whose FIRST request lands only after a MACROTASK — so a subscriber is
+ * registered while the seed is still in flight — and, with `failFirst`, throws
+ * instead of answering.
+ */
+function seedGatedClient(captured: Captured[], opts: { readonly failFirst?: boolean } = {}) {
+  const ok = fakeCommandClient(captured, () => SKILLS);
+  let calls = 0;
+  return {
+    transport: {
+      async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
+        const first = ++calls === 1;
+        if (first) await new Promise((r) => setTimeout(r, 0));
+        if (first && opts.failFirst) throw new Error("transport down");
+        return ok.transport.request(method, params);
+      },
+    },
+  };
+}
+
+describe("skillsHandle — the eager seed", () => {
+  it("notifies subscribers when the seed lands — nothing to await at boot", async () => {
+    const captured: Captured[] = [];
+    const handle = skillsHandle(seedGatedClient(captured), "s1");
+    let notified = 0;
+    const stop = handle.subscribe(() => {
+      notified += 1;
+    });
+
+    // Render what you have: the snapshot is empty while the seed is in flight…
+    expect(handle.list()).toEqual([]);
+    // …and re-render when it arrives. No boot `refresh()`, nothing awaited.
+    await waitFor(() => notified > 0);
+
+    expect(handle.list()).toEqual(SKILLS);
+    // ONE poll — the seed. A boot-time `refresh()` would be a second.
+    expect(captured).toHaveLength(1);
+    stop();
+  });
+
+  it("a seed that fails settles the snapshot empty; refresh() recovers it", async () => {
+    const captured: Captured[] = [];
+    const handle = skillsHandle(seedGatedClient(captured, { failFirst: true }), "s1");
+
+    // A failed seed throws nothing at the caller and leaves no half-filled
+    // snapshot — it settles empty, which is what the read surface then reports.
+    expect(await waitForStable(() => handle.list())).toEqual([]);
+
+    await handle.refresh();
+    expect(handle.list()).toEqual(SKILLS);
+  });
+});
 
 describe("skillsHandle", () => {
   it("list()/get() reflect the eager skills/list poll", async () => {

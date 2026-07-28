@@ -49,14 +49,14 @@ function Agent() {
 | **Persisted log** | Append-only ground truth. Never rewritten.                                                                         |
 | **Projection**    | The model-visible view. `compact()` rewrites it — the log is untouched, so compaction is reversible re-derivation. |
 
-`<Timeline/>` renders the projection. `readPersisted()` is the uncompacted record. `history({ fromSeq, limit })` pages the durable log by the store's frozen `seq` cursor.
+`<Timeline/>` renders the projection. `readPersisted()` is the uncompacted record. `history({ fromSeq, toSeq, limit })` reads the durable log by the store's frozen `seq` — in either direction.
 
 ```ts
 const { entries, version } = session.timeline.read(); // projection snapshot
 session.timeline.readPersisted(); // the uncompacted log
 session.timeline.trailingInput(); // input after the last assistant entry
 session.timeline.subscribe(() => rerender()); // any projection or log mutation
-await session.timeline.history({ limit: 50 }); // seq-cursored durable read
+await session.timeline.history({ limit: 50 }); // the durable log's LAST 50
 await session.timeline.compact(strategy); // rewrite the projection
 ```
 
@@ -325,7 +325,7 @@ const store = defineTimelineStore({
   read: (key) => selectEntries(key),
   keys: () => selectDistinctKeys(),
   delete: (key) => deleteLog(key),
-  history: (key, o) => selectEntriesFrom(key, o?.fromSeq, o?.limit),
+  history: (key, o) => selectEntryWindow(key, o), // { fromSeq?, toSeq?, limit? }
 });
 ```
 
@@ -363,13 +363,15 @@ const t = client.session(sessionId).timeline;
 
 t.subscribe(() => render(t.list())); // re-render on any change
 
+await t.loadOlder(50); // open on the conversation's last 50 entries
+
 onScrollTop(async () => {
-  const { done } = await t.loadOlder(50); // page older history in at the head
-  if (done) detachScrollHandler(); // reached the log's tail
+  const { done } = await t.loadOlder(50); // the 50 below those, at the head
+  if (done) detachScrollHandler(); // reached the log's head
 });
 ```
 
-That's the whole scroll-back loop. `loadOlder()` wraps a cursored, bounded read over the durable log, tracks its own cursor across calls, and splices each page at the head.
+That is the whole scroll-back loop, and it is **tail-anchored**: the first call reads the log's newest page, each later call walks down by the previous page's cursor, and every page splices at the head — so page two lands above page one and the window accumulates in log order. Opening a thread on its most recent messages is one call, and there is nothing for the app to mirror, re-seed, or re-sort. Live appends keep landing at the tail while scroll-back grows the head, so the two never fight.
 
 ### The granted read — `history()`
 
@@ -378,13 +380,15 @@ Both faces ride ONE wire door: `timeline/history`, the harness's own declared co
 ```ts
 let cursor: number | undefined;
 do {
-  const page = await t.history({ fromSeq: cursor, limit: 200 });
+  const page = await t.history({ toSeq: cursor, limit: 200 }); // newest page first
   myStore.ingest(page.entries.map(({ seq, entry }) => toMyMessage(seq, entry)));
-  cursor = page.nextFromSeq; // absent ⇒ you have the whole log
+  cursor = page.nextToSeq; // absent ⇒ you reached the log's head
 } while (cursor !== undefined);
 ```
 
-`nextFromSeq` is present **iff** the page filled its `limit`, so the loop above terminates on the first short page. It is `lastSeq + 1` — a valid lower bound in a sparse `seq` space, never a promise that an entry sits at that number.
+The window is `{ fromSeq?, toSeq?, limit? }`, both bounds inclusive, and **`limit` truncates from the end you anchored at**: declare a `fromSeq` and you get the first `limit` (forward); declare none and you get the last `limit` at or below `toSeq`, which defaults to the log's tail. So `{ limit: 200 }` is the newest 200 and `{ fromSeq: 0, limit: 200 }` is the oldest 200. Rows always come back ascending by `seq`, whichever end selected them.
+
+The reply hands back exactly one cursor — the one that continues the direction you asked in: `nextFromSeq` (`lastSeq + 1`) forward, `nextToSeq` (`firstSeq - 1`) backward. Either is present **iff** the page filled its `limit`, so a loop terminates on the first short page. Both are BOUNDS in a sparse `seq` space, never a promise that an entry sits at that number.
 
 > [!IMPORTANT]
 > The read is **deny-by-default**, twice over. The timeline's write verbs are not wire-exposed at all, so `timeline/append` is `MethodNotFound` from a client — indistinguishable from a method that doesn't exist. The read IS exposed, and therefore still needs a grant on the `timeline:history` scope; without one the call is `Forbidden`. Tenancy is structural on top of that: a caller can hold `*` and still be denied another principal's session by the same-principal target rule. See [@agentick/gateway](../gateway) for the grant recipe.
@@ -453,17 +457,17 @@ Definition slots: `store` · `hydrate` · `compact` · `writePolicy` · `turnBou
 
 ### `session.timeline`
 
-| Method                          | Returns                                               |
-| ------------------------------- | ----------------------------------------------------- |
-| `read()`                        | Projection snapshot `{ entries, version }`            |
-| `readPersisted()`               | The uncompacted durable log                           |
-| `trailingInput()`               | Input entries after the last assistant entry          |
-| `inputEntryCount()`             | Count of input entries in the persisted log           |
-| `append(...entries)`            | Append to log + projection atomically                 |
-| `compact(strategy?)`            | Rewrite the projection; no-arg runs the bound default |
-| `history({ fromSeq?, limit? })` | Seq-tagged durable page; flushes writes first         |
-| `endTurn(input)`                | Emit the turn-boundary record                         |
-| `subscribe(fn)`                 | Fires on any projection or log mutation               |
+| Method                                  | Returns                                                                    |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| `read()`                                | Projection snapshot `{ entries, version }`                                 |
+| `readPersisted()`                       | The uncompacted durable log                                                |
+| `trailingInput()`                       | Input entries after the last assistant entry                               |
+| `inputEntryCount()`                     | Count of input entries in the persisted log                                |
+| `append(...entries)`                    | Append to log + projection atomically                                      |
+| `compact(strategy?)`                    | Rewrite the projection; no-arg runs the bound default                      |
+| `history({ fromSeq?, toSeq?, limit? })` | Seq-tagged durable page (a bare `limit` is the tail); flushes writes first |
+| `endTurn(input)`                        | Emit the turn-boundary record                                              |
+| `subscribe(fn)`                         | Fires on any projection or log mutation                                    |
 
 Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timeline:compact`, `timeline:replaceProjection`, `timeline:resetProjection`, `timeline:history`. Two are wire-exposable and therefore grantable — `timeline:compact` and `timeline:history`; the rest are reachable only from the trusted domains (in-process, inbox, cluster).
 
@@ -486,7 +490,7 @@ Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timel
 | `timelineView(...)`                            | The headless fold the handle is built on                       |
 | `TimelineHistoryInput` / `TimelineHistoryPage` | The read's request + page shapes (types)                       |
 
-`session.timeline`: `list()` · `get(id)` · `subscribe(fn)` · `seed`/`prepend`/`append`/`clear` (local window) · `history({ fromSeq?, limit? })` (one granted page, no splice) · `loadOlder(limit?)` (cursor-tracking scroll-back) · `view({ filter })` · `close()`.
+`session.timeline`: `list()` · `get(id)` · `subscribe(fn)` · `seed`/`prepend`/`append`/`clear` (local window) · `history({ fromSeq?, toSeq?, limit? })` (one granted page, no splice) · `loadOlder(limit?)` (tail-anchored scroll-back) · `view({ filter })` · `close()`.
 
 ### `@agentick/timeline/testing`
 
@@ -508,13 +512,11 @@ Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timel
 
 ## Roadmap & known gaps
 
-- **The last N entries are not readable.** `history` (and the `LogQuery` under it) takes a lower bound only — no `toSeq`, no direction — so "open on the most recent 20 messages" cannot be expressed, and `loadOlder()` pages FORWARD from the log's head, prepending each page. Multi-page scroll-back therefore lands pages in the wrong order, and a client that wants a tail has to page the whole log to find it and hold its own copy. The first consumer hit all of it. The fix is a `toSeq` upper bound at the store seam mirrored up through the wire read, turning `loadOlder` into a true tail-anchored pager.
 - **SQLite adapter** — the recommended first durable store isn't shipped. Filesystem and Postgres are.
 - **Richer entry kinds** — non-message records beyond turn boundaries are still coarse; `role: "event"` conflation is deferred.
 - **`<Timeline>` turn affordances** — trailing-input styling and boundary turn-separators aren't built.
-- **Cursor vs. seq** — the live tail is bus-cursor-ordered while durable history is seq-ordered, and the two are deliberately not unified. An app doing true infinite-scroll-up reconciles final ordering itself.
+- **Cursor vs. seq** — the live tail is bus-cursor-ordered while durable history is seq-ordered, and the two are deliberately not unified. Scroll-back grows the head and the fold appends at the tail, so ordinary use never collides; an app that needs an exact interleaving at the seam reconciles it itself.
 - **`useTimeline` has no dedicated suite.** It is exercised through `<Timeline>`, which reads the projection through it; the re-render-on-version-advance path isn't pinned on its own.
-- **`hydrateTail` seeks forward.** The store port is forward-cursored by design, so locating the tail costs `ceil(log / page)` round-trips. Memory stays bounded regardless. An adapter that can answer "last n" in one query should ship its own one-line hydrator.
 - **The log still travels in snapshots.** A session snapshot carries the full durable log, because that is currently the only way to transplant a conversation into a session with a different id _and_ a different store (a fork, a cross-node move). Holding only the projection in memory waits on a transplant mechanism.
 - **Per-session definition overrides.** Configuration is app-wide; `createSession` takes no `timeline` override yet.
 - **A guard's `ctx` has no calling principal.** Bridge harnesses aren't principal-stamped, so `ctx.principal` is undefined inside `guards: { history }` and friends — key local rules on `ctx.sessionId`. Cross-principal admission is the wire choke point's job (and is already enforced there), so this bounds how narrow a namespace-local rule can be, not whether tenancy holds.
@@ -526,11 +528,11 @@ Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timel
 - `src/__tests__/harness-store.spec.ts` — write-behind and write-through, flush barrier and idempotence, hydration on resume, typed store failures, cursored `history()`, `turnBoundaries: false`, and that compaction never touches the store.
 - `src/__tests__/compact-default.spec.ts` — construction-bound default strategy, call-site override, typed rejection with neither, the bare `timeline:compact` verb, verb enumeration.
 - `src/__tests__/definition.spec.ts` — `defineTimeline` identity + non-enumerable brand, inertness (no store touched, no hydrator run), the inline-bag equivalence, and `defineTimelineStore` under the full store conformance suite plus its loud failure on a `fromSeq` query without `history`.
-- `src/__tests__/hydrators.spec.ts` — `hydrateFromStore` as the store-backed default, and the bounded-memory proof: an N-entry store with `hydrateTail(k)` reads only through the cursored `history` with a limit, never calls `read`, and transfers less than the log; plus the announced fallback when a store has no `history`.
+- `src/__tests__/hydrators.spec.ts` — `hydrateFromStore` as the store-backed default, and the bounded-memory proof: an N-entry store with `hydrateTail(k)` reads the tail in ONE cursored `history` call carrying a limit of `k`, never calls `read`, and transfers less than the log; plus the announced fallback when a store has no `history`.
 - `src/__tests__/genesis.spec.ts` — the seed law (genesis never reaches `append`, while a real append still does), typed `TimelineHydrateFailed` with nothing half-installed, the `ctx.store` facet carrying identity + the journal reader, the `compact(entries, ctx)` sugar in both dichotomy arms, the drop-layer `hooks:`/`guards:` bags, and the cascade order (app guards → definition guards → app before → definition before, afters unwinding reverse).
 - `src/__tests__/ctx-store.type.spec.ts` — compile-time pins on `ctx.store` inference from the `store` slot, its interplay with the derivation brand, and the variance that lets a definition specialized on a concrete adapter fit a port-typed slot.
 - The genesis lifecycle laws — the app-level `timeline` slot, ordering before first render, `createSession` failing on a throwing hydrator, and no genesis on fork or spawn — are covered in [@agentick/app](../app) (`genesis-lifecycle.spec.tsx`).
 - `src/__tests__/integration-with-compiler.spec.tsx` — `<Timeline/>` overriding the default fold, role/limit/predicate filtering, the render prop, budget eviction with `onEvict`, `preserveRoles`, the reference collapse pattern above, and `<Transcript>` identity.
-- `src/__tests__/history-command.spec.ts` — `timeline:history` as a declared read: the `exposure: "wire"` declaration and its enumeration, payload validation + normalization (the lane's `sessionId` never steers the read), the cursor semantics (`nextFromSeq` iff the page filled its limit), the flush before reading, the loud failure as an operation failure when the store has no cursored read, and the bus-only journal class (on the bus, absent from the journal, while `append` stays journaled) with an adopter policy layering over it.
-- `src/client/__tests__/timeline-view.spec.ts` + `timeline-handle.spec.ts` + `timeline-handle.conformance.spec.ts` + `timeline-fanout.spec.ts` — `initial` seeding, `fromCursor` threading with no double-count, visibility filtering, copy-on-write refs, the window splices, `history()` reading `timeline/history` and splicing nothing, `loadOlder` cursor advance and tail latch, and one shared subscription across minted views.
-- Steering and provenance stamps are covered in [@agentick/session](../session) (`extended-surface.spec.ts`); the grant tier in [@agentick/gateway](../gateway) (`timeline-history-grant.spec.ts`); and the full client scroll-back — 25-entry log paged backward, seq continuity, `MethodNotFound` on the unexposed write verb, `Forbidden` without a grant, and the cross-principal denial — in [@agentick/transport-in-process](../transport-in-process) (`timeline-history-e2e.spec.ts`).
+- `src/__tests__/history-command.spec.ts` — `timeline:history` as a declared read: the `exposure: "wire"` declaration and its enumeration, payload validation + normalization (the lane's `sessionId` never steers the read, and every seq bound is a non-negative integer), the cursor semantics in both directions (`nextFromSeq` forward, `nextToSeq` for a bare-`limit` tail read, each iff the page filled its limit), the inclusive upper bound composing with the lower one, the flush before reading, the loud failure as an operation failure when the store has no cursored read, and the bus-only journal class (on the bus, absent from the journal, while `append` stays journaled) with an adopter policy layering over it.
+- `src/client/__tests__/timeline-view.spec.ts` + `timeline-handle.spec.ts` + `timeline-handle.conformance.spec.ts` + `timeline-fanout.spec.ts` — `initial` seeding, `fromCursor` threading with no double-count, visibility filtering, copy-on-write refs, the window splices, `history()` reading `timeline/history` (upper bound included) and splicing nothing, `loadOlder` opening on the tail and walking backward so page two lands above page one, its head latch, live appends surviving a scroll-back, and one shared subscription across minted views.
+- Steering and provenance stamps are covered in [@agentick/session](../session) (`extended-surface.spec.ts`); the grant tier in [@agentick/gateway](../gateway) (`timeline-history-grant.spec.ts`); and the full client scroll-back — a 25-entry log paged backward from its tail into log order by `loadOlder` alone, seq continuity in both directions, `MethodNotFound` on the unexposed write verb, `Forbidden` without a grant, and the cross-principal denial — in [@agentick/transport-in-process](../transport-in-process) (`timeline-history-e2e.spec.ts`).

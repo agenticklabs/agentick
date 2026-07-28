@@ -350,6 +350,8 @@ await s.refresh(); // force a re-poll
 
 This handle is RPC-backed, not channel-backed — a deliberate divergence from knobs and tasks. There is no delta channel for skills, so the read side keeps a local snapshot seeded by an eager `skills/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop straight into `useSyncExternalStore`.
 
+The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it.
+
 `run`, `reload`, `resolve`, and `require` are not on the client. The first needs a serializable output form that doesn't exist yet; the rest are source and lookup concerns that don't cross the wire.
 
 ## Testing
@@ -431,5 +433,5 @@ Markdown files are the primary authoring form on purpose. Portability is the for
 - `src/__tests__/run.spec.ts` — default composition, the `composeRun` override, handle pass-through with and without `output`, failures riding `handle.result`, `allowedTools` round-trip and threading, isolated runs routing through the bound runner, and the typed unbound/missing-skill errors.
 - `src/__tests__/tools.spec.ts` — `skill_list` enumeration, `skill_read` content, honest degradation on an unknown name and with no library mounted, and the `registerModelTools: false` opt-out.
 - `src/__tests__/projection.spec.ts` — `skill://<name>` register-then-read, live update reflection, registration after install, unregister on removal, the `exposeAsResources: false` opt-out, degradation with no resource registry, and coexistence with reference uris.
-- `src/client/__tests__/skills-handle.spec.ts` + `session-skills.spec.ts` — the eager poll, each write verb followed by a re-poll, `search` leaving the snapshot alone, and the zero-argument subscribe contract.
+- `src/client/__tests__/skills-handle.spec.ts` + `session-skills.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, `search` leaving the snapshot alone, and the zero-argument subscribe contract.
 - End-to-end coverage lives with the packages that assemble the pieces: [@agentick/app](../app) for `run` through a real session including the isolation invariant, [@agentick/session](../session) for the loop-level tool restriction, and the in-process transport suite for the `skills/list` and `skills/get` wire round-trip.

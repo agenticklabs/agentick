@@ -96,8 +96,11 @@ export function toolsHandle(client: ToolsCommandClient, sessionId: string): Tool
   };
 
   // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected". Fire-and-forget; a failing poll before the
-  // session is reachable is swallowed (an explicit `refresh()` recovers).
+  // happened before I connected", so the snapshot fills itself and NOTIFIES when
+  // it lands — a caller binds `list()` + `subscribe()` and has nothing to await
+  // and no boot-time fetch to issue. A poll that fails before the session is
+  // reachable leaves the snapshot empty (never half-filled); the next mutation's
+  // re-fetch or an explicit `refresh()` recovers it.
   void refresh().catch(() => undefined);
 
   return {

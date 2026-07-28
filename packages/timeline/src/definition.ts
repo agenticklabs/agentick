@@ -38,6 +38,7 @@
 
 import type {
   ContentBlock,
+  LogHistoryOptions,
   LogMutation,
   LogQuery,
   OperationCtx,
@@ -275,10 +276,14 @@ export interface TimelineStoreVerbs {
   keys(ctx: StoreCtx): Promise<readonly string[]>;
   /** End a log. Idempotent; `true` when entries were removed. */
   delete(logKey: string, ctx: StoreCtx): Promise<boolean>;
-  /** OPTIONAL cursored read — seq-tagged, `seq >= fromSeq`, at most `limit`. */
+  /**
+   * OPTIONAL cursored read — the {@link LogHistoryOptions} window, seq-tagged,
+   * ASCENDING, at most `limit` taken from the anchor end (`fromSeq` present ⇒
+   * the first `limit`; absent ⇒ the last).
+   */
   history?(
     logKey: string,
-    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    options: LogHistoryOptions | undefined,
     ctx: StoreCtx,
   ): Promise<readonly SeqTagged<TimelineEntry>[]>;
   /** OPTIONAL destructive retention — drop entries with absolute `seq < before.seq`. */
@@ -304,7 +309,7 @@ export interface TimelineStoreVerbs {
  *   read: (key) => selectEntries(key),
  *   keys: () => selectDistinctKeys(),
  *   delete: (key) => deleteLog(key),
- *   history: (key, o) => selectEntriesFrom(key, o?.fromSeq, o?.limit),
+ *   history: (key, o) => selectEntryWindow(key, o),
  * });
  * ```
  */
@@ -321,24 +326,29 @@ export function defineTimelineStore(verbs: TimelineStoreVerbs): TimelineStore {
     // partitioned log has no "return all").
     query: async (q: LogQuery | undefined, ctx: StoreCtx): Promise<readonly TimelineEntry[]> => {
       if (q === undefined) return [];
+      const { logKey, ...window } = q;
       if (verbs.history !== undefined) {
-        const tagged = await verbs.history(q.logKey, { fromSeq: q.fromSeq, limit: q.limit }, ctx);
+        const tagged = await verbs.history(logKey, window, ctx);
         return tagged.map((t) => t.entry);
       }
-      // Degradation without the optional cursored read: a whole-log or
-      // head-limited projection is still answerable from `read`, but `fromSeq`
-      // is a SEQ cursor and seqs are store-assigned — position is not a legal
-      // substitute (a `prune` breaks the correspondence). Fail loudly rather
-      // than silently returning the wrong window.
-      if (q.fromSeq !== undefined) {
+      // Degradation without the optional cursored read: an unbounded projection
+      // (whole log, or a `limit`-anchored end of it) is still answerable from
+      // `read`, but `fromSeq`/`toSeq` are SEQ cursors and seqs are
+      // store-assigned — position is not a legal substitute (a `prune` breaks
+      // the correspondence). Fail loudly rather than silently returning the
+      // wrong window.
+      if (window.fromSeq !== undefined || window.toSeq !== undefined) {
         throw new Error(
           `TimelineStore "${backend}" does not implement the optional cursored read ` +
-            "(history), so a `fromSeq` query cannot be answered. Implement `history` " +
-            "(see runTimelineStoreConformance) or query without `fromSeq`.",
+            "(history), so a `fromSeq`/`toSeq` query cannot be answered. Implement " +
+            "`history` (see runTimelineStoreConformance) or query without seq bounds.",
         );
       }
-      const entries = await verbs.read(q.logKey, ctx);
-      return q.limit !== undefined ? entries.slice(0, q.limit) : entries;
+      const entries = await verbs.read(logKey, ctx);
+      // The anchor rule with no bounds: `limit` takes the log's LAST n.
+      return window.limit !== undefined
+        ? entries.slice(Math.max(entries.length - window.limit, 0))
+        : entries;
     },
     // The seam WRITE — the single append mutation; the assigned seqs are
     // discarded to satisfy the `Promise<void>` seam.

@@ -406,6 +406,8 @@ await p.refresh();
 
 RPC-backed, not channel-backed: there is no delta channel for prompts, so the read side keeps a local snapshot seeded by an eager `prompts/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop into `useSyncExternalStore`.
 
+The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it.
+
 ## Patterns
 
 **React content.** [@agentick/prompts-react](../prompts-react) ships the JSX renderer and `withReactPrompts`, which pre-bakes it.
@@ -434,5 +436,5 @@ RPC-backed, not channel-backed: there is no delta channel for prompts, so the re
 - `src/__tests__/store-backing.spec.ts` — the record/sidecar split (the record written without the functions), `update` and `remove` propagation, the source feeding both halves through `reload` and `resolve`, snapshot dropping the functions, store-to-seed restoring records only, plus the store conformance suite against `InMemoryPromptStore`.
 - `src/__tests__/projection.spec.ts` — the declaration document for a function-render prompt (function absent, argument schema stripped), a static string template served as `text/markdown`, register-after-install and remove-unregisters, the `exposeAsResources: false` opt-out, and degradation with no resource registry.
 - `src/__tests__/ctx-spine.spec.ts` — the invoking operation's context reaching `render(args, ctx)`.
-- `src/client/__tests__/prompts-handle.spec.ts` + `session-prompts.spec.ts` — the eager poll, each write verb followed by a re-poll, and the zero-argument subscribe contract.
+- `src/client/__tests__/prompts-handle.spec.ts` + `session-prompts.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, and the zero-argument subscribe contract.
 - The in-process transport suite covers the `prompts/list` wire round-trip as records without functions, and `commands/list` enumerating the wire verbs.

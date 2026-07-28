@@ -1,5 +1,12 @@
 # @agentick/client-core
 
+> [!IMPORTANT]
+> **Most apps want [@agentick/client](../client) instead** — the same API with
+> every built-in capability's client surface already registered (`session.timeline`,
+> `session.tools`, …). This is the LEAN core: you get `createClient` and the wire,
+> and you register each capability you use with one `import "@agentick/<x>/client"`.
+> Choose it when you are trimming a bundle.
+
 **The client is a proxy, not a second copy of the truth.** Every method on it is
 either a typed wire call or a fold over the server's event stream — nothing in
 between, and no framework-owned cache underneath.
@@ -142,7 +149,30 @@ session.elicitations.subscribe(() => {
 > adopters who opt in per capability.
 
 Slots are lazy, cached getters that never shadow a real handle member, so a slot
-costs nothing until first touched. To publish your own:
+costs nothing until first touched.
+
+### A missing registration says so
+
+Reading a slot you never registered throws right there, and the message leads with
+the fix — install [@agentick/client](../client), or add the one import if you are
+on the core deliberately:
+
+```
+session.tools is not registered. Install @agentick/client — it carries every
+built-in capability's client surface, with nothing to register. If you are on
+@agentick/client-core deliberately, add: import "@agentick/tool-executor/client".
+```
+
+Without that throw the access fell through to namespace synthesis (below) and
+handed back a proxy that failed much later, at `tools.list()`, with a `tools/list`
+method-not-found from a server that was fine. Types don't catch it either: a slot's
+type arrives from the same module you forgot to import.
+
+Only property reads throw. `"tools" in session`, `Object.keys(session)`, and
+debugger inspection report absence instead, so logging a session is always safe;
+`registeredSessionHandleExtensions()` is the feature-detection read.
+
+To publish your own slot:
 
 ```ts
 import { registerSessionHandleExtension } from "@agentick/client-core";
@@ -179,6 +209,12 @@ if (isRespondable<{ ok: boolean }>(handle)) {
   await handle.respond("correlation-1", { ok: true });
 }
 ```
+
+A handle whose state comes over the wire seeds itself and fires `subscribe` when
+the answer lands, so `list()` can be empty for one round-trip after you take the
+handle. Bind both and that moment handles itself — render what `list()` has,
+re-render on change; there is nothing to await and no fetch to issue at boot.
+Where a handle has `refresh()`, that is for invalidating state you already hold.
 
 That zero-argument `subscribe` is why a handle needs no React adapter:
 `useSyncExternalStore(handle.subscribe, handle.list, handle.list)` is the whole
@@ -242,7 +278,10 @@ const { approved } = await client.session("sess-123").billing.approve({ invoiceI
 The session handle synthesizes the namespace on first access and issues
 `billing/approve` with `sessionId` bound. A typo can't compile — the mapped type
 is the guard — and an unknown method is rejected by the server. Registered
-sub-handles win over synthesis for their own namespace, so nothing is shadowed.
+sub-handles win over synthesis for their own namespace, so nothing is shadowed,
+and a name reserved by a capability slot you never registered throws
+[the missing-registration error](#a-missing-registration-says-so) instead of
+quietly synthesizing.
 
 ## One interception seam
 
@@ -560,21 +599,22 @@ auto-connect; call `connect()` when you want the wire open.
 
 ### Exports
 
-| Export                                                                 | Purpose                                             |
-| ---------------------------------------------------------------------- | --------------------------------------------------- |
-| `createClient`                                                         | Build a client                                      |
-| `ClientHandle` / `Enumerable` / `Respondable`                          | The handle contract and its capability profiles     |
-| `isClientHandle` / `isEnumerable` / `isRespondable`                    | Runtime feature detection for the above             |
-| `registerSessionHandleExtension` / `registeredSessionHandleExtensions` | Publish + introspect session slots                  |
-| `makeGatewayHandle` / `makeAppHandle` / `makeSessionHandle`            | Handle factories, for building a client of your own |
-| `onLog` / `onProgress`                                                 | Tree-shakeable signal subscriptions                 |
-| `channelStream` / `channelView`                                        | Channel-pinned stream and fold                      |
-| `eventStream` / `eventView`                                            | The generic stream and fold beneath them            |
-| `liveStore` / `filteredView`                                           | Fan-out core; shared-subscription projections       |
-| `composeRequest` / `composeSubscribe`                                  | The middleware composers                            |
-| `effectMiddleware`                                                     | Effect ↔ Promise middleware adapter                 |
-| `ClientHandlerRegistry`                                                | Lifecycle-handler merge rules                       |
-| `commandForMethod`                                                     | Wire method → hook command name                     |
+| Export                                                                 | Purpose                                                        |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `createClient`                                                         | Build a client                                                 |
+| `ClientHandle` / `Enumerable` / `Respondable`                          | The handle contract and its capability profiles                |
+| `isClientHandle` / `isEnumerable` / `isRespondable`                    | Runtime feature detection for the above                        |
+| `registerSessionHandleExtension` / `registeredSessionHandleExtensions` | Publish + introspect session slots                             |
+| `knownSessionHandleExtensionImports` / `SessionSubHandleNotRegistered` | Slot → `/client` specifier map; the missing-registration throw |
+| `makeGatewayHandle` / `makeAppHandle` / `makeSessionHandle`            | Handle factories, for building a client of your own            |
+| `onLog` / `onProgress`                                                 | Tree-shakeable signal subscriptions                            |
+| `channelStream` / `channelView`                                        | Channel-pinned stream and fold                                 |
+| `eventStream` / `eventView`                                            | The generic stream and fold beneath them                       |
+| `liveStore` / `filteredView`                                           | Fan-out core; shared-subscription projections                  |
+| `composeRequest` / `composeSubscribe`                                  | The middleware composers                                       |
+| `effectMiddleware`                                                     | Effect ↔ Promise middleware adapter                            |
+| `ClientHandlerRegistry`                                                | Lifecycle-handler merge rules                                  |
+| `commandForMethod`                                                     | Wire method → hook command name                                |
 
 Protocol types (`Client`, `ClientProtocol`, `ClientTransport`, `ClientExtension`,
 `ClientState`, `TransportError`, …) are re-exported for one-import ergonomics;
@@ -666,6 +706,12 @@ transport changes the `createClient` call and nothing else.
 - `src/__tests__/handle-conformance.spec.ts` — `runClientHandleConformance` proven
   against a fake handle; `isClientHandle` / `isEnumerable` / `isRespondable`
   duck-typing, including a bare store that is a handle but not enumerable.
+- The seed-and-notify contract has no runtime here, so it is proven where the
+  seeding handles live — the client specs in
+  [@agentick/tool-executor](../tool-executor), [@agentick/prompts](../prompts),
+  [@agentick/skills](../skills), and [@agentick/resources](../resources): the eager
+  poll notifies subscribers when it lands (so no boot-time `refresh()` is needed)
+  and a failed poll settles the snapshot empty until `refresh()` recovers it.
 - `src/__tests__/signals.spec.ts` — cross-surface log/progress queries,
   envelope→payload+scope mapping, `fromCursor` forwarding, unsubscribe closing the
   stream, and the instance methods delegating to the free functions.
@@ -693,6 +739,14 @@ transport changes the `createClient` call and nothing else.
   `smoke.spec.ts` (connect, dispatch, extension middleware order, namespace
   registration, LIFO `onClose`) and `send-shortcut.spec.ts` (`client.send` emits
   the same RPC as `session(id).send`).
+- `src/__tests__/sub-handle-import-diagnostics.spec.ts` — a known-but-unregistered
+  slot throws `SessionSubHandleNotRegistered` naming both the slot and its exact
+  `/client` specifier, a registered slot is still served from the handle, an
+  unknown name still synthesizes `billing/<method>` with `{ sessionId }`, and
+  `in` / `Object.keys` / `util.inspect` / `await session` never trip the throw.
 - [@agentick/client](../client) — `wire-proxy-middleware-e2e.spec.ts` covers the
   synthesized namespace round-trip end-to-end and `client.use` observing both a
-  synthesized method and a sub-handle's verb.
+  synthesized method and a sub-handle's verb;
+  `sub-handle-dictionary-anti-rot.spec.ts` checks the import dictionary against
+  the live registry in both directions, so a renamed slot or a new built-in
+  missing its entry fails there.

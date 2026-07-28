@@ -253,7 +253,7 @@ const client = await createClient({ transport: http({ url: "http://localhost:878
 const timeline = client.session("repo-1").timeline;
 timeline.subscribe(() => render(timeline.list()));
 
-await timeline.loadOlder(50); // cursored scroll-back over the durable log
+await timeline.loadOlder(50); // the conversation's last 50, then scroll back
 ```
 
 Bind your UI straight to `list()` and `subscribe()`, or feed your own store from

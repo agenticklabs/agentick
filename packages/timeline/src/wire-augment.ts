@@ -26,41 +26,45 @@
  * @see docs/proposals/v2/blueprint/93-namespace-definitions.md §"The client read doors"
  */
 
-import type { CommandInfo, SeqTagged, TimelineEntry } from "@agentick/spec";
+import type { CommandInfo, LogHistoryOptions, SeqTagged, TimelineEntry } from "@agentick/spec";
 
 /**
- * The cursored page request — `timeline:history`'s payload.
+ * The cursored page request — `timeline:history`'s payload. The store port's
+ * {@link LogHistoryOptions} window verbatim (`fromSeq` / `toSeq` / `limit`), so
+ * the wire read cannot drift from the read underneath it. Every field is a
+ * serializable scalar, which is what makes this read addressable at all (the
+ * signal-form rule, ADR 51 §1.2).
  *
- * `fromSeq` is the cursor LOWER BOUND: entries with absolute `seq >= fromSeq`
- * (omit → from the log's start). `limit` caps the page (omit → uncapped, and the
- * reply then carries no `nextFromSeq` because it reached the tail). Both are
- * serializable scalars — the whole payload is, which is what makes this read
- * addressable at all (the signal-form rule, ADR 51 §1.2).
+ * Both directions ride the ONE shape, via the port's anchor rule: `{ fromSeq,
+ * limit }` pages FORWARD from a lower bound, `{ limit }` reads the log's LAST
+ * `limit` entries, and `{ toSeq, limit }` pages BACKWARD from an upper bound.
+ * The reply hands back whichever cursor continues the direction you asked in.
  */
-export interface TimelineHistoryInput {
-  /** Entries with absolute `seq >= fromSeq`. Omit → from the log's start. */
-  readonly fromSeq?: number;
-  /** Cap on entries in this page. Omit → uncapped (the store's own bound). */
-  readonly limit?: number;
-}
+export type TimelineHistoryInput = LogHistoryOptions;
 
 /**
- * One cursored page of the durable log. `entries` are seq-ordered and carry the
- * store's frozen `seq` — the ordering identity a client pages by.
+ * One cursored page of the durable log. `entries` are seq-ASCENDING whichever
+ * end anchored them, and carry the store's frozen `seq` — the ordering identity
+ * a client pages by.
  *
- * `nextFromSeq` is the cursor to pass as the next `fromSeq`, present IFF the page
- * was capped by `limit` (so there may be more) and absent once the page reached
- * the log's tail. Because `seq` is strictly increasing but MAY be sparse (a
- * `BIGSERIAL` gap, a `prune`), it is `lastSeq + 1` — a valid lower bound, never a
- * claim that the entry at that seq exists.
+ * The reply carries its own next action, and exactly ONE cursor — the one that
+ * continues the direction the request asked in. Both are present IFF the page
+ * was CAPPED by `limit` (so there may be more that way) and absent once the page
+ * ran out of log:
  *
- * The reply carries its own next action: `nextFromSeq` present means "call again
- * with this"; absent means "you have the whole log".
+ *   - `nextFromSeq` (forward reads) — pass as the next `fromSeq`. `lastSeq + 1`.
+ *   - `nextToSeq` (tail-anchored / backward reads) — pass as the next `toSeq`.
+ *     `firstSeq - 1`, and absent at seq 0 (nothing can sit below it).
+ *
+ * Because `seq` is strictly increasing but MAY be sparse (a `BIGSERIAL` gap, a
+ * `prune`), each is a valid BOUND, never a claim that an entry sits at it.
  */
 export interface TimelineHistoryPage {
   readonly entries: readonly SeqTagged<TimelineEntry>[];
-  /** Next `fromSeq` when the page was capped; absent at the log's tail. */
+  /** Next `fromSeq` for a FORWARD read; absent at the log's tail. */
   readonly nextFromSeq?: number;
+  /** Next `toSeq` for a BACKWARD read; absent at the log's head. */
+  readonly nextToSeq?: number;
 }
 
 declare module "@agentick/spec" {

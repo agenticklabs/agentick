@@ -309,10 +309,10 @@ If you are writing storage, one seam is the whole contract. `Store<T, Q, M>` is 
 
 Two profiles specialize it, and every shipped port is one of them:
 
-| Profile                           | Adds                                                               | Ports built on it                                                         |
-| --------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| `CollectionStore<T, Q, PruneArg>` | `get` / `list` / `put` / `delete`, optional `prune` — keyed upsert | `SessionStore`, `TaskStore`, `SkillStore`, `PromptStore`, `ResourceStore` |
-| `LogStore<T>`                     | `append → seq[]`, cursored `history`, `keys`, `delete`             | `TimelineStore`                                                           |
+| Profile                           | Adds                                                                                                                                                              | Ports built on it                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `CollectionStore<T, Q, PruneArg>` | `get` / `list` / `put` / `delete`, optional `prune` — keyed upsert                                                                                                | `SessionStore`, `TaskStore`, `SkillStore`, `PromptStore`, `ResourceStore` |
+| `LogStore<T>`                     | `append → seq[]`, cursored `history` (`{ fromSeq?, toSeq?, limit? }`, `limit` anchored at the bound you gave — so a bare `limit` is the last n), `keys`, `delete` | `TimelineStore`                                                           |
 
 The sugar is derived from the seam, not parallel to it: `list` **is** `query`, and `put` / `delete` **are** the two arms of the mutation union. So archetype-agnostic infrastructure — a conformance runner, a wire projector — targets `Store` while day-to-day callers reach for the sugar. Substrate ports live alongside: `OperationJournal`, `EventBus`, `MessageInbox`, `EventLog<E>`.
 

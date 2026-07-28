@@ -94,56 +94,92 @@ describe("timelineHandle", () => {
     expect(ids(handle.list())).toEqual(["live"]);
   });
 
-  it("loadOlder() reads timeline/history, prepends the page, tracks the cursor", async () => {
+  it("history() passes an upper bound through — the backward page", async () => {
     const captured: { params?: unknown[]; methods?: string[] } = { params: [], methods: [] };
     const handle = timelineHandle(
-      fakeClient({ entries: [{ seq: 1, entry: entry("older") }], nextFromSeq: 2 }, captured),
+      fakeClient({ entries: [{ seq: 6, entry: entry("older") }], nextToSeq: 5 }, captured),
+      "s1",
+    );
+    const page = await handle.history({ toSeq: 6, limit: 1 });
+    expect(page.nextToSeq).toBe(5);
+    expect(captured.params![0]).toEqual({ sessionId: "s1", toSeq: 6, limit: 1 });
+  });
+
+  it("loadOlder() opens on the TAIL — no lower bound, page prepended at the HEAD", async () => {
+    const captured: { params?: unknown[]; methods?: string[] } = { params: [], methods: [] };
+    const handle = timelineHandle(
+      fakeClient({ entries: [{ seq: 9, entry: entry("newest") }], nextToSeq: 8 }, captured),
       "s1",
       { initial: [entry("live")] },
     );
 
     const first = await handle.loadOlder(10);
     expect(first.done).toBe(false);
-    expect(ids(first.entries)).toEqual(["older"]);
+    expect(ids(first.entries)).toEqual(["newest"]);
     // Prepended at the HEAD, before the live window.
-    expect(ids(handle.list())).toEqual(["older", "live"]);
-    // First page reads from the log start (no fromSeq), capped by limit.
+    expect(ids(handle.list())).toEqual(["newest", "live"]);
+    // The tail-anchored read: a `limit` and NO `fromSeq` (the anchor rule).
     expect(captured.methods).toEqual(["timeline/history"]);
     expect(captured.params![0]).toEqual({ sessionId: "s1", limit: 10 });
   });
 
-  it("loadOlder() advances fromSeq across calls and latches done at the log tail", async () => {
+  it("loadOlder() walks BACKWARD by toSeq — page 2 lands above page 1", async () => {
     const captured: { params?: unknown[] } = { params: [] };
-    // First call returns a page with nextFromSeq; construct the handle so the
-    // SAME client answers both calls — second answer signals the tail.
+    // Two pages of a 4-entry log, newest first: [c,d] then [a,b], then the head.
+    const pages: TimelineHistoryPage[] = [
+      {
+        entries: [
+          { seq: 2, entry: entry("c") },
+          { seq: 3, entry: entry("d") },
+        ],
+        nextToSeq: 1,
+      },
+      {
+        entries: [
+          { seq: 0, entry: entry("a") },
+          { seq: 1, entry: entry("b") },
+        ],
+      },
+    ];
     let call = 0;
     const client = {
       transport: {
         subscribe: (_s: SubscriptionScope): SubscriptionStream => neverStream(),
         async request(_m: WireMethod, params: unknown): Promise<unknown> {
           captured.params!.push(params);
-          call += 1;
-          return call === 1
-            ? ({
-                entries: [{ seq: 5, entry: entry("p1") }],
-                nextFromSeq: 6,
-              } satisfies TimelineHistoryPage)
-            : ({ entries: [{ seq: 6, entry: entry("p2") }] } satisfies TimelineHistoryPage);
+          return pages[call++];
         },
       },
     };
-    const handle = timelineHandle(client as never, "s1");
+    const handle = timelineHandle(client as never, "s1", { initial: [entry("live")] });
 
-    const a = await handle.loadOlder();
+    const a = await handle.loadOlder(2);
     expect(a.done).toBe(false);
-    const b = await handle.loadOlder();
+    const b = await handle.loadOlder(2);
     expect(b.done).toBe(true);
-    // Second call carried the advanced cursor.
-    expect(captured.params![1]).toEqual({ sessionId: "s1", fromSeq: 6 });
+    // The whole point: scroll-back accumulates in log order, oldest at the top.
+    expect(ids(handle.list())).toEqual(["a", "b", "c", "d", "live"]);
+    // The cursor walks DOWN: no bound, then `toSeq` = the page's first seq - 1.
+    expect(captured.params![0]).toEqual({ sessionId: "s1", limit: 2 });
+    expect(captured.params![1]).toEqual({ sessionId: "s1", toSeq: 1, limit: 2 });
 
-    // Once done, further calls are no-ops (no new request).
-    const c = await handle.loadOlder();
+    // Once done (no `nextToSeq`), further calls are no-ops (no new request).
+    const c = await handle.loadOlder(2);
     expect(c).toEqual({ entries: [], done: true });
     expect(captured.params!.length).toBe(2);
+  });
+
+  it("live appends stay at the TAIL while scroll-back grows the head", async () => {
+    // The contortion this removes: the consumer re-seeded the window from its own
+    // mirrored copy, clobbering entries the live fold had appended meanwhile.
+    const captured: { params?: unknown[] } = { params: [] };
+    const handle = timelineHandle(
+      fakeClient({ entries: [{ seq: 4, entry: entry("older") }], nextToSeq: 3 }, captured),
+      "s1",
+      { initial: [entry("live-1")] },
+    );
+    await handle.loadOlder(1);
+    handle.append([entry("live-2")]); // the fold's next append
+    expect(ids(handle.list())).toEqual(["older", "live-1", "live-2"]);
   });
 });

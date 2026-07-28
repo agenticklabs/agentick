@@ -36,7 +36,11 @@ import type {
 import type { Cursor } from "@agentick/spec";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
-import { applySessionHandleExtensions } from "./session-handle-extensions.js";
+import {
+  applySessionHandleExtensions,
+  knownSessionHandleExtensionImports,
+  SessionSubHandleNotRegistered,
+} from "./session-handle-extensions.js";
 
 interface InternalClient {
   readonly id: string;
@@ -229,6 +233,15 @@ function withMiddlewareTransport(client: InternalClient): ClientProtocol {
  * untouched; symbols and `then` never synthesize (so the handle is not a
  * thenable and structured-clone / inspection don't trip the trap). Namespace
  * proxies are memoized so `session.billing === session.billing`.
+ *
+ * The one name that neither resolves nor synthesizes is a KNOWN sub-handle slot
+ * whose harness `/client` subpath was never imported: synthesizing there would
+ * hand back a proxy that answers `tools.list()` with a wire `method not found`
+ * from a server that is fine — the classic wrong-door degradation. That case
+ * throws {@link SessionSubHandleNotRegistered}, naming the import to add.
+ * Only `get` is affected: `"tools" in session`, `Object.keys(session)` and
+ * util.inspect route through `has`/`ownKeys`/own-property reads, so probes and
+ * debugger inspection report absence rather than throwing.
  */
 function wrapSessionWireProxy(
   base: SessionHandleBase,
@@ -239,8 +252,13 @@ function wrapSessionWireProxy(
   const proxy = new Proxy(base as object, {
     get(target, prop, receiver) {
       if (typeof prop !== "string") return Reflect.get(target, prop, receiver);
-      if (prop in target) return Reflect.get(target, prop, receiver);
+      if (prop in target) return Reflect.get(target, prop, receiver); // registered slots + base
       if (prop === "then") return undefined; // never a thenable
+      // Known slot, no registration → a forgotten harness `/client` import.
+      const importSpecifier = knownSessionHandleExtensionImports()[prop];
+      if (importSpecifier !== undefined) {
+        throw new SessionSubHandleNotRegistered({ slot: prop, importSpecifier });
+      }
       let ns = nsCache.get(prop);
       if (ns === undefined) {
         ns = makeWireNamespace(client, sessionId, prop);

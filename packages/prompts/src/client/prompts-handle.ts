@@ -108,10 +108,11 @@ export function promptsHandle(
   };
 
   // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected" — populate up front so `list()` reflects
-  // pre-connection declarations once the fetch lands. Fire-and-forget; a poll
-  // that fails before the session is reachable recovers on the next mutation's
-  // re-fetch or an explicit `refresh()`.
+  // happened before I connected", so the snapshot fills itself and NOTIFIES when
+  // it lands — a caller binds `list()` + `subscribe()` and has nothing to await
+  // and no boot-time fetch to issue. A poll that fails before the session is
+  // reachable leaves the snapshot empty (never half-filled); the next mutation's
+  // re-fetch or an explicit `refresh()` recovers it.
   void refresh().catch(() => undefined);
 
   return {

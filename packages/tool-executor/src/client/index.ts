@@ -34,13 +34,14 @@ export {
   type ClientToolHandler,
   type RouteClientToolsOptions,
 } from "./client-tool-calls.js";
-export { type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
+export { toolConfirmation, type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
 
 // The confirmation CONTRACT, for a client rendering its own confirm dialog rather
-// than handing the decision to `.confirm(policy)`. `TOOL_CONFIRMATION_KIND` is the
-// `hints.kind` discriminator that separates a confirmation from an ordinary
-// elicitation on `session.elicitations` — without it here, an app has to hardcode
-// the string or import the harness package into its browser bundle.
+// than handing the decision to `.confirm(policy)`. `toolConfirmation(elic)` is the
+// READER — narrows an elicitation off `session.elicitations` to a `ConfirmRequest`
+// (or `undefined`), so an app renders toolName/arguments/message/preview without
+// re-deriving the mapping. `TOOL_CONFIRMATION_KIND` is the underlying `hints.kind`
+// discriminator, for code that wants the raw key.
 // `ToolConfirmationReply` types the value `accept(...)` must carry.
 export { TOOL_CONFIRMATION_KIND, type ToolConfirmationReply } from "../confirmation-schema.js";
 

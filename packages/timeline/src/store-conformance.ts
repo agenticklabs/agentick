@@ -134,6 +134,38 @@ export function runTimelineStoreConformance(opts: TimelineStoreConformanceOption
         }
       });
 
+      it("history() bounds above with toSeq and anchors `limit` at the TAIL", async (ctx) => {
+        const store = await setup();
+        if (store.history === undefined) return ctx.skip();
+        const sid = "conf-tail";
+        const seqs = await store.append(
+          sid,
+          [entry("a"), entry("b"), entry("c"), entry("d")],
+          stubStoreCtx(),
+        );
+        // Inclusive upper bound.
+        const through = await store.history(sid, { toSeq: seqs[2]! }, stubStoreCtx());
+        expect(through.map((t) => idOf(t.entry))).toEqual(["a", "b", "c"]);
+        // Both bounds compose.
+        const window = await store.history(
+          sid,
+          { fromSeq: seqs[1]!, toSeq: seqs[2]! },
+          stubStoreCtx(),
+        );
+        expect(window.map((t) => idOf(t.entry))).toEqual(["b", "c"]);
+        // The anchor rule: no `fromSeq` ⇒ `limit` takes the LAST n, ASCENDING.
+        const tail = await store.history(sid, { limit: 2 }, stubStoreCtx());
+        expect(tail.map((t) => idOf(t.entry))).toEqual(["c", "d"]);
+        expect(tail.map((t) => t.seq)).toEqual([seqs[2], seqs[3]]);
+        // Backward paging: the n ending at an upper bound.
+        const older = await store.history(sid, { toSeq: seqs[2]! - 1, limit: 2 }, stubStoreCtx());
+        expect(older.map((t) => idOf(t.entry))).toEqual(["a", "b"]);
+        // A limit wider than the window is not padded; forward anchor unchanged.
+        expect((await store.history(sid, { limit: 99 }, stubStoreCtx())).length).toBe(4);
+        const head = await store.history(sid, { fromSeq: 0, limit: 2 }, stubStoreCtx());
+        expect(head.map((t) => idOf(t.entry))).toEqual(["a", "b"]);
+      });
+
       it("isolates entries across sessions (no bleed)", async () => {
         const store = await setup();
         await store.append("s1", [entry("a")], stubStoreCtx());

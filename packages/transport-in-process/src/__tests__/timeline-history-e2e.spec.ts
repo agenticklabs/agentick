@@ -134,31 +134,53 @@ describe("client scroll-back — 25-entry log, paged backward over timeline/hist
       changes += 1;
     });
 
+    // Page one is the log's NEWEST ten — one round-trip, no seek.
     const first = await timeline.loadOlder(10);
-    expect(first.entries.map(idOf)).toEqual(logOf(10).map(idOf));
+    expect(first.entries.map(idOf)).toEqual([
+      "m15",
+      "m16",
+      "m17",
+      "m18",
+      "m19",
+      "m20",
+      "m21",
+      "m22",
+      "m23",
+      "m24",
+    ]);
     expect(first.done).toBe(false);
     expect(timeline.list().map(idOf)).toEqual(first.entries.map(idOf));
 
+    // Page two is the ten BELOW it, spliced at the HEAD — above page one, which
+    // is what scroll-up means. No app-side mirror, no re-seed.
     const second = await timeline.loadOlder(10);
-    expect(second.entries.map(idOf)).toEqual(
-      ["m10", "m11", "m12", "m13", "m14"].concat(["m15", "m16", "m17", "m18", "m19"]),
-    );
+    expect(second.entries.map(idOf)).toEqual([
+      "m5",
+      "m6",
+      "m7",
+      "m8",
+      "m9",
+      "m10",
+      "m11",
+      "m12",
+      "m13",
+      "m14",
+    ]);
     expect(second.done).toBe(false);
-    // Each page splices at the HEAD. The read is FORWARD-cursored by `seq` while
-    // the window grows head-first, so page 2 lands ahead of page 1 — the
-    // documented cursor-vs-seq honesty, not a bug: an app doing true
-    // infinite-scroll-up owns the final ordering.
     expect(timeline.list().map(idOf)).toEqual([
       ...second.entries.map(idOf),
       ...first.entries.map(idOf),
     ]);
 
-    // The short page is the tail, and `done` latches: no further wire calls.
+    // The short page is the log's HEAD, and `done` latches: no further wire calls.
     const third = await timeline.loadOlder(10);
-    expect(third.entries.map(idOf)).toEqual(["m20", "m21", "m22", "m23", "m24"]);
+    expect(third.entries.map(idOf)).toEqual(["m0", "m1", "m2", "m3", "m4"]);
     expect(third.done).toBe(true);
     const fourth = await timeline.loadOlder(10);
     expect(fourth).toEqual({ entries: [], done: true });
+
+    // The whole 25-entry log, in log order, from three `loadOlder` calls alone.
+    expect(timeline.list().map(idOf)).toEqual(logOf(25).map(idOf));
 
     // Every splice notified the store-contract subscriber (three pages).
     expect(changes).toBe(3);
@@ -178,7 +200,8 @@ describe("client scroll-back — 25-entry log, paged backward over timeline/hist
     await client.connect();
     const timeline = client.session(session.id).timeline;
 
-    const page1 = await timeline.history({ limit: 10 });
+    // FORWARD paging declares its lower bound.
+    const page1 = await timeline.history({ fromSeq: 0, limit: 10 });
     expect(page1.entries.map((t) => t.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(page1.nextFromSeq).toBe(10);
 
@@ -189,10 +212,20 @@ describe("client scroll-back — 25-entry log, paged backward over timeline/hist
     expect(page2.entries.map((t) => idOf(t.entry))[0]).toBe("m10");
     expect(page2.nextFromSeq).toBe(20);
 
-    const tail = await timeline.history({ fromSeq: page2.nextFromSeq, limit: 10 });
-    expect(tail.entries.map((t) => t.seq)).toEqual([20, 21, 22, 23, 24]);
-    // Uncapped page ⇒ the tail: no cursor to continue with.
-    expect(tail.nextFromSeq).toBeUndefined();
+    const forwardTail = await timeline.history({ fromSeq: page2.nextFromSeq, limit: 10 });
+    expect(forwardTail.entries.map((t) => t.seq)).toEqual([20, 21, 22, 23, 24]);
+    // Short page ⇒ the log's tail: no cursor to continue with.
+    expect(forwardTail.nextFromSeq).toBeUndefined();
+
+    // TAIL-anchored: a bare `limit` opens on the most recent page, and hands
+    // back the BACKWARD cursor instead.
+    const newest = await timeline.history({ limit: 10 });
+    expect(newest.entries.map((t) => t.seq)).toEqual([15, 16, 17, 18, 19, 20, 21, 22, 23, 24]);
+    expect(newest.nextToSeq).toBe(14);
+    expect(newest.nextFromSeq).toBeUndefined();
+    const older = await timeline.history({ toSeq: newest.nextToSeq, limit: 5 });
+    expect(older.entries.map((t) => t.seq)).toEqual([10, 11, 12, 13, 14]);
+    expect(older.nextToSeq).toBe(9);
 
     // View-neutral: the window is untouched (Posture B pages into its OWN store).
     expect(timeline.list()).toEqual([]);
@@ -251,7 +284,8 @@ describe("the read is admitted twice — exposure, then grant", () => {
     });
     await reader.connect();
     const page = await reader.session(session.id).timeline.history({ limit: 2 });
-    expect(page.entries.map((t) => idOf(t.entry))).toEqual(["m0", "m1"]);
+    // A bare `limit` is the tail read, so this is the log's newest two.
+    expect(page.entries.map((t) => idOf(t.entry))).toEqual(["m1", "m2"]);
 
     // Ungranted — same method, same session, no grant.
     const mallory = await createClient({

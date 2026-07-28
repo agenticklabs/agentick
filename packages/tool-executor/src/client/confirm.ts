@@ -10,7 +10,9 @@
  *
  * It reads the confirmation fields the gate stamps onto the elicitation
  * `metadata` — `toolName`, `toolUseId`, `arguments`, and (when the tool sets a
- * `confirmationPreview`) `preview` — plus the top-level `message`.
+ * `confirmationPreview`) `preview` — plus the top-level `message`. That mapping
+ * is {@link toolConfirmation}, exported so a client drawing its OWN dialog reads
+ * a confirmation the same way the policy does instead of re-deriving it.
  *
  * **Coordination caveat.** If you use `confirmClientTools`, do NOT also answer
  * `tool_confirmation` elicitations in your own `session.elicitations` loop —
@@ -69,11 +71,13 @@ export function confirmClientTools(
   const acted = new Set<string>();
   const unsub = elicitations.subscribe(() => {
     for (const elic of elicitations.list()) {
-      if (elic.hints?.kind !== TOOL_CONFIRMATION_KIND) continue;
+      // The reader IS the filter: `undefined` means "not a tool confirmation".
+      const req = toolConfirmation(elic);
+      if (!req) continue;
       if (acted.has(elic.correlationId)) continue;
       acted.add(elic.correlationId);
       void (async () => {
-        const approved = await evaluate(policy, toRequest(elic));
+        const approved = await evaluate(policy, req);
         if (approved) await elic.accept({ approved: true });
         else await elic.decline();
       })();
@@ -91,10 +95,25 @@ function evaluate(policy: ConfirmPolicy, req: ConfirmRequest): boolean | Promise
   return policy(req);
 }
 
-function toRequest(elic: {
+/**
+ * Read a client elicitation as a {@link ConfirmRequest} — the narrowing reader
+ * for the tool-confirmation contract. Returns `undefined` when `elic` is NOT a
+ * tool confirmation (`hints.kind !== "tool_confirmation"`), so it doubles as the
+ * discriminator; otherwise the fully-populated request, `preview` included.
+ *
+ * This is the reader for a client that draws its OWN confirmation dialog instead
+ * of handing the decision to `.confirm(policy)`: pass anything
+ * `session.elicitations.list()` yields (a `ClientElicitationHandle` satisfies the
+ * parameter — the fields read are `message` / `hints` / `metadata`) and render
+ * what comes back, then answer with `elic.accept({ approved: true })`.
+ * `confirmClientTools` uses this same reader — one mapping, not two.
+ */
+export function toolConfirmation(elic: {
   readonly message?: string;
+  readonly hints?: Readonly<Record<string, unknown>>;
   readonly metadata?: Readonly<Record<string, unknown>>;
-}): ConfirmRequest {
+}): ConfirmRequest | undefined {
+  if (elic.hints?.kind !== TOOL_CONFIRMATION_KIND) return undefined;
   const meta = elic.metadata ?? {};
   return {
     ...(typeof meta.toolName === "string" ? { toolName: meta.toolName } : {}),

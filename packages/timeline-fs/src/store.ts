@@ -58,6 +58,7 @@ import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:
 import { join } from "node:path";
 
 import type {
+  LogHistoryOptions,
   LogMutation,
   LogQuery,
   SeqTagged,
@@ -215,14 +216,24 @@ class FsTimelineStore implements TimelineStore {
 
   history(
     sessionId: string,
-    options: { readonly fromSeq?: number; readonly limit?: number } | undefined,
+    options: LogHistoryOptions | undefined,
     _ctx: StoreCtx,
   ): Promise<readonly SeqTagged<TimelineEntry>[]> {
     return this.lock(sessionId, async () => {
       const lines = await this.readLines(sessionId);
-      const fromSeq = options?.fromSeq ?? 0;
-      const matched = lines.filter((l) => l.seq >= fromSeq);
-      const limited = options?.limit !== undefined ? matched.slice(0, options.limit) : matched;
+      const { fromSeq, toSeq, limit } = options ?? {};
+      const matched = lines.filter(
+        (l) =>
+          (fromSeq === undefined || l.seq >= fromSeq) && (toSeq === undefined || l.seq <= toSeq),
+      );
+      // The anchor rule: `fromSeq` present ⇒ the FIRST `limit` (forward);
+      // absent ⇒ the LAST `limit` (backward). Order stays ascending either way.
+      const limited =
+        limit === undefined
+          ? matched
+          : fromSeq !== undefined
+            ? matched.slice(0, limit)
+            : matched.slice(Math.max(matched.length - limit, 0));
       return limited.map((l): SeqTagged<TimelineEntry> => ({ seq: l.seq, entry: l.entry }));
     });
   }
@@ -320,7 +331,8 @@ class FsTimelineStore implements TimelineStore {
   // appends. `logKey` is the `sessionId`.
   async query(q: LogQuery | undefined, ctx: StoreCtx): Promise<readonly TimelineEntry[]> {
     if (q === undefined) return [];
-    const tagged = await this.history(q.logKey, { fromSeq: q.fromSeq, limit: q.limit }, ctx);
+    const { logKey, ...window } = q;
+    const tagged = await this.history(logKey, window, ctx);
     return tagged.map((t) => t.entry);
   }
 

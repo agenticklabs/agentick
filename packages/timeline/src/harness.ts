@@ -199,11 +199,12 @@ const compactSignalSchema: StandardSchemaV1<{
 /**
  * Payload schema for `timeline:history` — the cursored page request.
  *
- * NORMALIZING as well as validating: it returns ONLY `fromSeq` / `limit`, so the
- * addressing key the dynamic wire lane passes through (`sessionId`) and any other
- * extra never reach the body. The harness reads its OWN scopeId; a caller-supplied
- * session id must not be able to steer the read (the address already selected the
- * session, and the target rule already gated it).
+ * NORMALIZING as well as validating: it returns ONLY the seq window (`fromSeq` /
+ * `toSeq` / `limit`), so the addressing key the dynamic wire lane passes through
+ * (`sessionId`) and any other extra never reach the body. The harness reads its
+ * OWN scopeId; a caller-supplied session id must not be able to steer the read
+ * (the address already selected the session, and the target rule already gated
+ * it).
  */
 const historyRequestSchema: StandardSchemaV1<TimelineHistoryInput> = {
   "~standard": {
@@ -214,18 +215,25 @@ const historyRequestSchema: StandardSchemaV1<TimelineHistoryInput> = {
       if (typeof value !== "object") {
         return { issues: [{ message: "history payload must be an object" }] };
       }
-      const { fromSeq, limit } = value as { fromSeq?: unknown; limit?: unknown };
+      const { fromSeq, toSeq, limit } = value as {
+        fromSeq?: unknown;
+        toSeq?: unknown;
+        limit?: unknown;
+      };
       const issues: Array<{ message: string }> = [];
-      if (fromSeq !== undefined && !(Number.isSafeInteger(fromSeq) && (fromSeq as number) >= 0)) {
-        issues.push({ message: "fromSeq must be a non-negative integer" });
-      }
-      if (limit !== undefined && !(Number.isSafeInteger(limit) && (limit as number) >= 0)) {
-        issues.push({ message: "limit must be a non-negative integer" });
-      }
+      const bound = (name: string, v: unknown): void => {
+        if (v !== undefined && !(Number.isSafeInteger(v) && (v as number) >= 0)) {
+          issues.push({ message: `${name} must be a non-negative integer` });
+        }
+      };
+      bound("fromSeq", fromSeq);
+      bound("toSeq", toSeq);
+      bound("limit", limit);
       if (issues.length > 0) return { issues };
       return {
         value: omitUndefined({
           fromSeq: fromSeq as number | undefined,
+          toSeq: toSeq as number | undefined,
           limit: limit as number | undefined,
         }),
       };
@@ -518,10 +526,14 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * append (a client that just sent a message and immediately scrolls back must
    * not read a log missing it), then delegates to the store's optional `history`.
    *
-   * `nextFromSeq` is present IFF the page filled its `limit` — a full page MAY
-   * have more behind it, a short or uncapped one reached the tail. It is
-   * `lastSeq + 1`: a valid lower bound in a sparse `seq` space, never a claim
-   * that an entry sits at that seq.
+   * The cursor follows the read's DIRECTION, which the port's anchor rule fixes:
+   * a request carrying `fromSeq` paged forward, so it gets `nextFromSeq`
+   * (`lastSeq + 1`); one without paged backward from the tail (or from `toSeq`),
+   * so it gets `nextToSeq` (`firstSeq - 1`). Either is present IFF the page
+   * FILLED its `limit` — a full page MAY have more that way, a short or uncapped
+   * one ran out of log. Both are BOUNDS in a sparse `seq` space, never a claim
+   * that an entry sits at them, and `nextToSeq` is omitted at seq 0 (nothing can
+   * sit below it).
    */
   private async historyPage(input: TimelineHistoryInput): Promise<TimelineHistoryPage> {
     await this.flush();
@@ -537,9 +549,13 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       );
     }
     const entries = await this.store.history(this.scopeId, input, this.storeCtx());
-    const lastSeq = entries.length > 0 ? entries[entries.length - 1]!.seq : undefined;
     const capped = input.limit !== undefined && entries.length >= input.limit && input.limit > 0;
-    return capped && lastSeq !== undefined ? { entries, nextFromSeq: lastSeq + 1 } : { entries };
+    if (!capped || entries.length === 0) return { entries };
+    if (input.fromSeq !== undefined) {
+      return { entries, nextFromSeq: entries[entries.length - 1]!.seq + 1 };
+    }
+    const firstSeq = entries[0]!.seq;
+    return firstSeq > 0 ? { entries, nextToSeq: firstSeq - 1 } : { entries };
   }
 
   readPersisted(): readonly TimelineEntry[] {

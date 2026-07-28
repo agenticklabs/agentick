@@ -78,9 +78,12 @@ const ctx = stubStoreCtx();
 const seqs = await log.append("session-1", [{ text: "a" }, { text: "b" }], ctx); // [0, 1]
 await log.read("session-1", ctx); // both entries, defensively copied
 await log.history("session-1", { fromSeq: 1, limit: 10 }, ctx); // [{ seq: 1, entry }]
+await log.history("session-1", { limit: 20 }, ctx); // the LAST 20 — the tail read
 await log.keys(ctx); // ["session-1"] — only logs holding entries
 await log.prune("session-1", { seq: 1 }, ctx); // 1 — erases below an ABSOLUTE seq
 ```
+
+The window is `{ fromSeq?, toSeq?, limit? }`, both bounds inclusive, and `limit` truncates **from the end the query anchored at**: give a `fromSeq` and you get the first `limit` (forward paging); give none and you get the last `limit` at or below `toSeq`, defaulting to the log's tail. So `{ limit: 20 }` is the newest twenty and `{ fromSeq: 0, limit: 20 }` is the oldest twenty — one shape, both directions, and rows always come back ascending by `seq`.
 
 Pruning advances the log's base so survivors keep their `seq` and the next append never reuses a retired one. There is deliberately **no bounding or eviction** here — a full array per log is the intended default, and how much history lives in RAM is a durable adapter's decision, not a framework mandate.
 
@@ -302,7 +305,7 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 | ---------------------------------- | ------------------------------------------------------- |
 | `append(logKey, entries, ctx)`     | The assigned `seq[]`; `[]` for an empty batch           |
 | `read(logKey, ctx)`                | Full ordered read, defensively copied; `[]` when absent |
-| `history(logKey, opts, ctx)`       | `SeqTagged<T>[]` paged by `{ fromSeq?, limit? }`        |
+| `history(logKey, opts, ctx)`       | `SeqTagged<T>[]` for `{ fromSeq?, toSeq?, limit? }`     |
 | `keys(ctx)`                        | Log keys currently holding entries                      |
 | `delete(logKey, ctx)`              | `boolean`; ends that log's `seq` run                    |
 | `prune(logKey, { seq }, ctx)`      | Count erased below an **absolute** `seq`                |
@@ -367,7 +370,7 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 ## Verified by
 
 - `src/__tests__/memory-collection.spec.ts` — upsert and round-trip, unknown-key `undefined`, query filtering, fresh-array `list`, delete reporting prior existence, `prune` presence as a capability signal and its predicate selection; and the full `onChange` seam: insert and overwrite deltas, removal carrying `prev`, silence on a no-op delete and on `prune`, unsubscribe, listener-error isolation, registration-order fan-out.
-- `src/__tests__/memory-log.spec.ts` — append ordering and one `seq` per entry strictly increasing and never reused, empty-batch no-op, defensive-copy reads, per-log isolation, `keys` enumerating only non-empty logs, idempotent `delete`, configurable backend, `history` paging by inclusive `fromSeq` plus `limit`, and `prune` by absolute `seq` including that a pruned-to-empty log does not restart its counter.
+- `src/__tests__/memory-log.spec.ts` — append ordering and one `seq` per entry strictly increasing and never reused, empty-batch no-op, defensive-copy reads, per-log isolation, `keys` enumerating only non-empty logs, idempotent `delete`, configurable backend, `history` paging by inclusive `fromSeq` plus `limit`, the inclusive `toSeq` upper bound and the tail anchor (a bare `limit` reads the last n, and the seam query carries the same window), and `prune` by absolute `seq` including that a pruned-to-empty log does not restart its counter.
 - `src/__tests__/view.spec.ts` — sync reads reflecting a write with no await, keyed and wildcard pings, add-then-update by cache presence, `undefined`-value classification, idempotent `deleteSync`, change-silent `hydrate` overlay and `replace` union-ping, the fused case (write persists only the projected record, `seedSync` writes no store and emits no change, `seedSync` pings only with `{ ping: true }`, `hydrate` reconstructs wrappers and throws without `reconstruct`), the `flush` barrier awaiting a deferred write and surfacing then clearing a failure, and that a view drives a store implementing **only** `query`/`mutate`.
 - `src/__tests__/log-view.spec.ts` — both tiers and both versions advancing on append, subscriber pings, snapshot reference stability until mutation, write-behind memory authority with the store landing at `flush` (and `flush` idempotent, and a failed batch surfacing the wrapped error left latched), write-through durability without an explicit flush and rejecting `append` on failure, `replaceProjection` leaving `persisted` untouched, `resetProjection` re-mirroring and clearing provenance, `hydrate` replacing both tiers, and export/import round-trips in both modes.
 - `src/__tests__/idempotent-write.spec.ts` — one effect for a repeated `opId`, distinct `opId`s each passing through, an absent `opId` never deduped, `delete` deduping too, reads never deduped, and the composed backend label.

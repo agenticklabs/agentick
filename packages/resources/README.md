@@ -410,7 +410,11 @@ resources.subscribe(() => {
 RPC-backed (no `resources-state` delta channel yet — the reactive mirror rides
 the client channel-consumer primitive later): `list()`/`get()` read a local
 snapshot seeded by an eager `resources/list` poll; `read`/`listTemplates` are
-pure RPC. The `resources/*` wire rows are declared type-only in
+pure RPC. The snapshot fills itself — the poll fires `subscribe` when it lands,
+so binding `list()` + `subscribe()` is the whole read path and no boot-time
+`refresh()` is needed; `refresh()` invalidates a snapshot you already have, and a
+failed first poll settles empty until it (or the next mutation) recovers it.
+The `resources/*` wire rows are declared type-only in
 `src/wire-augment.ts` (imported by both the server `augment.ts` and the client
 subpath, so the `/client` bundle loads no server code).
 
@@ -420,7 +424,8 @@ subpath, so the `/client` bundle loads no server code).
   eager `resources/list` seed populates `list()` (unwrapped from
   `.resources`); `read`/`listTemplates` are pure RPC (no `resources/list`
   follow-up); `get(uri)` from snapshot; `refresh()` re-polls; `subscribe(cb)`
-  fires with no args. (5 tests)
+  fires with no args; the seed notifies subscribers when it lands (no boot
+  `refresh()` needed) and settles empty on a failed poll. (7 tests)
 - `src/client/__tests__/session-resources.spec.ts` — ADR 87 self-assembly:
   importing `/client` registers `client.session(id).resources`; `read(uri)`
   issues `resources/read` over the transport. (2 tests)

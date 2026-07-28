@@ -92,6 +92,13 @@ export interface CreateClientOptions {
  * widened with any extension-registered namespaces (via
  * `ClientNamespaces` declaration merging).
  *
+ * **This is the LEAN core: no capability's client surface is registered.**
+ * `session.timeline`, `session.tools`, `session.knobs` and friends exist only
+ * once you `import "@agentick/<capability>/client"` for each one you use.
+ * `createClient` from `@agentick/client` is this same function with every
+ * built-in already imported — reach for THIS package when you are trimming a
+ * bundle and will register capabilities yourself.
+ *
  * The client does NOT auto-connect — call `client.connect()`
  * explicitly. (This matches WebSocket / SSE semantics where adopters
  * typically want to control when the wire opens.)

@@ -22,6 +22,7 @@ import type { Unsubscribe, MessageTimelineEntry, TimelineEndTurnInput } from "@a
 import type {
   CompactResult,
   CompactStrategy,
+  LogHistoryOptions,
   SeqTagged,
   TimelineEntry,
   TimelineSnapshot,
@@ -58,18 +59,17 @@ export interface TimelineHandle {
    */
   compact(strategy?: CompactStrategy): Promise<CompactResult>;
   /**
-   * Cursored, seq-tagged read of the DURABLE log (#187). Flushes the
-   * write-behind buffer first so the read is complete, then delegates
-   * to the store's optional `history`. Throws when the configured store
-   * does not implement cursored reads — use `readPersisted()` for the
-   * seq-less full read.
+   * Cursored, seq-tagged read of the DURABLE log (#187) over the port's seq
+   * window. Flushes the write-behind buffer first so the read is complete, then
+   * delegates to the store's optional `history`. Throws when the configured store
+   * does not implement cursored reads — use `readPersisted()` for the seq-less
+   * full read.
    *
    * The in-process face of the `timeline:history` command — the same body a
-   * grant-gated wire client reaches for scroll-back (ADR 93). Page forward with
-   * `fromSeq: lastSeq + 1`; the wire face additionally returns that cursor.
+   * grant-gated wire client reaches for scroll-back (ADR 93). `{ limit: n }` is
+   * the log's LAST `n` (the anchor rule); page forward with `fromSeq: lastSeq + 1`
+   * or backward with `toSeq: firstSeq - 1`. The wire face additionally returns
+   * that cursor.
    */
-  history(options?: {
-    readonly fromSeq?: number;
-    readonly limit?: number;
-  }): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>>;
+  history(options?: LogHistoryOptions): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>>;
 }

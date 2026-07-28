@@ -152,7 +152,7 @@ describe("timeline:history — the declaration", () => {
     const r = await rig();
     await r.harness.append(entry("a"), entry("b"));
 
-    const page = await r.ask({ limit: 1 });
+    const page = await r.ask({ fromSeq: 0, limit: 1 });
     expect(ids(page)).toEqual(["a"]);
     expect(page.nextFromSeq).toBe(1);
   });
@@ -174,6 +174,8 @@ describe("timeline:history — the declaration", () => {
     expect(failure?.reason).toMatch(/fromSeq must be a non-negative integer/);
     const badLimit = (await r.askEither({ limit: 1.5 })) as { reason?: string } | undefined;
     expect(badLimit?.reason).toMatch(/limit must be a non-negative integer/);
+    const badTo = (await r.askEither({ toSeq: -2 })) as { reason?: string } | undefined;
+    expect(badTo?.reason).toMatch(/toSeq must be a non-negative integer/);
   });
 });
 
@@ -186,7 +188,9 @@ describe("timeline:history — the page", () => {
     const r = await rig();
     await r.harness.append(entry("a"), entry("b"), entry("c"));
 
-    const first = await r.ask({ limit: 2 });
+    // Forward paging declares its lower bound — that is what anchors `limit` at
+    // the head (a bare `{ limit }` is the TAIL read; see below).
+    const first = await r.ask({ fromSeq: 0, limit: 2 });
     expect(ids(first)).toEqual(["a", "b"]);
     // A FULL page may have more behind it — `lastSeq + 1`, valid in a sparse space.
     expect(first.nextFromSeq).toBe(2);
@@ -195,6 +199,31 @@ describe("timeline:history — the page", () => {
     expect(ids(second)).toEqual(["c"]);
     // Short page ⇒ the tail: no cursor, nothing left to ask for.
     expect(second.nextFromSeq).toBeUndefined();
+  });
+
+  it("a bare `{ limit }` is the TAIL read, and pages BACKWARD by nextToSeq", async () => {
+    const r = await rig();
+    await r.harness.append(entry("a"), entry("b"), entry("c"), entry("d"));
+
+    // What every chat UI opens on: the newest n, ascending, in ONE round-trip.
+    const newest = await r.ask({ limit: 2 });
+    expect(ids(newest)).toEqual(["c", "d"]);
+    // A full page may have more BELOW it — `firstSeq - 1`, the backward twin of
+    // `nextFromSeq`, and the only cursor a tail-anchored read hands back.
+    expect(newest.nextToSeq).toBe(1);
+    expect(newest.nextFromSeq).toBeUndefined();
+
+    const older = await r.ask({ toSeq: newest.nextToSeq!, limit: 2 });
+    expect(ids(older)).toEqual(["a", "b"]);
+    // Reached the log's head: seq 0 has nothing below it.
+    expect(older.nextToSeq).toBeUndefined();
+  });
+
+  it("the upper bound is inclusive and composes with the lower one", async () => {
+    const r = await rig();
+    await r.harness.append(entry("a"), entry("b"), entry("c"), entry("d"));
+    expect(ids(await r.ask({ toSeq: 1 }))).toEqual(["a", "b"]);
+    expect(ids(await r.ask({ fromSeq: 1, toSeq: 2 }))).toEqual(["b", "c"]);
   });
 
   it("an uncapped read returns the whole log with no cursor", async () => {
