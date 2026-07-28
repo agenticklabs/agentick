@@ -12,6 +12,8 @@ npm install @agentick/transport-unix-socket
 
 Subpaths: `/server` (the `net.Server` side), `/client` (the `ClientTransport`). The root re-exports both.
 
+**`/client` here is not a browser client.** It is the connecting end of a same-host IPC pair — a CLI or TUI dialing a daemon — and it opens a Unix domain socket with `node:net`, which no browser can do. Every subpath therefore denies the `browser` export condition, so a web bundler that lands on this package fails with "not exported under browser condition" instead of an unresolvable `node:net` scheme deep in the build. Browser clients want [@agentick/transport-websocket](../transport-websocket) or [@agentick/transport-http](../transport-http). The workspace sweep that forbids `node:` builtins behind browser entry points reads that declaration rather than carrying an exception for this package.
+
 ## Quick start
 
 **The daemon.** Hand the socket path to the gateway and let it own the bind:
