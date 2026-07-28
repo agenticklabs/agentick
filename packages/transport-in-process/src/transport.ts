@@ -32,7 +32,8 @@ import type {
   MediaUplink,
   TransportCapabilities,
 } from "@agentick/spec";
-import { BaseClientTransport, BaseConnectionContext, type DispatchHost } from "@agentick/transport";
+import { BaseConnectionContext, type DispatchHost } from "@agentick/transport";
+import { BaseClientTransport } from "@agentick/transport/client";
 
 export type InProcessGatewayHandler = (
   request: JsonRpcRequest,

@@ -22,7 +22,7 @@ import {
   CSRF_HEADER,
   DEFAULT_RECONNECT_POLICY,
   type ReconnectPolicy,
-} from "@agentick/transport";
+} from "@agentick/transport/client";
 import { parseSseFrames } from "../shared/sse.js";
 
 export interface HttpTransportOptions {

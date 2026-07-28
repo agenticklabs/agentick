@@ -12,6 +12,8 @@ npm install @agentick/transport
 
 Subpaths: `/client` (the base client transport, streams, backoff), `/server` (dispatch, connection context, ingress authn, web security), `/testing` (the ingress-authentication conformance suite).
 
+**`/client` is browser-safe; the root barrel is not.** The root re-exports `/server`, which reaches `node:crypto` and `node:http` — importing it from browser code fails the bundle outright. Client code imports `@agentick/transport/client`, always. Wire facts both halves need (the CSRF header name) live in `src/shared/wire.ts` and are exported from both doors, so neither side has to reach across for a constant. A test sweeps every browser entry point in the workspace and fails on any `node:` builtin reachable through the real import graph.
+
 You install this only when writing a transport. To _use_ one, install the concrete package: [@agentick/transport-websocket](../transport-websocket), [@agentick/transport-http](../transport-http), [@agentick/transport-unix-socket](../transport-unix-socket), or [@agentick/transport-in-process](../transport-in-process).
 
 ## Quick start — writing a transport
@@ -21,7 +23,7 @@ A transport is two halves that never meet: a client that speaks frames outbound,
 ### The client half
 
 ```ts
-import { BaseClientTransport } from "@agentick/transport";
+import { BaseClientTransport } from "@agentick/transport/client";
 import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec";
 
 const CAPABILITIES: TransportCapabilities = {
@@ -130,7 +132,7 @@ Ordering is the caller's obligation, not the transport's: send the marker after 
 A stream is unbounded by default. Bound it and pick what gives:
 
 ```ts
-import { MultiplexedStream, type BackpressureError } from "@agentick/transport";
+import { MultiplexedStream, type BackpressureError } from "@agentick/transport/client";
 
 const stream = new MultiplexedStream("events", onClose, {
   policy: "drop-oldest", // "unbounded" (default) | "drop-oldest" | "drop-newest" | "close-on-overflow"

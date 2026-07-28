@@ -19,7 +19,7 @@ import {
   BaseClientTransport,
   DEFAULT_RECONNECT_POLICY,
   type ReconnectPolicy,
-} from "@agentick/transport";
+} from "@agentick/transport/client";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 // ── WebSocket constructor type — matches both browser native and `ws` ─────

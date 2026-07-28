@@ -41,13 +41,16 @@
 
 import { randomBytes } from "node:crypto";
 
+import { CSRF_HEADER } from "../shared/wire.js";
+
 /**
- * Custom request header carrying the CSRF token on mutations, and the
- * response header the server issues it on. A custom (non-CORS-safelisted)
+ * The CSRF header is the request header carrying the token on mutations, and
+ * the response header the server issues it on. A custom (non-CORS-safelisted)
  * header cannot be set cross-origin without a preflight, which the
  * non-permissive CORS policy denies — so its mere presence is CSRF-meaningful.
+ * It lives in `shared/wire.ts` because the client has to send what this checks.
  */
-export const CSRF_HEADER = "x-agentick-csrf";
+export { CSRF_HEADER };
 
 /**
  * Default bind address for port-owning server transports — loopback only.

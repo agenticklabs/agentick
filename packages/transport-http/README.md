@@ -17,7 +17,7 @@ npm install @agentick/transport-http
 | `@agentick/transport-http/fetch`     | `fetchServerTransport` — the embedded web-standard handler            |
 | `@agentick/transport-http` (default) | all of the above                                                      |
 
-The client runs anywhere `fetch` does (Node 20.19+, browser, Bun, Deno, edge). The Node server paths need `node:http`. Pair the server with [@agentick/gateway](../gateway) and the client with [@agentick/client-core](../client-core).
+The client runs anywhere `fetch` does (Node 20.19+, browser, Bun, Deno, edge). The Node server paths need `node:http`, so the default subpath cannot be bundled for a browser — a bundler resolving with the `browser` condition gets `/client` for that same specifier instead. Pair the server with [@agentick/gateway](../gateway) and the client with [@agentick/client-core](../client-core).
 
 ## Quick start
 

@@ -1,9 +1,12 @@
 /**
- * `@agentick/transport-websocket` — WebSocket transport. Re-exports
- * client + server entry points so adopters can `import { websocket,
- * websocketServer } from "@agentick/transport-websocket"` if they
- * want both in one place; the package's `./client` and `./server`
- * subpaths are the recommended import sites for bundle minimization.
+ * `@agentick/transport-websocket` — WebSocket transport. This barrel is the
+ * NODE door: it re-exports client + server so a process that owns both sides
+ * can `import { websocket, websocketServer }` from one place.
+ *
+ * A bundler resolving with the `browser` condition gets `./client` for this
+ * same specifier — the server half reaches `node:http`/`ws` and cannot be
+ * bundled. So the obvious import works in both environments and `./client` /
+ * `./server` stay available for explicit, condition-independent targeting.
  *
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */

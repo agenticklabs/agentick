@@ -28,6 +28,10 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
+      "browser": {
+        "types": "./src/client/index.ts",
+        "default": "./src/client/index.ts"
+      },
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
@@ -51,6 +55,10 @@
     "access": "public",
     "exports": {
       ".": {
+        "browser": {
+          "types": "./dist/client/index.d.ts",
+          "default": "./dist/client/index.js"
+        },
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"

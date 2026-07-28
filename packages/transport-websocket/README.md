@@ -16,6 +16,8 @@ npm install @agentick/transport-websocket
 | `@agentick/transport-websocket/server`    | `websocketServer` / `webSocketServerTransport` |
 | `@agentick/transport-websocket` (default) | both, plus `AGENTICK_SUBPROTOCOL`              |
 
+The default subpath carries both halves for a process that owns both. A bundler resolving with the `browser` condition gets `/client` for that same specifier, because the server half reaches `node:http` and `ws` and cannot be bundled — so the obvious import works in a browser too, and asking it for `websocketServer` is a named-export error rather than an unresolvable `node:` scheme.
+
 The client uses `globalThis.WebSocket` (Node 22+, browser, Bun, Deno, edge) — no isomorphic shim. The server uses the bundled `ws` library, because Node's native WebSocket is client-only. Pair the server with [@agentick/gateway](../gateway) and the client with [@agentick/client-core](../client-core).
 
 ## Quick start

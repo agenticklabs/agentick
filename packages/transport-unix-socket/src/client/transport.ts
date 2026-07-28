@@ -19,7 +19,7 @@ import {
   DEFAULT_RECONNECT_POLICY,
   transportError,
   type ReconnectPolicy,
-} from "@agentick/transport";
+} from "@agentick/transport/client";
 import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
 
 export interface UnixSocketTransportOptions {
