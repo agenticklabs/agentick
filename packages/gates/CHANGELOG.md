@@ -1,5 +1,18 @@
 # @agentick/gates
 
+## 1.0.0-next.19
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.19
+  - @agentick/compiler@1.0.0-next.19
+  - @agentick/compiler-react@1.0.0-next.19
+  - @agentick/knobs@1.0.0-next.19
+  - @agentick/pubsub@1.0.0-next.19
+  - @agentick/runtime@1.0.0-next.19
+  - @agentick/spec@1.0.0-next.19
+
 ## 1.0.0-next.18
 
 ### Patch Changes

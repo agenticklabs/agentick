@@ -2,6 +2,15 @@
   dir: packages/app
   intents:
     - app-namespace-slot-arm
+"@agentick/client-core@1.0.0-next.19":
+  dir: packages/client-core
+  intents:
+    - catalog-handles-fill-in
+    - client-bundle-signpost
+"@agentick/client@1.0.0-next.19":
+  dir: packages/client
+  intents:
+    - client-bundle-signpost
 "@agentick/compiler-react@1.0.0-next.15":
   dir: packages/compiler-react
   intents:
@@ -59,6 +68,14 @@
   dir: packages/prompts
   intents:
     - definitions-d3
+"@agentick/prompts@1.0.0-next.19":
+  dir: packages/prompts
+  intents:
+    - catalog-handles-fill-in
+"@agentick/resources@1.0.0-next.19":
+  dir: packages/resources
+  intents:
+    - catalog-handles-fill-in
 "@agentick/runtime@1.0.0-next.15":
   dir: packages/runtime
   intents:
@@ -91,6 +108,10 @@
   dir: packages/skills
   intents:
     - definitions-d3
+"@agentick/skills@1.0.0-next.19":
+  dir: packages/skills
+  intents:
+    - catalog-handles-fill-in
 "@agentick/spec@1.0.0-next.0":
   dir: packages/spec
   intents:
@@ -115,6 +136,10 @@
     - spawn-boundary-events
     - tool-presentation-on-the-wire
     - tool-result-ui-metadata
+"@agentick/spec@1.0.0-next.19":
+  dir: packages/spec
+  intents:
+    - log-tail-read
 "@agentick/spec@1.0.0-next.2":
   dir: packages/spec
   intents:
@@ -135,6 +160,18 @@
   dir: packages/spec
   intents:
     - ctx-spine-phase2
+"@agentick/store@1.0.0-next.19":
+  dir: packages/store
+  intents:
+    - log-tail-read
+"@agentick/timeline-fs@1.0.0-next.19":
+  dir: packages/timeline-fs
+  intents:
+    - log-tail-read
+"@agentick/timeline-postgres@1.0.0-next.19":
+  dir: packages/timeline-postgres
+  intents:
+    - log-tail-read
 "@agentick/timeline@1.0.0-next.13":
   dir: packages/timeline
   intents:
@@ -143,10 +180,19 @@
   dir: packages/timeline
   intents:
     - definitions-d2
+"@agentick/timeline@1.0.0-next.19":
+  dir: packages/timeline
+  intents:
+    - log-tail-read
 "@agentick/tool-executor@1.0.0-next.15":
   dir: packages/tool-executor
   intents:
     - execution-summary-and-read-door-cutover
+"@agentick/tool-executor@1.0.0-next.19":
+  dir: packages/tool-executor
+  intents:
+    - catalog-handles-fill-in
+    - tool-confirmation-reader
 "@agentick/transport@1.0.0-next.13":
   dir: packages/transport
   intents:

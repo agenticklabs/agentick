@@ -1,5 +1,12 @@
 # @agentick/client-react
 
+## 1.0.0-next.19
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.19
+
 ## 1.0.0-next.18
 
 ### Patch Changes

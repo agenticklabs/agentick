@@ -1,5 +1,55 @@
 # @agentick/tool-executor
 
+## 1.0.0-next.19
+
+### Minor Changes
+
+- `toolConfirmation(elic)` — the reader for the tool-confirmation contract, on
+  `@agentick/tool-executor/client`. `ConfirmRequest` was exported as a TYPE with
+  nothing that produces one: the mapping from an elicitation's
+  `metadata.{toolName,toolUseId,arguments,preview}` + `message` lived in a private
+  `toRequest`, so the documented "draw your own confirmation dialog" path had a
+  shape to fill and no way to fill it. The first real consumer hand-rolled the
+  mapping and dropped `preview` — every tool with a `confirmationPreview` rendered
+  an empty dialog body.
+
+  The reader NARROWS: `undefined` when `hints.kind !== "tool_confirmation"`, so it
+  doubles as the discriminator a UI needs while walking
+  `session.elicitations.list()` — no hardcoded hint string, no second pass. Its
+  parameter is structural, so a `ClientElicitationHandle` off `list()` fits with no
+  cast. `confirmClientTools` now filters through the same reader; the private
+  `toRequest` is gone, so there is one mapping rather than two that can drift.
+
+### Patch Changes
+
+- Nothing to call at boot for a client catalog. The four RPC-polled
+  projections (`session.tools`, `session.prompts`, `session.skills`,
+  `session.resources`) already seed themselves on construction AND fire
+  `subscribe` when the answer lands — so binding `list()` + `subscribe()`
+  is the entire read path. That was never written down, so the first real
+  consumer fired three speculative `refresh()` round-trips at every
+  session open (`session.tools.refresh().catch(() => undefined)` and
+  friends) purely as a boot barrier, doubling the wire traffic and turning
+  a failed poll into a silently empty palette.
+
+  No new API: the requirement is removed by documenting the contract that
+  already holds and pinning it with tests. The `ClientHandle` contract, the
+  four package READMEs, and each handle's own comment now say the same
+  thing — render what `list()` has, re-render on change, never poll at
+  boot; `refresh()` is for invalidating a snapshot you already hold. Each
+  of the four packages gained a test that a subscriber registered while
+  the seed is still in flight is notified when it lands (with exactly ONE
+  poll on the wire), and that a failed first poll settles the snapshot
+  empty — never half-filled — until `refresh()` recovers it.
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.19
+  - @agentick/elicitation@1.0.0-next.19
+  - @agentick/runtime@1.0.0-next.19
+  - @agentick/spec@1.0.0-next.19
+  - @agentick/tasks@1.0.0-next.19
+  - @agentick/utils@1.0.0-next.19
+
 ## 1.0.0-next.18
 
 ### Patch Changes

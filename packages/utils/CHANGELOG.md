@@ -1,5 +1,7 @@
 # @agentick/utils
 
+## 1.0.0-next.19
+
 ## 1.0.0-next.18
 
 ## 1.0.0-next.17

@@ -1,5 +1,14 @@
 # @agentick/transport
 
+## 1.0.0-next.19
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/pubsub@1.0.0-next.19
+  - @agentick/spec@1.0.0-next.19
+  - @agentick/utils@1.0.0-next.19
+
 ## 1.0.0-next.18
 
 ### Minor Changes

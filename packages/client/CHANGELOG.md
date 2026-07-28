@@ -1,5 +1,52 @@
 # @agentick/client
 
+## 1.0.0-next.19
+
+### Minor Changes
+
+- Say which client to install. `@agentick/client` already carries every
+  built-in capability's client surface — `session.timeline`,
+  `session.tools`, `session.knobs` and the rest are registered by
+  importing it, with nothing to wire — while `@agentick/client-core` is
+  the lean core where you register each capability yourself. Nothing said
+  so. The first real consumer installed the core, hand-rolled five
+  `import "@agentick/<x>/client"` lines, missed one, and spent time
+  chasing a `tools/list` method-not-found at a server that was fine.
+
+  The fix is that both READMEs now state the choice in their first lines
+  — install `@agentick/client`; drop to the core only to trim a bundle —
+  and `createClient`'s own doc comment names the tradeoff at the point of
+  use, so the zero-config path is the one you find first.
+
+  Behind that, reading a capability slot you never registered now throws
+  `SessionSubHandleNotRegistered` instead of silently synthesizing a wire
+  namespace that fails at the first call; the message leads with
+  "install @agentick/client" and gives the single import as the
+  deliberate-lean-core alternative. Client-core gains no harness
+  dependency for it — a module-private dictionary of slot name →
+  `/client` specifier (string literals only), read on the one path where
+  synthesis would otherwise have happened, checked against the live
+  registry in both directions by an anti-rot test in `@agentick/client`.
+  Unknown names keep synthesizing (the gateway-porcelain
+  `session.billing.approve` case), and only property reads throw:
+  `"tools" in session`, `Object.keys`, and util.inspect report absence,
+  so logging a session is always safe.
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.19
+  - @agentick/elicitation@1.0.0-next.19
+  - @agentick/gates@1.0.0-next.19
+  - @agentick/knobs@1.0.0-next.19
+  - @agentick/prompts@1.0.0-next.19
+  - @agentick/resources@1.0.0-next.19
+  - @agentick/skills@1.0.0-next.19
+  - @agentick/state@1.0.0-next.19
+  - @agentick/tasks@1.0.0-next.19
+  - @agentick/timeline@1.0.0-next.19
+  - @agentick/tool-executor@1.0.0-next.19
+
 ## 1.0.0-next.18
 
 ### Patch Changes
