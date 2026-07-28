@@ -75,7 +75,20 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "react": [
+          "./dist/react/index.d.ts"
+        ],
+        "client": [
+          "./dist/client/index.d.ts"
+        ],
+        "testing": [
+          "./dist/testing/index.d.ts"
+        ]
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

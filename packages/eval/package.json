@@ -56,7 +56,17 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "plugins/workspace": [
+          "./dist/plugins/workspace.d.ts"
+        ],
+        "plugins/judge": [
+          "./dist/plugins/judge.d.ts"
+        ]
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

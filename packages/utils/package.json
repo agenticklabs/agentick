@@ -78,7 +78,23 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "testing": [
+          "./dist/testing/index.d.ts"
+        ],
+        "loaders": [
+          "./dist/loaders/index.d.ts"
+        ],
+        "loaders/node": [
+          "./dist/loaders/node/index.d.ts"
+        ],
+        "path/node": [
+          "./dist/path/node.d.ts"
+        ]
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

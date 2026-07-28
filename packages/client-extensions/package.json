@@ -83,7 +83,23 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "retry": [
+          "./dist/retry/index.d.ts"
+        ],
+        "telemetry": [
+          "./dist/telemetry/index.d.ts"
+        ],
+        "cache": [
+          "./dist/cache/index.d.ts"
+        ],
+        "offline": [
+          "./dist/offline/index.d.ts"
+        ]
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

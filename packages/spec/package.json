@@ -70,7 +70,20 @@
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "data": [
+          "./dist/data/index.d.ts"
+        ],
+        "protocol": [
+          "./dist/protocol/index.d.ts"
+        ],
+        "guards": [
+          "./dist/guards/index.d.ts"
+        ]
+      }
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
