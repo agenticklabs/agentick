@@ -1,5 +1,16 @@
 # @agentick/subscriptions
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.21
+  - @agentick/compiler-react@1.0.0-next.21
+  - @agentick/pubsub@1.0.0-next.21
+  - @agentick/runtime@1.0.0-next.21
+  - @agentick/spec@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Patch Changes

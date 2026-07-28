@@ -1,5 +1,21 @@
 # @agentick/sandbox
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler@1.0.0-next.21
+  - @agentick/compiler-react@1.0.0-next.21
+  - @agentick/elicitation@1.0.0-next.21
+  - @agentick/mcp@1.0.0-next.21
+  - @agentick/pubsub@1.0.0-next.21
+  - @agentick/resources@1.0.0-next.21
+  - @agentick/runtime@1.0.0-next.21
+  - @agentick/spec@1.0.0-next.21
+  - @agentick/tool@1.0.0-next.21
+  - @agentick/utils@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Patch Changes

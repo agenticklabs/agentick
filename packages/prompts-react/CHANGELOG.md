@@ -1,5 +1,14 @@
 # @agentick/prompts-react
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/compiler-react@1.0.0-next.21
+  - @agentick/prompts@1.0.0-next.21
+  - @agentick/spec@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Patch Changes

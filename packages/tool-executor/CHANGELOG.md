@@ -1,5 +1,17 @@
 # @agentick/tool-executor
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/client-core@1.0.0-next.21
+  - @agentick/elicitation@1.0.0-next.21
+  - @agentick/runtime@1.0.0-next.21
+  - @agentick/spec@1.0.0-next.21
+  - @agentick/tasks@1.0.0-next.21
+  - @agentick/utils@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Patch Changes

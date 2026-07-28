@@ -1,5 +1,13 @@
 # @agentick/transport-in-process
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/spec@1.0.0-next.21
+  - @agentick/transport@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Minor Changes

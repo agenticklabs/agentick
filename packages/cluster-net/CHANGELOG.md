@@ -1,5 +1,15 @@
 # @agentick/cluster-net
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/cluster@1.0.0-next.21
+  - @agentick/cluster-broker@1.0.0-next.21
+  - @agentick/spec@1.0.0-next.21
+  - @agentick/utils@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Patch Changes

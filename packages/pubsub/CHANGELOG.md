@@ -1,5 +1,12 @@
 # @agentick/pubsub
 
+## 1.0.0-next.21
+
+### Patch Changes
+
+- Updated dependencies:
+  - @agentick/utils@1.0.0-next.21
+
 ## 1.0.0-next.20
 
 ### Patch Changes
