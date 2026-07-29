@@ -36,7 +36,7 @@
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { EventEnvelope } from "../data/events.js";
 import type { ContentBlock } from "../data/content-blocks.js";
-import type { LanguageModelStopReason, UsageStats } from "../data/execution-result.js";
+import type { LanguageModelStopReason, StopCause, UsageStats } from "../data/execution-result.js";
 import type { TickResult } from "./loop-executor.js";
 import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
@@ -147,20 +147,73 @@ export interface MessageTimelineEntry {
 /**
  * Turn boundary (ADR 53) — a CONVERSATION-domain fact: "a turn ended
  * here." The framework's execution is the mechanism that produced the
- * turn, attached as provenance; ticks never become entries. The
- * committed offset is derived by fold: input entries after the last
- * `outcome: "succeeded"` boundary are UNCONSUMED — they drive the
- * loop's continuation predicate and are retried after failures.
- * Always `visibility: "log"` semantics: never rendered to the model.
+ * turn, attached as provenance; ticks never become entries. Always
+ * `visibility: "log"` semantics: never rendered to the model.
+ *
+ * **The framework reads this for nothing.** It is a record, not a control signal — see
+ * `TimelineHarness.endTurn`. An earlier version of this docblock claimed a committed
+ * offset "is derived by fold" from it; no such fold exists, and the claim outlived the
+ * intent by long enough to be worth correcting rather than implementing.
+ *
+ * What the fold WOULD be good for is an application's own concern: input entries appended
+ * after the last `outcome: "succeeded"` boundary are the entries a successful request has
+ * never carried, so a turn that starts failing narrows its suspects to exactly that window
+ * — the `git bisect` range, established for free rather than searched for. That is a
+ * ten-line fold over data the application already owns, which is why it lives there and
+ * not here. What the application CANNOT derive is `target`, below.
  */
 export interface TurnBoundaryEntry {
   readonly kind: "boundary";
   readonly boundary: {
     readonly executionId: string;
-    readonly outcome: "succeeded" | "failed" | "aborted";
+    /**
+     * How the turn ended, as the CONVERSATION sees it.
+     *
+     * `vetoed` is its own member and not folded into `failed`, because a turn a
+     * guard refused is not a turn that broke — and the two need different words
+     * on screen (a failure invites a retry; a veto does not). The loop resolves a
+     * veto as a succeeded terminal carrying `stopReason: "vetoed"`, so before this
+     * member existed the session recorded it as `succeeded`: a refused turn was
+     * indistinguishable on the timeline from one that answered. The very site that
+     * maps this already refused to launder a provider failure; it laundered a veto.
+     */
+    readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
     /** The TURN's aggregate usage — may exceed the entry-sum when a
      *  tick billed tokens but appended no assistant entry. */
     readonly usage?: import("../data/execution-result.js").UsageStats;
+    /**
+     * WHY the turn ended badly — see {@link StopCause}. Present on `failed` and
+     * `vetoed`, when a cause was carried.
+     *
+     * This is the DURABLE account, and the only one a reloaded client can read: a
+     * turn that dies before its first tick appends no assistant entry, so this
+     * boundary is the sole evidence on the timeline that the turn happened at all.
+     * Recording the outcome without the cause (which is what shipped first) leaves
+     * every consumer — a UI, a replay, an eval — able to say a turn ended badly and
+     * unable to say why.
+     */
+    readonly stopCause?: StopCause;
+    /**
+     * WHICH target ran this turn — the fact that makes a "last known good" watermark
+     * sound, and the one an application cannot derive from its own log.
+     *
+     * Every turn replays the whole conversation, so a turn that SUCCEEDED is a proof of
+     * projectability: every entry it carried was accepted. That makes the entries appended
+     * since the last success the natural suspect window when a turn starts failing — the
+     * `git bisect` range, established for free instead of searched for.
+     *
+     * The proof is only about the target that gave it. A `withFallback` failover, a model
+     * swap, or a knob change means "accepted by A" says nothing about B, and a watermark
+     * that ignores that lies exactly when the conversation has just changed underneath it.
+     * Recording provider + modelId is what lets a reader tell a comparable success from an
+     * incomparable one.
+     *
+     * Absent when the turn ended before a target was resolved.
+     */
+    readonly target?: {
+      readonly provider?: string;
+      readonly modelId?: string;
+    };
   };
   /** ISO milliseconds when the turn ended. */
   readonly ts: number;
@@ -414,6 +467,17 @@ export interface SendResult<T = unknown> {
    * wire `SendResult` never carries `data` — the schema never crossed.
    */
   readonly data?: T;
+  /**
+   * WHY the turn stopped badly, when it did — lifted verbatim from
+   * {@link ExecutionRunResult.stopCause}. See {@link StopCause}.
+   *
+   * `stopReason: "executor_failed"` and `"vetoed"` both RESOLVE this promise: the
+   * turn ran, and being refused by a provider or by a guard is an outcome rather
+   * than a broken contract. So a caller's `.catch` never fires, and before this
+   * field the resolved result said only `executor_failed` / `vetoed` — a caller who
+   * wanted the cause had nowhere to read it and no way to know one existed.
+   */
+  readonly stopCause?: StopCause;
 }
 
 // ============================================================================
