@@ -116,13 +116,16 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // them. State used to construct `super` with no options at all.
     super("state", scopeId, journal, bus, inbox, options);
     this.view = View.collection(options.store ?? createStateStore(), (entry) => entry.key);
-    const scope = () => ({ sessionId: this.scopeId });
+    // NO scope factory. The owning session is gap-filled by `makeEvent` from the
+    // harness's construction-bound `parentScope` (BaseHarness), so a command that
+    // adds no dims of its own declares nothing. Every command here previously
+    // carried `() => ({ sessionId: this.scopeId })` — the COMPOSED key
+    // `<sessionId>:<surface>`, which no session-scoped subscription can match.
     this.set = this.command({
       name: "state:set",
       // Wire-reachable (three-audiences-plan G): a client `session.state` handle
       // mutates through the dynamic lane, deny-by-default like every sibling.
       exposure: "wire",
-      scope,
       // Run B: read the ENRICHED store-ctx inside the fiber (carries the live
       // op's `opId`) and thread it to the mutation.
       handler: (i: StateSetInput) =>
@@ -133,7 +136,6 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     this.delete = this.command({
       name: "state:delete",
       exposure: "wire",
-      scope,
       handler: (i: StateDeleteInput) =>
         Effect.gen(this, function* () {
           this.applyDelete(i, yield* this.storeCtxEffect());
@@ -149,13 +151,11 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     this.command({
       name: "state:get",
       exposure: "wire",
-      scope,
       handler: (i: { key: string }) => Effect.sync(() => this.get(i.key)),
     });
     this.command({
       name: "state:list",
       exposure: "wire",
-      scope,
       handler: () => Effect.sync(() => this.list()),
     });
   }

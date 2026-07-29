@@ -27,7 +27,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Middleware } from "@agentick/runtime";
+import { BaseHarness, type BaseHarnessOptions, type Middleware } from "@agentick/runtime";
 // Load this package's own EventScope augmentation (`subscriptionId`) —
 // this file uses the augmented dim in op scopes, and a consumer that
 // reaches this module DEEPLY (bypassing the barrel that imports
@@ -63,7 +63,14 @@ declare module "@agentick/runtime" {
 // Options
 // ============================================================================
 
-export interface SubscriptionsHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so every slot the base accepts — `parentScope`,
+ * `principal`, telemetry, metadata, the interceptor fold — arrives without being
+ * re-declared here and re-forwarded by hand. Standing alone, this interface
+ * silently dropped every base option a caller passed, and the next thing the base
+ * gains would be dropped the same way.
+ */
+export interface SubscriptionsHarnessOptions extends BaseHarnessOptions {
   /**
    * CONSTRUCTION-BOUND lookup into the live subscription registry — in
    * practice `(id) => bridge.invoker(id)`. The seam that keeps the declared
@@ -116,10 +123,10 @@ export class SubscriptionsHarness extends BaseHarness<"subscriptions"> {
     inbox: MessageInbox,
     options: SubscriptionsHarnessOptions,
   ) {
-    super("subscriptions", scopeId, journal, bus, inbox, {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    });
+    // Forward the WHOLE bag: nothing to enumerate, so nothing to forget. Every
+    // hand-picked `super({ inheritedInterceptors, interceptorParent })` was a place
+    // a new base option would silently vanish — and `parentScope` did exactly that.
+    super("subscriptions", scopeId, journal, bus, inbox, options);
     this.resolveInvoker = options.resolveInvoker;
     this.dispatch = this.command<SubscriptionDispatchInput, void, unknown>({
       name: "subscriptions:dispatch",

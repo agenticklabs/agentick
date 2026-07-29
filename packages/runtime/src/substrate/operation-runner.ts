@@ -179,6 +179,25 @@ export interface OperationRunnerDeps {
    * for principal-less deployments.
    */
   readonly principal: string | undefined;
+  /**
+   * Construction-bound OWNING runtime coordinates, merged (gap-filling) into every
+   * emitted event scope by {@link OperationRunner.makeEvent}.
+   *
+   * The axis that answers "which session/app did this happen in", distinct from the
+   * harness's `scopeId` (its own WORK identity, which for a session sub-harness is a
+   * COMPOSED key like `"<sessionId>:timeline"` and must stay composed — it is the
+   * inbox address root and the store key) and from `principal` (whose behalf).
+   *
+   * It lives here, once, because when it was each harness's job to stamp, all six
+   * session sub-harnesses stamped `sessionId: this.scopeId` — the composed key — and
+   * the gateway narrows a session subscription to `scope.sessionId === <session id>`.
+   * Nothing matched, nothing errored, and every client-side live projection was dead.
+   * The seam's own docstring offered `() => ({ sessionId: this.scopeId })` as the
+   * example to copy.
+   *
+   * `undefined` for a top-level harness whose `scopeId` IS its scope.
+   */
+  readonly parentScope: EventScope | undefined;
   /** The operation journal — idempotency lookup + durable append per policy. */
   readonly journal: OperationJournal;
   /** The event bus — every emitted envelope appends here. */
@@ -235,6 +254,7 @@ export function createOperationRunner(deps: OperationRunnerDeps): OperationRunne
 class OperationRunnerImpl implements OperationRunner {
   private readonly surface: string;
   private readonly principal: string | undefined;
+  private readonly parentScope: EventScope | undefined;
   private readonly journal: OperationJournal;
   private readonly bus: EventBus;
   private readonly policy: JournalingPolicy;
@@ -251,6 +271,7 @@ class OperationRunnerImpl implements OperationRunner {
   constructor(deps: OperationRunnerDeps) {
     this.surface = deps.surface;
     this.principal = deps.principal;
+    this.parentScope = deps.parentScope;
     this.journal = deps.journal;
     this.bus = deps.bus;
     this.policy = deps.policy;
@@ -283,7 +304,22 @@ class OperationRunnerImpl implements OperationRunner {
       // a genuine CHILD rather than an orphaned root carrying only its own
       // dims: the MCP crossing's connection + principal reach the inner command
       // it drives, exactly as `parentOpId` already reaches it above.
-      const scope: EventScope = inheritScope(ambient, resolvedOp.scope);
+      // Three layers, widest first: the harness's construction-bound
+      // `parentScope` (where am I?) < the ambient crossing (what am I nested in?)
+      // < this op's own declared dims (what do I know that they don't).
+      //
+      // `parentScope` goes HERE and not at event-build time, because the resolved
+      // scope feeds BOTH the `RuntimeContext` a handler/guard/hydrator reads via
+      // `getContext` AND every envelope `makeEvent` builds. Merging it only into
+      // the envelope would give a guard a different answer than a subscriber — two
+      // authorities for one coordinate, which is the bug class this whole seam
+      // exists to remove.
+      const scope: EventScope = inheritScope(
+        ambient,
+        this.parentScope !== undefined
+          ? { ...this.parentScope, ...omitUndefined(resolvedOp.scope ?? {}) }
+          : resolvedOp.scope,
+      );
       const ctxScope: RuntimeContext = {
         ...scope,
         // The op's authorization identity (ADR 51) — `"host"` / `"wire"` /
@@ -427,12 +463,14 @@ class OperationRunnerImpl implements OperationRunner {
       phase,
       timestamp: Date.now(),
       // Stamp the harness's construction-bound principal (ADR 48).
-      // AUTHORITATIVE: a principal-bound harness overrides whatever the
-      // operation carries — an op cannot emit an event claiming a different
-      // principal than its harness (no per-op identity spoofing, ADR 45).
-      // `omitUndefined` keeps the rebuilt scope clean. Principal-less harnesses
-      // pass the op scope through untouched (zero-cost — the universal hot path
-      // is unaffected).
+      // AUTHORITATIVE: a principal-bound harness overrides whatever the operation
+      // carries — an op cannot emit an event claiming a different principal than its
+      // harness (no per-op identity spoofing, ADR 45).
+      //
+      // The harness's `parentScope` is NOT merged here: `runOperation` already
+      // folded it into the resolved scope this receives, so both the
+      // `RuntimeContext` a handler reads and every envelope built from it agree by
+      // construction. One coordinate, one authority.
       scope:
         this.principal !== undefined
           ? omitUndefined({ ...scope, principal: this.principal })

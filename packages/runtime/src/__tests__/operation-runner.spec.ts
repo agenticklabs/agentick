@@ -22,6 +22,7 @@ import { Effect, Exit, Stream } from "effect";
 import { DEFAULT_JOURNALING_POLICY } from "@agentick/spec";
 import type {
   EventBus,
+  EventScope,
   JournalingPolicy,
   Maybe,
   Middleware,
@@ -126,6 +127,7 @@ function fixture(opts?: {
   seedTerminals?: Record<string, TerminalEvent>;
   principal?: string;
   policy?: JournalingPolicy;
+  parentScope?: EventScope;
 }): Fixture {
   const journal = fakeJournal(opts?.seedTerminals);
   const bus = fakeBus();
@@ -134,6 +136,7 @@ function fixture(opts?: {
   const runner = createOperationRunner({
     surface: "test",
     principal: opts?.principal,
+    parentScope: opts?.parentScope,
     journal,
     bus,
     policy: opts?.policy ?? DEFAULT_JOURNALING_POLICY,

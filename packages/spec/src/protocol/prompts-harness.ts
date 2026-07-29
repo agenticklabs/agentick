@@ -73,6 +73,20 @@ export interface PromptArgument {
 export interface PromptDeclaration {
   /** Stable name (snake_case convention). Unique within the harness. */
   readonly name: string;
+  /**
+   * Human display label, when the name is not one. `jobs_over_budget` is an id;
+   * "Jobs Over Budget" is what belongs in a command palette next to it.
+   *
+   * Distinct from {@link description} on purpose — a palette row wants a LABEL and a
+   * subtitle, not one string doing both. Optional because a well-chosen name is often
+   * label enough, and a consumer falls back to the name rather than rendering a blank.
+   *
+   * Mirrors MCP's `title` on `prompts/list`, so a projected remote prompt keeps it. That
+   * projection previously collapsed `description ?? title ?? name`, which lost the title
+   * of any server supplying both and rendered a title AS a description for a server
+   * supplying only one.
+   */
+  readonly title?: string;
   /** One-line description; shown in command palette / slash list / MCP `prompts/list`. */
   readonly description: string;
   /** Argument descriptors. Empty / omitted → prompt takes no args. */
@@ -332,6 +346,8 @@ export interface PromptsHarnessProtocol {
  */
 export interface PromptDeclarationRecord {
   readonly name: string;
+  /** See {@link PromptDeclaration.title} — a display label, distinct from the subtitle. */
+  readonly title?: string;
   readonly description: string;
   readonly arguments?: readonly PromptArgument[];
   readonly metadata?: Readonly<Record<string, unknown>>;

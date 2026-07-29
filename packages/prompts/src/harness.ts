@@ -256,26 +256,27 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // ops with REQUIRED function parameters; the addressable form
     // carries `template` data — same precedent as `knobs:register`'s
     // optional `validate`).
-    const scope = () => ({ sessionId: this.scopeId });
+    // NO scope factory. The owning session is gap-filled by `makeEvent` from the
+    // harness's construction-bound `parentScope` (BaseHarness), so a command that
+    // adds no dims of its own declares nothing. Every command here previously
+    // carried `() => ({ sessionId: this.scopeId })` — the COMPOSED key
+    // `<sessionId>:<surface>`, which no session-scoped subscription can match.
     this.register = this.command({
       name: "prompts:register",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: PromptsRegisterInput) => this.applyRegister(i),
     });
     this.update = this.command({
       name: "prompts:update",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: PromptsUpdateInput) => this.applyUpdate(i),
     });
     this.remove = this.command({
       name: "prompts:remove",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: PromptsRemoveInput) =>
         Effect.sync(() => {
           this.applyRemove(i);
@@ -285,7 +286,6 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       name: "prompts:invoke",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: PromptsInvokeInput) => this.applyInvoke(i),
     });
     // `prompts:render` — the RENDER (was `prompts:get`). Renamed so the wire
@@ -295,7 +295,6 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       name: "prompts:render",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: PromptsGetInput) => this.applyGet(i),
     });
 
@@ -310,14 +309,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     this.command({
       name: "prompts:get",
       exposure: "wire",
-      scope,
       handler: (i: { name: string }) => Effect.sync(() => this.view.getSync(i.name) ?? null),
     });
     // `prompts:list` — every declaration as wire-safe records (name-sorted).
     this.command({
       name: "prompts:list",
       exposure: "wire",
-      scope,
       handler: () =>
         Effect.sync(() =>
           this.view
@@ -410,6 +407,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           name,
           declaration: {
             description: decl.description,
+            ...(decl.title !== undefined ? { title: decl.title } : {}),
             ...(decl.arguments ? { arguments: decl.arguments } : {}),
             ...(decl.template !== undefined ? { template: decl.template } : {}),
             ...(decl.render !== undefined ? { render: decl.render } : {}),
@@ -584,6 +582,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           name: declaration.name,
           description: declaration.description,
           ...omitUndefined({
+            title: declaration.title,
             arguments: declaration.arguments,
             metadata: declaration.metadata,
           }),
@@ -622,6 +621,11 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    */
   private hydrateCtx(): PromptsHydrateCtx {
     return this.deriveOperationCtx(
+      // NOT an event scope — the STORE KEY. A hydrator reads
+      // `store.read(ctx.sessionId ?? "", ctx)`, and the key is the composed
+      // `scopeId` this harness's store was keyed with. `StoreCtx` naming its key
+      // `sessionId` is the collision; see TODO(store-ctx-key-name) in
+      // `@agentick/timeline`.
       { sessionId: this.scopeId },
       {
         store: this.store,
@@ -663,7 +667,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       const record: PromptDeclarationRecord = {
         name: decl.name,
         description: decl.description,
-        ...omitUndefined({ arguments: decl.arguments, metadata: decl.metadata }),
+        ...omitUndefined({ title: decl.title, arguments: decl.arguments, metadata: decl.metadata }),
       };
       this.listCache = null;
       this.setAugmentation(decl.name, decl);
@@ -686,6 +690,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         name: input.name,
         description: patch.description ?? existingRecord.description,
         ...omitUndefined({
+          title: patch.title ?? existingRecord.title,
           arguments: patch.arguments ?? existingRecord.arguments,
           metadata: patch.metadata ?? existingRecord.metadata,
         }),

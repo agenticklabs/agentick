@@ -253,7 +253,7 @@ class CallbackSessionHarness<P = unknown>
       opId: `session:send:${ulid()}`,
       surface: "session",
       name: "session:command:send",
-      scope: { sessionId: this.scopeId },
+      scope: {},
       input,
     };
     // Same one-boundary cast as the reference harness: the pipeline is erased

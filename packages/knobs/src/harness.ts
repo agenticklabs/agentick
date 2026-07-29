@@ -47,7 +47,12 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Middleware, type Unsubscribe } from "@agentick/runtime";
+import {
+  BaseHarness,
+  type BaseHarnessOptions,
+  type Middleware,
+  type Unsubscribe,
+} from "@agentick/runtime";
 import type {
   CollectionMutation,
   ContentBlock,
@@ -93,7 +98,14 @@ import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js
  * substrate + layer-chain parent positionally; this carries the ADR 82 resolved
  * hook layer forwarded by the SessionHarness (via `buildSessionBridges`).
  */
-export interface KnobsHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so every slot the base accepts — `parentScope`,
+ * `principal`, telemetry, metadata, the interceptor fold — arrives without being
+ * re-declared here and re-forwarded by hand. Standing alone, this interface silently
+ * dropped every base option a caller passed, and the next thing the base gains would
+ * be dropped the same way.
+ */
+export interface KnobsHarnessOptions extends BaseHarnessOptions {
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * session's resolved interceptors (guards, `.use` transforms, AND declarative
@@ -194,18 +206,21 @@ export class KnobsHarness
     parentLayer?: KnobsHarnessProtocol,
     options: KnobsHarnessOptions = {},
   ) {
-    super("knobs", scopeId, journal, bus, inbox, {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    });
+    // Forward the WHOLE bag: nothing to enumerate, so nothing to forget. Every
+    // hand-picked `super({ inheritedInterceptors, interceptorParent })` was a place a
+    // new base option would silently vanish — and `parentScope` did exactly that.
+    super("knobs", scopeId, journal, bus, inbox, options);
     this.parentLayer = parentLayer;
     this.view = View.collection(options.store ?? createKnobStore(), (entry) => entry.id);
-    const scope = () => ({ sessionId: this.scopeId });
+    // NO scope factory. The owning session is folded into the resolved op scope from
+    // the harness's construction-bound `parentScope` (BaseHarness), so a command that
+    // adds no dims of its own declares nothing. Every command here previously carried
+    // `() => ({ sessionId: this.scopeId })` — the COMPOSED key `<sessionId>:knobs`,
+    // which no session-scoped subscription can match.
     this.set = this.command({
       name: "knobs:set",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       // Run B: read the ENRICHED store-ctx inside the fiber (carries the live
       // op's `opId` etc.) and thread it to the mutation, instead of the helper
       // synthesizing a construction-only base ctx.
@@ -216,7 +231,6 @@ export class KnobsHarness
     });
     this.register = this.command({
       name: "knobs:register",
-      scope,
       handler: (i: KnobsRegisterInput) =>
         Effect.gen(this, function* () {
           this.applyRegister(i, yield* this.storeCtxEffect());
@@ -224,7 +238,6 @@ export class KnobsHarness
     });
     this.dispatch = this.command({
       name: "knobs:dispatch",
-      scope,
       handler: (i: KnobsDispatchInput) =>
         Effect.gen(this, function* () {
           return this.executeDispatch(i, yield* this.storeCtxEffect());
@@ -450,7 +463,13 @@ export class KnobsHarness
         name: KNOBS_STATE_CHANNEL_FQN,
         phase: "delta",
         timestamp: Date.now(),
-        scope: { sessionId: this.scopeId },
+        // Stamped explicitly because this is a RAW `bus.append` — it bypasses both
+        // `makeEvent` and `emitSignal`, so the construction-bound scope is not folded
+        // in for it. `parentScope`, never `this.scopeId`: this frame IS the knobs
+        // state channel a client subscribes to per session, so the composed key
+        // (`<sessionId>:knobs`) made it unreachable — the whole reason the client-side
+        // knob projection never received anything.
+        scope: this.parentScope ?? {},
         payload: frame,
       } as Parameters<typeof this.bus.append>[0]),
     ).catch(() => undefined);

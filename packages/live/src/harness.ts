@@ -159,6 +159,12 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
     options: LiveHarnessOptions = {},
   ) {
     super("live", scopeId, journal, bus, inbox, {
+      // This harness's `scopeId` IS its session id (every caller constructs it that
+      // way), so it declares its own owning scope rather than making each caller
+      // remember to. Declared HERE and not stamped per-op: if a future caller ever
+      // passes a composed key, the `HookBridges` scope conformance fires instead of
+      // the projection silently going dead.
+      parentScope: { sessionId: scopeId },
       inheritedInterceptors: options.inheritedInterceptors,
       interceptorParent: options.interceptorParent,
       // `live:command:close` envelopes are bus-only — the house close-op rule
@@ -187,6 +193,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
   // Do NOT wrap this in `runOperation` without resolving that first.
   start(streamId?: string): MediaSessionRef {
     const sid = streamId ?? `live:${ulid()}`;
+    // NOT AN EVENT SCOPE — a data ref. This harness's `scopeId` IS its session id.
     const ref: MediaSessionRef = { sessionId: this.scopeId, streamId: sid };
     const existing = this.streams.get(sid);
     if (existing && !existing.closed) return ref; // idempotent per streamId
@@ -309,7 +316,8 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
       opId: `live:${verb}:${ulid()}`,
       surface: "live",
       name: `live:command:${verb}`,
-      scope: { sessionId: this.scopeId, ...scope },
+      // `parentScope` gap-fills the session; this op names only its own dims.
+      scope,
       input,
     };
     return this.runOperation(op, body);
@@ -417,7 +425,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
         name: `session:channel:${channel}`,
         phase: "delta",
         timestamp: Date.now(),
-        scope: { sessionId: this.scopeId },
+        scope: {},
         payload,
       } as Parameters<typeof this.bus.append>[0]),
     ).catch(() => undefined);

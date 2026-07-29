@@ -61,7 +61,12 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, type Middleware, type Unsubscribe } from "@agentick/runtime";
+import {
+  BaseHarness,
+  type BaseHarnessOptions,
+  type Middleware,
+  type Unsubscribe,
+} from "@agentick/runtime";
 import type {
   CollectionMutation,
   EventBus,
@@ -122,7 +127,14 @@ interface TemplateResolverEntry {
   readonly compiled: RegExp;
 }
 
-export interface ResourcesHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so every slot the base accepts — `parentScope`,
+ * `principal`, telemetry, metadata, the interceptor fold — arrives without being
+ * re-declared here and re-forwarded by hand. Standing alone, this interface
+ * silently dropped every base option a caller passed, and the next thing the base
+ * gains would be dropped the same way.
+ */
+export interface ResourcesHarnessOptions extends BaseHarnessOptions {
   /**
    * Page size for `list` / `listTemplates`. Defaults to
    * {@link DEFAULT_PAGE_SIZE}. Small values let tests exercise the
@@ -243,10 +255,10 @@ export class ResourcesHarness
     inbox: MessageInbox,
     options: ResourcesHarnessOptions = {},
   ) {
-    super(SURFACE, scopeId, journal, bus, inbox, {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    });
+    // Forward the WHOLE bag: nothing to enumerate, so nothing to forget. Every
+    // hand-picked `super({ inheritedInterceptors, interceptorParent })` was a place
+    // a new base option would silently vanish — and `parentScope` did exactly that.
+    super(SURFACE, scopeId, journal, bus, inbox, options);
     this.pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
     this.backend = options.backend ?? "memory";
     this.view = View.collection(
@@ -257,24 +269,25 @@ export class ResourcesHarness
       this.loaders = options.loaders;
     }
 
-    const scope = () => ({ sessionId: this.scopeId });
+    // NO scope factory. The owning session is gap-filled by `makeEvent` from the
+    // harness's construction-bound `parentScope` (BaseHarness), so a command that
+    // adds no dims of its own declares nothing. Every command here previously
+    // carried `() => ({ sessionId: this.scopeId })` — the COMPOSED key
+    // `<sessionId>:<surface>`, which no session-scoped subscription can match.
     this.readCommand = this.command({
       name: "resources:read",
       // Application-controlled read surface — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: ResourcesReadInput) => this.applyRead(i),
     });
     this.listCommand = this.command({
       name: "resources:list",
       exposure: "wire",
-      scope,
       handler: (i: ResourcesListInput) => this.applyList(i),
     });
     this.listTemplatesCommand = this.command({
       name: "resources:listTemplates",
       exposure: "wire",
-      scope,
       handler: (i: ResourcesListTemplatesInput) => this.applyListTemplates(i),
     });
   }

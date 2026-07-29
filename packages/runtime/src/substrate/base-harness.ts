@@ -316,6 +316,45 @@ export interface BaseHarnessOptions<I = unknown> {
    */
   readonly principal?: string;
   /**
+   * The OWNING scope's runtime coordinates — merged (gap-filling) into every event
+   * this harness emits, by {@link BaseHarness.makeEvent} and the signal family
+   * alike. The third identity axis, and the one that answers **which session / app
+   * did this happen in**.
+   *
+   * Read it against its two siblings:
+   *
+   * | axis          | question              | for a session sub-harness |
+   * | ------------- | --------------------- | ------------------------- |
+   * | `scopeId`     | which WORK unit am I? | `"<sessionId>:timeline"`  |
+   * | `principal`   | on WHOSE behalf?      | `"acme/user-42"`          |
+   * | `parentScope` | inside WHAT?          | `{ sessionId }`           |
+   *
+   * `scopeId` must stay composed — it is the inbox address root
+   * (`<surface>:<scopeId>`) and the backing store key, so two harnesses on one
+   * session would collide without the suffix. `EventScope.sessionId` is a different
+   * question with a different answer, and conflating them is invisible until
+   * something tries to SUBSCRIBE.
+   *
+   * That is precisely what happened. The gateway narrows a
+   * `{ kind: "session", id }` subscription to `scope.sessionId === id`, and while
+   * stamping was each harness's own job, all six session sub-harnesses stamped
+   * `sessionId: this.scopeId` — the composed key. Nothing matched. Nothing errored:
+   * the subscription opened, matched nothing, and stayed open. Every client-side
+   * live projection (timeline tails, knob state, task status) was dead, and the
+   * declaration seam's own docstring offered `() => ({ sessionId: this.scopeId })`
+   * as the example to copy. Two harnesses had been given an ad-hoc `parentScope`
+   * option to work around it; four had not.
+   *
+   * Now it is one slot on the base, inherited by every harness, and a harness that
+   * forgets to declare a per-command `scope` still emits attributable events —
+   * which is the point. Omitting it can no longer be a way to be wrong.
+   *
+   * A per-operation scope dim always WINS over this (an op legitimately knows more
+   * than its harness: a tick's `executionId`, a task stamping the session that
+   * submitted it). `undefined` for a top-level harness whose `scopeId` IS its scope.
+   */
+  readonly parentScope?: EventScope;
+  /**
    * Substrate slot overrides — `instance | factory`. When omitted,
    * the harness uses the positional substrate constructor args as-is
    * (the parent-provided defaults, today's behavior preserved).
@@ -451,6 +490,15 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * fact, not policy; policy stays in the Authorizer.
    */
   readonly principal: string | undefined;
+
+  /**
+   * Construction-bound OWNING scope (see `BaseHarnessOptions.parentScope`) —
+   * gap-filled into every emitted event's scope. PUBLIC for the same reason
+   * `principal` is: it is a structural fact about where this harness sits, and a
+   * caller assembling a subscription needs to be able to read it rather than
+   * re-derive it by string surgery on `scopeId`.
+   */
+  readonly parentScope: EventScope | undefined;
 
   /**
    * In-flight request/response correlation map. Every BaseHarness can
@@ -901,6 +949,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.input = options.input;
     this.metadata = Object.freeze({ ...(options.metadata ?? {}) });
     this.principal = options.principal;
+    this.parentScope = options.parentScope;
     this.telemetryNamespace = options.telemetryNamespace ?? "agentick";
     this.telemetryProvider = options.telemetryProvider;
     this.defaultMetricLabels = options.defaultMetricLabels;
@@ -960,6 +1009,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.operationRunner = createOperationRunner({
       surface,
       principal: this.principal,
+      parentScope: this.parentScope,
       journal: this.journal,
       bus: this.bus,
       policy: this.policy,
@@ -1035,6 +1085,8 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   protected storeCtx(): StoreCtx {
     return {
+      // NOT AN EVENT SCOPE — a store KEY, and the key IS the composed `scopeId`.
+      // See TODO(store-ctx-key-name): `StoreCtx.sessionId` is misnamed.
       sessionId: this.scopeId,
       ...(this.principal !== undefined ? { principal: this.principal } : {}),
       journalReader: this.journal,
@@ -1434,9 +1486,18 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       name,
       phase: "terminal",
       timestamp: Date.now(),
+      // The SAME merge `makeEvent` performs — gap-filling `parentScope`,
+      // authoritative `principal`. Duplicated shape, not duplicated policy: the
+      // signal family bypasses the operation runner entirely (bus-only, no
+      // journal), so it has to stamp for itself or emit events a session-scoped
+      // subscriber cannot match.
       scope:
-        this.principal !== undefined
-          ? omitUndefined({ ...scope, principal: this.principal })
+        this.parentScope !== undefined || this.principal !== undefined
+          ? omitUndefined({
+              ...this.parentScope,
+              ...omitUndefined(scope),
+              ...(this.principal !== undefined ? { principal: this.principal } : {}),
+            })
           : scope,
       payload,
     } as ProtocolEvent;

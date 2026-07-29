@@ -210,25 +210,44 @@ export function buildSessionBridges(
   },
   options: BuildSessionBridgesOptions = {},
 ): SessionHookBridges {
-  // Timeline / Knobs / State are harnesses wired to the session's substrate (ADR 26).
-  // Every one of them takes the interceptor fold (ADR 93 landmine 11) — the
-  // cascade is TOTAL, not "whichever bridge someone remembered to thread".
+  /**
+   * The options EVERY session-owned bridge takes — assembled ONCE.
+   *
+   * Two facts have to reach all of them, and both were previously hand-threaded per
+   * site. Both were then forgotten at some of the sites, in the same way, twice:
+   *
+   *   - The interceptor cascade (ADR 93 landmine 11). Timeline was the one bridge that
+   *     took no threading, so `app.guard()` / `createApp({ hooks })` silently skipped
+   *     `timeline:append` and friends. Fixed by threading it to all N — by hand.
+   *   - `parentScope`, the owning session's runtime coordinates. Threaded to 2 of 7 by
+   *     exactly the method the old comment here warned against: "whichever bridge
+   *     someone remembered to thread". The five that missed out emitted events no
+   *     session-scoped subscription could match, so every client-side live projection
+   *     over them was silently dead.
+   *
+   * A comment cannot enforce an invariant; a function can. Adding an eighth bridge now
+   * means calling this, and forgetting a fact is no longer expressible.
+   *
+   * `extra` spreads FIRST so the framework-owned wiring wins: an adopter-supplied
+   * namespace definition (`createApp({ timeline })`) must not be able to overwrite the
+   * cascade or the scope.
+   */
+  const sessionScoped = <T extends object>(extra: T = {} as T) => ({
+    ...extra,
+    parentScope: { sessionId: store.id },
+    inheritedInterceptors: options.inheritedInterceptors,
+    interceptorParent: options.interceptorParent,
+  });
+
   const timeline = new TimelineHarness(
     `${store.id}:timeline`,
     substrate.journal,
     substrate.bus,
     substrate.inbox,
-    {
-      // The ADR-93 namespace DEFINITION — store, genesis seam, shaping seams,
-      // hooks/guards bags — threaded verbatim from `createApp({ timeline })`.
-      // The definition IS the options, so there is nothing to translate.
-      ...(options.timeline ?? {}),
-      // ADR 93 landmine 11 — the cascade must be TOTAL. Timeline used to be the
-      // ONE bridge that took no interceptor threading, so `app.guard()` /
-      // `createApp({ hooks })` silently skipped `timeline:append` and friends.
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    },
+    // The ADR-93 namespace DEFINITION — store, genesis seam, shaping seams,
+    // hooks/guards bags — threaded verbatim from `createApp({ timeline })`. The
+    // definition IS the options, so there is nothing to translate.
+    sessionScoped(options.timeline ?? {}),
   );
   const knobs = new KnobsHarness(
     `${store.id}:knobs`,
@@ -241,24 +260,14 @@ export function buildSessionBridges(
     // app-scoped KnobsHarness drops in here with no rewrite. Session
     // snapshots capture the self layer only (never inherited app state).
     undefined,
-    // ADR 76 tier 3 + ADR 83 amendment — the session's resolved interceptor
-    // snapshot (incl. the app+session command hooks as op-scoped middleware), so
-    // `knobs:set` inherits `session.use()` / `app.use()` AND the hook cascade.
-    {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    },
+    sessionScoped(),
   );
   const state = new StateHarness(
     `${store.id}:state`,
     substrate.journal,
     substrate.bus,
     substrate.inbox,
-    // ADR 93 landmine 11 — same cascade totalization as timeline/knobs.
-    {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    },
+    sessionScoped(),
   );
   const elicitation =
     options.elicitation ??
@@ -267,33 +276,33 @@ export function buildSessionBridges(
       substrate.journal,
       substrate.bus,
       substrate.inbox,
-      {
-        parentScope: { sessionId: store.id },
-        // ADR 93 landmine 11 — cascade totalization (this arm only runs when the
-        // app did NOT construct + inject the harness; the app's own construction
-        // already threads the fold).
-        inheritedInterceptors: options.inheritedInterceptors,
-        interceptorParent: options.interceptorParent,
-      },
+      // This arm only runs when the app did NOT construct + inject the harness; the
+      // app's own construction already threads the same facts.
+      sessionScoped(),
     );
   const tasks =
     options.tasks ??
-    new TasksHarness(`${store.id}:tasks`, substrate.journal, substrate.bus, substrate.inbox, {
-      parentScope: { sessionId: store.id },
-      // ADR 69 — task `ctx.elicit` escalation. Inject the elicit-sugar
-      // factory so a task's `ctx.elicit.*` escalates to this session
-      // (`session:{sessionId}`) via `inbox.ask` and resolves with the
-      // client's response. Keeps `@agentick/tasks` free of an
-      // elicitation dependency (the escalation relay is payload-agnostic).
-      // NOTE: per-originating-session escalation now works at the harness —
-      // `submit({ scope })` stamps each task's owning session on the record
-      // and `ctx.elicit` escalates from `record.scope`, not the harness scope
-      // (tasks/harness.ts `makeEscalate`). The only remaining piece for a
-      // shared/app-scoped `options.tasks` path is app-owned wiring: the
-      // AppHarness must inject `buildElicit` on that shared harness too and
-      // pass the originating `scope` per submit.
-      buildElicit: buildElicitSugar,
-    });
+    new TasksHarness(
+      `${store.id}:tasks`,
+      substrate.journal,
+      substrate.bus,
+      substrate.inbox,
+      sessionScoped({
+        // ADR 69 — task `ctx.elicit` escalation. Inject the elicit-sugar
+        // factory so a task's `ctx.elicit.*` escalates to this session
+        // (`session:{sessionId}`) via `inbox.ask` and resolves with the
+        // client's response. Keeps `@agentick/tasks` free of an
+        // elicitation dependency (the escalation relay is payload-agnostic).
+        // NOTE: per-originating-session escalation now works at the harness —
+        // `submit({ scope })` stamps each task's owning session on the record
+        // and `ctx.elicit` escalates from `record.scope`, not the harness scope
+        // (tasks/harness.ts `makeEscalate`). The only remaining piece for a
+        // shared/app-scoped `options.tasks` path is app-owned wiring: the
+        // AppHarness must inject `buildElicit` on that shared harness too and
+        // pass the originating `scope` per submit.
+        buildElicit: buildElicitSugar,
+      }),
+    );
   const resources =
     options.resources ??
     new ResourcesHarness(
@@ -301,11 +310,7 @@ export function buildSessionBridges(
       substrate.journal,
       substrate.bus,
       substrate.inbox,
-      // ADR 93 landmine 11 — cascade totalization (fallback-construction arm).
-      {
-        inheritedInterceptors: options.inheritedInterceptors,
-        interceptorParent: options.interceptorParent,
-      },
+      sessionScoped(),
     );
 
   const base = {
@@ -342,15 +347,12 @@ export function buildSessionBridges(
     substrate.journal,
     substrate.bus,
     substrate.inbox,
-    {
+    sessionScoped({
       knobs,
       loopControl: () => base.loop,
       audit: makeGateAudit(substrate.bus, store.id),
       parent: undefined,
-      // ADR 93 landmine 11 — cascade totalization.
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    },
+    }),
   );
   (base as { gates: GatesController }).gates = gatesHarness.controller;
   // Lifecycle: the harness owns an inbox registration; staple it onto the bundle

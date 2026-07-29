@@ -192,6 +192,12 @@ export class ToolExecutorHarness
     options: ToolExecutorHarnessOptions,
   ) {
     super("tool", scopeId, journal, bus, inbox, {
+      // This harness's `scopeId` IS its session id (every caller constructs it that
+      // way), so it declares its own owning scope rather than making each caller
+      // remember to. Declared HERE and not stamped per-op: if a future caller ever
+      // passes a composed key, the `HookBridges` scope conformance fires instead of
+      // the projection silently going dead.
+      parentScope: { sessionId: scopeId },
       inheritedInterceptors: options.inheritedInterceptors,
       interceptorParent: options.interceptorParent,
       // ADR 64/78 — the resolved telemetry provider + ambient labels are now
@@ -220,7 +226,7 @@ export class ToolExecutorHarness
     // address, no hand-rolled inbox switch required.
     this.abort = this.command<AbortInput, void, never>({
       name: "tool:abort",
-      scope: () => ({ sessionId: this.scopeId }),
+      // Owning session comes from `parentScope` (BaseHarness) — never stamped here.
       handler: (i) => Effect.sync(() => this.abortBody(i)),
     });
 
@@ -288,6 +294,7 @@ export class ToolExecutorHarness
       toolCallId: `host:${ulid()}`,
       name,
       input,
+      // NOT AN EVENT SCOPE — the call's data context. `scopeId` IS the session id here.
       context: { via: "dispatch", sessionId: this.scopeId },
       ...(opts?.task !== undefined ? { task: opts.task } : {}),
     });

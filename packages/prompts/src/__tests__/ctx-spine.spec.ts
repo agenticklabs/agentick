@@ -22,7 +22,11 @@ describe("ADR 91 §2 — prompt render ctx", () => {
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
-      {},
+      // The ctx's `sessionId` is the harness's construction-bound `parentScope`
+      // now, not its own id self-stamped per command. `session-bridges` always
+      // supplies it; a standalone harness that does not is honestly "inside
+      // nothing" rather than claiming its own scope key as a session.
+      { parentScope: { sessionId: "prompt-sess-91" } },
     );
     await h.ready;
 
@@ -76,7 +80,11 @@ describe("ADR 92 §Slice A — fx.render composes in-fiber", () => {
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
-      {},
+      // The ctx's `sessionId` is the harness's construction-bound `parentScope`
+      // now, not its own id self-stamped per command. `session-bridges` always
+      // supplies it; a standalone harness that does not is honestly "inside
+      // nothing" rather than claiming its own scope key as a session.
+      { parentScope: { sessionId: id } },
     );
     await h.ready;
     await h.register({

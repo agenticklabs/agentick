@@ -791,6 +791,12 @@ export class SessionHarness<P = unknown>
     // without crashing the framework (ADR 31 Option G).
     super("session", options.sessionId, journal, bus, inbox, {
       metadata: options.metadata,
+      // The session's own coordinates, DECLARED rather than stamped per-op. Its
+      // `scopeId` happens to equal its session id, which is exactly why the old
+      // per-op `{ sessionId: this.scopeId }` looked correct here and was wrong in
+      // six sub-harnesses whose scopeId is composed. One rule, no exceptions to
+      // remember: nobody stamps `sessionId`; everybody declares `parentScope`.
+      parentScope: { sessionId: options.sessionId },
       ...omitUndefined({
         // ADR 48 — the construction-bound owning principal. Stamped onto every
         // emitted event scope by BaseHarness.makeEvent AND read by the wire
@@ -2163,7 +2169,7 @@ export class SessionHarness<P = unknown>
       opId: `session:${verb}:${ulid()}`,
       surface: "session",
       name: `session:command:${verb}`,
-      scope: { sessionId: this.scopeId },
+      scope: {},
       input,
     };
     return this.runOperation(op, body);
@@ -2665,13 +2671,32 @@ export class SessionHarness<P = unknown>
             // The loop RESOLVES provider failures (outcome "succeeded"
             // with stopReason "executor_failed") — the boundary record
             // must not launder them (review finding).
+            // The loop RESOLVES both kinds of refusal — a provider failure and a
+            // guard veto arrive as `outcome: "succeeded"` with the stop reason
+            // naming what happened. The record must launder NEITHER: this site
+            // already caught the provider case, and read a vetoed turn as
+            // `succeeded`, which made a refused turn indistinguishable on the
+            // timeline from one that answered.
             outcome:
               terminal.outcome === "succeeded"
                 ? terminal.result?.stopReason === "executor_failed"
                   ? "failed"
-                  : "succeeded"
+                  : terminal.result?.stopReason === "vetoed"
+                    ? "vetoed"
+                    : "succeeded"
                 : "aborted",
-            ...omitUndefined({ usage: this._executionUsage }),
+            // The CAUSE rides the record too — the only account a reloaded client
+            // can read, since a turn that died before its first tick appended no
+            // assistant entry at all.
+            ...omitUndefined({
+              usage: this._executionUsage,
+              stopCause: terminal.result?.stopCause,
+              // The target that ran the turn. A SUCCEEDED boundary is a proof that every
+              // entry it carried was projectable — but only for this target, so a reader
+              // narrowing suspects to "entries since the last success" can tell a
+              // comparable success from one across a failover or a model swap.
+              target: boundaryTarget(targetForCall),
+            }),
           })
           .catch(() => {});
         try {
@@ -2726,6 +2751,9 @@ export class SessionHarness<P = unknown>
             ticks: result.ticks,
             executionId,
             ...(result.data !== undefined ? { data: result.data } : {}),
+            // `executor_failed` and `vetoed` both RESOLVE — so a caller's `.catch`
+            // never runs and this is the ONLY place they can read what happened.
+            ...(result.stopCause !== undefined ? { stopCause: result.stopCause } : {}),
           };
           emit({ type: "result", tick: 0, result: sendResult });
           resultDeferred.resolve(sendResult);
@@ -2749,7 +2777,10 @@ export class SessionHarness<P = unknown>
           .endTurn({
             executionId,
             outcome: "failed",
-            ...omitUndefined({ usage: this._executionUsage }),
+            ...omitUndefined({
+              usage: this._executionUsage,
+              target: boundaryTarget(targetForCall),
+            }),
           })
           .catch(() => {});
         try {
@@ -3051,4 +3082,23 @@ function buildTreeInterceptorForwarder(
       const composed = composeMiddleware(orderInterceptors(collected), next);
       return yield* composed(input);
     });
+}
+
+/**
+ * The identity fields a turn boundary records about the target that ran it.
+ *
+ * `undefined` when the turn ended before a target resolved, and `undefined` again when
+ * neither field is known — an empty object on the record would read as "a target ran this
+ * and we know nothing about it", which is a different claim from "no target resolved".
+ *
+ * Only `provider` + `modelId`: capabilities are large, change with the code rather than
+ * with the turn, and would bloat every entry in a durable log to say something a reader
+ * can look up. Identity is what a "is this success comparable to that one" question needs.
+ */
+function boundaryTarget(
+  target: ExecutionTarget | undefined,
+): { readonly provider?: string; readonly modelId?: string } | undefined {
+  if (target === undefined) return undefined;
+  const fields = omitUndefined({ provider: target.provider, modelId: target.modelId });
+  return Object.keys(fields).length > 0 ? fields : undefined;
 }

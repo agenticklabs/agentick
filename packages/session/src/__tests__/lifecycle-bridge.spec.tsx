@@ -496,6 +496,71 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
     await tools.close();
   });
 
+  it("a provider failure reaches BOTH surfaces: the resolved SendResult and the turn boundary", async () => {
+    // The whole point of the field, end to end. `executor_failed` RESOLVES the
+    // caller's promise (a turn that reached a provider and was refused is an
+    // outcome, not a broken contract), so `.catch` never runs and `stopReason`
+    // used to be everything a caller could learn. Meanwhile the turn appended NO
+    // assistant entry — nothing generated — so the boundary is the only durable
+    // trace, and it recorded the outcome without the cause. Both gaps, one claim.
+    const stack = await mkStack(`err-cause-${Math.random()}`);
+    const failing = new FakeLanguageModelExecutor(
+      `exec-cause-${Math.random()}`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        scripted: [
+          {
+            outcome: "failed",
+            result: {
+              specVersion: "2026-05-08",
+              output: [],
+              stopReason: "end",
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          },
+        ],
+      },
+    );
+    const { session, tools } = await mkSession(
+      stack,
+      `err-cause-${Math.random()}`,
+      React.createElement(function Agent() {
+        return React.createElement(System, null, "err");
+      }),
+      failing,
+    );
+
+    const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
+    const result = await handle.result;
+    expect(result.stopReason).toBe("executor_failed");
+
+    // Surface 1 — the caller's channel.
+    expect(result.stopCause?.kind).toBe("failed");
+    if (result.stopCause?.kind !== "failed") throw new Error("expected a failure cause");
+    expect(result.stopCause.error._tag).toBe("ProviderRejected");
+
+    // Surface 2 — the durable record. Also confirms the premise: no assistant
+    // entry was written, so without the boundary there is nothing on the
+    // timeline to say this turn ever happened.
+    const persisted = session.timeline.readPersisted();
+    expect(persisted.some((e) => e.kind === "message" && e.message.role === "assistant")).toBe(
+      false,
+    );
+    const boundary = persisted.find((e) => e.kind === "boundary");
+    if (boundary?.kind !== "boundary") throw new Error("expected a boundary entry");
+    expect(boundary.boundary.outcome).toBe("failed");
+    if (boundary.boundary.stopCause?.kind !== "failed") {
+      throw new Error("expected the boundary to carry the failure cause");
+    }
+    expect(boundary.boundary.stopCause.error._tag).toBe("ProviderRejected");
+    expect(boundary.boundary.stopCause.error.message).toBe(result.stopCause.error.message);
+
+    await session.close();
+    await tools.close();
+  });
+
   it("error projection: a HARD tool-handler throw fires tool-end (failed) AND useOnError (phase 'tool')", async () => {
     const stack = await mkStack(`err-tool-${Math.random()}`);
 

@@ -125,7 +125,11 @@ export class GatesHarness extends BaseHarness<"gates"> {
     super(SURFACE, scopeId, journal, bus, inbox, deps);
     this.controller = new GatesController(deps);
 
-    const scope = () => ({ sessionId: this.scopeId });
+    // NO scope factory. The owning session is gap-filled by `makeEvent` from the
+    // harness's construction-bound `parentScope` (BaseHarness), so a command that
+    // adds no dims of its own declares nothing. Every command here previously
+    // carried `() => ({ sessionId: this.scopeId })` — the COMPOSED key
+    // `<sessionId>:<surface>`, which no session-scoped subscription can match.
 
     // Commands carry no input SCHEMA — like every sibling harness command
     // (`knobs:set`, `state:set`, `resources:read`), the wire payload is trusted
@@ -135,7 +139,6 @@ export class GatesHarness extends BaseHarness<"gates"> {
     const listCommand = this.command({
       name: "gates:list",
       exposure: "wire",
-      scope,
       handler: () => Effect.sync(() => this.controller.list()),
     });
     this.list = () => listCommand(undefined);
@@ -143,7 +146,6 @@ export class GatesHarness extends BaseHarness<"gates"> {
     this.clear = this.command({
       name: "gates:clear",
       exposure: "wire",
-      scope,
       // Delegate to the controller's RAW transition — NOT the public
       // `gate.clear()`, which routes back through this command (the sink the
       // harness binds below) and would recurse. `rawClear` is the shared
@@ -160,7 +162,6 @@ export class GatesHarness extends BaseHarness<"gates"> {
     this.defer = this.command({
       name: "gates:defer",
       exposure: "wire",
-      scope,
       // `reason` rides the wire shape for parity with `override`, but a latch
       // defer carries no audit — accepted and dropped here.
       handler: (i: GatesDeferInput) =>
@@ -175,7 +176,6 @@ export class GatesHarness extends BaseHarness<"gates"> {
     this.override = this.command({
       name: "gates:override",
       exposure: "wire",
-      scope,
       handler: (i: GatesOverrideInput) =>
         Effect.gen(this, function* () {
           // Origin rides the op scope (dynamic-commands stamps `origin: "wire"`

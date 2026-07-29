@@ -51,6 +51,7 @@
 import { Effect, Stream } from "effect";
 import {
   BaseHarness,
+  type BaseHarnessOptions,
   type Middleware,
   ulid,
   SESSION_ESCALATION_MESSAGE_TYPE,
@@ -202,7 +203,14 @@ function makeDeferred<T>(): Deferred<T> {
 // Options
 // ============================================================================
 
-export interface TasksHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so every substrate slot the base accepts —
+ * `parentScope`, `principal`, telemetry, metadata, the interceptor fold — arrives
+ * without being re-declared here and re-forwarded by hand. Standing alone, this
+ * interface silently dropped every base option a caller passed, and each one had to
+ * be rediscovered the next time something needed it.
+ */
+export interface TasksHarnessOptions extends BaseHarnessOptions {
   /**
    * Scope stamped on every published task envelope AND on every
    * {@link TaskRecord} (the store's scope-filter key). Session-scoped
@@ -211,7 +219,6 @@ export interface TasksHarnessOptions {
    * app-scoped {@link TaskStore} MUST pass a distinguishing scope so
    * hydration + `list` don't bleed across sessions.
    */
-  readonly parentScope?: EventScope;
   /**
    * Durable backing for the task FSM (ADR 68). Defaults to a fresh
    * per-harness {@link InMemoryTaskStore}. The AppHarness constructs ONE
@@ -302,7 +309,6 @@ export class TasksHarness
    * the cache + write-through is the conformance; the notify seams are opt-in.
    */
   private readonly view: View<LiveTask, TaskRecord, TaskStoreQuery, CollectionMutation<TaskRecord>>;
-  private readonly parentScope: EventScope | undefined;
   /** `parentScope ?? {}` — stamped on records + used as the store filter. */
   private readonly scope: EventScope;
   private readonly store: TaskStore;
@@ -348,12 +354,8 @@ export class TasksHarness
     inbox: MessageInbox,
     options: TasksHarnessOptions = {},
   ) {
-    super("tasks", scopeId, journal, bus, inbox, {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    });
-    this.parentScope = options.parentScope;
-    this.scope = options.parentScope ?? {};
+    super("tasks", scopeId, journal, bus, inbox, options);
+    this.scope = this.parentScope ?? {};
     this.store = options.store ?? new InMemoryTaskStore();
     // Fused View over the store: cache = LiveTask (record + live handles),
     // store = TaskRecord. `project` strips the non-serializable handles on

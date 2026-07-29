@@ -33,7 +33,13 @@
  */
 
 import { Effect, Either } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentick/runtime";
+import {
+  BaseHarness,
+  runHarnessProtocol,
+  ulid,
+  type BaseHarnessOptions,
+  type Middleware,
+} from "@agentick/runtime";
 import { reasonOf, omitUndefined } from "@agentick/utils";
 import type { RequestError } from "@agentick/runtime";
 import type {
@@ -100,7 +106,14 @@ const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 // Options
 // ============================================================================
 
-export interface ElicitationHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so every substrate slot the base accepts —
+ * `parentScope`, `principal`, telemetry, metadata, the interceptor fold — arrives
+ * without being re-declared here and re-forwarded by hand. Standing alone, this
+ * interface silently dropped every base option a caller passed, and each one had to
+ * be rediscovered the next time something needed it.
+ */
+export interface ElicitationHarnessOptions extends BaseHarnessOptions {
   /**
    * Default wait bound applied when the caller does not pass
    * `timeoutMs`. Defaults to 5 minutes — long enough for a human in
@@ -116,7 +129,6 @@ export interface ElicitationHarnessOptions {
    * sites in production (`AppHarness.createSession`, `withElicitation`,
    * `buildSessionBridges`) thread the owning session's id through.
    */
-  readonly parentScope?: import("@agentick/spec").EventScope;
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * parent scope's resolved interceptors (guards, `.use` transforms, AND
@@ -143,7 +155,6 @@ export class ElicitationHarness
   implements ElicitationHarnessProtocol, ChannelSnapshotProvider
 {
   private readonly defaultTimeoutMs: number;
-  private readonly parentScope: import("@agentick/spec").EventScope | undefined;
 
   get id(): string {
     return this.scopeId;
@@ -156,12 +167,8 @@ export class ElicitationHarness
     inbox: MessageInbox,
     options: ElicitationHarnessOptions = {},
   ) {
-    super("elicitation", scopeId, journal, bus, inbox, {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    });
+    super("elicitation", scopeId, journal, bus, inbox, options);
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.parentScope = options.parentScope;
   }
 
   // ─────────── elicit ───────────

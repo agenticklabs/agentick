@@ -24,7 +24,11 @@ describe("ADR 91 §2 — resource resolver ctx", () => {
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
-      {},
+      // The ctx's `sessionId` is the harness's construction-bound `parentScope`
+      // now, not its own id self-stamped per command. `session-bridges` always
+      // supplies it; a standalone harness that does not is honestly "inside
+      // nothing" rather than claiming its own scope key as a session.
+      { parentScope: { sessionId: "res-sess-91" } },
     );
     await harness.ready;
 
@@ -56,7 +60,11 @@ describe("ADR 91 §2 — resource resolver ctx", () => {
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
-      {},
+      // The ctx's `sessionId` is the harness's construction-bound `parentScope`
+      // now, not its own id self-stamped per command. `session-bridges` always
+      // supplies it; a standalone harness that does not is honestly "inside
+      // nothing" rather than claiming its own scope key as a session.
+      { parentScope: { sessionId: "res-tmpl-91" } },
     );
     await harness.ready;
 

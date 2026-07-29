@@ -241,26 +241,27 @@ export class SkillsHarness
     // Definitions are inert until install; genesis runs at session-open via
     // `hydrate()`. No default: a `store` alone loads nothing.
     this.hydrator = options.hydrate as SkillsHydrator | undefined;
-    const scope = () => ({ sessionId: this.scopeId });
+    // NO scope factory. The owning session is gap-filled by `makeEvent` from the
+    // harness's construction-bound `parentScope` (BaseHarness), so a command that
+    // adds no dims of its own declares nothing. Every command here previously
+    // carried `() => ({ sessionId: this.scopeId })` — the COMPOSED key
+    // `<sessionId>:<surface>`, which no session-scoped subscription can match.
     this.register = this.command({
       name: "skills:register",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: SkillsRegisterInput) => this.applyRegister(i),
     });
     this.update = this.command({
       name: "skills:update",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: SkillsUpdateInput) => this.applyUpdate(i),
     });
     this.remove = this.command({
       name: "skills:remove",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: SkillsRemoveInput) =>
         Effect.sync(() => {
           this.applyRemove(i);
@@ -279,19 +280,16 @@ export class SkillsHarness
     this.command({
       name: "skills:list",
       exposure: "wire",
-      scope,
       handler: () => Effect.sync(() => this.list()),
     });
     this.command({
       name: "skills:get",
       exposure: "wire",
-      scope,
       handler: (i: { name: string }) => Effect.sync(() => this.get(i.name) ?? null),
     });
     this.command({
       name: "skills:search",
       exposure: "wire",
-      scope,
       handler: (i: SkillsSearchInput) => Effect.sync(() => this.search(i)),
     });
 
@@ -637,6 +635,12 @@ export class SkillsHarness
    */
   private hydrateCtx(): SkillsHydrateCtx {
     return this.deriveOperationCtx(
+      // NOT an event scope — the STORE KEY. A hydrator reads
+      // `store.read(ctx.sessionId ?? "", ctx)`, and the key is the composed
+      // `scopeId` this harness's store was keyed with. `StoreCtx` naming its key
+      // `sessionId` is the collision; see TODO(store-ctx-key-name) in
+      // `@agentick/timeline`.
+      // NOT AN EVENT SCOPE — the STORE KEY (see the note above).
       { sessionId: this.scopeId },
       {
         store: this.store,

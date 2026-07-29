@@ -210,7 +210,8 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     inbox: MessageInbox,
     spec: DefineToolExecutorInput,
   ) {
-    super("tool", scopeId, journal, bus, inbox);
+    // Same rule as `ToolExecutorHarness` — see the note there.
+    super("tool", scopeId, journal, bus, inbox, { parentScope: { sessionId: scopeId } });
     this.spec = spec;
     this.registry = new InMemoryToolRegistry();
     this.tools = createToolsHandle({
@@ -221,7 +222,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     });
     this.abort = this.command<AbortInput, void, unknown>({
       name: "tool:abort",
-      scope: () => ({ sessionId: this.scopeId }),
+      // Owning session comes from `parentScope` (BaseHarness) — never stamped here.
       handler: (i) =>
         this.spec.abort
           ? Effect.tryPromise({ try: () => this.spec.abort!(i), catch: (cause) => cause })
@@ -474,6 +475,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
       toolCallId: `host:${ulid()}`,
       name,
       input,
+      // NOT AN EVENT SCOPE — the call's data context. `scopeId` IS the session id here.
       context: { via: "dispatch", sessionId: this.scopeId },
       ...(opts?.task !== undefined ? { task: opts.task } : {}),
     });

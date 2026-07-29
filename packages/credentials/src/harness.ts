@@ -49,7 +49,13 @@
 
 import { Effect } from "effect";
 
-import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentick/runtime";
+import {
+  BaseHarness,
+  runHarnessProtocol,
+  ulid,
+  type BaseHarnessOptions,
+  type Middleware,
+} from "@agentick/runtime";
 import { createNotifier, type Notifier } from "@agentick/pubsub";
 import { HandlerError } from "@agentick/spec";
 import type {
@@ -105,7 +111,14 @@ export interface CredentialsMutationInput {
   readonly key: string;
 }
 
-export interface CredentialsHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so every slot the base accepts — `parentScope`,
+ * `principal`, telemetry, metadata, the interceptor fold — arrives without being
+ * re-declared here and re-forwarded by hand. Standing alone, this interface
+ * silently dropped every base option a caller passed, and the next thing the base
+ * gains would be dropped the same way.
+ */
+export interface CredentialsHarnessOptions extends BaseHarnessOptions {
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83) — the installing
    * host's interceptors, folded in at construction so app-scope guards wrap
@@ -141,10 +154,10 @@ export class CredentialsHarness
     inbox: MessageInbox,
     options: CredentialsHarnessOptions = {},
   ) {
-    super("credentials", scopeId, journal, bus, inbox, {
-      inheritedInterceptors: options.inheritedInterceptors,
-      interceptorParent: options.interceptorParent,
-    });
+    // Forward the WHOLE bag: nothing to enumerate, so nothing to forget. Every
+    // hand-picked `super({ inheritedInterceptors, interceptorParent })` was a place
+    // a new base option would silently vanish — and `parentScope` did exactly that.
+    super("credentials", scopeId, journal, bus, inbox, options);
     this.store = store;
     this.changes = createNotifier<CredentialsChangeEvent>();
 
