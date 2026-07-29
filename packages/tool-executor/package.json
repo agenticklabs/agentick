@@ -1,6 +1,6 @@
 {
   "name": "@agentick/tool-executor",
-  "version": "1.0.0-next.41",
+  "version": "1.0.0-next.42",
   "description": "Reference tool executor harness for Agentick v2. Reference implementation of ToolExecutorProtocol from @agentick/spec — registry, dispatch (model + host doors), validation, confirmation flow, abort, lifecycle events.",
   "keywords": [
     "agent",
