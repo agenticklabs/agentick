@@ -70,8 +70,15 @@ export interface TimelineReplaceProjectionInput {
  *  Load-bearing NOWHERE (ADR 53 §2.3b). */
 export interface TimelineEndTurnInput {
   readonly executionId: string;
-  readonly outcome: "succeeded" | "failed" | "aborted";
+  readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
   readonly usage?: import("../data/execution-result.js").UsageStats;
+  /**
+   * Why the turn ended badly — recorded on the boundary. Supply it whenever the
+   * outcome is `failed` or `vetoed` and a cause is known; see
+   * `TurnBoundaryEntry.boundary.stopCause` on why the outcome alone leaves
+   * everything downstream unable to explain itself.
+   */
+  readonly stopCause?: import("../data/execution-result.js").StopCause;
 }
 
 // ─── compact() ───

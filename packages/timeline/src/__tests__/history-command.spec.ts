@@ -34,7 +34,9 @@ import type { TimelineHistoryInput, TimelineHistoryPage } from "../wire-augment.
 
 const HISTORY_OP = "timeline:command:history";
 const APPEND_OP = "timeline:command:append";
-const SCOPE_ID = "sess-history-1:timeline";
+const SESSION_ID = "sess-history-1";
+/** The harness's WORK identity — inbox address root + store key. */
+const SCOPE_ID = `${SESSION_ID}:timeline`;
 
 const entry = (id: string): TimelineEntry => ({
   kind: "message",
@@ -78,6 +80,9 @@ async function rig(options: TimelineHarnessOptions = {}): Promise<Rig> {
   const inbox = new LocalInbox();
   const harness = new TimelineHarness(SCOPE_ID, journal, bus, inbox, {
     store: new MemoryTimelineStore(),
+    // What `session-bridges` always passes. The two ids are deliberately different
+    // here so a test cannot pass by conflating them.
+    parentScope: { sessionId: SESSION_ID },
     ...options,
   });
   await harness.ready;
@@ -306,12 +311,17 @@ describe("timeline:history — hooks and guards, like any other verb", () => {
       outcome: "vetoed",
       terminal: { outcome: "vetoed", reason: "page too large" },
     });
-    // The guard ctx identifies the timeline being read (the harness's scope key
-    // — `<sessionId>:timeline`), the dimension a narrower-than-same-principal
-    // rule keys on. It does NOT carry the calling principal: bridge harnesses are
-    // not principal-stamped today, and cross-principal denial is the wire choke
-    // point's job regardless.
-    expect(scopes).toEqual([SCOPE_ID, SCOPE_ID]);
+    // The guard ctx carries the SESSION — the runtime coordinate, from the
+    // harness's construction-bound `parentScope`. It used to carry the composed
+    // scope key (`<sessionId>:timeline`) because every command hand-stamped
+    // `sessionId: this.scopeId`, which is also why no session-scoped subscription
+    // could ever match a timeline event. WHICH timeline is being guarded needs no
+    // ctx field: a guard is registered on one harness and is static to it.
+    //
+    // It does NOT carry the calling principal: bridge harnesses are not
+    // principal-stamped today, and cross-principal denial is the wire choke point's
+    // job regardless.
+    expect(scopes).toEqual([SESSION_ID, SESSION_ID]);
   });
 });
 

@@ -64,13 +64,13 @@ import type {
   EventBus,
   JournalingPolicy,
   MessageEnvelope,
-  EventScope,
   MessageHandlerError,
   MessageInbox,
   Operation,
   OperationJournal,
   OperationOrigin,
   SeqTagged,
+  StopCause,
   StandardSchemaV1,
   TimelineAppendInput,
   TimelineEntry,
@@ -341,20 +341,19 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     // unchanged (zero wire-shape change). Payloads carried no
     // validation before the registry; schemas stay off for parity —
     // EXCEPT the new compact signal form, a new surface that validates.
-    const scope = (): EventScope => ({ sessionId: this.scopeId });
+    // NO scope factory. `parentScope` (declared at construction, gap-filled by
+    // `makeEvent`) carries the owning session; a command that adds no dims of its
+    // own declares nothing.
     this.appendCmd = this.command({
       name: "timeline:append",
-      scope,
       handler: (i: TimelineAppendInput) => this.appendBody(i),
     });
     this.replaceProjectionCmd = this.command({
       name: "timeline:replaceProjection",
-      scope,
       handler: (i: TimelineReplaceProjectionInput) => this.replaceProjectionBody(i),
     });
     this.resetProjectionCmd = this.command({
       name: "timeline:resetProjection",
-      scope,
       handler: () => this.resetProjectionBody(),
     });
     // The ADR 51 signal form: a bare `timeline:compact` verb — from the
@@ -369,7 +368,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
       input: compactSignalSchema,
-      scope,
       handler: (signal) =>
         Effect.gen(this, function* () {
           const base = this.defaultStrategy();
@@ -396,7 +394,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       exposure: "wire",
       input: historyRequestSchema,
       description: "Read a cursored page of the durable timeline log",
-      scope,
       handler: (input) =>
         Effect.tryPromise({
           try: () => this.historyPage(input),
@@ -453,6 +450,9 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    */
   private compactCtx(instructions?: string | readonly ContentBlock[]): TimelineCompactCtx {
     return this.deriveOperationCtx(
+      // NOT AN EVENT SCOPE — the STORE KEY, and the key IS the
+      // composed `scopeId` (`LogView({ logKey: this.scopeId })`). Same field name,
+      // different concept; see the note on `hydrateCtx`.
       { sessionId: this.scopeId, op: "TimelineCompact" },
       omitUndefined({ instructions }),
     ) as TimelineCompactCtx;
@@ -474,6 +474,17 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    */
   private hydrateCtx(): TimelineHydrateCtx {
     return this.deriveOperationCtx(
+      // NOT AN EVENT SCOPE. `hydrateFromStore` reads this as the LOG KEY —
+      // `store.read(ctx.sessionId ?? "", ctx)` — and the log key is the composed
+      // `scopeId` the `LogView` was built with, so the composed value is correct
+      // here and only here. `StoreCtx` calling its key `sessionId` is why a sweep
+      // that deleted `sessionId: this.scopeId` on sight silently emptied genesis.
+      //
+      // TODO(store-ctx-key-name): `StoreCtx.sessionId` should be `logKey` (or
+      // `scopeKey`). One field name carrying two concepts — "which session emitted
+      // this" and "which row do I read" — is the same collision this sweep exists
+      // to remove, one layer down.
+      // NOT AN EVENT SCOPE — the STORE KEY (see the note above).
       { sessionId: this.scopeId },
       {
         store: this.store,
@@ -662,7 +673,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       opId: `timeline:compact:${ulid()}`,
       surface: "timeline",
       name: "timeline:command:compact",
-      scope: { sessionId: this.scopeId },
+      scope: {},
       input: strategy,
     };
     return runHarnessProtocol(this.runOperation(op, (s) => this.compactBody(s)));
@@ -791,15 +802,21 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   /**
-   * Emit the turn-boundary RECORD (ADR 53 §2.3b) — segmentation,
-   * outcome, and the turn's aggregate usage (which may exceed the
-   * entry-sum when a tick billed tokens but appended nothing). Read by
-   * NOTHING for behavior; disable via `options.turnBoundaries: false`.
+   * Emit the turn-boundary RECORD (ADR 53 §2.3b) — segmentation, outcome, the turn's
+   * aggregate usage (which may exceed the entry-sum when a tick billed tokens but
+   * appended nothing), and the target that ran it.
+   *
+   * Read by NOTHING in the framework for behavior — it is a record, not a control signal
+   * — and disableable via `options.turnBoundaries: false`. It is written for readers: a
+   * UI segmenting a conversation, an eval, and an application computing its own "entries
+   * since the last comparable success" window when a turn starts failing.
    */
   endTurn(input: {
     readonly executionId: string;
-    readonly outcome: "succeeded" | "failed" | "aborted";
+    readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
     readonly usage?: UsageStats;
+    readonly stopCause?: StopCause;
+    readonly target?: { readonly provider?: string; readonly modelId?: string };
   }): Promise<void> {
     if (!this.turnBoundaries) return Promise.resolve();
     const entry: TurnBoundaryEntry = {
@@ -807,7 +824,20 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       boundary: {
         executionId: input.executionId,
         outcome: input.outcome,
-        ...omitUndefined({ usage: input.usage }),
+        // The cause rides the record, not just the outcome: a turn that dies
+        // before its first tick appends no assistant entry, so this boundary is
+        // the only durable evidence the turn happened — and an outcome with no
+        // cause tells a reloaded client that something ended badly, and no more.
+        // `target` rides the record because a SUCCEEDED boundary is a proof of
+        // projectability, and a proof is only about the target that gave it. An
+        // application narrowing its suspects to "entries since the last success" needs to
+        // know whether that success is comparable — a failover or a model swap makes it
+        // not. This is the one part of that fold the application cannot derive itself.
+        ...omitUndefined({
+          usage: input.usage,
+          stopCause: input.stopCause,
+          target: input.target,
+        }),
       },
       ts: Date.now(),
       visibility: "log",

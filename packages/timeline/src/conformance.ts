@@ -21,6 +21,7 @@ import type {
   CompactStrategy,
   TimelineEntry,
   TimelineHarnessProtocol,
+  TurnBoundaryEntry,
   TimelineStore,
 } from "@agentick/spec";
 import { TimelineHydrateFailed } from "@agentick/spec";
@@ -418,6 +419,13 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       kind: "message",
       message: { id, role: "assistant", content: [{ type: "text", text: id }], ts: 0 },
     });
+    /** The boundary `endTurn` just appended — narrowed, so a claim can read it. */
+    const lastBoundary = (h: TimelineHarnessProtocol): TurnBoundaryEntry["boundary"] => {
+      const persisted = h.readPersisted();
+      const entry = persisted[persisted.length - 1]!;
+      if (entry.kind !== "boundary") throw new Error("expected a boundary entry");
+      return entry.boundary;
+    };
 
     it("trailingInput() is the input-after-last-assistant fold", async () => {
       const h = await deps.make();
@@ -460,6 +468,52 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       if (boundary.kind !== "boundary") throw new Error("expected boundary");
       expect(boundary.boundary.outcome).toBe("failed");
       expect(boundary.boundary.usage?.totalTokens).toBe(5);
+      await h.close();
+    });
+
+    it("a failed turn records WHY, not just that it failed", async () => {
+      // A turn that dies before its first tick appends no assistant entry, so
+      // this boundary is the only durable evidence the turn happened at all. An
+      // outcome with no cause tells a reloaded client that something failed and
+      // nothing more — which is what shipped first, and what left a failed turn
+      // unexplainable from the client side.
+      const h = await deps.make();
+      await h.endTurn({
+        executionId: "e3",
+        outcome: "failed",
+        stopCause: { kind: "failed", error: { _tag: "ProviderRejected", message: "no key" } },
+      });
+      const boundary = lastBoundary(h);
+      expect(boundary.stopCause?.kind).toBe("failed");
+      if (boundary.stopCause?.kind !== "failed") throw new Error("expected a failure cause");
+      expect(boundary.stopCause.error.message).toBe("no key");
+      expect(boundary.stopCause.error._tag).toBe("ProviderRejected");
+      await h.close();
+    });
+
+    it("a VETOED turn is its own outcome, carrying the guard's reason", async () => {
+      // Not folded into `failed`, and emphatically not recorded as `succeeded`
+      // (which is what happened before the outcome had this member): a turn a
+      // guard refused is not a turn that broke and not a turn that answered. The
+      // cause is a reason string, never an error — a veto is the policy WORKING,
+      // and typing it as a failure would make every error-rate metric count it.
+      const h = await deps.make();
+      await h.endTurn({
+        executionId: "e5",
+        outcome: "vetoed",
+        stopCause: { kind: "vetoed", reason: "monthly budget exhausted" },
+      });
+      const boundary = lastBoundary(h);
+      expect(boundary.outcome).toBe("vetoed");
+      if (boundary.stopCause?.kind !== "vetoed") throw new Error("expected a veto cause");
+      expect(boundary.stopCause.reason).toBe("monthly budget exhausted");
+      await h.close();
+    });
+
+    it("a succeeded turn carries no cause at all", async () => {
+      const h = await deps.make();
+      await h.endTurn({ executionId: "e4", outcome: "succeeded" });
+      expect("stopCause" in lastBoundary(h)).toBe(false);
       await h.close();
     });
   });

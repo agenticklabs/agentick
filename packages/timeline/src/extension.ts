@@ -81,6 +81,11 @@ export function withTimeline(config: TimelineConfig = {}): SessionExtension {
           // installer's handle, exactly like a session-constructed bridge does;
           // without this an app `guard`/`hook` silently skips it.
           ...inheritedFrom(installer),
+          // …and so must the emitted scope. An extension-installed timeline is a
+          // SESSION's timeline as much as a bridge-constructed one, so it stamps
+          // the host session on its envelopes — otherwise this arm reintroduces
+          // the dead client live tail that `parentScope` exists to fix.
+          parentScope: { sessionId: installer.hostId },
         },
       );
       await harness.ready;
