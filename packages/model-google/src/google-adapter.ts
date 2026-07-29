@@ -870,12 +870,11 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
           break;
         }
         case "tool_result": {
-          const responseText = toolResultText(part.content);
           parts.push({
             functionResponse: {
               id: part.toolUseId,
               name: lookupToolName(out, part.toolUseId) ?? part.toolUseId,
-              response: { result: responseText },
+              response: toolResultResponse(part),
             },
           });
           break;
@@ -900,13 +899,49 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
   return { systemInstruction, contents: out };
 }
 
+/**
+ * Flatten a tool result's blocks to text. Empty when the tool returned nothing —
+ * the CALLER decides what an absent result means, because that depends entirely on
+ * whether the call succeeded.
+ */
 function toolResultText(parts: ReadonlyArray<LanguageModelMessagePart>): string {
   const out: string[] = [];
   for (const part of parts) {
     if (part.type === "text") out.push(part.text);
     else out.push(JSON.stringify(part));
   }
-  return out.join("\n") || "Done";
+  return out.join("\n");
+}
+
+/**
+ * The `functionResponse.response` payload for one tool result.
+ *
+ * **A failed call must not read as a successful one.** `isError` was dropped here
+ * and an empty result was filled in with the literal `"Done"` — so a tool that threw
+ * reached the model as `{ result: "Done" }`, which is not merely uninformative but
+ * affirmatively false. Observed live: `resource_read` failed, Gemini was told
+ * "Done", and it retried the same uri and then reported that the tool "is not
+ * returning the expected content, only a 'Done' status" — the model diagnosing the
+ * adapter, because the adapter had lied to it.
+ *
+ * `response` is a free-form Struct, so `error` is the idiomatic key for the failure
+ * case and the model reads it as one.
+ *
+ * `"Done"` survives for a SUCCESSFUL call that returned nothing, where it is true: a
+ * void tool (navigate, dismiss) did its work and has nothing to say. The defect was
+ * never the word, it was using it for both outcomes.
+ */
+function toolResultResponse(part: {
+  readonly content: ReadonlyArray<LanguageModelMessagePart>;
+  readonly isError?: boolean;
+}): Record<string, unknown> {
+  const text = toolResultText(part.content);
+  if (part.isError === true) {
+    // A failure with no message still has to say it failed, or the model sees an
+    // empty error and guesses.
+    return { error: text.length > 0 ? text : "the tool call failed and reported no message" };
+  }
+  return { result: text.length > 0 ? text : "Done" };
 }
 
 /**

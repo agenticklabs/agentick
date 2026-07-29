@@ -617,7 +617,22 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
             type: "tool-result",
             toolCallId: p.toolUseId,
             toolName: "unknown",
-            output: { type: "text", value: textOnly || "[done]" },
+            // `error-text` is a real member of the SDK's `ToolResultOutput` union,
+            // and `isError` was being dropped — so a tool that threw reached the
+            // model as `{ type: "text", value: "[done]" }`: not merely uninformative
+            // but affirmatively false. A model told a failed call is done retries it
+            // or builds on a result it never got.
+            //
+            // `[done]` survives for a SUCCESSFUL call that returned nothing, where it
+            // is true — a void tool did its work and has nothing to say. The defect
+            // was using one word for both outcomes.
+            output:
+              p.isError === true
+                ? {
+                    type: "error-text",
+                    value: textOnly || "the tool call failed and reported no message",
+                  }
+                : { type: "text", value: textOnly || "[done]" },
             ...partProviderOptions(p),
           });
         }
