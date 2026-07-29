@@ -1,6 +1,6 @@
 {
   "name": "@agentick/resources",
-  "version": "1.0.0-next.21",
+  "version": "1.0.0-next.39",
   "description": "ResourcesHarness — a read-projection seam (registry of URI→resolver bindings + subscribe/list_changed notifier) that projects agentick's application-controlled readable content onto MCP resources. Owns no content; resolvers read from wherever it already lives. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
@@ -25,7 +25,11 @@
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js"
+    "./dist/augment.js",
+    "./src/client/*",
+    "./dist/client/*",
+    "./src/react/*",
+    "./dist/react/*"
   ],
   "main": "src/index.ts",
   "exports": {

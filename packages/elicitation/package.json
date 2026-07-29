@@ -1,6 +1,6 @@
 {
   "name": "@agentick/elicitation",
-  "version": "1.0.0-next.21",
+  "version": "1.0.0-next.39",
   "description": "ElicitationHarness — substrate-level 'ask the user for a structured response' primitive. Backs tool confirmation, MCP elicitation/create, and any future user-in-the-loop step. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
@@ -25,7 +25,11 @@
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js"
+    "./dist/augment.js",
+    "./src/client/*",
+    "./dist/client/*",
+    "./src/react/*",
+    "./dist/react/*"
   ],
   "main": "src/index.ts",
   "exports": {

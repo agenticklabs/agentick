@@ -1,6 +1,6 @@
 {
   "name": "@agentick/subscriptions",
-  "version": "1.0.0-next.21",
+  "version": "1.0.0-next.39",
   "description": "Long-lived subscription primitive for Agentick v2 — <Cron>, <Webhook>, <EventListener>. Bridge + JSX + in-process scheduler driver. The foundation that connectors build on.",
   "keywords": [
     "agent",
@@ -25,7 +25,11 @@
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js"
+    "./dist/augment.js",
+    "./src/client/*",
+    "./dist/client/*",
+    "./src/react/*",
+    "./dist/react/*"
   ],
   "main": "src/index.ts",
   "exports": {

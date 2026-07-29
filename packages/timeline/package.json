@@ -1,6 +1,6 @@
 {
   "name": "@agentick/timeline",
-  "version": "1.0.0-next.21",
+  "version": "1.0.0-next.39",
   "description": "TimelineHarness — the session's conversation log + projection. Append-only log paired with a materialized projection that can diverge via compaction. Per ADR 26, this is a harness (extends BaseHarness). Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
@@ -24,7 +24,11 @@
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js"
+    "./dist/augment.js",
+    "./src/client/*",
+    "./dist/client/*",
+    "./src/react/*",
+    "./dist/react/*"
   ],
   "main": "src/index.ts",
   "exports": {
