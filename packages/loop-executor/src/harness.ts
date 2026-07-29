@@ -94,6 +94,7 @@ import type {
   OperationJournal,
   OutputSpec,
   RunExecutionInput,
+  StopCause,
   SpecConfig,
   TickInput,
   TickResult,
@@ -431,6 +432,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         | "timeout"
         | "output_delivered" = "end";
 
+      // The account of a bad stop, kept alongside the stop reason it produced.
+      // Without this the mapping below was one-way and lossy: the outcome became a
+      // word (`executor_failed` / `vetoed`) and the evidence that explained it was
+      // dropped at the statement that read it, so no consumer — caller, timeline,
+      // UI, eval — could say why a turn ended the way it did. Serialized here (not
+      // at the boundary) because every reader is across a wire.
+      let stopCause: StopCause | undefined;
+
       // §B2 structured-output run-level state. `terminalCapture` is lifted from
       // the tick that called the terminal tool onto the ExecutionRunResult;
       // `terminalStrategy` (last observed) decides whether a MISS warrants the
@@ -520,6 +529,21 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
               : executorTerminal.outcome === "vetoed"
                 ? "vetoed"
                 : "executor_failed";
+          // Carry the CAUSE, not just the outcome — and keep the two bad endings
+          // apart. `failed` holds a typed error (`ProviderRejected`,
+          // `ProviderTimeout`, `StreamFailed`, …) — how a missing key or a refused
+          // model arrives. `vetoed` holds a guard's plain reason: a policy decision
+          // that worked, not a break, which is why it does NOT become an error
+          // (see `StopCause`). `canceled` needs neither; the stop reason already
+          // says everything true about it.
+          if (executorTerminal.outcome === "failed") {
+            stopCause = { kind: "failed", error: executorTerminal.error.toJSON() };
+          } else if (executorTerminal.outcome === "vetoed") {
+            stopCause = {
+              kind: "vetoed",
+              ...omitUndefined({ reason: executorTerminal.reason }),
+            };
+          }
           break;
         }
 
@@ -774,6 +798,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // §B2 — the raw terminal capture (tool strategy), kept for
         // observability alongside the validated `data`.
         ...(terminalCapture !== undefined ? { terminalCapture } : {}),
+        // WHY it stopped badly. The session lifts this onto `SendResult.stopCause`
+        // AND onto the turn-boundary record — the caller's channel and the durable
+        // one.
+        ...(stopCause !== undefined ? { stopCause } : {}),
       };
 
       // The cancellation discriminant. BOTH entry points land `canceled`: an

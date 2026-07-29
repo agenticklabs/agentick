@@ -380,7 +380,26 @@ function createSessionExecutionHandle<P>(
       for await (const frame of progressStream) {
         // The envelope's payload IS the StreamEvent — server already
         // normalized it.
-        yield frame.envelope.payload as StreamEvent;
+        const event = frame.envelope.payload as StreamEvent;
+        // Learn the execution's id from the FIRST event that names it. Every
+        // `StreamEventBase` carries `executionId`, and the send's own response does
+        // not arrive until the turn is OVER — so without this the handle advertised
+        // `executionId` as `""` for the entire life of the execution, which is
+        // precisely when a consumer needs it: to correlate the live turn against
+        // the committed entries arriving on the timeline. A UI doing that
+        // correlation saw every committed entry as "not mine" and rendered the turn
+        // twice — once from the stream, once from the timeline.
+        //
+        // CAVEAT, stated rather than hidden: this only advances the getter while
+        // someone is consuming `events()`. A caller that awaits `.result` alone
+        // still sees `""` until it resolves, exactly as before. Making the id known
+        // at `send()` time without a consumer means minting it client-side and
+        // passing it in the send params (the `clientId` pattern) — a change of
+        // id-minting authority, not a tweak. TODO(execution-id-at-send).
+        if (executionId === "" && typeof event?.executionId === "string") {
+          executionId = event.executionId;
+        }
+        yield event;
       }
     },
   };

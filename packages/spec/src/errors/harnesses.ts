@@ -301,13 +301,71 @@ export abstract class ExecuteError extends AgentickError {
     | "StreamFailed";
 }
 
+/**
+ * The cause's own words, for a wrapper whose message would otherwise be a bare
+ * classification.
+ *
+ * A wrapping error's `message` should be USEFUL, because it is what every consumer
+ * reads — a log line, a telemetry attribute, an eval score, a UI. The `_tag` already
+ * carries the classification, so repeating it in prose buys nothing while burying
+ * the one sentence that explains the failure. Exported so any future wrapper has a
+ * single right way to do this rather than reinventing the format.
+ *
+ * Returns `undefined` when the cause has nothing to say, which is when a bare
+ * classification is the honest message.
+ *
+ * NOT applied in {@link AgentickError} itself, deliberately: a `cause` may carry
+ * secrets, which is why some subclasses redact it from `toJSON()`. Folding a cause
+ * into `message` — always serialized — would defeat that. It is the WRAPPER's call,
+ * made where the wrapper knows what its cause is.
+ */
+export function causeMessage(cause: unknown): string | undefined {
+  if (cause === undefined || cause === null) return undefined;
+  // Covers AgentickError too — a nested one contributes its own composed message.
+  if (cause instanceof Error) return cause.message || undefined;
+  if (typeof cause === "string") return cause || undefined;
+  const text = String(cause);
+  return text === "" || text === "[object Object]" ? undefined : text;
+}
+
 export class ProviderRejected extends ExecuteError {
   readonly _tag = "ProviderRejected" as const;
   readonly status?: number;
   override readonly cause?: unknown;
-  constructor(args?: { readonly status?: number; readonly cause?: unknown }) {
+  constructor(args?: {
+    readonly status?: number;
+    readonly cause?: unknown;
+    /**
+     * The message to report, when the adapter can do better than the cause's own.
+     *
+     * A provider SDK's `Error.message` is often a serialized envelope rather than a
+     * sentence — Google's is a JSON string containing another JSON string, whose
+     * innermost `error.message` is the only human-readable part. An adapter that
+     * knows its provider's shape extracts that in `mapProviderError` and supplies it
+     * here; the raw envelope stays on `cause`, so nothing is lost and the UI is not
+     * handed 400 characters of escaped JSON to render.
+     */
+    readonly message?: string;
+  }) {
     const statusPart = args?.status !== undefined ? ` (status=${args.status})` : "";
-    super(`provider rejected${statusPart}`, { cause: args?.cause });
+    // Adopt the cause's message. This was the ONE error in the family that did not
+    // (`StreamFailed`, `NormalizationFailed`, `ProjectionFailed` and
+    // `UnknownExecutorError` all inline theirs), and it is the wrapper the loop
+    // puts around a failed stream — so the informative message went in and
+    // `"provider rejected"` came out. That string was then the entire explanation
+    // a caller, a log, and a UI ever saw, while the actual sentence — "Project/
+    // location and API key are mutually exclusive in the client initializer" — sat
+    // two levels down in `cause`, reachable only by a consumer that knew to walk it.
+    //
+    // No prefix: `_tag` is the classification and the grep key. Prefixing here
+    // would stack "provider rejected: provider stream failed: …" on a chain that is
+    // already nested.
+    // Precedence: an adapter's extracted message (it knows its provider's envelope
+    // shape) > the cause's own words > the bare classification.
+    const detail = args?.message ?? causeMessage(args?.cause);
+    super(detail !== undefined ? `${detail}${statusPart}` : `provider rejected${statusPart}`, {
+      cause: args?.cause,
+    });
     if (args?.status !== undefined) this.status = args.status;
     if (args?.cause !== undefined) this.cause = args.cause;
   }

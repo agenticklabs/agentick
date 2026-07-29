@@ -215,7 +215,7 @@ terminal.result?.output; // partial output up to the abort is preserved
 A mid-flight abort tears the provider call down immediately, not at the next tick boundary. A `timeoutMs` expiry travels the same path and lands `outcome: "canceled"` with `stopReason: "timeout"`. A tick's tool calls dispatch concurrently by default, and results stay in **call order** regardless of completion order, so persistence and the model's next-tick view are deterministic.
 
 > [!NOTE]
-> Every cancellation entry point reports the same way: `abort()`, `timeoutMs`, and a caller-supplied `signal` all land `outcome: "canceled"`, with `stopReason` naming which one fired (`"aborted"` / `"timeout"`). A signal that aborts only *after* the run finished naturally does not relabel the finished work — that run stays `"succeeded"`.
+> Every cancellation entry point reports the same way: `abort()`, `timeoutMs`, and a caller-supplied `signal` all land `outcome: "canceled"`, with `stopReason` naming which one fired (`"aborted"` / `"timeout"`). A signal that aborts only _after_ the run finished naturally does not relabel the finished work — that run stays `"succeeded"`.
 
 ## Structured output
 

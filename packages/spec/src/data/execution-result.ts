@@ -91,6 +91,50 @@ export type ExecutorTerminal<R extends ExecutionResult = ExecutionResult> =
   | { readonly outcome: "replaced"; readonly result: R; readonly reason?: string };
 
 // ============================================================================
+// StopCause — WHY a run stopped badly
+// ============================================================================
+
+/**
+ * Why an execution stopped badly, typed so the two bad endings cannot be
+ * mistaken for one another.
+ *
+ * The pair to read this with is `stopReason`, which names WHAT stopped the run
+ * (`"executor_failed"`, `"vetoed"`, …) as a flat string. This carries the
+ * evidence, and only for the endings that HAVE evidence — a cancellation needs
+ * none, because the stop reason already says everything true about it.
+ *
+ * ## Why a discriminated union and not one `error` field
+ *
+ * A veto is a guard verdict: the policy ran, decided no, and that is the
+ * mechanism working. A failure is something breaking. Squeezing both into a field
+ * named `error` — or worse, giving a veto an `AgentickError` subclass so it has
+ * somewhere to live — makes every consumer that folds errors count deliberate
+ * policy decisions as things going wrong: error-rate telemetry, alerting, retry
+ * policy, eval scoring. That is a permanent operational cost paid for a one-time
+ * naming convenience.
+ *
+ * `ExecutorTerminal` already discriminates these correctly
+ * (`{ outcome: "failed"; error }` vs `{ outcome: "vetoed"; reason }`); this is the
+ * same distinction surviving the trip to a caller, a timeline record, and a UI.
+ *
+ * Being discriminated FORCES a consumer to tell them apart, which it must: the
+ * two demand different words and different affordances. A failure means "something
+ * broke, here is what the provider said, retrying may work". A veto means "this was
+ * refused, here is the policy, retrying will not help".
+ */
+export type StopCause =
+  | {
+      readonly kind: "failed";
+      /** The executor's own error, serialized — `_tag`, `message`, own fields. */
+      readonly error: import("../errors/base.js").SerializedAgentickError;
+    }
+  | {
+      readonly kind: "vetoed";
+      /** The guard's reason, verbatim. Absent when the veto gave none. */
+      readonly reason?: string;
+    };
+
+// ============================================================================
 // LanguageModelExecutionResult — v2 shipped family
 // ============================================================================
 

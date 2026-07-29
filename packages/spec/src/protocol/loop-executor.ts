@@ -34,6 +34,7 @@ import type {
   ExecutorTerminal,
   LanguageModelExecutionResult,
   LanguageModelStopReason,
+  StopCause,
   UsageStats,
 } from "../data/execution-result.js";
 import type { LoopExecutorError } from "../errors/harnesses.js";
@@ -455,6 +456,25 @@ export interface ExecutionRunResult {
     /** The terminal tool call's raw, unvalidated input. */
     readonly input: unknown;
   };
+  /**
+   * WHY the execution stopped badly — see {@link StopCause}.
+   *
+   * A provider failure does not reject the run: the loop RESOLVES it as a terminal
+   * carrying `stopReason: "executor_failed"`, because a turn that reached a
+   * provider and was refused is a turn that happened. That resolution used to be
+   * lossy — the loop read `executorTerminal.outcome`, mapped it to a stop reason,
+   * and dropped the terminal's `error` (or a veto's `reason`) on the same
+   * statement. So the ONLY account of a bad turn anywhere in the system was a
+   * single word. A caller could not say whether the key was missing, the model name
+   * was wrong, the region refused, or a guard said no; neither could the timeline,
+   * and neither could a UI rendering either one.
+   *
+   * Present iff `stopReason` is `"executor_failed"` or `"vetoed"`. Carried in
+   * serialized form because every consumer downstream of here is across a wire:
+   * `SendResult.stopCause`, `TurnBoundaryEntry.boundary.stopCause`, and whatever a
+   * client draws from them.
+   */
+  readonly stopCause?: StopCause;
 }
 
 export interface ExecutionTerminal {

@@ -563,6 +563,51 @@ describe("LoopExecutorHarness [characterization] — executor failure paths", ()
     expect(trace.terminal.result!.stopReason).toBe("executor_failed");
   });
 
+  it("the failure's CAUSE rides the result — `executor_failed` is not the whole story", async () => {
+    // The regression this guards: the loop read `executorTerminal.outcome`,
+    // mapped it to a stop reason and dropped `.error` at the same statement. The
+    // word `executor_failed` was then the only account of the failure ANYWHERE —
+    // in the caller's resolved `SendResult`, on the turn-boundary record, and in
+    // every UI folding either one. A missing key and a refused model read
+    // identically.
+    const trace = await runChar({ scripted: [failRun("failed")], maxTicks: 5 });
+    const cause = trace.terminal.result!.stopCause;
+    expect(cause?.kind).toBe("failed");
+    if (cause?.kind !== "failed") throw new Error("expected a failure cause");
+    // Serialized, not the live class: every consumer downstream is across a wire.
+    expect(cause.error._tag).toBe("ProviderRejected");
+    expect(cause.error.message.length).toBeGreaterThan(0);
+  });
+
+  it("a VETO carries its reason, and is NOT reported as a failure", async () => {
+    // The distinction `StopCause` exists to preserve. A veto is the guard
+    // WORKING; typing it as an error would make every error-rate metric, retry
+    // policy and eval score count deliberate policy decisions as breakage. Its
+    // reason string used to be dropped here for want of somewhere honest to put
+    // it.
+    const trace = await runChar({ scripted: [failRun("vetoed")], maxTicks: 5 });
+    expect(trace.terminal.result!.stopReason).toBe("vetoed");
+    const cause = trace.terminal.result!.stopCause;
+    expect(cause?.kind).toBe("vetoed");
+    if (cause?.kind !== "vetoed") throw new Error("expected a veto cause");
+    expect(cause.reason).toBe("scripted veto");
+  });
+
+  it("a CANCELED run carries no cause — the stop reason already says it all", async () => {
+    const trace = await runChar({ scripted: [failRun("canceled")], maxTicks: 5 });
+    expect(trace.terminal.result!.stopReason).toBe("aborted");
+    expect(trace.terminal.result!.stopCause).toBeUndefined();
+  });
+
+  it("a turn that SUCCEEDED carries no cause", async () => {
+    // The field is evidence of a bad stop, so its mere PRESENCE is meaningful to a
+    // renderer (it draws a failure row off it). A `stopCause: undefined` key left
+    // on every result would make that unreliable.
+    const trace = await runChar({ scripted: [{ result: ended() }], maxTicks: 5 });
+    expect(trace.terminal.result!.stopReason).not.toBe("executor_failed");
+    expect("stopCause" in trace.terminal.result!).toBe(false);
+  });
+
   it("a canceled executor terminal → stopReason 'aborted', outcome 'canceled'", async () => {
     // Same ratified rule as the signal-abort case above: a cancellation the
     // harness `aborted` map never saw (here it originates INSIDE the model
