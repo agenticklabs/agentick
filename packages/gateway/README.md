@@ -60,6 +60,27 @@ gateway.app("tenant-a"); // by id, or undefined
 
 Duplicate `appId` is rejected, and `createApp` after `close()` is rejected. Substrate slots accept an instance **or** a factory; a factory receives the gateway's own substrate as its parent, which is how an app wraps rather than replaces what it inherits.
 
+### What a client can see of an app
+
+`gateway/list_apps` and `gateway/get_app` project each app as an `AppInfo` — the same `id` / `title` / `description` triple a tool or a prompt declares:
+
+```ts
+const { apps } = await client.gateway.listApps();
+// [{ id: "tenant-a", title: "Ernesto", description: "Knowify's assistant" }]
+```
+
+`id` is what a client routes on; `title` is what it renders — and what it joins a session's owning app to in order to say who answered. Set them on the app:
+
+```ts
+await gateway.createApp({
+  appId: "tenant-a",
+  rootElement: <Root />,
+  options: { ...options, title: "Ernesto", description: "Knowify's assistant" },
+});
+```
+
+Both are omitted from the projection when unset rather than sent as `null`, so a client falls back to `id` on presence. An app that never faces a person needs neither.
+
 ### Gating and shaping the mount
 
 `createApp` is itself a hookable operation, so the gateway is where a multi-tenant provisioning gate belongs — before the app is constructed:

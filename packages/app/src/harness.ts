@@ -249,6 +249,23 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
   /** Stable app id; defaults to `app:${ulid()}`. */
   readonly appId?: string;
   /**
+   * Display label — what a person reads, where `appId` is what a client routes on.
+   * Same `id` / `title` / `description` triple a tool or a prompt declares, so an
+   * app is not the one entity with a bespoke identity shape.
+   *
+   * This is also how a client learns WHO answered: a session record carries
+   * `appId`, and a UI joins it to this. Not copied onto each session, deliberately
+   * — renaming an app should relabel its existing threads, and a denormalized name
+   * would freeze them under the old one.
+   *
+   * Distinct from `name`, which is the telemetry identity dimension: that is a
+   * deployment-flavoured value (`"assistant-api-prod"`), and promoting an ops
+   * identifier to a user-visible label is easy to add and awkward to remove.
+   */
+  readonly title?: string;
+  /** One line on what this app is, for a picker or a catalog. */
+  readonly description?: string;
+  /**
    * Root agent element passed to every session's compiler mount.
    * Opaque to the app — the compiler impl owns the type contract.
    * For React this is a `React.ReactNode`; for an Angular compiler
@@ -714,6 +731,11 @@ export class AppHarness<P = unknown>
   get id(): string {
     return this.scopeId;
   }
+
+  /** @see AppHarnessOptions.title */
+  readonly title: string | undefined;
+  /** @see AppHarnessOptions.description */
+  readonly description: string | undefined;
 
   private readonly rootElement: unknown;
   /**
@@ -1181,6 +1203,8 @@ export class AppHarness<P = unknown>
     this.appSignal = options.signal;
     this.maxActive = options.sessions?.maxActive;
     this.idleTimeout = options.sessions?.idleTimeout;
+    this.title = options.title;
+    this.description = options.description;
     this.maxSpawnDepth = options.sessions?.maxSpawnDepth ?? 10;
     // Activity tracking + idle sweep are wired ONLY when eviction is
     // configured — zero overhead for the unbounded default. Activity =
@@ -2232,7 +2256,6 @@ export class AppHarness<P = unknown>
       ...omitUndefined({
         title: input.title,
         description: input.description,
-        agentId: input.agentId,
       }),
     });
 

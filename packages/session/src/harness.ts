@@ -440,11 +440,6 @@ export interface SessionHarnessOptions<P = unknown> {
   /** Owning app id — stamped on the session's `SessionRecord.appId`. */
   readonly appId?: string;
   /**
-   * Stable agent id / name for the `SessionRecord.agentId` slot (1 agent : 1
-   * session). Optional — the app passes it when the agent has a stable id.
-   */
-  readonly agentId?: string;
-  /**
    * App-owned descriptive slots seeded onto the initial `SessionRecord`
    * (E11 — the framework STORES these, never populates their semantics). The
    * app may also set them later via {@link SessionHarness.setMeta}.
@@ -604,8 +599,8 @@ export class SessionHarness<P = unknown>
    */
   private readonly _children = new Set<string>();
   /**
-   * Durable session registry (E11), captured identity (`createdAt` / `appId` /
-   * `agentId`), and the app-owned descriptive slots (`title` / `description` /
+   * Durable session registry (E11), captured identity (`createdAt` / `appId`),
+   * and the app-owned descriptive slots (`title` / `description` /
    * `metadata`) all live on {@link SessionRuntime} now — folded into the
    * single-key `View<SessionRecord>` that subsumed the harness's former
    * hand-rolled `syncSessionRecord` write-through + metadata notifier.
@@ -839,7 +834,6 @@ export class SessionHarness<P = unknown>
       storeCtx: () => this.storeCtx(),
       ...omitUndefined({
         appId: options.appId,
-        agentId: options.agentId,
         parentSessionId: options.parentSessionId,
         // ADR 48 — persist ownership on the durable record (resume index).
         principal: options.principal,

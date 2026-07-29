@@ -13,7 +13,7 @@
  * ## Store-backed via a single-key {@link View} (convergence run 3)
  *
  * The projection machine is no longer hand-rolled. The durable-mirror fields
- * PLUS the captured identity (`createdAt`, `appId`, `agentId`,
+ * PLUS the captured identity (`createdAt`, `appId`,
  * `parentSessionId`) and the app-owned descriptive slots (`title`,
  * `description`, `metadata`) live IN ONE cached `SessionRecord`, held by a
  * `View.collection` keyed by session id — a SINGLE cache entry. This proves the
@@ -104,7 +104,7 @@ const NULL_STORE: Store<SessionRecord, SessionStoreQuery, CollectionMutation<Ses
 
 /**
  * Construction slots for a {@link SessionRuntime}. The identity fields
- * (`createdAt` captured internally; `appId` / `agentId` / `parentSessionId`
+ * (`createdAt` captured internally; `appId` / `parentSessionId`
  * passed) and the app-owned descriptive slots (`title` / `description` /
  * `metadata`) are folded into the cached `SessionRecord` alongside the runtime
  * accounting. `store` is the durable registry (or `undefined` → {@link
@@ -118,7 +118,6 @@ export interface SessionRuntimeInit {
   /** The owning harness's {@link StoreCtx} carrier, evaluated per write. */
   readonly storeCtx: () => StoreCtx;
   readonly appId?: string;
-  readonly agentId?: string;
   readonly parentSessionId?: string;
   /** Owning principal (ADR 48) — construction-bound; folded into every record write. */
   readonly principal?: string;
@@ -135,7 +134,6 @@ export class SessionRuntime {
   /** Captured identity (E11) — folded into every record write. */
   private readonly createdAt: number;
   private readonly appId: string | undefined;
-  private readonly agentId: string | undefined;
   private readonly parentSessionId: string | undefined;
   /** Owning principal (ADR 48) — folded into every record write; absent when principal-less. */
   private readonly principal: string | undefined;
@@ -177,7 +175,6 @@ export class SessionRuntime {
     this.id = init.id;
     this.createdAt = Date.now();
     this.appId = init.appId;
-    this.agentId = init.agentId;
     this.parentSessionId = init.parentSessionId;
     this.principal = init.principal;
     this.spawnPath = init.spawnPath;
@@ -212,7 +209,6 @@ export class SessionRuntime {
         principal: this.principal,
         spawnPath: this.spawnPath,
         appId: this.appId,
-        agentId: this.agentId,
         title: this._meta.title,
         description: this._meta.description,
         metadata: this._meta.metadata,
@@ -270,7 +266,6 @@ export class SessionRuntime {
         principal: this.principal,
         spawnPath: this.spawnPath,
         appId: this.appId,
-        agentId: this.agentId,
         currentExecutionId: nextExecutionId ?? undefined,
         title: this._meta.title,
         description: this._meta.description,

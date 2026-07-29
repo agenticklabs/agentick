@@ -16,6 +16,7 @@
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  */
 
+import { omitUndefined } from "@agentick/utils";
 import {
   AppNotFoundError,
   defineWireExtension,
@@ -40,6 +41,10 @@ function toSessionEntry(record: SessionRecord): SessionEntry {
     metadata: record.metadata ?? {},
     createdAt: record.createdAt,
     lastActiveAt: record.updatedAt,
+    // The thread's own title / blurb were on the durable record and dropped here,
+    // so a session list had no label per row and no second door to one. Omitted
+    // when unset rather than sent as `null` — a renderer branches on presence.
+    ...omitUndefined({ title: record.title, description: record.description }),
   };
 }
 

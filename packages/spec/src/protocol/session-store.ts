@@ -52,7 +52,7 @@ import type { StoreCtx } from "./store-ctx.js";
  * `id`. Grouped by ownership (E11):
  *
  *   - **identity / lifecycle** (framework-owned) — `id`, `createdAt`,
- *     `updatedAt`, `status`, `parentSessionId`, `appId`, `agentId`.
+ *     `updatedAt`, `status`, `parentSessionId`, `appId`.
  *   - **runtime accounting** (framework-owned), hierarchy-aware
  *     (session → execution → tick) — `currentExecutionId`, `executionCount`,
  *     `usage`. NOTE: there is deliberately **NO `currentTick`** — a tick is
@@ -85,12 +85,6 @@ export interface SessionRecord {
   readonly spawnPath?: readonly string[];
   /** Owning app id — the primary `list` scope dimension. */
   readonly appId?: string;
-  /**
-   * Stable agent id / name when the session's agent has one (1:1 makes it
-   * meaningful for the sessions-list). Optional — populated by the app when a
-   * stable id exists, never fabricated by the framework.
-   */
-  readonly agentId?: string;
   /**
    * Construction-bound owning principal (ADR 48) — the durable projection of
    * the session harness's `principal`. Stamped at construction (from

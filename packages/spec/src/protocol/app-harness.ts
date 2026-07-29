@@ -78,12 +78,16 @@ export interface CreateSessionInput<P = unknown> {
    * App-owned descriptive slots seeded onto the session's durable
    * `SessionRecord` (E11). The framework STORES these and is blind to their
    * semantics (auto-summary, user-edit). The app may also set them later via
-   * `app.setSessionMeta(sessionId, ...)`. `agentId` is the stable agent id /
-   * name for the record's `agentId` slot (1 agent : 1 session).
+   * `app.setSessionMeta(sessionId, ...)`.
+   *
+   * WHO answered is not among them: a session's answering identity is its `appId`,
+   * joined to that app's `title`. Denormalizing a name onto the record would make
+   * renaming an app a data migration and freeze every historical thread under the
+   * old label — the opposite handling from `boundary.target`, which IS evidence
+   * about a past turn and must not move.
    */
   readonly title?: string;
   readonly description?: string;
-  readonly agentId?: string;
   /** Initial component props injected into the agent root element. */
   readonly initialProps?: P;
   /** Initial knob values copied into the session's knob bridge. */
@@ -185,6 +189,17 @@ export interface SessionEntry {
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly createdAt: number;
   readonly lastActiveAt?: number;
+  /**
+   * The app-owned descriptive slots off the durable record — the THREAD's title and
+   * blurb (auto-summary, user-edit), which a session list needs one of per row and
+   * cannot get any other way.
+   *
+   * No `appId` here, deliberately: a client reaches sessions THROUGH an app handle
+   * (`app.listSessions()`, `app/get_session` takes an `appId`), so it already knows
+   * which app answered and joins that app's `title` itself.
+   */
+  readonly title?: string;
+  readonly description?: string;
 }
 
 export type SessionListEntry = SessionEntry;
@@ -364,6 +379,22 @@ export interface AppHarnessProtocol<P = unknown> {
    * data.
    */
   readonly id: string;
+
+  /**
+   * Display label for this app — what a person reads. `id` is what a client
+   * routes on; this is what it renders. Optional: an app that never faces a
+   * person needs none, and a client falls back to `id`.
+   *
+   * WHO answered in a session resolves through here: `SessionRecord.appId` joined
+   * to this. Deliberately a live join rather than a name copied onto each record —
+   * renaming an app should relabel its threads, which a durable copy would prevent
+   * (the opposite of `boundary.target`, which is evidence about a past turn and
+   * must not move).
+   */
+  readonly title?: string;
+
+  /** One line on what this app is, for a picker or a catalog. */
+  readonly description?: string;
 
   /**
    * Create a session — **idempotent open-or-rehydrate (ADR 49)**. A

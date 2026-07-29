@@ -43,21 +43,31 @@ export interface WireRequestParams {
 
 export interface GatewayListAppsParams extends WireRequestParams {}
 
+/**
+ * One app as a client sees it. The same `id` / `title` / `description` triple a
+ * tool or a prompt declares — an app is not the one entity with a bespoke
+ * identity shape.
+ *
+ * `title` is also how a client resolves WHO answered in a session:
+ * `SessionEntry.appId` joined to this. A live join by design, so renaming an app
+ * relabels its threads instead of leaving them under the old name.
+ */
+export interface AppInfo {
+  readonly id: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
 export interface GatewayListAppsResult {
-  readonly apps: readonly {
-    readonly id: string;
-    readonly metadata?: Readonly<Record<string, unknown>>;
-  }[];
+  readonly apps: readonly AppInfo[];
 }
 
 export interface GatewayGetAppParams extends WireRequestParams {
   readonly appId: string;
 }
 
-export interface GatewayGetAppResult {
-  readonly id: string;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
+export type GatewayGetAppResult = AppInfo;
 
 // ============================================================================
 // app/* — multi-session host methods

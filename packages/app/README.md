@@ -171,6 +171,33 @@ It is an app singleton, defaulting to a node-local in-memory store. Swap a durab
 
 `title` / `description` / `metadata` are yours to populate — seed them at `createSession({ title })` or set them later with `app.setSessionMeta(id, { title })`. The framework stores them and is blind to their semantics.
 
+### Who answered — `appId` joined to the app's `title`
+
+An app declares the same `id` / `title` / `description` triple a tool or a prompt does:
+
+```tsx
+const app = await createApp(<Ernesto />, {
+  model,
+  appId: "ernesto",
+  title: "Ernesto",
+  description: "Knowify's assistant",
+});
+```
+
+A session records which app opened it, so **who answered is the app** — one app mounts one root element, and a client that reached the sessions through `app("ernesto")` already knows which app that is. It reads the name off the app:
+
+```ts
+const { title } = await client.gateway.getApp("ernesto"); // "Ernesto"
+const { sessions } = await client.gateway.app("ernesto").listSessions();
+sessions[0].title; // the THREAD's title — not the app's
+```
+
+**A live join, on purpose.** Copying a display name onto every session record would make renaming an app a data migration and freeze historical threads under the old label. Renaming should relabel them. That is the opposite of `boundary.target`, which stamps the model that ran a turn onto the timeline precisely so a later model swap cannot rewrite it — evidence about the past must not move, a display label should.
+
+There is no per-session author field. A spawned child shares its parent's `appId`, so naming individual specialists is a spawn-level concern and waits for one; inventing the field now would mean maintaining it everywhere for a feature that does not exist.
+
+**`title` is not `name`.** `name` is the telemetry identity dimension — a deployment-flavoured value like `"assistant-api-prod"`. They are deliberately not defaulted from one another: promoting an ops identifier to a user-visible label is easy to add and awkward to remove.
+
 ### Bounding the live registry
 
 The live registry is otherwise an unbounded map — a leak in a deployment that opens sessions and never closes them. Two knobs cap it by **paging out** idle sessions:
@@ -362,6 +389,8 @@ await app.closeApp(); // closes the cluster too
 | `name`                      | `string`                                               | Logical app name — the telemetry identity dimension and default `functionId`             |
 | `metadata`                  | `Record<string, unknown>`                              | Adopter bag carried on the instance                                                      |
 | `appId`                     | `string`                                               | Defaults to `app:${ulid()}`                                                              |
+| `title`                     | `string`                                               | Display label — what a person reads. Distinct from `name`; see below                     |
+| `description`               | `string`                                               | One line for a picker or catalog                                                         |
 | _namespace slots_           | e.g. `timeline`                                        | Contributed by namespace packages; not declared here                                     |
 
 Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, `streaming`, `narrate`, `migrateSnapshot`, `initialProps`, `initialKnobs`, `target`, `interceptorParent`.
