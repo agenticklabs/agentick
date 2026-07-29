@@ -626,6 +626,10 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       // `scopeId` this harness's store was keyed with. `StoreCtx` naming its key
       // `sessionId` is the collision; see TODO(store-ctx-key-name) in
       // `@agentick/timeline`.
+      // NOT AN EVENT SCOPE — the STORE KEY. Load-bearing: this exact phrase is
+      // the opt-out the `event-scope-authority` sweep greps for. It reads as a
+      // restatement of the sentence above and is not one; deleting it fails that
+      // conformance test.
       { sessionId: this.scopeId },
       {
         store: this.store,
