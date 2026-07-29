@@ -11,6 +11,7 @@ import type { CreateMessageRequest, CreateMessageResult } from "@modelcontextpro
 import type { ContentBlock, McpRoot, ResourceContents } from "@agentick/spec";
 import type { McpAuth } from "./auth.js";
 import type { EraCodec } from "./era-codec.js";
+import type { BaseHarnessOptions } from "@agentick/runtime";
 
 // ============================================================================
 // State machine
@@ -41,16 +42,28 @@ export type McpClientState =
 // ============================================================================
 
 /**
- * MCP protocol versions the client supports talking. The canonical
- * shape inside the harness mirrors `draft`; era codecs translate at
- * the wire edge so adopters interact with one canonical shape
- * regardless of which version the remote server speaks.
+ * MCP protocol versions the client can talk to. The canonical shape inside the
+ * harness mirrors the NEWEST era; era codecs translate at the wire edge, so
+ * adopters interact with one shape regardless of what the remote speaks.
  *
  *   2024-11-05  — legacy, supported but discouraged
- *   2025-11-25  — latest official
- *   draft        — the target going forward (2026-07-28-ish working draft)
+ *   2025-11-25  — previous official
+ *   2026-07-28  — current official, and what canonical mirrors
+ *
+ * ## Why canonical tracks the NEWEST era
+ *
+ * Because compatibility burden should sit on the side that is going away. With
+ * canonical on the newest era, an older era's codec absorbs the differences —
+ * `initialize`, protocol-level sessions, server-initiated requests — and gets
+ * DELETED when that era's deprecation window closes. Pin canonical to an older
+ * era instead and every future era pays a translation cost forever, in the
+ * direction that is growing.
+ *
+ * `"draft"` is gone as an era value but still ACCEPTED on the wire: servers
+ * built against the pre-publication draft report it, and `selectCodec` maps it
+ * to canonical rather than failing them.
  */
-export type McpSpecEra = "2024-11-05" | "2025-11-25" | "draft";
+export type McpSpecEra = "2024-11-05" | "2025-11-25" | "2026-07-28";
 
 // ============================================================================
 // Construction options
@@ -61,7 +74,14 @@ export type McpSpecEra = "2024-11-05" | "2025-11-25" | "draft";
  * with a fully-built transport and auth strategy — the `withMCP()`
  * extension (#3) wires these from declarative server configs.
  */
-export interface McpClientHarnessOptions {
+/**
+ * `extends BaseHarnessOptions` so `parentScope`, `principal`, telemetry and the
+ * interceptor fold reach the harness. Standing alone, this interface made every base
+ * slot unpassable, and the constructor's `super(...)` took no options at all — so an
+ * MCP harness emitted events scoped to its own doubly-composed key
+ * (`<sessionId>:mcp:<serverId>`) that no session subscription could match.
+ */
+export interface McpClientHarnessOptions extends BaseHarnessOptions {
   /**
    * Server id surfaced as the harness's scope (`mcp:<serverId>`).
    * Used for envelope routing + tool-registration keys downstream.

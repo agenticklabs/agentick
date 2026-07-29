@@ -45,6 +45,23 @@ export interface McpConnectionInfo {
    * falls back to its own best-effort authenticator run.
    */
   readonly authenticatedUser?: McpAuthenticatedUser | null;
+  /**
+   * Does each inbound MESSAGE on this connection carry its own credential material?
+   *
+   * `true` for HTTP — every request has an `Authorization` header, so the crossing
+   * re-authenticates and a token that expires mid-connection is caught. `false` for
+   * stdio and in-memory, where there is nothing per-message to re-read and the identity
+   * the connection was established with is the only truth there is.
+   *
+   * The crossing uses {@link authenticatedUser} instead of authenticating **only** when
+   * this is `false` AND an identity was forwarded. Both halves matter: `false` alone
+   * would break the case where an in-process caller deliberately states no identity and
+   * wants the configured authenticator to decide.
+   *
+   * **Absent means `true`** — authenticate. Fail-closed, so a transport that says
+   * nothing keeps the re-authenticating behaviour.
+   */
+  readonly credentialsPerRequest?: boolean;
 }
 
 // ============================================================================

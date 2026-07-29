@@ -913,21 +913,40 @@ export class McpServerHarness
      *   5. **Body.** The SDK handler, over the post-cascade input.
      */
     const runCrossing: RunCrossing = async <R>(crossing: McpCrossing<R>): Promise<R> => {
-      // The ADMISSION ctx — deliberately identity-less. The authenticator is
-      // what ESTABLISHES the identity, so it must not be handed one; it reads
-      // the credential material off `ctx.metadata.headers`.
-      const admissionCtx = buildRequestContext();
-      const authn = await this.security.authenticator(admissionCtx);
-      if (!authn.authenticated) {
-        this.emitAdmissionFailure("authenticate", info, authn.reason, connectionId);
-        throw new McpServerAuthRejected({ reason: authn.reason || "Authentication failed" });
+      // Where this crossing's identity comes from.
+      //
+      // On a transport whose every MESSAGE carries credential material (HTTP), the
+      // crossing re-authenticates: that is what catches a token expiring mid-connection
+      // on a long-lived stream, and it is why the pre-gate's identity is NOT reused here.
+      //
+      // On a transport where it does not (stdio, in-memory), there is nothing per-message
+      // to re-read, so the identity the connection was established with is the only truth
+      // there is — and re-authenticating would resolve an identity-less context to
+      // anonymous, silently replacing the caller. Both halves of the condition matter:
+      // `credentialsPerRequest === false` alone would break an in-process caller that
+      // deliberately states no identity and wants the configured authenticator to decide.
+      const forwarded = info.credentialsPerRequest === false ? info.authenticatedUser : undefined;
+      let resolvedUser: McpAuthenticatedUser | null | undefined;
+      if (forwarded !== undefined) {
+        resolvedUser = forwarded;
+      } else {
+        // The ADMISSION ctx — deliberately identity-less. The authenticator is
+        // what ESTABLISHES the identity, so it must not be handed one; it reads
+        // the credential material off `ctx.metadata.headers`.
+        const admissionCtx = buildRequestContext();
+        const authn = await this.security.authenticator(admissionCtx);
+        if (!authn.authenticated) {
+          this.emitAdmissionFailure("authenticate", info, authn.reason, connectionId);
+          throw new McpServerAuthRejected({ reason: authn.reason || "Authentication failed" });
+        }
+        resolvedUser = authn.user;
       }
       // The CROSSING ctx — the same connection, now carrying the identity
       // admission resolved. Minted (not spread over the admission ctx) so the
       // whole composition stays branded and the lazy facets stay lazy.
-      const identity = toIngressIdentity(authn.user, this.identityProjection);
+      const identity = toIngressIdentity(resolvedUser, this.identityProjection);
       const ctx = buildRequestContext(
-        omitUndefined({ user: authn.user, identity, progressToken: crossing.progressToken }),
+        omitUndefined({ user: resolvedUser, identity, progressToken: crossing.progressToken }),
       );
 
       const opName = crossingOpName(crossing.verb);

@@ -79,6 +79,7 @@
 
 import type {
   CredentialsHarnessProtocol,
+  Prompts,
   SessionExtension,
   SessionInstaller,
   Unsubscribe,
@@ -90,6 +91,8 @@ import type {
   ToolResultEnvelope,
 } from "@agentick/spec";
 import { jsonSchema, toRegistration } from "@agentick/spec";
+
+import { surfaceRemotePrompts } from "./prompt-surface.js";
 import { readContext, type RuntimeContext } from "@agentick/runtime";
 
 // Side-effect import — pulls in the `SessionHarnessProtocol.elicitation`
@@ -167,6 +170,19 @@ export interface McpServerConfig {
    * the risk of cross-server collisions).
    */
   readonly toolPrefix?: string;
+
+  /**
+   * Override the default `<serverId>__` prefix on PROJECTED PROMPT names.
+   *
+   * Prefixed by default for the same reason tools are — two servers may both publish
+   * `job_profitability`, and a collision is worse here than for tools because the loser
+   * would simply be missing from a user's palette.
+   *
+   * Set `""` for bare names when there is one server and the prompts are user-facing:
+   * `/jobs_over_budget` reads better in a command list than
+   * `/knowify__jobs_over_budget`.
+   */
+  readonly promptPrefix?: string;
 
   /**
    * Model-narration opt-out for THIS server's tools. MCP tools narrate
@@ -431,6 +447,8 @@ async function mkClient(
   const baseDeps = (interactive: boolean): TransportFactoryDeps => ({
     elicit: (request) => installer.elicitation.elicit(request),
     serverId: config.serverId,
+    sessionId: installer.sessionId,
+    ...(installer.principal !== undefined ? { principal: installer.principal } : {}),
     credentialKey: keyOfField,
     interactive,
     ...(credentials !== undefined ? { credentials } : {}),
@@ -467,6 +485,9 @@ async function mkClient(
     installer.substrate.inbox,
     {
       serverId: config.serverId,
+      // The owning session — the `scopeId` above is this harness's WORK identity
+      // (`<sessionId>:mcp:<serverId>`) and cannot serve as the runtime coordinate.
+      parentScope: { sessionId: installer.sessionId },
       transport,
       auth: config.auth ?? new NoneAuth(),
       elicitAddress: installer.elicitation.address,
@@ -496,6 +517,25 @@ async function mkClient(
  *      level: "session" }`. Lands in the session's ToolExecutor
  *      initialTools by way of `installer.registerExtensionTool`.
  */
+/** Resolve the session's prompts namespace and project this server's prompts into it. */
+async function discoverAndRegisterPrompts(
+  installer: SessionInstaller,
+  config: McpServerConfig,
+  harness: McpClientHarness,
+): Promise<readonly Unsubscribe[]> {
+  // `getNamespace` is dynamic — any extension installed before this one is visible — so a
+  // missing namespace means prompts were never declared, and there is nothing to project
+  // into. Declare prompts before this extension.
+  const prompts = installer.getNamespace<Prompts>("prompts");
+  if (prompts === undefined) return [];
+  return surfaceRemotePrompts(
+    prompts,
+    config.serverId,
+    config.promptPrefix ?? `${config.serverId}__`,
+    harness,
+  );
+}
+
 async function discoverAndRegisterTools(
   installer: SessionInstaller,
   config: McpServerConfig,
@@ -680,6 +720,9 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
         // ResourcesHarness (`installer.resources`) under the adopter
         // alias — see `surfaceRemoteResources`.
         let currentResourceUnsubs: readonly Unsubscribe[] = [];
+        // And for projected PROMPTS — registered into the session's prompts namespace,
+        // torn down and re-registered on `notifications/prompts/list_changed`.
+        let currentPromptUnsubs: readonly Unsubscribe[] = [];
         if (harness.status.kind === "connected") {
           try {
             currentUnsubs = await discoverAndRegisterTools(
@@ -705,6 +748,11 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
             // doesn't support `resources/*` (or errors listing) simply
             // surfaces no resources. Tools + the connection remain live.
           }
+          try {
+            currentPromptUnsubs = await discoverAndRegisterPrompts(installer, config, harness);
+          } catch {
+            // Same non-fatal rule: a server without `prompts/*` surfaces no prompts.
+          }
         }
 
         // Reactive re-discovery — the MCP server MAY emit
@@ -715,9 +763,9 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
         // (a second re-discovery waits for the first to finish clearing
         // + re-registering).
         //
-        // Prompt notifications fire too but withMCP does not project
-        // prompts today — ignored here. Adopters observing at the
-        // harness layer via `harness.onListChanged` still see all three.
+        // All three kinds are handled. Teardown-then-rediscover rather than a diff:
+        // the set is small, and re-registering is the same path genesis took, so there
+        // is one code path to be correct in instead of two.
         let rediscoveryInFlight: Promise<void> = Promise.resolve();
         const unsubListChanged = harness.onListChanged((event) => {
           if (event.kind === "tools") {
@@ -735,6 +783,15 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
                 // rather than a partial re-registration. Next
                 // notification triggers another attempt.
                 currentUnsubs = [];
+              }
+            });
+          } else if (event.kind === "prompts") {
+            rediscoveryInFlight = rediscoveryInFlight.then(async () => {
+              for (const u of currentPromptUnsubs) u();
+              try {
+                currentPromptUnsubs = await discoverAndRegisterPrompts(installer, config, harness);
+              } catch {
+                currentPromptUnsubs = [];
               }
             });
           } else if (event.kind === "resources") {
@@ -757,6 +814,7 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
           unsubListChanged();
           for (const u of currentUnsubs) u();
           for (const u of currentResourceUnsubs) u();
+          for (const u of currentPromptUnsubs) u();
         });
       }
 

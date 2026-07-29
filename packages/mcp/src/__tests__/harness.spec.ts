@@ -5,7 +5,7 @@
  * SDK `Server` to the harness's `Client`. Every round-trip exercises:
  *
  *   - The harness's connect / `initialize` handshake
- *   - Era codec selection (we report `draft` from the server)
+ *   - Era codec selection (the stub server reports the canonical era)
  *   - `listTools` + `callTool` through `runOperation` (canonical
  *     substrate phase contract)
  *   - State machine transitions (idle → connecting → ready → closed)
@@ -27,7 +27,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import {
-  DraftPassthroughCodec,
+  CanonicalPassthroughCodec,
   InMemoryMcpTransport,
   McpClientHarness,
   NoneAuth,
@@ -232,21 +232,21 @@ describe("McpClientHarness — protocol", () => {
 });
 
 describe("McpClientHarness — era codec", () => {
-  it("defaults to DraftPassthroughCodec when the server doesn't report a version we map", async () => {
+  it("falls back to the canonical passthrough for a version we do not map", async () => {
     const f = await makeFixture();
     try {
       await f.harness.connect();
-      expect(f.harness.currentCodec().era).toBe("draft");
+      expect(f.harness.currentCodec().era).toBe("2026-07-28");
     } finally {
       await f.close();
     }
   });
 
   it("honors an explicit codec override on the options", async () => {
-    const f = await makeFixture({ codec: DraftPassthroughCodec });
+    const f = await makeFixture({ codec: CanonicalPassthroughCodec });
     try {
       await f.harness.connect();
-      expect(f.harness.currentCodec()).toBe(DraftPassthroughCodec);
+      expect(f.harness.currentCodec()).toBe(CanonicalPassthroughCodec);
     } finally {
       await f.close();
     }

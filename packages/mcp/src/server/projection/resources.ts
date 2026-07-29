@@ -55,8 +55,12 @@ import type { Unsubscribe } from "@agentick/runtime";
 
 import type { OnCrossingFiber, RunCrossing } from "./crossing.js";
 
-/** JSON-RPC error code MCP reserves for "resource not found". */
-const RESOURCE_NOT_FOUND = -32002;
+/**
+ * "Resource not found". `-32602` (Invalid Params) as of protocol `2026-07-28`,
+ * which renumbered it from `-32002` to stop squatting the JSON-RPC
+ * implementation-defined range for something that is plainly a bad parameter.
+ */
+const RESOURCE_NOT_FOUND = -32602;
 
 /**
  * Per-connection visibility predicate for FIXED resources. A hidden

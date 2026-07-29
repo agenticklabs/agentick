@@ -131,6 +131,7 @@ function bearerDeps(serverId: string): TransportFactoryDeps {
   return {
     elicit: async () => ({ outcome: "cancelled" }),
     serverId,
+    sessionId: "sess-1",
     credentialKey: (field) => `mcp:${serverId}:${field}`,
     interactive: false,
   };
@@ -630,6 +631,7 @@ describe("streamableHttpTransport — client factory + OAuth threading", () => {
         elicitCalls.push(request);
         return { outcome: "accepted", value: undefined };
       },
+      sessionId: "sess-1",
       serverId: "oauth-srv",
       credentialKey: (field) => `mcp:oauth-srv:${field}`,
       interactive: true,

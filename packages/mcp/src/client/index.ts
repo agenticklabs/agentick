@@ -37,7 +37,7 @@ export {
 
 export { type McpAuth, BearerAuth, type BearerAuthOptions, NoneAuth } from "./auth.js";
 
-export { type EraCodec, DraftPassthroughCodec, selectCodec } from "./era-codec.js";
+export { type EraCodec, CanonicalPassthroughCodec, selectCodec } from "./era-codec.js";
 
 export { McpLifecycle, type McpLifecycleOptions } from "./lifecycle.js";
 

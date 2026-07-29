@@ -37,10 +37,9 @@ export interface EraCodec {
   readonly era: McpSpecEra;
 
   /**
-   * Decode a `tools/list` response's tool descriptor into canonical
-   * form. The default `draft` codec is a passthrough; older eras may
-   * remap `outputSchema` (added in 2025-11-25), drop `annotations`,
-   * etc.
+   * Decode a `tools/list` response's tool descriptor into canonical form. The
+   * canonical-era codec is a passthrough; older eras may remap `outputSchema`
+   * (added in 2025-11-25), drop `annotations`, etc.
    */
   decodeTool(raw: Readonly<Record<string, unknown>>): McpToolDescriptor;
 }
@@ -50,13 +49,15 @@ export interface EraCodec {
 // ============================================================================
 
 /**
- * Identity codec — assumes the wire shape matches our canonical
- * (draft) shape. Selected when the server reports `protocolVersion`
- * matching the draft era, or as a fallback when negotiation can't
- * narrow further.
+ * Identity codec — the wire shape already matches canonical. Selected when the
+ * remote reports the canonical era, reports the pre-publication `"draft"`, or
+ * when negotiation cannot narrow further.
+ *
+ * Named for its ROLE rather than for an era, so bumping canonical does not
+ * rename it; `era` below is the version that role currently points at.
  */
-export const DraftPassthroughCodec: EraCodec = {
-  era: "draft",
+export const CanonicalPassthroughCodec: EraCodec = {
+  era: "2026-07-28",
   decodeTool(raw) {
     const r = raw as {
       name?: unknown;
@@ -87,24 +88,29 @@ export const DraftPassthroughCodec: EraCodec = {
 // ============================================================================
 
 /**
- * Pick a codec for a server-reported protocolVersion. Returns
- * `DraftPassthroughCodec` for unknown / future versions — the SDK
- * itself rejects egregiously incompatible servers at handshake time,
- * so anything we receive here is at least somewhat-compatible.
+ * Pick a codec for a remote-reported protocolVersion. Falls back to the
+ * canonical passthrough for unknown / future versions — the SDK rejects
+ * egregiously incompatible remotes at handshake, so what reaches here is at
+ * least somewhat compatible, and passing it through beats refusing to talk.
  *
- * Future eras register their codec by appending a case here. Keeping
- * the dispatch in one place avoids the polymorphic-dispatch trap of
- * "every era ships its own selector and they disagree on fallbacks."
+ * `"draft"` maps to canonical deliberately: servers built against the
+ * pre-publication draft report it, and the shapes are near-identical. Dropping
+ * it from {@link McpSpecEra} removed it as something we CLAIM to be, not as
+ * something we accept.
+ *
+ * Future eras register by appending a case here. One dispatch site, so eras
+ * cannot disagree about fallbacks.
  */
 export function selectCodec(protocolVersion: string | undefined): EraCodec {
   switch (protocolVersion) {
+    case "2026-07-28":
     case "draft":
     case undefined:
-      return DraftPassthroughCodec;
+      return CanonicalPassthroughCodec;
     // Older eras land here when their codecs ship:
-    //   case "2025-11-25": return latestOfficialCodec;
+    //   case "2025-11-25": return previousOfficialCodec;
     //   case "2024-11-05": return legacyCodec;
     default:
-      return DraftPassthroughCodec;
+      return CanonicalPassthroughCodec;
   }
 }

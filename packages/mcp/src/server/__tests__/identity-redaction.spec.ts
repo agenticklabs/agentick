@@ -42,6 +42,7 @@ import {
 } from "../index.js";
 import { InMemoryMcpTransport } from "../../transport/in-memory.js";
 import type { AcceptHandler, AuthPreGate, ServerTransport } from "../transports/types.js";
+import { inMemoryServerTransport } from "../transports/in-memory.js";
 
 // ============================================================================
 // Fixtures
@@ -393,5 +394,166 @@ describe("the full record still reaches the tool handler", () => {
     // …and the trunk still carries the redacted projection.
     expect(seen?.identity?.principal).toBe("user-42");
     expect(seen?.identity?.user).not.toHaveProperty("token");
+  });
+});
+
+// ============================================================================
+// 4 — THE SAME LAW ON THE IN-PROCESS TRANSPORT
+// ============================================================================
+
+/**
+ * Everything above arrives over a pre-gated HTTP-shaped crossing, where the token
+ * rides an `Authorization` header. In-process there is no header and no pre-gate:
+ * the caller already knows who it is and states it with
+ * `connect({ authenticatedUser })`, which forward-derives onto `accept` the same
+ * way the pre-gate does.
+ *
+ * Both halves have to hold on that path too, and they are the halves in tension —
+ * a handler calling the host's own API needs the caller's token, and the durable
+ * journal must never see it. Neither is safe to leave resting on a docblock.
+ */
+describe("in-process identity — connect({ authenticatedUser })", () => {
+  async function inProcessRig(): Promise<{
+    readonly seen: () => McpRequestContext | undefined;
+    readonly journal: MemoryJournal;
+    readonly events: readonly ProtocolEvent[];
+    readonly call: () => Promise<void>;
+    readonly stop: () => Promise<void>;
+  }> {
+    let seen: McpRequestContext | undefined;
+    const bus = new LocalEventBus();
+    const journal = new MemoryJournal({ capacity: 4096 });
+    const transport = inMemoryServerTransport();
+    const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+      name: "inproc-test",
+      serverInfo: { name: "inproc-test", version: "0.0.0" },
+      transports: [transport],
+      tools: {
+        registry: [toolDecl("echo")],
+        resolveHandler: () => async (_input, ctx) => {
+          seen = ctx;
+          return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        },
+      },
+      // No auth stage at all — the point is that a trusted transport can state the
+      // identity without one, so nothing here extracts a token from anywhere.
+    });
+    await harness.ready;
+    await harness.start();
+
+    const events: ProtocolEvent[] = [];
+    const fiber = Effect.runFork(
+      Stream.runForEach(bus.subscribe({ surface: "mcpServer" }), (e) =>
+        Effect.sync(() => {
+          events.push(e);
+        }),
+      ),
+    );
+
+    const clientTransport = await transport.connect({ authenticatedUser: TOKEN_BEARING_USER });
+    const client = new McpClient({ name: "c", version: "0.0.0" }, { capabilities: {} });
+    await client.connect(clientTransport as unknown as Transport);
+
+    return {
+      seen: () => seen,
+      journal,
+      events,
+      call: async () => {
+        await client.callTool({ name: "echo", arguments: {} }, CallToolResultSchema);
+        await settle();
+      },
+      stop: async () => {
+        await client.close().catch(() => {});
+        await harness.close();
+        await Effect.runPromise(Fiber.interrupt(fiber));
+      },
+    };
+  }
+
+  it("the tool handler sees the WHOLE record, token included", async () => {
+    // The hard requirement: a handler calling the host's own API has to call it as
+    // the caller, and on a trusted transport there is no header to recover that from.
+    const r = await inProcessRig();
+    try {
+      await r.call();
+      expect(r.seen()?.mcp?.user).toEqual(TOKEN_BEARING_USER);
+      expect((r.seen()?.mcp?.user as Record<string, unknown> | undefined)?.token).toBe(BEARER);
+    } finally {
+      await r.stop();
+    }
+  });
+
+  it("and the journal still never sees the credential", async () => {
+    const r = await inProcessRig();
+    try {
+      await r.call();
+      const records = await journaled(r.journal);
+      // Non-vacuity first: a capture that saw nothing would pass the fragment check
+      // trivially, which is how a redaction test quietly stops testing anything.
+      expect(records.length).toBeGreaterThan(0);
+      expect(JSON.stringify(records)).not.toContain(BEARER_FRAGMENT);
+    } finally {
+      await r.stop();
+    }
+  });
+
+  it("nor does any bus envelope", async () => {
+    const r = await inProcessRig();
+    try {
+      await r.call();
+      expect(r.events.length).toBeGreaterThan(0);
+      expect(JSON.stringify(r.events)).not.toContain(BEARER_FRAGMENT);
+    } finally {
+      await r.stop();
+    }
+  });
+
+  it("stamps the redacted projection, so the crossing is still attributable", async () => {
+    // Redaction that also lost WHO acted would be a different bug. The declared four
+    // survive; the open bag does not.
+    const r = await inProcessRig();
+    try {
+      await r.call();
+      const identity = identityOf(r.events, "mcp:command:call-tool");
+      expect(identity["principal"]).toBe("user-42");
+      expect(identity["user"]).toMatchObject({ id: "user-42", displayName: "Ada" });
+      expect(identity["user"]).not.toHaveProperty("token");
+    } finally {
+      await r.stop();
+    }
+  });
+
+  it("an explicitly ANONYMOUS connection stamps no user", async () => {
+    // `authenticatedUser: null` asserts anonymity; omitting the field entirely means
+    // "run your own authenticator", which is a different statement.
+    const bus = new LocalEventBus();
+    const journal = new MemoryJournal({ capacity: 1024 });
+    const transport = inMemoryServerTransport();
+    let seen: McpRequestContext | undefined;
+    const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+      name: "anon-test",
+      serverInfo: { name: "anon-test", version: "0.0.0" },
+      transports: [transport],
+      tools: {
+        registry: [toolDecl("echo")],
+        resolveHandler: () => async (_input, ctx) => {
+          seen = ctx;
+          return { kind: "inline", content: [{ type: "text", text: "ok" }] as ContentBlock[] };
+        },
+      },
+    });
+    await harness.ready;
+    await harness.start();
+    const clientTransport = await transport.connect({ authenticatedUser: null });
+    const client = new McpClient({ name: "c", version: "0.0.0" }, { capabilities: {} });
+    await client.connect(clientTransport as unknown as Transport);
+    try {
+      await client.callTool({ name: "echo", arguments: {} }, CallToolResultSchema);
+      await settle();
+      expect(seen?.mcp?.user ?? null).toBeNull();
+    } finally {
+      await client.close().catch(() => {});
+      await harness.close();
+    }
   });
 });

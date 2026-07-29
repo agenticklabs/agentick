@@ -441,9 +441,9 @@ function loopbackSections(factories: McpConformanceFactories, era: McpSpecEra): 
       it("selects an era codec on connect", () => {
         // The harness re-selects from the negotiated protocolVersion;
         // `selectCodec` collapses all versions to the draft passthrough
-        // today, so the era is always "draft" post-connect. Pinned so a
+        // today, so the era is always canonical post-connect. Pinned so a
         // future real 2025-11-25 codec makes this assertion meaningful.
-        expect(lb.client.currentCodec().era).toBe("draft");
+        expect(lb.client.currentCodec().era).toBe("2026-07-28");
       });
     });
 
@@ -862,12 +862,15 @@ function eraCodecNormalizationSection(): void {
     };
 
     it("selects a codec for both draft and 2025-11-25", () => {
-      expect(selectCodec("draft").era).toBe("draft");
+      // `"draft"` is still accepted on the wire — a server built against the
+      // pre-publication draft reports it — and maps to canonical.
+      expect(selectCodec("draft").era).toBe("2026-07-28");
+      expect(selectCodec("2026-07-28").era).toBe("2026-07-28");
       expect(selectCodec("2025-11-25")).toBeDefined();
     });
 
     it("decodes a tool descriptor identically across the matrix (passthrough today)", () => {
-      const a = selectCodec("draft").decodeTool(rawTool);
+      const a = selectCodec("2026-07-28").decodeTool(rawTool);
       const b = selectCodec("2025-11-25").decodeTool(rawTool);
       expect(a).toEqual(b);
       expect(a.name).toBe("sample");
@@ -936,7 +939,7 @@ export function runMcpConformance(
   const label = options.label ? ` — ${options.label}` : "";
   suite(`MCP conformance${label}`, () => {
     // Part A + C: the loopback suite run against BOTH eras (version matrix).
-    for (const era of ["draft", "2025-11-25"] as const) {
+    for (const era of ["2026-07-28", "2025-11-25"] as const) {
       loopbackSections(factories, era);
     }
     // Part A: tasks (era-independent).

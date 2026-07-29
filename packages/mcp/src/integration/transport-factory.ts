@@ -63,6 +63,48 @@ export interface TransportFactoryDeps {
   readonly serverId: string;
 
   /**
+   * The session this transport is being built for.
+   *
+   * **The join key for per-session identity.** A `target: "session"` extension is
+   * declared once at `createApp` and cached, so `withMCP`'s config cannot close over
+   * anything session-specific — this factory is the only per-session hook, and this is
+   * how it learns *which* session.
+   *
+   * Its intended use is looking up the caller's auth material in the ADOPTER's own
+   * store, keyed by the session they created:
+   *
+   * ```ts
+   * transport: ({ sessionId }) =>
+   *   inproc.connect({ authenticatedUser: myAuth.forSession(sessionId) }),
+   * ```
+   *
+   * Deliberately NOT the principal, and deliberately not the material itself. A
+   * caller's live token is per-session, non-durable secret material, and every
+   * framework channel that could carry it here is the wrong one: the principal is an
+   * identity (a token in it is the leak `toIngressIdentity` exists to prevent), session
+   * metadata is persisted, and `credentials` is a durable store for OUTBOUND secrets.
+   * So the framework hands over the key and never holds the secret.
+   */
+  readonly sessionId: string;
+
+  /**
+   * The session's owning principal (ADR 48), when it has one.
+   *
+   * For attribution without a store lookup — an in-process server whose handlers need
+   * to know WHO but not to act AS them:
+   *
+   * ```ts
+   * transport: ({ principal }) => inproc.connect({ authenticatedUser: { id: principal } }),
+   * ```
+   *
+   * Not a substitute for {@link sessionId} when material is needed: a principal is an
+   * identity, so a token in one is precisely the leak `toIngressIdentity` prevents. It is
+   * also the coarser key — one principal may own several concurrent sessions, each
+   * authenticated separately.
+   */
+  readonly principal?: string;
+
+  /**
    * Credentials harness bound to this session, when
    * `withCredentials({ store })` is installed at the app/gateway
    * level. `undefined` if no credentials substrate is present —

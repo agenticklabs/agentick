@@ -46,7 +46,6 @@ import { Effect, Stream } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime";
 import type {
   EventBus,
-  EventScope,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
@@ -122,7 +121,7 @@ import type {
 } from "./types.js";
 import type { McpConnectionStatus, StatusUnsubscribe } from "./connection-status.js";
 import type { EraCodec } from "./era-codec.js";
-import { DraftPassthroughCodec, selectCodec } from "./era-codec.js";
+import { CanonicalPassthroughCodec, selectCodec } from "./era-codec.js";
 import { makeElicitRequestHandler } from "./elicit-bridge.js";
 import { omitUndefined } from "@agentick/utils";
 
@@ -452,11 +451,13 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     inbox: MessageInbox,
     options: McpClientHarnessOptions,
   ) {
-    super("mcp", scopeId, journal, bus, inbox);
+    // Forward the WHOLE bag. This `super` took no options at all, so every base
+    // slot a caller passed — `parentScope` included — was silently discarded.
+    super("mcp", scopeId, journal, bus, inbox, options);
     this.serverId = options.serverId;
     this.options = options;
     this.currentTransport = options.transport;
-    this.codec = options.codec ?? DraftPassthroughCodec;
+    this.codec = options.codec ?? CanonicalPassthroughCodec;
     this.elicitAddress = options.elicitAddress;
     this.lifecycle = new McpLifecycle({
       ...omitUndefined({ reconnect: options.reconnect }),
@@ -494,50 +495,46 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     // reauthenticate) is NOT declared — those verbs bind transports +
     // auth strategies (non-serializable, construction-bound; ADR 51
     // §1.2) and never ran through runOperation to begin with.
-    const scope = (): EventScope => ({ sessionId: this.scopeId });
+    // NO scope factory. This harness's `scopeId` is DOUBLY composed
+    // (`<sessionId>:mcp:<serverId>`), so stamping it as `sessionId` put a value on
+    // every envelope that no session-scoped subscription could ever match. The
+    // owning session arrives via `parentScope` at construction.
     this.listToolsCmd = this.command({
       name: "mcp:list-tools",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: () => this.listToolsBody(),
     });
     this.callToolCmd = this.command({
       name: "mcp:call-tool",
-      scope,
       handler: (i: McpCallToolInput) => this.callToolBody(i),
     });
     this.callToolAsTaskCmd = this.command({
       name: "mcp:call-tool-as-task",
-      scope,
       handler: (i: CallToolAsTaskParams) => this.callToolAsTaskBody(i),
     });
     this.getTaskCmd = this.command({
       name: "mcp:get-task",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: { readonly taskId: string }) => this.getTaskBody(i),
     });
     this.getTaskResultCmd = this.command({
       name: "mcp:get-task-result",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: { readonly taskId: string }) => this.getTaskResultBody(i),
     });
     this.listTasksCmd = this.command({
       name: "mcp:list-tasks",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: () => this.listTasksBody(),
     });
     this.cancelTaskCmd = this.command({
       name: "mcp:cancel-task",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      scope,
       handler: (i: { readonly taskId: string }) => this.cancelTaskBody(i),
     });
 
@@ -550,37 +547,30 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     // row is ratified for external resource/prompt reads.
     this.listResourcesCmd = this.command({
       name: "mcp:list-resources",
-      scope,
       handler: (i: McpCursorInput) => this.listResourcesBody(i),
     });
     this.listResourceTemplatesCmd = this.command({
       name: "mcp:list-resource-templates",
-      scope,
       handler: (i: McpCursorInput) => this.listResourceTemplatesBody(i),
     });
     this.readResourceCmd = this.command({
       name: "mcp:read-resource",
-      scope,
       handler: (i: McpReadResourceInput) => this.readResourceBody(i),
     });
     this.listPromptsCmd = this.command({
       name: "mcp:list-prompts",
-      scope,
       handler: (i: McpCursorInput) => this.listPromptsBody(i),
     });
     this.getPromptCmd = this.command({
       name: "mcp:get-prompt",
-      scope,
       handler: (i: McpGetPromptInput) => this.getPromptBody(i),
     });
     this.completeCmd = this.command({
       name: "mcp:complete",
-      scope,
       handler: (i: McpCompleteInput) => this.completeBody(i),
     });
     this.setLoggingLevelCmd = this.command({
       name: "mcp:set-logging-level",
-      scope,
       handler: (i: McpSetLoggingLevelInput) => this.setLoggingLevelBody(i),
     });
   }
@@ -1614,7 +1604,6 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         name: `mcp:${this.scopeId}:log`,
         phase: "delta",
         timestamp: Date.now(),
-        scope: { sessionId: this.scopeId },
         payload: { serverId: this.serverId, ...message },
       } as import("@agentick/spec").ProtocolEvent),
     ).catch(() => {
@@ -1659,7 +1648,6 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
         name: `mcp:${this.scopeId}:state`,
         phase: "delta",
         timestamp: Date.now(),
-        scope: { sessionId: this.scopeId },
         payload: { state, serverId: this.serverId },
       } as import("@agentick/spec").ProtocolEvent),
     );

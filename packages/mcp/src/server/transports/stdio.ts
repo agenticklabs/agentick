@@ -33,6 +33,8 @@ export function stdioTransport(): ServerTransport {
       void accept(sdkTransport, {
         transportKind: "stdio",
         remoteAddress: "stdio",
+        // One pipe, no per-message credentials — nothing to re-authenticate against.
+        credentialsPerRequest: false,
       });
     },
     async close() {

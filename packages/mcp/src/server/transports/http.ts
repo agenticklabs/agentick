@@ -208,9 +208,13 @@ function buildConnectionInfo(req: IncomingMessage): McpConnectionInfo {
     remoteAddress?: string;
     origin?: string;
     headers: Record<string, string | undefined>;
+    credentialsPerRequest: boolean;
   } = {
     transportKind: "http",
     headers,
+    // Every request carries its own `Authorization`, so the crossing re-authenticates
+    // — which is what catches a token expiring mid-connection on a long-lived stream.
+    credentialsPerRequest: true,
   };
   const remoteAddress = req.socket.remoteAddress;
   if (remoteAddress !== undefined) info.remoteAddress = remoteAddress;
