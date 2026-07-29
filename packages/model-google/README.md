@@ -81,14 +81,37 @@ Defaults with no `model` argument: `gemini-2.5-flash`.
 
 Gemini is natively multimodal, and the adapter projects `image`, `document`, `audio`, and `video` parts alike — the part type barely matters, the _source_ does:
 
-| Source      | Native part                                  |
-| ----------- | -------------------------------------------- |
-| `base64`    | `inlineData` — mimeType plus data            |
-| `url`       | `fileData` with `fileUri` set to the URL     |
-| `gcs`       | `fileData` with `fileUri` set to `gs://…`    |
-| `reference` | `fileData` with `fileUri` set to the file id |
+| Source      | Native part                              |
+| ----------- | ---------------------------------------- |
+| `base64`    | `inlineData` — mimeType plus data        |
+| `url`       | `fileData` with `fileUri` set to the URL |
+| `reference` | **declined** — see below                 |
 
-`s3` sources have no native form; stage them to GCS or base64 first. A replayed `reasoning` part is **dropped rather than flattened**, because Gemini round-trips thinking through the `thoughtSignature` on the function-call part, not through a replayed reasoning block.
+A `gs://` URI is just a `url` whose scheme is declared: Gemini's `fileUri` reads Cloud Storage natively, so `urlSchemes` lists `gs` and the URI passes through with zero bytes moved. The `gcs` MediaSource variant this used to require is gone — the adapter's `url` arm was already doing the work, and the framework was only recomposing `gs://${bucket}/${object}` on its behalf.
+
+Declared as `capabilities.media`, so the framework screens an unsupported source out _before_ this adapter is asked to project it:
+
+```ts
+media: {
+  image: ["base64", "url"],
+  document: ["base64", "url"],
+  audio: ["base64", "url"],
+  video: ["base64", "url"],
+  urlSchemes: ["https", "http", "data", "gs"], // ← `gs:` is why this field exists
+}
+```
+
+> [!IMPORTANT]
+> A `reference` source is **declined**, not forwarded. Its `fileId` lives in the adopter's namespace and Gemini's `fileUri` accepts only a `gs://` URI or one of its own Files API URIs — so this adapter used to emit the bare id and earn, every single time:
+>
+> ```
+> Unable to submit request because the fileUri parameter must be a Cloud Storage or
+> HTTP(S) URI but the entered value was '019faa2c-5506-7000-b8ea-3c63628e4c89'
+> ```
+>
+> A deterministic rejection against a durable timeline entry, so every later turn resent it and failed identically — **one attachment made a conversation permanently unusable.** Resolve a `reference` to a `url` or `base64` source in an `onModelGenerate` hook (that seam runs _before_ the screen, precisely so it gets its chance) — hand over the `gs://` URI itself and Vertex reads it natively, zero bytes moved.
+
+A replayed `reasoning` part is **dropped rather than flattened**, because Gemini round-trips thinking through the `thoughtSignature` on the function-call part, not through a replayed reasoning block. That drop is silent today and pinned by `src/__tests__/silent-drops.spec.ts` so a fix cannot land unnoticed.
 
 ## Provider knobs
 

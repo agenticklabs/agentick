@@ -40,6 +40,7 @@
 
 import type {
   AdapterDelta,
+  ExecutionTarget,
   LanguageModelExecutionResult,
   LanguageModelInput,
   LanguageModelMessage,
@@ -52,6 +53,7 @@ import { defaultFinalizeStream, type LanguageModelAdapter } from "./language-mod
 import { composeTransforms, type DeltaTransform } from "./delta-transform.js";
 import { StreamAccumulator } from "./stream-accumulator.js";
 import { customBlockTransform } from "./tag-transforms.js";
+import { applyMediaSupport } from "./media-support.js";
 
 /** Options bag shared by `generate` and `generateStream`. */
 export interface GenerateOptions<TRaw = unknown, TChunk = unknown> {
@@ -83,9 +85,22 @@ export interface GenerateStreamHandle {
   readonly result: Promise<LanguageModelExecutionResult>;
 }
 
-function toInput(options: GenerateOptions<unknown, unknown>): LanguageModelInput {
+/**
+ * Build the canonical input, screening media against what the adapter's target
+ * declares it can carry.
+ *
+ * This path never runs `project`, so it screens here — the executor does the same
+ * thing at its own `projectImpl`. Both are framework-owned; an adapter has no way
+ * to skip either, which is the whole reason the decision was taken out of the
+ * adapters' own `switch` arms.
+ */
+function toInput(
+  options: GenerateOptions<unknown, unknown>,
+  target: ExecutionTarget,
+): LanguageModelInput {
+  const { messages } = applyMediaSupport(options.messages, target);
   return {
-    messages: options.messages,
+    messages,
     ...omitUndefined({ tools: options.tools, parameters: options.parameters }),
   };
 }
@@ -99,7 +114,10 @@ export async function generate<TRaw, TChunk>(
   options: GenerateOptions<TRaw, TChunk>,
 ): Promise<LanguageModelExecutionResult> {
   const adapter = options.model;
-  const request = adapter.prepareRequest({ targetInput: toInput(options), target: adapter.target });
+  const request = adapter.prepareRequest({
+    targetInput: toInput(options, adapter.target),
+    target: adapter.target,
+  });
   let raw: TRaw = await adapter.send(request, options.signal);
   if (adapter.postProcessForNormalize) raw = adapter.postProcessForNormalize(raw);
   return adapter.normalize(raw);
@@ -133,7 +151,7 @@ export function generateStream<TRaw, TChunk>(
         );
       }
       const request = adapter.prepareRequest({
-        targetInput: toInput(options),
+        targetInput: toInput(options, adapter.target),
         target: adapter.target,
       });
       const iter = await adapter.openStream(request, options.signal);

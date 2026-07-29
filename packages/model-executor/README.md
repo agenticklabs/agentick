@@ -228,6 +228,27 @@ declare function audit(x: unknown): void;
 
 The transformed value is what actually reaches `send` / `openStream`. The nested operation journals with `parentOpId` pointing at the enclosing `model:generate`, so causality survives into the trace.
 
+### Where the media screen runs, and why it matters
+
+Between the hook cascade and `prepareRequest`, the executor screens every media part against `target.capabilities.media` — dropping what the target has declared it cannot carry. Placement is the whole point, and both earlier positions were wrong in ways that succeeded silently:
+
+| Position                | What breaks                                                                                                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Inside `defaultProject` | Bypassed the moment an adapter supplies its own `project` — Anthropic does. A screen a custom projection can skip is not a guarantee                                                                                                  |
+| In `projectImpl`        | Runs **before** `model:generate`, so it drops parts `onBeforeModelGenerate` was about to **fix**. An app resolving its own `reference` sources at that seam finds its attachments already gone — and nothing fails, so nobody notices |
+
+So it sits as late as possible: after every transform has had its chance, before any adapter can skip it.
+
+```ts
+// This ordering is guaranteed: the hook gets first refusal on every part.
+exec.hooks.onBeforeModelGenerate((input) => resolveMyFileIds(input));
+// → then the screen drops only what the hook left unprojectable
+```
+
+That is the seam for the one source the framework cannot resolve. A `MediaSource` of `{ type: "reference", fileId }` names something in **your** storage — swap it for a `url`, `gcs`, or `base64` source your provider accepts, and it goes through. Leave it, and it is dropped with a stated reason rather than sent in a form the provider rejects.
+
+Verdicts are not threaded anywhere: `applyMediaSupport` is pure, so re-derive them when you need them, joined to `buildMessageProvenance` to name the timeline entry behind each. Surfacing them per-request without asking is `TODO(decline-reporting)`.
+
 ## Cancellation
 
 `abort({ executionId })` fires the in-flight `AbortController`, which is merged with the caller's `signal` and with Effect's own fiber-interrupt signal into one signal the SDK sees. Aborting before a run starts short-circuits it: the next call with that id resolves a `canceled` terminal without touching the provider.
@@ -362,6 +383,8 @@ Adapter hooks that override executor defaults: `project`, `adapterTransforms`, `
 - **No cost or pricing concern lives here.** `estimateCost` and the pricing tables are in [@agentick/model](../model); the executor only reports `usage` as the adapter normalized it.
 
 ## Verified by
+
+- `src/__tests__/media-screen-ordering.spec.ts` — a declared-unprojectable source dropped before `prepareRequest` sees it, a declared-carryable one kept, neighbouring text never taken with the dropped part, and the ordering that matters: an `onBeforeModelGenerate` hook resolving a `reference` to `gcs` has its result **survive**, while whatever the hook leaves unresolved is still screened. Plus `project()` deliberately NOT screening, since the request it produces is not yet the request being sent.
 
 - `src/__tests__/language-model-executor-conformance.spec.ts` — `runExecutorConformance` against the real executor with a synthetic adapter. The suite includes the command block: `model:generate` mints and fires its hooks, a guard veto rejects `execute()` and folds to a `vetoed` terminal on `run()`, the streaming command fires `onAfterModelGenerateStream` at its terminal, and every envelope carries a `model:*` operation name.
 - `src/__tests__/base-effect-stream.spec.ts` — delta ordering through the pipeline, synthetic message-start and finalize gap-filling, bounded-queue backpressure under a slow consumer, `abort()` interrupting the stream fiber, iterator `return()` interrupting the producer, a provider failure settling (not hanging) with the typed error on both the iterator and `.result`, and the per-chunk interceptor observing and transforming what the iterator sees.

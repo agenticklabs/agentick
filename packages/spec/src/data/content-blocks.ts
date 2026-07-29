@@ -50,7 +50,7 @@ export type MessageRole = "user" | "assistant" | "system" | "tool" | "event" | (
 /**
  * Discriminator for {@link MediaSource}.
  */
-export type MediaSourceType = "url" | "base64" | "reference" | "s3" | "gcs";
+export type MediaSourceType = "url" | "base64" | "reference";
 
 // Common MIME hints — open strings, but typed for ergonomics.
 export type ImageMimeType = "image/jpeg" | "image/png" | "image/gif" | "image/webp" | (string & {});
@@ -140,8 +140,30 @@ export interface BaseContentBlock {
 // Media sources
 // ============================================================================
 
+/**
+ * A URI, of ANY scheme — `https:`, `data:`, `gs:`, `s3:`, `r2:`, `azure:`, `file:`,
+ * whatever your storage speaks.
+ *
+ * This deliberately absorbs what used to be separate `s3` and `gcs` variants, and the
+ * reason they were wrong is worth keeping: **the framework never read their structure.**
+ * Both existed only to be re-concatenated — `gs://${bucket}/${object}` in the Google
+ * adapter, `s3://${bucket}/${key}` in the AI SDK one — so an app decomposed a URI purely
+ * so the framework could put it back together. Pure ceremony, and it named two vendors in
+ * a canonical vocabulary that has no business knowing any.
+ *
+ * It also had no closure. R2, Azure Blob, MinIO, IPFS and a local file are all equally
+ * legitimate, and each would have meant a breaking spec change plus a new arm in every
+ * adapter. A scheme-bearing URI is closed under all of them with no framework change at
+ * all.
+ *
+ * Which scheme a given target can actually FETCH is a separate question, and a real one:
+ * Gemini reads `gs://` natively, Anthropic does not. That is declared per target by
+ * `TargetCapabilities.media.urlSchemes` rather than inferred from a source variant, so
+ * adding a scheme is data rather than a release.
+ */
 export interface UrlSource {
   readonly type: "url";
+  /** Any URI. `gs://bucket/object`, `s3://bucket/key`, `data:image/png;base64,…`, … */
   readonly url: string;
   readonly mimeType?: string;
   readonly metadata?: Record<string, unknown>;
@@ -154,8 +176,35 @@ export interface Base64Source {
   readonly metadata?: Record<string, unknown>;
 }
 
+/**
+ * A file the APP holds, named by an id only the app can resolve.
+ *
+ * **The framework cannot project this.** `fileId` is in the ADOPTER's namespace — a row
+ * in their media table, a key in their object store — so no adapter can turn it into
+ * anything a provider accepts. An adapter that receives one should decline it (see
+ * `LanguageModelAdapter.mapProviderError`'s sibling concern: emit nothing rather than
+ * something invalid), and an app that uses this source type is responsible for
+ * resolving it to a projectable source — a `url` (of any scheme the target accepts) or
+ * `base64` — before the request leaves. The `model:generate` / `model:generate_stream` middleware keys
+ * (`onModelGenerate`, the full `(input, next)` form) are the seam for that.
+ *
+ * This docblock exists because its absence cost a day. `fileId: string` said nothing
+ * about whose namespace it was in, so the Google adapter read it as a Gemini Files API
+ * id and emitted `fileData: { fileUri: fileId }`. Vertex replied:
+ *
+ *     Unable to submit request because the fileUri parameter must be a Cloud Storage
+ *     or HTTP(S) URI but the entered value was '019faa2c-5506-7000-b8ea-3c63628e4c89'
+ *
+ * Both readings were reasonable. The contract simply never said, and the rejection was
+ * deterministic against a durable entry — so every subsequent turn resent the block and
+ * failed identically, making the conversation permanently unusable.
+ *
+ * `fileName`, `size` and `mimeType` are for DISPLAY and are safe to rely on: a renderer
+ * shows the filename and size without resolving anything.
+ */
 export interface FileReferenceSource {
   readonly type: "reference";
+  /** Opaque to the framework — the ADOPTER's file id. See the note above. */
   readonly fileId: string;
   readonly mimeType?: string;
   readonly fileName?: string;
@@ -163,25 +212,16 @@ export interface FileReferenceSource {
   readonly metadata?: Record<string, unknown>;
 }
 
-export interface S3Source {
-  readonly type: "s3";
-  readonly bucket: string;
-  readonly key: string;
-  readonly region?: string;
-  readonly mimeType?: string;
-  readonly metadata?: Record<string, unknown>;
-}
-
-export interface GCSSource {
-  readonly type: "gcs";
-  readonly bucket: string;
-  readonly object: string;
-  readonly project?: string;
-  readonly mimeType?: string;
-  readonly metadata?: Record<string, unknown>;
-}
-
-export type MediaSource = UrlSource | Base64Source | FileReferenceSource | S3Source | GCSSource;
+/**
+ * Three source kinds, and the set is CLOSED — which is the point.
+ *
+ * `S3Source` and `GCSSource` used to sit here and are deleted, not deprecated: the
+ * framework only ever recomposed their fields into a URI, and naming two storage vendors
+ * in a canonical vocabulary invited an unbounded tail of siblings (R2, Azure, MinIO,
+ * IPFS, `file:`). {@link UrlSource} carries any of them as a scheme, and
+ * `TargetCapabilities.media.urlSchemes` says which schemes a target can fetch.
+ */
+export type MediaSource = UrlSource | Base64Source | FileReferenceSource;
 
 // ============================================================================
 // Citations

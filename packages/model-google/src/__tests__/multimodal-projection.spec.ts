@@ -75,7 +75,7 @@ describe("google() adapter — ADR 57 multimodal projection", () => {
       targetInput: userInput([
         {
           type: "video",
-          source: { type: "gcs", bucket: "b", object: "clip.mp4", mimeType: "video/mp4" },
+          source: { type: "url", url: "gs://b/clip.mp4", mimeType: "video/mp4" },
         },
       ]),
       target,

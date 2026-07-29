@@ -11,3 +11,12 @@ export {
   type ScriptedAdapter,
   type ScriptedAdapterOptions,
 } from "./scripted-adapter.js";
+
+// The `capabilities.media` declaration bound to the adapter's real wire projection.
+// Lives here rather than in @agentick/spec-conformance because it needs
+// `detectDroppedInputs`, and that package is spec + utils only by design.
+export {
+  runMediaDeclarationCheck,
+  MEDIA_MODALITIES,
+  type MediaModality,
+} from "./media-declaration.js";

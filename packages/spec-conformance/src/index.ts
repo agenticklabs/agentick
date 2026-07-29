@@ -60,6 +60,13 @@ export {
   type ExecutorConformanceFactoryInput,
 } from "./executor.js";
 
+// NOTE: `runMediaDeclarationCheck` lives in `@agentick/model/testing`, not here. It
+// checks a declaration against an adapter's real wire projection, which needs
+// `detectDroppedInputs` from @agentick/model — and this package is spec + utils only by
+// design, since it certifies SPEC protocols rather than one layer's implementations.
+// What stays here is the part that is genuinely spec-level: declaration/supportsVision
+// coherence, inside `runExecutorConformance`.
+
 // Loop executor (Phase 4d.2)
 export {
   runLoopExecutorConformance,

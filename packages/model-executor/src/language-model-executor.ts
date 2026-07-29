@@ -77,6 +77,8 @@ import {
 } from "@agentick/spec";
 
 import {
+  applyMediaSupport,
+  type PartDeclined,
   composeTransforms,
   customBlockTransform,
   defaultFinalizeStream,
@@ -416,6 +418,44 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    */
   private projectImpl(input: ProjectInput): LanguageModelInput {
     return this.adapter.project ? this.adapter.project(input) : defaultProject(input);
+  }
+
+  /**
+   * Screen media against what the target DECLARES it carries — the LAST thing that
+   * happens before the adapter builds its native request.
+   *
+   * Placement is the whole design, and two earlier positions are both wrong:
+   *
+   *   - **Inside `defaultProject`** — bypassed the moment an adapter supplies its own
+   *     `project`, which Anthropic does. A screen a custom projection can skip is the
+   *     same "trust every adapter" problem the declaration exists to remove.
+   *   - **In `projectImpl`** — runs BEFORE the `model:generate` command, so it would
+   *     drop parts that `onBeforeModelGenerate` was about to FIX. An app that resolves
+   *     its own `reference` sources to `gcs` / `base64` at that hook (the documented
+   *     way to handle an id the framework cannot resolve) would find its attachments
+   *     already gone. The screen must judge the request that is actually being sent,
+   *     which means after every hook that can still change it.
+   *
+   * So it sits here, between the hook cascade and `prepareRequest`: late enough that
+   * every transform has had its chance, early enough that no adapter can skip it.
+   *
+   * Verdicts are dropped rather than threaded — `applyMediaSupport` is pure, so a
+   * caller that wants them re-derives them, joined to `buildMessageProvenance` to name
+   * the timeline entry behind each. TODO(decline-reporting): emit them on the generate
+   * operation so a silently dropped attachment is observable without asking.
+   */
+  private screenMedia(input: ExecuteInput<LanguageModelInput>): {
+    readonly input: ExecuteInput<LanguageModelInput>;
+    readonly declined: readonly PartDeclined[];
+  } {
+    const { messages, declined } = applyMediaSupport(input.targetInput.messages, input.target);
+    return {
+      input:
+        messages === input.targetInput.messages
+          ? input
+          : { ...input, targetInput: { ...input.targetInput, messages } },
+      declined,
+    };
   }
 
   /**
@@ -768,7 +808,38 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       };
       // (2) prepareRequest — pure, provider-native. This is the value the
       // `onBeforeModelProviderRequest` hook transforms last-mile.
-      const request = this.prepareRequest(input);
+      //
+      // `screenMedia` first: `input` here is POST-hook (the command cascade already
+      // ran `onBeforeModelGenerate`), so an app that resolves its own sources at that
+      // seam has already done so, and what remains genuinely cannot go on the wire.
+      const screened = this.screenMedia(input);
+      // A dropped attachment on an otherwise SUCCESSFUL request is the quietest failure
+      // in this layer: the model never sees it, the answer comes back confident, and
+      // nothing marks it. So it is logged rather than merely made auditable — one warning
+      // per declined part, carrying the position so a reader can join it to
+      // `buildMessageProvenance` and name the timeline entry. `ctx.log` is
+      // fire-and-forget and never a control path, and the adopter's log level decides
+      // whether anyone sees it. TODO(decline-reporting): also project these onto the
+      // stream, for a UI that wants to tell the user directly.
+      if (screened.declined.length > 0) {
+        const opCtx = yield* this.currentOperationCtx();
+        for (const part of screened.declined) {
+          opCtx.log.warning(
+            {
+              event: "model.media.declined",
+              provider: this.adapter.provider,
+              modelId: input.target.modelId,
+              messageIndex: part.messageIndex,
+              partIndex: part.partIndex,
+              partType: part.partType,
+              sourceType: part.sourceType,
+              reason: part.reason,
+            },
+            "model",
+          );
+        }
+      }
+      const request = this.prepareRequest(screened.input);
       // (3) Invoke the nested provider-request command in-fiber. Its OWN sink
       // (raw TChunk) is a no-op here — the raw chunk hook wraps it; the
       // AdapterDelta flow rides `call.deltaSink`/the bus inside the body. The

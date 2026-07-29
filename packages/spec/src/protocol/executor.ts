@@ -307,8 +307,31 @@ export type LanguageModelMessagePart =
       readonly cache?: import("../data/entries.js").CacheHint;
     }
   | {
+      /**
+       * Wire-native image. Carries a {@link MediaSource}, for the same reason
+       * `document` / `audio` / `video` below do.
+       *
+       * This was `imageUrl: string` — the lossy pre-flattening the next member's
+       * docblock warns against — and it was the ONLY member that still did it.
+       * The cost was not theoretical:
+       *
+       *   - A `MediaSource` that has no string form could not survive the trip. A
+       *     `reference` (an adopter's own file id) was flattened to the bare id and
+       *     handed to providers as a URL; Vertex answered "the fileUri parameter must
+       *     be a Cloud Storage or HTTP(S) URI but the entered value was
+       *     '019faa2c-…'". The information was destroyed before any adapter — or any
+       *     amount of provider knowledge — could have helped.
+       *   - Adapters re-parsed the string back into a `MediaSource` to project it
+       *     (`imageSourceFromUrl` in the Anthropic adapter). A structured value
+       *     stringified and then reverse-engineered, losing exactly the cases that
+       *     have no lexical form.
+       *
+       * It survived because two of four providers happen to want a URL string on the
+       * wire, so the flattening looked free until a source type appeared that has no
+       * string form.
+       */
       readonly type: "image";
-      readonly imageUrl: string;
+      readonly source: MediaSource;
       readonly mediaType?: string;
       readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;

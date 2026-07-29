@@ -85,7 +85,17 @@ The last two matter: a refusal and a paused turn are not a clean completion, and
 | `document`  | `document`                       | base64 (inline), URL (Anthropic fetches server-side)             |
 | `reasoning` | `thinking` / `redacted_thinking` | signed thinking replayed verbatim; redacted payload stays opaque |
 
-Audio and video input are **dropped, not flattened** — Messages has no native part for either, and a transcript stuffed into text would be a silent token bomb with different semantics. Same for `reference` (file id), `s3`, and `gcs` document sources: the SDK's document `source` union does not express them.
+Declared as `capabilities.media` — and what it **omits** is the load-bearing part:
+
+```ts
+media: { image: ["base64", "url"], document: ["base64", "url"] }
+//  audio and video are absent, which is how "cannot carry" becomes a stated fact
+```
+
+Audio and video input are **dropped, not flattened** — Messages has no native part for either, and a transcript stuffed into text would be a silent token bomb with different semantics. Same for a `reference` (an adopter file id): the SDK's document `source` union does not express it. And `urlSchemes` is left at its default, so a `gs://` or `s3://` URI is declined rather than handed to an API that cannot fetch it.
+
+> [!NOTE]
+> The audio and video cases are why the declaration exists at all. This adapter's projection has **no arm** for either — those parts fall off the end of the `switch` with no `null` returned anywhere, so no "report your declines" convention could have covered them. Declaring the omission turns a hole in a `switch` into something the framework enforces and a test can check. `src/__tests__/silent-drops.spec.ts` pins both, plus the `responseFormat` drop noted under Provider knobs.
 
 ## Provider knobs
 
@@ -186,7 +196,7 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 - **`responseFormat` is dropped.** The canonical structured-output knob has no Messages equivalent this adapter maps. `generateObject` still validates the model's text, so it stays correct — but prompt the JSON contract explicitly here.
 - **No audio or video input.** Dropped rather than flattened; Messages has no native part.
-- **Document sources are base64 or URL only.** `reference`, `s3`, and `gcs` are not expressible in the SDK's `source` union.
+- **Document sources are base64 or an HTTP(S) URL only.** A `reference` is not expressible in the SDK's `source` union, and a non-HTTP URI scheme is declined by the media screen because `urlSchemes` is left at its default.
 - **Server-tool types are local.** The web-search block and citation shapes are this package's own interfaces until the SDK types them.
 - **Code-execution provenance.** Only web search is stamped with `executedBy`; other server tools return their results unmarked.
 

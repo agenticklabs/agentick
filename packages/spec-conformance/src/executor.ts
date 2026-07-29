@@ -27,14 +27,18 @@ import { ADAPTER_DELTA_TYPES } from "@agentick/spec";
 import { drainRejection } from "@agentick/utils/testing";
 import type {
   AdapterDeltaType,
+  ContentBlock,
   EventBus,
   ImageBlock,
+  MediaSourceKind,
+  MediaSupport,
   LanguageModelExecutionResult,
   LanguageModelExecutor,
   LanguageModelInput,
   LanguageModelTarget,
   RenderedTree,
   SectionEntry,
+  MediaSource,
 } from "@agentick/spec";
 
 // ============================================================================
@@ -68,6 +72,8 @@ const SPEC_VERSION_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 function mkRenderedTree(
   opts: {
     imageBlock?: ImageBlock;
+    /** Any modality block — the media-support probe drives all four. */
+    mediaBlock?: ContentBlock;
     config?: RenderedTree["config"];
     providerOptions?: RenderedTree["providerOptions"];
   } = {},
@@ -77,12 +83,13 @@ function mkRenderedTree(
     id: "system",
     content: [{ type: "text", text: "You are a helpful assistant." }],
   };
+  const media = opts.mediaBlock ?? opts.imageBlock;
   const userContent: RenderedTree["context"]["entries"][number] = {
     kind: "message",
     id: "m_1",
     role: "user",
-    content: opts.imageBlock
-      ? [{ type: "text", text: "Describe this image." }, opts.imageBlock]
+    content: media
+      ? [{ type: "text", text: "Describe this image." }, media]
       : [{ type: "text", text: "Say hi." }],
   };
   return {
@@ -218,7 +225,7 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
   // ============================================================================
 
   describe("ExecutorProtocol parity — base64 image source (G4)", () => {
-    it("projects Base64Source image blocks to data URLs (not '[binary]')", async () => {
+    it("carries a Base64Source image through structurally", async () => {
       const { executor } = await factory({ harnessId: "ex-img-1" });
       const imageBlock: ImageBlock = {
         type: "image",
@@ -237,14 +244,22 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       const userMsg = projected.messages.find((m) => m.role === "user");
       expect(userMsg).toBeDefined();
       const imgPart = userMsg!.content.find((p) => p.type === "image") as
-        | { type: "image"; imageUrl: string }
+        | { type: "image"; source: MediaSource }
         | undefined;
       expect(imgPart).toBeDefined();
-      expect(imgPart!.imageUrl.startsWith("data:image/png;base64,")).toBe(true);
-      expect(imgPart!.imageUrl).not.toBe("[binary]");
+      // The SOURCE survives, structurally. This used to assert a `data:` URL string,
+      // because the canonical part carried `imageUrl: string` — and that flattening is
+      // what destroyed any source with no lexical form (an adopter `reference` became a
+      // bare file id before any adapter saw it). Asserting the source is strictly
+      // stronger: it pins that nothing was lost, not merely that one case round-trips.
+      expect(imgPart!.source).toEqual({
+        type: "base64",
+        data: "iVBORw0KGgo=",
+        mimeType: "image/png",
+      });
     });
 
-    it("projects UrlSource image blocks to the bare URL", async () => {
+    it("projects UrlSource image blocks without flattening the source", async () => {
       const { executor } = await factory({ harnessId: "ex-img-2" });
       const imageBlock: ImageBlock = {
         type: "image",
@@ -258,9 +273,91 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       })) as LanguageModelInput;
       const userMsg = projected.messages.find((m) => m.role === "user");
       const imgPart = userMsg!.content.find((p) => p.type === "image") as
-        | { type: "image"; imageUrl: string }
+        | { type: "image"; source: MediaSource }
         | undefined;
-      expect(imgPart!.imageUrl).toBe("https://example.com/img.png");
+      expect(imgPart!.source).toEqual({ type: "url", url: "https://example.com/img.png" });
+    });
+
+    it("carries a REFERENCE source through untouched — the case flattening destroyed", async () => {
+      // The regression this whole change exists for. `{ type: "reference", fileId }` is
+      // an adopter's own id; the framework cannot resolve it and must not invent a form
+      // for it. Flattened, it arrived at every provider as a bare uuid typed as a URL,
+      // and Vertex answered "the fileUri parameter must be a Cloud Storage or HTTP(S)
+      // URI but the entered value was '019faa2c-…'".
+      //
+      // Deterministic rejection against a durable timeline entry, so every later turn
+      // resent it and failed identically — one attachment made a conversation
+      // permanently unusable. The source reaching the adapter INTACT is what lets an
+      // app resolve it (at the `onModelGenerate` seam) or an adapter decline it.
+      const { executor } = await factory({ harnessId: "ex-img-3" });
+      const imageBlock: ImageBlock = {
+        type: "image",
+        source: { type: "reference", fileId: "019faa2c-5506-7000-b8ea-3c63628e4c89" },
+        mimeType: "image/png",
+      };
+      const projected = (await executor.project({
+        compiled: mkRenderedTree({ imageBlock }),
+        target: mkTarget(),
+        tools: [],
+      })) as LanguageModelInput;
+      const imgPart = projected.messages
+        .find((m) => m.role === "user")!
+        .content.find((p) => p.type === "image") as
+        | { type: "image"; source: MediaSource }
+        | undefined;
+      expect(imgPart!.source).toEqual({
+        type: "reference",
+        fileId: "019faa2c-5506-7000-b8ea-3c63628e4c89",
+      });
+    });
+  });
+
+  // ==========================================================================
+  // The media-support declaration — the part checkable WITHOUT the wire.
+  //
+  // `capabilities.media` states which `MediaSource` kinds a target carries per
+  // modality, and the executor enforces it immediately before `prepareRequest`
+  // (see `screenMedia`). Whether a DECLARATION matches an adapter's real wire
+  // projection can only be checked against the provider-native request, which is
+  // provider-shaped and therefore not visible from a generic suite — that check
+  // lives in `runMediaDeclarationCheck`, which each adapter package runs with its
+  // own "does this request carry a part of this modality" predicate.
+  //
+  // What IS generic is coherence between the declaration and the older, coarser
+  // `supportsVision` boolean. Two fields answering overlapping questions is exactly
+  // where drift hides, and no type can catch a target that claims vision while
+  // declaring no image kinds.
+  // ==========================================================================
+
+  describe("ExecutorProtocol — media declaration coherence", () => {
+    it("agrees with supportsVision, in both directions", async () => {
+      const { executor } = await factory({ harnessId: "ex-media-coherence" });
+      const capabilities = executor.target.capabilities;
+      const media: MediaSupport | undefined = capabilities?.media;
+      if (media === undefined || capabilities?.supportsVision === undefined) return;
+      const carriesImages = (media.image ?? []).length > 0;
+      expect(carriesImages).toBe(capabilities.supportsVision);
+    });
+
+    it("declares no source kind outside the MediaSource union", async () => {
+      // Types cover a literal declaration; this covers one built dynamically or cast,
+      // where a typo becomes a modality that silently carries nothing.
+      const { executor } = await factory({ harnessId: "ex-media-kinds" });
+      const media: MediaSupport | undefined = executor.target.capabilities?.media;
+      if (media === undefined) return;
+      const known: readonly MediaSourceKind[] = ["base64", "url", "reference"];
+      // Only the MODALITY keys hold source kinds. `urlSchemes` sits in the same object
+      // and holds URI schemes, so iterating `Object.values` blindly would assert that
+      // "https" is a MediaSource kind — which it is not, and which is how this test
+      // failed the moment `urlSchemes` landed.
+      const modalities = ["image", "document", "audio", "video"] as const;
+      for (const modality of modalities) {
+        for (const kind of media[modality] ?? []) expect(known).toContain(kind);
+      }
+      for (const scheme of media.urlSchemes ?? []) {
+        expect(scheme).not.toContain(":"); // a scheme, not a URI prefix
+        expect(scheme).toBe(scheme.toLowerCase());
+      }
     });
   });
 

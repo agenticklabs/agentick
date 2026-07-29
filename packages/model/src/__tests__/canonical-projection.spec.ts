@@ -146,7 +146,12 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
   it("a generated_image reuses the image variant — NOT a JSON.stringify base64 text bomb (regression)", () => {
     // The old `default` case emitted `JSON.stringify(block)` — for a
     // generated_image that dumped the entire base64 payload into a text
-    // token. It must now project to an image part (data URI).
+    // token. It must project to an image part carrying a base64 SOURCE.
+    //
+    // It used to assert a `data:` URI string, because the canonical image part was
+    // `imageUrl: string`. That flattening is gone (it destroyed any source with no
+    // lexical form), so the payload now rides a `Base64Source` — which is also one
+    // fewer string concatenation of a 4KB payload per projection.
     const bigData = "A".repeat(4096);
     const part = messagePartFromBlock({
       type: "generated_image",
@@ -155,7 +160,7 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
     } as ContentBlock);
     expect(part.type).toBe("image");
     if (part.type !== "image") return;
-    expect(part.imageUrl).toBe(`data:image/png;base64,${bigData}`);
+    expect(part.source).toEqual({ type: "base64", data: bigData, mimeType: "image/png" });
     // Belt-and-suspenders: no text part anywhere carrying the raw base64.
     expect((part as { text?: string }).text).toBeUndefined();
   });

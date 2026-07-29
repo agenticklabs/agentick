@@ -248,7 +248,22 @@ export function openai(
     kind: "language-model",
     provider: "openai",
     modelId: model ?? "gpt-4o-mini",
-    capabilities: { supportsTools: true, supportsStreaming: true, supportsJsonSchema: true },
+    capabilities: {
+      supportsTools: true,
+      supportsStreaming: true,
+      supportsJsonSchema: true,
+      // Chat Completions, and the three modalities diverge — which is precisely
+      // why the declaration is per-modality rather than one `supportsVision`
+      // boolean. `image_url` takes a URL or an inline data URI; a `file` part
+      // takes inline base64 or a Files API `file_id` but has NO url form;
+      // `input_audio` takes base64 only. Video has no Chat Completions part at
+      // all, so it is absent.
+      media: {
+        image: ["url", "base64"],
+        document: ["base64", "reference"],
+        audio: ["base64"],
+      },
+    },
   };
 
   let clientMemo: OpenAI | undefined = options.client;
@@ -596,12 +611,14 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
       case "text":
         textParts.push({ type: "text", text: part.text });
         break;
-      case "image":
-        mediaParts.push({
-          type: "image_url",
-          image_url: { url: part.imageUrl },
-        });
+      case "image": {
+        // The same `…PartFromSource` + skip-on-null shape `document` and `audio` below
+        // already used. Image was the one kind that took a pre-flattened string, which
+        // is how an adopter `reference` reached the wire as `image_url: { url: "<uuid>" }`.
+        const imagePart = openAIImagePartFromSource(part.source, part.mediaType);
+        if (imagePart) mediaParts.push(imagePart);
         break;
+      }
       case "document": {
         // OpenAI Chat Completions takes documents (e.g. PDFs) as a `file`
         // part: base64 payloads go inline as a data URI with a filename;
@@ -674,6 +691,35 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
   const out: ChatCompletionMessageParam[] = [base];
   if (toolResults.length > 0) out.push(...toolResults);
   return out;
+}
+
+/**
+ * Project a {@link MediaSource} to OpenAI's `image_url` part.
+ *
+ * Chat Completions takes a URL or a `data:` URI, so `base64` and `url` both work and
+ * everything else is declined: `reference` is the adopter's own file id (the framework
+ * cannot resolve it — see `FileReferenceSource`), and `gcs` / `s3` are not schemes
+ * OpenAI fetches.
+ *
+ * OpenAI wanting a URL string on the wire is exactly why the canonical part could carry
+ * `imageUrl: string` for so long without anyone noticing: two of four providers happened
+ * to want the flattened form. It only broke for a source with no string form.
+ *
+ * TODO(decline-reporting): the `null` is a verdict that is now OBSERVABLE via
+ * `detectDroppedInputs` but still not REPORTED — it reaches no stream, hook or result.
+ * See the same marker on `googlePartFromSource`.
+ */
+function openAIImagePartFromSource(
+  source: MediaSource,
+  mimeType: string | undefined,
+): { type: "image_url"; image_url: { url: string } } | null {
+  if (source.type === "url") return { type: "image_url", image_url: { url: source.url } };
+  if (source.type === "base64") {
+    const mt = source.mimeType ?? mimeType ?? "image/png";
+    const url = source.data.startsWith("data:") ? source.data : `data:${mt};base64,${source.data}`;
+    return { type: "image_url", image_url: { url } };
+  }
+  return null;
 }
 
 /**

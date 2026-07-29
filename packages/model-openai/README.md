@@ -102,7 +102,14 @@ Two things earn their keep there. `provider` is the **serving** provider, so pri
 | `document` | `file`        | base64 (inline data URI, filename from the source metadata), `reference` (a Files API `file_id`) |
 | `audio`    | `input_audio` | base64 only; `format` (wav / mp3) inferred from the MIME type                                    |
 
-Video and replayed `reasoning` input are **dropped, not flattened** — Chat Completions has no slot for either, and stuffing them into text would be a silent token bomb. URL, `s3`, and `gcs` document sources need staging first: fetch to base64, or upload for a `file_id`.
+Declared as `capabilities.media`, so the framework screens an unsupported source out before this adapter projects it — and note the three modalities genuinely disagree, which is why the declaration is per-modality rather than one `supportsVision` flag:
+
+```ts
+media: { image: ["url", "base64"], document: ["base64", "reference"], audio: ["base64"] }
+//                                                       ^ a Files API file_id      ^ video absent
+```
+
+Video and replayed `reasoning` input are **dropped, not flattened** — Chat Completions has no slot for either, and stuffing them into text would be a silent token bomb. Both drops are pinned by `src/__tests__/silent-drops.spec.ts`, so a fix cannot land unnoticed. A URL document source needs staging first — Chat Completions has no url form for `file` — so fetch to base64 or upload for a `file_id`. `urlSchemes` is left at its default, so a non-HTTP scheme is declined rather than sent.
 
 ## Provider knobs
 

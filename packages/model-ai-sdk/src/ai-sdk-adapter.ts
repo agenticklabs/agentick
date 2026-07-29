@@ -489,6 +489,12 @@ function toAISDKInput(input: LanguageModelInput, target: ExecutionTarget): AISDK
  * Project a {@link MediaSource} to AI SDK 5's `file` part `data` field.
  * base64 payloads pass through as the raw string; every other source
  * (url / gcs / s3 / reference) becomes a URL the SDK fetches or forwards.
+ *
+ * TODO(ai-sdk-reference): the `reference` arm returns a bare adopter file id, which is
+ * not a URL the SDK can fetch — the same flattening that made the canonical image part
+ * lossy. Unlike the other adapters this one forwards an opaque string by contract, so it
+ * is left as-is rather than silently changing document / audio / video behaviour here;
+ * an adopter using `reference` should resolve it at the `onModelGenerate` seam.
  */
 function aiSDKFileData(source: MediaSource): { data: string } {
   switch (source.type) {
@@ -496,10 +502,6 @@ function aiSDKFileData(source: MediaSource): { data: string } {
       return { data: source.data };
     case "url":
       return { data: source.url };
-    case "gcs":
-      return { data: `gs://${source.bucket}/${source.object}` };
-    case "s3":
-      return { data: `s3://${source.bucket}/${source.key}` };
     case "reference":
       return { data: source.fileId };
   }
@@ -552,9 +554,12 @@ function toAISDKMessage(m: LanguageModelMessage): ModelMessage[] {
               return { type: "text", text: p.text, ...partProviderOptions(p) };
             }
             if (p.type === "image") {
+              // The SAME projection document / audio / video use. Image previously
+              // took a pre-flattened `imageUrl` string, which is how an adopter
+              // `reference` reached the wire as a bare file id.
               return {
                 type: "image",
-                image: p.imageUrl,
+                image: aiSDKFileData(p.source).data,
                 ...omitUndefined({ mediaType: p.mediaType }),
                 ...partProviderOptions(p),
               };
@@ -810,6 +815,21 @@ function mapBackFinishReason(reason: LanguageModelStopReason): FinishReason {
 // Helpers
 // ============================================================================
 
+/**
+ * Note what is NOT declared here: `capabilities.media`.
+ *
+ * The other three adapters know their provider and can state per modality which
+ * {@link MediaSource} kinds reach the wire. This one is a meta-adapter over an
+ * arbitrary AI SDK provider — `aiSDKFileData` forwards every kind as an opaque
+ * string and whether the provider behind it accepts a `gs://` URI or a bare file
+ * id is unknowable from here. Declaring support would be a claim this adapter
+ * cannot make, and declaring the empty set would drop media that works today.
+ *
+ * An absent declaration means *undeclared*, so `applyMediaSupport` screens
+ * nothing and behaviour is exactly as before. An adopter who DOES know their
+ * provider states it by passing their own `target` with `capabilities.media` —
+ * which is the honest division: the fact lives with whoever actually holds it.
+ */
 function deriveTarget(model: LanguageModel): ExecutionTarget {
   if (typeof model === "string") {
     return {

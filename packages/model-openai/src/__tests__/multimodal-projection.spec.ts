@@ -138,7 +138,12 @@ describe("openai() adapter — ADR 57 multimodal projection", () => {
   it("a generated_image is NOT a base64 text bomb — projects to image_url data URI", () => {
     const bigData = "A".repeat(2048);
     const params = adapter.prepareRequest({
-      targetInput: userInput([{ type: "image", imageUrl: `data:image/png;base64,${bigData}` }]),
+      // A base64 SOURCE now, not a pre-flattened `imageUrl` string. OpenAI still wants a
+      // data URI on the wire — which is exactly why the flattened part survived so long
+      // — but the adapter builds it from the source rather than receiving it pre-built.
+      targetInput: userInput([
+        { type: "image", source: { type: "base64", data: bigData, mimeType: "image/png" } },
+      ]),
       target,
     });
     const parts = userContent(params);

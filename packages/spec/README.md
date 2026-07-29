@@ -192,6 +192,30 @@ mergeProviderOptions({ acme: { seed: 1, safety: "strict" } }, { acme: { seed: 7 
 
 Do not hand-roll it. A per-call-site merge is how a decoration silently disappears.
 
+### `capabilities.media` — declaring what a target can carry
+
+`TargetCapabilities` already carried `supportsVision?: boolean`. `media` is the refinement that boolean cannot express: which `MediaSource` kinds a target accepts, **per modality**.
+
+```ts
+capabilities: {
+  media: { image: ["base64", "url"], document: ["base64", "url"] },
+  //       ^ audio and video ABSENT — this target carries neither
+}
+```
+
+It is read by `applyMediaSupport` in [@agentick/model](../model), which the executor runs immediately before the adapter builds its request — so an unprojectable attachment is dropped with a stated reason instead of being sent in a form the provider rejects.
+
+`urlSchemes` says which URI schemes a `url` source may use — `["http", "https", "data"]` when absent. That field is what let `MediaSource` shrink to **three closed kinds** (`base64` | `url` | `reference`): `s3` and `gcs` used to be variants, the framework only ever re-concatenated their fields into a URI, and the taxonomy had no closure (R2, Azure, MinIO, IPFS, `file:` were all equally entitled). The only fact those variants really encoded was _which scheme this provider can fetch_ — Gemini reads `gs://`, Anthropic does not — so stating it as data covers every scheme instead of the two that happened to get types.
+
+The two rules are worth memorizing, because they are not symmetric:
+
+|                     | Meaning                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `media` **absent**  | **Undeclared** — nothing is screened. Never "carries nothing", or every target that has not opted in would silently start dropping media |
+| `media` **present** | **Complete** — a modality with no entry carries nothing. `[]` says the same thing explicitly                                             |
+
+Why a declaration and not a per-adapter convention: whether a part can go on the wire was previously decided inside each adapter's own projection, and the verdict was discarded. A part an adapter could not carry was skipped and the request **succeeded** — the model never saw the user's attachment and nothing recorded it. Worse, some adapters have no arm for a modality at all, so there was no decline to report even in principle. Moving the fact into the target makes it **data**: enforceable in one place, and checkable — `runMediaDeclarationCheck` from `@agentick/model/testing` asserts each adapter's declaration against its real wire projection, in both directions.
+
 ### Wire methods derive their own hooks
 
 Augmenting `WireMethods` is the only declaration a new wire method needs. The key is statically known, so the runtime's command registry folds every row in wholesale and the typed interceptor names are _derived_ — `Pascal` (exported here) is the pure type-level function that mints them:
@@ -392,6 +416,8 @@ Both shapes derive from one underlying run: iterating does not change the summar
 - **The shadow-trap footgun has no automated guard.** A missing `export {}` in an augmentation file fails loudly but in the _wrong_ package. Nothing warns at authoring time.
 
 ## Verified by
+
+- `capabilities.media` semantics are pinned in [@agentick/model](../model): `src/__tests__/media-support.spec.ts` (absent = unscreened, present = complete, an omitted modality declines, a declined part never takes its neighbours) and each adapter's `media-declaration.spec.ts` (the declaration against the real wire projection, both directions).
 
 - `src/__tests__/types.spec.ts` — structural assertions across the whole data layer: `EventEnvelope`, `CommandOutcome`, phases, surfaces, verdicts, `Operation`, `EventQuery`, `MessageEnvelope`, the error taxonomies, the default journaling policy, and `StandardSchemaV1`.
 - `src/__tests__/guards.spec.ts` — every narrowing family: content blocks, context entries, event phase and outcome, terminal outcomes, lifecycle kinds, declaration kinds, semantic content, and `hasFeature`.

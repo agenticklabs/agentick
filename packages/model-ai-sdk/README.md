@@ -65,12 +65,17 @@ Target derivation is why a handle beats a bare string here — a string id carri
 
 ## What crosses the bridge
 
-| Canonical part               | AI SDK part                 | Sources                                                                            |
-| ---------------------------- | --------------------------- | ---------------------------------------------------------------------------------- |
-| `image`                      | `image`                     | any URL or data URI                                                                |
-| `document`, `audio`, `video` | `file` with a `mediaType`   | base64 raw; `url` / `gcs` / `s3` / `reference` forwarded as a URL the SDK resolves |
-| `reasoning`                  | `reasoning`                 | the signed payload rides on the part's `providerOptions`                           |
-| `tool_use` / `tool_result`   | `tool-call` / `tool-result` | —                                                                                  |
+| Canonical part               | AI SDK part               | Sources                                                                             |
+| ---------------------------- | ------------------------- | ----------------------------------------------------------------------------------- |
+| `image`                      | `image`                   | any URL or data URI                                                                 |
+| `document`, `audio`, `video` | `file` with a `mediaType` | base64 raw; `url` (any scheme) / `reference` forwarded as a string the SDK resolves |
+
+> [!IMPORTANT]
+> This adapter declares **no** `capabilities.media`, deliberately. The other three know their provider and can state per modality which `MediaSource` kinds reach the wire; this one is a meta-adapter over an arbitrary AI SDK provider, and whether the provider behind it accepts a `gs://` URI or a bare file id is unknowable from here. Declaring support would be a claim it cannot make; declaring the empty set would drop media that works today.
+>
+> An absent declaration means **undeclared** — nothing is screened and behaviour is unchanged. If you _do_ know your provider's limits, state them by passing your own `target` with `capabilities.media`, which is the honest division: the fact lives with whoever holds it.
+> | `reasoning` | `reasoning` | the signed payload rides on the part's `providerOptions` |
+> | `tool_use` / `tool_result` | `tool-call` / `tool-result` | — |
 
 Reasoning comes back through both paths: streamed `reasoning`, `reasoning-delta`, `reasoning-start`, and `reasoning-end` parts map to reasoning deltas, while a non-streaming `reasoning` / `reasoningText` surfaces as a `reasoning` content block ordered before the text. `usage.reasoningTokens` surfaces on the canonical usage.
 

@@ -233,6 +233,15 @@ export function anthropic(
       supportsTools: true,
       supportsStreaming: true,
       supportsVision: true,
+      // Images and documents take `base64` (inline) or `url` (Anthropic fetches
+      // server-side). `reference` / `gcs` / `s3` are not expressible in this SDK
+      // version's source unions.
+      //
+      // `audio` and `video` are ABSENT deliberately, and that is the declaration
+      // earning its keep: the message projection below has no arm for either, so
+      // those parts used to fall off the end of the switch and disappear with no
+      // `null` anywhere to observe. Stated here, they are dropped with a reason.
+      media: { image: ["base64", "url"], document: ["base64", "url"] },
       contextWindow: 200_000,
       maxOutputTokens: 8_192,
     },
@@ -767,7 +776,9 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
           break;
         }
         case "image": {
-          const source = imageSourceFromUrl(part.imageUrl, part.mediaType);
+          const source = anthropicImageSource(part.source, part.mediaType);
+          // Declined → the block is skipped rather than sent in a form the API rejects.
+          if (source === null) break;
           const block: ImageBlockParam = { type: "image", source };
           if (cache) (block as { cache_control?: { type: "ephemeral" } }).cache_control = cache;
           content.push(block);
@@ -871,8 +882,8 @@ function toolResultContent(
     if (c.type === "text") {
       result.push({ type: "text", text: c.text } as TextBlockParam);
     } else if (c.type === "image") {
-      const source = imageSourceFromUrl(c.imageUrl, c.mediaType);
-      result.push({ type: "image", source } as ImageBlockParam);
+      const source = anthropicImageSource(c.source, c.mediaType);
+      if (source !== null) result.push({ type: "image", source } as ImageBlockParam);
     } else {
       // Flatten anything else to a JSON text representation (matches v1).
       result.push({ type: "text", text: JSON.stringify(c) } as TextBlockParam);
@@ -968,8 +979,25 @@ function reasoningRedactedData(part: {
   return typeof v === "string" ? v : undefined;
 }
 
-function imageSourceFromUrl(
-  imageUrl: string,
+/**
+ * Project a {@link MediaSource} to Anthropic's image source.
+ *
+ * This was `imageSourceFromUrl(imageUrl, mimeType)` — it parsed a `data:` URL with a
+ * regex to recover the base64 payload the framework had just stringified. A structured
+ * value flattened and then reverse-engineered, which lost precisely the sources that
+ * have no lexical form: an adopter `reference` arrived as a bare file id and was sent as
+ * `{ type: "url", url: "<uuid>" }`.
+ *
+ * `null` for a source Anthropic cannot take. `reference` is the adopter's own id (the
+ * framework cannot resolve it — see `FileReferenceSource`), and `gcs` / `s3` are not
+ * schemes Anthropic fetches. Declining beats emitting a request the API will reject.
+ *
+ * TODO(decline-reporting): the `null` is a verdict that is now OBSERVABLE via
+ * `detectDroppedInputs` but still not REPORTED — it reaches no stream, hook or result.
+ * See the same marker on `googlePartFromSource`.
+ */
+function anthropicImageSource(
+  source: MediaSource,
   mimeType: string | undefined,
 ):
   | {
@@ -977,24 +1005,30 @@ function imageSourceFromUrl(
       media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
       data: string;
     }
-  | { type: "url"; url: string } {
-  if (imageUrl.startsWith("data:")) {
-    // data:image/png;base64,XXXX
-    const match = /^data:([^;]+);base64,(.*)$/.exec(imageUrl);
+  | { type: "url"; url: string }
+  | null {
+  if (source.type === "base64") {
+    const mt = (source.mimeType ?? mimeType ?? "image/png") as
+      | "image/jpeg"
+      | "image/png"
+      | "image/gif"
+      | "image/webp";
+    return { type: "base64", media_type: mt, data: source.data };
+  }
+  if (source.type === "url") {
+    // A `data:` URL is still inline bytes; Anthropic wants those as base64, not a url.
+    const match = /^data:([^;]+);base64,(.*)$/.exec(source.url);
     if (match) {
-      const inferred = (match[1] ?? mimeType ?? "image/png") as
+      const mt = (match[1] ?? mimeType ?? "image/png") as
         | "image/jpeg"
         | "image/png"
         | "image/gif"
         | "image/webp";
-      return {
-        type: "base64",
-        media_type: inferred,
-        data: match[2] ?? "",
-      };
+      return { type: "base64", media_type: mt, data: match[2] ?? "" };
     }
+    return { type: "url", url: source.url };
   }
-  return { type: "url", url: imageUrl };
+  return null;
 }
 
 // ============================================================================
@@ -1098,7 +1132,7 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
     case "image":
       return {
         type: "image",
-        imageUrl: anthropicImageUrlFromSource(block.source, block.mimeType),
+        source: block.source,
         ...omitUndefined({ mediaType: block.mimeType }),
         ...po,
       };
@@ -1135,7 +1169,11 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
       // JSON.stringify base64 token-bomb.
       return {
         type: "image",
-        imageUrl: `data:${block.mimeType};base64,${block.data}`,
+        source: {
+          type: "base64",
+          data: block.data,
+          ...omitUndefined({ mimeType: block.mimeType }),
+        },
         ...omitUndefined({ mediaType: block.mimeType }),
         ...po,
       };
@@ -1187,23 +1225,6 @@ function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessag
         text:
           "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
-  }
-}
-
-function anthropicImageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
-  switch (source.type) {
-    case "url":
-      return source.url;
-    case "base64": {
-      const mt = source.mimeType ?? mimeType ?? "image/png";
-      return `data:${mt};base64,${source.data}`;
-    }
-    case "reference":
-      return source.fileId;
-    case "s3":
-      return `s3://${source.bucket}/${source.key}`;
-    case "gcs":
-      return `gs://${source.bucket}/${source.object}`;
   }
 }
 

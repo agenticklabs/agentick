@@ -70,6 +70,7 @@ import {
 } from "@agentick/model";
 import type { AdapterDelta } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
+import { ProviderRejected, StreamFailed, type ExecuteErrorChannel } from "@agentick/spec";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Google escape hatch (G5)
@@ -212,6 +213,22 @@ export function google(
       supportsStreaming: true,
       supportsJsonSchema: true,
       supportsVision: true,
+      // Every modality goes through the ONE `googlePartFromSource` path, so all
+      // four carry the same three kinds: `base64` → `inlineData`, `url` and `gcs`
+      // → `fileData` with a `fileUri`. `reference` is an adopter-namespace id
+      // Gemini's `fileUri` cannot accept and `s3` has no native form — declared
+      // out here so the framework drops them with a stated reason instead of the
+      // adapter dropping them quietly.
+      media: {
+        image: ["base64", "url"],
+        document: ["base64", "url"],
+        audio: ["base64", "url"],
+        video: ["base64", "url"],
+        // The `gs:` scheme is the whole reason `gcs` used to be a MediaSource variant.
+        // Gemini's `fileUri` reads a Cloud Storage URI natively — zero bytes moved — so
+        // it is declared here as a scheme rather than encoded as a source shape.
+        urlSchemes: ["https", "http", "data", "gs"],
+      },
       contextWindow: 1_000_000,
       maxOutputTokens: 8_192,
     },
@@ -233,6 +250,8 @@ export function google(
     prepareRequest(input: ExecuteInput<LanguageModelInput>): GenerateContentParameters {
       return toGoogleParams(input.targetInput, input.target, defaultModel);
     },
+
+    mapProviderError,
 
     send(
       request: GenerateContentParameters,
@@ -541,16 +560,134 @@ function applyTagsToText(
 }
 
 // ============================================================================
+// Provider errors
+// ============================================================================
+
+/** The parts of a Google error envelope worth reporting. */
+interface GoogleErrorDetail {
+  readonly message?: string;
+  readonly status?: string;
+  readonly code?: number;
+}
+
+/**
+ * Peel Google's error envelope down to the sentence a human can act on.
+ *
+ * `GoogleGenAI` puts a SERIALIZED envelope in `Error.message`, and the envelope's own
+ * `error.message` is frequently another serialized envelope. Reported raw, a
+ * bad-request looked like this — one string, and the only useful eight words buried in
+ * the middle of it:
+ *
+ *     {"error":{"message":"{\n  \"error\": {\n    \"code\": 400,\n    \"message\":
+ *     \"Request contains an invalid argument.\",\n    \"status\":
+ *     \"INVALID_ARGUMENT\"\n  }\n}\n","code":400,"status":"Bad Request"}}
+ *
+ * So the unwrap recurses: descend through `error`, and if the `message` it finds is
+ * itself parseable JSON, descend again. The DEEPEST message wins, because the outer
+ * layers are transport restatements ("Bad Request") while the inner one is the
+ * provider's actual complaint.
+ *
+ * Bounded rather than `while (true)`: a malformed or hostile payload must not be able
+ * to spin here, and no real envelope nests beyond a couple of levels.
+ */
+function googleErrorDetail(cause: unknown): GoogleErrorDetail {
+  const raw = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "";
+  let detail: GoogleErrorDetail = {};
+  let text: string | undefined = raw;
+  for (let depth = 0; depth < 4 && text !== undefined; depth += 1) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      break;
+    }
+    const node = (parsed as { error?: unknown })?.error ?? parsed;
+    if (typeof node !== "object" || node === null) break;
+    const { message, status, code } = node as GoogleErrorDetail;
+    // Each level overwrites only what it actually carries, so an inner level that
+    // names just `message` keeps the outer `code`.
+    detail = {
+      ...detail,
+      ...(typeof message === "string" && message !== "" ? { message } : {}),
+      ...(typeof status === "string" ? { status } : {}),
+      ...(typeof code === "number" ? { code } : {}),
+    };
+    // Descend only when the message is itself an envelope.
+    text = typeof message === "string" && message.trimStart().startsWith("{") ? message : undefined;
+  }
+  return detail;
+}
+
+/**
+ * Google's structured errors → a typed executor error, per the adapter seam
+ * `LanguageModelAdapter.mapProviderError` ("override when your provider surfaces
+ * structured errors you can extract more detail from"). Google does, and this adapter
+ * did not take the seam — so every rejection reached the caller, the turn boundary and
+ * the UI as an escaped JSON envelope.
+ *
+ * The raw cause stays attached; only the reported MESSAGE is cleaned.
+ */
+export function mapProviderError(cause: unknown): ExecuteErrorChannel {
+  const detail = googleErrorDetail(cause);
+  if (detail.message === undefined && detail.code === undefined) {
+    // Nothing structured to extract — let the executor's default classification stand
+    // rather than dressing an unknown failure as a provider rejection.
+    return new StreamFailed({ cause });
+  }
+  // `INVALID_ARGUMENT` and friends name the failure CLASS in a way the sentence often
+  // does not ("Request contains an invalid argument." says nothing about which one).
+  const message =
+    detail.status !== undefined && detail.message !== undefined
+      ? `${detail.message} [${detail.status}]`
+      : detail.message;
+  return new ProviderRejected({
+    ...omitUndefined({ status: detail.code, message }),
+    cause,
+  });
+}
+
+// ============================================================================
 // Client construction
 // ============================================================================
 
-function buildClientOptions(opts: GoogleAdapterOptions): GoogleGenAIOptions {
+/**
+ * Resolve adapter options + environment into the `GoogleGenAI` constructor's
+ * options — the one place the two sources are reconciled.
+ *
+ * Exported because the reconciliation has a rule in it (see `vertex` below) that
+ * is worth pinning directly rather than inferring from a client that throws.
+ */
+export function buildClientOptions(opts: GoogleAdapterOptions): GoogleGenAIOptions {
   // Adopter-supplied clientOptions wins; env-var fallbacks fill in any
   // missing fields. Spread last so explicit clientOptions overrides
   // env-derived values.
+  const supplied = opts.clientOptions;
+  /**
+   * Has the adopter explicitly chosen VERTEX?
+   *
+   * `GoogleGenAI` treats `project`/`location` and `apiKey` as MUTUALLY EXCLUSIVE
+   * and throws in its constructor when given both. The env fallback below is
+   * therefore not merely a default — on a Vertex configuration it is poison: an
+   * adopter who passed `{ vertexai: true, project, location }` and happens to have
+   * `GOOGLE_API_KEY` in the environment got both, and every execution died in
+   * single-digit milliseconds with
+   *
+   *   Project/location and API key are mutually exclusive in the client initializer.
+   *
+   * A fallback must never be able to invalidate an explicit choice. The adopter
+   * said Vertex; the framework's job is to not undo that.
+   */
+  const vertex =
+    supplied?.vertexai === true ||
+    supplied?.project !== undefined ||
+    supplied?.location !== undefined;
+
   const base: GoogleGenAIOptions = {};
   const envApiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GEMINI_API_KEY"];
-  if (envApiKey !== undefined) base.apiKey = envApiKey;
+  // An adopter who passes BOTH an explicit `apiKey` and Vertex fields still gets
+  // the SDK's error, and should — that conflict is theirs, and inventing a
+  // precedence between two explicit instructions would be worse than reporting it.
+  if (envApiKey !== undefined && !vertex) base.apiKey = envApiKey;
   const envBaseUrl = process.env["GOOGLE_GENAI_BASE_URL"];
   if (envBaseUrl !== undefined) {
     base.httpOptions = { baseUrl: envBaseUrl };
@@ -678,7 +815,12 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
           if (part.text.length > 0) parts.push({ text: part.text });
           break;
         case "image": {
-          const partOut = imagePartFromUrl(part.imageUrl, part.mediaType);
+          // ONE path for all four media kinds now. This used to call
+          // `imagePartFromUrl(part.imageUrl, …)` — a second projection that took a
+          // pre-flattened string — so a `reference` source arrived here as a bare
+          // adopter file id and was emitted as a `fileUri` Vertex rejects. Five lines
+          // below, `document` had always done it correctly.
+          const partOut = googlePartFromSource(part.source, part.mediaType, "image/jpeg");
           if (partOut) parts.push(partOut);
           break;
         }
@@ -781,10 +923,22 @@ function lookupToolName(contents: ReadonlyArray<Content>, toolUseId: string): st
 }
 
 /**
- * Project a document/audio/video {@link MediaSource} to a Gemini `Part`.
- * Ports v1's `google.ts:454` shape: base64 → `inlineData`; url / gcs /
- * files-API reference → `fileData` with a `fileUri`. Mirrors the image
- * path (`imagePartFromUrl`).
+ * Project a {@link MediaSource} to a Gemini `Part` — image, document, audio and video
+ * alike. `base64` → `inlineData`; `url` → `fileData` with a `fileUri`, which is how a
+ * `gs://` URI reaches Vertex natively (the `gcs` variant that used to sit here was
+ * deleted: this arm already did the work, and the framework was only recomposing
+ * `gs://${bucket}/${object}` for it). `reference` has no valid Gemini form and is
+ * declined.
+ *
+ * The single path. Images used to have their own string-taking projection, which is how
+ * a `reference` reached the wire as a bare file id.
+ *
+ * TODO(decline-reporting): `null` here is a VERDICT — this adapter has decided, locally
+ * and with certainty, that this block cannot go on the wire. `detectDroppedInputs` now
+ * makes that OBSERVABLE without any cooperation from this function, so the remaining gap
+ * is narrower than it was: the verdict is not REPORTED. It reaches no stream, no hook and
+ * no result, so an application only learns of a dropped attachment by auditing for it.
+ * See "Repair is yours" in `@agentick/model`'s README.
  */
 function googlePartFromSource(
   source: MediaSource,
@@ -800,45 +954,30 @@ function googlePartFromSource(
       return {
         fileData: { mimeType: source.mimeType ?? mediaType ?? defaultMime, fileUri: source.url },
       };
-    case "gcs":
-      return {
-        fileData: {
-          mimeType: source.mimeType ?? mediaType ?? defaultMime,
-          fileUri: `gs://${source.bucket}/${source.object}`,
-        },
-      };
     case "reference":
-      return {
-        fileData: {
-          mimeType: source.mimeType ?? mediaType ?? defaultMime,
-          fileUri: source.fileId,
-        },
-      };
+      // DECLINED, deliberately. `fileId` is in the ADOPTER's namespace (see
+      // `FileReferenceSource`) and Gemini's `fileUri` accepts only a `gs://` URI or one
+      // of its own Files API URIs — so there is no id this adapter could turn into a
+      // valid one. It used to send the bare id and get, every time:
+      //
+      //   Unable to submit request because the fileUri parameter must be a Cloud
+      //   Storage or HTTP(S) URI but the entered value was '019faa2c-5506-…'
+      //
+      // Emitting a request you KNOW the provider rejects is worse than emitting
+      // nothing: the rejection is deterministic and the timeline entry is durable, so
+      // every later turn resends it and fails identically — one attachment renders a
+      // conversation permanently unusable. Dropping the block costs the model one
+      // image; guessing cost the user their thread.
+      //
+      // An app that uses `reference` resolves it to `gcs` / `url` / `base64` before the
+      // request leaves, via the `onModelGenerate` middleware. The `gcs` arm above then
+      // projects it to `gs://…`, which Vertex reads natively with zero bytes moved.
+      return null;
     default:
       // s3 has no native Gemini source — TODO(adr-57-followup: google s3
       // staged sources).
       return null;
   }
-}
-
-function imagePartFromUrl(imageUrl: string, mimeType: string | undefined): Part | null {
-  if (imageUrl.startsWith("data:")) {
-    const match = /^data:([^;]+);base64,(.*)$/.exec(imageUrl);
-    if (match) {
-      return {
-        inlineData: {
-          mimeType: match[1] ?? mimeType ?? "image/jpeg",
-          data: match[2] ?? "",
-        },
-      };
-    }
-  }
-  return {
-    fileData: {
-      mimeType: mimeType ?? "image/jpeg",
-      fileUri: imageUrl,
-    },
-  };
 }
 
 function toGoogleTools(tools: ReadonlyArray<LanguageModelTool>): GoogleTool[] {

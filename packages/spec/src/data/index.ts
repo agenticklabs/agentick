@@ -12,7 +12,7 @@
  *   - declarations.ts     ToolDeclaration, ResourceDeclaration, OutputDeclaration, MCPDeclaration
  *   - rendered-tree.ts    RenderedTree, SpecConfig, ProviderClientOptions, ProviderOptions, ProviderToolOptions, ModelSelection
  *   - execution-result.ts ExecutionResult, ExecutorTerminal, LanguageModelExecutionResult, ExecutorDelta
- *   - execution-target.ts ExecutionTarget, LanguageModelTarget, TargetCapabilities
+ *   - execution-target.ts ExecutionTarget, LanguageModelTarget, TargetCapabilities, MediaSupport, MediaSourceKind
  *
  * Still pending (later phases):
  *   - timeline.ts          TimelineEntry

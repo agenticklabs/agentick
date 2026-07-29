@@ -108,7 +108,7 @@ const result = await generate({
       role: "user",
       content: [
         { type: "text", text: "What's in this chart, and summarize the attached PDF." },
-        { type: "image", imageUrl: "https://example.com/chart.png" },
+        { type: "image", source: { type: "url", url: "https://example.com/chart.png" } },
         {
           type: "document",
           source: { type: "base64", data: pdfBase64, mimeType: "application/pdf" },
@@ -120,7 +120,11 @@ const result = await generate({
 });
 ```
 
-A `MediaSource` is `base64` | `url` | `reference` (provider file id) | `s3` | `gcs`. Replayed model output round-trips through the same set: a `generated_image` block projects back to an `image` part as a data URI, a `generated_file` to a `document` with a URL source. Per-provider support is documented in each adapter's README.
+A `MediaSource` is `base64` | `url` | `reference` (an id in the **adopter's** namespace) — three kinds, and the set is **closed**.
+
+`s3` and `gcs` used to sit alongside them and are deleted, not deprecated: the framework only ever re-concatenated their fields into a URI (`gs://${bucket}/${object}`), so an app decomposed a URI purely so the framework could put it back together. And the set had no closure — R2, Azure Blob, MinIO, IPFS and `file:` were all equally entitled, each a breaking change plus four adapter arms. A `url` carries any of them as a scheme, and `capabilities.media.urlSchemes` says which schemes a target can actually fetch. Adding a vendor is now data, not a release. All four modality parts carry one, so nothing is flattened to a string before an adapter sees it — the projection preserves sources that have no lexical form, and the adapter declines what its provider cannot fetch rather than emitting an invalid URL. Replayed model output round-trips through the same set: a `generated_image` block projects back to an `image` part with a `base64` source, a `generated_file` to a `document` with a URL source. Per-provider support is documented in each adapter's README.
+
+`reference` is the one source the framework **cannot** resolve: `fileId` is meaningful only to the adopter's own storage. Resolve it in a `onModelGenerate` hook — swap it for a `url` (any scheme your provider declares) or a `base64` source — or accept that adapters will decline it.
 
 ## Bring your own provider
 
@@ -244,7 +248,56 @@ Failover is per-adapter all the way down: each adapter runs its own `prepareRequ
 
 `defaultProject` folds a compiled tree into a `LanguageModelInput`: sections become one system message, message entries become chat messages, model-exposed tool declarations become `tools[]`. Adapters override `project` only when their system-message or tool shape demands it.
 
-The parts are exported individually so a custom projection stays aligned with the canonical one: `buildMessages`, `buildTools`, `buildProviderTools`, `buildParameters`, `collectSectionText`, `sectionText`, `messagePartFromBlock`, `imageUrlFromSource`.
+The parts are exported individually so a custom projection stays aligned with the canonical one: `buildMessages`, `buildTools`, `buildProviderTools`, `buildParameters`, `collectSectionText`, `sectionText`, `messagePartFromBlock`.
+
+### Media fidelity — what reaches the provider, and what you are told
+
+Every modality part carries a `MediaSource`: `base64` | `url` (any scheme) | `reference`. Nothing is flattened to a string before an adapter sees it, so a source with no lexical form survives the trip.
+
+A target **declares** which kinds it carries, per modality, and the framework enforces it immediately before the adapter builds its request:
+
+```ts
+capabilities: {
+  media: { image: ["base64", "url"], document: ["base64", "url"] },
+  //       ^ audio and video ABSENT — this target carries neither
+  urlSchemes: ["https", "http", "data", "gs"], // Vertex reads Cloud Storage natively
+}
+```
+
+Absent `media` means **undeclared** — nothing is screened, never "carries nothing". Present means **complete**: a modality with no entry carries nothing. `urlSchemes` defaults to `["http", "https", "data"]`.
+
+Why a declaration rather than letting each adapter decide, which is what used to happen: the verdict was **discarded**. A part an adapter could not carry was skipped and the request **succeeded**, so the model never saw the user's attachment and nothing recorded it. And some verdicts were never reached — Anthropic has no `audio` or `video` arm, so those parts fall off the end of its `switch` with no `null` to observe. Moving the fact onto the target makes it data: enforced in one place, and checkable (`runMediaDeclarationCheck` asserts each adapter's declaration against its real wire projection).
+
+**A declined part is reported.** One `ctx.log` warning per decline, carrying coordinates that join to a timeline entry id.
+
+> [!IMPORTANT]
+> A `reference` is the one source the framework **cannot** resolve — `fileId` is in your namespace. Swap it for a `url` or `base64` source in an `onBeforeModelGenerate` hook (that seam runs _before_ the screen, precisely so it gets its chance), or accept that it is dropped and reported.
+
+### Attribution — repair is yours, legibility is ours
+
+A provider rejects a **request** and names nothing inside it. Since every turn replays the whole conversation, one bad entry then breaks every future turn.
+
+The framework does not repair that, and cannot: repair needs to know what in your store is durable versus derived, whether you may mutate it, and what a quarantine means in your data model. So it owes you the facts it uniquely holds, and you decide.
+
+| We own               | You get                                                    |
+| -------------------- | ---------------------------------------------------------- |
+| The projection       | `buildMessageProvenance` — which entry produced which part |
+| The adapter boundary | `applyMediaSupport` declines, and `detectDroppedInputs`    |
+| The error taxonomy   | `ProviderRejected`, status, `isTransientProviderError`     |
+| The wire             | The request as sent, at a hook                             |
+
+```ts
+const messages = buildMessages(tree);
+const provenance = buildMessageProvenance(tree);
+provenance[1]?.[1]; // → { entryId: "m_7", blockIndex: 1 } — durable, unlike a position
+```
+
+Provenance is **derived, never stored**: it is a function of `(tree, target)`, so it is a property of a _projection_, not of a message — storing it on the entity is the category error of storing a query plan on the table. Same rule as a compiler's source map.
+
+> [!WARNING]
+> **It describes THIS projection.** It mirrors the walk `buildMessages` does, so if an adapter supplies its own `project` (Anthropic does) or your app filters via `<Timeline>`, these origins name the wrong entries. The framework's real contribution is the contract — _if you project, emit origins_.
+
+Two facts make the rest cheap and are worth knowing before you build on it. `boundary.target` records which target ran a turn, so a `succeeded` boundary proves every entry it carried was projectable **for that target** — narrowing suspects after a failure to the entries appended since the last comparable success, usually one. And `detectDroppedInputs` catches what a declaration cannot: it re-projects without one input and deep-compares, so an identical request means that input contributed nothing. `n + 1` local projections, no network — a failure-time audit rather than a per-tick cost.
 
 ### Tool-call narration (`_summary`)
 
@@ -404,19 +457,23 @@ A source with neither a URL nor a document index has no shared identity and is i
 | `thinkTagTransform` / `customBlockTransform`                                                 | Tag routing as transforms                      |
 | `StreamTagParser`                                                                            | The streaming XML-ish tag parser beneath them  |
 | `defaultProject` + `buildTools` / `buildProviderTools` / `buildMessages` / `buildParameters` | Canonical projection and its parts             |
-| `messagePartFromBlock` / `imageUrlFromSource` / `sectionText` / `collectSectionText`         | Projection leaves                              |
+| `messagePartFromBlock` / `sectionText` / `collectSectionText`                                | Projection leaves                              |
+| `buildMessageProvenance`                                                                     | Where-provenance over a projected request      |
+| `applyMediaSupport`                                                                          | Screen media against the target's declaration  |
+| `detectDroppedInputs`                                                                        | What the adapter silently discarded            |
 | `createSourceInterner`                                                                       | Per-turn one-source-one-id registry            |
 | `SEED_MODELS` / `resolveModelInfo` / `mergeRegistry` / `effectiveModelInfo`                  | The model registry                             |
 | `contextUtilization` / `estimateTokens`                                                      | Window ratio and token estimation              |
 | `SEED_PRICING` / `resolvePricing` / `mergePricing` / `estimateCost` / `mergeUsageStats`      | Cost accounting                                |
 
-Types: `LanguageModelAdapter`, `LanguageModelAdapterDefinition`, `StreamAccumulatorView`, `AccumToolCall`, `DeltaTransform`, `CustomBlockDefinition`, `StreamTagHandler` / `StreamTagParserConfig` / `StreamTagEvent`, `GenerateOptions`, `GenerateObjectOptions` / `GenerateObjectResult`, `RetryOptions`, `ModelTap`, `SourceInterner`, `ModelInfo` / `ModelPricing` / `ModelRegistry`, `PricingTable` / `CostEstimate`.
+Types: `LanguageModelAdapter`, `LanguageModelAdapterDefinition`, `StreamAccumulatorView`, `AccumToolCall`, `DeltaTransform`, `CustomBlockDefinition`, `StreamTagHandler` / `StreamTagParserConfig` / `StreamTagEvent`, `GenerateOptions`, `GenerateObjectOptions` / `GenerateObjectResult`, `RetryOptions`, `ModelTap`, `SourceInterner`, `ModelInfo` / `ModelPricing` / `ModelRegistry`, `PricingTable` / `CostEstimate`, `MessageProvenance` / `PartOrigin`, `MediaSupportResult` / `PartDeclined`, `DroppedInputs` / `DroppedPart` / `ProjectingAdapter`.
 
 ### `@agentick/model/testing`
 
-| Export                     | Purpose                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `scriptedAdapter(text, ?)` | Scripted adapter double — chunk scripting, failure scripting, `calls()` / `seenParams()` introspection |
+| Export                              | Purpose                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `scriptedAdapter(text, ?)`          | Scripted adapter double — chunk scripting, failure scripting, `calls()` / `seenParams()` introspection |
+| `runMediaDeclarationCheck(adapter)` | Asserts `capabilities.media` matches the adapter's real wire projection, both directions               |
 
 ```ts
 import { scriptedAdapter } from "@agentick/model/testing";
@@ -452,6 +509,9 @@ Spread-override any hook for a behavior-specific variant: `{ ...scriptedAdapter(
 - **Chain-wide transforms under `withFallback`.** `adapterTransforms` are compiled before the serving adapter is known, so the primary's transforms apply to whichever adapter ends up serving. Compose adapters that share a projection.
 - **Seed registry breadth.** `SEED_MODELS` covers a handful of headline models with approximate numbers. Treat it as a convenience default and override anything cost- or limit-sensitive.
 - **No token-budget enforcement.** `estimateCost` and `estimateTokens` report; nothing in this layer stops a call for exceeding a budget.
+- **No search ships.** When the declaration and `detectDroppedInputs` both come up empty, narrowing further means probing — re-projecting without a subset and asking again. That is a minimizing search over a candidate set (Zeller's `ddmin`), it needs nothing only the framework has, and it is yours to write. Narrow with the regression range first (`boundary.target` plus your own log) and you will usually not need one.
+- **Four adapters still discard inputs silently.** `detectDroppedInputs` makes them _observable_; nothing yet makes them _reported_. The verdicts are not on the stream and not at a hook, so an application only learns of them by asking. Surfacing them per-request is the remaining half of the disclosure invariant. `TODO(decline-reporting)`.
+- **Lossy-but-accepted transformations are undetected.** An adapter that keeps an input while changing its meaning — flattening a reasoning block into visible text, joining cache-hinted sections and losing the breakpoints — passes both mechanisms here: nothing was dropped, and the provider accepts it. Only the adapter knows, so only the adapter can disclose it, and no adapter does yet.
 - **`customBlockTransform` has no suite here.** It is exercised through the provider packages' executor tests; `StreamTagParser` beneath it is pinned directly.
 
 ## Verified by
@@ -460,6 +520,9 @@ Spread-override any hook for a behavior-specific variant: `{ ...scriptedAdapter(
 - `src/__tests__/generate-object.spec.ts` — `responseFormat` wiring, a raw `jsonSchema()` carried through, the typed validated object, and `GenerateObjectError` on both non-JSON output and schema violation.
 - `src/__tests__/combinators.spec.ts` — retry of transient failures and of the stream open, non-retry of non-transient causes, failover to a secondary with the serving adapter's `normalize`, streaming failover through the secondary's `mapChunk`, never-on-abort, exhausted chains, composition of retry with failover, tap transparency with swallowed tap errors, and the transient classifier.
 - `src/__tests__/canonical-projection.spec.ts` — wire-native modality parts, the `generated_image` data-URI regression, resource projection, `providerMetadata → providerOptions` on parts and on messages, the tree-over-target `providerOptions` fold, `buildParameters` lifting the generation knobs and `toolChoice`, and `buildProviderTools` name resolution, dedupe, empty-slot omission, and exclusion from the function tools list.
+- `src/__tests__/dropped-inputs.spec.ts` — a dropped part found among carried ones and reported nothing for a faithful adapter; a SOLO dropped part whose removal also empties its message (and again when the adapter drops the emptied message wholesale — the apparent confound that is not one); drops across several messages; two identical parts not mistaken for one drop; a dropped `responseFormat` and a dropped tool; **the case it cannot see** — an input carried in a form the provider would reject — pinned so silence is never read as safety; and a drop joined through provenance to the durable entry id.
+- `src/__tests__/media-support.spec.ts` — undeclared targets unscreened (by reference); a declared kind carried and an undeclared one declined; an entire omitted modality declined, and `[]` read the same as omission; a declined image not taking neighbouring text with it; a message emptied by the removal dropped while an already-empty one is left alone; and declines joining provenance to name a durable entry id, over a tree where the filtered list diverges from the indexed one.
+- `src/__tests__/provenance.spec.ts` — the alignment invariant (`provenance[i][j]` describes `messages[i].content[j]`) over the trees a divergent walk would go off by one on: cache-hinted sections emitting one part each, an empty section contributing none, no sections at all, mixed blocks, empty content; plus the timeline message id rather than a position, `undefined` for a system part, `entryId` omitted rather than invented for an id-less entry, out-of-range lookups returning `undefined`, and out-of-range lookups returning `undefined`.
 - `src/__tests__/narration-injection.spec.ts` — `_summary` injected when enabled, never in `required`, skipped on the app-level off-switch, on `annotations.narrate: false`, and on an author-owned `_summary`; source schema never mutated; dispatch-only tools dropped.
 - `src/__tests__/cache-hints.spec.ts` — message-level cache hints carried, unhinted sections keeping the joined system blob, and a hinted section switching the system message to per-section parts.
 - `src/__tests__/model-info.spec.ts` — longest-prefix resolution, `mergeRegistry` layering, the adopter > self > seed precedence in every direction, `undefined` when no layer knows the model, utilization ratio and clamping, token estimation, single-source pricing parity, and distinct rows per serving provider for the same underlying model.

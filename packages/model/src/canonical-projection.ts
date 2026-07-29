@@ -23,7 +23,6 @@ import type {
   LanguageModelMessagePart,
   LanguageModelParameters,
   LanguageModelTool,
-  MediaSource,
   ProjectInput,
   ProviderToolDeclaration,
   ProviderToolWire,
@@ -34,6 +33,10 @@ import type {
 import { mergeProviderOptions, TOOL_NARRATION_FIELD, toJsonSchema } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
+// Media is NOT screened here. `applyMediaSupport` runs one level up, in the
+// executor's `projectImpl`, because an adapter may replace this whole function
+// with its own `project` — and a screen that a custom projection can skip is the
+// same "trust every adapter" problem the declaration exists to remove.
 export function defaultProject(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);
   // Tools come from `input.tools` — the loop's per-tick compile result
@@ -184,7 +187,7 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
     case "image":
       return {
         type: "image",
-        imageUrl: imageUrlFromSource(block.source, block.mimeType),
+        source: block.source,
         ...omitUndefined({ mediaType: block.mimeType }),
         ...po,
       };
@@ -222,7 +225,11 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
       // latter dumped the entire base64 payload into a text token-bomb.
       return {
         type: "image",
-        imageUrl: `data:${block.mimeType};base64,${block.data}`,
+        source: {
+          type: "base64",
+          data: block.data,
+          ...omitUndefined({ mimeType: block.mimeType }),
+        },
         ...omitUndefined({ mediaType: block.mimeType }),
         ...po,
       };
@@ -300,23 +307,6 @@ export function messagePartFromBlock(block: ContentBlock): LanguageModelMessageP
         text:
           "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
       };
-  }
-}
-
-export function imageUrlFromSource(source: MediaSource, mimeType: string | undefined): string {
-  switch (source.type) {
-    case "url":
-      return source.url;
-    case "base64": {
-      const mt = source.mimeType ?? mimeType ?? "image/png";
-      return `data:${mt};base64,${source.data}`;
-    }
-    case "reference":
-      return source.fileId;
-    case "s3":
-      return `s3://${source.bucket}/${source.key}`;
-    case "gcs":
-      return `gs://${source.bucket}/${source.object}`;
   }
 }
 
