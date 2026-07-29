@@ -40,9 +40,16 @@ const ALIAS_SCHEME = "mcp";
 /**
  * Namespace a remote resource uri under an adopter alias:
  * `config://app` + alias `docs` → `mcp://docs/config://app`.
+ *
+ * An EMPTY alias surfaces the uri verbatim — the opt-out for a first-party server
+ * whose uri scheme the adopter owns, and whose own documentation names those uris.
+ * Rewriting them makes the model's most reliable source of truth wrong: the server
+ * says to read `knowify://me`, the registry holds `mcp://knowify/knowify://me`, and
+ * the read misses. (Without this branch an empty alias would mint `mcp:///…`, which
+ * is a third uri matching nothing.)
  */
 export function aliasResourceUri(alias: string, originalUri: string): string {
-  return `${ALIAS_SCHEME}://${alias}/${originalUri}`;
+  return alias === "" ? originalUri : `${ALIAS_SCHEME}://${alias}/${originalUri}`;
 }
 
 /**
@@ -52,6 +59,7 @@ export function aliasResourceUri(alias: string, originalUri: string): string {
  * verbatim rather than throwing).
  */
 export function stripResourceAlias(alias: string, aliasedUri: string): string {
+  if (alias === "") return aliasedUri;
   const prefix = `${ALIAS_SCHEME}://${alias}/`;
   return aliasedUri.startsWith(prefix) ? aliasedUri.slice(prefix.length) : aliasedUri;
 }

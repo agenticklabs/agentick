@@ -152,6 +152,20 @@ export interface SessionStoreQuery {
   readonly status?: SessionStatus | readonly SessionStatus[];
   /** Match sessions whose parent is exactly this id (the session tree). */
   readonly parentSessionId?: string;
+  /**
+   * `true` matches only ROOT sessions — those with no parent at all.
+   *
+   * The gap `parentSessionId` cannot fill: it asks "whose parent is X", and there is
+   * no id meaning "none". A conversation list needs exactly this, because a spawned
+   * child is a real session with a real record — so a sub-agent's working session
+   * would otherwise sit in a user's thread list beside conversations they actually
+   * had.
+   *
+   * Mutually exclusive with `parentSessionId` in practice (a session cannot both
+   * have no parent and have a specific one); supplying both matches nothing rather
+   * than silently preferring one.
+   */
+  readonly root?: boolean;
   /** Recency: `record.updatedAt >= updatedAfter`. */
   readonly updatedAfter?: number;
 }

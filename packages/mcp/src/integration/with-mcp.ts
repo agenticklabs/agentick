@@ -185,6 +185,26 @@ export interface McpServerConfig {
   readonly promptPrefix?: string;
 
   /**
+   * Alias to namespace this server's RESOURCE uris under — `mcp://<alias>/<uri>`.
+   * Defaults to `serverId`. **Set `""` to surface uris verbatim.**
+   *
+   * Namespacing exists because two servers may both publish `config://app`, and a
+   * uri is the identity a resolver is registered under — a collision silently
+   * shadows one server's resource with another's.
+   *
+   * But a uri is not a name: unlike a tool, a resource's uri is frequently
+   * DOCUMENTED — by the server's own instructions, by its resource descriptions,
+   * by prose the model reads. Rewriting it makes the model's most reliable source
+   * of truth wrong. `knowify://me` becomes `mcp://knowify/knowify://me`, the server
+   * still tells the model to read `knowify://me`, `resource_read` misses, and the
+   * agent concludes the resource is broken.
+   *
+   * So: alias when hosting several third-party servers; pass `""` for a
+   * first-party server you mount yourself and whose uri scheme you own.
+   */
+  readonly resourceAlias?: string;
+
+  /**
    * Model-narration opt-out for THIS server's tools. MCP tools narrate
    * by default (like any tool); set `false` to stamp
    * `annotations.narrate: false` on this server's declarations so the
@@ -740,7 +760,7 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
           try {
             currentResourceUnsubs = await surfaceRemoteResources(
               installer.resources,
-              config.serverId,
+              config.resourceAlias ?? config.serverId,
               harness,
             );
           } catch {
@@ -800,7 +820,7 @@ export function withMCP(options: WithMCPOptions): SessionExtension {
               try {
                 currentResourceUnsubs = await surfaceRemoteResources(
                   installer.resources,
-                  config.serverId,
+                  config.resourceAlias ?? config.serverId,
                   harness,
                 );
               } catch {

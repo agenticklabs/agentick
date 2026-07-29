@@ -44,7 +44,11 @@ function toSessionEntry(record: SessionRecord): SessionEntry {
     // The thread's own title / blurb were on the durable record and dropped here,
     // so a session list had no label per row and no second door to one. Omitted
     // when unset rather than sent as `null` — a renderer branches on presence.
-    ...omitUndefined({ title: record.title, description: record.description }),
+    ...omitUndefined({
+      title: record.title,
+      description: record.description,
+      parentSessionId: record.parentSessionId,
+    }),
   };
 }
 
@@ -55,8 +59,12 @@ function toSessionEntry(record: SessionRecord): SessionEntry {
  * in-process post-filter below so the wire's metadata filter does not regress.
  */
 function toQuery(filter?: SessionFilter): SessionStoreQuery | undefined {
-  if (filter?.status === undefined) return undefined;
-  return { status: filter.status };
+  if (filter === undefined) return undefined;
+  // `root` is a STORE dimension, unlike `metadata` — so it must reach the query
+  // rather than being post-filtered, or a paged list would drop children from the
+  // page it already fetched instead of fetching more roots.
+  const query = omitUndefined({ status: filter.status, root: filter.root });
+  return Object.keys(query).length === 0 ? undefined : (query as SessionStoreQuery);
 }
 
 /** In-process metadata containment post-filter (the store query has no metadata dim). */

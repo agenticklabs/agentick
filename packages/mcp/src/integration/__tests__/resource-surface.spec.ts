@@ -76,6 +76,14 @@ describe("alias helpers", () => {
   it("strip leaves a non-matching prefix untouched", () => {
     expect(stripResourceAlias("docs", "config://app")).toBe("config://app");
   });
+
+  it("an EMPTY alias surfaces the uri verbatim, both ways", () => {
+    // The opt-out for a first-party server whose uri scheme the adopter owns. Note
+    // what the naive form would produce: `mcp:///config://app` — a THIRD uri,
+    // matching neither what the registry holds nor what anyone documents.
+    expect(aliasResourceUri("", "config://app")).toBe("config://app");
+    expect(stripResourceAlias("", "config://app")).toBe("config://app");
+  });
 });
 
 describe("surfaceRemoteResources", () => {
@@ -94,6 +102,28 @@ describe("surfaceRemoteResources", () => {
     // The remote read was called with the ORIGINAL uri, not the aliased one.
     expect(client.reads).toEqual(["config://app"]);
     expect(contents[0]).toMatchObject({ text: "content-of:config://app" });
+  });
+
+  it("registers VERBATIM under an empty alias — the uri a server documents is the uri that works", async () => {
+    // The failure this closes: Knowify's MCP server instructions tell the model to
+    // read `knowify://me`. Aliased, the registry held `mcp://knowify/knowify://me`,
+    // so `resource_read("knowify://me")` missed, the model retried the same uri,
+    // failed again, and reported the resource broken. A uri is not a name — it is
+    // frequently DOCUMENTED, so rewriting it makes the model's best source of truth
+    // wrong.
+    const resources = await makeResources("rs-verbatim");
+    const client = fakeClient({
+      resources: [{ uri: "knowify://me", name: "Current User" }],
+      read: (uri) => [{ uri, text: `content-of:${uri}` }],
+    });
+
+    await surfaceRemoteResources(resources, "", client);
+
+    expect(resources.has("knowify://me")).toBe(true);
+    expect(resources.has("mcp:///knowify://me")).toBe(false);
+    const contents = await resources.read("knowify://me");
+    expect(client.reads).toEqual(["knowify://me"]);
+    expect(contents[0]).toMatchObject({ text: "content-of:knowify://me" });
   });
 
   it("surfaces templates; the resolver reads the stripped concrete uri", async () => {

@@ -146,6 +146,38 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
     await gateway.close();
   });
 
+  it("lists ROOT sessions only when asked, and says which is which", async () => {
+    // The failure this closes: a spawned child is a real session with a real durable
+    // record, so a conversation list showed a sub-agent's working session beside
+    // conversations the user actually had.
+    const gateway = await createGateway();
+    await gateway.listen();
+    const app = await gateway.createApp({
+      rootElement: NULL_ROOT,
+      options: mkAppOptions({ title: "Ernesto" }),
+    });
+    const parent = await app.createSession({ title: "a real conversation" });
+    await app.createSession({ title: "the analyst's own work", parentSessionId: parent.id });
+    const wire = fakeWireCaller({ apps: [app] });
+
+    const all = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
+      appId: app.id,
+    });
+    expect(all.sessions).toHaveLength(2);
+    // Unfiltered, a client can still tell them apart — that is what nests a
+    // sub-session under the turn that opened it.
+    expect(all.sessions.filter((session) => session.parentSessionId !== undefined)).toHaveLength(1);
+
+    const roots = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
+      appId: app.id,
+      filter: { root: true },
+    });
+    expect(roots.sessions.map((session) => session.title)).toEqual(["a real conversation"]);
+    expect(roots.sessions[0]?.parentSessionId).toBeUndefined();
+
+    await gateway.close();
+  });
+
   it("omits them for a thread that has none", async () => {
     const gateway = await createGateway();
     await gateway.listen();

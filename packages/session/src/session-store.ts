@@ -74,6 +74,8 @@ export class InMemorySessionStore implements SessionStore {
       ) {
         return false;
       }
+      // Root-only: absence of a parent, which the equality dims above cannot say.
+      if (query.root === true && record.parentSessionId !== undefined) return false;
       if (!statusMatches(record, query)) return false;
       // Recency: include records last touched at-or-after the cutoff (`>=`).
       if (query.updatedAfter !== undefined && record.updatedAt < query.updatedAfter) return false;

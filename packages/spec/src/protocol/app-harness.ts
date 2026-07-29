@@ -200,6 +200,15 @@ export interface SessionEntry {
    */
   readonly title?: string;
   readonly description?: string;
+  /**
+   * The parent session, when this one was SPAWNED. Absent on a root.
+   *
+   * A client filters roots with `SessionFilter.root`, but a client that lists
+   * everything still has to tell them apart — to nest a sub-session under the turn
+   * that opened it, or to mark a row as an agent's own work rather than a
+   * conversation.
+   */
+  readonly parentSessionId?: string;
 }
 
 export type SessionListEntry = SessionEntry;
@@ -207,6 +216,17 @@ export type SessionListEntry = SessionEntry;
 export interface SessionFilter {
   readonly status?: SessionStatus | ReadonlyArray<SessionStatus>;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * `true` lists only ROOT sessions — what a conversation list wants.
+   *
+   * A spawned child is a real session with a real durable record, so without this a
+   * sub-agent's working session appears in the user's thread list beside
+   * conversations they actually had. Named `root` rather than expressed as
+   * `parentSessionId: null` because a wire filter is read by callers who did not
+   * write it, and an accidental `null` silently narrowing a list to roots is a
+   * worse failure than one extra field.
+   */
+  readonly root?: boolean;
 }
 
 // ============================================================================
