@@ -398,6 +398,12 @@ export function google(
       if (state.finishReasonRaw && accum.stopReason === "end") {
         accum.stopReason = mapFinishReason(state.finishReasonRaw);
       }
+      // Same correction as `normalize`: Gemini reports `STOP` on a chunk that
+      // carried `functionCall` parts, and `"end"` would tell the loop the turn
+      // was answered when it was not. See the note there.
+      if (accum.toolCalls.size > 0 && accum.stopReason === "end") {
+        accum.stopReason = "tool_use";
+      }
       return defaultFinalizeStream(accum);
     },
 
@@ -1092,7 +1098,15 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   const interner = createSourceInterner();
   attachGroundingCitations(output, partIndexToOutputIndex, candidate?.groundingMetadata, interner);
 
-  const stopReason = mapFinishReason(candidate?.finishReason);
+  // Gemini has NO tool-use finish reason — a candidate carrying `functionCall`
+  // parts still reports `STOP`. Normalizing that to `"end"` is a lie in the
+  // canonical vocabulary: the model stopped in order to call tools, which is
+  // exactly what `"tool_use"` means. Translating provider vocabulary is this
+  // adapter's job, so the correction belongs here and not in every consumer.
+  const stopReason =
+    toolCalls.length > 0 && mapFinishReason(candidate?.finishReason) === "end"
+      ? "tool_use"
+      : mapFinishReason(candidate?.finishReason);
   const usage = toUsageStats(raw.usageMetadata);
 
   const result: LanguageModelExecutionResult = {

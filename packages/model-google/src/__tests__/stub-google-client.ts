@@ -15,6 +15,11 @@ import type {
   GenerateContentParameters,
   GenerateContentResponse,
 } from "@google/genai";
+import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { LanguageModelExecutor } from "@agentick/model-executor";
+
+import { google } from "../google-adapter.js";
 
 export type CannedResponse =
   | { readonly kind: "non-streaming"; readonly response: GenerateContentResponse }
@@ -233,4 +238,57 @@ export function mkFinishChunk(opts: {
       }),
     },
   } as unknown as GenerateContentResponse;
+}
+
+// ============================================================================
+// Executor harness
+// ============================================================================
+// A `google()` adapter wired into a real `LanguageModelExecutor` over the stub
+// above. Lives here rather than in one spec file because every Google spec needs
+// the same three pieces to say anything at all, and a second copy is a second
+// place for the wiring to drift from the adapter it is testing.
+
+/** A one-user-message tree — the minimum a target will accept. */
+export function emptyTree(): RenderedTree {
+  return {
+    specVersion: "2026-05-08",
+    context: {
+      entries: [
+        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+    },
+  };
+}
+
+export function mkTarget(overrides?: Partial<LanguageModelTarget>): LanguageModelTarget {
+  return {
+    kind: "language-model",
+    provider: "google",
+    modelId: "gemini-2.5-flash",
+    ...(overrides ?? {}),
+  };
+}
+
+export async function makeExecutor(
+  stub: StubGoogleClient,
+  opts: {
+    stream?: boolean;
+    model?: string;
+    parseThinkTags?: boolean;
+    customBlocks?: Record<string, { tag?: string; onContent?: (c: string) => void }>;
+  } = {},
+) {
+  const journal = new MemoryJournal();
+  const bus = new LocalEventBus();
+  const inbox = new LocalInbox();
+  const exec = new LanguageModelExecutor("exec-google-test", journal, bus, inbox, {
+    adapter: google(opts.model ?? "gemini-2.5-flash", {
+      client: asClient(stub),
+      ...omitUndefined({ stream: opts.stream }),
+      ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
+      ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
+    }),
+  });
+  await exec.ready;
+  return { exec, journal, bus, inbox };
 }

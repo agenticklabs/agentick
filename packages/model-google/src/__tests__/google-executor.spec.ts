@@ -10,14 +10,11 @@
  * cache tokens, providerOptions spread, streaming deltas.
  */
 
-import { omitUndefined } from "@agentick/utils";
-
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import type { LanguageModelTarget, LanguageModelToolChoice, RenderedTree } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type {
   GenerateContentParameters,
   GenerateContentResponse,
@@ -25,66 +22,22 @@ import type {
 } from "@google/genai";
 import { FunctionCallingConfigMode } from "@google/genai";
 
-import { LanguageModelExecutor } from "@agentick/model-executor";
-
 import { google, sanitizeSchemaForGemini } from "../google-adapter.js";
 import {
   StubGoogleClient,
-  asClient,
   mkResponse,
   mkTextChunk,
   mkThoughtChunk,
   mkFunctionCallChunk,
   mkFinishChunk,
+  makeExecutor,
+  emptyTree,
+  mkTarget,
 } from "./stub-google-client.js";
 
 // ============================================================================
 // Helpers
 // ============================================================================
-
-function emptyTree(): RenderedTree {
-  return {
-    specVersion: "2026-05-08",
-    context: {
-      entries: [
-        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
-      ],
-    },
-  };
-}
-
-function mkTarget(overrides?: Partial<LanguageModelTarget>): LanguageModelTarget {
-  return {
-    kind: "language-model",
-    provider: "google",
-    modelId: "gemini-2.5-flash",
-    ...(overrides ?? {}),
-  };
-}
-
-async function makeExecutor(
-  stub: StubGoogleClient,
-  opts: {
-    stream?: boolean;
-    model?: string;
-    parseThinkTags?: boolean;
-    customBlocks?: Record<string, { tag?: string; onContent?: (c: string) => void }>;
-  } = {},
-) {
-  const journal = new MemoryJournal();
-  const bus = new LocalEventBus();
-  const inbox = new LocalInbox();
-  const exec = new LanguageModelExecutor("exec-google-test", journal, bus, inbox, {
-    adapter: google(opts.model ?? "gemini-2.5-flash", {
-      client: asClient(stub),
-      ...omitUndefined({ stream: opts.stream }),
-      ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
-      ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
-    }),
-  });
-  await exec.ready;
-  return { exec, journal, bus, inbox };
-}
 
 // ============================================================================
 // Non-streaming

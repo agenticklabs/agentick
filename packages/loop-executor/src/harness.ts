@@ -1401,7 +1401,29 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // (in the DECIDE, OUTSIDE this command). It rides the `TickResult` as
       // `shouldContinue` so a gate/steering predicate can read "would the
       // loop otherwise stop?" and hold it open.
-      const provisionalContinue = result.stopReason === "tool_use" && tickToolResults.length > 0;
+      // **Tool calls in the response mean the loop continues, whatever the
+      // provider called its stop reason.** A tick that asked for tools has not
+      // finished answering: either results are waiting for a model that has
+      // never seen them, or the calls produced nothing and the model is owed
+      // that fact. Ending the execution there strands work that already
+      // happened and already cost money, and forces the USER to send another
+      // message to make the agent look at what it just fetched.
+      //
+      // Keying this on `stopReason === "tool_use"` made the invariant a
+      // property of the ADAPTER's vocabulary instead of the loop's own state.
+      // Gemini has no tool-use finish reason — it returns `STOP` with
+      // `functionCall` parts in the same candidate — so every Google tool call
+      // ended its execution, while anthropic/openai/ai-sdk all report
+      // `tool_use` and worked. One provider broken, and no provider-agnostic
+      // test could see it.
+      //
+      // This is safe as an unconditional disposition because it is the LOWEST
+      // tier of the resolution in the DECIDE: a terminal tool call
+      // (`terminalCapture`) and a gate `stop` both short-circuit it to false
+      // before it is read, and `maxTicks` bounds it either way. So "tool calls
+      // continue" never overrides a deliberate stop — it only stops the loop
+      // from inventing one out of a provider's finish word.
+      const provisionalContinue = (result.toolCalls?.length ?? 0) > 0 || tickToolResults.length > 0;
       const tickResult: TickResult = {
         executionId,
         sessionId: input.sessionId,

@@ -213,3 +213,132 @@ describe("LoopExecutorHarness — no dangling tool_use (#33, ADR 67)", () => {
     expect(runResult!.toolResults.map((r) => r.toolCallId)).toEqual(["call-1"]);
   });
 });
+
+// ============================================================================
+// Tool calls continue the loop, whatever the provider called its stop
+// ============================================================================
+
+describe("LoopExecutorHarness — tool calls continue the loop regardless of stopReason", () => {
+  it("keeps ticking on a tick that asked for tools while reporting stopReason 'end'", async () => {
+    // The Gemini shape. Google has NO tool-use finish reason: a candidate
+    // carrying `functionCall` parts still reports `STOP`, which normalizes to
+    // `"end"`. The continuation disposition used to be
+    // `stopReason === "tool_use" && toolResults.length > 0`, so this exact
+    // result ended the execution — the tool ran, its result was persisted, and
+    // no model ever saw it. The user had to send another message to make the
+    // agent look at what it had just fetched.
+    //
+    // The adapter half is fixed too (`model-google` now reports `tool_use`
+    // here), but the loop must not depend on every adapter getting that right:
+    // a tick that asked for tools has not finished answering.
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_tc", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+
+    const resolver = new InMemoryHandlerResolver();
+    resolver.register(
+      "h.record",
+      async (): Promise<readonly ContentBlock[]> => [{ type: "text", text: "tool ran" }],
+    );
+    const elic = new ElicitationHarness("loop_tc:elic", sub.journal, sub.bus, sub.inbox);
+    await elic.ready;
+    const toolExecutor = new ToolExecutorHarness("tools_tc", sub.journal, sub.bus, sub.inbox, {
+      handlerResolver: resolver,
+      elicitation: elic,
+      initialTools: [recordToolReg()],
+    });
+    await toolExecutor.ready;
+
+    const executor = new FakeLanguageModelExecutor("exec_tc", sub.journal, sub.bus, sub.inbox, {
+      scripted: [
+        {
+          result: {
+            specVersion: SPEC_VERSION,
+            output: [{ type: "text", text: "let me look that up" }],
+            // The lie the loop used to believe.
+            stopReason: "end",
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            toolCalls: [{ id: "call-1", name: "record_me", input: {} }],
+          },
+        },
+        {
+          result: {
+            specVersion: SPEC_VERSION,
+            output: [{ type: "text", text: "here is what I found" }],
+            stopReason: "end",
+            usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          },
+        },
+      ],
+    });
+    await executor.ready;
+
+    const { applicator } = mkRecordingApplicator();
+    const terminal = await loop.runExecution({
+      sessionId: "s_tc",
+      mountId: "nd-mount",
+      compiler: mkEmptyCompiler(),
+      modelExecutor: executor,
+      toolExecutor,
+      target: executor.target,
+      stateApplicator: applicator,
+      executionId: "exec_tc",
+      maxTicks: 5,
+    });
+
+    expect(terminal.outcome).toBe("succeeded");
+    // TWO ticks: the tool tick, then the tick that actually answers with the
+    // result. One tick would mean the result was stranded.
+    expect(terminal.result!.ticks).toBe(2);
+    expect(terminal.result!.stopReason).toBe("end");
+    // The aggregate carries BOTH ticks' output; what matters is that the second
+    // tick — the one that saw the tool result — is in there at all.
+    expect(terminal.result!.output).toEqual([
+      { type: "text", text: "let me look that up" },
+      { type: "text", text: "here is what I found" },
+    ]);
+  });
+
+  it("still stops after a tick with no tool calls", async () => {
+    // The disposition must not turn every execution into two ticks.
+    const sub = mkSubstrate();
+    const loop = new LoopExecutorHarness("loop_tc2", sub.journal, sub.bus, sub.inbox);
+    await loop.ready;
+
+    const elic2 = new ElicitationHarness("loop_tc2:elic", sub.journal, sub.bus, sub.inbox);
+    await elic2.ready;
+    const toolExecutor = new ToolExecutorHarness("tools_tc2", sub.journal, sub.bus, sub.inbox, {
+      handlerResolver: new InMemoryHandlerResolver(),
+      elicitation: elic2,
+    });
+    await toolExecutor.ready;
+
+    const executor = new FakeLanguageModelExecutor("exec_tc2", sub.journal, sub.bus, sub.inbox, {
+      scripted: {
+        result: {
+          specVersion: SPEC_VERSION,
+          output: [{ type: "text", text: "answered outright" }],
+          stopReason: "end",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        },
+      },
+    });
+    await executor.ready;
+
+    const { applicator } = mkRecordingApplicator();
+    const terminal = await loop.runExecution({
+      sessionId: "s_tc2",
+      mountId: "nd-mount",
+      compiler: mkEmptyCompiler(),
+      modelExecutor: executor,
+      toolExecutor,
+      target: executor.target,
+      stateApplicator: applicator,
+      executionId: "exec_tc2",
+      maxTicks: 5,
+    });
+
+    expect(terminal.outcome).toBe("succeeded");
+    expect(terminal.result!.ticks).toBe(1);
+  });
+});
