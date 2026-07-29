@@ -108,6 +108,19 @@ export async function surfaceRemoteResources(
         mimeType: r.mimeType,
         size: r.size,
         title: r.title,
+        // The uri the SERVER publishes, offered as an alias so it stays readable.
+        //
+        // Namespacing keeps two servers from shadowing each other, but a uri is not
+        // a name: unlike a tool name it is DOCUMENTED — by the server's own
+        // instructions, by its resource descriptions, by prose the model reads. A
+        // model that reads `knowify://me` in the docs and gets "not found" concludes
+        // the resource is broken, which is exactly what happened.
+        //
+        // Resolvable, not listed: the catalog still shows the namespaced uri alone,
+        // so this does not double the list. And if two servers publish the same uri,
+        // reading the bare form throws `ResourceAliasAmbiguous` naming both rather
+        // than handing back whichever registered first.
+        ...(aliased === r.uri ? {} : { aliases: [r.uri] }),
       });
       // Proxy resolver closes over the ORIGINAL uri — the surfaced uri
       // is aliased, the remote read is verbatim.

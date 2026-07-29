@@ -175,6 +175,17 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
     expect(roots.sessions.map((session) => session.title)).toEqual(["a real conversation"]);
     expect(roots.sessions[0]?.parentSessionId).toBeUndefined();
 
+    // The other half of the tree: children of one session, which is what a
+    // session-GRAPH view asks for once a thread is open. The store always had the
+    // dimension; the wire did not project it, so a client could exclude
+    // sub-sessions but never enumerate the ones belonging to a turn.
+    const children = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
+      appId: app.id,
+      filter: { parentSessionId: parent.id },
+    });
+    expect(children.sessions.map((session) => session.title)).toEqual(["the analyst's own work"]);
+    expect(children.sessions[0]?.parentSessionId).toBe(parent.id);
+
     await gateway.close();
   });
 

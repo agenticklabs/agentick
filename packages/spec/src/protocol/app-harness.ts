@@ -227,6 +227,17 @@ export interface SessionFilter {
    * worse failure than one extra field.
    */
   readonly root?: boolean;
+  /**
+   * Children of exactly this session — the other half of the tree, and what a
+   * session-GRAPH view asks for once a thread is open.
+   *
+   * The store has had this dimension all along; the wire did not project it, so a
+   * client could exclude sub-sessions from a list but never enumerate the ones
+   * belonging to a turn. Contradictory with `root: true` (nothing has both no
+   * parent and a specific one) — supplying both matches nothing rather than
+   * silently preferring one.
+   */
+  readonly parentSessionId?: string;
 }
 
 // ============================================================================

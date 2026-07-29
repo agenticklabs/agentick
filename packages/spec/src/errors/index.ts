@@ -154,6 +154,7 @@ export {
   GateNotFound,
   GatesError,
   type GatesErrorChannel,
+  ResourceAliasAmbiguous,
   ResourceAlreadyRegistered,
   ResourceNotFound,
   ResourceResolverFailed,

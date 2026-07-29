@@ -96,6 +96,7 @@ import type {
 } from "@agentick/spec";
 import {
   HandlerError,
+  ResourceAliasAmbiguous,
   ResourceAlreadyRegistered,
   ResourceNotFound,
   ResourceResolverFailed,
@@ -215,6 +216,15 @@ export class ResourcesHarness
   private readonly fixedResolvers = new Map<string, ResourceResolver>();
   /** Resolver sidecar — `uriTemplate → { resolver, compiled RegExp }`. */
   private readonly templateResolvers = new Map<string, TemplateResolverEntry>();
+  /**
+   * alias uri → the registered uris claiming it (`ResourceMeta.aliases`).
+   *
+   * A SET, not a single uri, because two registrations claiming one alias must be
+   * detectable — reading it then throws {@link ResourceAliasAmbiguous} instead of
+   * answering with whichever registered first. Transient beside the resolvers, for
+   * the same reason: neither survives serialization.
+   */
+  private readonly aliasIndex = new Map<string, Set<string>>();
 
   /** Content-update fan-out, keyed by uri (`notifyUpdated`). */
   private readonly updatedNotifier: KeyedNotifier = createKeyedNotifier();
@@ -326,12 +336,30 @@ export class ResourcesHarness
     // store (re-mounts on restart).
     this.view.seedSync({ uri, kind: "fixed", meta });
     this.fixedResolvers.set(uri, resolver);
+    // Aliases are resolvable but NOT listed — `snapshotResources` walks the view,
+    // which holds one record per registration, so a catalog never doubles.
+    for (const alias of meta?.aliases ?? []) {
+      // An alias that collides with a real registration is ignored rather than
+      // shadowing it: the registered uri is the identity, an alias is a courtesy.
+      if (alias === uri) continue;
+      const claimants = this.aliasIndex.get(alias) ?? new Set<string>();
+      claimants.add(uri);
+      this.aliasIndex.set(alias, claimants);
+    }
     this.invalidateAndNotifyList();
     return () => {
       // deleteSync drops the cache entry and fires an idempotent store-delete —
       // a harmless no-op for a transient key the store never held.
       if (this.view.deleteSync(uri, this.storeCtx())) {
         this.fixedResolvers.delete(uri);
+        for (const alias of meta?.aliases ?? []) {
+          const claimants = this.aliasIndex.get(alias);
+          if (claimants === undefined) continue;
+          claimants.delete(uri);
+          // Drop the key with the last claimant, so an alias that was ambiguous
+          // becomes unambiguous again once the other registration goes away.
+          if (claimants.size === 0) this.aliasIndex.delete(alias);
+        }
         this.invalidateAndNotifyList();
       }
     };
@@ -569,10 +597,29 @@ export class ResourcesHarness
 
   // ─────────── Internals ───────────
 
-  /** Fixed binding wins; then the first template whose pattern matches. */
+  /**
+   * Fixed binding wins; then a declared ALIAS; then the first template whose
+   * pattern matches.
+   *
+   * Aliases sit above templates because an alias is an exact, declared name for one
+   * resource, where a template is a pattern that might incidentally match it.
+   *
+   * @throws {ResourceAliasAmbiguous} two registrations claim the same alias.
+   */
   private resolverFor(uri: string): ResourceResolver | TemplateResolver | null {
     const exact = this.fixedResolvers.get(uri);
     if (exact) return exact;
+    const claimants = this.aliasIndex.get(uri);
+    if (claimants !== undefined && claimants.size > 0) {
+      if (claimants.size > 1) {
+        // Never pick a winner — see ResourceAliasAmbiguous. Sorted so the message
+        // is stable across runs rather than dependent on insertion order.
+        throw new ResourceAliasAmbiguous({ uri, candidates: [...claimants].sort() });
+      }
+      const canonical = [...claimants][0]!;
+      const aliased = this.fixedResolvers.get(canonical);
+      if (aliased) return aliased;
+    }
     for (const entry of this.templateResolvers.values()) {
       if (matchesTemplate(entry.compiled, uri)) return entry.resolver;
     }

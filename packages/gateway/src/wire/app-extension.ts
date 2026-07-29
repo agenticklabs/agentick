@@ -60,10 +60,14 @@ function toSessionEntry(record: SessionRecord): SessionEntry {
  */
 function toQuery(filter?: SessionFilter): SessionStoreQuery | undefined {
   if (filter === undefined) return undefined;
-  // `root` is a STORE dimension, unlike `metadata` — so it must reach the query
-  // rather than being post-filtered, or a paged list would drop children from the
-  // page it already fetched instead of fetching more roots.
-  const query = omitUndefined({ status: filter.status, root: filter.root });
+  // `root` and `parentSessionId` are STORE dimensions, unlike `metadata` — so they
+  // must reach the query rather than being post-filtered, or a paged list would
+  // drop rows from the page it already fetched instead of fetching more matches.
+  const query = omitUndefined({
+    status: filter.status,
+    root: filter.root,
+    parentSessionId: filter.parentSessionId,
+  });
   return Object.keys(query).length === 0 ? undefined : (query as SessionStoreQuery);
 }
 

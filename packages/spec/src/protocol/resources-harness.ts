@@ -96,6 +96,25 @@ export interface ResourceMeta {
   /** Display title (MCP `title`). */
   readonly title?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Additional uris that `read` accepts for this resource. Resolvable, never
+   * listed — `list` projects the registered uri alone, so an alias does not
+   * double a catalog.
+   *
+   * The case this exists for: a registrar that RENAMES a uri to keep two sources
+   * from shadowing each other. `withMCP` namespaces every remote resource
+   * (`knowify://me` → `mcp://knowify/knowify://me`) so two servers publishing
+   * `config://app` cannot collide. But a uri is not a name — unlike a tool name,
+   * it is DOCUMENTED, by the server's own instructions and by prose the model
+   * reads. Rewriting it makes the model's most reliable source of truth wrong: it
+   * reads what the docs say, misses, and concludes the resource is broken.
+   *
+   * So the namespaced uri stays the identity (collisions remain impossible) and
+   * the original stays readable. Ambiguity is an ERROR, not a winner: if two
+   * registrations claim the same alias, `read` throws naming both rather than
+   * silently resolving to whichever registered first.
+   */
+  readonly aliases?: readonly string[];
 }
 
 /** Optional descriptor metadata for a URI-template registration. */

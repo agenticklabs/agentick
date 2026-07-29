@@ -126,6 +126,85 @@ describe("surfaceRemoteResources", () => {
     expect(contents[0]).toMatchObject({ text: "content-of:knowify://me" });
   });
 
+  it("the uri the SERVER publishes stays readable, without doubling the catalog", async () => {
+    // The failure this closes, for every server and not just a configured one:
+    // Knowify's MCP instructions tell the model to read `knowify://me`. Namespaced,
+    // the registry held `mcp://knowify/knowify://me`, so the read missed, the model
+    // retried the same uri, failed again, and reported the resource broken. A uri is
+    // not a name — it is DOCUMENTED, so rewriting it makes the model's best source
+    // of truth wrong.
+    const resources = await makeResources("rs-alias");
+    const client = fakeClient({
+      resources: [{ uri: "knowify://me", name: "Current User" }],
+      read: (uri) => [{ uri, text: `content-of:${uri}` }],
+    });
+
+    await surfaceRemoteResources(resources, "knowify", client);
+
+    // Both uris read, and the remote is asked for its OWN uri either way.
+    const viaAlias = await resources.read("knowify://me");
+    expect(viaAlias[0]).toMatchObject({ text: "content-of:knowify://me" });
+    const viaCanonical = await resources.read("mcp://knowify/knowify://me");
+    expect(viaCanonical[0]).toMatchObject({ text: "content-of:knowify://me" });
+    expect(client.reads).toEqual(["knowify://me", "knowify://me"]);
+
+    // …and the catalog lists ONE entry. An alias resolves; it is not a resource.
+    const listed = await resources.list();
+    expect(listed.resources.map((r) => r.uri)).toEqual(["mcp://knowify/knowify://me"]);
+    // `has` reports the REGISTERED uri only — an alias is a read affordance, so a
+    // caller asking "is this registered" gets the honest answer.
+    expect(resources.has("mcp://knowify/knowify://me")).toBe(true);
+  });
+
+  it("REFUSES to guess when two servers publish the same uri", async () => {
+    // Both keep their namespaced uris, so neither is shadowed — but the bare uri now
+    // has two claimants. Answering with whichever registered first would hand the
+    // caller another server's data under the name it asked for: a wrong answer that
+    // looks right. So it throws, naming both.
+    const resources = await makeResources("rs-ambiguous");
+    const a = fakeClient({
+      resources: [{ uri: "config://app", name: "A" }],
+      read: () => [{ uri: "config://app", text: "from-a" }],
+    });
+    const b = fakeClient({
+      resources: [{ uri: "config://app", name: "B" }],
+      read: () => [{ uri: "config://app", text: "from-b" }],
+    });
+
+    await surfaceRemoteResources(resources, "srv-a", a);
+    await surfaceRemoteResources(resources, "srv-b", b);
+
+    // Each server's own uri still reads, unambiguously.
+    expect((await resources.read("mcp://srv-a/config://app"))[0]).toMatchObject({
+      text: "from-a",
+    });
+    expect((await resources.read("mcp://srv-b/config://app"))[0]).toMatchObject({
+      text: "from-b",
+    });
+
+    await expect(resources.read("config://app")).rejects.toThrow(/ambiguous/i);
+  });
+
+  it("an alias becomes unambiguous again when the other claimant goes away", async () => {
+    const resources = await makeResources("rs-unclaim");
+    const a = fakeClient({
+      resources: [{ uri: "config://app", name: "A" }],
+      read: () => [{ uri: "config://app", text: "from-a" }],
+    });
+    const b = fakeClient({
+      resources: [{ uri: "config://app", name: "B" }],
+      read: () => [{ uri: "config://app", text: "from-b" }],
+    });
+
+    await surfaceRemoteResources(resources, "srv-a", a);
+    const bUnsubs = await surfaceRemoteResources(resources, "srv-b", b);
+    await expect(resources.read("config://app")).rejects.toThrow(/ambiguous/i);
+
+    // Teardown must un-claim, or a disconnected server poisons the bare uri forever.
+    for (const u of bUnsubs) u();
+    expect((await resources.read("config://app"))[0]).toMatchObject({ text: "from-a" });
+  });
+
   it("surfaces templates; the resolver reads the stripped concrete uri", async () => {
     const resources = await makeResources("rs2");
     const client = fakeClient({

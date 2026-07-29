@@ -891,6 +891,38 @@ export class ResourceAlreadyRegistered extends ResourcesError {
 }
 registerAgentickError("ResourceAlreadyRegistered", ResourceAlreadyRegistered);
 
+/**
+ * A uri offered as an ALIAS by more than one registration — so reading it would
+ * have to pick a winner.
+ *
+ * Thrown rather than resolved because the alternative is worse than a failure: two
+ * MCP servers both publishing `config://app` register under distinct namespaced
+ * uris (no shadowing), and both offer the bare uri as an alias. Silently answering
+ * with whichever registered first hands the caller ANOTHER SERVER'S data under the
+ * name it asked for — a wrong answer that looks right. The candidates are named so
+ * the caller can address one exactly.
+ */
+export class ResourceAliasAmbiguous extends ResourcesError {
+  readonly _tag = "ResourceAliasAmbiguous" as const;
+  readonly uri: string;
+  /** The registered uris that all claim `uri` as an alias. */
+  readonly candidates: readonly string[];
+  constructor(args: {
+    readonly uri: string;
+    readonly candidates: readonly string[];
+    readonly cause?: unknown;
+  }) {
+    super(
+      `resource alias ${args.uri} is ambiguous — claimed by ${args.candidates.join(", ")}; ` +
+        `read one of those uris directly`,
+      { cause: args.cause },
+    );
+    this.uri = args.uri;
+    this.candidates = args.candidates;
+  }
+}
+registerAgentickError("ResourceAliasAmbiguous", ResourceAliasAmbiguous);
+
 export class ResourceResolverFailed extends ResourcesError {
   readonly _tag = "ResourceResolverFailed" as const;
   readonly uri: string;
