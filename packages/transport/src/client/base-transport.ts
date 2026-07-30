@@ -45,6 +45,7 @@ import type {
   SubscriptionScope,
   SubscriptionStream,
   TransportCapabilities,
+  TransportError,
   WireMethod,
   WireParams,
   WireResult,
@@ -52,6 +53,12 @@ import type {
 import { createNotifier } from "@agentick/pubsub";
 
 import { MultiplexedStream } from "./multiplexed-stream.js";
+import { transportError } from "./transport-failure.js";
+
+/** Render a `ClientState` for an error message (the failed variant is an object). */
+function describeState(state: ClientState): string {
+  return typeof state === "string" ? state : `failed (${state.error.kind})`;
+}
 
 /**
  * Active subscription bookkeeping. Subclasses with reconnect support
@@ -69,6 +76,24 @@ export interface ActiveSubscription {
  * Reconnect policy shared by every transport that supports reconnect.
  * Exponential backoff with full jitter per AWS Builder's Library
  * "Timeouts, retries, and backoff with jitter".
+ *
+ * ## Scope: this policy covers the FIRST dial too
+ *
+ * `connect()` rejects as soon as its own dial fails — an adopter awaiting it
+ * gets an answer immediately rather than blocking on a loop whose default
+ * `maxAttempts` is `Infinity`. But rejecting is not giving up: when this
+ * policy is `enabled`, the transport ALSO arms the backoff loop and keeps
+ * dialing, so a client pointed at a server that is still booting comes up on
+ * its own. The rejection says so explicitly, and the recovery is observable
+ * on {@link ClientTransport.onStateChange} (`reconnecting` → `open`).
+ *
+ * Two consequences worth knowing:
+ *   - A rejected `connect()` does NOT mean the transport is dead. Either
+ *     await `client.whenReady()` / watch `onStateChange`, or pass
+ *     `enabled: false` if you want a single dial and nothing more.
+ *   - With `enabled: false`, a failed `connect()` IS terminal.
+ *
+ * @verifiedBy ../../../transport-websocket/src/__tests__/reconnect-e2e.spec.ts
  */
 export interface ReconnectPolicy {
   readonly enabled?: boolean;
@@ -82,6 +107,46 @@ export const DEFAULT_RECONNECT_POLICY: Required<ReconnectPolicy> = {
   initialDelayMs: 100,
   maxDelayMs: 30_000,
   maxAttempts: Infinity,
+};
+
+/**
+ * Liveness policy — how a transport notices a wire that died SILENTLY.
+ *
+ * The reconnect loop above is armed by one thing: the wire reporting that it
+ * closed. Every drop that produces a FIN, an RST, or a close frame is
+ * therefore covered. The drop that produces NONE of those is not: laptop
+ * sleep, NAT/conntrack eviction, a cellular handoff, a load balancer that
+ * stops forwarding without resetting. The socket stays in `OPEN`, no event
+ * ever fires, and a transport with no liveness probe sits in `state: "open"`
+ * forever while every request hangs unanswered — the wire is gone and the
+ * client is the last to know.
+ *
+ * So the transport asks. A `ping` RPC goes out every `intervalMs`; if no
+ * answer arrives within `timeoutMs`, the wire is declared dead, in-flight
+ * requests reject, and the reconnect loop above takes over. `ping` is the
+ * MCP-convention keepalive and every gateway serves it, so this costs one
+ * tiny frame per interval and needs no capability negotiation.
+ *
+ * Set `enabled: false` when something else already guarantees liveness (an
+ * in-process handler, a test double). Note that the WS protocol's own
+ * ping/pong is NOT a substitute: the browser `WebSocket` API cannot send a
+ * ping, and a server-side ping into a blackholed path detects the death only
+ * on the server's side, which cannot tell a client that cannot hear it.
+ *
+ * @verifiedBy ../../../transport-websocket/src/__tests__/reconnect-e2e.spec.ts
+ */
+export interface KeepalivePolicy {
+  readonly enabled?: boolean;
+  /** Interval between liveness probes while the wire is open. */
+  readonly intervalMs?: number;
+  /** How long a probe may go unanswered before the wire is declared dead. */
+  readonly timeoutMs?: number;
+}
+
+export const DEFAULT_KEEPALIVE_POLICY: Required<KeepalivePolicy> = {
+  enabled: true,
+  intervalMs: 30_000,
+  timeoutMs: 10_000,
 };
 
 /**
@@ -132,6 +197,11 @@ export abstract class BaseClientTransport implements ClientTransport {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Liveness machinery — armed by `markWireUp()`, disarmed on drop/close.
+  protected keepalivePolicy: Required<KeepalivePolicy> = DEFAULT_KEEPALIVE_POLICY;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private probeInFlight = false;
+
   get state(): ClientState {
     return this.currentState;
   }
@@ -165,14 +235,19 @@ export abstract class BaseClientTransport implements ClientTransport {
   }
 
   async close(): Promise<void> {
+    // Deliberate close: disarm liveness AND the dial loop before tearing the
+    // wire down, so nothing redials behind the caller's back. `explicitClose`
+    // (set by the subclass's `closeConnection`) is what keeps the wire's own
+    // close event from re-arming it.
+    this.stopKeepalive();
+    this.cancelReconnect();
     for (const s of this.subscriptionStreams.values()) await s.end(null);
     for (const s of this.progressStreams.values()) await s.end(null);
     this.subscriptionStreams.clear();
     this.progressStreams.clear();
     this.activeSubscriptions.clear();
-    for (const p of this.pending.values()) {
-      p.reject({ kind: "closed", message: "transport closing" });
-    }
+    const closing = transportError({ kind: "closed", message: "transport closing" });
+    for (const p of this.pending.values()) p.reject(closing);
     this.pending.clear();
     await this.closeConnection();
     this.setState("closed");
@@ -186,10 +261,13 @@ export abstract class BaseClientTransport implements ClientTransport {
     signal?: AbortSignal,
   ): Promise<WireResult<M>> {
     if (this.currentState !== "open") {
-      throw { kind: "connection" as const, message: `transport ${this.id} is not open` };
+      throw transportError({
+        kind: "connection",
+        message: `transport ${this.id} is not open (state: ${describeState(this.currentState)})`,
+      });
     }
     if (signal?.aborted) {
-      throw { kind: "cancelled" as const, message: "aborted before send" };
+      throw transportError({ kind: "cancelled", message: "aborted before send" });
     }
 
     const id = this.nextRequestId++ as JsonRpcId;
@@ -229,7 +307,7 @@ export abstract class BaseClientTransport implements ClientTransport {
             requestId: id,
             reason: "aborted",
           });
-          settle("reject", { kind: "cancelled", message: "aborted" });
+          settle("reject", transportError({ kind: "cancelled", message: "aborted" }));
         };
         signal.addEventListener("abort", onAbort, { once: true });
       }
@@ -381,7 +459,7 @@ export abstract class BaseClientTransport implements ClientTransport {
     if (!pending) return;
     this.pending.delete(id);
     if ("error" in response && response.error) {
-      pending.reject({ kind: "rpc", error: response.error });
+      pending.reject(transportError({ kind: "rpc", error: response.error }));
       return;
     }
     if ("result" in response) {
@@ -471,11 +549,24 @@ export abstract class BaseClientTransport implements ClientTransport {
    *
    * Consolidated in Phase 33.C.2 — was duplicated identically in
    * WS / UDS / HTTP transports.
+   *
+   * **Call this exactly once per dead wire.** Twice for the same wire arms two
+   * competing dial loops (the second `scheduleReconnect` overwrites
+   * `reconnectTimer`, orphaning the first timer's socket). That is easy to trip
+   * now that {@link declareWireDead} can report a death the wire itself will
+   * ALSO report a moment later via its close event. Deduplicating belongs at
+   * the wire, not here: only the subclass knows whether an inbound event came
+   * from the socket it still holds or from one it already discarded, and a
+   * latch in this method cannot tell that apart from the next dial's failure
+   * (which MUST re-arm the loop). Every subclass therefore drops events from a
+   * wire it no longer holds — see the staleness guards in the WS transport's
+   * `openSocket`, the UDS `close` listener, and HTTP's `signal.aborted` check.
    */
-  protected handleConnectionDrop(): void {
-    for (const p of this.pending.values()) {
-      p.reject({ kind: "closed", message: "wire closed mid-request" });
-    }
+  protected handleConnectionDrop(cause?: TransportError): void {
+    this.stopKeepalive();
+
+    const failure = transportError(cause ?? { kind: "closed", message: "wire closed mid-request" });
+    for (const p of this.pending.values()) p.reject(failure);
     this.pending.clear();
 
     if (this.explicitClose) {
@@ -496,10 +587,84 @@ export abstract class BaseClientTransport implements ClientTransport {
     this.scheduleReconnect();
   }
 
-  /** Reset the reconnect attempt counter — call after a successful open. */
-  protected resetReconnectAttempts(): void {
+  /**
+   * Subclasses call this from their successful-open path. Resets the backoff
+   * counter and arms the liveness probe — both correct only once the wire is
+   * actually carrying frames, and both easy to forget one of (an un-armed
+   * probe leaves the transport blind to a silent death again).
+   */
+  protected markWireUp(): void {
     this.reconnectAttempts = 0;
+    this.startKeepalive();
   }
+
+  // ── liveness ─────────────────────────────────────────────────────────
+
+  /**
+   * Arm the liveness probe. Idempotent — re-arming replaces the timer, so a
+   * redial never leaves two probes running.
+   */
+  protected startKeepalive(): void {
+    this.stopKeepalive();
+    const { enabled, intervalMs } = this.keepalivePolicy;
+    if (!enabled || !Number.isFinite(intervalMs) || intervalMs <= 0) return;
+    const timer = setInterval(() => void this.probeLiveness(), intervalMs);
+    // A keepalive must never be the reason a process refuses to exit; the
+    // open socket it is probing already holds the loop.
+    (timer as { unref?: () => void }).unref?.();
+    this.keepaliveTimer = timer;
+  }
+
+  protected stopKeepalive(): void {
+    if (this.keepaliveTimer === null) return;
+    clearInterval(this.keepaliveTimer);
+    this.keepaliveTimer = null;
+  }
+
+  /**
+   * One liveness probe: a `ping` RPC under a deadline. No answer in time means
+   * the wire is gone regardless of what the socket claims, so declare it dead
+   * and let the reconnect loop redial.
+   *
+   * `AbortSignal.timeout` supplies the deadline — `request()` already honors a
+   * signal, so this needs no timeout plumbing of its own.
+   */
+  private async probeLiveness(): Promise<void> {
+    if (this.currentState !== "open" || this.probeInFlight) return;
+    this.probeInFlight = true;
+    try {
+      await this.request("ping", {}, AbortSignal.timeout(this.keepalivePolicy.timeoutMs));
+    } catch {
+      // A drop detected by the wire itself already ran the drop path (and
+      // rejected this probe with it) — `handleConnectionDrop` is idempotent,
+      // but skip the redundant teardown when the state already moved.
+      if (this.currentState !== "open") return;
+      this.declareWireDead(`liveness probe unanswered after ${this.keepalivePolicy.timeoutMs}ms`);
+    } finally {
+      this.probeInFlight = false;
+    }
+  }
+
+  /**
+   * Declare an apparently-open wire dead. Unlike the wire's own close event
+   * this runs while the socket still claims to be `OPEN`, so the zombie is
+   * discarded first ({@link discardWire}) — otherwise `sendFrame` keeps
+   * writing into it and the redial competes with a socket that will never
+   * answer.
+   */
+  protected declareWireDead(reason: string): void {
+    this.stopKeepalive();
+    this.discardWire();
+    this.handleConnectionDrop({ kind: "connection", message: reason });
+  }
+
+  /**
+   * Abruptly discard the current wire without marking an explicit close.
+   * Default is a no-op — override in subclasses that hold a socket the
+   * liveness probe can find dead. A graceful close is the wrong tool here: it
+   * waits for a peer close-frame that a blackholed path will never deliver.
+   */
+  protected discardWire(): void {}
 
   private scheduleReconnect(): void {
     this.setState("reconnecting");

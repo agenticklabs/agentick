@@ -8,9 +8,11 @@
 export { CSRF_HEADER } from "../shared/wire.js";
 export {
   BaseClientTransport,
+  DEFAULT_KEEPALIVE_POLICY,
   DEFAULT_RECONNECT_POLICY,
   computeFullJitterBackoff,
   type ActiveSubscription,
+  type KeepalivePolicy,
   type ReconnectPolicy,
 } from "./base-transport.js";
 export {

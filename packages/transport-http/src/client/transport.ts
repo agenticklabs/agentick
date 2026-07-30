@@ -91,7 +91,7 @@ class HttpTransport extends BaseClientTransport {
     this.explicitClose = false;
     this.setState("connecting");
     await this.openNotificationStream();
-    this.resetReconnectAttempts();
+    this.markWireUp();
     this.setState("open");
     this.resubscribeAfterReconnect();
   }
@@ -115,6 +115,18 @@ class HttpTransport extends BaseClientTransport {
       }
       this.sessionId = null;
     }
+  }
+
+  /**
+   * Abandon a notification stream the liveness probe found dead. An SSE body
+   * that stopped being delivered never ends on its own, so aborting the fetch
+   * is what releases it — and what stops `drainNotifications` from calling
+   * `handleConnectionDrop` a second time once the abort surfaces.
+   */
+  protected override discardWire(): void {
+    if (!this.notificationAbort) return;
+    this.notificationAbort.abort();
+    this.notificationAbort = null;
   }
 
   protected async sendFrame(frame: JsonRpcFrame): Promise<void> {

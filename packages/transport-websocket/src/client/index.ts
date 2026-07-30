@@ -8,4 +8,9 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
-export { websocket, type WebSocketTransportOptions, type ReconnectPolicy } from "./transport.js";
+export {
+  websocket,
+  type KeepalivePolicy,
+  type ReconnectPolicy,
+  type WebSocketTransportOptions,
+} from "./transport.js";

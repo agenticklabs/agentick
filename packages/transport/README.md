@@ -110,8 +110,32 @@ That is the whole surface. `close()` on the context iterates both registries and
 | **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.                                      |
 | **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`, ended by `notifications/progress/complete`. |
 | **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.                                    |
-| **Reconnect backoff**    | Full-jitter, capped. `DEFAULT_RECONNECT_POLICY` is the shared shape.                                          |
+| **Reconnect backoff**    | Full-jitter, capped, and it covers the first dial too. `DEFAULT_RECONNECT_POLICY` is the shared shape.        |
+| **Liveness**             | A `ping` probe declares a silently-dead wire dead. `DEFAULT_KEEPALIVE_POLICY` is the shared shape.            |
 | **Resubscribe**          | After a reconnect, re-issues each live subscription from its last-seen cursor.                                |
+
+### Reconnect covers the first dial, and `connect()` still rejects
+
+Both of those are true at once, and the pair surprises people.
+
+`connect()` rejects the moment its own dial fails. It does not wait for the backoff loop, because the default `maxAttempts` is `Infinity` and an adopter awaiting `connect()` deserves an answer rather than an indefinite block. But rejecting is not giving up: when the policy is `enabled`, the loop is armed by that same failure and keeps dialing, so a client pointed at a server that is still booting comes up on its own. The rejection's message says so, and the recovery is observable — `reconnecting` → `open` on `onStateChange`, with `client.whenReady()` covering the handshake that follows.
+
+So a rejected `connect()` does not mean the transport is dead. If you want a single dial and nothing more, pass `enabled: false`; then a failed `connect()` really is terminal.
+
+### A wire that dies silently is the one that needs asking
+
+The reconnect loop is armed by exactly one thing: the wire reporting that it closed. Every drop that produces a FIN, an RST, or a close frame is therefore covered, and a server restart recovers on its own.
+
+The drop that produces none of those is not covered by that mechanism at all. Laptop sleep, NAT/conntrack eviction, a cellular handoff, a load balancer that stops forwarding without resetting — the socket stays in `OPEN`, no event ever fires, and a transport with no liveness probe sits in `state: "open"` forever while every request hangs unanswered. The wire is gone and the client is the last to know.
+
+So the base class asks. A `ping` RPC goes out every `intervalMs` (30s default); if no answer arrives within `timeoutMs` (10s default), the wire is declared dead, in-flight requests reject with `{ kind: "connection" }`, and the reconnect loop above takes over. `ping` is the MCP-convention keepalive that every gateway serves, so it costs one small frame per interval and needs no capability negotiation.
+
+Two notes for anyone implementing a transport on this base:
+
+- The WS protocol's own ping/pong is **not** a substitute. The browser `WebSocket` API cannot send a ping, and a server-side ping into a blackholed path detects the death only on the server's side — which cannot then tell a client that cannot hear it. Both ends need their own detection.
+- Override `discardWire()` if your subclass holds a handle the probe can find dead. A graceful close is the wrong tool: it waits for a peer close-frame a blackholed path will never send. The WS transport prefers `terminate()`, UDS `destroy()`, HTTP aborts the SSE fetch.
+
+Call `markWireUp()` from your successful-open path (it resets the backoff counter and arms the probe), and call `handleConnectionDrop()` **exactly once per dead wire** — twice arms two competing dial loops. That last part is on the subclass, because only the subclass can tell an event from the socket it still holds apart from one it already discarded; a latch in the base cannot distinguish that from the next dial's failure, which must re-arm the loop.
 
 ### The subscription id re-key
 
@@ -301,14 +325,15 @@ runIngressAuthnConformance({
 
 ### `@agentick/transport/client`
 
-| Export                                                             | Purpose                                                       |
-| ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| `BaseClientTransport`                                              | The abstract client base. Implement three methods.            |
-| `MultiplexedStream<T>`                                             | The `AsyncIterable` behind subscription and progress streams. |
-| `DEFAULT_RECONNECT_POLICY` / `computeFullJitterBackoff`            | The shared reconnect backoff, exported for testing.           |
-| `ReconnectPolicy` / `ActiveSubscription` (types)                   | Policy shape and resubscribe bookkeeping.                     |
-| `BackpressurePolicy` / `BackpressureOptions` / `BackpressureError` | Per-stream backpressure types.                                |
-| `transportError(shape)`                                            | A rejection that is both an `Error` and a `TransportError`.   |
+| Export                                                             | Purpose                                                          |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `BaseClientTransport`                                              | The abstract client base. Implement three methods.               |
+| `MultiplexedStream<T>`                                             | The `AsyncIterable` behind subscription and progress streams.    |
+| `DEFAULT_RECONNECT_POLICY` / `computeFullJitterBackoff`            | The shared reconnect backoff, exported for testing.              |
+| `DEFAULT_KEEPALIVE_POLICY`                                         | The shared liveness-probe defaults (30s interval, 10s deadline). |
+| `ReconnectPolicy` / `KeepalivePolicy` / `ActiveSubscription`       | Policy shapes and resubscribe bookkeeping.                       |
+| `BackpressurePolicy` / `BackpressureOptions` / `BackpressureError` | Per-stream backpressure types.                                   |
+| `transportError(shape)`                                            | A rejection that is both an `Error` and a `TransportError`.      |
 
 ### `@agentick/transport/server`
 

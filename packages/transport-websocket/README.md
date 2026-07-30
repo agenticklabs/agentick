@@ -83,12 +83,24 @@ const transport = websocket({
     maxDelayMs: 30_000,
     maxAttempts: Infinity,
   },
+  keepalive: {
+    intervalMs: 30_000,
+    timeoutMs: 10_000,
+  },
 });
 ```
 
-That is the default policy written out. On a drop the transport moves to `reconnecting`, waits a full-jitter exponential delay, opens a fresh socket, and replays each still-open subscription from its last-seen cursor. If the cursor is still inside the server's retention window the subscription resumes with no gap. If it fell out, the stream surfaces `notifications/subscription/evicted` as a protocol error, so the decision to resume from oldest, jump to latest, or give up is yours to make explicitly rather than silently.
+That is both default policies written out. On a drop the transport moves to `reconnecting`, waits a full-jitter exponential delay, opens a fresh socket, and replays each still-open subscription from its last-seen cursor. If the cursor is still inside the server's retention window the subscription resumes with no gap. If it fell out, the stream surfaces `notifications/subscription/evicted` as a protocol error, so the decision to resume from oldest, jump to latest, or give up is yours to make explicitly rather than silently.
 
-Two escapes matter and both are pinned by tests: `close()` never triggers a reconnect, and `reconnect: { enabled: false }` transitions straight to `closed` on a drop instead of retrying.
+The policy covers the **first** dial as well as later drops, so a client pointed at a server that is still booting comes up on its own. `connect()` still rejects on its own failed dial rather than blocking on a loop whose default `maxAttempts` is `Infinity` — a rejected `connect()` therefore does not mean the transport gave up, and its message says as much. Watch `onStateChange` for `reconnecting` → `open`, or `await client.whenReady()` for the handshake that follows. Pass `reconnect: { enabled: false }` when you want one dial and nothing more.
+
+### The drop nobody reports
+
+`reconnect` is armed by the socket's `close` event, which covers every drop that produces a FIN, an RST, or a close frame. It cannot cover the drop that produces none of those — laptop sleep, NAT eviction, a load balancer that quietly stops forwarding. There the socket stays `OPEN`, no event fires, and without a probe the client sits in `state: "open"` forever while every request hangs.
+
+`keepalive` is that probe: a `ping` RPC every `intervalMs`, and if no answer arrives within `timeoutMs` the wire is declared dead, in-flight requests reject, and the reconnect loop above takes over. The WS protocol's own ping/pong is not an option here — the browser `WebSocket` API cannot send one, and the server pinging a blackholed path learns of the death on the side that cannot tell the client.
+
+Three escapes matter and all are pinned by tests: `close()` never triggers a reconnect (even mid-backoff), `reconnect: { enabled: false }` transitions straight to `closed` on a drop, and `keepalive: { enabled: false }` opts out of probing when something else already guarantees liveness.
 
 ## Any `WebSocket` implementation
 
@@ -227,6 +239,7 @@ server.listen(8080);
 | `websocket(options)`               | The `ClientTransport`              |
 | `WebSocketTransportOptions` (type) | The option bag below               |
 | `ReconnectPolicy` (type)           | Re-exported from the base plumbing |
+| `KeepalivePolicy` (type)           | Re-exported from the base plumbing |
 
 | Option              | Meaning                                                                                  |
 | ------------------- | ---------------------------------------------------------------------------------------- |
@@ -234,6 +247,7 @@ server.listen(8080);
 | `WebSocket`         | Constructor override. Defaults to `globalThis.WebSocket`                                 |
 | `extraSubprotocols` | Additional offers appended after `agentick-rpc-v1`                                       |
 | `reconnect`         | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }`. Full-jitter backoff, 100ms → 30s |
+| `keepalive`         | `{ enabled, intervalMs, timeoutMs }`. `ping` liveness probe, 30s interval / 10s deadline |
 | `id`                | Stable transport id for logs. Defaults to `ws-<n>`                                       |
 
 ### `@agentick/transport-websocket/server`
@@ -268,7 +282,7 @@ Security fields (shared, from [@agentick/transport](../transport)): `allowedOrig
 - **No session affinity across reconnects.** `initialize` returns a `connectionId`, but the client does not carry it on reconnect, so a load balancer cannot sticky-route. Fine for single-node deployments; broken for clustered ones.
 - **No server-initiated broadcast.** The server tracks live sockets for teardown but does not fan a gateway-level `notify` out to connected clients. Notifications flow only within a dispatch — subscription events and progress.
 - **Heartbeat termination is unverified.** The server pings on an interval and terminates a socket that misses its pong; the miss branch has no test (it needs a client that deliberately ignores `ping`).
-- **Cursor-aware replay under retention pressure is unverified.** Reconnect is covered and the replay path is wired, but no test drives a subscription past a tight retention window to assert the `evicted` notification arrives.
+- **Cursor-aware resubscribe is unverified end-to-end.** Reconnect itself is covered thoroughly (see `reconnect-e2e.spec.ts`), and the replay path is wired, but no test carries a live subscription across a drop to assert events resume flowing on the same stream from the last-seen cursor. Two things follow: a resubscribe that silently failed would look identical to a healthy reconnect from the outside, because `resubscribeAfterReconnect` discards the `sub/subscribe` rejection by design (nobody awaits it); and nothing drives a subscription past a tight retention window to assert `evicted` arrives.
 - **`extraSubprotocols` has no integration test.** The client offers them; nothing exercises a server that actually speaks a second dialect.
 
 ## Verified by
@@ -276,6 +290,7 @@ Security fields (shared, from [@agentick/transport](../transport)): `allowedOrig
 - `src/__tests__/smoke.spec.ts` — upgrade with subprotocol negotiation against a real gateway, `ping` round-trip, `listApps` reflecting `createApp`, a server error arriving typed (`_tag` preserved), several RPCs multiplexed on one socket, clean close with subsequent requests rejecting, and a subprotocol-less client refused.
 - `src/__tests__/transport-conformance.spec.ts` (`runTransportConformance`) — state machine and listener notification, RPC correlation, pre-connect rejection, `JsonRpcError` → `TransportError`, concurrent multiplexing, `notifications/cancelled` on abort, subscription routing plus `closed` and `evicted`, and progress frames reaching `progress(token)`.
 - `src/__tests__/reconnect.spec.ts` — a server bounce driving `reconnecting` → `open` with the wire working afterwards, explicit `close()` suppressing reconnect, and `enabled: false` going straight to `closed`.
+- `src/__tests__/reconnect-e2e.spec.ts` — reconnect where the server actually stays gone: an outage held across several backoff cycles then a fresh server on the same port, with the handshake re-run and a new request round-tripping; a first dial against a dead port recovering once the server arrives late (and `connect()`'s rejection naming the armed retry); a graceful server-side `1001` retried like an abrupt death; `close()` mid-backoff staying closed; in-flight requests rejecting as an `Error` that is also `{ kind: "closed" }`; and — through a TCP forwarder that blackholes both directions without closing either socket — a silently dead wire detected by the `keepalive` probe rather than hanging in `open` forever.
 - `src/__tests__/security.spec.ts` — upgrades refused with no subprotocol and with an unrecognised one, accepted with `agentick-rpc-v1`; disallowed `Origin` refused and allowlisted accepted; no `Origin` admitted; and the default posture — cross-origin refused, same-origin admitted, spoofed non-loopback `Host` refused.
 - `src/__tests__/ingress-authn.spec.ts` (`runIngressAuthnConformance`) — valid bearer stamping a principal, missing and invalid and prototype-key tokens refused at the edge, local pole with no `authSource`, two dispatches on one socket sharing the connection's identity, plus the admission-failure event: published on refusal, absent on admission, and carrying no credential material.
 - `src/__tests__/authn-timeout.spec.ts` — a never-answering `AuthSource` refusing the upgrade instead of leaving it pending, three refused probes leaving zero sockets held, and one that answers inside the ceiling still upgrading.

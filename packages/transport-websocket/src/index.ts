@@ -11,7 +11,12 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
-export { websocket, type WebSocketTransportOptions, type ReconnectPolicy } from "./client/index.js";
+export {
+  websocket,
+  type KeepalivePolicy,
+  type ReconnectPolicy,
+  type WebSocketTransportOptions,
+} from "./client/index.js";
 
 export {
   websocketServer,

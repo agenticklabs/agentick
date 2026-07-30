@@ -91,11 +91,32 @@ class UnixSocketTransport extends BaseClientTransport {
     this.socket.write(encodeNdjson(frame));
   }
 
+  /**
+   * Destroy a socket the liveness probe found dead. `end()` is the wrong verb:
+   * it half-closes and waits on a peer that is not answering (a SIGSTOP'd
+   * server, a filesystem that went away), which would leak the fd for as long
+   * as the process lives.
+   */
+  protected override discardWire(): void {
+    const socket = this.socket;
+    this.socket = null;
+    socket?.destroy();
+  }
+
   private async openSocket(): Promise<void> {
     this.setState("connecting");
     return new Promise<void>((resolve, reject) => {
       const socket = netConnect(this.socketPath);
 
+      // TODO(uds-redial): this path wedges the reconnect loop. `removeAllListeners`
+      // takes the `close` listener with it, so a FAILED redial reports nothing to
+      // `handleConnectionDrop` — the transport is left in `connecting` forever and
+      // never schedules another attempt (`scheduleReconnect` swallows the
+      // rejection by design). The WS transport dodges this by assigning
+      // `this.socket` before the dial settles and letting `close` drive the loop
+      // uniformly; mirror that here (assign eagerly, drop the
+      // `removeAllListeners`, keep the staleness guard below) and cover it with a
+      // UDS twin of `transport-websocket/src/__tests__/reconnect-e2e.spec.ts`.
       const onError = (err: unknown) => {
         if (this.currentState !== "open") {
           socket.removeAllListeners();
@@ -116,7 +137,7 @@ class UnixSocketTransport extends BaseClientTransport {
       socket.once("connect", () => {
         socket.removeListener("error", onError);
         this.socket = socket;
-        this.resetReconnectAttempts();
+        this.markWireUp();
         this.decoder = new NdjsonDecoder(this.decoderOptions);
         this.setState("open");
         this.resubscribeAfterReconnect();
@@ -145,6 +166,10 @@ class UnixSocketTransport extends BaseClientTransport {
       });
 
       socket.on("close", () => {
+        // Ignore a socket we no longer hold: `discardWire` already reported
+        // this wire's death, and a second report would arm a competing dial
+        // loop. See the note on `handleConnectionDrop`.
+        if (this.socket !== socket) return;
         this.handleConnectionDrop();
       });
     });

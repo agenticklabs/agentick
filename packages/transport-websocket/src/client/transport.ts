@@ -17,7 +17,10 @@
 import type { ClientTransport, JsonRpcFrame, TransportCapabilities } from "@agentick/spec";
 import {
   BaseClientTransport,
+  DEFAULT_KEEPALIVE_POLICY,
   DEFAULT_RECONNECT_POLICY,
+  transportError,
+  type KeepalivePolicy,
   type ReconnectPolicy,
 } from "@agentick/transport/client";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
@@ -28,6 +31,8 @@ type WebSocketLike = {
   readyState: number;
   send(data: string): void;
   close(code?: number, reason?: string): void;
+  /** `ws` library only — an abrupt teardown with no close handshake. */
+  terminate?: () => void;
   addEventListener(type: "open", listener: () => void): void;
   addEventListener(type: "message", listener: (ev: { data: unknown }) => void): void;
   addEventListener(type: "error", listener: (ev: unknown) => void): void;
@@ -52,10 +57,17 @@ export interface WebSocketTransportOptions {
   readonly extraSubprotocols?: readonly string[];
   /** Exponential backoff (100ms → 30s cap) with full jitter by default. */
   readonly reconnect?: ReconnectPolicy;
+  /**
+   * How a silently-dead wire is detected — a `ping` RPC every 30s with a 10s
+   * deadline by default. Without it, a blackholed path (sleep, NAT eviction,
+   * a load balancer that stops forwarding) leaves the socket in `OPEN` and no
+   * `close` event ever arms the reconnect loop. See {@link KeepalivePolicy}.
+   */
+  readonly keepalive?: KeepalivePolicy;
   readonly id?: string;
 }
 
-export type { ReconnectPolicy };
+export type { KeepalivePolicy, ReconnectPolicy };
 
 const CAPABILITIES: TransportCapabilities = {
   bidirectional: true,
@@ -88,6 +100,7 @@ class WebSocketTransport extends BaseClientTransport {
     this.ctor = options.WebSocket ?? resolveDefaultWebSocketCtor();
     this.subprotocols = [AGENTICK_SUBPROTOCOL, ...(options.extraSubprotocols ?? [])];
     this.reconnectPolicy = { ...DEFAULT_RECONNECT_POLICY, ...(options.reconnect ?? {}) };
+    this.keepalivePolicy = { ...DEFAULT_KEEPALIVE_POLICY, ...(options.keepalive ?? {}) };
   }
 
   protected async openConnection(): Promise<void> {
@@ -109,6 +122,27 @@ class WebSocketTransport extends BaseClientTransport {
     this.socket.send(encodeFrame(frame));
   }
 
+  /**
+   * Drop a wire the liveness probe found dead. `close()` is the wrong verb: it
+   * starts a closing handshake that waits for a peer close-frame a blackholed
+   * path will never send, leaving the socket wedged in `CLOSING`. Prefer the
+   * `ws` library's abrupt `terminate()`; the browser/undici `WebSocket` has no
+   * equivalent, so fall back to `close()` — either way the reference is
+   * dropped first, which is what makes the redial safe (see the staleness
+   * guards in {@link openSocket}).
+   */
+  protected override discardWire(): void {
+    const socket = this.socket;
+    this.socket = null;
+    if (!socket) return;
+    try {
+      if (typeof socket.terminate === "function") socket.terminate();
+      else socket.close();
+    } catch {
+      /* the wire is already gone — nothing left to release */
+    }
+  }
+
   // ── WS-specific machinery ────────────────────────────────────────────
 
   private async openSocket(): Promise<void> {
@@ -118,24 +152,55 @@ class WebSocketTransport extends BaseClientTransport {
       const socket = new this.ctor(this.url, this.subprotocols);
       this.socket = socket;
 
+      // Every listener below is scoped to THIS socket. A redial installs a
+      // fresh set, and the socket it replaced can still emit late — a zombie
+      // discarded by `discardWire`, or a dial that lost the race. Acting on
+      // those events would tear down the healthy connection that replaced it,
+      // so each one returns early once `this.socket` has moved on.
+      const isCurrent = (): boolean => this.socket === socket;
+
       socket.addEventListener("open", () => {
-        this.resetReconnectAttempts();
+        if (!isCurrent()) return;
+        this.markWireUp();
         this.setState("open");
         this.resubscribeAfterReconnect();
         resolve();
       });
 
       socket.addEventListener("message", (ev) => {
+        if (!isCurrent()) return;
         this.handleMessage(ev.data);
       });
 
+      // A dial can also fail with a `close` and NO `error` — a refused
+      // subprotocol, an upgrade the server answered 403. Rejecting from
+      // whichever arrives first is what keeps `connect()` from hanging
+      // forever on those paths.
+      const failDial = (cause: unknown): void => {
+        reject(
+          transportError({
+            kind: "connection",
+            // A rejected dial does not mean the transport gave up — with
+            // reconnect enabled the backoff loop is already armed and will
+            // keep dialing. Say so, or adopters read this as terminal.
+            message: this.reconnectPolicy.enabled
+              ? `WebSocket dial to ${this.url} failed; reconnect is armed and will keep retrying (watch onStateChange)`
+              : `WebSocket dial to ${this.url} failed and reconnect is disabled`,
+            cause,
+          }),
+        );
+      };
+
       socket.addEventListener("error", (err) => {
-        if (this.currentState !== "open") {
-          reject({ kind: "connection", message: "WebSocket error before open", cause: err });
-        }
+        if (!isCurrent() || this.currentState === "open") return;
+        failDial(err);
       });
 
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (ev) => {
+        if (!isCurrent()) return;
+        // `reject` after `resolve` is a no-op, so an established connection
+        // closing settles nothing here — it just runs the drop path.
+        failDial(ev);
         this.handleConnectionDrop();
       });
     });

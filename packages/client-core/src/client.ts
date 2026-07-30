@@ -256,6 +256,24 @@ class AgentickClient implements ClientProtocol {
       // transition above.
       if (s === "open" && this.reconnectHandshakePending) {
         this.reconnectHandshakePending = false;
+        // TODO(whenReady-honesty): this swallow makes unreadiness SILENT.
+        // `whenReady()` resolves after a handshake that failed, so an adopter
+        // that awaited it sees an open wire with empty capabilities and no
+        // reason why — every namespaced call then fails as "capability
+        // missing". The asserting test
+        // (`__tests__/capabilities.spec.ts` → "post-reconnect handshake failure
+        // leaves capabilities empty") justifies it with "nobody awaited it",
+        // which `whenReady()` exists to contradict.
+        //
+        // Note this is NOT the reconnect hazard it looks like: when the
+        // handshake fails because the WIRE went again, the transport drops,
+        // redials, and the `reconnecting → open` transition below re-arms this
+        // handshake — that case self-heals. What does not self-heal is a
+        // handshake that fails while the wire STAYS up (a gateway that accepted
+        // the socket before it could serve `initialize`, or a
+        // protocolVersionMismatch). Fix is to surface the failure — reject
+        // `whenReady()`, or expose it as a `ClientEvent` — which flips a
+        // documented contract, so it wants a deliberate call, not a drive-by.
         this.postReconnectHandshake = this.runHandshake().catch(() => {
           // Best-effort — a failed post-reconnect handshake leaves
           // capabilities empty, but the wire is otherwise open.
