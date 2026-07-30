@@ -1806,6 +1806,94 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 — MCP spec parity audit (`docs/proposals/v2/mcp-parity.md`)
+
+Systematic four-way audit (have / partial / missing / deliberately-not) of
+agentick v2 against MCP `2025-11-25` + `draft`, at `cbfdae13`. **The headline:
+parity is materially better than our working memory of it, and there is no
+missing vertical.** What remains is three small correctness defects, one
+metadata asymmetry, and exactly one architectural question.
+
+**Counts.** Server features: 12 have, 7 partial, 4 missing. Client features: 3
+have (roots both directions, elicitation form + URL both directions), 1 partial
+(sampling). Protocol: 8 have, 4 partial, 2 missing, 1 deliberately-not.
+
+**Three defects, not gaps — the code is wrong rather than absent.** (1)
+`ctx.signal` on the MCP server is a throwaway `new AbortController().signal` at
+both ctx mint sites (`server/harness.ts:855`, `:1224`), so a client cancelling an
+in-flight `tools/call` drops its request while the handler runs to completion.
+(2) Outbound tool-result content is an unchecked cast
+(`projection/tools.ts:278`) — agentick's 23-member `ContentBlock` union goes
+straight onto a wire whose union has five, so a `JsonBlock` / `CodeBlock` /
+`XmlBlock` emits content no MCP client can parse. The **inbound** direction has a
+real mapper (`integration/content-mapper.ts:87`); outbound has none. (3)
+`PromptDeclaration.title` is declared, documented, motivated
+(`spec/.../prompts-harness.ts:154`) and then dropped by `toWirePrompt`
+(`projection/prompts.ts:178`).
+
+**The metadata asymmetry.** `tool-extensions.ts` established exactly the right
+convention — one namespaced `metadata.mcp` key, helper-built, projected at the
+wire, byte-identical when absent, folded on the inbound side too — and it stopped
+at tools. Prompts and resources already carry the open `metadata` bag it needs
+(`prompts-harness.ts:193`, `resources-harness.ts:98`), so extending it requires
+no new spec surface. This is generalizing a proven pattern, not designing one.
+
+**Pagination: resources solved it, nothing else adopted it.** `resources-harness.ts:159`
+is first-class cursored end to end; `ToolCatalog.list()` (`tool/src/catalog.ts:53`)
+and prompts/skills/completions/elicitation return whole arrays. The client harness
+mirrors the split — `listResources`/`listPrompts` take cursors, `listTools()`
+takes no argument (`client/harness.ts:873`), which means we silently consume only
+the first page of any large third-party server. Steel-manned: for agentick's own
+catalogs pagination mostly does not matter (tool lists are context-bound), but the
+client-side truncation is a correctness bug against servers we do not control, and
+`Store<T,Q,M>`'s generic `Q` already permits cursors (`spec/.../store.ts:62`), so
+the cost is per-harness with zero foundational change. Noted for the record: this
+puts mild tension on "wire constraints live at the wire" — the resolution is that
+the principle governs wire _encodings_, and pagination is a storage concern.
+
+**Sampling is the one real architectural question, and it splits in half.**
+Outbound (server→client): **defer.** An agentick MCP server already has a model —
+sessions own them, tree-declared per tick (ADR 56) — so a handler needing
+inference composes `session.spawn()`. Sampling adds no capability there; it
+transfers _cost and consent_, and we have no cross-boundary cost primitive to hang
+that on. It is also a poor fit for tool-is-the-action: it is a reverse dependency,
+not an invocable action. The `SamplingHarness` name stays a TODO, not a package.
+Inbound (a remote server asks us): **build, opt-in.** Today an adopter
+hand-writes a model call against raw SDK types (`client/types.ts:182` calls
+executor routing "a Wave 3 concern") while the session sits right there with a
+configured executor. Ships as capability-not-opinion: a default handler behind an
+explicit opt-in with a `(request) => verdict` seam, never on by default.
+
+**Resumability is one unset SDK option.** `transports/http.ts:22` claims the SDK
+owns resumability; it does only when given an `eventStore`, and `:466` passes
+none. A dropped SSE stream silently loses every notification sent while
+disconnected — which bites hardest on exactly the long-running Pattern B tasks our
+tasks projection is good at.
+
+**Corrections to what we believed.** The recorded "MCP server-harness next.5
+gaps" note is **stale**: all four listed gaps are closed — declaration and result
+`_meta` (`tool-extensions.ts:78`/`:95`, the MCP Apps `ui://` and step-up-auth
+cases), annotation hints (`:67`), and both prompt render and resource resolution
+now run on the crossing's fiber carrying caller identity plus the `mcp` boundary
+facet (`projection/prompts.ts:117`, `projection/resources.ts:146`). Also:
+`ctx.sample` does **not** exist despite `server/protocol/lifecycle.ts:80` claiming
+it was installed in #171d — that line is the only hit in the workspace; delete it.
+Effect-returning tool handlers throw on the MCP server projection
+(`server/config.ts:993`).
+
+**Shortlist (earn-per-line order).** (1) Thread the SDK per-request abort into
+`ctx.signal` — S. (2) Outbound content-block mapper — S/M. (3) Extend
+`metadata.mcp` to prompts + resources and project prompt `title` — S. (4)
+`listTools(cursor)` on the client harness — S. (5) Inbound sampling default from
+the session's own model, opt-in behind a verdict seam — S/M. (6) Native cursors on
+tools + prompts, and an `eventStore` for HTTP resumability — M. **Explicitly not
+building:** a `SamplingHarness` for outbound sampling, a `RootsHarness` (ADR 65
+already refused it with a recorded trigger), JSON-RPC batching (withdrawn from the
+spec), and any projection of skills / knobs / gates / timeline as MCP capabilities
+— they already reach clients through tools and prompts, and
+`capabilities.extensions` (`lifecycle.ts:118`) is the open seam if that ever
+changes.
+
 ### 2026-07-30 — materialization provenance A+B landed (the stamp + declared `version`)
 
 `docs/proposals/v2/materialization-provenance.md` phases A and B(skills half).

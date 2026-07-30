@@ -76,8 +76,10 @@ export function buildCapabilities(
   // requests when the CLIENT has advertised support — there's no
   // server-side capability flag to set here. v2's `wired.elicitation`
   // / `wired.sampling` track whether the harness can ISSUE those when
-  // appropriate, surfaced through ctx-side APIs (ctx.elicit /
-  // ctx.sample) installed in #171d. The wire shape stays correct.
+  // appropriate, surfaced through ctx-side APIs. `ctx.elicit` shipped
+  // (#171d); `ctx.sample` never did — sampling issuance is deferred
+  // pending an ADR (see docs/proposals/v2/mcp-parity.md §sampling).
+  // The wire shape stays correct.
 
   // Tasks (#171d.3) — advertise server-side tasks capability when at
   // least one tool declares taskSupport: "required" | "supported". The
