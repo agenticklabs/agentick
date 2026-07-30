@@ -36,6 +36,20 @@ export {
   type PromptsHydrator,
   type PromptsStore,
 } from "./definition.js";
+// `definePrompt` (singular) — identity + inference for ONE declaration: `render`'s
+// `args` typed from the declared argument list. No brand (nothing discriminates a
+// single declaration); the harness consumes the result unchanged.
+export { definePrompt, type PromptArgs, type TypedPromptDeclaration } from "./define-prompt.js";
+// Per-argument completion (completions.md §2.1) — the record/sidecar split and THE
+// derived-ref grammar. `promptCompletionRef` is the address a P2 resolve door and a
+// client asking the completions registry directly must both compute.
+export {
+  isDerivedCompletionRef,
+  normalizePromptArguments,
+  promptCompletionRef,
+  restorePromptArguments,
+  type NormalizedPromptArguments,
+} from "./completion.js";
 // The named hydrators — the genesis-seam library, and the ONE source vocabulary.
 // Narrower than skills' by design: only a module import carries a prompt's
 // `render` function across a load boundary.

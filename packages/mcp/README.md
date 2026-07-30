@@ -332,7 +332,11 @@ structured content, the error flag, and embedded resource blocks.
 `sanitizeErrorMessage`, `stripMcpErrorPrefix`, `toMCPResult`, `toolError`,
 `toolResult`; and for completions, `completeFromList`, `completeFromEnum`,
 `completeFromAsync`, `completePrefixMatch`, `completeDependent`,
-`normalizeCompletionResult`, `COMPLETION_MAX_VALUES`.
+`normalizeCompletionResult` — re-exported from
+[`@agentick/completions`](../completions/README.md), which is where they live.
+They apply **no** value cap: MCP's 100-value ceiling
+(`COMPLETION_MAX_VALUES`, exported from `@agentick/mcp/server`) is applied by the
+`completion/complete` projection, because wire constraints live at the wire.
 
 ### Tasks
 

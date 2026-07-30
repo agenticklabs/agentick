@@ -23,6 +23,7 @@
 import type { Effect } from "effect";
 import type { MessageEntry } from "../data/entries.js";
 import type { SubstrateError } from "../data/errors.js";
+import type { CompletionResolver } from "./completions-harness.js";
 import type { PromptsErrorChannel } from "../errors/harnesses.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
@@ -53,7 +54,71 @@ export interface PromptArgument {
   readonly schema?: StandardSchemaV1;
   /** Default `false` — arg is optional. */
   readonly required?: boolean;
+  /**
+   * How this argument COMPLETES — what a composer offers while the user types.
+   * Either form of the ADR 42 dichotomy:
+   *
+   *   - an INLINE {@link CompletionResolver} — the declarative shorthand, and the
+   *     common case. A function, so it follows the `render` precedent exactly: it
+   *     lives in the harness's augmentation sidecar and never reaches durability
+   *     (the record carries a `completeRef` string instead, see
+   *     {@link PromptArgumentRecord}).
+   *   - a NAMED REF (`"knowify.jobs"`) into the completions registry — the
+   *     reusable form. A string crosses the spec firewall the way `handlerRef`
+   *     does; the resolver itself stays registry-resident.
+   *
+   * **LAW.** The resolver is invoked with the PARTIAL value typed so far and a
+   * {@link CompletionResolver}'s {@link import("./completions-harness.js").CompletionCtx},
+   * whose `resolvedArguments` are THIS prompt's sibling arguments — the values
+   * the user has already filled in on the same form. That is what makes
+   * conditional completion possible (the phases of *that* job), and it is why a
+   * resolver declared here is not interchangeable with a free-standing query:
+   * the sibling scope is the prompt's argument list, nothing wider.
+   *
+   * @see docs/proposals/v2/completions.md §2.1
+   */
+  readonly complete?: CompletionResolver | string;
 }
+
+/**
+ * The **record-safe** slice of a {@link PromptArgument} — what
+ * {@link PromptDeclarationRecord} holds and the store persists. It is
+ * `PromptArgument` with the author-facing `complete` slot REPLACED by its two
+ * serializable projections.
+ *
+ * The `complete?: never` is deliberate, and is what makes the split load-bearing
+ * rather than documentary: a `PromptArgument` carrying a resolver is NOT
+ * assignable to this type, so a write site that forgets to normalize fails to
+ * compile instead of quietly persisting a closure.
+ *
+ * **Pre-existing wart, deliberately not fixed here:** `schema` survives the
+ * Omit, and a `StandardSchemaV1` carries a `~standard.validate` function — so
+ * this record is not *fully* JSON-safe today. Do not read the `complete` split
+ * as a claim that it is; the claim is narrower and exact: no COMPLETION resolver
+ * reaches durability.
+ */
+export type PromptArgumentRecord = Omit<PromptArgument, "complete"> & {
+  /** Never present on a record. See the type doc — this is the forcing function. */
+  readonly complete?: never;
+  /**
+   * The registry NAME of this argument's resolver: the author's string ref
+   * verbatim, or — for an inline resolver — the name the prompts harness derived
+   * for it (`prompt:<promptName>:<argName>`, whose `prompt:` prefix is RESERVED
+   * for derived refs). The sidecar holds the function; this holds its address.
+   */
+  readonly completeRef?: string;
+  /**
+   * Sibling arguments that must be filled before this one is completable, from a
+   * `completeDependent({ requires })` resolver's readable metadata. The
+   * PROJECTABLE half of that declaration (completions.md §4): a composer reads
+   * it to grey out a slot instead of issuing a doomed request per keystroke.
+   *
+   * Populated at normalization from the INLINE form only. A named ref leaves it
+   * `undefined` — the registry knows the resolver's dependencies, and projecting
+   * them to a client is the P2 enumeration concern, not a duplicated field here.
+   */
+  readonly completeRequires?: readonly string[];
+};
 
 // ============================================================================
 // Declaration
@@ -332,13 +397,14 @@ export interface PromptsHarnessProtocol {
 /**
  * The **serializable slice** of a {@link PromptDeclaration} — the persisted
  * record the {@link import("./prompts-store.js").PromptStore} holds and the
- * snapshot serializes. It is `PromptDeclaration` MINUS the two non-serializable
- * runtime-augmentation fields (`template`, `render`): the prompts harness is the
- * definition-library archetype's first **augmented instance** — skills' pure
- * record PLUS a non-persisted `{ template, render }` sidecar (data-layer plan
- * §6-C / Phase 5). The store round-trips this record whole; the augmentation
- * lives in a parallel harness-local map and is re-registered on restore (fns
- * cannot survive serialization).
+ * snapshot serializes. It is `PromptDeclaration` MINUS its non-serializable
+ * runtime-augmentation fields (`template`, `render`, and each argument's
+ * `complete` resolver — see {@link PromptArgumentRecord}): the prompts harness is
+ * the definition-library archetype's first **augmented instance** — skills' pure
+ * record PLUS a non-persisted `{ template, render, completions }` sidecar
+ * (data-layer plan §6-C / Phase 5). The store round-trips this record whole; the
+ * augmentation lives in a parallel harness-local map and is re-registered on
+ * restore (fns cannot survive serialization).
  *
  * The snapshot's own entry shape ({@link PromptsSnapshotEntry}) is exactly this
  * record — they are aliases, one canonical definition. Should they diverge (a
@@ -349,7 +415,8 @@ export interface PromptDeclarationRecord {
   /** See {@link PromptDeclaration.title} — a display label, distinct from the subtitle. */
   readonly title?: string;
   readonly description: string;
-  readonly arguments?: readonly PromptArgument[];
+  /** Record-safe descriptors: `complete` traded for `completeRef` / `completeRequires`. */
+  readonly arguments?: readonly PromptArgumentRecord[];
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

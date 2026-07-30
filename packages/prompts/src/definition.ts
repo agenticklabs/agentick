@@ -12,9 +12,10 @@
  * `withPrompts` used to have no `store` at all, while `withSkills` did — the same
  * archetype with half the port (ADR 93 rendered-moot #4). It has one now. What
  * the store holds is narrower than skills': ONLY the serializable
- * `PromptDeclarationRecord`. A prompt's `render(args, ctx)` function and its
- * `template` live in the harness's augmentation sidecar and never reach the
- * store, because a function does not serialize. A hydrated prompt therefore has
+ * `PromptDeclarationRecord`. A prompt's `render(args, ctx)` function, its
+ * `template`, and any inline `complete` resolver on its arguments live in the
+ * harness's augmentation sidecar and never reach the store, because a function
+ * does not serialize. A hydrated prompt therefore has
  * record-only content until the adopter re-registers its content — which is
  * exactly why {@link hydrateFromModule} exists: a module import is the one source
  * that carries functions across the load boundary.
@@ -64,8 +65,12 @@ const PROMPTS_DEFINITION: unique symbol = Symbol("agentick.promptsDefinition");
 /**
  * The store port prompts is written against: a keyed collection of the
  * SERIALIZABLE declaration slice. The `{ template, render }` augmentation is
- * excluded by the record type — a compile-time guarantee that a function never
- * reaches durability.
+ * excluded by the record type, as is each argument's inline `complete` resolver
+ * (`PromptArgumentRecord` trades it for a `completeRef` string and types
+ * `complete?: never`) — a compile-time guarantee that a CODE-carrying field
+ * never reaches durability. Note the record is not thereby fully JSON-safe: an
+ * argument's `schema` survives it and carries a `~standard.validate` function.
+ * That wart predates the completion split and is not what the split claims.
  */
 export type PromptsStore = Store<
   PromptDeclarationRecord,

@@ -4,8 +4,9 @@
  * Per ADR 32, Shape 1 harness:
  *   - Audit envelopes for every register / update / remove / invoke
  *   - Snapshot/restore via `SnapshotCapable` (declarations only —
- *     `template` and `render` aren't serializable; adopter
- *     re-registers content alongside snapshot load)
+ *     `template`, `render`, and an argument's inline `complete`
+ *     resolver aren't serializable; adopter re-registers content
+ *     alongside snapshot load)
  *   - Substrate slot pattern inherited from BaseHarness
  *
  * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
@@ -45,6 +46,7 @@ import {
 } from "@agentick/runtime";
 import type {
   CollectionMutation,
+  CompletionResolver,
   EventBus,
   MessageEntry,
   MessageEnvelope,
@@ -84,6 +86,11 @@ import {
 import { View } from "@agentick/store";
 import { omitUndefined, ulid } from "@agentick/utils";
 
+import {
+  normalizePromptArguments,
+  restorePromptArguments,
+  type NormalizedPromptArguments,
+} from "./completion.js";
 import type {
   PromptSeed,
   PromptsDefinition,
@@ -95,15 +102,23 @@ import { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from 
 import { InMemoryPromptStore } from "./store.js";
 
 /**
- * The NON-serializable runtime augmentation of a prompt — the two fields the
- * store slice ({@link PromptDeclarationRecord}) drops. Held in a parallel
- * harness-local sidecar keyed by name (never persisted): a `render` fn is
- * closure-bound and a `template` may be a live framework node. Re-attached at
+ * The NON-serializable runtime augmentation of a prompt — the fields the store
+ * slice ({@link PromptDeclarationRecord}) drops. Held in a parallel harness-local
+ * sidecar keyed by name (never persisted): a `render` fn is closure-bound, a
+ * `template` may be a live framework node, and a per-argument completion
+ * resolver is a closure over whatever data source answers it. Re-attached at
  * `register`/`update`; the full {@link PromptDeclaration} is the record COMBINED
  * with this. On restore the sidecar starts empty — the adopter re-registers
  * content alongside snapshot load.
  */
-type PromptAugmentation = Pick<PromptDeclaration, "template" | "render">;
+type PromptAugmentation = Pick<PromptDeclaration, "template" | "render"> & {
+  /**
+   * Inline {@link CompletionResolver}s from `arguments[].complete`, keyed by
+   * ARGUMENT name (the record's `completeRef` holds each one's derived registry
+   * name). Same ride `render` takes, for the same reason.
+   */
+  readonly completions?: Readonly<Record<string, CompletionResolver>>;
+};
 
 const SURFACE = "prompts" as const;
 type PromptsSurface = typeof SURFACE;
@@ -157,8 +172,8 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * through it (sync cache first, durable store off the critical path via the
    * `query`/`mutate` seam) and each single write pings the key. The record slice
    * is a pure-mirror collection (cache value IS the stored record), so the view
-   * fits without refinement; the non-serializable `{ template, render }`
-   * augmentation lives in the parallel {@link augmentations} sidecar the view is
+   * fits without refinement; the non-serializable `{ template, render,
+   * completions }` augmentation lives in the parallel {@link augmentations} sidecar the view is
    * agnostic to. Keyed by record `name`. No `onChange` subscriber — prompts has
    * no client-facing change channel.
    */
@@ -297,6 +312,13 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       exposure: "wire",
       handler: (i: PromptsGetInput) => this.applyGet(i),
     });
+    // TODO(completions-p2): resolve door — sidecar-first, else ctx completions
+    // registry. `prompts:complete` belongs HERE, beside `prompts:render`: given
+    // `{ name, argument, value, resolvedArguments }`, look the argument's resolver
+    // up in `augmentations.get(name)?.completions` (the inline form, already in
+    // hand) and fall back to resolving the record's `completeRef` through the
+    // session's completions harness (the named form). P1 threads the DECLARATION
+    // only — nothing here invokes a resolver yet.
 
     // ─── Wire read commands (three-audiences-plan G-prep) — the enumeration +
     // read lane a client prompts handle needs. Registered for their side effect
@@ -482,7 +504,18 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     const record = this.view.getSync(name);
     if (!record) return undefined;
     const aug = this.augmentations.get(name);
-    return aug ? { ...record, ...aug } : record;
+    if (aug === undefined && record.arguments === undefined) return record;
+    // Arguments re-join too: an inline resolver comes back off the sidecar, an
+    // author's named ref comes back as the string it always was. `completions` is
+    // sidecar bookkeeping and NOT a declaration field, so it is destructured off
+    // rather than spread — only `{ template, render }` belong on the result.
+    const { completions: _completions, ...content } = aug ?? {};
+    const args = restorePromptArguments(record.arguments, aug?.completions);
+    return {
+      ...record,
+      ...(args !== undefined ? { arguments: args } : {}),
+      ...content,
+    };
   }
 
   get(name: string): PromptDeclaration | undefined {
@@ -530,9 +563,13 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // `notifier.notifyAll()` fired the wildcard once; `replace` pings each touched
     // key — the keyed bucket AND the wildcard per key — a superset, never fewer.
     //
-    // The augmentation sidecar is CLEARED — `template`/`render` are
+    // The augmentation sidecar is CLEARED — `template`/`render`/`completions` are
     // non-serializable, so a restored prompt has no content until the adopter
     // re-registers it (invoke/render then throw `PromptMissingContent` until they do).
+    // Its arguments keep their `completeRef` / `completeRequires` (records, and the
+    // metadata a palette reads), but an INLINE resolver is gone — `declarationOf`
+    // restores no `complete` for a derived ref with no sidecar rather than handing
+    // back an address nothing answers to.
     // The `View` is agnostic to the sidecar; the clear is harness-owned.
     //
     // TODO(store-phase-4): `importSnapshot` is still the snapshot-based resume
@@ -573,17 +610,22 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     this.listCache = null;
     for (const { declaration } of records) {
       // Same record/sidecar SPLIT `applyRegister` performs — the serializable
-      // slice into the view, the `{ template, render }` code into the sidecar.
-      // Populate the sidecar BEFORE the seed's ping so a subscriber reading
-      // during the ping sees the combined declaration.
-      this.setAugmentation(declaration.name, declaration);
+      // slice into the view, the `{ template, render, completions }` code into the
+      // sidecar. Populate the sidecar BEFORE the seed's ping so a subscriber
+      // reading during the ping sees the combined declaration.
+      const args = normalizePromptArguments(declaration.name, declaration.arguments);
+      this.setAugmentation(declaration.name, {
+        template: declaration.template,
+        render: declaration.render,
+        ...omitUndefined({ completions: args.completions }),
+      });
       this.view.seedSync(
         {
           name: declaration.name,
           description: declaration.description,
           ...omitUndefined({
             title: declaration.title,
-            arguments: declaration.arguments,
+            arguments: args.records,
             metadata: declaration.metadata,
           }),
         },
@@ -668,13 +710,22 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       // Invalidate `listCache` and populate the sidecar BEFORE the view write so a
       // subscriber that reads during the write's synchronous ping sees BOTH the
       // fresh list and the combined declaration (the sidecar-merged view).
+      // The arguments split (completions.md §2.1): each `complete` resolver moves
+      // to the sidecar under its DERIVED ref, each named ref stays on the record
+      // as `completeRef`. A `PromptArgument` carrying a resolver does not fit
+      // `PromptArgumentRecord`, so skipping this is a compile error, not a leak.
+      const args = normalizePromptArguments(decl.name, decl.arguments);
       const record: PromptDeclarationRecord = {
         name: decl.name,
         description: decl.description,
-        ...omitUndefined({ title: decl.title, arguments: decl.arguments, metadata: decl.metadata }),
+        ...omitUndefined({ title: decl.title, arguments: args.records, metadata: decl.metadata }),
       };
       this.listCache = null;
-      this.setAugmentation(decl.name, decl);
+      this.setAugmentation(decl.name, {
+        template: decl.template,
+        render: decl.render,
+        ...omitUndefined({ completions: args.completions }),
+      });
       this.view.write(record, this.storeCtx());
       return Effect.succeed(this.declarationOf(decl.name)!);
     });
@@ -690,12 +741,24 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       }
       const existingAug = this.augmentations.get(input.name);
       const patch = input.declaration;
+      // A patch that names `arguments` REPLACES them wholesale, so it also
+      // replaces their resolvers: re-split the incoming list. A patch that is
+      // silent about arguments keeps both halves of the existing split — the
+      // record's descriptors AND the sidecar's resolvers, which stay in step
+      // because they are only ever written together.
+      const args: NormalizedPromptArguments =
+        patch.arguments !== undefined
+          ? normalizePromptArguments(input.name, patch.arguments)
+          : {
+              ...omitUndefined({ records: existingRecord.arguments }),
+              ...omitUndefined({ completions: existingAug?.completions }),
+            };
       const updatedRecord: PromptDeclarationRecord = {
         name: input.name,
         description: patch.description ?? existingRecord.description,
         ...omitUndefined({
           title: patch.title ?? existingRecord.title,
-          arguments: patch.arguments ?? existingRecord.arguments,
+          arguments: args.records,
           metadata: patch.metadata ?? existingRecord.metadata,
         }),
       };
@@ -707,6 +770,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       this.setAugmentation(input.name, {
         template: patch.template ?? existingAug?.template,
         render: patch.render ?? existingAug?.render,
+        ...omitUndefined({ completions: args.completions }),
       });
       this.view.write(updatedRecord, this.storeCtx());
       return Effect.succeed(this.declarationOf(input.name)!);
@@ -735,7 +799,8 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     const aug: { -readonly [K in keyof PromptAugmentation]: PromptAugmentation[K] } = {};
     if (source.template !== undefined) aug.template = source.template;
     if (source.render !== undefined) aug.render = source.render;
-    if (aug.template !== undefined || aug.render !== undefined) {
+    if (source.completions !== undefined) aug.completions = source.completions;
+    if (aug.template !== undefined || aug.render !== undefined || aug.completions !== undefined) {
       this.augmentations.set(name, aug);
     } else {
       this.augmentations.delete(name);

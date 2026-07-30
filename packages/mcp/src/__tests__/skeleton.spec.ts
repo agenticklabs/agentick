@@ -4,7 +4,7 @@
  *
  * Each section maps 1:1 to a chunk in the v1 → v2 port plan:
  *   - protocol/errors  (sanitization + builders)
- *   - protocol/completions (sugar + 100-cap)
+ *   - protocol/completions (the re-exported sugar; the cap is the wire's now)
  *   - transport/in-memory (linked-pair round-trip)
  *   - oauth/provider + default-provider (interface + pending-auth gate)
  */
@@ -12,13 +12,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  COMPLETION_MAX_VALUES,
   ErrorCodes,
   completeDependent,
   completeFromAsync,
   completeFromEnum,
   completeFromList,
   completePrefixMatch,
+  normalizeCompletionResult,
   protocolError,
   sanitizeErrorMessage,
   stripMcpErrorPrefix,
@@ -144,74 +144,34 @@ describe("protocolError + stripMcpErrorPrefix", () => {
 // protocol/completions
 // ---------------------------------------------------------------------------
 
-describe("completion builders", () => {
+describe("completion builders — re-exported from @agentick/completions", () => {
   const ctx = completionCtx();
 
-  it("completeFromList prefix-filters", async () => {
-    const r = await completeFromList(["alpha", "alphabet", "beta"])("alph", ctx);
-    expect(r.values).toEqual(["alpha", "alphabet"]);
-  });
+  // The five builders' own behavior is covered where they LIVE
+  // (packages/completions/src/__tests__/builders.spec.ts). What matters here is
+  // that mcp's import path still resolves them, that they accept mcp's
+  // `CompletionContext`, and that the 100-cap is NO LONGER theirs.
 
-  it("completeFromList returns full list for empty input", async () => {
-    const r = await completeFromList(["a", "b", "c"])("", ctx);
-    expect(r.values).toEqual(["a", "b", "c"]);
-  });
-
-  it("completeFromEnum works with Zod-shape enums", async () => {
-    const Schema = { options: ["red", "green", "blue"] as const };
-    const r = await completeFromEnum(Schema)("g", ctx);
-    expect(r.values).toEqual(["green"]);
-  });
-
-  it("completePrefixMatch lazy-loads and filters", async () => {
-    let loaded = 0;
-    const handler = completePrefixMatch(async () => {
-      loaded += 1;
-      return ["foo", "bar", "baz"];
+  it("resolve through mcp's barrel and prefix-filter", async () => {
+    expect(await completeFromList(["alpha", "alphabet", "beta"])("alph", ctx)).toEqual({
+      values: ["alpha", "alphabet"],
     });
-    const r = await handler("ba", ctx);
-    expect(r.values).toEqual(["bar", "baz"]);
-    expect(loaded).toBe(1);
+    expect(await completeFromEnum({ options: ["red", "green"] })("g", ctx)).toEqual({
+      values: ["green"],
+    });
+    expect(await completePrefixMatch(() => ["foo", "bar"])("ba", ctx)).toEqual({
+      values: ["bar"],
+    });
+    expect(await completeDependent({ requires: ["projectId"] }, () => ["x"])("any", ctx)).toEqual({
+      values: [],
+    });
   });
 
-  it("completeDependent returns empty when required deps are missing", async () => {
-    const handler = completeDependent({ requires: ["projectId"] }, () => ["x"]);
-    const r = await handler("any", ctx);
-    expect(r.values).toEqual([]);
-  });
-
-  it("completeDependent passes resolved deps to the loader", async () => {
-    const handler = completeDependent({ requires: ["projectId"] }, (_, deps) => [
-      `contract-${deps.projectId}`,
-    ]);
-    const r = await handler("any", completionCtx({ projectId: "p1" }));
-    expect(r.values).toEqual(["contract-p1"]);
-  });
-
-  it("completeFromAsync supports custom hasMore/total", async () => {
-    const handler = completeFromAsync(async () => ({
-      values: ["a", "b"],
-      total: 100,
-      hasMore: true,
-    }));
-    const r = (await handler("", ctx)) as {
-      values: readonly string[];
-      total?: number;
-      hasMore?: boolean;
-    };
-    expect(r.values).toEqual(["a", "b"]);
-    expect(r.total).toBe(100);
-    expect(r.hasMore).toBe(true);
-  });
-
-  it("enforces the 100-value cap and sets hasMore", async () => {
+  it("no longer cap at 100 — the cap moved to the wire projection", async () => {
     const huge = Array.from({ length: 150 }, (_, i) => `v${i}`);
-    const r = (await completeFromList(huge)("", ctx)) as {
-      values: readonly string[];
-      hasMore?: boolean;
-    };
-    expect(r.values).toHaveLength(COMPLETION_MAX_VALUES);
-    expect(r.hasMore).toBe(true);
+    const r = normalizeCompletionResult(await completeFromList(huge)("", ctx));
+    expect(r.values).toHaveLength(150);
+    expect(r.hasMore).toBeUndefined();
   });
 
   it("ADR 91 §2 — threads the request ctx (trunk + facets) into the handler", async () => {
@@ -224,8 +184,7 @@ describe("completion builders", () => {
       ...deriveTestContext({ sessionId: "compl-91" }),
       resolvedArguments: { projectId: "p1" },
     };
-    const r = await handler("q", requestCtx);
-    expect(r.values).toEqual(["q!"]);
+    expect(await handler("q", requestCtx)).toEqual({ values: ["q!"] });
     // The handler reads the request's trunk (sessionId) + sibling arguments +
     // the log/run facets off the SAME ctx.
     expect(seen?.sessionId).toBe("compl-91");

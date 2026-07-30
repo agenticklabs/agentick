@@ -1,20 +1,21 @@
 {
-  "name": "@agentick/prompts",
-  "version": "1.0.0-next.42",
-  "description": "PromptsHarness — durable parameterized prompt library. Renders to MessageEntry[] via pluggable framework renderers (String + MessageEntry[] handled natively in core; framework JSX via @agentick/prompts-react).",
+  "name": "@agentick/completions",
+  "version": "1.0.0-next.43",
+  "description": "CompletionsHarness — argument completion as a first-class seam: a registry of name→resolver bindings plus one resolve door, with the complete* sugar family (list, enum, prefix-match, dependent, async). Owns no data; resolvers read from wherever the candidates already live. No wire cap — each wire trims to its own limit.",
   "keywords": [
     "agent",
     "agentick",
     "ai",
+    "completion",
     "harness",
-    "prompts"
+    "mcp"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/prompts"
+    "directory": "packages/completions"
   },
   "files": [
     "dist"
@@ -24,11 +25,7 @@
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js",
-    "./src/client/*",
-    "./dist/client/*",
-    "./src/react/*",
-    "./dist/react/*"
+    "./dist/augment.js"
   ],
   "main": "src/index.ts",
   "exports": {
@@ -36,16 +33,6 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
-    },
-    "./client": {
-      "types": "./src/client/index.ts",
-      "import": "./src/client/index.ts",
-      "default": "./src/client/index.ts"
-    },
-    "./hydrators": {
-      "types": "./src/hydrators.ts",
-      "import": "./src/hydrators.ts",
-      "default": "./src/hydrators.ts"
     },
     "./testing": {
       "types": "./src/testing/index.ts",
@@ -61,16 +48,6 @@
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       },
-      "./client": {
-        "types": "./dist/client/index.d.ts",
-        "import": "./dist/client/index.js",
-        "default": "./dist/client/index.js"
-      },
-      "./hydrators": {
-        "types": "./dist/hydrators.d.ts",
-        "import": "./dist/hydrators.js",
-        "default": "./dist/hydrators.js"
-      },
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "import": "./dist/testing/index.js",
@@ -81,12 +58,6 @@
     "types": "./dist/index.d.ts",
     "typesVersions": {
       "*": {
-        "client": [
-          "./dist/client/index.d.ts"
-        ],
-        "hydrators": [
-          "./dist/hydrators.d.ts"
-        ],
         "testing": [
           "./dist/testing/index.d.ts"
         ]
@@ -101,17 +72,10 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/client-core": "workspace:*",
     "@agentick/pubsub": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
-    "@agentick/store": "workspace:*",
-    "@agentick/utils": "workspace:*",
     "effect": "^3.22.0"
-  },
-  "devDependencies": {
-    "@agentick/completions": "workspace:*",
-    "@agentick/resources": "workspace:*"
   },
   "engines": {
     "node": ">=20.19"

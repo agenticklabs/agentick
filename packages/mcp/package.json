@@ -113,6 +113,7 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
+    "@agentick/completions": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/prompts": "workspace:*",
     "@agentick/pubsub": "workspace:*",

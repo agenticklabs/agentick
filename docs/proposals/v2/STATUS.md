@@ -1806,6 +1806,63 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 — completions P1 landed (@agentick/completions + prompts threading, #244)
+
+The primitive phase of docs/proposals/v2/completions.md, implemented same-day.
+What shipped: spec seam (`CompletionResult` / `CompletionCtx = OperationCtx &
+{ resolvedArguments, signal? }` / `CompletionResolver` /
+`CompletionsHarnessProtocol` + `CompletionNotFound`/`CompletionResolveFailed`);
+new `packages/completions` mirroring resources' layout — registry + `resolve`
+door that mints NO journaled op (asserted: 3 keystrokes → `totalAppended() === 0`),
+ctx via `deriveOperationCtx` with facets composed into the brand; the five
+builders LIFTED from `mcp/protocol/completions.ts` with the v1 100-cap stripped
+(cap now enforced once at `mcp/server/projection/completions.ts::clampToWireLimit`
+— wire behavior unchanged, tested both sides); conformance + `/testing`
+(`fakeCompletions`/`stubCompletions`/`fakeCompletionCtx`). Prompts side:
+`PromptArgument.complete?: CompletionResolver | string`, record split
+(`PromptArgumentRecord` with `complete?: never` as the compile-time forcing
+function; `completeRef` + projectable `completeRequires`), sidecar widened
+(`completions` keyed by arg name, cleared on importSnapshot like render),
+derived-ref grammar `prompt:<prompt>:<arg>` in ONE site
+(`prompts/src/completion.ts::promptCompletionRef`, `prompt:` prefix reserved).
+
+Design corrections vs. the morning doc (recon-verified): MCP server completion
+ctx-free gap #3 was ALREADY closed (`CompletionContext extends OperationCtx` +
+`ctx.mcp.user`); resolver ctx is `OperationCtx & facets`, NOT ToolHandlerCtx
+(no toolCallId/task/transport to fabricate; Derived brand forbids it anyway).
+Doc updated in place.
+
+Singular/plural definition rule (Ryan): `defineCompletion(name, fn)` returns
+the resolver carrying `completionName` (dual-use: barrel entry OR direct
+`complete:` value — prompts normalization uses the canonical name as
+`completeRef` instead of deriving); `defineCompletions({ sources: map | named[] })`
+— reshaped from bare-map to an options bag for slot-grammar uniformity +
+unambiguous instance discrimination (NO `store`: nothing serializable to hold;
+`guards: { resolve }` is the believable future knob). Duplicate barrel names
+throw at define time. `definePrompt` (singular, in prompts): identity +
+const-generic inference — `render(args)` typed from the arguments literal
+(required→string, optional→`string | undefined`, schema→InferOutput; LAW: no
+schema → string, MCP parity); returns ERASED `PromptDeclaration` (createTool
+precedent — the narrowing can't survive strictFunctionTypes). Nothing
+self-registers at import: attachment = listed in `sources` or embedded in a
+declaration; ambient registries refused on multi-session-isolation grounds.
+
+Notable: records already project `completeRef`/`completeRequires` through
+`prompts/list`/`get` and the client handle — Knowify's composer can grey out
+dependent slots with zero further wire work (P4 input). READMEs: completions
+written + resources rewritten per .claude/skills/create-readme (elicitation as
+the bar); found real bug → #245 (`ResourceAliasAmbiguous` missing from
+`ResourcesErrorChannel` + `RESOURCES_ERROR_TAGS`, unreachable as typed error).
+`scripts/dep-graph-gate.mjs` hardened: `${…}` template-literal artifacts no
+longer read as import specifiers (was a false-positive publish blocker at HEAD).
+Gates: 1279 tests green across completions/prompts/spec/mcp; workspace
+typecheck green except pre-existing `@agentick/model` failure from a concurrent
+session's in-flight files (not ours; left untouched). NOT committed here:
+pnpm-lock.yaml + the 59 version-bump package.json hunks (concurrent session's
+sweep) — only the two dependency hunks were staged surgically. Next: P2 wire
+verb (`TODO(completions-p2)` markers at the exact sites), P3 MCP squaring
+(`TODO(completions-p3)` in-fiber twin), P4 ernesto consumers.
+
 ### 2026-07-30 — completions design doc (docs/proposals/v2/completions.md)
 
 Argument completion (MCP `completion/complete` generalized) designed doc-first;

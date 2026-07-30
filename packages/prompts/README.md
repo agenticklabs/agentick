@@ -104,10 +104,60 @@ interface PromptArgument {
   description?: string;
   schema?: StandardSchemaV1; // omitted → no shape check
   required?: boolean; // default false
+  complete?: CompletionResolver | string; // candidates while the user types
 }
 ```
 
 Supply `template` or `render`; `render` wins if both are present, and neither raises `PromptMissingContent` at invoke time. Arguments validate against their Standard Schema before content is produced.
+
+## Argument completion
+
+An argument can say how to finish the user's sentence. `complete` takes a resolver inline — the common case — and the builders in [@agentick/completions](../completions) cover the shapes worth naming:
+
+```ts
+import { definePrompt } from "@agentick/prompts";
+import { completeDependent, completeFromAsync, completeFromList } from "@agentick/completions";
+
+export default definePrompt({
+  name: "tm_change_order_actual_cost",
+  description: "Log an actual cost against a change order.",
+  arguments: [
+    {
+      name: "job",
+      required: true,
+      complete: completeFromAsync((value, ctx) => jobsApi.search(value, ctx)),
+    },
+    {
+      name: "phase",
+      required: true,
+      complete: completeDependent({ requires: ["job"] }, (value, { job }, ctx) =>
+        phasesApi.search(value, job, ctx),
+      ),
+    },
+    { name: "markup_pct", complete: completeFromList(["10", "15", "20", "25", "30"]) },
+  ],
+  render: (args) => `Log ${args.markup_pct ?? "0"}% markup on ${args.job} / ${args.phase}.`,
+});
+```
+
+A resolver is handed the partial value typed so far and a context whose `resolvedArguments` are **this prompt's sibling arguments** — which is what makes the phases of _that_ job answerable. It runs with the caller's identity, like any other operation.
+
+The reusable form names a resolver registered once instead of re-wrapping it per prompt:
+
+```ts
+export default defineCompletions({
+  sources: { "knowify.jobs": completeFromAsync((value, ctx) => jobsApi.search(value, ctx)) },
+});
+
+// …and a declaration references it by name:
+{ name: "job", required: true, complete: "knowify.jobs" }
+```
+
+A string is durable and a function is not, so the two forms part ways at the store: a named ref persists verbatim, while an inline resolver moves to the same sidecar `render` lives in and the record keeps `completeRef` — `prompt:<promptName>:<argName>`, derived. A resolver from `defineCompletion(name, fn)` is both at once, and keeps the name it already has rather than being aliased under a derived one. The record also carries `completeRequires` for a dependent resolver, so a composer reading `prompts/list` can grey out the phase slot until a job is chosen instead of issuing a request that cannot succeed. `get(name)` re-joins the split and hands back what you declared. A restored snapshot keeps the refs and the dependencies but not the functions, exactly as it keeps no `render`.
+
+`definePrompt` (singular) is worth the import here: it types `render`'s `args` from the argument list — required arguments as their value, optional ones as the value or `undefined`, and a schema's inferred output where one is declared. **No schema means the argument is a `string`**, which is MCP's shape on the wire; declare a schema when you want anything else.
+
+Resolving a completion is not wired yet — see the known gaps.
 
 ## Where prompts come from
 
@@ -384,6 +434,8 @@ type PromptsError =
 | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
 | `withPrompts(config)`                                                                                  | The session extension — a plan or a live library     |
 | `definePrompts(options)`                                                                               | Name a plan: identity + brand, inert until install   |
+| `definePrompt(declaration)`                                                                            | Name one prompt: `render`'s args typed from the list |
+| `promptCompletionRef(prompt, arg)`                                                                     | The derived registry name for an inline resolver     |
 | `hydrateFrom` / `hydrateFromModule` / `hydrateFromStaticUrl` / `hydrateFromStore` / `composeHydrators` | The sources                                          |
 | `PromptsHarness`                                                                                       | The implementation, for direct construction          |
 | `InMemoryPromptStore` / `matchesPromptQuery`                                                           | Bundled store and its name-substring query predicate |
@@ -424,6 +476,7 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - **Content doesn't survive the store.** `hydrateFromStore()` returns declarations without `template` / `render`. Compose it under `hydrateFromModule` to put the code back, or re-register the content yourself.
 - **No filesystem source.** `.tsx` prompts need a bundler; a framework binding is the right home for one.
 - **No model-facing tools.** Prompts are user-directed, so a `prompt_list` / `prompt_get` pair needs its audience story told before it ships.
+- **Completion declares but does not resolve.** `complete` threads all the way to the record and the sidecar; nothing invokes a resolver yet. The `prompts/complete` verb, its client handle, and the MCP `completion/complete` projection are the next phase ([`docs/proposals/v2/completions.md`](../../docs/proposals/v2/completions.md) §7 P2–P3), marked `TODO(completions-p2)` at the site it lands. A named ref is not validated against the completions registry at registration time either — a typo surfaces when the resolve door ships.
 - **No transactions and no per-prompt ACL.** Each mutation is its own operation, and all session participants share one library.
 
 ## Verified by
@@ -435,6 +488,8 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - `src/__tests__/source-surface.spec.ts` — `reload` adds/updates/prunes, lookup-on-miss through `invoke` and `render`, `resolve` and `require` on hit and miss, and a source-less harness touching nothing.
 - `src/__tests__/store-backing.spec.ts` — the record/sidecar split (the record written without the functions), `update` and `remove` propagation, the source feeding both halves through `reload` and `resolve`, snapshot dropping the functions, store-to-seed restoring records only, plus the store conformance suite against `InMemoryPromptStore`.
 - `src/__tests__/projection.spec.ts` — the declaration document for a function-render prompt (function absent, argument schema stripped), a static string template served as `text/markdown`, register-after-install and remove-unregisters, the `exposeAsResources: false` opt-out, and degradation with no resource registry.
+- `src/__tests__/completion.spec.ts` — the completion split against the real builders: an inline resolver never reaching the store (JSON round-trip included), the derived `completeRef`, `completeRequires` off a dependent resolver, a named ref copied verbatim and side-caring nothing, the re-join through `get` and `list`, `update` / `remove` / `importSnapshot` / genesis keeping both halves in step, and a wire-delivered `complete` stripped at runtime.
+- `src/__tests__/define-prompt.type.spec.ts` — `definePrompt`'s inference: required versus optional values, the no-schema-means-string law, a schema's inferred output, no keys for an argument-less prompt, undeclared keys unreadable, the erased result assignable where declarations go, and both forms of `complete` in one argument list.
 - `src/__tests__/ctx-spine.spec.ts` — the invoking operation's context reaching `render(args, ctx)`.
 - `src/client/__tests__/prompts-handle.spec.ts` + `session-prompts.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, and the zero-argument subscribe contract.
 - The in-process transport suite covers the `prompts/list` wire round-trip as records without functions, and `commands/list` enumerating the wire verbs.

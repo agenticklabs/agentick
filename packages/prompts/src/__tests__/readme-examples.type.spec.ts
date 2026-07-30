@@ -8,10 +8,18 @@
  */
 
 import { describe, it } from "vitest";
+import {
+  completeDependent,
+  completeFromAsync,
+  completeFromList,
+  defineCompletions,
+} from "@agentick/completions";
 
 import {
   composeHydrators,
+  definePrompt,
   definePrompts,
+  promptCompletionRef,
   hydrateFrom,
   hydrateFromModule,
   hydrateFromStaticUrl,
@@ -104,8 +112,45 @@ withPrompts({ renderers: [myRenderer] });
 const mySharedPrompts = {} as import("@agentick/spec").Prompts;
 withPrompts(mySharedPrompts);
 
+// ── Argument completion
+declare const jobsApi: { search(value: string, ctx: unknown): Promise<string[]> };
+declare const phasesApi: { search(value: string, job: string, ctx: unknown): Promise<string[]> };
+
+definePrompt({
+  name: "tm_change_order_actual_cost",
+  description: "Log an actual cost against a change order.",
+  arguments: [
+    {
+      name: "job",
+      required: true,
+      complete: completeFromAsync((value, ctx) => jobsApi.search(value, ctx)),
+    },
+    {
+      name: "phase",
+      required: true,
+      complete: completeDependent({ requires: ["job"] }, (value, { job }, ctx) =>
+        phasesApi.search(value, job, ctx),
+      ),
+    },
+    { name: "markup_pct", complete: completeFromList(["10", "15", "20", "25", "30"]) },
+  ],
+  render: (args) => `Log ${args.markup_pct ?? "0"}% markup on ${args.job} / ${args.phase}.`,
+});
+
+// The reusable form — a named resolver, referenced by string.
+defineCompletions({
+  sources: { "knowify.jobs": completeFromAsync((value, ctx) => jobsApi.search(value, ctx)) },
+});
+definePrompt({
+  name: "named_ref",
+  description: "d",
+  template: "t",
+  arguments: [{ name: "job", required: true, complete: "knowify.jobs" }],
+});
+
 // ── Misc exports the README names
 promptUri("weekly_status");
+promptCompletionRef("tm_change_order_actual_cost", "job");
 matchesPromptQuery({ name: "x", description: "d" }, { name: "x" });
 
 describe("README examples", () => {

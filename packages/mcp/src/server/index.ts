@@ -126,13 +126,16 @@ export {
   type ResourcesProjectionOptions,
 } from "./projection/resources.js";
 export {
+  clampToWireLimit,
+  COMPLETION_MAX_VALUES,
   installCompletionsHandlers,
   type CompletionsProjectionOptions,
 } from "./projection/completions.js";
 // Completion sugar builders — re-exported so server adopters build
-// `completions` handlers from the same import path as the harness.
+// `completions` handlers from the same import path as the harness. The builders
+// themselves live in `@agentick/completions` and apply NO cap; the cap
+// (`COMPLETION_MAX_VALUES` above) is this wire's, applied by the projection.
 export {
-  COMPLETION_MAX_VALUES,
   completeDependent,
   completeFromAsync,
   completeFromEnum,

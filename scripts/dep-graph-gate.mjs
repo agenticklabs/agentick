@@ -73,7 +73,10 @@ function specifiersOf(src) {
   const out = new Set();
   for (const m of stripComments(src).matchAll(SPEC_RE)) {
     const spec = m[1] ?? m[2];
-    if (spec) out.add(spec);
+    // A `${…}` interpolation is a runtime string quoting import syntax (an error
+    // message's `import "${x}"`), not a static edge — template literals keep
+    // their quote characters, so the regex alone can't tell them apart.
+    if (spec && !spec.includes("${")) out.add(spec);
   }
   return out;
 }

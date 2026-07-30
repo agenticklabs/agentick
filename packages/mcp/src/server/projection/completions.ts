@@ -20,17 +20,48 @@
  * arguments the user already filled) flows through as
  * {@link CompletionContext.resolvedArguments}.
  *
- * Output is capped at 100 values by {@link normalizeCompletionResult}
- * (spec-mandated), which the sugar builders also enforce.
+ * ## The 100-value cap lives HERE
+ *
+ * MCP caps a `completion/complete` response at 100 values. v1 baked that clamp
+ * into every sugar builder, and v2's mcp package inherited it — so a builder
+ * called from anywhere silently truncated, including from the native prompts
+ * surface that has no such limit. Wire constraints live at the wire: the builders
+ * (now in `@agentick/completions`) return everything they found, and
+ * {@link clampToWireLimit} trims THIS wire's result to
+ * {@link COMPLETION_MAX_VALUES}, setting `hasMore` when it does.
  */
 
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CompleteRequest, CompleteResult } from "@modelcontextprotocol/sdk/types.js";
 import { CompleteRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Unsubscribe } from "@agentick/runtime";
+import type { CompletionResult } from "@agentick/spec";
+import { omitUndefined } from "@agentick/utils";
 
 import { normalizeCompletionResult, type CompletionHandler } from "../../protocol/completions.js";
 import type { RunCrossing } from "./crossing.js";
+
+/** Spec-mandated max values per `completion/complete` response. */
+export const COMPLETION_MAX_VALUES = 100;
+
+/**
+ * Trim a completion result to this wire's advertised limit, stamping `hasMore`
+ * on truncation. The ONE enforcement point for the MCP cap — no builder and no
+ * primitive applies it.
+ *
+ * @verifiedBy packages/mcp/src/server/__tests__/projection-completions-logging.spec.ts
+ */
+export function clampToWireLimit(
+  result: CompletionResult,
+  limit = COMPLETION_MAX_VALUES,
+): CompletionResult {
+  if (result.values.length <= limit) return result;
+  return {
+    values: result.values.slice(0, limit),
+    ...omitUndefined({ total: result.total }),
+    hasMore: true,
+  };
+}
 
 export interface CompletionsProjectionOptions {
   /** Prompt-argument handlers, keyed by prompt name then argument name. */
@@ -94,7 +125,9 @@ export function installCompletionsHandlers(
           // for `runCrossing` to expose a per-crossing `derive(extras)` seam so
           // the boundary's own field composes INTO the branded mint.
           const raw = await handler(argument.value, { ...ctx, resolvedArguments });
-          const result = normalizeCompletionResult(raw);
+          // Normalize the sugar shape, THEN apply this wire's cap. The handler
+          // itself no longer truncates.
+          const result = clampToWireLimit(normalizeCompletionResult(raw));
           // CompletionResult uses readonly arrays; the SDK wire type wants
           // mutable — spread into a fresh array at the boundary.
           return {

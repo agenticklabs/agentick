@@ -1,8 +1,10 @@
 # Completions — argument completion as a first-class seam
 
-**Status:** DESIGN — written 2026-07-30, pre-implementation. Reviewed in-session
-with Ryan; the verdicts in §6 were argued live and are settled unless new
-evidence arrives.
+**Status:** P1 LANDED 2026-07-30 (`30a4f21f`, #244) — spec seam,
+`@agentick/completions`, the mcp builder lift, prompts threading, and the
+`definePrompt`/`defineCompletion` singular rule are in-tree; P2–P4 remain.
+Reviewed in-session with Ryan; the verdicts in §6 were argued live and are
+settled unless new evidence arrives.
 
 **Reads before this:** blueprint/27-modular-built-ins.md (package pattern),
 ADR 43 (unified handler ctx), ADR 66 (dispatch-resolved ctx),
@@ -26,12 +28,12 @@ then phases-given-job).
 
 ### Where v2 stands today (verified 2026-07-30)
 
-| Surface                                               | Support                                                                                                                                                          |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **MCP client harness** (agentick → remote MCP server) | ✅ `mcp:complete` cmd; `completePromptArgument(name, arg, value)`, `completeResourceTemplate(uri, variable, value)` (Wave 2, #146)                               |
-| **MCP server harness** (agentick serving MCP clients) | ✅ `completions.{prompts,resources}` config — but **ctx-free**: `CompletionContext = { resolvedArguments }` only; no identity, no services (Knowify-port gap #3) |
-| **Native prompts harness** (`PromptDeclaration`)      | ❌ no per-arg seam of any kind                                                                                                                                   |
-| **agentick client wire** (session RPC → client-core)  | ❌ no verb                                                                                                                                                       |
+| Surface                                               | Support                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **MCP client harness** (agentick → remote MCP server) | ✅ `mcp:complete` cmd; `completePromptArgument(name, arg, value)`, `completeResourceTemplate(uri, variable, value)` (Wave 2, #146)                                                                                                                                               |
+| **MCP server harness** (agentick serving MCP clients) | ✅ `completions.{prompts,resources}` config; `CompletionContext extends OperationCtx` (identity via `ctx.mcp.user` — gap #3 CLOSED by the ctx-spine work). Builders live here with the v1 cap-100 baked in (`protocol/completions.ts`) — the wrong home per §4/§5; P1 lifts them |
+| **Native prompts harness** (`PromptDeclaration`)      | ❌ no per-arg seam of any kind                                                                                                                                                                                                                                                   |
+| **agentick client wire** (session RPC → client-core)  | ❌ no verb                                                                                                                                                                                                                                                                       |
 
 Both MCP **edges** have completion; the native **middle** is empty. An
 agentick-wire client (ernesto) has no path to any completion — which is why
@@ -74,11 +76,25 @@ const prompts = definePrompts({
 ```
 
 Inline functions are the common case. The resolver receives the **typed value**,
-the **declared dependencies / sibling args**, and a **real ctx** — the same
-`ToolHandlerCtx` shape tool handlers get (ADR 43: one ctx shape, transport
-discriminated). That last point is the fix for the MCP server harness's
-ctx-free completion: identity-scoped completion (`knowify://me`-class problems)
-becomes possible because the resolver is dispatch-resolved like any handler.
+the **declared dependencies / sibling args**, and a **real ctx** —
+`CompletionCtx extends OperationCtx` plus its boundary facets, the exact
+pattern the MCP server's `CompletionContext` already follows (spec's
+`runtime-context.ts` names completion as an `OperationCtx` seam alongside
+`ResourceResolver` and `PromptDeclaration.render`). Identity-scoped completion
+(`knowify://me`-class problems) works because the resolver is minted in-fiber
+like any operation — NOT `ToolHandlerCtx`: a keystroke query has no
+`toolCallId`, no `task` mode, no `transport` discriminator, and the `Derived`
+brand makes fabricating them a compile error. The one dispatch extra completion
+genuinely shares is the `AbortSignal` (latest-wins cancellation), carried as a
+boundary facet.
+
+**`definePrompt()` (singular)** ships alongside: identity + **inference** (no
+brand — nothing discriminates a single declaration; it always arrives inside a
+seed list or module barrel). A const generic over the `arguments` literal types
+`render(args)` — required → `string`, optional → `string | undefined`,
+`schema` present → its inferred output — and types `completeDependent`'s
+sibling-deps the same way. Law settled with it: **no schema → the arg is a
+string** (MCP parity); want a number, declare a schema.
 
 ### 2.2 Naming — register once, reference anywhere
 
@@ -86,10 +102,18 @@ becomes possible because the resolver is dispatch-resolved like any handler.
 import { defineCompletions } from "@agentick/completions";
 
 const completions = defineCompletions({
-  "knowify.jobs":   completeFromAsync((value, ctx) => jobsApi.search(value, ctx)),
-  "knowify.phases": completeDependent({ requires: ["job"] }, (v, { job }, ctx) =>
-    phasesApi.search(v, job, ctx)),
+  sources: {
+    "knowify.jobs":   completeFromAsync((value, ctx) => jobsApi.search(value, ctx)),
+    "knowify.phases": completeDependent({ requires: ["job"] }, (v, { job }, ctx) =>
+      phasesApi.search(v, job, ctx)),
+  },
 });
+
+// Or the file-grammar form: one source per file via the SINGULAR, folded by a
+// barrel. defineCompletion returns the resolver itself carrying its canonical
+// name (dual-use: barrel entry, or handed straight to a `complete:` slot).
+export default defineCompletion("knowify.jobs", completeFromAsync(…));
+defineCompletions({ sources: [jobs, phases] }); // duplicate names throw at define time
 
 // A declaration references by NAME — a string crosses the spec firewall the
 // way handlerRef does; a function never does.
@@ -97,11 +121,17 @@ const completions = defineCompletions({
 ```
 
 Same dichotomy as every other slot: the inline function is the declarative
-shorthand (auto-registered under a derived name at construction); the named ref
-is the reusable form. In **spec-land the declaration carries only
-`completeRef?: string`** — the resolver itself is registry-resident, exactly the
-`handlerRef` pattern. This is what Knowify v1 never had and paid for: every
-prompt re-imported `searchJobs` and re-wrapped it.
+shorthand — it rides the prompts sidecar exactly like `render`, and the record
+gets a `completeRef` (the resolver's own `completionName` when it has one, else
+the derived `prompt:<prompt>:<arg>`; the `prompt:` prefix is reserved). The
+named ref is the reusable form. In **spec-land the record carries only
+`completeRef?: string` (+ projectable `completeRequires`)** — the resolver
+itself is sidecar- or registry-resident, exactly the `handlerRef` pattern.
+Nothing self-registers at import (an ambient registry has no answer to "which
+session?"); `defineCompletions` is an options bag (`{ sources }`, deliberately
+NO `store` — nothing serializable to hold) so future knobs like
+`guards: { resolve }` land flatly. This is what Knowify v1 never had and paid
+for: every prompt re-imported `searchJobs` and re-wrapped it.
 
 ### 2.3 Resolving — programmatic, wire, and UI
 
@@ -125,12 +155,15 @@ squaring up with MCP costs a projection, not a translation. `ref.type` opens as
 ### 2.4 The two MCP projections
 
 - **Outward (server harness):** `completion/complete` for `ref/prompt` resolves
-  through the prompts harness's completion seam — the SAME resolvers, now with
-  real ctx (`bearerTokenAuth` → `ctx.mcp.user` reaches completion, closing
-  gap #3). The MCP wire applies MCP's constraints at the wire: 100-value cap +
+  through the prompts harness's completion seam — the SAME resolvers serving
+  both wires (ctx already carries identity there; gap #3 closed independently).
+  The MCP wire applies MCP's constraints at the wire: 100-value cap +
   `hasMore` truncation happen in the projection, **not** in the primitive or
-  the builders. (v1 baked the cap into the builders; v2 deliberately does not —
-  wire constraints live at the wire.)
+  the builders. (v1 baked the cap into the builders, and v2's mcp package
+  inherited that — every builder in `mcp/src/protocol/completions.ts` calls
+  `clamp()` internally. P1 lifts the builders into `@agentick/completions`
+  WITHOUT the clamp; mcp re-exports them and keeps `COMPLETION_MAX_VALUES`
+  in `projection/completions.ts` only — wire constraints live at the wire.)
 - **Inward (client harness):** when MCP-origin prompts fold into the native
   prompts surface (not yet built — they currently live on the MCP client
   harness), their completion is a **forwarding resolver**: same seam, resolver
@@ -191,8 +224,9 @@ scoping, provenance, handler-ctx, interceptors, and a wire dispatch all exist;
 Maximum primitive-reuse, zero new registry.
 
 **Option B — a dedicated (small) completions facility.** Own name→resolver
-registry; resolver ctx **borrows the `ToolHandlerCtx` shape** (ADR 43) so a
-resolver reads like a tool handler; own wire verb.
+registry; resolver ctx is **`OperationCtx` + boundary facets** (the
+`CompletionContext` precedent) so a resolver reads like every other starved
+seam (`render`, `ResourceResolver`); own wire verb.
 
 **Verdict: B.** A's steel-man breaks on three concrete failures, not taste:
 
@@ -239,9 +273,14 @@ later `tool`, `resources`). It is a registry + resolve door, not a subsystem.
 ## 7. Phasing
 
 - **P1 — primitive.** `@agentick/completions`: spec types (`CompletionResult`,
-  `completeRef` on `PromptArgumentDeclaration`), registry + `resolve` door with
-  `ToolHandlerCtx`-shaped ctx, the five builders + `normalizeCompletionResult`,
-  conformance + `/testing` doubles. Prompts harness threads declarations.
+  `completeRef` on `PromptArgument`), registry + `resolve` door with
+  `CompletionCtx extends OperationCtx` (+ `AbortSignal` facet), the five
+  builders (LIFTED from `mcp/src/protocol/completions.ts`, clamp stripped) +
+  `normalizeCompletionResult`, conformance + `/testing` doubles, per-harness
+  layout mirroring `@agentick/resources`. Prompts harness threads declarations
+  (inline fn → sidecar like `render`, auto-registered under a derived name;
+  record carries only the string ref). `definePrompt()` factory in
+  `@agentick/prompts`.
 - **P2 — agentick wire.** `complete` session RPC (ref-discriminated),
   client-core handle, gateway route.
 - **P3 — MCP squaring.** Server-harness `completion/complete` resolves through

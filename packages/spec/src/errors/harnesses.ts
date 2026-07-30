@@ -952,6 +952,46 @@ export type ResourcesErrorChannel =
   | ResourcesBackendError;
 
 // ============================================================================
+// CompletionsError — argument-completion registry failures
+// ============================================================================
+
+export abstract class CompletionsError extends AgentickError {}
+
+/**
+ * `resolve` named a completion that is not registered. Errors-over-nulls: an
+ * empty value list would read as "this argument has no candidates", which is a
+ * wrong answer that looks right. A wire projection that WANTS the best-effort
+ * empty (MCP's `completion/complete` probes freely) catches this at the wire.
+ */
+export class CompletionNotFound extends CompletionsError {
+  readonly _tag = "CompletionNotFound" as const;
+  /** `completionName`, not `name` — `name` is `Error`'s own slot (the class name). */
+  readonly completionName: string;
+  constructor(args: { readonly completionName: string; readonly cause?: unknown }) {
+    super(`completion ${args.completionName} not found`, { cause: args.cause });
+    this.completionName = args.completionName;
+  }
+}
+registerAgentickError("CompletionNotFound", CompletionNotFound);
+
+/** The registered resolver threw or rejected. Carries the source name + cause. */
+export class CompletionResolveFailed extends CompletionsError {
+  readonly _tag = "CompletionResolveFailed" as const;
+  readonly completionName: string;
+  override readonly cause: unknown;
+  constructor(args: { readonly completionName: string; readonly cause: unknown }) {
+    super(`completion ${args.completionName} resolver failed: ${String(args.cause)}`, {
+      cause: args.cause,
+    });
+    this.completionName = args.completionName;
+    this.cause = args.cause;
+  }
+}
+registerAgentickError("CompletionResolveFailed", CompletionResolveFailed);
+
+export type CompletionsErrorChannel = CompletionNotFound | CompletionResolveFailed;
+
+// ============================================================================
 // GatesError — gate registry failures (ADR 27 GatesHarness)
 // ============================================================================
 

@@ -24,6 +24,7 @@
     "../packages/timeline-postgres",
     "../packages/tasks-store-postgres",
     "../packages/skills",
+    "../packages/completions",
     "../packages/prompts",
     "../packages/prompts-react",
     "../packages/client-react",

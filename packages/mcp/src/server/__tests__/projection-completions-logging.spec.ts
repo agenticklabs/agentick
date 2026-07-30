@@ -36,11 +36,16 @@ import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtim
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
+import { deriveTestContext } from "@agentick/runtime/testing";
+
 import { buildCapabilities } from "../protocol/lifecycle.js";
 import {
+  clampToWireLimit,
+  COMPLETION_MAX_VALUES,
   completeFromList,
   inMemoryServerTransport,
   McpServerHarness,
+  normalizeCompletionResult,
   type McpServerOptions,
   type ToolHandlerResolver,
 } from "../index.js";
@@ -249,6 +254,45 @@ describe("completion projection — round-trip", () => {
     });
     expect(res.completion.values).toEqual([]);
     await cleanup();
+  });
+});
+
+// ═══════════════ the 100-value cap lives at the WIRE ═══════════════
+
+describe("completion projection — the cap moved to the wire", () => {
+  const huge = Array.from({ length: 150 }, (_, i) => `v${i}`);
+
+  it("the builder itself returns everything — no cap in the primitive", async () => {
+    const raw = await completeFromList(huge)("", {
+      ...deriveTestContext(),
+      resolvedArguments: {},
+    });
+    const result = normalizeCompletionResult(raw);
+    expect(result.values).toHaveLength(150);
+    expect(result.hasMore).toBeUndefined();
+  });
+
+  it("the projection caps the wire response at 100 and sets hasMore", async () => {
+    const { client, cleanup } = await makeConnectedClient({
+      name: "cmp-cap",
+      completions: { prompts: { greet: { name: completeFromList(huge) } } },
+    });
+    const res = await client.complete({
+      ref: { type: "ref/prompt", name: "greet" },
+      argument: { name: "name", value: "" },
+    });
+    expect(res.completion.values).toHaveLength(COMPLETION_MAX_VALUES);
+    expect(res.completion.hasMore).toBe(true);
+    await cleanup();
+  });
+
+  it("clampToWireLimit preserves a source-reported total and leaves small results alone", () => {
+    const small = { values: ["a", "b"], total: 2 };
+    expect(clampToWireLimit(small)).toBe(small);
+    const clamped = clampToWireLimit({ values: huge, total: 500 }, 10);
+    expect(clamped.values).toHaveLength(10);
+    expect(clamped.total).toBe(500);
+    expect(clamped.hasMore).toBe(true);
   });
 });
 
