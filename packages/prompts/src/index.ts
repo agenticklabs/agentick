@@ -22,6 +22,7 @@ export {
   PromptsHarness,
   type PromptsHarnessOptions,
   type TimelineAppendCapability,
+  type TimelineAppendSource,
 } from "./harness.js";
 // Materialization provenance — the `MessageSource.prompt` slot `invoke` stamps on
 // every entry it queues. The augmentation itself rides the `./augment.js` side

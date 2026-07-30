@@ -1806,6 +1806,47 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 (later) — era discovery, defect wave, #257
+
+**MCP 2026-07-28 era**: current-official MCP is a protocol REWRITE (stateless,
+MRTR/requestState, no sessions; SDK answer = the GA 2.0.0 package split — the
+monolith is capped at 2025-11-25 forever). Repo advertises the era in labels
+only (0cbe88e3). Decision doc `mcp-era-2026-07-28.md` (178acd33), umbrella
+#256. Era-safe: completions, pagination, icons. Moot: the URL-elicitation
+completion-notification gap (fields removed in-era).
+
+**Defect wave landed** (parity-audit shortlist + handle audit):
+
+- `a7081eac` — #246 sub-handle teardown on session close; #247 live active-map
+  shrinks (+ live gains close()); #248 per-method namespace merge
+  (wireFallthrough proxy gated on satisfies-checked wireMethods lists; handle
+  methods always win; timeline.compact newly reachable). Follow-up #258
+  (\*/commands rows reachable, zero consumers — verdict needed).
+- `01899e4c` — #254 SDK abort → ctx.signal (no merge: single source, listener-
+  leak argument); #255 outbound content mapper (foldContentBlock-exhaustive,
+  both producing sites, retired the broken toMCPResult duplicate); #253 +
+  display/\_meta carriage for prompts/resources (tool-extensions →
+  wire-extensions); opt-in SSE eventStore + bundled bounded
+  inMemoryEventStore (old-era surface by spec). Found: #259 icon sizes shape
+  mismatch + GetPromptResult.\_meta needs a spec source.
+- #257 (this commit) — prompts.invoke appended NOTHING in every default
+  createApp deployment: host timeline invisible to installer.getNamespace
+  (session constructed after extensions install). Fix: app publishes the host
+  timeline into the shared extensionBridges map post-construction (guarded —
+  withTimeline claims win); PromptsHarnessOptions.timeline widens to a
+  provider thunk (retry-on-miss, cache-on-hit); the silent skip warns once.
+  Ordering law doc-blocked on BaseInstaller.getNamespace. Found by the Knowify
+  usage-walk e2e (send→3 entries, invoke→0); missing test class added
+  (real-createApp integration in packages/app).
+
+**Releases**: next.43 publish had silently half-failed (concurrent 02:16
+publish of the same version → immutable-conflict skips; only the new
+completions name landed — false-green types via skipLibCheck any-degradation).
+next.44 = the real tree, tarball-verified. next.45 cut after this wave.
+Completions /client subpath added (8395a54f) — the wire row is now importable
+outside the monorepo. Knowify piece 2 landed (composer→invoke; bare-send run
+trigger; RunOutcome "appended"); pieces 1&3 resume on next.45.
+
 ### 2026-07-30 — MCP spec parity audit (`docs/proposals/v2/mcp-parity.md`)
 
 Systematic four-way audit (have / partial / missing / deliberately-not) of

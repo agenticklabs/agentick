@@ -26,7 +26,7 @@
 import { isPromptsInstance, type SessionExtension, type SessionInstaller } from "@agentick/spec";
 import { inheritedFrom } from "@agentick/runtime";
 
-import { PromptsHarness } from "./harness.js";
+import { PromptsHarness, type TimelineAppendCapability } from "./harness.js";
 import type { PromptsConfig, PromptsDefinition } from "./definition.js";
 import { wirePromptProjection } from "./projection.js";
 
@@ -79,12 +79,17 @@ export function withPrompts(config: PromptsConfig = {}): SessionExtension {
 
       // ── Definition arm: construct THIS session's harness from the plan.
       //
-      // Read the session's timeline harness if available — `invoke()` uses it to
-      // append rendered messages to the durable timeline. When absent (e.g. a test
-      // setup), `invoke()` renders and returns without appending.
-      const timeline = (installer.getNamespace?.("timeline") ?? undefined) as
-        | import("@agentick/spec").TimelineHarnessProtocol
-        | undefined;
+      // The session's timeline, as a PROVIDER — read at append time, never here
+      // (#257). Install runs before the session exists, so its `bridges.timeline`
+      // is not yet in the namespace map and an eager read resolves `undefined`
+      // permanently: `invoke()` would render and silently append nothing in every
+      // default `createApp` deployment. The app publishes the host timeline into
+      // this same map right after constructing the session (an adopter's
+      // `withTimeline` instance, registered HERE at install, keeps the name), so
+      // the read succeeds from the first invoke onward. When nothing ever claims
+      // it, `invoke()` renders and returns without appending.
+      const timeline = (): TimelineAppendCapability | undefined =>
+        installer.getNamespace<TimelineAppendCapability>("timeline");
 
       const harness = new PromptsHarness(
         `${installer.hostId}:prompts`,
@@ -93,7 +98,7 @@ export function withPrompts(config: PromptsConfig = {}): SessionExtension {
         installer.substrate.inbox,
         {
           ...config,
-          ...(timeline ? { timeline } : {}),
+          timeline,
           // ADR 93 landmine 11 — the cascade must be TOTAL. An extension-installed
           // namespace inherits the app/session interceptor cascade through the
           // installer's handle, exactly like a session-constructed bridge does;

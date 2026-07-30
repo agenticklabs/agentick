@@ -163,6 +163,28 @@ declare module "@agentick/runtime" {
 export type TimelineAppendCapability = Pick<TimelineHarnessProtocol, "append">;
 
 /**
+ * How the host supplies {@link TimelineAppendCapability} — a value OR a
+ * PROVIDER read at append time.
+ *
+ * The provider arm exists because of an ordering fact the value arm cannot
+ * express: session extensions install BEFORE the session (and therefore before
+ * its `bridges.timeline`) exists, so an installer that resolves the timeline
+ * eagerly resolves `undefined` — permanently, for the whole session. The
+ * extension passes `() => installer.getNamespace("timeline")`; the app
+ * publishes the host timeline into that same namespace map once the session is
+ * constructed; the first `invoke()` reads through and finds it.
+ *
+ * A provider that returns `undefined` is retried on the NEXT invoke — a
+ * timeline that appears later starts working, and a miss is never cached.
+ *
+ * @verifiedBy packages/prompts/src/__tests__/timeline-late-binding.spec.ts
+ * @verifiedBy packages/app/src/__tests__/prompts-invoke-timeline.spec.tsx
+ */
+export type TimelineAppendSource =
+  | TimelineAppendCapability
+  | (() => TimelineAppendCapability | undefined);
+
+/**
  * Construction options for {@link PromptsHarness} — the {@link PromptsDefinition}
  * (store · genesis · shaping seams · `hooks:` / `guards:`) plus the
  * {@link BaseHarnessOptions} the substrate needs (journaling policy, the
@@ -177,8 +199,12 @@ export interface PromptsHarnessOptions extends BaseHarnessOptions, PromptsDefini
    * construction by the extension installer, NOT part of the adopter-facing
    * definition — when absent, `invoke()` renders and returns without appending
    * (exactly what `render()` does).
+   *
+   * Takes a live capability (the direct-injection path: tests, a BYO harness) or
+   * a PROVIDER resolved at append time (what `withPrompts` passes — see
+   * {@link TimelineAppendSource} for why the eager read cannot work).
    */
-  readonly timeline?: TimelineAppendCapability;
+  readonly timeline?: TimelineAppendSource;
 }
 
 export class PromptsHarness extends BaseHarness<PromptsSurface> implements PromptsHarnessProtocol {
@@ -217,7 +243,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    */
   private readonly augmentations = new Map<string, PromptAugmentation>();
   private readonly renderers: readonly PromptRenderer[];
-  private readonly timeline?: TimelineAppendCapability;
+  /** Value or provider — resolved per append by {@link resolveTimeline}. */
+  private readonly timelineSource?: TimelineAppendSource;
+  /** Provider result, cached on the first HIT only (a miss must re-resolve). */
+  private resolvedTimeline?: TimelineAppendCapability;
+  /** Latch for the once-per-harness "no timeline wired" warning. */
+  private warnedNoTimeline = false;
 
   /**
    * The definition's own store — held so the genesis ctx can hand it to a
@@ -275,7 +306,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // the definition advertises its own `hooks:` / `guards:` bags.
     super(SURFACE, scopeId, journal, bus, inbox, options);
     this.renderers = options.renderers ?? [];
-    this.timeline = options.timeline;
+    this.timelineSource = options.timeline;
     this.store = options.store ?? new InMemoryPromptStore();
     this.view = View.collection(this.store, (r) => r.name);
     // Genesis (ADR 93): the definition's hydrator, resolved — not RUN — here.
@@ -1014,6 +1045,22 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     }
   }
 
+  /**
+   * Resolve the append target for THIS invoke. A directly-injected capability
+   * passes through; a provider is called every time until it hits, then the hit
+   * is cached (the timeline of a live session never changes identity).
+   *
+   * Deliberately NOT resolved at construction: see {@link TimelineAppendSource}.
+   */
+  private resolveTimeline(): TimelineAppendCapability | undefined {
+    if (this.resolvedTimeline !== undefined) return this.resolvedTimeline;
+    const source = this.timelineSource;
+    if (source === undefined) return undefined;
+    const resolved = typeof source === "function" ? source() : source;
+    if (resolved !== undefined) this.resolvedTimeline = resolved;
+    return resolved;
+  }
+
   private applyInvoke(
     input: PromptsInvokeInput,
   ): Effect.Effect<PromptsGetResult, PromptsError, never> {
@@ -1035,8 +1082,28 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           // (ADR 53 — input appends the moment it exists; no queue/drain
           // tier). The next render sees them via <Timeline/>. When no
           // timeline is wired (e.g., test setup without session), skip —
-          // adopters use `get()` for that path.
-          if (this.timeline) {
+          // adopters use `get()` for that path. Resolved HERE, not at
+          // construction: the session's timeline is born after this harness is
+          // (#257).
+          const timeline = this.resolveTimeline();
+          if (timeline === undefined) {
+            // The skip used to be silent, and it stayed silent through an entire
+            // release: every default `createApp` deployment rendered its prompts
+            // into the void because the eager resolve missed. Warn ONCE per
+            // harness (an invoke-driven session would otherwise emit per message).
+            if (!this.warnedNoTimeline) {
+              this.warnedNoTimeline = true;
+              ctx.log.warn(
+                {
+                  msg: "prompts:invoke rendered but appended nothing — no timeline is wired to this harness",
+                  prompt: input.name,
+                  scopeId: this.scopeId,
+                },
+                "@agentick/prompts",
+              );
+            }
+          }
+          if (timeline) {
             const ts = Date.now();
             // MATERIALIZATION PROVENANCE — every entry queued here carries WHO
             // put it there, so a chat projection can render an invoked prompt as
@@ -1055,7 +1122,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
               }),
             };
             for (const msg of result.messages) {
-              await this.timeline.append({
+              await timeline.append({
                 kind: "message",
                 message: {
                   id: `m_${ulid()}`,

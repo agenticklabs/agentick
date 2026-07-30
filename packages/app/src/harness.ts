@@ -2265,6 +2265,36 @@ export class AppHarness<P = unknown>
       }),
     });
 
+    // ── The namespace map's ORDERING CONTRACT (#257) ─────────────────────
+    //
+    // `sessionExtensionBridges` is the SAME map object the SessionInstaller's
+    // `getNamespace` closes over, so a write here is visible to every extension
+    // that installed above. That is the only way a host-constructed bridge can
+    // ever reach an extension: sessions are constructed AFTER their extensions
+    // install, so at install time `getNamespace("timeline")` is structurally
+    // undefined and no amount of ordering fixes it.
+    //
+    // The contract, therefore: an extension that needs a HOST bridge must
+    // LATE-BIND (hold a provider, read it when it uses the value), never resolve
+    // at install. `@agentick/prompts` does exactly this — an eager read left
+    // `PromptsHarness.timeline` undefined in every default deployment and
+    // `invoke()` rendered into the void.
+    //
+    // Guarded, never an overwrite: `withTimeline(...)` (definition or live
+    // instance) claims the name at install and MUST keep it — and when it does,
+    // `session.timeline` already IS that instance, because `buildSessionBridges`
+    // spreads the extension map over its own bundle. This write only fills a name
+    // nobody claimed. It happens after the bridges bundle is built, so it can
+    // never feed back into it.
+    //
+    // TODO(#257 follow-up): only `timeline` is published because only `timeline`
+    // has a consumer. The other host-constructed bridges (`knobs`, `state`,
+    // `gates`) are equally invisible to `getNamespace`; publish them here the
+    // moment an extension needs one, rather than inventing a second seam.
+    if (!sessionExtensionBridges.has("timeline")) {
+      sessionExtensionBridges.set("timeline", session.timeline);
+    }
+
     // `ready` / `close` aren't on `ToolExecutorProtocol` — duck-type
     // through `readyOf` / `closeOf` so both the reference harness AND
     // factory-produced impls work transparently.

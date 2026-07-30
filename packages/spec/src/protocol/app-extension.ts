@@ -220,6 +220,24 @@ export interface BaseInstaller {
    * Returns `undefined` when no harness is registered under that name.
    * Lookup is dynamic — late-installed extensions become visible as
    * soon as their `install` returns.
+   *
+   * ## Ordering: HOST bridges are not visible at install time (#257)
+   *
+   * A session is constructed AFTER its extensions install, so the bridges the
+   * session owns (`timeline`, `knobs`, `state`, …) do not yet exist while
+   * `install` runs — `getNamespace("timeline")` inside `install` returns
+   * `undefined` no matter how the extensions are ordered. The host publishes
+   * them into this same map once the session is constructed.
+   *
+   * An extension that needs a host bridge must therefore LATE-BIND: hold
+   * `() => installer.getNamespace<T>(name)` and call it when it uses the value,
+   * not when it installs. Resolving eagerly caches the miss for the lifetime of
+   * the session — which is exactly how `@agentick/prompts` came to render every
+   * invoked prompt into a timeline it never had.
+   *
+   * Peer EXTENSION namespaces (`prompts`, `credentials`, …) have no such
+   * constraint: they are registered during the same install pass and an eager
+   * read sees any extension installed before this one.
    */
   getNamespace<T>(name: string): T | undefined;
 
