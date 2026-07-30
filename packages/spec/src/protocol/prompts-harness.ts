@@ -211,10 +211,12 @@ export interface PromptsRemoveInput {
 }
 
 /**
- * Invoke a prompt — produces messages AND queues them onto the
- * session timeline (via `bridges.timeline.queue`, same path explicit
- * user input takes). On the next `session.send`, queued messages
- * drain into the durable timeline before the first tick.
+ * Invoke a prompt — renders AND appends the messages directly to the
+ * session timeline (ADR 53: input appends the moment it exists; there
+ * is no queue/drain tier). Nothing RUNS on invoke: the entries sit in
+ * the durable timeline until the next `session.send` — which may be a
+ * bare send with no messages of its own — starts an execution whose
+ * first render sees them.
  */
 export interface PromptsInvokeInput {
   readonly name: string;

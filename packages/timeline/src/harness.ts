@@ -754,8 +754,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     });
   }
 
-  // ─────────── Async surface — pending queue (queue / drain) ───────────
-
   // ─────────── Turn boundaries (ADR 53, simplified) ───────────
   //
   // Consumption is NON-DESTRUCTIVE — the loop re-renders the whole log

@@ -1,6 +1,6 @@
 {
   "name": "@agentick/completions",
-  "version": "1.0.0-next.43",
+  "version": "1.0.0-next.44",
   "description": "CompletionsHarness — argument completion as a first-class seam: a registry of name→resolver bindings plus one resolve door, with the complete* sugar family (list, enum, prefix-match, dependent, async). Owns no data; resolvers read from wherever the candidates already live. No wire cap — each wire trims to its own limit.",
   "keywords": [
     "agent",
@@ -25,7 +25,9 @@
     "./src/index.ts",
     "./src/augment.ts",
     "./dist/index.js",
-    "./dist/augment.js"
+    "./dist/augment.js",
+    "./src/client/index.ts",
+    "./dist/client/index.js"
   ],
   "main": "src/index.ts",
   "exports": {
@@ -33,6 +35,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./client": {
+      "types": "./src/client/index.ts",
+      "import": "./src/client/index.ts",
+      "default": "./src/client/index.ts"
     },
     "./testing": {
       "types": "./src/testing/index.ts",
@@ -48,6 +55,11 @@
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       },
+      "./client": {
+        "types": "./dist/client/index.d.ts",
+        "import": "./dist/client/index.js",
+        "default": "./dist/client/index.js"
+      },
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "import": "./dist/testing/index.js",
@@ -58,6 +70,9 @@
     "types": "./dist/index.d.ts",
     "typesVersions": {
       "*": {
+        "client": [
+          "./dist/client/index.d.ts"
+        ],
         "testing": [
           "./dist/testing/index.d.ts"
         ]
