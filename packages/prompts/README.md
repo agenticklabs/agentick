@@ -87,6 +87,24 @@ render: (args, ctx) => `Hello ${ctx?.principal ?? "there"}.`;
 
 It's optional in the signature — declarations stay pure and trivially testable — and always threaded by the framework.
 
+### A render can ask
+
+The arguments a person supplied are frequently not the arguments the prompt needs: `/quoting_report` with no period, `/summarize` pointed at an ambiguous name. `ctx.elicit` is the way out — the same `Elicit` surface a tool handler reads as `ctx.elicit`, so there is one vocabulary for asking:
+
+```ts
+render: async (args, ctx) => {
+  const period =
+    (args.period as string | undefined) ??
+    (await ctx?.elicit?.text("Which period?", { pattern: "^\\d{4}-\\d{2}$" })) ??
+    currentPeriod();
+  return `Quoting report for ${period}.`;
+};
+```
+
+The invoke parks until the user answers, then rendering continues with the answer in hand. Both doors carry it — `invoke` and `render` alike.
+
+**Write the no-elicit branch.** `ctx?.elicit` is absent whenever nobody is there to answer: a unit test calling `decl.render(args)` directly, a doc generator walking the catalog, a harness constructed with no session behind it. That is a normal shape, not an error state, so the honest fallback is a default, a placeholder, or a thrown `PromptArgumentMissing` — the `??` chain above, never a hang. Whether the facet is present at all is the host's answer; `createApp` wires the session's own elicitation to it for you.
+
 ### Declaration shape
 
 ```ts
@@ -95,7 +113,7 @@ interface PromptDeclaration {
   description: string;
   arguments?: PromptArgument[];
   template?: unknown; // static content
-  render?: (args: Record<string, unknown>, ctx?: OperationCtx) => unknown; // dynamic content
+  render?: (args: Record<string, unknown>, ctx?: PromptRenderCtx) => unknown; // dynamic content
   version?: string; // your revision string — see "Provenance on the timeline"
   metadata?: Record<string, unknown>;
 }
@@ -524,6 +542,7 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - **No filesystem source.** `.tsx` prompts need a bundler; a framework binding is the right home for one.
 - **No model-facing tools.** Prompts are user-directed, so a `prompt_list` / `prompt_get` pair needs its audience story told before it ships.
 - **A named ref is never validated.** An argument may name a completion source nobody bound, and registration does not check — the request answers with no candidates, so a typo looks exactly like an unmounted source.
+- **An MCP `prompts/get` render asks the SESSION's user, not the MCP client.** `ctx.elicit` is threaded from the session that owns the harness, and the MCP crossing does not yet publish its own per-connection elicit — so a prompt rendered over MCP that asks reaches the wrong human. The crossing already holds the right `Elicit` and the harness already yields to a crossing-published one; see `TODO(mcp-prompt-elicit)` in `packages/mcp/src/server/harness.ts`.
 - **MCP's `completion/complete` does not route through this door yet.** An MCP server's completion still resolves against its own per-server config with its own ctx ([`docs/proposals/v2/completions.md`](../../docs/proposals/v2/completions.md) §7 P3). Closing it needs an in-fiber twin of the door, so the completion parents under the MCP crossing and sees the connection's identity.
 - **No transactions and no per-prompt ACL.** Each mutation is its own operation, and all session participants share one library.
 
@@ -541,6 +560,8 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - `src/__tests__/define-prompt.type.spec.ts` — `definePrompt`'s inference: required versus optional values, the no-schema-means-string law, a schema's inferred output, no keys for an argument-less prompt, undeclared keys unreadable, the erased result assignable where declarations go, and both forms of `complete` in one argument list.
 - `src/__tests__/ctx-spine.spec.ts` — the invoking operation's context reaching `render(args, ctx)`.
 - `src/__tests__/provenance.spec.ts` — the stamp on every entry `invoke` appends (name, arguments, and the invoking operation's own id, read off the render context), `version` present only when declared, `render` appending and stamping nothing, existing message metadata merged rather than replaced, a message's own `source` left alone, and a declared version surviving register → get → list → snapshot → import and a silent patch.
+- `src/__tests__/render-elicit.spec.ts` — the render's `ctx.elicit`: a directly-injected `Elicit` reaching the declaration through `invoke` and through `render`, the elicited value in the appended entries, an argument the caller supplied never eliciting, the provider re-read after a miss and cached on a hit, the no-source and ctx-free calls landing on the declaration's fallback branch, and an elicit published by the enclosing crossing winning over the session's.
+- `packages/app/src/__tests__/prompts-invoke-elicit.spec.tsx` — the same facet through real `createApp` wiring: a render's question raised as a real ask on `session.elicitation` with the prompt's own message, the answer landing in the timeline entries, and a fully-argued invoke asking nothing.
 - `src/__tests__/timeline-late-binding.spec.ts` — the append target resolved per invoke: a directly-injected capability unchanged, a provider re-read after a miss so a timeline wired later starts working, a hit cached, and the "nothing is wired" skip warning once instead of silently.
 - `packages/app/src/__tests__/prompts-invoke-timeline.spec.tsx` — the same fact through real `createApp` wiring: `invoke` landing stamped entries in the session's own timeline, repeat invokes still landing, and an adopter's `withTimeline(instance)` keeping its name claim and receiving them.
 - `src/client/__tests__/prompts-handle.spec.ts` + `session-prompts.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, and the zero-argument subscribe contract.

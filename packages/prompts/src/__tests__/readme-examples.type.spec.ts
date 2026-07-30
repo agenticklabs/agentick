@@ -60,6 +60,26 @@ definePrompts({
   ]),
 });
 
+// ── A render can ask
+declare function currentPeriod(): string;
+definePrompts({
+  hydrate: hydrateFrom([
+    {
+      declaration: {
+        name: "quoting_report",
+        description: "q",
+        render: async (args, ctx) => {
+          const period =
+            (args.period as string | undefined) ??
+            (await ctx?.elicit?.text("Which period?", { pattern: "^\\d{4}-\\d{2}$" })) ??
+            currentPeriod();
+          return `Quoting report for ${period}.`;
+        },
+      },
+    },
+  ]),
+});
+
 // ── Sources
 withPrompts({
   hydrate: composeHydrators(

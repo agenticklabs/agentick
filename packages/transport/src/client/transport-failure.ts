@@ -40,8 +40,29 @@ class TransportFailure extends Error {
  * the union, and per-kind fields (`afterMs`, `error`) survive.
  */
 export function transportError<T extends TransportError>(shape: T): T & Error {
-  const message = "message" in shape ? shape.message : `transport error (${shape.kind})`;
   // `message` is an own, writable property on an Error instance, so the assign
   // below carries the shape's own message when it has one.
-  return Object.assign(new TransportFailure(message), shape) as T & Error;
+  return Object.assign(new TransportFailure(describeFailure(shape)), shape) as T & Error;
+}
+
+/**
+ * The `Error.message` for a failure shape.
+ *
+ * Every kind but `rpc` carries its own `message` and uses it verbatim. `rpc`
+ * is the one whose text lives a level down, in the JSON-RPC error the SERVER
+ * sent (`{ code, message, data }`) — and that text is the only part of the
+ * failure a human reads. A generic `transport error (rpc)` would turn a
+ * perfectly specific server answer ("prompt argument 'topic' is required")
+ * into an unactionable one at exactly the moment someone is reading a console,
+ * so the server's message leads and the code trails it for correlation.
+ *
+ * The structured payload is untouched: `err.error.code`, `err.error.message`
+ * and `err.error.data` all remain on the rejection, and `@agentick/client-core`
+ * still rehydrates a typed `AgentickError` out of `error.data` when the server
+ * stamped one.
+ */
+function describeFailure(shape: TransportError): string {
+  if ("message" in shape) return shape.message;
+  const { code, message } = shape.error;
+  return message ? `${message} (rpc error ${code})` : `rpc error ${code}`;
 }

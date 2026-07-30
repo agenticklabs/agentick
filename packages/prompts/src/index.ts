@@ -20,6 +20,7 @@ import "./augment.js";
 
 export {
   PromptsHarness,
+  type ElicitSource,
   type PromptsHarnessOptions,
   type TimelineAppendCapability,
   type TimelineAppendSource,

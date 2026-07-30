@@ -42,6 +42,7 @@
 import { Effect } from "effect";
 import {
   BaseHarness,
+  getBoundaryFacets,
   qualifyNamespaceGuards,
   qualifyNamespaceHooks,
   type BaseHarnessOptions,
@@ -52,6 +53,7 @@ import type {
   CompletionCtx,
   CompletionResolver,
   CompletionsErrorChannel,
+  Elicit,
   EventBus,
   MessageEntry,
   MessageEnvelope,
@@ -61,6 +63,7 @@ import type {
   PromptArgument,
   PromptDeclaration,
   PromptDeclarationRecord,
+  PromptRenderCtx,
   PromptStoreQuery,
   PromptsCompleteInput,
   PromptsCompleteOutcome,
@@ -75,7 +78,6 @@ import type {
   PromptsRemoveInput,
   PromptsSnapshotEntry,
   PromptsUpdateInput,
-  OperationCtx,
   StandardSchemaIssue,
   StandardSchemaV1,
   TimelineHarnessProtocol,
@@ -186,6 +188,24 @@ export type TimelineAppendSource =
   | (() => TimelineAppendCapability | undefined);
 
 /**
+ * How the host supplies the {@link Elicit} a render may ask through — a value OR
+ * a PROVIDER read at render time, for the same ordering reason as
+ * {@link TimelineAppendSource}: the session that owns the elicitation harness is
+ * born after the extension that wants it installs.
+ *
+ * Why the host hands over a BUILT `Elicit` rather than the elicitation harness:
+ * `Elicit` is a spec type, so prompts types the facet without depending on
+ * `@agentick/elicitation` at runtime. Building the sugar here would put a hard
+ * dependency on the elicitation package into every deployment that registers a
+ * prompt — for a facet most prompts never touch. The app already holds both
+ * (`session.elicit` IS this value) and is the one place that can hand it over
+ * for free.
+ *
+ * @verifiedBy packages/prompts/src/__tests__/render-elicit.spec.ts
+ */
+export type ElicitSource = Elicit | (() => Elicit | undefined);
+
+/**
  * Construction options for {@link PromptsHarness} — the {@link PromptsDefinition}
  * (store · genesis · shaping seams · `hooks:` / `guards:`) plus the
  * {@link BaseHarnessOptions} the substrate needs (journaling policy, the
@@ -206,6 +226,17 @@ export interface PromptsHarnessOptions extends BaseHarnessOptions, PromptsDefini
    * {@link TimelineAppendSource} for why the eager read cannot work).
    */
   readonly timeline?: TimelineAppendSource;
+  /**
+   * Source of the {@link Elicit} threaded onto the render ctx as `ctx.elicit`,
+   * so a declaration can ask the user for what the invoke did not supply.
+   * Injected at construction by the extension installer exactly like
+   * {@link timeline}, NOT part of the adopter-facing definition — when absent,
+   * `ctx.elicit` is `undefined` and the declaration takes its no-elicit branch.
+   *
+   * Takes a live `Elicit` (the direct-injection path: tests, a BYO wiring) or a
+   * PROVIDER resolved at render time (what `withPrompts` passes).
+   */
+  readonly elicit?: ElicitSource;
 }
 
 export class PromptsHarness extends BaseHarness<PromptsSurface> implements PromptsHarnessProtocol {
@@ -248,6 +279,10 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   private readonly timelineSource?: TimelineAppendSource;
   /** Provider result, cached on the first HIT only (a miss must re-resolve). */
   private resolvedTimeline?: TimelineAppendCapability;
+  /** Value or provider — resolved per render by {@link resolveElicit}. */
+  private readonly elicitSource?: ElicitSource;
+  /** Provider result, cached on the first HIT only (a miss must re-resolve). */
+  private resolvedElicit?: Elicit;
   /** Latch for the once-per-harness "no timeline wired" warning. */
   private warnedNoTimeline = false;
 
@@ -308,6 +343,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     super(SURFACE, scopeId, journal, bus, inbox, options);
     this.renderers = options.renderers ?? [];
     this.timelineSource = options.timeline;
+    this.elicitSource = options.elicit;
     this.store = options.store ?? new InMemoryPromptStore();
     this.view = View.collection(this.store, (r) => r.name);
     // Genesis (ADR 93): the definition's hydrator, resolved — not RUN — here.
@@ -1070,13 +1106,50 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return resolved;
   }
 
+  /**
+   * The session's {@link Elicit}, resolved through the provider on every render
+   * until one answers — the {@link resolveTimeline} discipline, and for the same
+   * ordering reason. A miss is never cached: an elicit source published after
+   * this harness was built starts working on the next render.
+   */
+  private resolveElicit(): Elicit | undefined {
+    if (this.resolvedElicit !== undefined) return this.resolvedElicit;
+    const source = this.elicitSource;
+    if (source === undefined) return undefined;
+    const resolved = typeof source === "function" ? source() : source;
+    if (resolved !== undefined) this.resolvedElicit = resolved;
+    return resolved;
+  }
+
+  /**
+   * The render's boundary facets, composed INTO the branded mint via `extras`
+   * (never spread over it afterwards, which would erase the brand).
+   *
+   * `published` is what the enclosing crossing put on the fiber, and an `elicit`
+   * already there WINS: extras beat boundary facets on a key collision, so
+   * without this check a session-scoped elicit would silently override a
+   * crossing's own — asking the wrong human. A crossing that can reach the
+   * caller directly (an MCP connection, whose client serves
+   * `elicitation/create`) is nearer to them than the session that happens to own
+   * this harness. Nothing publishes `elicit` today; this is what makes wiring
+   * that half a one-line change rather than a defect.
+   */
+  private renderFacets(published: Readonly<Record<string, unknown>>): {
+    readonly elicit?: Elicit;
+  } {
+    if (published.elicit !== undefined) return {};
+    const elicit = this.resolveElicit();
+    return elicit === undefined ? {} : { elicit };
+  }
+
   private applyInvoke(
     input: PromptsInvokeInput,
   ): Effect.Effect<PromptsGetResult, PromptsError, never> {
     // ADR 91 §2 — derive the invoking op's branded ctx in-fiber and thread it
-    // into `render(args, ctx)`, so a dynamic prompt can render per-principal.
+    // into `render(args, ctx)`, so a dynamic prompt can render per-principal
+    // and ask through `ctx.elicit` for what the invoke did not supply.
     return Effect.gen(this, function* () {
-      const ctx = yield* this.currentOperationCtx();
+      const ctx = yield* this.currentOperationCtx(this.renderFacets(yield* getBoundaryFacets));
       return yield* Effect.tryPromise({
         try: async () => {
           // Lookup-on-miss: if the name isn't yet registered, re-run the source
@@ -1152,9 +1225,13 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   }
 
   private applyGet(input: PromptsGetInput): Effect.Effect<PromptsGetResult, PromptsError, never> {
-    // ADR 91 §2 — same in-fiber ctx derivation + threading as `applyInvoke`.
+    // ADR 91 §2 — same in-fiber ctx derivation + threading as `applyInvoke`,
+    // `elicit` facet included: `render()` renders the same declaration through
+    // the same seam, and a prompt that asks must not depend on which door was
+    // used. (The MCP `prompts/get` projection reaches the render through THIS
+    // path — see `renderFacets` on whose elicit it gets.)
     return Effect.gen(this, function* () {
-      const ctx = yield* this.currentOperationCtx();
+      const ctx = yield* this.currentOperationCtx(this.renderFacets(yield* getBoundaryFacets));
       return yield* Effect.tryPromise({
         try: async () => {
           // Same lookup-on-miss path as `applyInvoke` — one source seam.
@@ -1172,7 +1249,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
   private async renderToMessages(
     name: string,
     rawArgs: Readonly<Record<string, unknown>> | undefined,
-    ctx: OperationCtx,
+    ctx: PromptRenderCtx,
   ): Promise<PromptsGetResult> {
     const decl = this.declarationOf(name);
     if (!decl) throw new PromptNotFound({ promptName: name });

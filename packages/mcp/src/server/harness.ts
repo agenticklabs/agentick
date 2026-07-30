@@ -1043,6 +1043,17 @@ export class McpServerHarness
         // exists to close. Boundary facets ride `deriveContext`'s extras channel
         // and stop at the seam's own ctx. What the journal records is
         // `identity` — the redacted twin.
+        // TODO(mcp-prompt-elicit): publish this connection's `elicit` alongside
+        // `mcp` — `{ mcp: ctx.mcp, ...(ctx.elicit ? { elicit: ctx.elicit } : {}) }`.
+        // `PromptDeclaration.render` now takes an optional `ctx.elicit`
+        // (`PromptRenderCtx`) and the prompts harness supplies the SESSION's
+        // elicit, which for a `prompts/get` crossing asks the wrong human: the
+        // session's own client, not the MCP client that made this request. The
+        // per-connection `buildMcpElicit` is already on `ctx.elicit` here, and
+        // `PromptsHarness.renderFacets` already yields to a crossing-published
+        // `elicit`, so this is one line plus a test that the MCP client is the
+        // one asked. Held back only because it changes MCP-side behavior and
+        // belongs in an MCP-gated change.
         withBoundaryFacets(
           { mcp: ctx.mcp },
           Effect.gen(this, function* () {

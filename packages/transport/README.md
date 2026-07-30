@@ -137,6 +137,18 @@ Two notes for anyone implementing a transport on this base:
 
 Call `markWireUp()` from your successful-open path (it resets the backoff counter and arms the probe), and call `handleConnectionDrop()` **exactly once per dead wire** — twice arms two competing dial loops. That last part is on the subclass, because only the subclass can tell an event from the socket it still holds apart from one it already discarded; a latch in the base cannot distinguish that from the next dial's failure, which must re-arm the loop.
 
+### A failed RPC rejects with the server's own words
+
+Every rejection out of a client transport is built by `transportError(shape)`, so it is an `Error` (real stack, `instanceof Error`, loggers print it properly) that also satisfies the `TransportError` union structurally — `.kind` still discriminates.
+
+The kind worth knowing is `rpc`, the one raised when the server answers with a JSON-RPC error rather than a result. Its explanation lives a level down, in the `{ code, message, data }` the server sent, and that message is the only human-readable part of the whole failure. So it leads, with the code trailing for correlation:
+
+```
+TransportFailure: prompt 'summarize' requires argument 'topic' (rpc error -32602)
+```
+
+A bare `console.error(err)` is therefore actionable on its own. The structured payload is untouched underneath — `err.kind === "rpc"`, `err.error.code`, `err.error.message`, `err.error.data` — which is what [@agentick/client](../client) reads to rehydrate a typed `AgentickError` when the server stamped one into `error.data`. Every other kind (`connection`, `timeout`, `cancelled`, `protocol`, `closed`) carries its own `message` and uses it verbatim.
+
 ### The subscription id re-key
 
 Subscribing is asynchronous but the caller wants a stream immediately, so the base class hands out a stream keyed by a tentative client-side id, issues the `subscribe` RPC, and re-keys the stream to the server-allocated `subscriptionId` when the response lands. Frames route by the server id from then on, and a stream closed early sends its unsubscribe under the real id.
@@ -391,5 +403,6 @@ runIngressAuthnConformance({
 - `src/__tests__/wire-command-e2e.spec.ts` — a wire method as a full command: journaled operation, typed hook transform, middleware, span attributes, live context facets, and define-time guard verdicts mapping to Forbidden and rate-limited at the JSON-RPC edge with the handler never running.
 - `src/__tests__/client-projection.spec.ts` — each bounded path for results and notifications, unknown methods passing through by reference, no input mutation, the default-off zero-overhead path, raised and infinite ceilings, and the two-tier proof that the client copy is bounded while store and model views keep full bytes.
 - `src/__tests__/multiplexed-stream-backpressure.spec.ts` — unbounded never dropping, capacity validation, drop-oldest and drop-newest eviction order, close-on-overflow terminating with a backpressure error and ignoring later pushes, and a parked consumer bypassing the buffer.
+- `src/__tests__/rpc-error-fidelity.spec.ts` — a JSON-RPC error response reaching the caller with the server's message and code in `Error.message`, the structured `kind`/`error.code`/`error.data` still reachable for typed rehydration, a message-less server error naming its code, and message-carrying kinds used verbatim.
 - `src/__tests__/backoff-jitter.spec.ts` — full-jitter shape: per-attempt bounds, cap doubling to the maximum, never exceeding it, uniform distribution across the range, and reproducibility under an injected RNG.
 - `src/testing/index.ts` (`runIngressAuthnConformance`) and `@agentick/spec-conformance`'s `runTransportConformance` — run by every concrete transport against a real server; see [@agentick/transport-websocket](../transport-websocket) and [@agentick/transport-in-process](../transport-in-process) for the invocations.

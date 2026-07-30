@@ -2287,12 +2287,23 @@ export class AppHarness<P = unknown>
     // nobody claimed. It happens after the bridges bundle is built, so it can
     // never feed back into it.
     //
-    // TODO(#257 follow-up): only `timeline` is published because only `timeline`
-    // has a consumer. The other host-constructed bridges (`knobs`, `state`,
-    // `gates`) are equally invisible to `getNamespace`; publish them here the
-    // moment an extension needs one, rather than inventing a second seam.
+    // TODO(#257 follow-up): only what has a CONSUMER is published. The other
+    // host-constructed bridges (`knobs`, `state`, `gates`) are equally invisible
+    // to `getNamespace`; publish them here the moment an extension needs one,
+    // rather than inventing a second seam.
     if (!sessionExtensionBridges.has("timeline")) {
       sessionExtensionBridges.set("timeline", session.timeline);
+    }
+    // `elicit` — the session's `Elicit` sugar, consumed by `@agentick/prompts`
+    // as the `ctx.elicit` a declaration's `render(args, ctx)` asks through.
+    //
+    // The BUILT sugar, not the `elicitation` harness under it, and deliberately:
+    // `Elicit` is a spec type, so a consumer types the facet without taking a
+    // runtime dependency on `@agentick/elicitation` to build the sugar itself.
+    // This app already holds both. Same guard as `timeline` — an extension that
+    // claimed the name at install keeps it.
+    if (!sessionExtensionBridges.has("elicit")) {
+      sessionExtensionBridges.set("elicit", session.elicit);
     }
 
     // `ready` / `close` aren't on `ToolExecutorProtocol` — duck-type

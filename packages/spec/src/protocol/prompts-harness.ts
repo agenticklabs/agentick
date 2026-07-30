@@ -25,6 +25,7 @@ import type { MessageEntry } from "../data/entries.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { CompletionResolver, CompletionResult } from "./completions-harness.js";
 import type { CompletionsErrorChannel, PromptsErrorChannel } from "../errors/harnesses.js";
+import type { Elicit } from "./elicit-api.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { Unsubscribe } from "./inbox.js";
@@ -125,6 +126,49 @@ export type PromptArgumentRecord = Omit<PromptArgument, "complete"> & {
 // ============================================================================
 
 /**
+ * The ctx a {@link PromptDeclaration.render} receives: the invoking op's
+ * {@link OperationCtx} plus the one facet a render can want that no other
+ * starved seam does — the ability to ASK.
+ *
+ * A prompt is invoked by a person, and the arguments they supplied are
+ * frequently not the arguments the prompt needs. `/quoting_report` with no
+ * period, `/summarize` pointed at an ambiguous name — a render that can only
+ * read `args` must fail, or guess. With `elicit` it can ask the one question
+ * and continue, which is what every chat-side prompt UI does and what v1's MCP
+ * prompts could already do.
+ *
+ * **Optional, and a declaration MUST branch on its absence.** Nothing supplies
+ * it in a ctx-free render: a unit test calling `decl.render(args)` directly, a
+ * doc generator walking the catalog, a snapshot fixture. The absent case is not
+ * an error state to guard against — it is the normal shape of "nobody is there
+ * to answer", and the honest branch is a default, a placeholder, or a thrown
+ * `PromptArgumentMissing`, never a hang:
+ *
+ * ```ts
+ * render: async (args, ctx) => {
+ *   const period = (args.period as string | undefined)
+ *     ?? (await ctx?.elicit?.text("Which period?", { pattern: "^\\d{4}-\\d{2}$" }))
+ *     ?? currentPeriod();
+ *   return `Quoting report for ${period}.`;
+ * }
+ * ```
+ *
+ * Whether the facet is present at all is the HOST's answer, not the
+ * declaration's: it is there when the harness was given an elicit source and
+ * the render is running inside a session that can reach a user.
+ */
+export type PromptRenderCtx = OperationCtx & {
+  /**
+   * Ask the user a typed question mid-render. The same {@link Elicit} surface a
+   * tool handler reads as `ctx.elicit`, so one vocabulary covers both.
+   *
+   * Absent in a ctx-free render, and absent when no elicit source reached the
+   * harness — always `?.`-guarded, never assumed.
+   */
+  readonly elicit?: Elicit;
+};
+
+/**
  * Registration shape for a prompt. Adopters supply EITHER `template`
  * (static; args unused) OR `render` (dynamic; receives validated args).
  * Supplying both is allowed; `render` takes precedence at invoke
@@ -164,14 +208,15 @@ export interface PromptDeclaration {
    * adapter layer (React: `(args) => ReactNode`).
    *
    * The optional second parameter is the invoking crossing's {@link
-   * OperationCtx} (ADR 91 §2) — the trunk (sessionId / opId / identity) plus
-   * the `log` / `trace` / `metrics` / `run` facets. Optional in the SIGNATURE
-   * (a declaration stays pure and trivially testable); REQUIRED in the LAW —
-   * the harness `render` path and the MCP `prompts/get` projection always
-   * thread the ctx of the invoking op. A dynamic prompt reads `ctx?.user` /
-   * the MCP identity to render per-principal content.
+   * PromptRenderCtx} (ADR 91 §2) — the trunk (sessionId / opId / identity), the
+   * `log` / `trace` / `metrics` / `run` facets, and the optional `elicit`.
+   * Optional in the SIGNATURE (a declaration stays pure and trivially testable);
+   * REQUIRED in the LAW — the harness `render` path and the MCP `prompts/get`
+   * projection always thread the ctx of the invoking op. A dynamic prompt reads
+   * `ctx?.user` / the MCP identity to render per-principal content, and
+   * `ctx?.elicit` to ask for what the caller did not supply.
    */
-  readonly render?: (args: Readonly<Record<string, unknown>>, ctx?: OperationCtx) => unknown;
+  readonly render?: (args: Readonly<Record<string, unknown>>, ctx?: PromptRenderCtx) => unknown;
   /**
    * WHICH REVISION of this prompt is registered — adopter-defined, never
    * framework-computed.

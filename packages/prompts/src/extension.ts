@@ -23,7 +23,12 @@
  * @see ./augment.ts — the top-level slot registration
  */
 
-import { isPromptsInstance, type SessionExtension, type SessionInstaller } from "@agentick/spec";
+import {
+  isPromptsInstance,
+  type Elicit,
+  type SessionExtension,
+  type SessionInstaller,
+} from "@agentick/spec";
 import { inheritedFrom } from "@agentick/runtime";
 
 import { PromptsHarness, type TimelineAppendCapability } from "./harness.js";
@@ -91,6 +96,14 @@ export function withPrompts(config: PromptsConfig = {}): SessionExtension {
       const timeline = (): TimelineAppendCapability | undefined =>
         installer.getNamespace<TimelineAppendCapability>("timeline");
 
+      // The session's `Elicit`, as a PROVIDER for the same reason — the app
+      // publishes `session.elicit` into this map once the session exists. It is
+      // what reaches a declaration as `ctx.elicit`, so a prompt can ask for the
+      // argument the invoke left out instead of guessing. Nothing publishes it
+      // in a bare-harness setup, and `ctx.elicit` is then `undefined` — the
+      // declaration's no-elicit branch, which every declaration must have.
+      const elicit = (): Elicit | undefined => installer.getNamespace<Elicit>("elicit");
+
       const harness = new PromptsHarness(
         `${installer.hostId}:prompts`,
         installer.substrate.journal,
@@ -99,6 +112,7 @@ export function withPrompts(config: PromptsConfig = {}): SessionExtension {
         {
           ...config,
           timeline,
+          elicit,
           // ADR 93 landmine 11 — the cascade must be TOTAL. An extension-installed
           // namespace inherits the app/session interceptor cascade through the
           // installer's handle, exactly like a session-constructed bridge does;
