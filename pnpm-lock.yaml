@@ -262,6 +262,9 @@ importers:
       '@agentick/cluster':
         specifier: workspace:*
         version: link:../cluster
+      '@agentick/completions':
+        specifier: workspace:*
+        version: link:../completions
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
@@ -610,6 +613,21 @@ importers:
         specifier: 0.33.0
         version: 0.33.0(@types/react@19.2.13)
 
+  packages/completions:
+    dependencies:
+      '@agentick/pubsub':
+        specifier: workspace:*
+        version: link:../pubsub
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
+
   packages/connector:
     dependencies:
       '@agentick/formatters':
@@ -906,6 +924,9 @@ importers:
 
   packages/mcp:
     dependencies:
+      '@agentick/completions':
+        specifier: workspace:*
+        version: link:../completions
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
@@ -1135,6 +1156,9 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
+      '@agentick/completions':
+        specifier: workspace:*
+        version: link:../completions
       '@agentick/resources':
         specifier: workspace:*
         version: link:../resources
@@ -1822,6 +1846,9 @@ importers:
       '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
+      '@agentick/completions':
+        specifier: workspace:*
+        version: link:../completions
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
