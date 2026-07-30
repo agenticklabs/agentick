@@ -24,7 +24,7 @@ import type { Effect } from "effect";
 import type { MessageEntry } from "../data/entries.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { CompletionResolver, CompletionResult } from "./completions-harness.js";
-import type { PromptsErrorChannel } from "../errors/harnesses.js";
+import type { CompletionsErrorChannel, PromptsErrorChannel } from "../errors/harnesses.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { Unsubscribe } from "./inbox.js";
@@ -172,7 +172,24 @@ export interface PromptDeclaration {
    * the MCP identity to render per-principal content.
    */
   readonly render?: (args: Readonly<Record<string, unknown>>, ctx?: OperationCtx) => unknown;
-  /** Adopter-defined metadata (version, tags, source URL, etc.). */
+  /**
+   * WHICH REVISION of this prompt is registered — adopter-defined, never
+   * framework-computed.
+   *
+   * What the string MEANS is entirely yours: a semver, a deploy hash, a date, a
+   * row id from the table the declaration was loaded out of. The framework never
+   * reads it, never derives it, and never defaults it — it copies it verbatim
+   * into the provenance stamp `invoke` puts on the timeline entries it queues, so
+   * "which revision of this prompt produced this message" is answerable from the
+   * entry alone. Set nothing and everything works, minus that one string.
+   *
+   * Serializable, so it rides {@link PromptDeclarationRecord} everywhere records
+   * already go — `list`, snapshots, the client handle — with no new plumbing.
+   *
+   * @see docs/proposals/v2/materialization-provenance.md §3
+   */
+  readonly version?: string;
+  /** Adopter-defined metadata (tags, source URL, etc.). */
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -343,6 +360,29 @@ export interface PromptsFx extends HarnessFx {
   render(
     input: PromptsGetInput,
   ): Effect.Effect<PromptsGetResult, PromptsErrorChannel | SubstrateError, never>;
+  /**
+   * Complete one ARGUMENT — the Effect twin of
+   * {@link PromptsHarnessProtocol.complete}, and the same three-arm outcome.
+   *
+   * The MCP server's completions projection composes THIS from inside its
+   * `mcp:command:complete` crossing, for the reason `render` is here: the
+   * declaration's inline resolver must see the CONNECTION's identity
+   * (`ctx.mcp.user` — a completion against tenant data is scoped by the caller,
+   * not by whoever owns the registry). The Promise facade mints from the
+   * harness's own construction scope, so the resolver would see the session and
+   * nothing of the client that asked.
+   *
+   * Unlike `render`, this is NOT sugar over a declared command — `complete` is
+   * deliberately command-less so a keystroke mints no journaled operation. The
+   * twin buys the FIBER, not an envelope; neither face journals.
+   */
+  complete(
+    input: PromptsCompleteInput,
+  ): Effect.Effect<
+    PromptsCompleteOutcome,
+    PromptsErrorChannel | CompletionsErrorChannel | SubstrateError,
+    never
+  >;
 }
 
 /**
@@ -485,6 +525,8 @@ export interface PromptDeclarationRecord {
   readonly description: string;
   /** Record-safe descriptors: `complete` traded for `completeRef` / `completeRequires`. */
   readonly arguments?: readonly PromptArgumentRecord[];
+  /** See {@link PromptDeclaration.version} — the adopter's revision string, carried verbatim. */
+  readonly version?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

@@ -138,6 +138,26 @@ describe("hydrateFromDirectory — allowed-tools mapping", () => {
 });
 
 // ---------------------------------------------------------------------
+// `version` — the DECLARED field, promoted out of the metadata bag so the
+// run's provenance stamp can carry it.
+// ---------------------------------------------------------------------
+
+describe("hydrateFromDirectory — version mapping", () => {
+  it("maps frontmatter `version` onto the declared field, not metadata", async () => {
+    await writeSkill("ver", "name: ver\ndescription: A\nversion: 2026-01-14");
+    const [record] = await hydrateFromDirectory({ root })(noCtx);
+    expect(record!.version).toBe("2026-01-14");
+    expect(record!.metadata).not.toHaveProperty("version");
+  });
+
+  it("leaves version absent when the frontmatter omits it", async () => {
+    await writeSkill("bare", "name: bare\ndescription: A");
+    const [record] = await hydrateFromDirectory({ root })(noCtx);
+    expect(record).not.toHaveProperty("version");
+  });
+});
+
+// ---------------------------------------------------------------------
 // E2 — references ride the resources harness
 // ---------------------------------------------------------------------
 

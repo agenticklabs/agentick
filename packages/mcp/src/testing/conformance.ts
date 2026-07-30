@@ -565,8 +565,8 @@ function loopbackSections(factories: McpConformanceFactories, era: McpSpecEra): 
     // ─── completion ───
     describe("completion", () => {
       it("prompt-argument completion prefix-filters from the configured list", async () => {
-        const values = await lb.client.completePromptArgument("greet", "name", "A");
-        expect(values).toEqual(["Ada", "Alan"]);
+        const result = await lb.client.completePromptArgument("greet", "name", "A");
+        expect(result.values).toEqual(["Ada", "Alan"]);
       });
 
       it("resource-template completion returns empty (Wave 4 gap — pinned)", async () => {
@@ -574,8 +574,8 @@ function loopbackSections(factories: McpConformanceFactories, era: McpSpecEra): 
         // completions slot only carries `prompts`). The server returns
         // an empty value list for `ref/resource`; pinned so wiring it
         // later flips this to a positive assertion.
-        const values = await lb.client.completeResourceTemplate("mem://users/{id}", "id", "4");
-        expect(values).toEqual([]);
+        const result = await lb.client.completeResourceTemplate("mem://users/{id}", "id", "4");
+        expect(result.values).toEqual([]);
       });
     });
 

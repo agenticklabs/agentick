@@ -238,6 +238,7 @@ async function agentSkillRecord(
   if (!description) return null; // no description → skip (matches hydrateFromMarkdownFiles)
 
   const tags = arrayField(meta, "tags");
+  const version = versionField(meta);
   const allowedTools = allowedToolsField(meta);
   const { pure, wiring } = await collectReferences(skillDir, name, encoding);
 
@@ -252,6 +253,7 @@ async function agentSkillRecord(
     description,
     content: body,
     ...(tags ? { tags } : {}),
+    ...(version ? { version } : {}),
     ...(allowedTools ? { allowedTools } : {}),
     metadata,
   };
@@ -366,12 +368,14 @@ function fileRecordToSkill(
     );
   }
   const tags = arrayField(meta, "tags");
+  const version = versionField(meta);
   const allowedTools = allowedToolsField(meta);
   const out: SkillSeed = {
     name,
     description,
     content: body,
     ...(tags ? { tags } : {}),
+    ...(version ? { version } : {}),
     ...(allowedTools ? { allowedTools } : {}),
     metadata: { sourcePath: record.path, ...stripKnown(meta) },
   };
@@ -413,8 +417,24 @@ function allowedToolsField(meta: FrontmatterRecord): readonly string[] | null {
   return null;
 }
 
+/**
+ * Map a frontmatter `version:` onto the DECLARED {@link Skill.version} — the
+ * adopter's own revision string, promoted out of the metadata bag so the run's
+ * provenance stamp can carry it. A YAML parser hands `version: 2` back as a
+ * NUMBER, so a number is stringified; anything else (a map, a list) is not a
+ * version and is dropped, exactly as a malformed `allowed-tools` is.
+ */
+function versionField(meta: FrontmatterRecord): string | null {
+  const v = meta.version;
+  if (typeof v === "string") {
+    const trimmed = v.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return typeof v === "number" ? String(v) : null;
+}
+
 function stripKnown(meta: FrontmatterRecord): FrontmatterRecord {
-  const { name: _n, description: _d, tags: _t, "allowed-tools": _a, ...rest } = meta;
+  const { name: _n, description: _d, tags: _t, version: _v, "allowed-tools": _a, ...rest } = meta;
   return rest;
 }
 

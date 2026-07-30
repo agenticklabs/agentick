@@ -264,43 +264,87 @@ originating tool call. See ADR 43 + the @agentick/elicitation README.
 
 ## Argument completion (`completions`)
 
-Wires the `completion/complete` request to per-argument
-`CompletionHandler`s built with the sugar factories re-exported from this
-subpath (`completeFromList`, `completeFromEnum`, `completePrefixMatch`,
-`completeDependent`, `completeFromAsync`). The `completions` capability is
-advertised iff at least one handler is wired.
+Answers `completion/complete` — what a client's composer offers while a user
+types into a prompt argument.
+
+**If your prompts already declare how their arguments complete, you are done.**
+A `PromptDeclaration` argument carries `complete` (an inline resolver, or a name
+into a completions registry), and the server resolves `ref/prompt` through that
+declaration. The same resolver that serves the agentick wire serves this one;
+there is nothing to restate here.
+
+```ts
+// The declaration — written once, in @agentick/prompts.
+definePrompts({
+  prompts: [
+    {
+      name: "summarize",
+      description: "…",
+      arguments: [
+        { name: "style", complete: completeFromList(["concise", "detailed", "bullet"]) },
+        // A dependent argument reads sibling values off ctx.resolvedArguments.
+        {
+          name: "section",
+          complete: completeDependent({ requires: ["docId"] }, async (typed, { docId }) =>
+            (await loadSections(docId)).filter((s) => s.startsWith(typed)),
+          ),
+        },
+      ],
+      render: …,
+    },
+  ],
+});
+
+// The server — projecting that surface is the whole wiring.
+prompts: { use: myPrompts },
+```
+
+The `completions` slot is the **override**, and the only completion path for a
+server that projects no prompts surface at all (a façade over a REST API, say).
+An entry here outranks the declaration for that one argument:
 
 ```ts
 completions: {
-  prompts: {
-    summarize: {
-      // ref/prompt "summarize", argument "style"
-      style: completeFromList(["concise", "detailed", "bullet"]),
-      // dependent arg: sees sibling values via ctx.resolvedArguments
-      section: completeDependent({ requires: ["docId"] }, async (typed, { docId }) => {
-        return (await loadSections(docId)).filter((s) => s.startsWith(typed));
-      }),
-    },
-  },
-},
+  // ref/prompt "summarize", argument "style" — wins over the declaration's own.
+  prompts: { summarize: { style: completeFromList(["terse", "long"]) } },
+  // Resource-template variables (ref/resource), keyed by template uri. These
+  // have no declaration seam to fold into, so config is the whole story.
+  resources: { "file:///{path}": { path: completeFromList(["a.txt", "b.txt"]) } },
+  // The registry that answers an argument naming a source (complete: "crm.customers").
+  use: myCompletions,
+}
 ```
 
-Handlers live at the wire (a server-config slot), NOT on
-`PromptDeclaration` — argument completion is an MCP-wire concept, and the
-100-value cap + sugar belong at the wire edge while prompt declarations stay
-framework-neutral. Unknown prompts / arguments resolve to an empty value
-list (clients probe freely, no protocol error). `ref/resource`
-(resource-template completion) resolves to empty until the resource
-substrate lands (Wave 4).
+Both forms build handlers from the sugar factories re-exported from this subpath
+(`completeFromList`, `completeFromEnum`, `completePrefixMatch`,
+`completeDependent`, `completeFromAsync`).
+
+**Nothing here protocol-errors.** An unknown prompt, an unknown argument, an
+argument declaring no completion, a named source no registry answers to — all
+return an empty value list, so a client probes freely. A prompt your
+per-connection `prompts.filter` hides is not completable either: completion runs
+a resolver over the caller's data, which is exactly what the filter withholds.
+
+The `completions` capability is advertised when the slot carries a handler OR a
+prompts surface is projected — a declaration can complete its own arguments, so
+the capability follows the surface. `capabilities: { completions: false }` opts
+out of either.
+
+**The 100-value cap is this wire's, and it is applied here.** A resolver returns
+everything it found; the projection trims the response to
+`COMPLETION_MAX_VALUES` and sets `hasMore`. The same resolver reached over the
+agentick wire is not capped — wire constraints live at the wire.
 
 **Handler context (ADR 91 §2).** `CompletionContext extends OperationCtx` —
-beyond `resolvedArguments` (the sibling-argument values), a handler now reads
-the SAME per-request trunk (sessionId / the `mcp.user` authenticated identity)
-and the `log` / `trace` / `run` facets the completions projection derives from
-the request ctx. So a DB-backed completion scopes its query to the
-authenticated principal; a prefix-match handler ignores everything but
-`resolvedArguments`. The extra trunk/facet fields are additive — existing
-handlers that read only `resolvedArguments` are unchanged.
+beyond `resolvedArguments` (the sibling-argument values), a handler reads the
+per-request trunk (the redacted `identity`) plus `ctx.mcp.user`, the caller's
+full authenticated record with its credential, and the `log` / `trace` / `run`
+facets. That holds for a declaration's resolver too, and it is why the projection
+composes the prompts harness's Effect twin from inside the crossing rather than
+calling its Promise face: on a fresh fiber the resolver would see the session
+that owns the registry instead of the client that asked. So a DB-backed
+completion scopes its query to the authenticated principal; a prefix-match
+handler ignores everything but `resolvedArguments`.
 
 ---
 
@@ -760,7 +804,10 @@ when the prompts source has declarations. `elicitation` advertises when
 `elicit` is enabled. `tasks` advertises when at least one tool declares
 `taskSupport: "required" | "supported"`. `resources` advertises (with
 `subscribe` + `listChanged`) when a Resources source is wired (ADR 62).
-`completions` advertises when the `completions` slot carries a handler.
+`completions` advertises when the `completions` slot carries a handler OR a
+prompts surface is projected (a declaration completes its own arguments, so the
+capability follows the surface — it deliberately does not scan for arguments that
+declare one, because prompts register after `initialize` has already negotiated).
 `logging` advertises by default (every request context gets a `ctx.log`
 sink). (`elicitation` and `sampling` are CLIENT capabilities in MCP — the
 server never advertises them on the wire; it issues `elicitation/create`

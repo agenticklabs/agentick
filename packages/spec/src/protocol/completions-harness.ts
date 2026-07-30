@@ -28,8 +28,11 @@
  * @see docs/proposals/v2/blueprint/91-ctx-spine.md §2 — the ctx spine this seam rides
  */
 
+import type { Effect } from "effect";
+import type { CompletionsErrorChannel } from "../errors/harnesses.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { Unsubscribe } from "./inbox.js";
+import type { HarnessFx } from "./middleware.js";
 
 // ============================================================================
 // Result currency
@@ -134,6 +137,44 @@ export {
 // ============================================================================
 
 /**
+ * The completions harness's **canonical** resolve surface: the composable Effect
+ * twin of the {@link CompletionsHarnessProtocol.resolve} door. Returns the
+ * resolve Effect un-run, so an in-fiber caller composes it with `yield*` and
+ * stays in ONE fiber tree; `completions.resolve(...)` is the derived Promise
+ * facade.
+ *
+ * ## Why this is on the PROTOCOL, not just the concrete class
+ *
+ * Same rule as {@link import("./prompts-harness.js").PromptsFx} and
+ * {@link import("./resources-harness.js").ResourcesFx}: the MCP server's
+ * completions projection holds `Completions` (the protocol) and resolves from
+ * INSIDE the `mcp:command:complete` crossing operation. Through the Promise
+ * facade the resolver's ctx is minted from the harness's CONSTRUCTION-bound
+ * scope, so it carries the owning session's identity and knows nothing of the
+ * connection that asked (ADR 92 §Slice A, the residual ADR 91 stop-rule #2).
+ * Composed on the crossing's captured runtime, the trunk connection → crossing →
+ * `resolver(value, ctx)` stays intact, and the resolver reads the CALLER's
+ * `ctx.mcp.user` exactly as a `PromptDeclaration.render` does.
+ *
+ * Neither face mints a journaled operation — `resolve` is deliberately not a
+ * declared command (see the protocol doc-block), so this is the one `.fx`
+ * surface in the tree that is NOT sugar over `commandEffect`. What it buys is
+ * the FIBER, not the envelope.
+ */
+export interface CompletionsFx extends HarnessFx {
+  /**
+   * Run a named resolver on the CALLING fiber — the Effect twin of
+   * {@link CompletionsHarnessProtocol.resolve}. Mints the resolver's
+   * {@link CompletionCtx} from the ambient operation trunk (plus the caller's
+   * `resolvedArguments` / `signal`) rather than the harness's own scope.
+   */
+  resolve(
+    name: string,
+    input: CompletionsResolveInput,
+  ): Effect.Effect<CompletionResult, CompletionsErrorChannel, never>;
+}
+
+/**
  * The completions harness protocol — a registry and a resolve door, nothing
  * more. No snapshot (a resolver is a function and does not serialize; a session
  * re-registers from its tree / definition on restore), no pagination (names are
@@ -146,6 +187,13 @@ export {
 export interface CompletionsHarnessProtocol {
   readonly id: string;
   readonly ready: Promise<void>;
+  /**
+   * The Effect-canonical resolve surface — the twin an in-fiber caller composes
+   * with `yield*`. On the PROTOCOL so a protocol-typed ref (the MCP server's
+   * completions projection) can resolve without severing the fiber at the
+   * Promise facade. See {@link CompletionsFx}.
+   */
+  readonly fx: CompletionsFx;
   close(): Promise<void>;
 
   // ─── Sync surface ─────────────────────────────────────────────

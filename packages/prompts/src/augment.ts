@@ -19,6 +19,10 @@ import { withPrompts } from "./extension.js";
 // server augment). Re-imported here for its side effect so importing
 // `@agentick/prompts` still contributes the rows.
 import "./wire-augment.js";
+// Same split, same reason: the `MessageSource.prompt` provenance slot `invoke`
+// stamps is read on the CLIENT (it renders the pill), so it lives in the
+// type-only `./message-source.ts` and is re-imported here.
+import "./message-source.js";
 
 declare module "@agentick/spec" {
   interface HookBridges {

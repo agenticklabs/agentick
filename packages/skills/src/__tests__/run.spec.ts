@@ -26,13 +26,14 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import type {
+  MessageSource,
   SendInput,
   SendResult,
   SessionExecutionHandle,
   SessionSendCapability,
 } from "@agentick/spec";
 
-import { SkillsHarness } from "../harness.js";
+import { SkillsHarness, type SkillsHarnessOptions } from "../harness.js";
 import type { SkillRunCompose } from "../handle.js";
 
 const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 } as const;
@@ -78,12 +79,13 @@ function stubRunner(opts: { readonly result?: SendResult; readonly reject?: unkn
   return { send, captured };
 }
 
-async function mkHarness(): Promise<SkillsHarness> {
+async function mkHarness(options: SkillsHarnessOptions = {}): Promise<SkillsHarness> {
   const h = new SkillsHarness(
     `run:${ulid()}`,
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),
+    options,
   );
   await h.ready;
   return h;
@@ -318,6 +320,93 @@ describe("skills.run — guards", () => {
     h.bindRunner(send);
 
     await expect(h.run("nope")).rejects.toMatchObject({ _tag: "SkillNotFound", skillName: "nope" });
+    await h.close();
+  });
+});
+
+/**
+ * Materialization provenance — a run's messages carry WHO composed them.
+ *
+ * A skill run is a `session.send` primed with the skill document, so without a
+ * stamp a chat projection has to render the whole document as if the human typed
+ * it. The stamp is `metadata.source.skill`: the name and the adopter's declared
+ * `version`, both already in hand. No `opId` — `run` mints no operation, and we
+ * refuse to fabricate one (see `SkillMessageSource`).
+ *
+ * @see docs/proposals/v2/materialization-provenance.md §3
+ */
+describe("skills.run — materialization provenance", () => {
+  /** The documented reader path: cast `metadata.source` to `MessageSource`, then key. */
+  const skillSourceOf = (m: { readonly metadata?: Readonly<Record<string, unknown>> }) =>
+    (m.metadata?.source as MessageSource | undefined)?.skill;
+
+  it("stamps name + declared version on every composed message", async () => {
+    const h = await mkHarness();
+    await h.register({ name: "s", description: "x", content: "body", version: "3" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+
+    await h.run("s", { args: { x: 1 } });
+
+    const messages = captured[0]!.messages!;
+    expect(messages).toHaveLength(2); // default composition: system body + user args
+    for (const m of messages) expect(skillSourceOf(m)).toEqual({ name: "s", version: "3" });
+
+    await h.close();
+  });
+
+  it("omits version when the skill declares none", async () => {
+    const h = await mkHarness();
+    await h.register({ name: "s", description: "x", content: "body" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+
+    await h.run("s");
+
+    expect(skillSourceOf(captured[0]!.messages![0]!)).toEqual({ name: "s" });
+
+    await h.close();
+  });
+
+  it("stamps a composeRun OVERRIDE's messages too, merging its metadata", async () => {
+    // The framework is what put this in the timeline, so the stamp must not be
+    // opt-out-able by replacing the composition.
+    const composeRun: SkillRunCompose = (skill) => ({
+      messages: [
+        { role: "user", content: `custom: ${skill.name}`, metadata: { adopterKey: 7 } },
+        { role: "user", content: "second" },
+      ],
+    });
+    const h = await mkHarness({ composeRun });
+    await h.register({ name: "s", description: "x", content: "body", version: "9" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+
+    await h.run("s");
+
+    const [first, second] = captured[0]!.messages!;
+    expect(first!.metadata?.adopterKey).toBe(7);
+    expect(skillSourceOf(first!)).toEqual({ name: "s", version: "9" });
+    expect(skillSourceOf(second!)).toEqual({ name: "s", version: "9" });
+
+    await h.close();
+  });
+
+  it("does NOT overwrite a source the composition stamped itself", async () => {
+    const composeRun: SkillRunCompose = () => ({
+      messages: [{ role: "user", content: "quoted", metadata: { source: { telegram: 42 } } }],
+    });
+    const h = await mkHarness({ composeRun });
+    await h.register({ name: "s", description: "x", content: "body" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+
+    await h.run("s");
+
+    const message = captured[0]!.messages![0]!;
+    expect(skillSourceOf(message)).toBeUndefined();
+    expect(message.metadata?.source).toEqual({ telegram: 42 });
+
     await h.close();
   });
 });

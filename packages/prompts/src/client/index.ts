@@ -15,6 +15,11 @@
 // client handle's `transport.request("prompts/…", …)` — WITHOUT the server
 // augmentations (zero runtime).
 import "../wire-augment.js";
+// Type-only side effect: types `entry.metadata.source.prompt` for the chat
+// projection that renders an invoked prompt as a pill instead of a wall of text.
+import "../message-source.js";
+
+export type { PromptMessageSource } from "../message-source.js";
 
 export {
   promptsHandle,

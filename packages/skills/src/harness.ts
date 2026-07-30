@@ -67,12 +67,17 @@ import type {
   SkillsStore,
 } from "./definition.js";
 import type { SkillRunCompose, SkillRunOptions } from "./handle.js";
+import type { SkillMessageSource } from "./message-source.js";
 import { defaultComposeRun } from "./compose-run.js";
 import { InMemorySkillStore, matchesSkillQuery } from "./store.js";
 
 function skillContentChanged(existing: Skill, incoming: SkillSeed): boolean {
   if (existing.description !== incoming.description) return true;
   if (existing.content !== incoming.content) return true;
+  // A version-only bump is a real change: the adopter said "this is a different
+  // revision", and a reload that ignored it would leave every subsequent run
+  // stamped with the stale string.
+  if (existing.version !== incoming.version) return true;
   const existingTags = existing.tags ? [...existing.tags].sort().join("|") : "";
   const incomingTags = incoming.tags ? [...incoming.tags].sort().join("|") : "";
   if (existingTags !== incomingTags) return true;
@@ -80,6 +85,36 @@ function skillContentChanged(existing: Skill, incoming: SkillSeed): boolean {
   const incomingAllowed = incoming.allowedTools ? [...incoming.allowedTools].sort().join("|") : "";
   if (existingAllowed !== incomingAllowed) return true;
   return false;
+}
+
+/**
+ * MERGE the skill-run stamp into every message the composition produced, at
+ * `metadata.source.skill` (the ADR 58 convention — see the `MessageSource` seed in
+ * spec, and why the grammar is a keyed bag rather than a `kind` union).
+ *
+ * Two laws, both about not destroying what someone else said:
+ *
+ *  - **Merge, never clobber.** A `composeRun` override may put its own keys on a
+ *    message's metadata; the stamp is one more key beside them.
+ *  - **An existing `source` WINS.** A composition that stamped its own is the
+ *    closer authority — it knows what that particular message is where the run
+ *    only knows it composed something. The more specific claim survives.
+ *
+ * A composition that produced no `messages` is returned untouched: we do not add
+ * an empty array where the override left none.
+ *
+ * @verifiedBy packages/skills/src/__tests__/run.spec.ts §materialization provenance
+ */
+function stampSkillRun(input: SendInput, source: SkillMessageSource): SendInput {
+  if (input.messages === undefined) return input;
+  return {
+    ...input,
+    messages: input.messages.map((m) =>
+      m.metadata?.source !== undefined
+        ? m
+        : { ...m, metadata: { ...m.metadata, source: { skill: source } } },
+    ),
+  };
 }
 
 /**
@@ -94,6 +129,7 @@ function seededSkill(seed: SkillSeed, now: number): Skill {
     content: seed.content,
     ...omitUndefined({
       tags: seed.tags,
+      version: seed.version,
       allowedTools: seed.allowedTools,
       metadata: seed.metadata,
     }),
@@ -382,6 +418,14 @@ export class SkillsHarness
     // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
     const skill = await this.require(name);
     const input: SendInput = this.composeRun(skill, opts as SkillRunOptions);
+    // MATERIALIZATION PROVENANCE — stamp AFTER composition, deliberately: the
+    // framework is what put this content in the timeline, so the stamp must
+    // survive a `composeRun` override that knows nothing about it. Both facts
+    // (name, the record's declared version) are already in hand.
+    const stamped = stampSkillRun(input, {
+      name: skill.name,
+      ...omitUndefined({ version: skill.version }),
+    });
     // The run IS a send — the handle passes through untouched (streaming via
     // `for await (const ev of handle.events())`, `abort()`, `status`, and the
     // typed `result`: `data` is validated against `opts.output` by the send
@@ -390,7 +434,7 @@ export class SkillsHarness
     // typed error propagates to whoever awaits it. The isolation runner threads
     // the same composed send through a forked child and disposes it after the
     // handle settles.
-    return (await runner(input)) as SessionExecutionHandle<T>;
+    return (await runner(stamped)) as SessionExecutionHandle<T>;
   }
 
   // ─────────── Dynamic surface ───────────
@@ -677,6 +721,7 @@ export class SkillsHarness
         content: input.content,
         ...omitUndefined({
           tags: input.tags,
+          version: input.version,
           allowedTools: input.allowedTools,
           metadata: input.metadata,
         }),
@@ -705,6 +750,7 @@ export class SkillsHarness
           description: input.description,
           content: input.content,
           tags: input.tags,
+          version: input.version,
           allowedTools: input.allowedTools,
         }),
         ...(input.metadata !== undefined

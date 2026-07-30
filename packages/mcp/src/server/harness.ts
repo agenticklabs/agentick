@@ -316,11 +316,26 @@ export class McpServerHarness
    */
   private readonly resolvedCompletions: ResolvedCompletionsOptions | null;
   /**
-   * True iff the `completions` capability is advertised — the slot
-   * carried at least one handler AND the adopter didn't opt out. Gates
-   * both the capability advertisement and installing the
-   * `completion/complete` request handler (the SDK asserts the
-   * capability on registration).
+   * True iff the `completions` capability is advertised. Gates BOTH the
+   * capability advertisement and installing the `completion/complete` request
+   * handler — one derivation for both, because the SDK asserts the capability
+   * when a handler registers, so a disagreement between them throws.
+   *
+   * Two ways to earn it, and the adopter's `capabilities.completions: false`
+   * suppresses either:
+   *
+   *   - the `completions` slot carries at least one handler; or
+   *   - this server projects a PROMPTS surface. A projected declaration can
+   *     complete its own arguments through the prompts seam, so the capability
+   *     follows the surface rather than a handler count.
+   *
+   * The second arm deliberately does not scan for arguments that actually
+   * declare `complete`. Prompts register dynamically (`start()` seeds them, and
+   * an adopter registers more later) while a capability is negotiated ONCE at
+   * `initialize` — so a scan would answer for a catalog that has not finished
+   * arriving, and a prompt registered a second later would be uncompletable for
+   * the life of the connection. Over-advertising costs a client one request that
+   * answers `{ values: [] }`; under-advertising costs it the feature.
    */
   private readonly completionsAdvertised: boolean;
 
@@ -459,7 +474,7 @@ export class McpServerHarness
         ? resolveCompletionsOption(this.options.completions)
         : null;
     this.completionsAdvertised =
-      (this.resolvedCompletions?.hasHandlers ?? false) &&
+      ((this.resolvedCompletions?.hasHandlers ?? false) || !isNull(this.promptsSource)) &&
       this.options.capabilities?.completions !== false;
 
     this.loggingEnabled = this.options.capabilities?.logging !== false;
@@ -686,10 +701,12 @@ export class McpServerHarness
         // taskSupport: "required" | "supported". Pattern B clients
         // gate the task wire on this capability.
         tasks: this.hasTasksWired,
-        // Wave 3a — completions advertised when the slot carries a
-        // handler; logging advertised by default (every ctx gets a
-        // `log` sink). Both subject to `capabilities.*` opt-out.
-        completions: this.resolvedCompletions?.hasHandlers ?? false,
+        // Completions: the slot carries a handler OR a prompts surface is
+        // projected (its declarations complete their own arguments through the
+        // seam). ONE derivation shared with the handler-install gate below —
+        // see `completionsAdvertised`. Logging is advertised by default (every
+        // ctx gets a `log` sink). Both subject to `capabilities.*` opt-out.
+        completions: this.completionsAdvertised,
         logging: this.loggingEnabled,
       },
       this.options.capabilities,
@@ -761,16 +778,19 @@ export class McpServerHarness
     /**
      * Mint the per-request branded ctx. `overrides` carry what only the
      * crossing knows: the identity the PRE-OP authenticator resolved (ADR 92 —
-     * admission stays pre-op) and `tools/call`'s per-call progress token. Both
-     * compose INTO the single branded mint rather than being spread on
+     * admission stays pre-op), `tools/call`'s per-call progress token, and the
+     * crossing's own `ctxExtras` (a `completion/complete`'s `resolvedArguments`).
+     * All compose INTO the single branded mint rather than being spread on
      * afterwards (a post-mint spread erases the brand and forces the lazy
      * facets).
      */
-    const buildRequestContext = (overrides?: {
+    const buildRequestContext = <X extends object = Record<never, never>>(overrides?: {
       readonly user?: McpAuthenticatedUser | null;
       readonly identity?: IngressIdentity;
       readonly progressToken?: ProgressToken;
-    }): Derived<McpRequestContext> => {
+      /** The crossing's own boundary fields — see `McpCrossing.ctxExtras`. */
+      readonly ctxExtras?: X;
+    }): Derived<McpRequestContext & X> => {
       // The crossing's trunk: the connection dimensions plus the authenticated
       // ingress identity. This is what a handler reads as `ctx.identity` and
       // what every ad-hoc `ctx.run` op inherits as its scope.
@@ -887,9 +907,15 @@ export class McpServerHarness
             remoteAddress: info.remoteAddress,
           }),
           ...(elicitExtra !== undefined ? { elicit: elicitExtra } : {}),
+          // The crossing's own boundary fields land LAST among the extras, so a
+          // verb-specific field wins over a universal default of the same name.
+          ...(overrides?.ctxExtras ?? {}),
         },
       );
-      const ctx: Derived<McpRequestContext> = built;
+      // The extras literal is composed from a fixed field set PLUS the generic
+      // `ctxExtras`, which no structural check can relate back to `X` — so the
+      // narrowing lands here, once, at the mint that owns it.
+      const ctx = built as unknown as Derived<McpRequestContext & X>;
       return ctx;
     };
 
@@ -912,7 +938,9 @@ export class McpServerHarness
      *      connection dim.
      *   5. **Body.** The SDK handler, over the post-cascade input.
      */
-    const runCrossing: RunCrossing = async <R>(crossing: McpCrossing<R>): Promise<R> => {
+    const runCrossing: RunCrossing = async <R, X extends object = Record<never, never>>(
+      crossing: McpCrossing<R, X>,
+    ): Promise<R> => {
       // Where this crossing's identity comes from.
       //
       // On a transport whose every MESSAGE carries credential material (HTTP), the
@@ -945,8 +973,13 @@ export class McpServerHarness
       // admission resolved. Minted (not spread over the admission ctx) so the
       // whole composition stays branded and the lazy facets stay lazy.
       const identity = toIngressIdentity(resolvedUser, this.identityProjection);
-      const ctx = buildRequestContext(
-        omitUndefined({ user: resolvedUser, identity, progressToken: crossing.progressToken }),
+      const ctx = buildRequestContext<X>(
+        omitUndefined({
+          user: resolvedUser,
+          identity,
+          progressToken: crossing.progressToken,
+          ctxExtras: crossing.ctxExtras,
+        }),
       );
 
       const opName = crossingOpName(crossing.verb);
@@ -1069,13 +1102,23 @@ export class McpServerHarness
       cleanup.push(unsubscribe);
     }
 
-    // Wave 3a — argument completion. Installed only when the capability
-    // is advertised (slot carries a handler AND no opt-out); the SDK
-    // asserts the `completions` capability on handler registration.
-    if (this.completionsAdvertised && this.resolvedCompletions !== null) {
+    // Argument completion. Installed on exactly the condition the capability was
+    // advertised on — the SDK asserts the capability when the handler registers,
+    // so the two must not diverge. The projection receives BOTH sources: the
+    // explicit config handlers (the override) and the prompts surface whose
+    // declarations answer everything else through the seam, plus the completions
+    // registry that resolves a named ref. Refs arrive the same way the prompts and
+    // resources projections receive theirs — resolved once at construction,
+    // handed to the per-connection projection.
+    if (this.completionsAdvertised) {
       const unsubscribe = installCompletionsHandlers(sdkServer, {
-        prompts: this.resolvedCompletions.prompts,
-        resources: this.resolvedCompletions.resources,
+        prompts: this.resolvedCompletions?.prompts ?? {},
+        resources: this.resolvedCompletions?.resources ?? {},
+        ...(this.promptsSource !== null ? { promptsSource: this.promptsSource } : {}),
+        ...(this.promptsFilter ? { promptsFilter: this.promptsFilter } : {}),
+        ...(this.resolvedCompletions?.use
+          ? { completionsSource: this.resolvedCompletions.use }
+          : {}),
         runCrossing,
       });
       cleanup.push(unsubscribe);

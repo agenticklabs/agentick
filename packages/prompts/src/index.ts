@@ -18,7 +18,15 @@
 // slots via TypeScript module augmentation.
 import "./augment.js";
 
-export { PromptsHarness, type PromptsHarnessOptions } from "./harness.js";
+export {
+  PromptsHarness,
+  type PromptsHarnessOptions,
+  type TimelineAppendCapability,
+} from "./harness.js";
+// Materialization provenance — the `MessageSource.prompt` slot `invoke` stamps on
+// every entry it queues. The augmentation itself rides the `./augment.js` side
+// effect above; this is the payload type a reader narrows to.
+export type { PromptMessageSource } from "./message-source.js";
 export type { PromptsHandle } from "./handle.js";
 export { withPrompts, type WithPromptsOptions } from "./extension.js";
 // ADR 93 — the namespace definition: the store (the asymmetry with skills is

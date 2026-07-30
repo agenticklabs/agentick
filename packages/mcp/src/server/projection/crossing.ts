@@ -87,8 +87,15 @@ export interface McpCrossingInput {
   readonly toolInput: Record<string, unknown> | undefined;
 }
 
-/** One inbound crossing, as declared by a projection. */
-export interface McpCrossing<R> {
+/**
+ * One inbound crossing, as declared by a projection.
+ *
+ * `X` is the crossing's OWN ctx extras — boundary fields this particular verb
+ * contributes, composed INTO the branded ctx mint and surfaced on the body's
+ * `ctx` (see {@link McpCrossing.ctxExtras}). Defaults to nothing, so a crossing
+ * that adds no fields declares only `R`.
+ */
+export interface McpCrossing<R, X extends object = Record<never, never>> {
   readonly verb: McpCrossingVerb;
   /** What the per-operation security stages authorize + rate-limit. */
   readonly operation: OperationInfo;
@@ -102,14 +109,31 @@ export interface McpCrossing<R> {
    */
   readonly progressToken?: string | number;
   /**
+   * This crossing's OWN boundary fields, composed INTO the branded ctx mint and
+   * typed onto the body's `ctx` as `Derived<McpRequestContext & X>`.
+   *
+   * The generalization of what `progressToken` did by hand. It exists because the
+   * alternative a projection reaches for — `{ ...ctx, extra }` inside the body —
+   * ERASES the `Derived` brand and eagerly forces the five lazy facet getters
+   * (ADR 91 §Phase-2 brand totalization). A field known before the body runs
+   * belongs in the mint, and every field a completion crossing adds
+   * (`resolvedArguments`) is known from the request params.
+   *
+   * Boundary fields only: these land on the ctx the body and the seams it invokes
+   * read, NOT on the op's `EventScope`, so nothing here reaches the bus or the
+   * journal.
+   */
+  readonly ctxExtras?: X;
+  /**
    * The SDK request handler body. Receives the POST-CASCADE input (so an
    * `InputSanitizer` or an adopter `onBeforeCallTool` hook that reshapes the
-   * arguments is honored), the authenticated request ctx, and the crossing's
-   * {@link OnCrossingFiber} runner for composing harness `.fx` twins.
+   * arguments is honored), the authenticated request ctx (carrying
+   * {@link ctxExtras}), and the crossing's {@link OnCrossingFiber} runner for
+   * composing harness `.fx` twins.
    */
   readonly run: (
     input: McpCrossingInput,
-    ctx: Derived<McpRequestContext>,
+    ctx: Derived<McpRequestContext & X>,
     onFiber: OnCrossingFiber,
   ) => Promise<R>;
 }
@@ -141,7 +165,9 @@ export type OnCrossingFiber = <A>(effect: Effect.Effect<A, unknown, never>) => P
  * — it owns admission, op manufacture, the guard mapping, and the ctx mint.
  * One bound instance per connection.
  */
-export type RunCrossing = <R>(crossing: McpCrossing<R>) => Promise<R>;
+export type RunCrossing = <R, X extends object = Record<never, never>>(
+  crossing: McpCrossing<R, X>,
+) => Promise<R>;
 
 /**
  * Map the three PER-OPERATION security stages onto tier-4 call-scoped
@@ -212,9 +238,9 @@ export function securityStageInterceptors(args: {
  * — `runOperation` re-raises whatever this fails with, so a thrown
  * `McpServerError` reaches the SDK serializer unchanged.
  */
-export function crossingBody<R>(
-  run: McpCrossing<R>["run"],
-  ctx: Derived<McpRequestContext>,
+export function crossingBody<R, X extends object>(
+  run: McpCrossing<R, X>["run"],
+  ctx: Derived<McpRequestContext & X>,
   onFiber: OnCrossingFiber,
 ): (input: McpCrossingInput) => Effect.Effect<R, unknown, never> {
   return (input) =>

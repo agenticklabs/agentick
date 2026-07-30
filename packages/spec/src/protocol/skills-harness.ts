@@ -32,7 +32,8 @@ import type { Unsubscribe } from "./inbox.js";
  *   - `content` is the full skill document — markdown, prose, or
  *     structured recipe steps
  *   - `tags` enable category-based filtering
- *   - `metadata` is adopter-defined (version, author, source URL, etc.)
+ *   - `version` is the adopter's own revision string (declared, never computed)
+ *   - `metadata` is adopter-defined (author, source URL, etc.)
  *
  * Skills are first-class data. The harness treats them as opaque
  * content; the agent's prompt design decides what to do with them.
@@ -46,7 +47,21 @@ export interface Skill {
   readonly content: string;
   /** Category tags for filtering. */
   readonly tags?: readonly string[];
-  /** Adopter-defined metadata (version, author, source URL, etc.). */
+  /**
+   * WHICH REVISION of this skill is registered — adopter-defined, never
+   * framework-computed.
+   *
+   * What the string MEANS is entirely yours: a semver, a deploy hash, a date, the
+   * frontmatter `version` of the file it was hydrated from. The framework never
+   * reads it, never derives it, and never defaults it — it copies it verbatim into
+   * the provenance stamp `run` puts on the messages it composes, so "which
+   * revision of this skill drove this turn" is answerable from the timeline entry
+   * alone. Set nothing and everything works, minus that one string.
+   *
+   * @see docs/proposals/v2/materialization-provenance.md §3
+   */
+  readonly version?: string;
+  /** Adopter-defined metadata (author, source URL, etc.). */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /**
    * Allowlist of tool names the model may use during `skills.run` of this
@@ -66,6 +81,8 @@ export interface SkillsRegisterInput {
   readonly description: string;
   readonly content: string;
   readonly tags?: readonly string[];
+  /** See {@link Skill.version} — the adopter's revision string, carried verbatim. */
+  readonly version?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Allowlist of tool names the model may use during `skills.run` of this skill. */
   readonly allowedTools?: readonly string[];
@@ -77,6 +94,8 @@ export interface SkillsUpdateInput {
   readonly description?: string;
   readonly content?: string;
   readonly tags?: readonly string[];
+  /** See {@link Skill.version} — the adopter's revision string, carried verbatim. */
+  readonly version?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Allowlist of tool names the model may use during `skills.run` of this skill. */
   readonly allowedTools?: readonly string[];

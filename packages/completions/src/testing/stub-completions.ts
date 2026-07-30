@@ -10,11 +10,16 @@
  * needs the resolver ctx wants `fakeCompletions()` instead.
  */
 
+import { Effect } from "effect";
 import type {
   CompletionResult,
   CompletionResolver,
+  CompletionsErrorChannel,
+  CompletionsFx,
   CompletionsHarnessProtocol,
   CompletionsResolveInput,
+  Middleware,
+  Unsubscribe as SpecUnsubscribe,
 } from "@agentick/spec";
 import { CompletionNotFound } from "@agentick/spec";
 import type { Unsubscribe } from "@agentick/runtime";
@@ -32,8 +37,29 @@ export function stubCompletions(options: StubCompletionsOptions = {}): Completio
   const changed = createNotifier();
   const id = options.id ?? "stub-completions";
 
-  return {
+  /**
+   * The Effect twin, lifted from the canned door — a stub has no fiber trunk to
+   * mint from, so `fx.resolve` and `resolve` answer identically here. A consumer
+   * asserting that the twin picks up the CALLER's trunk wants `fakeCompletions()`
+   * (a real harness on a real substrate); this exists so a stub still satisfies
+   * the protocol.
+   */
+  const fx: CompletionsFx = {
+    use:
+      <I, R, E>(_mw: Middleware<I, R, E>): SpecUnsubscribe =>
+      () => {
+        /* a stub runs no ops, so there is nothing to wrap */
+      },
+    resolve: (name, input) =>
+      Effect.tryPromise({
+        try: () => stub.resolve(name, input),
+        catch: (cause) => cause as CompletionsErrorChannel,
+      }),
+  };
+
+  const stub: CompletionsHarnessProtocol = {
     id,
+    fx,
     ready: Promise.resolve(),
     async close(): Promise<void> {
       /* no-op */
@@ -71,4 +97,6 @@ export function stubCompletions(options: StubCompletionsOptions = {}): Completio
       return Promise.resolve({ values: matched });
     },
   };
+
+  return stub;
 }

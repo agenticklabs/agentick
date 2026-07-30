@@ -21,11 +21,13 @@
  */
 
 import {
+  isCompletionsInstance,
   isPromptsInstance,
   isResourcesInstance,
   isTaskHandle,
   McpServerConfigInvalid,
   normalizeToolResult,
+  type Completions,
   type McpAuthenticatedUser,
   type McpRequestContext,
   type PromptDeclaration,
@@ -255,24 +257,26 @@ export interface McpServerCapabilitiesOptions {
 export type McpServerExtensionsOptions = Readonly<NonNullable<ServerCapabilities["extensions"]>>;
 
 /**
- * Argument-completion slot. Maps a prompt name to a per-argument map
- * of {@link CompletionHandler}s — the sugar builders in
- * `@agentick/mcp` (`completeFromList`, `completeFromEnum`,
- * `completeDependent`, ...) produce these. When a client issues
- * `completion/complete` for `ref/prompt` + argument name, the matching
- * handler runs; unknown refs / arguments resolve to an empty value
- * list (no protocol error — clients probe freely).
+ * Argument-completion slot — the server-config OVERRIDE, and the only completion
+ * path a standalone server (one projecting no native prompts surface) has.
  *
- * Kept as a server-config slot rather than a field on
- * `PromptDeclaration` because argument completion is an MCP-wire
- * concept: the sugar + the 100-cap live at the wire edge, and prompt
- * declarations stay framework-neutral (usable by non-MCP surfaces
- * that have no completion notion).
+ * Maps a prompt name to a per-argument map of {@link CompletionHandler}s — the
+ * sugar builders in `@agentick/mcp` (`completeFromList`, `completeFromEnum`,
+ * `completeDependent`, ...) produce these. When a client issues
+ * `completion/complete` for `ref/prompt` + argument name, the matching handler
+ * runs; unknown refs / arguments resolve to an empty value list (no protocol
+ * error — clients probe freely).
+ *
+ * **A prompt declaring its own `complete` needs nothing here.** When the server
+ * projects a `prompts` surface, `completion/complete` resolves through that
+ * declaration's completion seam — the SAME resolver serving the agentick wire, so
+ * one declaration answers both. This slot wins where both exist, because an
+ * explicit per-connection handler is a deliberate override of the declaration.
  */
 export interface McpServerCompletionsConfig {
   /**
    * Prompt-argument completion handlers, keyed by prompt name, then by
-   * argument name.
+   * argument name. Overrides the projected prompt declaration's own `complete`.
    */
   readonly prompts?: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
   /**
@@ -284,11 +288,27 @@ export interface McpServerCompletionsConfig {
    * or variable resolves to an empty completion (clients probe freely).
    */
   readonly resources?: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
+  /**
+   * The completions REGISTRY this server resolves named refs against — the
+   * `use` form, mirroring how the `resources` slot receives its instance.
+   *
+   * A projected prompt argument may name a registry source
+   * (`complete: "knowify.jobs"`) instead of inlining a resolver. The prompts
+   * harness will not chase that name (it holds resolvers, it does not own the
+   * registry), so it hands the name back and whoever asked resolves the second
+   * hop. Wire the registry here and this server can. Omit it and a named ref
+   * answers empty — the same silence every other unresolvable completion keeps.
+   *
+   * Always adopter-owned: a registry entry needs a resolver function, so the
+   * server never constructs one and never closes it.
+   */
+  readonly use?: Completions;
 }
 
 /**
  * The completions slot — a config-object carrying prompt-argument and/or
- * resource-template-argument completion handlers.
+ * resource-template-argument completion handlers, and/or the completions
+ * registry that answers named refs.
  */
 export type McpServerCompletionsOptions = McpServerCompletionsConfig;
 
@@ -720,14 +740,17 @@ export interface ResolvedCompletionsOptions {
   readonly prompts: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
   readonly resources: Readonly<Record<string, Readonly<Record<string, CompletionHandler>>>>;
   readonly hasHandlers: boolean;
+  /** The registry that answers a named ref, or `null` when none was wired. */
+  readonly use: Completions | null;
 }
 
 /**
  * Normalize the completions option into its internal resolved shape.
  * Throws {@link McpServerConfigInvalid} on shape violations. `hasHandlers`
  * is `true` iff at least one prompt OR resource template carries at least
- * one argument handler — the gate for advertising the `completions`
- * capability.
+ * one argument handler — HALF the gate for advertising the `completions`
+ * capability (a projected prompts surface is the other half; see
+ * `McpServerHarness`).
  */
 export function resolveCompletionsOption(
   option: McpServerCompletionsOptions,
@@ -735,7 +758,7 @@ export function resolveCompletionsOption(
   const prompts = option.prompts ?? {};
   const resources = option.resources ?? {};
   const hasHandlers = hasAnyHandler(prompts) || hasAnyHandler(resources);
-  return { prompts, resources, hasHandlers };
+  return { prompts, resources, hasHandlers, use: option.use ?? null };
 }
 
 /** True iff any inner arg-map in a two-level handler record is non-empty. */
@@ -754,6 +777,9 @@ function validateCompletionsOption(option: McpServerCompletionsOptions): void {
   }
   validateHandlerRecord(option.prompts, "prompts");
   validateHandlerRecord(option.resources, "resources");
+  if (option.use !== undefined && !isCompletionsInstance(option.use)) {
+    throw invalid("completions.use must be a Completions instance", ["completions", "use"]);
+  }
 }
 
 /**

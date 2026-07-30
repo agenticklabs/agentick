@@ -65,6 +65,9 @@ function projectPromptContents(decl: PromptDeclaration, uri: string): ResourceCo
   const doc = {
     name: decl.name,
     description: decl.description,
+    // The adopter's declared revision, when they set one — serializable metadata a
+    // browsing client wants ("which version am I looking at"), absent otherwise.
+    ...omitUndefined({ version: decl.version }),
     arguments: (decl.arguments ?? []).map((a) =>
       omitUndefined({ name: a.name, description: a.description, required: a.required }),
     ),

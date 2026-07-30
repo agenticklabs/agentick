@@ -45,6 +45,7 @@
 import { Effect, Stream } from "effect";
 import { BaseHarness, ulid } from "@agentick/runtime";
 import type {
+  CompletionResult,
   EventBus,
   MessageEnvelope,
   MessageHandlerError,
@@ -441,7 +442,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private readonly readResourceCmd: Cmd<McpReadResourceInput, readonly ResourceContents[]>;
   private readonly listPromptsCmd: Cmd<McpCursorInput, McpPromptPage>;
   private readonly getPromptCmd: Cmd<McpGetPromptInput, McpGetPromptResult>;
-  private readonly completeCmd: Cmd<McpCompleteInput, readonly string[]>;
+  private readonly completeCmd: Cmd<McpCompleteInput, CompletionResult>;
   private readonly setLoggingLevelCmd: Cmd<McpSetLoggingLevelInput, void>;
 
   constructor(
@@ -1266,14 +1267,21 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   // ═════════════════════════════════════════════════════════════════
 
   /**
-   * Request argument completions for a prompt argument
-   * (`ref/prompt`). Returns the server's suggested completion values.
+   * Request argument completions for a prompt argument (`ref/prompt`).
+   *
+   * Answers the full {@link CompletionResult} — `values` plus the server's
+   * `total` / `hasMore` when it reported them. Those two fields are the reason
+   * this is not a bare `string[]`: MCP caps a response at 100 values and flags
+   * the truncation, and a FORWARDING resolver (an MCP-origin prompt whose
+   * completion re-asks its origin server) has to pass that judgment along rather
+   * than silently presenting a truncated list as the whole answer. A caller that
+   * only wants candidates reads `.values`.
    */
   completePromptArgument(
     promptName: string,
     argumentName: string,
     value: string,
-  ): Promise<readonly string[]> {
+  ): Promise<CompletionResult> {
     return this.completeCmd({
       ref: { type: "ref/prompt", name: promptName },
       argument: { name: argumentName, value },
@@ -1281,26 +1289,33 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   }
 
   /**
-   * Request completions for a resource-template variable
-   * (`ref/resource`). Returns the server's suggested completion values.
+   * Request completions for a resource-template variable (`ref/resource`).
+   * Answers the full {@link CompletionResult} — see
+   * {@link completePromptArgument} for why `total` / `hasMore` survive.
    */
   completeResourceTemplate(
     uriTemplate: string,
     argumentName: string,
     value: string,
-  ): Promise<readonly string[]> {
+  ): Promise<CompletionResult> {
     return this.completeCmd({
       ref: { type: "ref/resource", uri: uriTemplate },
       argument: { name: argumentName, value },
     });
   }
 
-  private completeBody(i: McpCompleteInput): Effect.Effect<readonly string[], McpClientError> {
+  private completeBody(i: McpCompleteInput): Effect.Effect<CompletionResult, McpClientError> {
     return Effect.tryPromise({
-      try: async (): Promise<readonly string[]> => {
+      try: async (): Promise<CompletionResult> => {
         const c = this.requireReadyClient();
         const res = await c.complete({ ref: i.ref, argument: i.argument });
-        return res.completion.values;
+        // TODO(mcp-prompts-fold): `context.arguments` is not forwarded yet — a
+        // conditional completion on a REMOTE prompt needs it, and that arrives
+        // with the fold that turns these calls into resolver bodies.
+        return {
+          values: res.completion.values,
+          ...omitUndefined({ total: res.completion.total, hasMore: res.completion.hasMore }),
+        };
       },
       catch: (cause) => cause as McpClientError,
     });

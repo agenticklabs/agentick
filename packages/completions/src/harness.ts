@@ -16,10 +16,17 @@
  * (completions.md §5, refutation 1). So `resolve` is a plain async method:
  *
  *   - no `runOperation`, no journal write, no bus envelope;
- *   - the resolver's ctx is still MINTED, never hand-assembled — through
- *     `deriveOperationCtx`, the one branded boundary-ctx constructor (ADR 91),
- *     so a resolver sees the owning session's identity and the
- *     `log`/`trace`/`metrics`/`run` facets exactly like a `ResourceResolver` does.
+ *   - the resolver's ctx is still MINTED, never hand-assembled — through the
+ *     branded boundary-ctx constructors (ADR 91), so a resolver sees an
+ *     identity and the `log`/`trace`/`metrics`/`run` facets exactly like a
+ *     `ResourceResolver` does.
+ *
+ * The door has two faces for the ONE reason a ctx can come from two places:
+ * `resolve` (Promise) mints from this harness's construction-bound scope, and
+ * `fx.resolve` (Effect) mints from the CALLER's fiber. An inbound MCP
+ * `completion/complete` needs the second — its resolver must see the connecting
+ * client's identity, not the session that happens to own the registry. Neither
+ * face journals; the twin buys the fiber, not an envelope.
  *
  * Registration is likewise a plain synchronous insert: `register` carries a
  * REQUIRED resolver function, which makes it unaddressable over a wire by
@@ -37,6 +44,8 @@ import type {
   CompletionCtx,
   CompletionResolver,
   CompletionResult,
+  CompletionsErrorChannel,
+  CompletionsFx,
   CompletionsHarnessProtocol,
   CompletionsResolveInput,
   EventBus,
@@ -120,14 +129,91 @@ export class CompletionsHarness
   // ─────────── The door ───────────
 
   async resolve(name: string, input: CompletionsResolveInput): Promise<CompletionResult> {
+    const resolver = this.requireResolver(name);
+    // ONE ctx mint per resolve, shared by the resolver call and the counter in
+    // `runResolver`. OFF-FIBER: the trunk is this harness's construction-bound
+    // scope, because a plain async door has no enclosing Effect to read.
+    return this.runResolver(name, resolver, input, this.completionCtx(input));
+  }
+
+  /**
+   * The Effect-canonical resolve surface — the twin an in-fiber caller composes
+   * with `yield*`. The MCP server's completions projection reaches this from
+   * inside its `mcp:command:complete` crossing so the resolver runs on the
+   * CROSSING's fiber: its ctx carries the connection's authenticated identity
+   * (`ctx.mcp.user`, the boundary facet the crossing published) instead of the
+   * owning session's, and its `ctx.run` / `ctx.trace` nest under the crossing.
+   * Through the Promise facade above it would see this harness's own scope and
+   * nothing of the caller.
+   *
+   * Unlike every sibling `.fx`, this is NOT sugar over `commandEffect` — there is
+   * no command to sugar. What the twin buys is the FIBER, not an envelope; the
+   * no-journal-per-keystroke law holds on both faces. See {@link CompletionsFx}.
+   *
+   * @verifiedBy packages/completions/src/__tests__/harness.spec.ts
+   */
+  get fx(): CompletionsFx {
+    return this.fxProxy({
+      resolve: ((name: string, input: CompletionsResolveInput) =>
+        this.resolveEffect(name, input)) as never,
+    }) as unknown as CompletionsFx;
+  }
+
+  /** In-fiber body of {@link fx}.resolve — mints the ctx from the ambient trunk. */
+  private resolveEffect(
+    name: string,
+    input: CompletionsResolveInput,
+  ): Effect.Effect<CompletionResult, CompletionsErrorChannel, never> {
+    return Effect.gen(this, function* () {
+      // `Effect.fail`, NOT the throwing `requireResolver` the Promise face uses: a
+      // synchronous throw inside `Effect.gen` becomes a DEFECT, which escapes the
+      // declared `CompletionsErrorChannel` and reaches a caller as an unwrapped
+      // crash rather than the typed miss it is. The unknown-ref-is-silence rule
+      // downstream depends on this arriving as a failure.
+      const resolver = this.resolvers.get(name);
+      if (resolver === undefined) {
+        return yield* Effect.fail(new CompletionNotFound({ completionName: name }));
+      }
+      // IN-FIBER mint (ADR 91): the trunk comes from the ambient operation, and
+      // the two boundary facets compose INTO the branded mint via `extras` — not
+      // a post-mint spread, which would erase the brand and force the lazy
+      // facets. Fiber-published boundary facets (the MCP crossing's `ctx.mcp`)
+      // fold in too, which is how a resolver reaches the caller's credential.
+      const ctx: CompletionCtx = yield* this.currentOperationCtx(this.completionFacets(input));
+      return yield* Effect.tryPromise({
+        try: () => this.runResolver(name, resolver, input, ctx),
+        catch: (cause) => cause as CompletionsErrorChannel,
+      });
+    });
+  }
+
+  /**
+   * Lookup-or-throw. `CompletionNotFound` is the ONE protocol error a caller
+   * cannot avoid by typing differently, so both faces raise it identically.
+   */
+  private requireResolver(name: string): CompletionResolver {
     const resolver = this.resolvers.get(name);
     if (resolver === undefined) throw new CompletionNotFound({ completionName: name });
-    // ONE ctx mint per resolve, shared by the resolver call and the counter below.
-    // Metrics is the honest observability answer for a surface that deliberately
-    // writes no journal envelope: the tally survives, the per-keystroke event does
-    // not. Fire-and-forget — nothing here is control flow, and off the telemetry
-    // path `count` is the frozen no-op singleton.
-    const ctx = this.completionCtx(input);
+    return resolver;
+  }
+
+  /**
+   * Invoke the resolver and fold its answer — shared by both faces so the tally,
+   * the normalization, and the error mapping cannot drift between them. The ctx
+   * is the ONLY thing the two faces disagree about, which is the whole point of
+   * the twin.
+   *
+   * The metrics tally is the honest observability answer for a surface that
+   * deliberately writes no journal envelope: the count survives, the
+   * per-keystroke event does not. Fire-and-forget — nothing here is control flow,
+   * and off the telemetry path `count` is the frozen no-op singleton.
+   */
+  private async runResolver(
+    name: string,
+    resolver: CompletionResolver,
+    input: CompletionsResolveInput,
+    ctx: CompletionCtx,
+  ): Promise<CompletionResult> {
     ctx.metrics.count("completions.resolve", 1, { name });
     try {
       return normalizeCompletionResult(await resolver(input.value, ctx));
@@ -137,6 +223,20 @@ export class CompletionsHarness
       if (cause instanceof CompletionNotFound) throw cause;
       throw new CompletionResolveFailed({ completionName: name, cause });
     }
+  }
+
+  /**
+   * The two boundary facets, in the shape both mints compose. `resolvedArguments`
+   * defaults to `{}` — a resolver reads it unconditionally.
+   */
+  private completionFacets(input: CompletionsResolveInput): {
+    readonly resolvedArguments: Readonly<Record<string, string>>;
+    readonly signal?: AbortSignal;
+  } {
+    return {
+      resolvedArguments: input.resolvedArguments ?? {},
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
+    };
   }
 
   /**
@@ -151,20 +251,13 @@ export class CompletionsHarness
    *
    * The trunk is this harness's construction-bound `parentScope` (`{ sessionId }`
    * for a session-installed harness). It is NOT read from an ambient fiber,
-   * because `resolve` is a plain async door with no enclosing Effect.
-   *
-   * TODO(completions-p3): when the MCP server harness resolves
-   * `completion/complete` through this seam, it wants the CROSSING's trunk (so
-   * the resolver sees the connection's authenticated identity and the completion
-   * parents under the crossing). That needs an in-fiber twin — a `.fx`-style
-   * `resolveEffect` using `currentOperationCtx()` — alongside this off-fiber
-   * door. Today MCP threads its own ctx at its own projection.
+   * because `resolve` is a plain async door with no enclosing Effect. A caller
+   * that HAS a fiber and wants ITS trunk — the MCP server's completions
+   * projection, resolving inside its crossing — composes {@link fx}.resolve
+   * instead; that is the one asymmetry between the two faces.
    */
   private completionCtx(input: CompletionsResolveInput): CompletionCtx {
-    return this.deriveOperationCtx(this.parentScope ?? {}, {
-      resolvedArguments: input.resolvedArguments ?? {},
-      ...(input.signal !== undefined ? { signal: input.signal } : {}),
-    });
+    return this.deriveOperationCtx(this.parentScope ?? {}, this.completionFacets(input));
   }
 
   // ─────────── Inbox routing ───────────

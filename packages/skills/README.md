@@ -53,6 +53,7 @@ interface Skill {
   readonly description: string; // one line — this is what retrieval matches on
   readonly content: string; // the full body: markdown, prose, recipe
   readonly tags?: readonly string[];
+  readonly version?: string; // your revision string — see "Provenance on the timeline"
   readonly allowedTools?: readonly string[]; // tool allowlist for `run`
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly createdAt: number;
@@ -144,6 +145,27 @@ withSkills({
 > [!IMPORTANT]
 > `output` is a mechanism, not a behavioral promise. The chain is: the model calls the terminal tool on its own, a forced wrap-up tick if it doesn't, then executor validation, then a typed error in the residual sliver. Whether a given model reaches for it unprompted is an eval question, never a CI assertion.
 
+### Provenance on the timeline
+
+A run's messages are the skill document, not something the user typed, so every message the composition produces is stamped with where it came from — including a composition you wrote yourself:
+
+```ts
+await skills.register({
+  name: "refund_flow",
+  description: "…",
+  content: body,
+  version: "2026-01-14",
+});
+await session.skills.run("refund_flow", { args: { orderId: "A-1" } });
+
+// on each message the run put on the timeline — `metadata` is an open bag, so a
+// reader casts to the typed `MessageSource` seam and keys off the slot:
+const source = entry.metadata?.source as MessageSource | undefined;
+source?.skill; // → { name: "refund_flow", version: "2026-01-14" }
+```
+
+`version` is yours — a semver, a deploy hash, a date, the frontmatter `version:` of the file it was hydrated from. Nothing computes it and nothing defaults it. A message your composition already stamped with its own `source` keeps it: the closer authority wins. There is no operation id in the stamp, because `run` is a plain method and mints no operation — the send it drives is what the journal records.
+
 ## Where skills come from
 
 One option decides it: `hydrate`. A source is a function of the session's context returning the records the session opens with, and the package names the useful ones.
@@ -217,7 +239,7 @@ Each immediate subdirectory of `root` (default `<cwd>/.agents/skills/`) containi
       checklist.md        ← skill://code-review/references/checklist.md
 ```
 
-Frontmatter maps to the record: `name` defaults to the directory name when omitted; `description` is required and a directory lacking one is skipped; `allowed-tools` accepts both an inline array (`[Bash, Read]`) and a comma-separated string (`"Bash, Read"`); every other key lands on `metadata`. A missing root loads empty — a source pointed at a default path must not explode on absence. Hidden and symlinked skill directories are rejected at load.
+Frontmatter maps to the record: `name` defaults to the directory name when omitted; `description` is required and a directory lacking one is skipped; `allowed-tools` accepts both an inline array (`[Bash, Read]`) and a comma-separated string (`"Bash, Read"`); `version` becomes the record's revision string (a number is stringified); every other key lands on `metadata`. A missing root loads empty — a source pointed at a default path must not explode on absence. Hidden and symlinked skill directories are rejected at load.
 
 **Supporting files ride the resource registry.** Files under `references/` register as transient resources at `skill://<name>/references/<relpath>`, resolved lazily from disk. The model pulls them with the ordinary resource-read tool; there is no bespoke "skill file API". If no resource registry is mounted the skills still load — the references simply aren't addressable.
 
@@ -430,7 +452,8 @@ Markdown files are the primary authoring form on purpose. Portability is the for
 - `src/__tests__/genesis.spec.ts` — the seed law (no store write, no `register` operation), timestamp preservation, typed `SkillsHydrateFailed` including through the extension install, the `ctx.store` / `ctx.principal` / journal-reader facets, no-genesis-on-fork, and the app-wraps-plan ordering for hooks and guards.
 - `src/__tests__/hydrators.spec.ts` + `hydrators-node.spec.ts` — each named source, `composeHydrators` ordering and last-wins, directory discovery, the `name` default, missing-description skips, missing-root-loads-empty, symlink rejection, `allowed-tools` in both array and comma-string form, and reference files registering and reading back.
 - `src/__tests__/source-surface.spec.ts` — `reload` adds/updates/prunes, `resolve` and `require` on hit and miss, a source-less harness touching nothing, and reload-writes-while-genesis-does-not.
-- `src/__tests__/run.spec.ts` — default composition, the `composeRun` override, handle pass-through with and without `output`, failures riding `handle.result`, `allowedTools` round-trip and threading, isolated runs routing through the bound runner, and the typed unbound/missing-skill errors.
+- `src/__tests__/run.spec.ts` — default composition, the `composeRun` override, handle pass-through with and without `output`, failures riding `handle.result`, `allowedTools` round-trip and threading, isolated runs routing through the bound runner, the typed unbound/missing-skill errors, and the provenance stamp on every composed message (name and declared version, present on an override's messages too, merged into their metadata, and never overwriting a source the composition set itself).
+- `src/__tests__/harness.spec.ts` §declared version + `hydrators-node.spec.ts` §version mapping — `version` through register / get / list / snapshot / import and a silent patch, and the frontmatter `version:` landing on the field rather than the metadata bag.
 - `src/__tests__/tools.spec.ts` — `skill_list` enumeration, `skill_read` content, honest degradation on an unknown name and with no library mounted, and the `registerModelTools: false` opt-out.
 - `src/__tests__/projection.spec.ts` — `skill://<name>` register-then-read, live update reflection, registration after install, unregister on removal, the `exposeAsResources: false` opt-out, degradation with no resource registry, and coexistence with reference uris.
 - `src/client/__tests__/skills-handle.spec.ts` + `session-skills.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, `search` leaving the snapshot alone, and the zero-argument subscribe contract.

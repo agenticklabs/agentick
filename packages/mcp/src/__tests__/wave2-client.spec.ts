@@ -234,16 +234,20 @@ describe("wave2 client — prompts", () => {
 // ============================================================================
 
 describe("wave2 client — completion", () => {
-  it("completePromptArgument returns prompt-arg completions", async () => {
+  it("completePromptArgument returns the full CompletionResult", async () => {
     const { harness } = await wire();
-    const values = await harness.completePromptArgument("greet", "who", "al");
-    expect(values).toEqual(["alice", "alan"]);
+    const result = await harness.completePromptArgument("greet", "who", "al");
+    expect(result.values).toEqual(["alice", "alan"]);
+    // The server's own judgment about the answer's completeness survives the
+    // client — the reason this is not a bare string[].
+    expect(result.total).toBe(2);
+    expect(result.hasMore).toBe(false);
   });
 
-  it("completeResourceTemplate returns template-var completions", async () => {
+  it("completeResourceTemplate returns the full CompletionResult", async () => {
     const { harness } = await wire();
-    const values = await harness.completeResourceTemplate("mem://users/{id}", "id", "4");
-    expect(values).toEqual(["42"]);
+    const result = await harness.completeResourceTemplate("mem://users/{id}", "id", "4");
+    expect(result.values).toEqual(["42"]);
   });
 });
 

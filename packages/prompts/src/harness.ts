@@ -26,10 +26,13 @@
  *     registered array (`opts.renderers` at construction). Framework
  *     bindings ship their own renderer + convenience extension.
  *
- * `invoke()` queues to the session timeline via `bridges.timeline.queue`
- * (same channel as explicit user input). `render()` renders without
- * queueing for external consumers (MCP server `prompts/get`, snapshot
- * tests, doc generators); `get(name)` is the sync declaration read.
+ * `invoke()` APPENDS the rendered messages to the session timeline (ADR 53
+ * — input appends the moment it exists), each entry STAMPED with its
+ * materialization provenance at `metadata.source.prompt` so a projection can
+ * tell a rendered prompt from typed user input. `render()` renders without
+ * appending, for external consumers (MCP server `prompts/get`, snapshot
+ * tests, doc generators), and stamps nothing — nothing entered the
+ * timeline; `get(name)` is the sync declaration read.
  *
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
@@ -48,6 +51,7 @@ import type {
   CollectionMutation,
   CompletionCtx,
   CompletionResolver,
+  CompletionsErrorChannel,
   EventBus,
   MessageEntry,
   MessageEnvelope,
@@ -61,6 +65,7 @@ import type {
   PromptsCompleteInput,
   PromptsCompleteOutcome,
   PromptsError,
+  PromptsErrorChannel,
   PromptsFx,
   PromptsGetInput,
   PromptsGetResult,
@@ -90,6 +95,7 @@ import {
 import { View } from "@agentick/store";
 import { omitUndefined, ulid } from "@agentick/utils";
 
+import type { PromptMessageSource } from "./message-source.js";
 import {
   foldCompletionValues,
   normalizePromptArguments,
@@ -148,6 +154,15 @@ declare module "@agentick/runtime" {
 }
 
 /**
+ * The one capability `invoke()` needs from the session's timeline — appending an
+ * entry. Least-privilege injection (the `bindRunner(send: SessionSendCapability)`
+ * precedent in `@agentick/skills`): prompts materializes INTO the timeline, it
+ * never reads, filters, or snapshots it, so the whole harness is more than the
+ * seam requires. A real `TimelineHarnessProtocol` satisfies it structurally.
+ */
+export type TimelineAppendCapability = Pick<TimelineHarnessProtocol, "append">;
+
+/**
  * Construction options for {@link PromptsHarness} — the {@link PromptsDefinition}
  * (store · genesis · shaping seams · `hooks:` / `guards:`) plus the
  * {@link BaseHarnessOptions} the substrate needs (journaling policy, the
@@ -163,7 +178,7 @@ export interface PromptsHarnessOptions extends BaseHarnessOptions, PromptsDefini
    * definition — when absent, `invoke()` renders and returns without appending
    * (exactly what `render()` does).
    */
-  readonly timeline?: TimelineHarnessProtocol;
+  readonly timeline?: TimelineAppendCapability;
 }
 
 export class PromptsHarness extends BaseHarness<PromptsSurface> implements PromptsHarnessProtocol {
@@ -202,7 +217,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    */
   private readonly augmentations = new Map<string, PromptAugmentation>();
   private readonly renderers: readonly PromptRenderer[];
-  private readonly timeline?: TimelineHarnessProtocol;
+  private readonly timeline?: TimelineAppendCapability;
 
   /**
    * The definition's own store — held so the genesis ctx can hand it to a
@@ -372,11 +387,20 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * `prompts:command:render` op parents under the crossing and the
    * declaration's `render(args, ctx)` sees the crossing's identity. Through the
    * Promise facade it would re-enter Effect on a root fiber and lose both. Both
-   * faces dispatch the SAME declared command — `fx` is the sugar over
+   * faces dispatch the SAME declared command — `fx.render` is the sugar over
    * `commandEffect`, typed via {@link PromptsFx}.
+   *
+   * `fx.complete` is the exception that proves the rule: `complete` is
+   * deliberately NOT a command (no journaled op per keystroke), so there is no
+   * `commandEffect` to sugar and the twin is hand-written. It is on `.fx` anyway
+   * because what an in-fiber caller needs from it is the FIBER — the MCP server's
+   * completion projection composes it so an inline resolver sees the connecting
+   * client's identity instead of this harness's owning session.
    */
   get fx(): PromptsFx {
-    return this.fxProxy() as unknown as PromptsFx;
+    return this.fxProxy({
+      complete: ((input: PromptsCompleteInput) => this.completeEffect(input)) as never,
+    }) as unknown as PromptsFx;
   }
 
   /**
@@ -435,6 +459,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
             ...(decl.arguments ? { arguments: decl.arguments } : {}),
             ...(decl.template !== undefined ? { template: decl.template } : {}),
             ...(decl.render !== undefined ? { render: decl.render } : {}),
+            ...(decl.version !== undefined ? { version: decl.version } : {}),
             ...(decl.metadata ? { metadata: decl.metadata } : {}),
           },
         });
@@ -532,16 +557,56 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * @verifiedBy packages/prompts/src/__tests__/complete.spec.ts
    */
   async complete(input: PromptsCompleteInput): Promise<PromptsCompleteOutcome> {
+    // ONE ctx mint, shared by the resolver invocation and the counter on every
+    // arm. OFF-FIBER: the trunk is this harness's construction-bound scope,
+    // because a plain async door has no enclosing Effect to read.
+    return this.completeWith(input, (i) => this.completionCtx(i));
+  }
+
+  /**
+   * The Effect-canonical completion twin — the body of {@link fx}.complete.
+   *
+   * Identical to {@link complete} in every respect but the ctx mint, which is the
+   * whole point: `currentOperationCtx` reads the CALLER's fiber, so a resolver
+   * invoked through an MCP `completion/complete` crossing sees that connection's
+   * authenticated identity (and its `ctx.mcp` boundary facet, credential
+   * included) rather than the session that happens to own this harness.
+   *
+   * @verifiedBy packages/mcp/src/server/__tests__/projection-completions-seam.spec.ts
+   */
+  private completeEffect(
+    input: PromptsCompleteInput,
+  ): Effect.Effect<PromptsCompleteOutcome, PromptsErrorChannel | CompletionsErrorChannel, never> {
+    return Effect.gen(this, function* () {
+      // IN-FIBER mint (ADR 91): the two boundary facets compose INTO the branded
+      // mint via `extras`, and the fiber's published boundary facets (the MCP
+      // crossing's `ctx.mcp`) fold in alongside them.
+      const ctx: CompletionCtx = yield* this.currentOperationCtx(this.completionFacets(input));
+      return yield* Effect.tryPromise({
+        try: () => this.completeWith(input, () => ctx),
+        catch: (cause) => cause as PromptsErrorChannel | CompletionsErrorChannel,
+      });
+    });
+  }
+
+  /**
+   * The three-arm body both faces run. `mintCtx` is the ONLY difference between
+   * them, taken as a thunk so the mint happens after the lookup-on-miss (a miss
+   * that ends in `PromptNotFound` should not pay for a ctx).
+   */
+  private async completeWith(
+    input: PromptsCompleteInput,
+    mintCtx: (input: PromptsCompleteInput) => CompletionCtx,
+  ): Promise<PromptsCompleteOutcome> {
     if (!this.view.hasSync(input.name) && this.hydrator !== undefined) {
       await this.resolve(input.name);
     }
     const decl = this.declarationOf(input.name);
     if (decl === undefined) throw new PromptNotFound({ promptName: input.name });
 
-    // ONE ctx mint, shared by the resolver invocation and the counter on every
-    // arm. Metrics is the honest observability answer for a door that writes no
+    // Metrics is the honest observability answer for a door that writes no
     // journal envelope: the tally survives, the per-keystroke event does not.
-    const ctx = this.completionCtx(input);
+    const ctx = mintCtx(input);
     const tally = (outcome: PromptsCompleteOutcome["kind"]): void => {
       ctx.metrics.count("prompts.complete", 1, { prompt: input.name, outcome });
     };
@@ -605,10 +670,23 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * asymmetry with `render`, which derives in-fiber from the invoking op.
    */
   private completionCtx(input: PromptsCompleteInput): CompletionCtx {
-    return this.deriveOperationCtx(this.parentScope ?? {}, {
+    return this.deriveOperationCtx(this.parentScope ?? {}, this.completionFacets(input));
+  }
+
+  /**
+   * The two boundary facets, in the shape BOTH mints compose — the off-fiber
+   * `deriveOperationCtx` above and the in-fiber `currentOperationCtx` in
+   * {@link completeEffect}. `resolvedArguments` is MCP's `context.arguments`
+   * flattened onto the name the seam itself uses.
+   */
+  private completionFacets(input: PromptsCompleteInput): {
+    readonly resolvedArguments: Readonly<Record<string, string>>;
+    readonly signal?: AbortSignal;
+  } {
+    return {
       resolvedArguments: input.context?.arguments ?? {},
       ...(input.signal !== undefined ? { signal: input.signal } : {}),
-    });
+    };
   }
 
   // ─────────── Sync surface ───────────
@@ -748,6 +826,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           ...omitUndefined({
             title: declaration.title,
             arguments: args.records,
+            version: declaration.version,
             metadata: declaration.metadata,
           }),
         },
@@ -840,7 +919,12 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       const record: PromptDeclarationRecord = {
         name: decl.name,
         description: decl.description,
-        ...omitUndefined({ title: decl.title, arguments: args.records, metadata: decl.metadata }),
+        ...omitUndefined({
+          title: decl.title,
+          arguments: args.records,
+          version: decl.version,
+          metadata: decl.metadata,
+        }),
       };
       this.listCache = null;
       this.setAugmentation(decl.name, {
@@ -881,6 +965,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
         ...omitUndefined({
           title: patch.title ?? existingRecord.title,
           arguments: args.records,
+          version: patch.version ?? existingRecord.version,
           metadata: patch.metadata ?? existingRecord.metadata,
         }),
       };
@@ -953,6 +1038,22 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           // adopters use `get()` for that path.
           if (this.timeline) {
             const ts = Date.now();
+            // MATERIALIZATION PROVENANCE — every entry queued here carries WHO
+            // put it there, so a chat projection can render an invoked prompt as
+            // a pill instead of a wall of text the user never typed, and an audit
+            // can follow `opId` back to this operation. Every field is a fact
+            // already in hand at this site: the name is the op input, the args are
+            // that input verbatim, the `opId` is this command's, and the version
+            // is the record's own declared string. Nothing is derived, hashed, or
+            // computed. `render()` / `get()` stamp NOTHING — they queue nothing.
+            const source: PromptMessageSource = {
+              name: input.name,
+              ...omitUndefined({
+                args: input.args,
+                opId: ctx.opId,
+                version: this.view.getSync(input.name)?.version,
+              }),
+            };
             for (const msg of result.messages) {
               await this.timeline.append({
                 kind: "message",
@@ -961,7 +1062,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
                   role: msg.role,
                   content: msg.content,
                   ts,
-                  ...omitUndefined({ metadata: msg.metadata }),
+                  metadata: stampPromptSource(msg.metadata, source),
                 },
               });
             }
@@ -1048,6 +1149,34 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       cause: `no registered renderer handles content (typeof=${typeof content}); registered: [${this.renderers.map((r) => r.name).join(", ")}]`,
     });
   }
+}
+
+// ─────────── Materialization provenance ───────────
+
+/**
+ * MERGE the prompt stamp into one rendered message's metadata, at
+ * `metadata.source.prompt` (the ADR 58 convention — see the `MessageSource` seed
+ * in spec, and why the grammar is a keyed bag rather than a `kind` union).
+ *
+ * Two laws, both about not destroying what someone else said:
+ *
+ *  - **Merge, never clobber.** A render fn may put its own keys on a message's
+ *    metadata (`cache`, `providerMetadata`, adopter keys); the stamp is one more
+ *    key beside them.
+ *  - **An existing `source` WINS.** If the rendered message already carries one,
+ *    the render fn stamped it deliberately — and it is the closer authority: it
+ *    knows what that particular message is (a quoted inbound Telegram message, a
+ *    replayed transcript line) where the invoke only knows it rendered something.
+ *    The more specific claim survives.
+ *
+ * @verifiedBy packages/prompts/src/__tests__/provenance.spec.ts
+ */
+function stampPromptSource(
+  metadata: MessageEntry["metadata"],
+  source: PromptMessageSource,
+): MessageEntry["metadata"] {
+  if (metadata?.source !== undefined) return metadata;
+  return { ...metadata, source: { prompt: source } };
 }
 
 // ─────────── Argument validation ───────────

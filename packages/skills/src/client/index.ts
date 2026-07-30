@@ -15,6 +15,11 @@
 // client handle's `transport.request("skills/…", …)` — WITHOUT the server
 // augmentations (zero runtime).
 import "../wire-augment.js";
+// Type-only side effect: types `entry.metadata.source.skill` for the chat
+// projection that renders a skill run as a pill instead of the whole document.
+import "../message-source.js";
+
+export type { SkillMessageSource } from "../message-source.js";
 
 export {
   skillsHandle,

@@ -231,9 +231,17 @@ describe("completions/complete end-to-end — client ↔ gateway ↔ prompts ↔
     // exempting authorization audit is not this verb's call to make. A deployment
     // that finds the volume unacceptable overrides
     // `"authorizer:command:authorize"` in its own journaling policy.
-    // TODO(completions-p3): revisit alongside the MCP squaring — if per-keystroke
-    // authorization audit proves too costly in practice, the fix belongs at the
-    // authorization seam for ALL high-cadence verbs, not here.
+    // TODO(authorize-journal-per-method): that override is ALL-OR-NOTHING, and
+    // that is the finding. `JournalingPolicy.override` is keyed by event NAME
+    // while `GatewayHarness.authorize` mints one name for every method, so
+    // silencing this verb's authorization audit silences `session/send`'s too.
+    // The discriminator exists but lives in the op's INPUT
+    // (`AuthorizeInput.scope` carries the verb label), which policy cannot read —
+    // so `WireExtension.journal` cannot be extended to cover it either. Closing
+    // it needs a per-op disposition on the `Operation` descriptor plus a
+    // SEPARATE declaration key, deliberately not a reuse of `journal`: "my
+    // traffic is a query" and "my authorization need not be audited" are
+    // different claims with different owners.
     expect(added).toEqual(Array(8).fill("authorizer:command:authorize"));
 
     await cleanup();

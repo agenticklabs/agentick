@@ -22,11 +22,17 @@
  *      projection, never in the primitive or the builders.
  *  10. **`completeDependent`** gates on unmet requires without invoking the
  *      loader, and exposes `requires` as readable metadata.
+ *  11. **`fx.resolve` is the twin, not a variant** — the Effect face answers what
+ *      the Promise face answers, and raises the same protocol error on its own
+ *      channel. (What it uniquely buys — the CALLER's fiber trunk — needs an
+ *      enclosing operation to observe, so it is pinned where one exists: the MCP
+ *      server's completion projection.)
  *
  * Factory contract: the impl constructs its own substrate and exposes a
  * `close()`. `sessionId` is the owning scope the suite asserts on the derived ctx.
  */
 
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { CompletionCtx, CompletionsHarnessProtocol } from "@agentick/spec";
 
@@ -184,6 +190,26 @@ export function runCompletionsHarnessConformance(
         completionName: "broken",
         cause: boom,
       });
+      await close();
+    });
+
+    it("fx.resolve is the composable twin — same answer, same protocol error", async () => {
+      const { harness, close } = await make();
+      harness.register("twinned", (typed, ctx) => [
+        `${typed}:${ctx.resolvedArguments["k"] ?? "-"}`,
+      ]);
+      const viaFx = await Effect.runPromise(
+        harness.fx.resolve("twinned", { value: "q", resolvedArguments: { k: "v" } }),
+      );
+      const viaPromise = await harness.resolve("twinned", {
+        value: "q",
+        resolvedArguments: { k: "v" },
+      });
+      expect(viaFx).toEqual(viaPromise);
+      expect(viaFx.values).toEqual(["q:v"]);
+      // The unknown-name protocol error travels the Effect channel, not a throw.
+      const exit = await Effect.runPromiseExit(harness.fx.resolve("nope", { value: "" }));
+      expect(exit._tag).toBe("Failure");
       await close();
     });
 

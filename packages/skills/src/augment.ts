@@ -28,6 +28,10 @@ import { withSkills } from "./extension.js";
 // server augment). Re-imported here for its side effect so importing
 // `@agentick/skills` still contributes the rows.
 import "./wire-augment.js";
+// Same split, same reason: the `MessageSource.skill` provenance slot `run` stamps
+// is read on the CLIENT (it renders the pill), so it lives in the type-only
+// `./message-source.ts` and is re-imported here.
+import "./message-source.js";
 
 declare module "@agentick/spec" {
   interface HookBridges {

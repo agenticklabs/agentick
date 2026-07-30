@@ -1806,6 +1806,176 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 — materialization provenance A+B landed (the stamp + declared `version`)
+
+`docs/proposals/v2/materialization-provenance.md` phases A and B(skills half).
+THE DEFECT: `prompts:invoke` appended rendered messages carrying no provenance,
+so a chat UI had to render four hundred words as if the user had typed the six
+tokens of `/quoting_report period:2026-01`. What shipped: `version?: string`
+declared on `PromptDeclaration` / `PromptDeclarationRecord` and on
+`Skill` / register / update inputs — **adopter-defined, never
+framework-computed** — plus a `metadata.source` stamp written by the two sites
+that materialize content: `applyInvoke` on every entry it appends, and
+`skills.run` on every message its composition produced.
+
+**The razor held: the framework stamps only facts it already holds.** Name, args
+(the op input verbatim), `opId` (the invoking command's), `version` (the
+record's own string). No hashing, no computed revision, no extra store read. The
+record-hash helper from §4 was NOT built: `@agentick/utils` has no stable-hash
+and no canonical-JSON serializer to compose one from, and hand-rolling a
+canonicalizer (key order, undefined-vs-absent, cycles, floats) inside a
+provenance slice is exactly the kind of subtle thing that should not ride along.
+
+**Correction to the design doc #1 — the augmentation grammar is a KEYED BAG, and
+the `kind` union was impossible, not merely unidiomatic.** `MessageSource` is an
+augmentable INTERFACE; interface merging requires every declaration of a
+property to have the same type, so prompts declaring `kind: "prompt"` and skills
+declaring `kind: "skill"` is `TS2717` (verified with `tsc` before choosing) — and
+both are bundled in the `agentick` metapackage, so the second tenant would have
+broken the build. Each package contributes an optional KEY instead
+(`source.prompt`, `source.skill`), which is what the founding tenant
+(connectors: `source.telegram`) already did. The seed's doc-block now states
+this as law so the next tenant does not rediscover it.
+
+**Correction #2 — the skills stamp carries no `opId`, and that is honest.**
+`skills.run` is a plain method, not a declared command: it mints no operation, so
+there is no id to link to and none is fabricated. `TODO(skills-run-op)` records
+what would close it (promote `skills:run` to a command → journal envelope, guard
+seam, and an `opId`). The skills materialization site was investigated rather
+than assumed: `run` → `composeRun` → the bound send capability → an ordinary
+turn on the timeline. The stamp goes on AFTER composition, so a `composeRun`
+override cannot opt out of provenance by not knowing about it. Skill LOADS
+(`skill_read`) are NOT a site — a tool result is already structurally
+provenance-bearing.
+
+**Two laws at both stamp sites:** merge into existing metadata, never clobber;
+and an entry that already carries a `source` KEEPS it — a `render` fn or a
+composition that stamped its own is the closer authority. Also promoted the
+Agent Skills frontmatter `version:` key onto the declared field (it used to fall
+into the metadata bag, which would have left two homes for one fact), and made a
+version-only bump count as a change in the reload diff. One design improvement
+fell out: `PromptsHarnessOptions.timeline` narrowed from the whole
+`TimelineHarnessProtocol` to `TimelineAppendCapability` (`Pick<…, "append">`) —
+least-privilege injection on the `bindRunner(send: SessionSendCapability)`
+precedent, and it is what let the provenance test double be typed rather than
+cast.
+
+### 2026-07-30 — completions P3 landed (MCP squaring: one declaration, both wires, #244)
+
+The MCP server's `completion/complete` now resolves through the SAME seam the
+agentick wire uses, so a prompt argument that declares `complete` answers an MCP
+client with **nothing restated in server config**. Ryan's requirement was that
+MCP consume completion the way it consumes every other layer, and the answer was
+already written down: the `PromptsFx` / `ResourcesFx` precedent — the projection
+holds the PROTOCOL and composes the harness's Effect twin from inside its
+crossing. P3 added the two twins that were missing and mirrored that wiring
+exactly.
+
+**The twins, and why the Promise face is not merely less elegant but WRONG here.**
+`CompletionsFx.resolve` and `PromptsFx.complete` are new protocol members
+implemented via a widened `fxProxy(extras)`. Through the Promise facade,
+`complete`/`resolve` mint the resolver ctx from the harness's CONSTRUCTION-bound
+scope — so an inbound MCP completion would run a tenant-scoped lookup with the
+owning session's identity and know nothing of the client that asked. That is
+fatal for the exact feature (`knowify.jobs` filtered by caller). Composed on the
+crossing's captured runtime via `onFiber`, connection → crossing → resolver holds
+and `ctx.mcp.user` carries the caller's credential. Pinned directly: the seam
+test asserts the resolver reads `ctx.mcp.user.token` AND the redacted trunk
+`identity.principal` in the same call.
+
+**These twins are the first `.fx` members that are NOT sugar over a command,**
+and that is a consequence of an earlier decision rather than a new one:
+`complete`/`resolve` are deliberately command-less so a keystroke mints no
+journaled op. So `fxProxy` gained an `extras` bag for hand-written Effect twins,
+and `currentOperationCtx` gained a typed `extras` param — the in-fiber mirror of
+`deriveOperationCtx`'s existing one, merged by descriptor so a lazy getter is not
+forced. Deliberately NOT `withBoundaryFacets`: a fiber-published facet would leak
+one completion's `resolvedArguments` onto every nested seam on that fiber, while
+`extras` stops at the call that owns them.
+
+**Resolution order, doc-blocked at the projection.** (1) an explicit
+`completions.prompts[name][arg]` handler wins — the adopter's override, and the
+ONLY path for a standalone server with no prompts surface to read; (2) else
+`prompts.fx.complete` inside the crossing, `resolved` → clamp → wire, `ref` →
+`completions.fx.resolve` (registry via the new `completions.use` slot,
+adopter-owned exactly like `resources.use`); (3) else empty. Unknown prompt,
+unknown argument, an argument declaring nothing, a ref nobody bound — all
+`{ values: [] }`, byte-identical to the pre-seam wire.
+
+**One rule ADDED, on purpose:** the per-connection prompts `filter` now applies
+to completion. A prompt hidden from `prompts/list` was already unfetchable via
+`prompts/get`; completing its arguments runs a resolver over the caller's data,
+which is precisely what the filter withholds, so leaving that open would have
+been a quiet read-side leak around a visibility control.
+
+**`clampToWireLimit` stays the ONE cap site** and now covers seam-resolved
+results too. Pinned as a differential: one 150-value declaration answers
+100 + `hasMore` over MCP and all 150 through `prompts.complete`.
+
+**Capability advertisement now follows the SURFACE, not a handler count.**
+`completions` is advertised when the config slot carries a handler OR a prompts
+surface is projected. It deliberately does NOT scan for arguments that declare
+`complete`: a capability is negotiated once at `initialize` while prompts
+register after it (`start()` seeds them, adopters add more later), so a scan
+answers for a catalog that has not finished arriving and a prompt registered a
+second later would be uncompletable for the connection's life. Over-advertising
+costs a client one request that answers empty; under-advertising costs it the
+feature. Advertisement and handler-install now read the SAME field — the SDK
+asserts the capability at registration, so a disagreement would throw.
+
+**`TODO(adr91-brand)` retired.** `{ ...ctx, resolvedArguments }` inside the
+handler body erased the `Derived` brand and force-forced five lazy facet getters.
+The fix is the generalization of what `progressToken` already did by hand:
+`McpCrossing<R, X>` gained a typed `ctxExtras?: X` that composes INTO the branded
+mint, and the body's ctx is typed `Derived<McpRequestContext & X>` — so the
+projection needs no cast to satisfy `CompletionContext`. One `as unknown as`
+remains, at the mint that owns it, because no structural check can relate a
+generic `X` back through the composed extras literal. No new runtime crossing
+machinery was needed.
+
+**MCP client widened (breaking, no shim per v2 rules):**
+`completePromptArgument` / `completeResourceTemplate` answer `CompletionResult`
+instead of `readonly string[]`. The reason is the forwarding resolver the
+MCP-prompts-fold will need — MCP caps at 100 and flags it, and a forwarder that
+drops `total`/`hasMore` presents a truncated list as the whole answer.
+`TODO(mcp-prompts-fold)` marks both where the fold lands and that
+`context.arguments` is not forwarded yet.
+
+**One real defect caught by the new tests, not by review.**
+`CompletionsHarness.fx.resolve` first reused the throwing `requireResolver`; a
+synchronous throw inside `Effect.gen` becomes a DEFECT, which escapes the
+declared `CompletionsErrorChannel` and reached the wire as an unwrapped crash —
+breaking the "a ref nobody bound is silence" rule one layer up. Now
+`Effect.fail`. Worth remembering as a general trap for the hand-written twins.
+
+Gates: `npx vitest run packages/mcp packages/completions packages/prompts
+packages/spec` → 98 files / 1332 passed; a second sweep over runtime, gateway,
+transport-in-process, session, resources, knobs, tool-executor, loop-executor,
+compiler, app (base-harness is shared) → 220 files / 1774 passed.
+`turbo run typecheck` → only the pre-existing `@agentick/model` failure.
+dep-graph, ctx-derivers, oxfmt, oxlint clean.
+
+**Still open, reported not built:** the `authorizer:command:authorize` journaling
+question P2 pinned. See the investigation below.
+
+**Authorizer journaling — the finding.** `JournalingPolicy.override` is keyed by
+event NAME, and `GatewayHarness.authorize` mints ONE name
+(`authorizer:command:authorize`) for every wire method. So the existing knob is
+all-or-nothing: silencing completion's authorization audit silences
+`session/send`'s too. The information needed IS present — `AuthorizeInput.scope`
+carries the canonical verb label — but it lives in the op's INPUT, and policy
+cannot see inputs. `WireExtension.journal` therefore cannot be extended to cover
+it, since its fold translates a method name into an op name and the authorize op
+has no method in its name. Recommended shape: a per-op disposition on the
+`Operation` descriptor (`journal?: EventNameOverride`) that the runner consults
+before the name-keyed policy — ~15 LOC in runtime, generalizes to any op whose
+cadence depends on its input rather than its name — plus a SEPARATE declaration
+key for the induced authorization op, deliberately not a reuse of
+`WireExtension.journal`. Conflating them is how audit gaps happen: "this verb's
+traffic is a query" and "this verb's authorization need not be audited" are
+different claims with different owners, and a wire extension must not silently
+make the second while tuning the first. Not built — the decision is Ryan's.
+
 ### 2026-07-30 — completions P2 landed (the agentick wire verb, #244)
 
 The client half of docs/proposals/v2/completions.md, same day as P1. What
@@ -1860,7 +2030,9 @@ security audit record with a different owner and an explicit hook seam
 authorization audit is not one verb's call to make. The e2e test ASSERTS those 8
 appends across 4 keystrokes so the fact is pinned rather than discovered later;
 `TODO(completions-p3)` marks revisiting it at the authorization seam for all
-high-cadence verbs if the volume proves real.
+high-cadence verbs if the volume proves real. (P3 investigated it and reported:
+the op name is shared across every method, so the name-keyed policy knob cannot
+express a per-verb answer. See the P3 entry above.)
 
 **Registration home: `builtinWireExtensions`, not `withCompletions`'s bundle.**
 Completions is extension-installed, so the optional-package pattern
@@ -1941,7 +2113,8 @@ session's in-flight files (not ours; left untouched). NOT committed here:
 pnpm-lock.yaml + the 59 version-bump package.json hunks (concurrent session's
 sweep) — only the two dependency hunks were staged surgically. Next: P2 wire
 verb (`TODO(completions-p2)` markers at the exact sites), P3 MCP squaring
-(`TODO(completions-p3)` in-fiber twin), P4 ernesto consumers.
+(`TODO(completions-p3)` in-fiber twin), P4 ernesto consumers. (P2 and P3 have
+since landed; both TODOs are retired.)
 
 ### 2026-07-30 — completions design doc (docs/proposals/v2/completions.md)
 

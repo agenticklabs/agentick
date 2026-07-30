@@ -1,8 +1,17 @@
 # Materialization provenance — who put this in the timeline, and which version of them
 
-**Status:** DESIGN — 2026-07-30, exploring with Ryan. Grew out of the
-completions work: a chat UI showing a full rendered prompt as if the user
-typed it (they typed `/quoting_report period:…`).
+**Status:** PHASE A + B(skills half) LANDED — 2026-07-30. `version` is a
+declared field on prompt declarations/records and on skills; `prompts:invoke`
+stamps every entry it appends, and `skills.run` stamps every message it
+composes. Two corrections came out of the build, both recorded inline below:
+the augmentation grammar is a KEYED BAG, not a `kind` union (§3 — TypeScript
+forbids the union under interface augmentation), and the skills stamp carries
+no `opId` because `skills.run` mints no operation (§3, §8-B). The record-hash
+helper is NOT built (§4 — no canonical-JSON util exists to compose one from).
+Phase C (Knowify composer + pill) is untouched.
+
+Grew out of the completions work: a chat UI showing a full rendered prompt as
+if the user typed it (they typed `/quoting_report period:…`).
 
 **Prior verdicts this builds on (do not re-litigate):** the op is the record;
 provenance rides the artifact, never a parallel event stream; the timeline is
@@ -63,10 +72,30 @@ Each materializing package augments `MessageSource` with its variant. The
 stamp is exactly what `applyInvoke` has in hand when it queues:
 
 ```ts
-// variant shapes (each package's own augment.ts):
-{ kind: "prompt"; name: string; args?: Record<string, unknown>; opId: string; version?: string }
-{ kind: "skill";  name: string; opId: string; version?: string }
+// each package's own message-source.ts — a KEYED SLOT, not a union member:
+declare module "@agentick/spec" {
+  interface MessageSource {
+    readonly prompt?: {
+      name: string;
+      args?: Record<string, unknown>;
+      opId?: string;
+      version?: string;
+    };
+    readonly skill?: { name: string; version?: string }; // the skills package's own file
+  }
+}
 ```
+
+**CORRECTION (2026-07-30, at build): the grammar is a keyed bag, and a `kind`
+discriminant is impossible — not merely unidiomatic.** `MessageSource` is an
+augmentable INTERFACE, and interface merging requires every declaration of a
+property to have the same type: a second tenant declaring `kind` fails with
+`TS2717 — Subsequent property declarations must have the same type` (verified
+directly with `tsc`). Prompts and skills are both bundled in the `agentick`
+metapackage, so the union shape would break the build the moment the second one
+landed. The KEY is the discriminant, which is also what the founding tenant
+(connectors: `source.telegram`) already does. Readers ask
+`source.prompt !== undefined`, not `source.kind === "prompt"`.
 
 - `opId` — the materializing operation (`prompts:command:invoke`), the
   navigable link entry → journal. Already minted.
@@ -87,9 +116,32 @@ decisions are whether to set it and how to project it.
 
 **Prompts.** `applyInvoke` stamps every entry it queues (merge into existing
 entry metadata, never clobber). `render`/`get` (non-queueing) do NOT stamp —
-nothing entered the timeline.
+nothing entered the timeline. An entry that ALREADY carries a `source` keeps it:
+a `render` fn that stamped its own is the closer authority — it knows what that
+particular message is (a quoted inbound message, a replayed transcript line)
+where the invoke only knows it rendered something.
 
-**Skills.** Same shape when skill content materializes into the timeline.
+**Skills — the site exists, and it is `run`, not a load.** Investigated at
+build: skill content reaches the timeline through exactly one path.
+`skills.run` calls `composeRun(skill, opts)` (default: a `system` message with
+the skill body + a `user` message with the serialized args) and hands the
+resulting `SendInput` to the bound send capability, which appends those messages
+as an ordinary turn. So a chat projection would otherwise render the entire
+skill document as if the human typed it — the same defect, same fix. The stamp
+goes on AFTER composition, deliberately: the framework is what materialized the
+content, so an adopter's `composeRun` override must not be able to opt out of
+provenance by not knowing about it.
+
+Skill LOADS (`skill_read`, the model's progressive-disclosure tool) are NOT a
+materialization site — a tool result is already structurally provenance-bearing
+(name + `toolCallId`), which is §5's "tools are the already-solved half".
+
+**CORRECTION: the skills stamp carries no `opId`.** `skills.run` is a plain
+method, not a declared command: it mints no operation, so there is no id to link
+to and we refuse to fabricate one. Promoting `skills:run` to a command (ADR 51)
+would give the run its own journal envelope, guard seam, and an `opId` — a real
+gap, tracked at `TODO(skills-run-op)` in
+`packages/skills/src/message-source.ts`, deliberately out of this slice.
 
 **Later, unchanged pattern:** resource reads inlined into context, connector
 ingress (already stamps `source` — the founding tenant), paste/attachment
@@ -103,11 +155,18 @@ none of which the framework invokes on its own behalf:
 1. **`version?: string`** — the declared field per §3: the adopter sets it
    (or doesn't); the framework only copies it into the stamp. What the
    string MEANS (semver, deploy hash, date) is entirely theirs.
-2. **A record-hash helper.** One exported function (home:
-   `@agentick/utils` — grep for an existing stable-hash first):
-   canonicalized JSON → truncated sha-256 of a record slice. Call it at
-   whatever point you consider "the version that ran" and put it wherever
-   you like. The framework never calls it.
+2. **A record-hash helper — NOT BUILT (2026-07-30).** One exported function
+   (home: `@agentick/utils`): canonicalized JSON → truncated sha-256 of a
+   record slice, called at whatever point the adopter considers "the version
+   that ran". `@agentick/utils` holds no stable-hash and no canonical-JSON
+   serializer to compose one from (grepped: `ulid`, `isEqual`,
+   `mergeLayered`, `omitUndefined`, `json-patch`, `split-message` — nothing
+   in the neighbourhood), and writing a canonicalizer from scratch is a
+   subtle job (key ordering, undefined vs absent, cycles, float
+   normalization) that does not belong in a provenance slice. It stays open.
+   The declared `version` above covers the case an adopter actually asked
+   for; a hash is what someone who WON'T declare a version would want, and
+   nobody has asked yet.
 3. **The journal itself.** Declaration mutations (`register`/`update`) are
    already journaled ops carrying the full record — "which revision was
    live at time T" is answerable today by anyone retaining the journal,
@@ -161,12 +220,18 @@ On slash-command submit the composer calls
 client-side and pushing it through `timeline.send` — the client stops
 holding prompt content entirely (declaration records from `prompts:list`
 suffice; the render fn never leaves the server). The chat projection then
-discriminates `entry.metadata.source.kind`:
+reads `entry.metadata.source` (cast to `MessageSource`) and keys off it:
 
-- `"prompt"` → pill: `/quoting_report period:2026-01…` — expandable to the
-  full content already in the entry; "inspect" in devtools follows `opId` /
-  `ref.revision` into the journal.
+- `source.prompt` → pill: `/quoting_report period:2026-01…` — expandable to
+  the full content already in the entry; "inspect" in devtools follows
+  `opId` into the journal. The payload type ships from
+  `@agentick/prompts/client` as `PromptMessageSource`, so the browser types
+  the stamp without pulling the server harness.
+- `source.skill` → the same pill, for a skill run.
 - absent → the user typed it; render as today.
+- NOTE: `source` may also be the bare STRING `"task-wake"` on a
+  task-synthesized turn (a pre-existing divergence, see the
+  `TODO(source-grammar)` on the seed) — check for an object first.
 
 **Open ergonomics question (decide against the composer's real submit
 flow, P4):** after `invoke()` queues, what kicks the run — a trailing
@@ -188,14 +253,23 @@ flow, P4):** after `invoke()` queues, what kicks the run — a trailing
 
 ## 8. Phasing
 
-- **A (agentick):** `MessageSource` prompt variant (`kind`/`name`/`args`/
-  `opId`); `applyInvoke` stamps queued entries. Tests: stamp present on
-  queued, absent on render/get, metadata merged not clobbered, opId matches
-  the invoking op.
-- **B (agentick):** skills variant at its materialization site; the
-  record-hash helper in `@agentick/utils` (grep for an existing stable-hash
-  first) + the `metadata.version` convention documented where declarations
-  are documented.
+- **A (agentick) — LANDED.** `MessageSource.prompt` slot (`name`/`args`/
+  `opId`/`version`); `applyInvoke` stamps every appended entry; `version`
+  declared on `PromptDeclaration` + `PromptDeclarationRecord` and threaded
+  through register/update/genesis/reload/snapshot/projection. Tests in
+  `packages/prompts/src/__tests__/provenance.spec.ts`: stamp on appended
+  entries, `opId` equal to the invoking op's (read off the render ctx),
+  version present iff declared, nothing stamped or appended by `render`,
+  metadata merged not clobbered, an entry's own `source` not overwritten,
+  version through register → get → list → snapshot → import.
+- **B (agentick) — skills half LANDED, hash helper SKIPPED.**
+  `MessageSource.skill` slot stamped in `skills.run` after composition;
+  `version` declared on `Skill` / register / update inputs and threaded
+  through the store, genesis, reload diff, snapshot, and the Agent Skills
+  frontmatter `version:` key (promoted out of the metadata bag). Tests in
+  `packages/skills/src/__tests__/run.spec.ts` (§materialization provenance),
+  `harness.spec.ts` (§declared version), `hydrators-node.spec.ts`
+  (§version mapping). The hash helper is not built — see §4 item 2.
 - **C (Knowify):** composer submit → `prompts.invoke`; chat pill projection;
   the run-trigger ergonomics decision.
 

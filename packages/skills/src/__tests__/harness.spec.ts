@@ -70,3 +70,52 @@ describe("SkillsHarness — impl-specific", () => {
     await harness.close();
   });
 });
+
+/**
+ * `Skill.version` — the adopter's own revision string, promoted out of the
+ * metadata bag so the run's provenance stamp can carry it. Declared, never
+ * computed: the framework copies it and nothing else.
+ *
+ * @see docs/proposals/v2/materialization-provenance.md §3
+ */
+describe("SkillsHarness — declared version rides the record", () => {
+  const mk = async (): Promise<SkillsHarness> => {
+    const h = new SkillsHarness(
+      `ver:${ulid()}`,
+      new MemoryJournal({ capacity: 1024 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+    );
+    await h.ready;
+    return h;
+  };
+
+  it("survives register → get → list → snapshot → import", async () => {
+    const h = await mk();
+    await h.register({ name: "s", description: "d", content: "body", version: "1.4.0" });
+
+    expect(h.get("s")?.version).toBe("1.4.0");
+    expect(h.list()[0]?.version).toBe("1.4.0");
+
+    const snapshot = h.exportSnapshot();
+    expect(snapshot.s?.version).toBe("1.4.0");
+
+    const restored = await mk();
+    restored.importSnapshot(snapshot);
+    expect(restored.get("s")?.version).toBe("1.4.0");
+
+    await h.close();
+    await restored.close();
+  });
+
+  it("is absent when undeclared, patchable, and untouched by a silent patch", async () => {
+    const h = await mk();
+    await h.register({ name: "s", description: "d", content: "body" });
+    expect(h.get("s")).not.toHaveProperty("version");
+
+    expect((await h.update({ name: "s", version: "2" })).version).toBe("2");
+    expect((await h.update({ name: "s", description: "d2" })).version).toBe("2");
+
+    await h.close();
+  });
+});

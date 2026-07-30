@@ -7,8 +7,16 @@
 the `completions/complete` wire route, the derived client method, and
 `WireExtension.journal` (the per-method durability declaration that keeps a
 per-keystroke verb out of the gateway journal); `ctx.completions` is now
-populated. P3–P4 remain. Reviewed in-session with Ryan; the verdicts in §6 were
-argued live and are settled unless new evidence arrives.
+populated.
+**P3 LANDED 2026-07-30** — the MCP server's `completion/complete` resolves
+through the SAME seam: two in-fiber `.fx` twins (`prompts.fx.complete`,
+`completions.fx.resolve`) composed inside the `mcp:command:complete` crossing, so
+one declaration serves both wires and the resolver sees the CONNECTING client's
+identity; the `completions.use` registry slot; the `completions` capability
+following a projected prompts surface; `TODO(adr91-brand)` retired by a typed
+per-crossing `ctxExtras` mint; the MCP client's two completion verbs widened to
+`CompletionResult`. P4 remains. Reviewed in-session with Ryan; the verdicts in §6
+were argued live and are settled unless new evidence arrives.
 
 **Reads before this:** blueprint/27-modular-built-ins.md (package pattern),
 ADR 43 (unified handler ctx), ADR 66 (dispatch-resolved ctx),
@@ -32,12 +40,12 @@ then phases-given-job).
 
 ### Where v2 stands today (verified 2026-07-30)
 
-| Surface                                               | Support                                                                                                                                                                                                                                                                          |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **MCP client harness** (agentick → remote MCP server) | ✅ `mcp:complete` cmd; `completePromptArgument(name, arg, value)`, `completeResourceTemplate(uri, variable, value)` (Wave 2, #146)                                                                                                                                               |
-| **MCP server harness** (agentick serving MCP clients) | ✅ `completions.{prompts,resources}` config; `CompletionContext extends OperationCtx` (identity via `ctx.mcp.user` — gap #3 CLOSED by the ctx-spine work). Builders live here with the v1 cap-100 baked in (`protocol/completions.ts`) — the wrong home per §4/§5; P1 lifts them |
-| **Native prompts harness** (`PromptDeclaration`)      | ✅ P1/P2 — `complete` on the argument descriptor (inline resolver or named ref) and `PromptsHarness.complete` resolving it                                                                                                                                                       |
-| **agentick client wire** (session RPC → client-core)  | ✅ P2 — `completions/complete`; the client method derives from the wire row                                                                                                                                                                                                      |
+| Surface                                               | Support                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **MCP client harness** (agentick → remote MCP server) | ✅ `mcp:complete` cmd; `completePromptArgument(name, arg, value)`, `completeResourceTemplate(uri, variable, value)` (Wave 2, #146)                                                                                                                                                                                                    |
+| **MCP server harness** (agentick serving MCP clients) | ✅ P3 — `completion/complete` resolves through the prompts/completions seam (one declaration, both wires); `completions.{prompts,resources}` config is now the OVERRIDE and the standalone-server path; `completions.use` supplies the registry for named refs. `CompletionContext extends OperationCtx` with `ctx.mcp.user` in-fiber |
+| **Native prompts harness** (`PromptDeclaration`)      | ✅ P1/P2 — `complete` on the argument descriptor (inline resolver or named ref) and `PromptsHarness.complete` resolving it                                                                                                                                                                                                            |
+| **agentick client wire** (session RPC → client-core)  | ✅ P2 — `completions/complete`; the client method derives from the wire row                                                                                                                                                                                                                                                           |
 
 Both MCP **edges** had completion; the native **middle** was empty. The rows
 above read as of P2 — the columns marked ❌ when this was written are what P1/P2
@@ -188,16 +196,54 @@ different owner, deliberately left alone.
 
 ### 2.4 The two MCP projections
 
-- **Outward (server harness):** `completion/complete` for `ref/prompt` resolves
-  through the prompts harness's completion seam — the SAME resolvers serving
-  both wires (ctx already carries identity there; gap #3 closed independently).
+- **Outward (server harness). LANDED P3.** `completion/complete` for `ref/prompt`
+  resolves through the prompts harness's completion seam — the SAME resolvers
+  serving both wires. Resolution order, and why it is that order:
+  1. an explicit `completions.prompts[name][arg]` config handler wins. It is the
+     adopter's deliberate override, and the ONLY path for a **standalone** server
+     — one projecting no prompts surface has no declaration to read;
+  2. else `prompts.fx.complete` composed INSIDE the crossing. `resolved` →
+     clamp → wire. `ref` → `completions.fx.resolve` (the registry arrives via
+     `completions.use`, adopter-owned exactly like `resources.use`), also on the
+     crossing's fiber; no registry wired ⇒ empty;
+  3. else empty. Unknown prompt, unknown argument, an argument declaring
+     nothing, a ref nobody bound — all `{ values: [] }`, byte-identical to the
+     pre-seam projection. Only the per-connection prompts `filter` adds a rule:
+     a prompt hidden from `prompts/list` is not completable either, because
+     completion runs a resolver over the caller's data.
+
+  **The twins are the load-bearing part, not a style choice.** Through the
+  Promise facade, `complete` mints the resolver's ctx from the harness's
+  CONSTRUCTION scope — so an inbound MCP completion would run the resolver with
+  the owning session's identity and know nothing of the client that asked, which
+  is fatal for exactly the tenant-scoped lookup this feature exists for. Composed
+  on the crossing's captured runtime, the chain connection → crossing → resolver
+  holds and `ctx.mcp.user` carries the caller's credential (ADR 92 §Slice A —
+  the same rule that put `ResourcesFx` and `PromptsFx.render` on their
+  protocols). Neither twin is sugar over a command: `complete` / `resolve` are
+  deliberately command-less so a keystroke mints no journaled op, so the twins
+  are hand-written Effects riding `fxProxy`'s extras. What they buy is the FIBER,
+  not an envelope.
+
   The MCP wire applies MCP's constraints at the wire: 100-value cap +
   `hasMore` truncation happen in the projection, **not** in the primitive or
-  the builders. (v1 baked the cap into the builders, and v2's mcp package
-  inherited that — every builder in `mcp/src/protocol/completions.ts` calls
-  `clamp()` internally. P1 lifts the builders into `@agentick/completions`
+  the builders — and a seam-resolved result passes through that same one site, so
+  a 150-value declaration answers 100-with-`hasMore` over MCP and all 150 over
+  the agentick wire. (v1 baked the cap into the builders, and v2's mcp package
+  inherited that — every builder in `mcp/src/protocol/completions.ts` called
+  `clamp()` internally. P1 lifted the builders into `@agentick/completions`
   WITHOUT the clamp; mcp re-exports them and keeps `COMPLETION_MAX_VALUES`
   in `projection/completions.ts` only — wire constraints live at the wire.)
+
+  Two things P3 fixed on the way past. The `completions` capability now follows a
+  projected prompts surface, not just a config handler count — a declaration can
+  complete its own arguments — and it deliberately does NOT scan for arguments
+  declaring `complete`, because a capability is negotiated once at `initialize`
+  while prompts register after it. And `{ ...ctx, resolvedArguments }` inside the
+  handler body is gone: a crossing declares `ctxExtras` and the boundary field
+  composes INTO the branded mint, generalizing what `progressToken` did by hand.
+  The spread erased the `Derived` brand and force-forced five lazy facet getters.
+
 - **Inward (client harness):** when MCP-origin prompts fold into the native
   prompts surface (not yet built — they currently live on the MCP client
   harness), their completion is a **forwarding resolver**: same seam, resolver
@@ -322,9 +368,16 @@ later `tool`, `resources`). It is a registry + resolve door, not a subsystem.
   client method (no hand-written handle); `WireExtension.journal` so the verb's
   gateway boundary op stays out of the journal; `ctx.completions` populated at the
   app's `ctxExtensions` site.
-- **P3 — MCP squaring.** Server-harness `completion/complete` resolves through
-  the seam (ctx restored; cap-100 at the wire). Client-harness forwarding
-  resolvers wait on the MCP-prompts-fold (separate work).
+- **P3 — MCP squaring. LANDED.** Server-harness `completion/complete` resolves
+  through the seam: `PromptsFx.complete` + `CompletionsFx.resolve` (in-fiber
+  twins on the PROTOCOLS, composed inside the `mcp:command:complete` crossing so
+  the resolver sees the connection's identity), the `completions.use` registry
+  slot, capability advertisement following a projected prompts surface, the
+  cap-100 still the single wire site, and `McpCrossing.ctxExtras` retiring the
+  brand-erasing ctx spread. The MCP client's `completePromptArgument` /
+  `completeResourceTemplate` now answer `CompletionResult` (breaking, no shim).
+  Client-harness forwarding resolvers wait on the MCP-prompts-fold (separate
+  work, `TODO(mcp-prompts-fold)`).
 - **P4 — consumers.** ernesto-client `RunnableSources.prompts.complete` +
   registry prompt branch (kills the `TODO(prompts-complete)`); later
   `flatArgsOf` for tools.

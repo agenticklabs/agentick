@@ -116,7 +116,7 @@ Beyond tools, the harness exposes the client half of the protocol directly:
 | Tasks      | `callToolAsTask`, `getTask`, `getTaskResult`, `listTasks`, `cancelTask`, `taskNotifications` |
 | Resources  | `listResources`, `listResourceTemplates`, `readResource`                                     |
 | Prompts    | `listPrompts`, `getPrompt`                                                                   |
-| Completion | `completePromptArgument`, `completeResourceTemplate`                                         |
+| Completion | `completePromptArgument`, `completeResourceTemplate` (both answer a full `CompletionResult`) |
 | Logging    | `setLoggingLevel`, `onLogMessage`                                                            |
 | Roots      | `notifyRootsListChanged`                                                                     |
 | Lifecycle  | `connect`, `disconnect`, `reconnect`, `reauthenticate`, `onListChanged`, `currentCodec`      |
@@ -404,7 +404,8 @@ Server-to-client sampling is a `describe.skip` seam, gated behind
 - `src/__tests__/wave2-client.spec.ts` — the client half against a real
   in-memory SDK server: resource list / templates / read with text and blob
   typing, prompt list and get including embedded-resource blocks, both
-  completion verbs, an inbound sampling handler invoked (and method-not-found
+  completion verbs (each returning the server's `total` / `hasMore` alongside
+  its values), an inbound sampling handler invoked (and method-not-found
   when unconfigured), roots served from both a static list and a provider
   function with nothing else in the graph, `setLoggingLevel` reaching the server
   with `notifications/message` surfacing through `onLogMessage`. Plus content

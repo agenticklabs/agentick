@@ -13,6 +13,10 @@
 import "./augment.js";
 
 export { SkillsHarness, type SkillsHarnessOptions } from "./harness.js";
+// Materialization provenance — the `MessageSource.skill` slot `run` stamps on the
+// messages it composes. The augmentation itself rides the `./augment.js` side
+// effect above; this is the payload type a reader narrows to.
+export type { SkillMessageSource } from "./message-source.js";
 export type { SkillsHandle, SkillRunCompose, SkillRunOptions } from "./handle.js";
 export { defaultComposeRun } from "./compose-run.js";
 export { withSkills, type WithSkillsOptions } from "./extension.js";

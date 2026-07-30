@@ -1396,8 +1396,19 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * identity (sessionId / opId / `user`) and diagnostics instead of nothing.
    * Runs in-fiber so the captured op runtime parents `ctx.trace` child spans
    * and `ctx.run` ad-hoc ops under the enclosing operation.
+   *
+   * `extras` composes the CALL's own boundary fields (a completion's
+   * `resolvedArguments` / `signal`) INTO the same branded mint — the in-fiber
+   * twin of {@link deriveOperationCtx}'s `extras`. They ride the same channel as
+   * the fiber-published boundary facets and win a key collision with them,
+   * because a value the caller passed for THIS resolve is more specific than one
+   * a crossing published for every seam on the fiber. Use `extras` (not
+   * `withBoundaryFacets`) for a per-call field: a fiber-published facet would
+   * leak this call's arguments onto every nested seam.
    */
-  protected currentOperationCtx(): Effect.Effect<Derived<OperationCtx>> {
+  protected currentOperationCtx<X extends object = Record<never, never>>(
+    extras?: X,
+  ): Effect.Effect<Derived<OperationCtx & X>> {
     return Effect.gen(this, function* () {
       const parent = yield* getContext;
       const runtime = yield* Effect.runtime<never>();
@@ -1408,7 +1419,20 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       // `ResourceResolver`) reach a caller credential the journal must never
       // see. `{}` when no boundary contributed any.
       const boundary = yield* getBoundaryFacets;
-      return deriveContext(parent, this.operationFacets(parent, runtime, parent.op), boundary);
+      // Descriptors, not a spread: an extra defined as a live getter must stay
+      // lazy (the same promise `deriveContext` makes about its own `extras`).
+      const composed =
+        extras === undefined
+          ? boundary
+          : Object.defineProperties(
+              Object.defineProperties({}, Object.getOwnPropertyDescriptors(boundary)),
+              Object.getOwnPropertyDescriptors(extras),
+            );
+      return deriveContext<X>(
+        parent,
+        this.operationFacets(parent, runtime, parent.op),
+        composed as X,
+      );
     });
   }
 
@@ -1790,8 +1814,17 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * (NOT run to a Promise), so an in-process caller composes it with `yield*`
    * and stays in one fiber tree; the plain `harness.<action>()` Promise method
    * is the edge facade. A concrete harness exposes a typed `get fx()` over this.
+   *
+   * `extras` carries the twins that are NOT declared commands and therefore have
+   * no `commandEffect` to derive from — `completions.fx.resolve`,
+   * `prompts.fx.complete`. Both are deliberately command-less (a keystroke must
+   * not mint a journaled operation), yet an in-fiber caller still needs the
+   * FIBER; hand-written Effects are the only honest source. They shadow the
+   * derived actions, so a name here is the one the `.fx` surface answers with.
    */
-  protected fxProxy(): HarnessFx &
+  protected fxProxy(
+    extras?: Readonly<Record<string, (...args: never[]) => Effect.Effect<unknown, unknown, never>>>,
+  ): HarnessFx &
     Record<
       string,
       (
@@ -1807,6 +1840,8 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
         // universal across all `.fx` surfaces including the fxProxy-based ones.
         if (action === "use")
           return (mw: Middleware<unknown, unknown, unknown>) => this.registerEffectMiddleware(mw);
+        const hand = extras?.[action];
+        if (hand !== undefined) return hand;
         return (input: unknown, opts?: { readonly origin?: OperationOrigin }) =>
           this.commandEffect(`${surface}:${action}`, input, opts);
       },

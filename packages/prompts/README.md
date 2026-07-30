@@ -96,6 +96,7 @@ interface PromptDeclaration {
   arguments?: PromptArgument[];
   template?: unknown; // static content
   render?: (args: Record<string, unknown>, ctx?: OperationCtx) => unknown; // dynamic content
+  version?: string; // your revision string — see "Provenance on the timeline"
   metadata?: Record<string, unknown>;
 }
 
@@ -369,6 +370,29 @@ await prompts.render({ name, args });
 // A fresh root fiber: no ambient trunk to inherit. Correct for a top-level call.
 ```
 
+## Provenance on the timeline
+
+`invoke` stamps every entry it appends with where that entry came from, so a chat UI can show that the user ran `/quoting_report period:2026-01` instead of rendering the four hundred words the prompt produced:
+
+```ts
+await prompts.register({
+  declaration: { name: "quoting_report", description: "…", version: "2026-01-14", render },
+});
+await session.prompts.invoke({ name: "quoting_report", args: { period: "2026-01" } });
+
+// on every entry the invoke appended — `metadata` is an open bag, so a reader
+// casts to the typed `MessageSource` seam and keys off the slot:
+const source = entry.metadata?.source as MessageSource | undefined;
+source?.prompt;
+// → { name: "quoting_report", args: { period: "2026-01" }, opId: "op_…", version: "2026-01-14" }
+```
+
+`PromptMessageSource` (the payload type) ships from both `@agentick/prompts` and `@agentick/prompts/client`, so a browser types the stamp without pulling the harness. A message with no `prompt` slot is one nobody materialized — the user typed it.
+
+`version` is yours — a semver, a deploy hash, a date, the row id you loaded the declaration from. Nothing computes it and nothing defaults it: set it and the stamp carries it verbatim, omit it and the stamp omits it. `opId` addresses the invoke operation in the journal, so "which prompt produced this message, with which arguments, at which revision" is answerable from the entry alone.
+
+`render` stamps nothing, because nothing entered the timeline. A message your `render` fn already stamped keeps its own `source`: it knows what that particular message is, and the closer authority wins.
+
 ## Addressable as resources
 
 Registering a prompt also projects it as a read-only resource at `prompt://<name>` on the session's resource registry — the same registry remote MCP servers project into. The catalog becomes browsable with no bespoke wire work. Default-on; opt out with `exposeAsResources: false`.
@@ -509,5 +533,6 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - `src/__tests__/complete.spec.ts` — the completion door against the real builders: an inline resolver running and its bare array folding, prefix-filtering as the user types, `context.arguments` reaching a dependent resolver (gated when a sibling is unfilled, answering when it is not), the minted ctx carrying the session trunk plus the facets and the `AbortSignal`, a `defineCompletion` source resolved inline rather than handed back, a named ref returned verbatim, `unavailable` for a bare argument / an argument the prompt does not have / a restored sidecar-less declaration, `PromptNotFound` for an unknown prompt, a throwing resolver wrapped as `CompletionResolveFailed` with its cause and its derived address, **nothing appended to the journal across four keystrokes**, and the local value-fold agreeing with the canonical one.
 - `src/__tests__/define-prompt.type.spec.ts` — `definePrompt`'s inference: required versus optional values, the no-schema-means-string law, a schema's inferred output, no keys for an argument-less prompt, undeclared keys unreadable, the erased result assignable where declarations go, and both forms of `complete` in one argument list.
 - `src/__tests__/ctx-spine.spec.ts` — the invoking operation's context reaching `render(args, ctx)`.
+- `src/__tests__/provenance.spec.ts` — the stamp on every entry `invoke` appends (name, arguments, and the invoking operation's own id, read off the render context), `version` present only when declared, `render` appending and stamping nothing, existing message metadata merged rather than replaced, a message's own `source` left alone, and a declared version surviving register → get → list → snapshot → import and a silent patch.
 - `src/client/__tests__/prompts-handle.spec.ts` + `session-prompts.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, and the zero-argument subscribe contract.
 - The in-process transport suite covers the `prompts/list` wire round-trip as records without functions, and `commands/list` enumerating the wire verbs.
