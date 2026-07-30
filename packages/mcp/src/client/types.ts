@@ -346,6 +346,21 @@ export interface McpGetPromptResult {
 }
 
 /**
+ * The `context` half of a `completion/complete` request — the sibling
+ * arguments the caller has already filled, which is what makes a
+ * conditional completion answerable (the phases of *that* job).
+ *
+ * Shaped exactly like the SDK's `CompleteRequest["params"]["context"]`
+ * (`arguments` optional), because the harness forwards it onto the wire
+ * verbatim rather than repacking it. Spec's `PromptsCompleteInput.context`
+ * — whose `arguments` is required — satisfies it, so a forwarding resolver
+ * passes the composer's siblings straight through.
+ */
+export interface McpCompletionContext {
+  readonly arguments?: Readonly<Record<string, string>>;
+}
+
+/**
  * Re-export of the spec resource-contents union for adopters reading
  * `resources/read` results without importing spec directly.
  */

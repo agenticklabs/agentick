@@ -33,6 +33,7 @@ export {
   type McpToolPage,
   type McpPromptMessage,
   type McpGetPromptResult,
+  type McpCompletionContext,
   type ResourceContents,
 } from "./types.js";
 

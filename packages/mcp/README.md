@@ -110,16 +110,16 @@ path: `session.tools.dispatch("docs__search", { query })`.
 
 Beyond tools, the harness exposes the client half of the protocol directly:
 
-| Area       | Methods                                                                                      |
-| ---------- | -------------------------------------------------------------------------------------------- |
-| Tools      | `listTools`, `callTool`                                                                      |
-| Tasks      | `callToolAsTask`, `getTask`, `getTaskResult`, `listTasks`, `cancelTask`, `taskNotifications` |
-| Resources  | `listResources`, `listResourceTemplates`, `readResource`                                     |
-| Prompts    | `listPrompts`, `getPrompt`                                                                   |
-| Completion | `completePromptArgument`, `completeResourceTemplate` (both answer a full `CompletionResult`) |
-| Logging    | `setLoggingLevel`, `onLogMessage`                                                            |
-| Roots      | `notifyRootsListChanged`                                                                     |
-| Lifecycle  | `connect`, `disconnect`, `reconnect`, `reauthenticate`, `onListChanged`, `currentCodec`      |
+| Area       | Methods                                                                                            |
+| ---------- | -------------------------------------------------------------------------------------------------- |
+| Tools      | `listTools`, `callTool`                                                                            |
+| Tasks      | `callToolAsTask`, `getTask`, `getTaskResult`, `listTasks`, `cancelTask`, `taskNotifications`       |
+| Resources  | `listResources`, `listResourceTemplates`, `readResource`                                           |
+| Prompts    | `listPrompts`, `getPrompt`                                                                         |
+| Completion | `completePromptArgument`, `completeResourceTemplate` — full `CompletionResult`, optional `context` |
+| Logging    | `setLoggingLevel`, `onLogMessage`                                                                  |
+| Roots      | `notifyRootsListChanged`                                                                           |
+| Lifecycle  | `connect`, `disconnect`, `reconnect`, `reauthenticate`, `onListChanged`, `currentCodec`            |
 
 Paginated list verbs take an optional cursor and return a page with the next
 one.
@@ -259,6 +259,30 @@ The compiler also surfaces a summary of connected servers into model context
 and an advertised-capability summary. It's lazy, overridable via
 `<Project projectionKey="mcpServerInfo">`, and reads the bridge structurally so
 the compiler carries no dependency on this package.
+
+## A server's prompts, in your palette
+
+Prompts fold the same way, into the session's Prompts as
+`<promptPrefix><remoteName>` (default `<serverId>__`; pass `promptPrefix: ""` for
+bare names when one server owns the palette). A folded prompt renders by calling
+`prompts/get` at invoke time rather than caching a rendering, so a server whose
+prompt text changes without announcing it still serves the current one.
+Re-surfaced on `notifications/prompts/list_changed`; removed on session close.
+Declare `prompts` before `withMCP` — a session with no prompts namespace has
+nothing to fold into, and the fold is skipped.
+
+**Their argument slots complete.** Each folded argument carries a forwarding
+resolver: the native completion seam runs it, and its body re-asks the origin
+server's `completion/complete`. The siblings the user already filled ride along
+as MCP's `context.arguments`, which is what makes a conditional slot answerable —
+typing into `phase` offers the phases of the job chosen two slots ago. Every
+argument gets one, because `prompts/list` advertises no per-argument
+completability; a server with nothing to say for that argument answers empty
+values, which is the composer's dismissal. A server that never advertised the
+`completions` capability gets no resolver at all, so the slot reads as
+uncompletable rather than spending a request per keystroke, and a server that
+advertised it but declines this particular ref answers empty rather than throwing
+on every character typed.
 
 ## Serving Agentick as an MCP server
 
@@ -425,6 +449,17 @@ Server-to-client sampling is a `describe.skip` seam, gated behind
   differential: two servers advertise the same URI and one self-reports the
   other's alias as its name — each alias still routes to its own server and
   neither shadows the other.
+- `src/integration/__tests__/prompt-surface.spec.ts` and
+  `prompt-surface-completion.spec.ts` — the prompts fold: prefixed names, title
+  and description kept distinct, arguments carried through, content fetched per
+  invoke, teardown leaving no stale palette entry. Completion is proved end to
+  end against a real SDK server — a `phase` slot scoped by the `job` already
+  filled (and empty for a different job, so the scoping is not an artifact of the
+  prefix filter), the origin's `hasMore` surviving the fold, a declined ref
+  answering empty rather than throwing, and an unadvertised `completions`
+  capability leaving the slot `unavailable`. Includes the two-hop case: the same
+  folded prompt re-exposed through our own `McpServerHarness`, where a downstream
+  client's `completion/complete` reaches a server it never connected to.
 - `src/__tests__/with-mcp-resources-e2e.spec.ts` — a real server's resources
   readable both through `session.resources` and the `resource_read` tool;
   `resources/list_changed` re-surfaces; session close unregisters.
@@ -474,9 +509,10 @@ Server-side verification is listed in
   version to the draft codec. The seam and its version-matrix tests exist so a
   real `2025-11-25` codec can land with coverage, but no translation happens
   today.
-- **Prompts are not projected into the session.** `withMCP` surfaces a server's
-  tools and resources; prompts are reachable through
-  `client.listPrompts` / `getPrompt` but are not registered anywhere. Prompt
-  `list_changed` notifications are observable via `onListChanged` and otherwise
-  ignored.
+- **A forwarded completion drops `ctx.signal`.** The client's completion verb is
+  a declared command and its invoker takes no `AbortSignal`, so latest-wins
+  cancellation stops at the fold: a superseded keystroke's request still
+  round-trips to the origin server (its answer is discarded by the caller).
+  Threading it needs a signal on the command invoker
+  (`TODO(mcp-complete-abort)`).
 - **WebSocket transport is not implemented** in either direction.

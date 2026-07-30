@@ -24,6 +24,7 @@ import {
   ReadResourceRequestSchema,
   SetLevelRequestSchema,
   type CallToolResult,
+  type CompleteRequest,
   type CreateMessageRequest,
   type LoggingLevel,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -43,10 +44,13 @@ interface ServerFixture {
   readonly server: Server;
   /** Level captured by the server's `logging/setLevel` handler. */
   currentLevel(): LoggingLevel | undefined;
+  /** Params of the last `completion/complete` the server received. */
+  lastCompleteParams(): CompleteRequest["params"] | undefined;
 }
 
 function makeServer(): { server: Server; fixture: ServerFixture } {
   let level: LoggingLevel | undefined;
+  let completeParams: CompleteRequest["params"] | undefined;
   const server = new Server(
     { name: "wave2-test-server", version: "0.0.0" },
     { capabilities: { resources: {}, prompts: {}, completions: {}, logging: {} } },
@@ -101,6 +105,7 @@ function makeServer(): { server: Server; fixture: ServerFixture } {
 
   // — Completion —
   server.setRequestHandler(CompleteRequestSchema, async (req) => {
+    completeParams = req.params;
     if (req.params.ref.type === "ref/prompt") {
       return { completion: { values: ["alice", "alan"], total: 2, hasMore: false } };
     }
@@ -113,7 +118,14 @@ function makeServer(): { server: Server; fixture: ServerFixture } {
     return {};
   });
 
-  return { server, fixture: { server, currentLevel: () => level } };
+  return {
+    server,
+    fixture: {
+      server,
+      currentLevel: () => level,
+      lastCompleteParams: () => completeParams,
+    },
+  };
 }
 
 interface Wired {
@@ -248,6 +260,24 @@ describe("wave2 client — completion", () => {
     const { harness } = await wire();
     const result = await harness.completeResourceTemplate("mem://users/{id}", "id", "4");
     expect(result.values).toEqual(["42"]);
+  });
+
+  it("forwards `context` onto the wire, so a conditional completion is answerable", async () => {
+    // Sibling values are the difference between "which job?" and "which phase of THAT
+    // job?". They reach the server only if the params carry `context.arguments`.
+    const { harness, fixture } = await wire();
+    await harness.completePromptArgument("greet", "who", "al", {
+      arguments: { greeting: "howdy" },
+    });
+    expect(fixture.lastCompleteParams()?.context).toEqual({ arguments: { greeting: "howdy" } });
+  });
+
+  it("omits `context` entirely when the caller offers none", async () => {
+    // An empty `context: {}` is a different request from no context at all; a server
+    // reading `params.context.arguments` should see the absence as absence.
+    const { harness, fixture } = await wire();
+    await harness.completeResourceTemplate("mem://users/{id}", "id", "4");
+    expect(fixture.lastCompleteParams()?.context).toBeUndefined();
   });
 });
 

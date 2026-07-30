@@ -110,6 +110,7 @@ import { McpLifecycle } from "./lifecycle.js";
 import type {
   McpClientHarnessOptions,
   McpClientState,
+  McpCompletionContext,
   McpGetPromptResult,
   McpLogMessage,
   McpLoggingLevel,
@@ -294,6 +295,8 @@ type McpCompleteInput = {
     | { readonly type: "ref/prompt"; readonly name: string }
     | { readonly type: "ref/resource"; readonly uri: string };
   readonly argument: { readonly name: string; readonly value: string };
+  /** Sibling arguments already filled — MCP's `params.context`. */
+  readonly context?: McpCompletionContext;
 };
 
 /** Serializable payload of `mcp:set-logging-level`. */
@@ -1286,31 +1289,40 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * completion re-asks its origin server) has to pass that judgment along rather
    * than silently presenting a truncated list as the whole answer. A caller that
    * only wants candidates reads `.values`.
+   *
+   * `context.arguments` carries the sibling arguments already filled, and is the
+   * difference between "which job?" and "which phase of *that* job?" — a
+   * forwarding resolver passes its ctx's `resolvedArguments` straight in.
    */
   completePromptArgument(
     promptName: string,
     argumentName: string,
     value: string,
+    context?: McpCompletionContext,
   ): Promise<CompletionResult> {
     return this.completeCmd({
       ref: { type: "ref/prompt", name: promptName },
       argument: { name: argumentName, value },
+      ...omitUndefined({ context }),
     });
   }
 
   /**
    * Request completions for a resource-template variable (`ref/resource`).
    * Answers the full {@link CompletionResult} — see
-   * {@link completePromptArgument} for why `total` / `hasMore` survive.
+   * {@link completePromptArgument} for why `total` / `hasMore` survive and what
+   * `context` buys.
    */
   completeResourceTemplate(
     uriTemplate: string,
     argumentName: string,
     value: string,
+    context?: McpCompletionContext,
   ): Promise<CompletionResult> {
     return this.completeCmd({
       ref: { type: "ref/resource", uri: uriTemplate },
       argument: { name: argumentName, value },
+      ...omitUndefined({ context }),
     });
   }
 
@@ -1318,10 +1330,13 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     return Effect.tryPromise({
       try: async (): Promise<CompletionResult> => {
         const c = this.requireReadyClient();
-        const res = await c.complete({ ref: i.ref, argument: i.argument });
-        // TODO(mcp-prompts-fold): `context.arguments` is not forwarded yet — a
-        // conditional completion on a REMOTE prompt needs it, and that arrives
-        // with the fold that turns these calls into resolver bodies.
+        // `context` is forwarded verbatim — it is already the wire shape, and a
+        // conditional completion on a remote prompt is answerable only with it.
+        const res = await c.complete({
+          ref: i.ref,
+          argument: i.argument,
+          ...omitUndefined({ context: i.context }),
+        });
         return {
           values: res.completion.values,
           ...omitUndefined({ total: res.completion.total, hasMore: res.completion.hasMore }),

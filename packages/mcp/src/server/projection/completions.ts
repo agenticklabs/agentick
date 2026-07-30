@@ -186,11 +186,10 @@ export function installCompletionsHandlers(
             });
             if (seamed !== undefined) return toWire(clampToWireLimit(seamed));
           }
-          // TODO(mcp-prompts-fold): when MCP-origin prompts fold into the native
-          // prompts surface, their completion becomes a FORWARDING resolver
-          // (resolver body = `completePromptArgument` against the origin server)
-          // registered on that surface — so it arrives at arm 2 above and needs
-          // no arm of its own. `ref: { type: "tool" }` lands here likewise.
+          // An MCP-ORIGIN prompt needs no arm of its own, and now has none:
+          // `surfaceRemotePrompts` folds it in carrying forwarding resolvers, so
+          // re-exposing it over this server resolves at arm 2 and chains through to
+          // the origin server — one seam, however many hops.
           // 3. Nothing to ask.
           return EMPTY;
         },

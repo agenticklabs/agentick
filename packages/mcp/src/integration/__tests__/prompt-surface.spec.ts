@@ -14,7 +14,11 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { PromptsHarness } from "@agentick/prompts";
 
 import { surfaceRemotePrompts, type RemotePromptClient } from "../prompt-surface.js";
-import type { McpGetPromptResult, McpPromptPage } from "../../client/types.js";
+import type {
+  McpCompletionContext,
+  McpGetPromptResult,
+  McpPromptPage,
+} from "../../client/types.js";
 
 async function harness(): Promise<PromptsHarness> {
   const h = new PromptsHarness(
@@ -33,10 +37,22 @@ interface FakeSpec {
   readonly get?: (name: string, args?: Readonly<Record<string, string>>) => McpGetPromptResult;
 }
 
-function fakeClient(spec: FakeSpec): RemotePromptClient & { gets: string[] } {
+/** One recorded `completion/complete` forward, as the resolver issued it. */
+interface CompleteCall {
+  readonly prompt: string;
+  readonly argument: string;
+  readonly value: string;
+  readonly context: McpCompletionContext | undefined;
+}
+
+function fakeClient(
+  spec: FakeSpec,
+): RemotePromptClient & { gets: string[]; completes: CompleteCall[] } {
   const gets: string[] = [];
+  const completes: CompleteCall[] = [];
   return {
     gets,
+    completes,
     async listPrompts(cursor?: string): Promise<McpPromptPage> {
       if (cursor !== undefined && spec.pages?.[cursor]) return spec.pages[cursor]!;
       return { prompts: spec.prompts, ...(spec.pages ? { nextCursor: "p2" } : {}) };
@@ -48,6 +64,10 @@ function fakeClient(spec: FakeSpec): RemotePromptClient & { gets: string[] } {
           messages: [{ role: "user", content: [{ type: "text", text: `rendered:${name}` }] }],
         }
       );
+    },
+    async completePromptArgument(prompt, argument, value, context) {
+      completes.push({ prompt, argument, value, context });
+      return { values: [`${argument}:${value}`] };
     },
   };
 }
@@ -131,9 +151,16 @@ describe("what a user sees in the palette", () => {
         ],
       }),
     );
-    expect(prompts.get("profit")?.arguments).toEqual([
-      { name: "jobId", description: "Which job", required: true },
-      { name: "asOf" },
+    expect(
+      prompts.get("profit")?.arguments?.map((a) => ({
+        name: a.name,
+        ...(a.description !== undefined ? { description: a.description } : {}),
+        ...(a.required !== undefined ? { required: a.required } : {}),
+        completable: typeof a.complete === "function",
+      })),
+    ).toEqual([
+      { name: "jobId", description: "Which job", required: true, completable: true },
+      { name: "asOf", completable: true },
     ]);
     await prompts.close();
   });
@@ -186,6 +213,7 @@ describe("content comes from the remote, on every invoke", () => {
         seen = args;
         return { messages: [{ role: "user", content: [{ type: "text", text: "ok" }] }] };
       },
+      completePromptArgument: async () => ({ values: [] }),
     };
     await surfaceRemotePrompts(prompts, "k", "", client);
     await prompts.invoke({ name: "p", args: { jobId: "4471" } });
@@ -204,6 +232,32 @@ describe("content comes from the remote, on every invoke", () => {
     expect(prompts.get("pre__p")?.metadata).toEqual({
       mcp: { serverId: "knowify", remoteName: "p" },
     });
+    await prompts.close();
+  });
+});
+
+describe("argument completion forwards to the origin", () => {
+  it("hands the composer's filled siblings to the origin as context.arguments", async () => {
+    // The fold's half of the inward chain, pinned without a transport: the resolver is
+    // called with the ORIGIN's prompt name (not the prefixed local one) and the ctx's
+    // `resolvedArguments` re-nested under MCP's `context`. The full chain through a real
+    // server lives in ./prompt-surface-completion.spec.ts.
+    const prompts = await harness();
+    const client = fakeClient({
+      prompts: [{ name: "co", arguments: [{ name: "job" }, { name: "phase" }] }],
+    });
+    await surfaceRemotePrompts(prompts, "k", "pre__", client);
+
+    const outcome = await prompts.complete({
+      name: "pre__co",
+      argument: { name: "phase", value: "fra" },
+      context: { arguments: { job: "Miller" } },
+    });
+
+    expect(outcome).toEqual({ kind: "resolved", result: { values: ["phase:fra"] } });
+    expect(client.completes).toEqual([
+      { prompt: "co", argument: "phase", value: "fra", context: { arguments: { job: "Miller" } } },
+    ]);
     await prompts.close();
   });
 });

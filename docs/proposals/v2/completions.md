@@ -15,8 +15,11 @@ one declaration serves both wires and the resolver sees the CONNECTING client's
 identity; the `completions.use` registry slot; the `completions` capability
 following a projected prompts surface; `TODO(adr91-brand)` retired by a typed
 per-crossing `ctxExtras` mint; the MCP client's two completion verbs widened to
-`CompletionResult`. P4 remains. Reviewed in-session with Ryan; the verdicts in §6
+`CompletionResult`. Reviewed in-session with Ryan; the verdicts in §6
 were argued live and are settled unless new evidence arrives.
+**INWARD MCP DIRECTION LANDED 2026-07-30** — the fold's forwarding resolvers plus
+`context.arguments` threading on the client's completion verbs (§2.4, inward);
+`TODO(mcp-prompts-fold)` is retired everywhere. P4 (consumers) remains.
 
 **Reads before this:** blueprint/27-modular-built-ins.md (package pattern),
 ADR 43 (unified handler ctx), ADR 66 (dispatch-resolved ctx),
@@ -244,11 +247,34 @@ different owner, deliberately left alone.
   composes INTO the branded mint, generalizing what `progressToken` did by hand.
   The spread erased the `Derived` brand and force-forced five lazy facet getters.
 
-- **Inward (client harness):** when MCP-origin prompts fold into the native
-  prompts surface (not yet built — they currently live on the MCP client
-  harness), their completion is a **forwarding resolver**: same seam, resolver
-  body = `completePromptArgument(...)` against the origin server. Four
-  surfaces, one seam.
+- **Inward (client harness). LANDED 2026-07-30.** MCP-origin prompts fold into
+  the native prompts surface (`surfaceRemotePrompts`), and each folded argument
+  carries a **forwarding resolver**: same seam, resolver body =
+  `completePromptArgument(prompt, arg, value, { arguments: ctx.resolvedArguments })`
+  against the origin server. The composer's filled siblings become MCP's
+  `context.arguments` — which is the whole chain phase-scoped-by-job rides
+  (`prompts.complete({ context })` → `ctx.resolvedArguments` → the client verb's
+  `context` → `params.context.arguments` → the origin's handler). The client's
+  two completion verbs gained that optional 4th argument, shaped as the SDK's
+  `CompleteRequest["params"]["context"]` so the harness forwards it verbatim.
+
+  Three decisions worth recording. **Every** argument gets a resolver, because
+  `prompts/list` carries no per-argument completability metadata — a server with
+  nothing to say for one answers empty values, which is already the composer's
+  dismissal, at the cost of one round-trip. Attachment is gated on the origin
+  having advertised the `completions` capability (read off
+  `McpClientHarness.serverInfo`, the only signal MCP offers, and a whole-server
+  one), so an unadvertised server leaves the slot `unavailable` rather than
+  spending a request per keystroke; unknown counts as yes. And a forwarded
+  failure — a declined ref, a transport fault — answers `{ values: [] }` and logs
+  at debug on the resolver's ctx, never a throw: `CompletionResolveFailed` on
+  every character typed is not something a composer can act on. `ctx.signal` is
+  the one thing that does not cross (`TODO(mcp-complete-abort)`) — the client's
+  completion verb is a declared command and its invoker takes no `AbortSignal`.
+
+  A folded prompt re-exposed over our own MCP server therefore chains: the
+  outward projection's arm 2 runs the forwarding resolver and the completion
+  travels two hops. Four surfaces, one seam.
 
 ### 2.5 The already-landed consumer (Knowify)
 
@@ -376,8 +402,10 @@ later `tool`, `resources`). It is a registry + resolve door, not a subsystem.
   cap-100 still the single wire site, and `McpCrossing.ctxExtras` retiring the
   brand-erasing ctx spread. The MCP client's `completePromptArgument` /
   `completeResourceTemplate` now answer `CompletionResult` (breaking, no shim).
-  Client-harness forwarding resolvers wait on the MCP-prompts-fold (separate
-  work, `TODO(mcp-prompts-fold)`).
+  **The client-harness half landed 2026-07-30** (see §2.4, inward): the folded
+  prompt's arguments carry forwarding resolvers and MCP's `context.arguments` is
+  threaded through the client's two completion verbs, closing
+  `TODO(mcp-prompts-fold)` at all three of its sites.
 - **P4 — consumers.** ernesto-client `RunnableSources.prompts.complete` +
   registry prompt branch (kills the `TODO(prompts-complete)`); later
   `flatArgsOf` for tools.
