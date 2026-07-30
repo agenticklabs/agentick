@@ -38,7 +38,8 @@ import { applyTransform, composeTransforms } from "@agentick/tool/transforms";
 import type { ToolTransform } from "@agentick/tool/transforms";
 
 import { toCreateTaskResult, type ServerTaskRegistry } from "./tasks.js";
-import { readMcpToolExtensions } from "../tool-extensions.js";
+import { toWireContent } from "../../protocol/content.js";
+import { readMcpToolExtensions, readMetadataIcons, readMetadataTitle } from "../wire-extensions.js";
 
 /**
  * Per-connection projection rules — narrow slice of
@@ -51,7 +52,7 @@ export interface ToolsProjectionRules {
   readonly transforms?: readonly ToolTransform<McpRequestContext>[];
 }
 
-import type { RunCrossing } from "./crossing.js";
+import type { McpHandlerExtra, RunCrossing } from "./crossing.js";
 
 /**
  * Discriminated return shape from a resolved tool handler:
@@ -166,10 +167,11 @@ export function installToolsHandlers(
   // ─────────── tools/list ───────────
   sdkServer.setRequestHandler(
     ListToolsRequestSchema,
-    async (_request: ListToolsRequest): Promise<ListToolsResult> =>
+    async (_request: ListToolsRequest, extra: McpHandlerExtra): Promise<ListToolsResult> =>
       options.runCrossing({
         verb: "list-tools",
         operation: { type: "tool_list" },
+        signal: extra.signal,
         run: async (_input, ctx): Promise<ListToolsResult> => {
           const projected = projectTools(options.registry.list(), filter, composed, ctx);
           return { tools: projected.map(toWireTool) };
@@ -180,7 +182,7 @@ export function installToolsHandlers(
   // ─────────── tools/call ───────────
   sdkServer.setRequestHandler(
     CallToolRequestSchema,
-    async (request: CallToolRequest): Promise<CallToolResult> => {
+    async (request: CallToolRequest, extra: McpHandlerExtra): Promise<CallToolResult> => {
       // ADR 64 / A1 — the client's per-call `_meta.progressToken` rides into the
       // ctx mint so a handler calling `ctx.progress(ctx.mcp!.progressToken!, …)`
       // emits a signal the progress projection echoes back under the token the
@@ -190,6 +192,8 @@ export function installToolsHandlers(
         verb: "call-tool",
         operation: { type: "tool_call", name: request.params.name },
         params: { name: request.params.name },
+        // #254 — the caller's cancellation reaches the handler as `ctx.signal`.
+        signal: extra.signal,
         // The sanitizer stage (and any `onBeforeCallTool` hook) rewrites this;
         // the body below reads the POST-CASCADE value off `input`.
         toolInput: (request.params.arguments ?? {}) as Record<string, unknown>,
@@ -275,7 +279,10 @@ export function installToolsHandlers(
             // `CallToolResult._meta` only when the handler produced one, so a
             // handler that carried none is byte-identical to before.
             return {
-              content: result.content as CallToolResult["content"],
+              // #255 — the 23-member agentick union narrowed onto MCP's five,
+              // once, in `protocol/content.ts`. Native kinds byte-stable;
+              // everything else fenced text naming what was projected.
+              content: toWireContent(result.content),
               isError: result.isError ?? false,
               ...(result.structuredContent !== undefined
                 ? {
@@ -339,9 +346,12 @@ export function projectTools(
  *   - `mcp.meta`        → wire `Tool._meta` (MCP Apps `ui://` linkage, …)
  *   - `mcp.annotations` → wire `Tool.annotations` advisory hints
  * Absent block ⇒ neither field is emitted (byte-identical to before).
- * Explicit fields win over metadata-carried ones where they overlap:
- * the wire `Tool.title` stays sourced from `metadata.title`, never the
- * annotations block.
+ *
+ * The wire `title` resolves `metadata.title ?? annotations.title`:
+ * `metadata.title` is the per-connection OVERRIDE a `setTitle` transform
+ * writes, and `annotations.title` is where `createTool({ title })` lands.
+ * The MCP `annotations` block on the wire still carries hints ONLY — the
+ * title is a top-level field, one source of truth for the value.
  *
  * The framework `annotations.taskSupport` still flows through to the
  * wire `execution` block below — it's a semantic flag that influences
@@ -358,11 +368,17 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
   if (decl.outputSchema) {
     wire.outputSchema = toJsonSchema(decl.outputSchema) as McpWireTool["outputSchema"];
   }
-  if (typeof meta.title === "string") {
-    wire.title = meta.title;
+  // `metadata.title` is the OVERRIDE (a per-connection `setTitle` transform
+  // writes there); `annotations.title` is what `createTool({ title })` sets.
+  // Reading only the former made an authored title vanish from the wire —
+  // the tool showed up under its snake_case name with no way to tell why.
+  const title = readMetadataTitle(meta) ?? decl.annotations?.title;
+  if (title !== undefined) {
+    wire.title = title;
   }
-  if (Array.isArray(meta.icons)) {
-    wire.icons = meta.icons as McpWireTool["icons"];
+  const icons = readMetadataIcons(meta);
+  if (icons !== undefined) {
+    wire.icons = icons as McpWireTool["icons"];
   }
   // 3b-0b-B — MCP declaration extensions carried under `metadata.mcp`.
   const mcpExt = readMcpToolExtensions(meta);

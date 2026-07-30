@@ -39,9 +39,9 @@ exactly one genuine architectural question (sampling).
 | ---------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `tools/list` · `tools/call` · `list_changed`                           | **have**                                                | `packages/mcp/src/server/projection/tools.ts:167`, `:181`, `:310`                                                  |
 | Tool `outputSchema` + `structuredContent`                              | **have**                                                | `projection/tools.ts:358`, `:280`; envelope at `server/config.ts:975`                                              |
-| Tool `annotations` (readOnly/destructive/idempotent/openWorld)         | **have**                                                | `server/tool-extensions.ts:67`; projected `projection/tools.ts:372`                                                |
+| Tool `annotations` (readOnly/destructive/idempotent/openWorld)         | **have**                                                | `server/wire-extensions.ts:67`; projected `projection/tools.ts:372`                                                |
 | Tool `title` + `icons`                                                 | **have**                                                | `projection/tools.ts:361`, `:364`                                                                                  |
-| Tool `_meta` — declaration and result (MCP Apps `ui://`, step-up auth) | **have**                                                | `tool-extensions.ts:78`, `:95`; projected `projection/tools.ts:369` and `:286`; result read `server/config.ts:982` |
+| Tool `_meta` — declaration and result (MCP Apps `ui://`, step-up auth) | **have**                                                | `wire-extensions.ts:78`, `:95`; projected `projection/tools.ts:369` and `:286`; result read `server/config.ts:982` |
 | Tool `taskSupport` → wire `execution`                                  | **have**                                                | `projection/tools.ts:392`                                                                                          |
 | Tool result content blocks → MCP content union                         | **partial** (defect)                                    | raw cast, `projection/tools.ts:278` — see §1                                                                       |
 | `tools/list` pagination                                                | **missing**                                             | `packages/tool/src/catalog.ts:53` — `list()` returns a plain array                                                 |
@@ -80,7 +80,7 @@ Agentick as the MCP _client_ — the capabilities a server may invoke on us.
 | Progress notifications (`progressToken`, progress/total/message) | **have** — bus-sourced, not a direct wire write                               | token ingest `projection/tools.ts:188`; ctx sink `server/harness.ts:862`; projection `projection/logging.ts:146`          |
 | Cancellation (`notifications/cancelled`)                         | **partial** (defect) — `ctx.signal` is a dead controller                      | `server/harness.ts:855` and `:1224` — see §1                                                                              |
 | `ping`                                                           | **have** (SDK-provided)                                                       | `testing/conformance.ts:775`                                                                                              |
-| `_meta` general carriage                                         | **partial** — tools + resource contents yes, prompts no                       | `tool-extensions.ts:46` (one namespaced key, both directions)                                                             |
+| `_meta` general carriage                                         | **partial** — tools + resource contents yes, prompts no                       | `wire-extensions.ts:46` (one namespaced key, both directions)                                                             |
 | Protocol version negotiation                                     | **have** (seam), **partial** (impl) — only the draft passthrough codec exists | `client/era-codec.ts:1`, `:34`                                                                                            |
 | Capability negotiation                                           | **have**, and stricter than the spec requires                                 | `server/protocol/lifecycle.ts:57` — advertise-what-is-wired; `override = true` is a deliberate no-op `:47`                |
 | Tasks (call→task, statuses, get/result/cancel/list, polling)     | **have**                                                                      | `projection/tasks.ts:221`; status fan-out `:155`; `interrupted` lossy-maps at the wire `:53`                              |
@@ -90,7 +90,7 @@ Agentick as the MCP _client_ — the capabilities a server may invoke on us.
 | Resumability / redelivery (`Last-Event-ID`)                      | **missing** — no `eventStore` passed to the SDK transport                     | `server/transports/http.ts:466` — see §5                                                                                  |
 | JSON-RPC batching                                                | **deliberately-not**                                                          | removed from the spec; zero implementation and zero rejection code in `packages/mcp/src` — correct posture, nothing to do |
 | Icons metadata                                                   | **partial** — tools only                                                      | `projection/tools.ts:364`                                                                                                 |
-| MCP Apps (`_meta` ui templates)                                  | **have** — carriage exists, both directions                                   | `tool-extensions.ts:80` documents the `openai/outputTemplate` → `ui://` case verbatim                                     |
+| MCP Apps (`_meta` ui templates)                                  | **have** — carriage exists, both directions                                   | `wire-extensions.ts:80` documents the `openai/outputTemplate` → `ui://` case verbatim                                     |
 
 ---
 
@@ -140,10 +140,10 @@ its title_ — and `toWirePrompt` (`projection/prompts.ts:178`) emits only
 `name` / `description` / `arguments`. The field is declared, documented,
 motivated, and dropped on the floor.
 
-Wider: `tool-extensions.ts` established exactly the right convention — one
+Wider: `wire-extensions.ts` established exactly the right convention — one
 namespaced `metadata.mcp` key, read/written by helper functions, projected at the
 wire, byte-identical when absent, and folded on the inbound side too
-(`tool-extensions.ts:23`). It was never extended to prompts or resources, both of
+(`wire-extensions.ts:23`). It was never extended to prompts or resources, both of
 which already carry the open `metadata` bag it needs (`prompts-harness.ts:193`,
 `resources-harness.ts:98`). So prompts get no `title`, no `icons`, no `_meta`;
 resource descriptors get `title` but no `icons`, no `_meta`.
@@ -278,7 +278,7 @@ implementation plus wiring — no protocol design. **Build. M.**
   the generic `_meta` carriage and nothing else — the package sits in the lock file
   only transitively and is declared by no agentick `package.json`. The `ui`
   descriptor rides the same open key as any other `_meta`
-  (`tool-extensions.ts:80`), exercised end to end at
+  (`wire-extensions.ts:80`), exercised end to end at
   `server/__tests__/tool-extensions-e2e.spec.ts:127` and through the loop executor
   at `loop-executor/src/__tests__/characterization.spec.ts:779`. Right call while
   the Apps direction is still moving — no vendored types to chase.
@@ -330,8 +330,8 @@ Two things worth saying about this asymmetry:
   `www_authenticate` step-up cases), no annotation hints, ctx-free prompt
   render/completion, identity-free resource resolvers. Every one now lands.
   Declaration and result `_meta` both project through the one namespaced key
-  (`tool-extensions.ts:78`/`:95`, wired at `projection/tools.ts:369` and `:286`);
-  annotation hints project (`tool-extensions.ts:67` → `projection/tools.ts:372`);
+  (`wire-extensions.ts:78`/`:95`, wired at `projection/tools.ts:369` and `:286`);
+  annotation hints project (`wire-extensions.ts:67` → `projection/tools.ts:372`);
   and prompt render, prompt-argument completion, and resource resolution all now
   run on the crossing's fiber carrying the caller's identity plus the `mcp`
   boundary facet with its live credential (`projection/prompts.ts:117`,

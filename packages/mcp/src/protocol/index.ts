@@ -4,6 +4,8 @@
  * (transport, lifecycle, registration) live in the client/ tree.
  */
 
+export { toWireContent, toWireContentBlock } from "./content.js";
+
 export {
   ErrorCodes,
   protocolError,

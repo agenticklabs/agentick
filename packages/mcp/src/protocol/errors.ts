@@ -8,6 +8,9 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
+import type { ContentBlock } from "@agentick/spec";
+
+import { toWireContent } from "./content.js";
 
 // ============================================================================
 // JSON-RPC error codes
@@ -75,32 +78,16 @@ export function toolResult(text: string): CallToolResult {
 }
 
 /**
- * Project an agentick-style `{ content: ContentBlock[] }` payload to
- * MCP's `CallToolResult` shape. Maps text + image blocks; anything
- * else falls through as a JSON-stringified text block.
+ * Project an agentick `{ content: ContentBlock[] }` payload to MCP's
+ * `CallToolResult` shape — the whole 23-member union narrowed by
+ * {@link toWireContent}, not just text + image.
  *
  * Used at the wire edge when bridging tool results from the local
  * `ToolExecutor` (agentick ContentBlock) to an outbound MCP
  * `tools/call` response (MCP content).
  */
-export function toMCPResult(result: { content: readonly unknown[] }): CallToolResult {
-  return {
-    content: result.content.map((block) => {
-      const b = block as Record<string, unknown>;
-      if (b.type === "text") {
-        return { type: "text" as const, text: String(b.text ?? "") };
-      }
-      if (b.type === "image") {
-        return {
-          type: "image" as const,
-          data: String(b.data ?? ""),
-          mimeType: String(b.mediaType ?? b.mimeType ?? "image/png"),
-        };
-      }
-      // Unknown block type — serialize as JSON text so nothing is lost.
-      return { type: "text" as const, text: JSON.stringify(block) };
-    }),
-  };
+export function toMCPResult(result: { readonly content: readonly ContentBlock[] }): CallToolResult {
+  return { content: toWireContent(result.content) };
 }
 
 /**

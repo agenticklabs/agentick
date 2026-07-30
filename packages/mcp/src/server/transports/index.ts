@@ -5,6 +5,7 @@
  *   inMemoryServerTransport()    — test pair with explicit `connect()` helper
  *   httpTransport({ port })      — Streamable HTTP listener (multi-connection)
  *   httpMiddlewareTransport()    — Streamable HTTP mount door (host-owned server)
+ *   inMemoryEventStore()         — bounded SSE resumability store for either HTTP shape
  *
  * Future (#171f):
  *   wsTransport({ port })     — WebSocket listener (multi-connection)
@@ -27,3 +28,8 @@ export {
   type HttpMiddlewareTransportHandle,
   type OAuthTransportOptions,
 } from "./http.js";
+export {
+  inMemoryEventStore,
+  DEFAULT_MAX_EVENTS,
+  type InMemoryEventStoreOptions,
+} from "./event-store.js";

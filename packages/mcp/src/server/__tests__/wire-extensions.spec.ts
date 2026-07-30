@@ -1,6 +1,7 @@
 /**
- * MCP tool wire extensions (3b-0b-B) — the `metadata.mcp` carriage
- * convention + its declaration-side projection through `toWireTool`.
+ * MCP wire extensions — the `metadata.mcp` carriage convention and its
+ * declaration-side projection, across all four sites (tool, tool result,
+ * prompt, resource).
  *
  * Pins:
  *  - Helper shapes: `mcpToolExtensions` / `mcpResultExtensions` build a
@@ -12,19 +13,29 @@
  *    wire `Tool` byte-identical to before (no `_meta`, no `annotations`).
  *  - Partial hints emit only the set keys; an all-empty hint object emits
  *    no `annotations` block.
+ *  - The wire `Tool.title` resolves `metadata.title ?? annotations.title`,
+ *    so a title authored via `createTool({ title })` reaches the wire and
+ *    a `setTitle` transform still overrides it.
+ *  - Prompts and resources carry the SAME conventions: `title`, `icons`,
+ *    and `metadata.mcp.meta` → wire `_meta`; absent ⇒ nothing emitted.
  */
 
 import { describe, expect, it } from "vitest";
 import { jsonSchema, type ToolDeclaration } from "@agentick/spec";
 
+import { toWirePrompt } from "../projection/prompts.js";
+import { toWireResource, toWireResourceTemplate } from "../projection/resources.js";
 import { toWireTool } from "../projection/tools.js";
 import {
   MCP_METADATA_KEY,
+  mcpPromptExtensions,
+  mcpResourceExtensions,
   mcpResultExtensions,
   mcpToolExtensions,
+  readMcpDeclarationExtensions,
   readMcpResultExtensions,
   readMcpToolExtensions,
-} from "../tool-extensions.js";
+} from "../wire-extensions.js";
 
 const schema = jsonSchema({ type: "object", properties: { q: { type: "string" } } });
 
@@ -40,7 +51,7 @@ function decl(name: string, metadata?: Readonly<Record<string, unknown>>): ToolD
   };
 }
 
-describe("mcp tool-extensions — helper + reader shapes", () => {
+describe("mcp wire-extensions — helper + reader shapes", () => {
   it("mcpToolExtensions nests under the single `mcp` key", () => {
     const frag = mcpToolExtensions({
       annotations: { readOnlyHint: true },
@@ -128,5 +139,110 @@ describe("toWireTool — declaration extensions projection", () => {
     );
     expect(wire.title).toBe("Titled Tool");
     expect(wire.annotations).toEqual({ readOnlyHint: true });
+  });
+});
+
+describe("toWireTool — title sources", () => {
+  it("projects an authored annotations.title when no metadata.title overrides it", () => {
+    // `createTool({ title })` lands on `annotations.title`; reading only
+    // `metadata.title` silently dropped it from the wire.
+    const wire = toWireTool({ ...decl("search"), annotations: { title: "Search Invoices" } });
+    expect(wire.title).toBe("Search Invoices");
+  });
+
+  it("metadata.title wins — it is the per-connection override", () => {
+    const wire = toWireTool({
+      ...decl("search", { title: "Find Invoices" }),
+      annotations: { title: "Search Invoices" },
+    });
+    expect(wire.title).toBe("Find Invoices");
+  });
+
+  it("emits no title when neither source carries one", () => {
+    expect("title" in toWireTool(decl("plain2"))).toBe(false);
+  });
+});
+
+describe("toWirePrompt — title / icons / _meta", () => {
+  const icons = [{ src: "https://example.com/p.png", mimeType: "image/png" }];
+
+  it("projects the declaration title, icons, and metadata.mcp.meta", () => {
+    const wire = toWirePrompt({
+      name: "jobs_over_budget",
+      title: "Jobs Over Budget",
+      description: "Jobs past their budget.",
+      metadata: {
+        icons,
+        ...mcpPromptExtensions({ meta: { "openai/outputTemplate": "ui://widget/jobs" } }),
+      },
+    });
+    expect(wire.title).toBe("Jobs Over Budget");
+    expect(wire.icons).toEqual(icons);
+    expect(wire._meta).toEqual({ "openai/outputTemplate": "ui://widget/jobs" });
+  });
+
+  it("metadata.title overrides the declaration title", () => {
+    const wire = toWirePrompt({
+      name: "p",
+      title: "Declared",
+      description: "d",
+      metadata: { title: "Relabelled" },
+    });
+    expect(wire.title).toBe("Relabelled");
+  });
+
+  it("REGRESSION: a bare declaration projects name + description only", () => {
+    const wire = toWirePrompt({ name: "p", description: "d" });
+    expect(wire).toEqual({ name: "p", description: "d" });
+  });
+});
+
+describe("toWireResource / toWireResourceTemplate — title / icons / _meta", () => {
+  const icons = [{ src: "https://example.com/r.svg", mimeType: "image/svg+xml" }];
+
+  it("projects a fixed resource's display + extension fields", () => {
+    const wire = toWireResource({
+      uri: "file:///reports/q1.pdf",
+      name: "q1_report",
+      title: "Q1 Report",
+      metadata: { icons, ...mcpResourceExtensions({ meta: { "acme/kind": "report" } }) },
+    });
+    expect(wire.title).toBe("Q1 Report");
+    expect(wire.icons).toEqual(icons);
+    expect(wire._meta).toEqual({ "acme/kind": "report" });
+  });
+
+  it("projects a template's display + extension fields", () => {
+    const wire = toWireResourceTemplate({
+      uriTemplate: "file:///reports/{quarter}.pdf",
+      name: "report",
+      metadata: { title: "Quarterly Report", ...mcpResourceExtensions({ meta: { v: 2 } }) },
+    });
+    expect(wire.title).toBe("Quarterly Report");
+    expect(wire._meta).toEqual({ v: 2 });
+  });
+
+  it("REGRESSION: bare descriptors project their locator + name only", () => {
+    expect(toWireResource({ uri: "file:///a", name: "a" })).toEqual({
+      uri: "file:///a",
+      name: "a",
+    });
+    expect(toWireResourceTemplate({ uriTemplate: "file:///{x}", name: "t" })).toEqual({
+      uriTemplate: "file:///{x}",
+      name: "t",
+    });
+  });
+});
+
+describe("readMcpDeclarationExtensions", () => {
+  it("round-trips both builders and rejects a malformed block", () => {
+    expect(readMcpDeclarationExtensions(mcpPromptExtensions({ meta: { a: 1 } }))?.meta).toEqual({
+      a: 1,
+    });
+    expect(readMcpDeclarationExtensions(mcpResourceExtensions({ meta: { b: 2 } }))?.meta).toEqual({
+      b: 2,
+    });
+    expect(readMcpDeclarationExtensions({ mcp: "nope" })).toBeUndefined();
+    expect(readMcpDeclarationExtensions(undefined)).toBeUndefined();
   });
 });

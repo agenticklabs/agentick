@@ -93,13 +93,19 @@ export {
   MCP_METADATA_KEY,
   mcpToolExtensions,
   mcpResultExtensions,
+  mcpPromptExtensions,
+  mcpResourceExtensions,
   readMcpToolExtensions,
   readMcpResultExtensions,
+  readMcpDeclarationExtensions,
+  readMetadataIcons,
+  readMetadataTitle,
+  type McpDeclarationExtensions,
   type McpMetadataFragment,
   type McpToolAnnotationHints,
   type McpToolDeclarationExtensions,
   type McpToolResultExtensions,
-} from "./tool-extensions.js";
+} from "./wire-extensions.js";
 export * from "./transports/index.js";
 export { buildCapabilities, type WiredCapabilities } from "./protocol/lifecycle.js";
 export {

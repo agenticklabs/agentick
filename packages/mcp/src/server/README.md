@@ -109,6 +109,34 @@ await harness.start();
 const clientTransport = await transport.connect(); // pass into McpClient
 ```
 
+### SSE resumability (`eventStore`)
+
+Streamable HTTP delivers server→client messages over SSE. When that connection
+drops — a proxy timeout, a closed laptop, a flaky mobile link — the client
+reconnects with `Last-Event-ID`. **With no event store the server has nothing to
+replay**, so every message sent during the gap is gone: a long tool call's
+progress notifications and its result included. The reconnect silently becomes a
+fresh stream.
+
+Resumability is opt-in config, because a store retains messages in memory and
+that is not a cost to impose on a server that never asked for it:
+
+```ts
+import { httpTransport, inMemoryEventStore } from "@agentick/mcp/server";
+
+httpTransport({ port: 3000, eventStore: inMemoryEventStore() });
+// or bound it explicitly — default is 1000 events across all streams
+httpTransport({ port: 3000, eventStore: inMemoryEventStore({ maxEvents: 5_000 }) });
+```
+
+`inMemoryEventStore` is a **reference** implementation: single-process,
+non-durable, and bounded (oldest dropped first — a client reconnecting past the
+window is told the id is unknown and opens a fresh stream). A multi-node
+deployment needs a shared store, since a reconnect can land on a different node:
+implement the SDK's `EventStore` against Redis / Postgres / your own log and pass
+that instead. Both HTTP shapes (`httpTransport`, `httpMiddlewareTransport`) take
+the option.
+
 ---
 
 ## The `tools` slot — accepted shapes
@@ -761,6 +789,82 @@ const transport = httpTransport({
 
 ---
 
+## Display metadata and `_meta` on the wire
+
+Tools, prompts, and resources all reach the wire through the same two
+conventions, so a declaration says these things once and every projection reads
+them the same way.
+
+**Display fields.** `metadata.title` and `metadata.icons` project onto the wire
+record's `title` / `icons`. Prompts and resource descriptors also have a
+first-class `title`; `metadata.title` overrides it, which is what lets a
+per-connection transform relabel without touching the declaration. A tool has no
+declaration-level title field — `createTool({ title })` lands on
+`annotations.title`, and that is the fallback when no `metadata.title` overrides
+it.
+
+**MCP `_meta`.** Anything MCP-specific rides one namespaced key, `metadata.mcp`,
+built by a helper rather than hand-written — an MCP Apps `ui://` template
+linkage, a client-understood descriptor, a step-up challenge:
+
+```ts
+import {
+  mcpToolExtensions,
+  mcpPromptExtensions,
+  mcpResourceExtensions,
+} from "@agentick/mcp/server";
+
+createTool({
+  name: "search_invoices",
+  // …
+  metadata: mcpToolExtensions({
+    annotations: { readOnlyHint: true },
+    meta: { "openai/outputTemplate": "ui://widget/invoice-list" },
+  }),
+});
+
+prompts.register({
+  name: "jobs_over_budget",
+  title: "Jobs Over Budget",
+  description: "Jobs past their budget.",
+  metadata: mcpPromptExtensions({ meta: { "openai/outputTemplate": "ui://widget/jobs" } }),
+});
+
+resources.register({
+  uri: "file:///reports/q1.pdf",
+  name: "q1_report",
+  metadata: mcpResourceExtensions({ meta: { "acme/kind": "report" } }),
+});
+```
+
+A declaration carrying none of this projects exactly as it did before — the
+fields are emitted only when present. Nothing MCP-shaped leaks into the shared
+spec: `metadata` is an open bag, and this package is the only reader.
+
+---
+
+## Content on the way out
+
+agentick's content model has 23 block types; MCP's has five (`text`, `image`,
+`audio`, `resource_link`, embedded `resource`). Every `tools/call` result and
+every `prompts/get` message crosses that narrowing through one mapper, by three
+rules:
+
+| Block                                                                                                                                                       | Wire                                                               |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `text`, `resource`, base64 `image` / `audio`                                                                                                                | the same kind, field-for-field (byte-stable)                       |
+| `generated_image`                                                                                                                                           | `image` (it already is base64 + mimeType)                          |
+| url-sourced `image` / `audio` / `document` / `video`, `generated_file`                                                                                      | `resource_link` pointing at the uri                                |
+| `json` / `xml` / `csv` / `html` / `code` / `executable_code` / `reasoning` / `code_execution_result`                                                        | `text`, fenced, info string = the kind or its language             |
+| everything else (`tool_use`, `tool_result`, `task_ref`, `document`/`video` with an inline payload, `user_action`, `system_event`, `state_change`, `custom`) | `text`, fenced JSON of the block's payload, info string = the kind |
+
+Lossy where it must be, never silent: the fence names what was projected, so a
+consumer can tell a narrowed `csv` from a narrowed `xml`. A `reference` media
+source (an adopter-namespaced `fileId`) is reported as the id it is rather than
+being turned into a uri the wire could not resolve.
+
+---
+
 ## Per-connection request context (`McpRequestContext`)
 
 Built once per `tools/call` / `prompts/get` / etc., passed to handlers,
@@ -782,6 +886,19 @@ interface McpRequestContext extends ToolHandlerCtx {
   readonly elicit?: Elicit; // when client advertised the capability
   readonly metadata?: Readonly<Record<string, unknown>>; // transport-supplied (headers, origin, remoteAddr)
 }
+```
+
+`ctx.signal` is the CALLER's cancellation, not a placeholder: it aborts when the
+client sends `notifications/cancelled` for this request and when the connection
+closes. Pass it into whatever your handler awaits — a `fetch`, a query, a child
+process — and the work stops when the client gives up instead of running to
+completion against a peer that is gone.
+
+```ts
+handler: async ({ q }, { ctx }) => {
+  const res = await fetch(url(q), { signal: ctx.signal });
+  return [{ type: "text", text: await res.text() }];
+};
 ```
 
 > [!IMPORTANT]
@@ -884,6 +1001,8 @@ with #171g.
 | `McpIdentityProjection`                                                                                                                                                                        | The PII / credential redaction seam for the journaled identity stamp                                                                     |
 | `ToolsFilter` / `PromptsFilter` / `ResourcesFilter`                                                                                                                                            | Per-connection visibility predicates — receive the full request context                                                                  |
 | `inMemoryServerTransport`                                                                                                                                                                      | In-process transport for tests                                                                                                           |
+| `inMemoryEventStore` / `InMemoryEventStoreOptions` / `DEFAULT_MAX_EVENTS`                                                                                                                      | Bounded SSE resumability store for the HTTP transports (opt-in)                                                                          |
+| `mcpToolExtensions` / `mcpResultExtensions` / `mcpPromptExtensions` / `mcpResourceExtensions` (+ their readers, `MCP_METADATA_KEY`)                                                            | The `metadata.mcp` carriage convention — `_meta` and tool annotation hints                                                               |
 | `ElicitationCancelled` / `ElicitationDeclined` / `ElicitationNotSupported` / `UrlElicitationRequired`                                                                                          | Elicit error classes (re-exports)                                                                                                        |
 
 Spec types are re-exported for adopters' convenience: `McpRequestContext`,
@@ -929,6 +1048,21 @@ resource_metadata="…"` (derived url AND explicit `resourceMetadataUrl`)
   URL-mode deferred-auth path.
 - `__tests__/projection-prompts.spec.ts` — `prompts/list` + `prompts/get`
   projection.
+- `__tests__/crossing-abort.spec.ts` — `ctx.signal` IS the caller's
+  cancellation, over the real wire: a client cancelling an in-flight
+  `tools/call` aborts the running handler's signal carrying the client's
+  reason; closing the connection aborts it too; and an uncancelled crossing
+  leaves it quiet.
+- `__tests__/wire-extensions.spec.ts` — the `metadata.mcp` convention and its
+  projection at all four sites: tool `_meta` + annotation hints, the wire
+  title resolving `metadata.title ?? annotations.title`, prompt and resource
+  `title` / `icons` / `_meta`, and a regression guard per site proving a bare
+  declaration still projects byte-identically.
+- `transports/__tests__/event-store.spec.ts` — `inMemoryEventStore`'s replay
+  contract (order, stream isolation, unknown anchor, the bound) plus the
+  option reaching the SDK, proven over real loopback HTTP: the SAME resumption
+  request opens a fresh stream on a store-less server (today's default — the
+  hole) and is refused as an unknown event id on one configured with a store.
 - `__tests__/projection-completions-logging.spec.ts` — Wave 3a: argument
   completion round-trip (ref/prompt routing, `context.arguments`
   pass-through, unknown-ref + ref/resource → empty), `ctx.log`
@@ -988,6 +1122,11 @@ resource_metadata="…"` (derived url AND explicit `resourceMetadataUrl`)
   `elicit` seam, so a render that needs to disambiguate an argument with the
   user cannot ask — it has to resolve or fall back. Server-initiated
   elicitation from a render is unbuilt.
+- **`prompts/get` results carry no `_meta`.** The wire slot exists, but
+  `PromptsGetResult` (`{ description, messages }`) has no metadata bag, so a
+  render has nowhere to put result-scoped `_meta`. A prompt's
+  `metadata.mcp.meta` is declaration-scoped and rides `prompts/list` only.
+  Closing it needs a spec change (`PromptsGetResult.metadata`).
 - **`initialize` stamps an identity only when the transport forward-derives
   one.** The HTTP pre-gate does; trusted transports (stdio, in-memory) have
   no credential to resolve at accept time, so the connection crossing carries

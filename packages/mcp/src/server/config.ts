@@ -56,7 +56,7 @@ import type {
 } from "./security/stages.js";
 import type { ServerTransport } from "./transports/types.js";
 import type { ToolHandlerResolver } from "./projection/tools.js";
-import { readMcpResultExtensions } from "./tool-extensions.js";
+import { readMcpResultExtensions } from "./wire-extensions.js";
 import type { ResourcesFilter } from "./projection/resources.js";
 import type { CompletionHandler } from "../protocol/completions.js";
 

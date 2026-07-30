@@ -53,7 +53,12 @@ import type {
 } from "@agentick/spec";
 import type { Unsubscribe } from "@agentick/runtime";
 
-import type { OnCrossingFiber, RunCrossing } from "./crossing.js";
+import {
+  readMcpDeclarationExtensions,
+  readMetadataIcons,
+  readMetadataTitle,
+} from "../wire-extensions.js";
+import type { McpHandlerExtra, OnCrossingFiber, RunCrossing } from "./crossing.js";
 
 /**
  * "Resource not found". `-32602` (Invalid Params) as of protocol `2026-07-28`,
@@ -94,10 +99,11 @@ export function installResourcesHandlers(
   // ─────────── resources/list ───────────
   sdkServer.setRequestHandler(
     ListResourcesRequestSchema,
-    async (request: ListResourcesRequest): Promise<ListResourcesResult> =>
+    async (request: ListResourcesRequest, extra: McpHandlerExtra): Promise<ListResourcesResult> =>
       runCrossing({
         verb: "list-resources",
         operation: { type: "resource_list" },
+        signal: extra.signal,
         run: async (_input, ctx, onFiber): Promise<ListResourcesResult> => {
           const page = await onFiber(source.fx.list(cursorInput(request.params?.cursor)));
           const projected = filter ? page.resources.filter((r) => filter(r, ctx)) : page.resources;
@@ -111,10 +117,14 @@ export function installResourcesHandlers(
   // ─────────── resources/templates/list ───────────
   sdkServer.setRequestHandler(
     ListResourceTemplatesRequestSchema,
-    async (request: ListResourceTemplatesRequest): Promise<ListResourceTemplatesResult> =>
+    async (
+      request: ListResourceTemplatesRequest,
+      extra: McpHandlerExtra,
+    ): Promise<ListResourceTemplatesResult> =>
       runCrossing({
         verb: "list-resource-templates",
         operation: { type: "resource_list" },
+        signal: extra.signal,
         run: async (_input, _ctx, onFiber): Promise<ListResourceTemplatesResult> => {
           const page = await onFiber(source.fx.listTemplates(cursorInput(request.params?.cursor)));
           const result: ListResourceTemplatesResult = {
@@ -129,11 +139,12 @@ export function installResourcesHandlers(
   // ─────────── resources/read ───────────
   sdkServer.setRequestHandler(
     ReadResourceRequestSchema,
-    async (request: ReadResourceRequest): Promise<ReadResourceResult> =>
+    async (request: ReadResourceRequest, extra: McpHandlerExtra): Promise<ReadResourceResult> =>
       runCrossing({
         verb: "read-resource",
         operation: { type: "resource_read", name: request.params.uri },
         params: { uri: request.params.uri },
+        signal: extra.signal,
         run: async (_input, ctx, onFiber): Promise<ReadResourceResult> => {
           // A fixed resource hidden by the per-connection filter must not be
           // readable either. Templated / unknown uris carry no fixed
@@ -174,11 +185,12 @@ export function installResourcesHandlers(
 
   sdkServer.setRequestHandler(
     SubscribeRequestSchema,
-    async (request: SubscribeRequest): Promise<Record<string, never>> =>
+    async (request: SubscribeRequest, extra: McpHandlerExtra): Promise<Record<string, never>> =>
       runCrossing({
         verb: "subscribe-resource",
         operation: { type: "resource_read", name: request.params.uri },
         params: { uri: request.params.uri },
+        signal: extra.signal,
         run: async (): Promise<Record<string, never>> => {
           const uri = request.params.uri;
           if (!perUriUnsub.has(uri)) {
@@ -197,11 +209,12 @@ export function installResourcesHandlers(
 
   sdkServer.setRequestHandler(
     UnsubscribeRequestSchema,
-    async (request: UnsubscribeRequest): Promise<Record<string, never>> =>
+    async (request: UnsubscribeRequest, extra: McpHandlerExtra): Promise<Record<string, never>> =>
       runCrossing({
         verb: "unsubscribe-resource",
         operation: { type: "resource_read", name: request.params.uri },
         params: { uri: request.params.uri },
+        signal: extra.signal,
         run: async (): Promise<Record<string, never>> => {
           const unsub = perUriUnsub.get(request.params.uri);
           if (unsub) {
@@ -231,13 +244,20 @@ export function installResourcesHandlers(
 // Wire mappers
 // ============================================================================
 
-/** Convert a v2 `ResourceDescriptor` to the MCP wire `Resource` shape. */
+/**
+ * Convert a v2 `ResourceDescriptor` to the MCP wire `Resource` shape.
+ *
+ * Display + extension fields follow the conventions shared with the tools
+ * and prompts projections: `metadata.title` overrides the first-class
+ * `title`, `metadata.icons` → wire `icons`, and `metadata.mcp.meta` →
+ * wire `_meta` ({@link McpDeclarationExtensions}). Absent ⇒ not emitted.
+ */
 export function toWireResource(descriptor: ResourceDescriptor): McpWireResource {
   const wire: McpWireResource = { uri: descriptor.uri, name: descriptor.name };
   if (descriptor.description !== undefined) wire.description = descriptor.description;
   if (descriptor.mimeType !== undefined) wire.mimeType = descriptor.mimeType;
   if (descriptor.size !== undefined) wire.size = descriptor.size;
-  if (descriptor.title !== undefined) wire.title = descriptor.title;
+  applyDisplayMetadata(wire, descriptor);
   return wire;
 }
 
@@ -251,8 +271,26 @@ export function toWireResourceTemplate(
   };
   if (descriptor.description !== undefined) wire.description = descriptor.description;
   if (descriptor.mimeType !== undefined) wire.mimeType = descriptor.mimeType;
-  if (descriptor.title !== undefined) wire.title = descriptor.title;
+  applyDisplayMetadata(wire, descriptor);
   return wire;
+}
+
+/**
+ * Stamp `title` / `icons` / `_meta` onto a wire resource record. The two
+ * descriptor shapes differ only in their locator field, so the display +
+ * extension carriage is written once. Mutates in place — both callers own
+ * a freshly built wire object.
+ */
+function applyDisplayMetadata(
+  wire: { title?: string; icons?: unknown; _meta?: unknown },
+  descriptor: ResourceDescriptor | ResourceTemplateDescriptor,
+): void {
+  const title = readMetadataTitle(descriptor.metadata) ?? descriptor.title;
+  if (title !== undefined) wire.title = title;
+  const icons = readMetadataIcons(descriptor.metadata);
+  if (icons !== undefined) wire.icons = icons;
+  const meta = readMcpDeclarationExtensions(descriptor.metadata)?.meta;
+  if (meta !== undefined) wire._meta = meta;
 }
 
 /**

@@ -24,6 +24,11 @@
  *   - `system` → `user` (treats the system instruction as user context;
  *     consistent with v1 and how clients typically consume `prompts/get`)
  *   - `tool` / `event` / other → skipped (don't make sense in prompts/get)
+ *
+ * Message CONTENT narrows through the shared outbound mapper
+ * (`protocol/content.ts`) — `PromptMessage.content` is the same
+ * five-member union a `tools/call` result carries, so both projections
+ * use one mapping.
  */
 
 import type { Server as SdkServer } from "@modelcontextprotocol/sdk/server/index.js";
@@ -40,17 +45,21 @@ import {
   ListPromptsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type {
-  ContentBlock,
   McpRequestContext,
   MessageEntry,
   PromptDeclaration,
   Prompts,
   PromptsGetResult,
 } from "@agentick/spec";
-import { isTextBlock } from "@agentick/spec";
 import type { Unsubscribe } from "@agentick/runtime";
 
-import type { RunCrossing } from "./crossing.js";
+import { toWireContentBlock } from "../../protocol/content.js";
+import {
+  readMcpDeclarationExtensions,
+  readMetadataIcons,
+  readMetadataTitle,
+} from "../wire-extensions.js";
+import type { McpHandlerExtra, RunCrossing } from "./crossing.js";
 
 export interface PromptsProjectionOptions {
   /** Prompts source whose registry is projected onto the wire. */
@@ -78,10 +87,11 @@ export function installPromptsHandlers(
   // ─────────── prompts/list ───────────
   sdkServer.setRequestHandler(
     ListPromptsRequestSchema,
-    async (_request: ListPromptsRequest): Promise<ListPromptsResult> =>
+    async (_request: ListPromptsRequest, extra: McpHandlerExtra): Promise<ListPromptsResult> =>
       options.runCrossing({
         verb: "list-prompts",
         operation: { type: "prompt_list" },
+        signal: extra.signal,
         run: async (_input, ctx): Promise<ListPromptsResult> => {
           const projected = projectPrompts(options.source.list(), filter, ctx);
           return { prompts: projected.map(toWirePrompt) };
@@ -92,11 +102,12 @@ export function installPromptsHandlers(
   // ─────────── prompts/get ───────────
   sdkServer.setRequestHandler(
     GetPromptRequestSchema,
-    async (request: GetPromptRequest): Promise<GetPromptResult> =>
+    async (request: GetPromptRequest, extra: McpHandlerExtra): Promise<GetPromptResult> =>
       options.runCrossing({
         verb: "get-prompt",
         operation: { type: "prompt_get", name: request.params.name },
         params: { name: request.params.name },
+        signal: extra.signal,
         run: async (_input, ctx, onFiber): Promise<GetPromptResult> => {
           // Re-project so per-connection filter decides visibility for
           // this specific get. A prompt hidden from `list` must not be
@@ -133,6 +144,12 @@ export function installPromptsHandlers(
             }),
           );
 
+          // TODO(spec): `GetPromptResult._meta` has no source. The wire slot
+          // exists, but `PromptsGetResult` ({ description, messages }) carries
+          // no metadata bag, so a render has nowhere to put result-scoped
+          // `_meta` — the declaration's `metadata.mcp.meta` is declaration-
+          // scoped and already rides `prompts/list`. Give `PromptsGetResult` a
+          // `metadata?` bag and project `metadata.mcp.meta` here.
           return {
             description: result.description,
             messages: result.messages.flatMap(toWirePromptMessages),
@@ -174,9 +191,25 @@ export function projectPrompts(
  * Convert a v2 `PromptDeclaration` to the MCP wire `Prompt` shape.
  * MCP arguments only carry `{name, description, required}`; v2's
  * Standard-Schema validator is server-side only.
+ *
+ * Display + extension fields follow the same conventions the tools
+ * projection uses (`toWireTool`):
+ *   - `decl.title` → wire `title` (the FIRST-CLASS field; a prompt has
+ *     one on the declaration, unlike a tool). `metadata.title` overrides
+ *     it, so a per-connection transform can relabel without touching the
+ *     declaration.
+ *   - `metadata.icons` → wire `icons`
+ *   - `metadata.mcp.meta` → wire `_meta` ({@link McpDeclarationExtensions})
+ * Absent ⇒ the field is not emitted (byte-identical to before).
  */
 export function toWirePrompt(decl: PromptDeclaration): McpWirePrompt {
   const wire: McpWirePrompt = { name: decl.name, description: decl.description };
+  const title = readMetadataTitle(decl.metadata) ?? decl.title;
+  if (title !== undefined) wire.title = title;
+  const icons = readMetadataIcons(decl.metadata);
+  if (icons !== undefined) wire.icons = icons as McpWirePrompt["icons"];
+  const meta = readMcpDeclarationExtensions(decl.metadata)?.meta;
+  if (meta !== undefined) wire._meta = meta as McpWirePrompt["_meta"];
   if (decl.arguments && decl.arguments.length > 0) {
     wire.arguments = decl.arguments.map((arg) => {
       const out: NonNullable<McpWirePrompt["arguments"]>[number] = { name: arg.name };
@@ -191,35 +224,21 @@ export function toWirePrompt(decl: PromptDeclaration): McpWirePrompt {
 /**
  * Convert one `MessageEntry` to zero-or-more MCP `PromptMessage`s.
  * Roles that don't map to MCP get filtered out (returns `[]`).
- * Multi-block messages produce one PromptMessage per supported block.
+ * Multi-block messages produce one PromptMessage per block.
+ *
+ * Content narrows through {@link toWireContentBlock} — the SAME mapper
+ * the `tools/call` result projection uses, because `PromptMessage.content`
+ * is the same five-member MCP union. An image survives as an image
+ * instead of becoming a JSON blob.
  */
 export function toWirePromptMessages(entry: MessageEntry): readonly McpWirePromptMessage[] {
   const role = mapRole(entry.role);
   if (role === null) return [];
-  const out: McpWirePromptMessage[] = [];
-  for (const block of entry.content) {
-    const content = blockToWireContent(block);
-    if (content !== null) out.push({ role, content });
-  }
-  return out;
+  return entry.content.map((block) => ({ role, content: toWireContentBlock(block) }));
 }
 
 function mapRole(role: string): "user" | "assistant" | null {
   if (role === "user" || role === "assistant") return role;
   if (role === "system") return "user";
   return null;
-}
-
-function blockToWireContent(block: ContentBlock): McpWirePromptMessage["content"] | null {
-  // Text blocks are by far the dominant case — handle them precisely.
-  // Other block types (image/audio/json/code/...) are best-effort
-  // serialized to text for now; the full media-block surface lands
-  // alongside #123 (resources) when wire content blocks get audited.
-  if (isTextBlock(block)) {
-    return { type: "text", text: block.text };
-  }
-  // Pragmatic fallback: render block as a fenced code blob so clients
-  // see something coherent instead of dropping content. This matches
-  // v1's behaviour for unknown blocks in prompts.
-  return { type: "text", text: JSON.stringify(block) };
 }

@@ -107,6 +107,15 @@ const SURFACE = "mcpServer" as const;
 type McpServerSurface = typeof SURFACE;
 
 /**
+ * The `ctx.signal` for a crossing with no caller cancellation behind it —
+ * an off-connection context (HTTP pre-gate, instructions resolution) or
+ * the identity-less admission ctx. Shared because it is immutable and
+ * never fires; minting a controller per request only to abandon it says
+ * "there is a cancellation here" when there is not.
+ */
+const NEVER_ABORTS: AbortSignal = new AbortController().signal;
+
+/**
  * Discrete bus event published when an inbound crossing is REJECTED at
  * admission (ADR 92 §Family 1.3). Not an operation — admission denied means no
  * work unit exists — but the audit trail must still see the attempt.
@@ -788,6 +797,8 @@ export class McpServerHarness
       readonly user?: McpAuthenticatedUser | null;
       readonly identity?: IngressIdentity;
       readonly progressToken?: ProgressToken;
+      /** The SDK's per-request cancellation signal — see `McpCrossing.signal`. */
+      readonly signal?: AbortSignal;
       /** The crossing's own boundary fields — see `McpCrossing.ctxExtras`. */
       readonly ctxExtras?: X;
     }): Derived<McpRequestContext & X> => {
@@ -852,7 +863,14 @@ export class McpServerHarness
           // this default per-call); `task` defaults to `"auto"` until per-call
           // wire metadata flips it.
           toolCallId: `mcp:req:${ulid()}`,
-          signal: new AbortController().signal,
+          // #254 — the CALLER's cancellation, straight from the SDK request
+          // handler (`RequestHandlerExtra.signal`): it fires on
+          // `notifications/cancelled` for this request id AND on connection
+          // close, so a handler awaiting `ctx.signal` stops when the client
+          // gives up instead of running to completion against a dead peer.
+          // Absent (the admission ctx, minted before the crossing declares
+          // itself) ⇒ a signal that never aborts.
+          signal: overrides?.signal ?? NEVER_ABORTS,
           setState: () => {
             /* no-op for MCP-server ctx — sessions own this */
           },
@@ -978,6 +996,7 @@ export class McpServerHarness
           user: resolvedUser,
           identity,
           progressToken: crossing.progressToken,
+          signal: crossing.signal,
           ctxExtras: crossing.ctxExtras,
         }),
       );
@@ -1221,7 +1240,10 @@ export class McpServerHarness
       },
       {
         toolCallId: `mcp:${label}:${ulid()}`,
-        signal: new AbortController().signal,
+        // No SDK request behind an off-connection crossing (the HTTP
+        // pre-gate / instructions resolution run before the SDK sees one),
+        // so there is no caller cancellation to carry.
+        signal: NEVER_ABORTS,
         setState: () => {
           /* no-op — no session behind an off-connection crossing */
         },

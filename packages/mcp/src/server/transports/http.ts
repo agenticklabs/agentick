@@ -18,10 +18,16 @@
  *     per-session map.
  *   - Subsequent requests (POST / GET-SSE / DELETE) carry the
  *     `Mcp-Session-Id`; we route them straight to the owning SDK
- *     transport's `handleRequest`. The SDK owns id generation +
- *     resumability; we own the routing table.
+ *     transport's `handleRequest`. The SDK owns id generation; we own
+ *     the routing table.
  *   - `onsessionclosed` (DELETE) prunes the map. `close()` stops the
  *     listener + tears down every live session.
+ *
+ * Resumability is OPT-IN, via {@link HttpTransportOptions.eventStore}.
+ * Without a store a dropped SSE connection loses every message sent
+ * during the gap — the SDK has nothing to replay against the client's
+ * `Last-Event-ID`. Pass `inMemoryEventStore()` (bounded, single-process)
+ * or your own `EventStore` to close that hole.
  *
  * The SDK transport parses / validates the body itself; we read the
  * POST body once (to distinguish a new-session `initialize` from a
@@ -61,6 +67,7 @@ import {
 import type { AddressInfo } from "node:net";
 
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
@@ -152,6 +159,21 @@ export interface HttpTransportOptions {
    * Defaults to `false` (SSE preferred).
    */
   readonly enableJsonResponse?: boolean;
+
+  /**
+   * SSE resumability store. When provided, every server→client message
+   * is recorded and a client reconnecting with `Last-Event-ID` gets the
+   * messages it missed replayed — the difference between a dropped SSE
+   * connection costing a long tool call's result and costing nothing.
+   *
+   * ABSENT BY DEFAULT: a store retains messages in memory, which is not
+   * a cost to impose on a server that never asked for it. Pass
+   * {@link inMemoryEventStore} for the bundled bounded implementation,
+   * or any object satisfying the SDK's `EventStore` (Redis, Postgres, a
+   * log) — a multi-node deployment needs the latter, since a reconnect
+   * can land on a different node than the one holding the memory.
+   */
+  readonly eventStore?: EventStore;
 
   /**
    * OAuth resource-server discovery (MCP authorization spec / RFC 9728).
@@ -327,6 +349,7 @@ function createHttpCore(options: {
   readonly oauth?: OAuthTransportOptions;
   readonly sessionIdGenerator?: () => string;
   readonly enableJsonResponse?: boolean;
+  readonly eventStore?: EventStore;
 }) {
   // OAuth resource-server discovery (RFC 9728). When a metadata document
   // is configured, resolve the well-known path(s) it is served at, keyed
@@ -474,6 +497,10 @@ function createHttpCore(options: {
       ...(options.enableJsonResponse !== undefined
         ? { enableJsonResponse: options.enableJsonResponse }
         : {}),
+      // Resumability, opt-in: with a store the SDK records every
+      // server→client message and replays what a reconnecting client
+      // missed; without one it has nothing to replay (today's default).
+      ...(options.eventStore !== undefined ? { eventStore: options.eventStore } : {}),
     });
 
     if (closed) {
@@ -660,6 +687,13 @@ export interface HttpMiddlewareTransportOptions {
    * opening SSE streams. Defaults to `false` (SSE preferred).
    */
   readonly enableJsonResponse?: boolean;
+
+  /**
+   * SSE resumability store — identical in meaning to
+   * {@link HttpTransportOptions.eventStore}: absent by default, and the
+   * only way a dropped SSE connection replays what it missed.
+   */
+  readonly eventStore?: EventStore;
 
   /**
    * OAuth resource-server discovery (MCP authorization spec / RFC 9728).

@@ -99,20 +99,20 @@ describe("toolError / toolResult / toMCPResult", () => {
     expect((r.content[0] as { text: string }).text).toBe("ok");
   });
 
-  it("toMCPResult maps text + image blocks; unknown → JSON text", () => {
+  it("toMCPResult narrows the agentick union onto the wire (via toWireContent)", () => {
     const r = toMCPResult({
       content: [
         { type: "text", text: "hi" },
-        { type: "image", data: "abc", mediaType: "image/jpeg" },
+        { type: "image", source: { type: "base64", data: "abc", mimeType: "image/jpeg" } },
         { type: "json", data: { x: 1 } },
       ],
     });
     expect(r.content).toHaveLength(3);
     expect(r.content[0]).toEqual({ type: "text", text: "hi" });
     expect(r.content[1]).toEqual({ type: "image", data: "abc", mimeType: "image/jpeg" });
-    // Unknown type falls through as JSON text.
+    // No wire kind for `json` — fenced text naming what was projected.
     expect((r.content[2] as { type: string; text: string }).type).toBe("text");
-    expect((r.content[2] as { type: string; text: string }).text).toContain('"x":1');
+    expect((r.content[2] as { type: string; text: string }).text).toBe('```json\n{"x":1}\n```');
   });
 });
 

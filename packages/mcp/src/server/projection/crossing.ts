@@ -109,6 +109,19 @@ export interface McpCrossing<R, X extends object = Record<never, never>> {
    */
   readonly progressToken?: string | number;
   /**
+   * The SDK's per-request cancellation signal ({@link McpHandlerExtra}),
+   * threaded onto the body's `ctx.signal` so a handler's own async work
+   * aborts when the CALLER gives up. The SDK fires it on both
+   * `notifications/cancelled` for this request id and connection close
+   * (`Protocol._onclose` aborts every in-flight handler), so it is the
+   * complete cancellation source for a crossing — a projection passing
+   * it through is all the wiring `ctx.signal` needs.
+   *
+   * Absent ⇒ the ctx carries a signal that never aborts (the pre-#254
+   * behavior), which is also what the off-connection contexts get.
+   */
+  readonly signal?: AbortSignal;
+  /**
    * This crossing's OWN boundary fields, composed INTO the branded ctx mint and
    * typed onto the body's `ctx` as `Derived<McpRequestContext & X>`.
    *
@@ -136,6 +149,16 @@ export interface McpCrossing<R, X extends object = Record<never, never>> {
     ctx: Derived<McpRequestContext & X>,
     onFiber: OnCrossingFiber,
   ) => Promise<R>;
+}
+
+/**
+ * The slice of the SDK's `RequestHandlerExtra` the crossings read — its
+ * per-request cancellation signal. Narrowed deliberately: a projection
+ * that grew a dependency on `authInfo` / `sessionId` / `sendRequest`
+ * would be reaching around the harness's own admission + ctx mint.
+ */
+export interface McpHandlerExtra {
+  readonly signal: AbortSignal;
 }
 
 /**

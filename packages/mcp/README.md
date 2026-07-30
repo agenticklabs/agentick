@@ -322,9 +322,18 @@ identifier would be a bug rather than strictness. Absent or empty means no
 
 ### Content mapping
 
-`mcpContentToBlocks`, `mapCallToolResult`, `mapResourceContents`,
-`MappedCallToolResult` — MCP content into framework content blocks, preserving
+Inbound (a server's content into framework blocks): `mcpContentToBlocks`,
+`mapCallToolResult`, `mapResourceContents`, `MappedCallToolResult` — preserving
 structured content, the error flag, and embedded resource blocks.
+
+Outbound (framework blocks onto the wire): `toWireContent`,
+`toWireContentBlock` — the whole 23-member `ContentBlock` union narrowed onto
+MCP's five. Native kinds pass through unchanged; a url-sourced medium becomes a
+`resource_link`; everything else becomes fenced text whose info string names the
+kind that was projected. Applied by the server's `tools/call` and `prompts/get`
+projections; see
+[the server README](./src/server/README.md#content-on-the-way-out) for the
+per-kind table.
 
 ### Protocol utilities
 

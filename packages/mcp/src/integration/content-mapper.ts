@@ -17,7 +17,7 @@ import type { CallToolResult, ResourceContents } from "@modelcontextprotocol/sdk
 import type { ContentBlock, ResourceContents as SpecResourceContents } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
-import { mcpResultExtensions } from "../server/tool-extensions.js";
+import { mcpResultExtensions } from "../server/wire-extensions.js";
 
 /**
  * A `CallToolResult` mapped into agentick's content model, preserving

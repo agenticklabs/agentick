@@ -1,24 +1,37 @@
 /**
- * MCP tool wire extensions — the ONE typed convention for carrying
- * MCP-specific tool payloads that v2's shared `ToolDeclaration` /
- * `ToolResultEnvelope` don't natively model.
+ * MCP wire extensions — the ONE typed convention for carrying
+ * MCP-specific payloads that v2's shared declarations (`ToolDeclaration`,
+ * `PromptDeclaration`, `ResourceDescriptor`) and `ToolResultEnvelope`
+ * don't natively model.
  *
  * Wire constraints live at the wire. v2's spec is deliberately
- * provider-agnostic: `ToolDeclaration` and `ToolResultEnvelope` each
- * carry an open `metadata` bag, and MCP-specific payloads ride through
- * it under a single namespaced key (`metadata.mcp`), projected onto the
- * MCP wire here — never leaking MCP vocabulary into the shared substrate.
+ * provider-agnostic: every declaration carries an open `metadata` bag,
+ * and MCP-specific payloads ride through it under a single namespaced
+ * key (`metadata.mcp`), projected onto the MCP wire here — never leaking
+ * MCP vocabulary into the shared substrate.
  *
- * Two carriage sites, one key:
+ * Four carriage sites, one key:
  *
- *   - **Declaration** — `ToolDeclaration.metadata.mcp` carries
+ *   - **Tool declaration** — `ToolDeclaration.metadata.mcp` carries
  *     {@link McpToolDeclarationExtensions} (`meta` + `annotations`).
  *     `toWireTool` projects them onto the wire `Tool._meta` and
  *     `Tool.annotations` (`projection/tools.ts`).
- *   - **Result** — a `ToolResultEnvelope.metadata.mcp` carries
+ *   - **Tool result** — a `ToolResultEnvelope.metadata.mcp` carries
  *     {@link McpToolResultExtensions} (`meta`). The CreatedTool wrapper
  *     (`config.ts`) reads it off the normalized result and the tools
  *     projection spreads it onto the wire `CallToolResult._meta`.
+ *   - **Prompt declaration** — `PromptDeclaration.metadata.mcp` carries
+ *     {@link McpDeclarationExtensions} (`meta`); `toWirePrompt` projects
+ *     it onto `Prompt._meta` (`projection/prompts.ts`).
+ *   - **Resource descriptor** — `ResourceDescriptor.metadata.mcp` (and a
+ *     template descriptor's) carries the same shape; `toWireResource` /
+ *     `toWireResourceTemplate` project it onto `Resource._meta`
+ *     (`projection/resources.ts`).
+ *
+ * `metadata.title` / `metadata.icons` are a SEPARATE, older convention
+ * (see `@agentick/tool/transforms/describe.ts`) shared by all four sites
+ * and read directly by each projection — they are display fields with
+ * first-class wire slots, not MCP-specific payloads.
  *
  * The convention runs BOTH directions on the same key: when agentick
  * CONSUMES an MCP server, `mapCallToolResult` (`integration/content-
@@ -176,4 +189,96 @@ export function readMcpResultExtensions(
   const block = metadata?.[MCP_METADATA_KEY];
   if (typeof block !== "object" || block === null) return undefined;
   return block as McpToolResultExtensions;
+}
+
+// ============================================================================
+// Prompts + resources — same key, `meta` only
+// ============================================================================
+
+/**
+ * MCP extensions for a declaration whose only wire extension point is
+ * `_meta`: a prompt (`Prompt._meta`) or a resource / resource-template
+ * descriptor (`Resource._meta`, `ResourceTemplate._meta`).
+ *
+ * Tools take {@link McpToolDeclarationExtensions} instead — they alone
+ * have an `annotations` hint block on the wire.
+ */
+export interface McpDeclarationExtensions {
+  /**
+   * Free-form `_meta` projected verbatim onto the wire record's `_meta`.
+   * An MCP Apps `ui://` template linkage on a prompt, a client-understood
+   * descriptor on a resource — anything declaration-scoped rides here.
+   */
+  readonly meta?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Build the `metadata` fragment carrying a prompt's MCP extensions. Spread
+ * it into the declaration's `metadata` — never hand-write the `mcp` key.
+ *
+ * @example
+ *   prompts.register({
+ *     name: "jobs_over_budget",
+ *     description: "Jobs over their budget.",
+ *     metadata: {
+ *       title: "Jobs Over Budget",
+ *       ...mcpPromptExtensions({ meta: { "openai/outputTemplate": "ui://widget/jobs" } }),
+ *     },
+ *   });
+ */
+export function mcpPromptExtensions(
+  ext: McpDeclarationExtensions,
+): McpMetadataFragment<McpDeclarationExtensions> {
+  return { [MCP_METADATA_KEY]: ext };
+}
+
+/**
+ * Build the `metadata` fragment carrying a resource (or resource-template)
+ * descriptor's MCP extensions. Same key, same shape as
+ * {@link mcpPromptExtensions} — named separately so the call site reads as
+ * the surface it decorates.
+ */
+export function mcpResourceExtensions(
+  ext: McpDeclarationExtensions,
+): McpMetadataFragment<McpDeclarationExtensions> {
+  return { [MCP_METADATA_KEY]: ext };
+}
+
+/**
+ * Read the `meta`-only MCP extensions off a prompt / resource descriptor's
+ * `metadata` bag. Returns `undefined` when it carries none (or a malformed
+ * `mcp` value), so the projection emits a byte-identical wire record.
+ */
+export function readMcpDeclarationExtensions(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): McpDeclarationExtensions | undefined {
+  const block = metadata?.[MCP_METADATA_KEY];
+  if (typeof block !== "object" || block === null) return undefined;
+  return block as McpDeclarationExtensions;
+}
+
+/**
+ * Read the shared `metadata.icons` display convention off any declaration
+ * bag, in the wire's icon shape. One reader for all four projections —
+ * tools, prompts, resources, resource templates.
+ *
+ * The convention is structural (`describe.ts`'s `IconDescriptor`), so a
+ * malformed value is dropped rather than emitted onto the wire.
+ */
+export function readMetadataIcons(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): readonly Readonly<Record<string, unknown>>[] | undefined {
+  const icons = metadata?.icons;
+  return Array.isArray(icons) ? (icons as readonly Readonly<Record<string, unknown>>[]) : undefined;
+}
+
+/**
+ * Read the shared `metadata.title` display convention off any declaration
+ * bag. `undefined` when absent or not a string.
+ */
+export function readMetadataTitle(
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): string | undefined {
+  const title = metadata?.title;
+  return typeof title === "string" ? title : undefined;
 }

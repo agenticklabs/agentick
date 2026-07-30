@@ -67,7 +67,7 @@ import { CompletionNotFound, PromptNotFound } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
 import { normalizeCompletionResult, type CompletionHandler } from "../../protocol/completions.js";
-import type { OnCrossingFiber, RunCrossing } from "./crossing.js";
+import type { McpHandlerExtra, OnCrossingFiber, RunCrossing } from "./crossing.js";
 import { projectPrompts } from "./prompts.js";
 
 /** Spec-mandated max values per `completion/complete` response. */
@@ -141,7 +141,7 @@ export function installCompletionsHandlers(
 ): Unsubscribe {
   sdkServer.setRequestHandler(
     CompleteRequestSchema,
-    async (request: CompleteRequest): Promise<CompleteResult> => {
+    async (request: CompleteRequest, extra: McpHandlerExtra): Promise<CompleteResult> => {
       const { ref, argument } = request.params;
       const resolvedArguments = request.params.context?.arguments ?? {};
 
@@ -152,6 +152,7 @@ export function installCompletionsHandlers(
           name: ref.type === "ref/prompt" ? ref.name : ref.uri,
         },
         params: { ref: ref.type, argument: argument.name },
+        signal: extra.signal,
         // ADR 91 — `resolvedArguments` is a BOUNDARY field of this crossing, so
         // it composes INTO the branded ctx mint instead of being spread over the
         // ctx inside the body. The spread it replaces erased the `Derived` brand
