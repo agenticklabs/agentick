@@ -1806,6 +1806,27 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 — completions design doc (docs/proposals/v2/completions.md)
+
+Argument completion (MCP `completion/complete` generalized) designed doc-first;
+implementation not started. Findings: both MCP edges already have completion
+(client harness `completePromptArgument`/`completeResourceTemplate` from Wave 2
+#146; server harness `completions.{prompts,resources}` config but CTX-FREE),
+while the native middle is empty — no seam on `PromptDeclaration`, no verb on
+the agentick client wire. Decisions: named completion sources resolved by
+`completeRef` string (handlerRef pattern — functions never cross the spec
+firewall); resolver ctx borrows the `ToolHandlerCtx` shape (fixes the MCP
+server harness's ctx-free completion as a side effect); ONE generalized
+ref-discriminated `complete` wire verb, MCP-shaped; the five v1 sugar builders
+port WITHOUT the 100-cap (cap moves to the MCP wire — wire constraints live at
+the wire); home is a small dedicated `@agentick/completions` package, NOT
+sources-as-runtime-tools (journal pollution per keystroke, result-envelope
+mismatch, tools-list pollution — see doc §5). Verdicts recorded in doc §6: no
+"command" vertical (decomposes to existing primitives), no `Action` supertype
+under Tool. Consumer chain is already live in nx-knowify (Tiptap composer slot
+completion + `RunnableRegistry.complete`, commits 312601d6a6d / 990083d90d9 /
+4ddd8ce8f8f) and terminates at a `TODO(prompts-complete)` waiting on P2.
+
 ### 2026-07-27 (13th) — node10 consumers cannot import ANY subpath
 
 The first real server consumer (`apps/assistant-api` in nx-knowify, a Nest app on
