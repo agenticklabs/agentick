@@ -37,8 +37,20 @@ export interface SessionLive {
    * transport has no media capability.
    */
   start(streamId?: string): Promise<RuntimeLiveSessionHandle>;
-  /** Every currently-open handle on this session, in open order. */
+  /**
+   * Every currently-OPEN handle on this session, in open order. A stream drops
+   * out the moment it reaches a terminal state (`stop`/`abort`/`close`) — the
+   * handle reports it back through its terminal callback, so this is a live
+   * registry, not a log of everything ever started.
+   */
   readonly active: readonly RuntimeLiveSessionHandle[];
+  /**
+   * Release every open stream's CLIENT resources (each handle's `close()` — no
+   * `live/stop` traffic) and empty `active`. Called by `session.close()`, which
+   * is tearing the whole session down; end a single stream with its own
+   * `stop()`/`abort()` instead. Idempotent.
+   */
+  close(): void;
 }
 
 /**
@@ -76,12 +88,26 @@ export function sessionLive(client: LiveFacetClient, sessionId: string): Session
       });
       const ref = { sessionId: opened.sessionId, streamId: opened.streamId };
 
-      const handle = liveSessionHandle({ client: commandClient, media, ref });
+      const handle = liveSessionHandle({
+        client: commandClient,
+        media,
+        ref,
+        // The registry shrinks from the HANDLE's terminal transition, not from a
+        // poll over `status`: teardown is the one place every terminal path
+        // (`stop`, `abort`, `close`) converges, and it fires exactly once.
+        onTerminal: (closed) => {
+          active.delete(closed.streamId);
+        },
+      });
       active.set(ref.streamId, handle);
       return handle;
     },
     get active(): readonly RuntimeLiveSessionHandle[] {
       return [...active.values()];
+    },
+    close: (): void => {
+      // Snapshot first — each `close()` deletes its own entry via `onTerminal`.
+      for (const handle of [...active.values()]) handle.close();
     },
   };
 }

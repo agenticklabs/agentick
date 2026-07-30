@@ -23,4 +23,20 @@ declare module "@agentick/spec" {
   }
 }
 
+// NO `wireMethods` — deliberate, and the one registered slot that declines the
+// namespace fallthrough. The `live/*` rows are STREAM-addressed (`{ sessionId,
+// streamId }`), and each open stream is already served by its own
+// `LiveSessionHandle`, whose `stop()`/`abort()` issue the same rows AND run the
+// local teardown that drops the stream from `active`. Exposing `live.stop(…)` on
+// the FACET would let a caller end a stream behind the registry's back, leaving
+// a dead handle enumerating as open — the bug #247 just fixed, through a second
+// door. Reach a stream through `start()`'s handle, or through `active`.
+//
+// `SessionLive` is likewise the one sub-handle NOT on the unified `ClientHandle`
+// contract: it has no `subscribe(cb)`, because a facet over N streams has no
+// single state to notify about — the per-stream `onState`/`onTranscript`/`onFrame`
+// callbacks are the change feeds, at the granularity that has one. `useHandle`
+// therefore cannot bind `session.live`; bind a stream handle's callbacks
+// instead. It does carry `close()` (the optional half of the contract) so
+// `session.close()` can release every open stream.
 registerSessionHandleExtension("live", (client, sessionId) => sessionLive(client, sessionId));

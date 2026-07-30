@@ -8,6 +8,7 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core";
+import type { WireNamespaceMethods } from "@agentick/spec";
 import { tasksHandle, type TasksHandle } from "./tasks-handle.js";
 
 declare module "@agentick/spec" {
@@ -23,4 +24,10 @@ declare module "@agentick/spec" {
   }
 }
 
-registerSessionHandleExtension("tasks", (client, sessionId) => tasksHandle(client, sessionId));
+// The namespace's only wire row, which the handle already implements — so it
+// stays SHADOWED by `tasks.cancel(taskId, reason)`. Declared anyway so a row
+// added to `tasks/*` tomorrow is reachable through `session.tasks.<row>(…)` with
+// no client change; the `satisfies` makes a removed row a compile error here.
+registerSessionHandleExtension("tasks", (client, sessionId) => tasksHandle(client, sessionId), {
+  wireMethods: ["cancel"] satisfies readonly (keyof WireNamespaceMethods<"tasks">)[],
+});

@@ -10,6 +10,7 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core";
+import type { WireNamespaceMethods } from "@agentick/spec";
 import { stateHandle, type StateClientHandle } from "./state-handle.js";
 
 declare module "@agentick/spec" {
@@ -24,4 +25,16 @@ declare module "@agentick/spec" {
   }
 }
 
-registerSessionHandleExtension("state", (client, sessionId) => stateHandle(client, sessionId));
+// The namespace's wire rows. TODAY the handle implements all four, so all four
+// stay SHADOWED — `state.get(key)` is the sync snapshot read, never the async
+// `state/get` row. Declaring the set anyway is the point: a row added to
+// `state/*` tomorrow is reachable through `session.state.<row>(…)` with no client
+// change, and the `satisfies` makes a removed row a compile error here.
+registerSessionHandleExtension("state", (client, sessionId) => stateHandle(client, sessionId), {
+  wireMethods: [
+    "delete",
+    "get",
+    "list",
+    "set",
+  ] satisfies readonly (keyof WireNamespaceMethods<"state">)[],
+});

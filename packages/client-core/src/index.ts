@@ -44,7 +44,10 @@ export {
   registeredSessionHandleExtensions,
   SessionSubHandleNotRegistered,
   type SessionSubHandleFactory,
+  type SessionSubHandleOptions,
+  type SessionSubHandleTeardown,
 } from "./session-handle-extensions.js";
+export { makeWireNamespace, wireFallthrough, type WireCallClient } from "./wire-namespace.js";
 export {
   isClientHandle,
   isEnumerable,

@@ -9,6 +9,7 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core";
+import type { WireNamespaceMethods } from "@agentick/spec";
 import { timelineHandle, type TimelineHandle } from "./timeline-handle.js";
 
 declare module "@agentick/spec" {
@@ -25,6 +26,17 @@ declare module "@agentick/spec" {
   }
 }
 
-registerSessionHandleExtension("timeline", (client, sessionId) =>
-  timelineHandle(client, sessionId),
+// The namespace's wire rows, so the ones this handle does NOT implement stay
+// reachable (`session.timeline.compact(…)`). Rows the handle DOES implement stay
+// shadowed by it — precedence lives in `wireFallthrough`, not in this list.
+registerSessionHandleExtension(
+  "timeline",
+  (client, sessionId) => timelineHandle(client, sessionId),
+  {
+    wireMethods: [
+      "commands",
+      "compact",
+      "history",
+    ] satisfies readonly (keyof WireNamespaceMethods<"timeline">)[],
+  },
 );

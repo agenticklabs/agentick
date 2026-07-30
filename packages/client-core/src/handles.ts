@@ -40,7 +40,9 @@ import {
   applySessionHandleExtensions,
   knownSessionHandleExtensionImports,
   SessionSubHandleNotRegistered,
+  type SessionSubHandleTeardown,
 } from "./session-handle-extensions.js";
+import { makeWireNamespace } from "./wire-namespace.js";
 
 interface InternalClient {
   readonly id: string;
@@ -138,6 +140,9 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
 }
 
 export function makeSessionHandle(client: InternalClient, sessionId: string): SessionHandle {
+  // Assigned right below the literal, once the sub-handle getters are installed;
+  // `close()` reaches it through the closure rather than through `this`.
+  let closeSubHandles: SessionSubHandleTeardown;
   // Typed against the hand-written BASE ({@link SessionHandleBase}) so the literal
   // is fully checked. The registered sub-handles (`session.knobs`, …) are attached
   // as getters below (ADR 87); the wire-DERIVED namespace methods
@@ -168,8 +173,26 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
     async rebind(auth) {
       await client.request("session/rebind", { sessionId, auth });
     },
+    /**
+     * Close the session AND release what this handle opened. Every BUILT
+     * sub-handle (`session.knobs`, `session.timeline`, … — each one holding a
+     * live wire subscription) is closed first, then the `session/close` RPC
+     * goes out. Without the first half the server-side session ends while the
+     * client keeps every channel subscription and live stream running.
+     *
+     * Best-effort and order-independent: a sub-handle whose `close()` throws
+     * does NOT stop the others or suppress the RPC; the failures surface
+     * together as an `AggregateError` once the session is closed. Sub-handles
+     * that were never touched are never built — closing a session does not open
+     * the subscriptions it is about to abandon. Idempotent, because the teardown
+     * runs once and every sub-handle `close()` is itself idempotent.
+     */
     async close() {
+      const failures = closeSubHandles();
       await client.request("session/close", { sessionId });
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "session.close(): sub-handle teardown failed");
+      }
     },
     events(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream {
       return client.transport.subscribe({ kind: "session", id: sessionId }, query, fromCursor);
@@ -184,7 +207,7 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   // universal. `transport.subscribe`/`progress` pass through untouched (a fold's
   // input is a stream, not a call — it gets a frame tap, not middleware).
   const handleClient = withMiddlewareTransport(client);
-  applySessionHandleExtensions(handle, handleClient, sessionId);
+  closeSubHandles = applySessionHandleExtensions(handle, handleClient, sessionId);
   // B2 slice 4 — WIRE PROXY: wrap so an unregistered namespace access
   // (`session.billing`) synthesizes a namespace whose methods issue
   // `client.request("billing/<method>", { sessionId, ...params })`. Registered
@@ -230,7 +253,10 @@ function withMiddlewareTransport(client: InternalClient): ClientProtocol {
  * Wrap the base session handle so property access on an UNREGISTERED wire
  * namespace (`session.billing`) returns a synthesized namespace proxy. Base
  * members and ADR-87 sub-handle getters (already `in handle`) are served
- * untouched; symbols and `then` never synthesize (so the handle is not a
+ * untouched — a REGISTERED namespace reaches its leftover wire rows through its
+ * own `wireFallthrough` wrapper one level down, installed by
+ * `applySessionHandleExtensions`, not here; symbols and `then` never synthesize
+ * (so the handle is not a
  * thenable and structured-clone / inspection don't trip the trap). Namespace
  * proxies are memoized so `session.billing === session.billing`.
  *
@@ -270,30 +296,6 @@ function wrapSessionWireProxy(
   // The runtime Proxy is a structural superset of every session-scoped wire
   // namespace; the mapped `SessionHandle` type is what constrains callers.
   return proxy as unknown as SessionHandle;
-}
-
-/**
- * Synthesize a namespace object for `namespace` whose every accessed method
- * `m` issues `client.request("<namespace>/<m>", { sessionId, ...params })`. No
- * per-method knowledge is needed — a typo can't compile (the mapped type is the
- * guard), and an unknown-at-runtime method is rejected by the server. Method
- * functions are memoized.
- */
-function makeWireNamespace(client: InternalClient, sessionId: string, namespace: string): unknown {
-  const methodCache = new Map<string, (params?: Record<string, unknown>) => Promise<unknown>>();
-  return new Proxy(Object.create(null) as object, {
-    get(_target, prop) {
-      if (typeof prop !== "string" || prop === "then") return undefined;
-      let fn = methodCache.get(prop);
-      if (fn === undefined) {
-        const method = `${namespace}/${prop}` as WireMethod;
-        fn = (params?: Record<string, unknown>) =>
-          client.request(method, { sessionId, ...(params ?? {}) } as never);
-        methodCache.set(prop, fn);
-      }
-      return fn;
-    },
-  });
 }
 
 // ============================================================================

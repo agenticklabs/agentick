@@ -320,6 +320,74 @@ describe("session.live.start() — facet", () => {
   });
 });
 
+/**
+ * #247 — `active` used to only ever GROW: a stopped or aborted stream stayed in
+ * the registry, so a UI enumerating open streams found dead handles. The handle
+ * reports its terminal transition back to the facet from `teardown()` — the one
+ * point every terminal path converges on — rather than the facet polling `status`.
+ */
+describe("session.live.active — shrinks on every terminal path", () => {
+  it("drops a stream on stop()", async () => {
+    const t = fakeTransport();
+    const facet = sessionLive({ transport: t.transport }, "s1");
+
+    const handle = await facet.start("mic");
+    expect(facet.active).toContain(handle);
+
+    await handle.stop();
+    expect(facet.active).not.toContain(handle);
+    expect(facet.active).toHaveLength(0);
+  });
+
+  it("drops a stream on abort()", async () => {
+    const t = fakeTransport();
+    const facet = sessionLive({ transport: t.transport }, "s1");
+
+    const handle = await facet.start("mic");
+    await handle.abort("kill");
+
+    expect(facet.active).not.toContain(handle);
+  });
+
+  it("keeps the OTHER concurrent streams (mic uplink + screen share)", async () => {
+    const t = fakeTransport();
+    const facet = sessionLive({ transport: t.transport }, "s1");
+
+    const mic = await facet.start("mic");
+    const screen = await facet.start("screen");
+    await mic.stop();
+
+    expect(facet.active).toEqual([screen]);
+  });
+
+  it("stop() then abort() reports terminal once — the registry does not churn", async () => {
+    const t = fakeTransport();
+    const facet = sessionLive({ transport: t.transport }, "s1");
+
+    const handle = await facet.start("mic");
+    await handle.stop();
+    await handle.abort();
+
+    expect(facet.active).toHaveLength(0);
+  });
+
+  it("close() releases every open stream LOCALLY — no live/stop traffic", async () => {
+    const t = fakeTransport();
+    const facet = sessionLive({ transport: t.transport }, "s1");
+
+    await facet.start("mic");
+    await facet.start("screen");
+    const beforeClose = t.captured.length;
+
+    facet.close();
+    facet.close(); // idempotent
+
+    expect(facet.active).toHaveLength(0);
+    // The session is closing; telling the server about each stream is noise.
+    expect(t.captured).toHaveLength(beforeClose);
+  });
+});
+
 // ── microtask flush (for the "ignored frame leaves status unchanged" assertion) ──
 function tick(): Promise<void> {
   return new Promise((r) => setImmediate(r));

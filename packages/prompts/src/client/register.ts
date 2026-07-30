@@ -10,6 +10,7 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core";
+import type { WireNamespaceMethods } from "@agentick/spec";
 import { promptsHandle, type PromptsClientHandle } from "./prompts-handle.js";
 
 declare module "@agentick/spec" {
@@ -25,4 +26,18 @@ declare module "@agentick/spec" {
   }
 }
 
-registerSessionHandleExtension("prompts", (client, sessionId) => promptsHandle(client, sessionId));
+// The namespace's wire rows, so the ones this handle does NOT implement stay
+// reachable (`session.prompts.commands(…)`). Rows the handle DOES implement stay
+// shadowed by it — precedence lives in `wireFallthrough`, not in this list.
+registerSessionHandleExtension("prompts", (client, sessionId) => promptsHandle(client, sessionId), {
+  wireMethods: [
+    "commands",
+    "get",
+    "invoke",
+    "list",
+    "register",
+    "remove",
+    "render",
+    "update",
+  ] satisfies readonly (keyof WireNamespaceMethods<"prompts">)[],
+});

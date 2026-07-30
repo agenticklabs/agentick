@@ -23,7 +23,7 @@ import type { SubscriptionStream } from "./transport.js";
 import type { Unsubscribe } from "../protocol/inbox.js";
 import type { OnSignalOptions, ReceivedLog, ReceivedProgress } from "./signals.js";
 import type { ChannelView, ChannelViewConfig } from "./channel.js";
-import type { SessionWireNamespaces } from "./wire-proxy.js";
+import type { SessionWireNamespace, WireNamespaceMethods } from "./wire-proxy.js";
 
 // ============================================================================
 // Scoped subscriptions — the runtime-signal / channel-view subscriptions
@@ -144,24 +144,55 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
 }
 
 /**
+ * The wire-derived namespaces MERGED PER METHOD with the rich sub-handle that
+ * claims the same namespace.
+ *
+ * The merge is per-METHOD, not per-namespace: a sub-handle owns the rows it
+ * implements and the namespace's REMAINING rows stay reachable through the wire
+ * (`session.timeline.compact(…)` sits beside the hand-written
+ * `session.timeline.history(…)`). Omitting the whole namespace — the shape this
+ * replaces — made every unmirrored row unreachable except through raw
+ * `client.request`, which is how a shipped, gateway-served, e2e-tested
+ * `timeline/compact` ended up with no way to call it.
+ *
+ * A handle method WINS over a same-named wire row, and that shadowing is
+ * deliberate: `state.get(key)` / `skills.get(name)` / `prompts.get(name)` are
+ * SYNC snapshot reads against the handle's local mirror, a different contract
+ * from the async `state/get` / `skills/get` / `prompts/get` rows. The handle's
+ * contract is the published one; the row stays shadowed. The runtime proxy
+ * enforces the same precedence.
+ *
+ * `NonNullable` because an OPTIONAL slot (`readonly live?: SessionLive`) would
+ * otherwise make `keyof` collapse to `never` and re-expose every row the handle
+ * already owns.
+ */
+type MergedSessionNamespaces = {
+  [NS in SessionWireNamespace]: NS extends keyof SessionHandleExtensions
+    ? SessionHandleExtensions[NS] &
+        Omit<WireNamespaceMethods<NS>, keyof NonNullable<SessionHandleExtensions[NS]>>
+    : WireNamespaceMethods<NS>;
+};
+
+/**
  * Client-side session handle = **WIRE PROXY + VIEW FACTORY** (B2 slice 4):
  *
  *   - {@link SessionHandleBase} — the hand-written core (`send`, `dispatch`, …).
  *   - {@link SessionHandleExtensions} — per-harness rich sub-handles
  *     (`session.knobs`, `session.timeline`, …), contributed via ADR-87
- *     augmentation. These WIN over the wire-derived surface for their namespace.
- *   - {@link SessionWireNamespaces} — the wire-DERIVED namespace methods
- *     (`session.billing.approve(…)`), for every session-scoped `WireMethods` row
- *     whose namespace does NOT already have a rich sub-handle. Zero client code:
- *     declare the row + the gateway handler and the typed client method falls out.
+ *     augmentation. A slot with no wire namespace of its own
+ *     (`session.clientToolCalls`) rides through as-is.
+ *   - {@link MergedSessionNamespaces} — every session-scoped wire namespace,
+ *     each merged PER METHOD with the sub-handle that claims it (the sub-handle
+ *     wins; the leftover rows fall through). Zero client code: declare the row +
+ *     the gateway handler and the typed client method falls out.
  *
  * A `type` (not an `interface`) because it intersects a mapped type; augmentation
  * happens on `SessionHandleExtensions` / `WireMethods`, never on `SessionHandle`
  * directly, so nothing depends on it being an interface.
  */
 export type SessionHandle = SessionHandleBase &
-  SessionHandleExtensions &
-  Omit<SessionWireNamespaces, keyof SessionHandleBase | keyof SessionHandleExtensions>;
+  Omit<SessionHandleExtensions, keyof SessionHandleBase | SessionWireNamespace> &
+  Omit<MergedSessionNamespaces, keyof SessionHandleBase>;
 
 /**
  * Identical shape to server-side `SessionExecutionHandle`. Re-exported

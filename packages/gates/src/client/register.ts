@@ -10,6 +10,7 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core";
+import type { WireNamespaceMethods } from "@agentick/spec";
 import { gatesHandle, type GatesClientHandle } from "./gates-handle.js";
 
 declare module "@agentick/spec" {
@@ -24,4 +25,15 @@ declare module "@agentick/spec" {
   }
 }
 
-registerSessionHandleExtension("gates", (client, sessionId) => gatesHandle(client, sessionId));
+// The namespace's wire rows, so the ones this handle does NOT implement stay
+// reachable (`session.gates.commands(…)`). Rows the handle DOES implement stay
+// shadowed by it — precedence lives in `wireFallthrough`, not in this list.
+registerSessionHandleExtension("gates", (client, sessionId) => gatesHandle(client, sessionId), {
+  wireMethods: [
+    "clear",
+    "commands",
+    "defer",
+    "list",
+    "override",
+  ] satisfies readonly (keyof WireNamespaceMethods<"gates">)[],
+});

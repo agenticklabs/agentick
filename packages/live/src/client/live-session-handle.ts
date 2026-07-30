@@ -55,6 +55,16 @@ export interface RuntimeLiveSessionHandle extends LiveSessionHandle {
   readonly uplink: WritableStream<MediaFrame>;
   /** `ReadableStream<MediaFrame>` — enqueues from `onFrame`. */
   readonly downlink: ReadableStream<MediaFrame>;
+  /**
+   * Release this handle's CLIENT resources — media uplink/downlink, the
+   * transcript/state channel views, every listener — without telling the server
+   * anything. The local half of `stop()`, for when the far side is going away on
+   * its own: `session.close()` calls it on every open stream, where issuing
+   * `live/stop` into a session that is closing would be noise. Reach for `stop()`
+   * (graceful) or `abort()` (hard) to end a stream the server still owns.
+   * Idempotent.
+   */
+  close(): void;
 }
 
 export interface LiveSessionHandleDeps {
@@ -62,6 +72,12 @@ export interface LiveSessionHandleDeps {
   /** The media-plane capability, feature-detected off the transport by the facet. */
   readonly media: MediaTransport;
   readonly ref: MediaSessionRef;
+  /**
+   * Fired ONCE when the stream reaches a terminal state — `stop()`, `abort()`,
+   * or `close()` — after teardown. The facet deletes the handle from its `active`
+   * registry here; without it a stopped stream keeps enumerating as open.
+   */
+  readonly onTerminal?: (ref: MediaSessionRef) => void;
 }
 
 /**
@@ -70,7 +86,7 @@ export interface LiveSessionHandleDeps {
  * teardown happens on `stop` / `abort`.
  */
 export function liveSessionHandle(deps: LiveSessionHandleDeps): RuntimeLiveSessionHandle {
-  const { client, media, ref } = deps;
+  const { client, media, ref, onTerminal } = deps;
   const scope: SubscriptionScope = { kind: "session", id: ref.sessionId };
 
   const uplinkChannel: MediaUplink = media.openUplink(ref);
@@ -142,7 +158,13 @@ export function liveSessionHandle(deps: LiveSessionHandleDeps): RuntimeLiveSessi
     },
   });
 
+  // Guarded so the terminal callback fires exactly once — `stop()` then
+  // `abort()`, or either then `close()`, must not double-notify the facet (nor
+  // re-close channels that already ran their teardown).
+  let torndown = false;
   const teardown = (): void => {
+    if (torndown) return;
+    torndown = true;
     offDownlink();
     frameListeners.clear();
     transcriptListeners.clear();
@@ -151,6 +173,7 @@ export function liveSessionHandle(deps: LiveSessionHandleDeps): RuntimeLiveSessi
     transcriptView?.close();
     void uplinkChannel.close();
     void downlinkChannel.close();
+    onTerminal?.(ref);
   };
 
   const handle: RuntimeLiveSessionHandle = {
@@ -196,6 +219,7 @@ export function liveSessionHandle(deps: LiveSessionHandleDeps): RuntimeLiveSessi
       });
       teardown();
     },
+    close: teardown,
     // RUNTIME projections (ADR 88) — not on the portable spec surface.
     uplink,
     downlink,

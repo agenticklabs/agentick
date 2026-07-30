@@ -10,6 +10,7 @@
  */
 
 import { registerSessionHandleExtension } from "@agentick/client-core";
+import type { WireNamespaceMethods } from "@agentick/spec";
 import { skillsHandle, type SkillsClientHandle } from "./skills-handle.js";
 
 declare module "@agentick/spec" {
@@ -25,4 +26,17 @@ declare module "@agentick/spec" {
   }
 }
 
-registerSessionHandleExtension("skills", (client, sessionId) => skillsHandle(client, sessionId));
+// The namespace's wire rows, so the ones this handle does NOT implement stay
+// reachable (`session.skills.commands(…)`). Rows the handle DOES implement stay
+// shadowed by it — precedence lives in `wireFallthrough`, not in this list.
+registerSessionHandleExtension("skills", (client, sessionId) => skillsHandle(client, sessionId), {
+  wireMethods: [
+    "commands",
+    "get",
+    "list",
+    "register",
+    "remove",
+    "search",
+    "update",
+  ] satisfies readonly (keyof WireNamespaceMethods<"skills">)[],
+});

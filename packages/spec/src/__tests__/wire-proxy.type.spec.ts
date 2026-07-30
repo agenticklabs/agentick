@@ -37,6 +37,26 @@ declare module "../wire/params.js" {
       params: { sessionId: string; count: number };
       result: { echoed: number };
     };
+    // A namespace a rich sub-handle CLAIMS below — three rows, one of which the
+    // handle mirrors under the same name with a different contract.
+    "merged/get": { params: { sessionId: string; id: string }; result: { row: string } };
+    "merged/compact": { params: { sessionId: string; keep: number }; result: { removed: number } };
+    "merged/commands": { params: { sessionId: string }; result: readonly string[] };
+  }
+}
+
+/** The rich sub-handle a harness `/client` contributes for `merged` (ADR 87). */
+interface MergedClientHandle {
+  /** SYNC snapshot read — the same NAME as `merged/get`, a different contract. */
+  get(id: string): { row: string; from: "snapshot" } | undefined;
+  close(): void;
+}
+
+declare module "../client/handles.js" {
+  interface SessionHandleExtensions {
+    readonly merged: MergedClientHandle;
+    /** A slot with NO wire namespace of its own — it must ride through as-is. */
+    readonly slotOnly: { readonly marker: "no-wire-namespace" };
   }
 }
 
@@ -92,5 +112,45 @@ describe("session wire proxy — type-level IntelliSense contract", () => {
     type _Typo = SessionHandle["billing"]["aprove"];
     // @ts-expect-error — `nope` is not a session-scoped namespace at all.
     type _NoNs = SessionHandle["nope"];
+  });
+});
+
+/**
+ * #248 — a claimed namespace merges PER METHOD. Registering a rich sub-handle
+ * used to `Omit` the whole namespace, so every row the handle didn't mirror fell
+ * off `session.*` (the shipped-but-uncallable `timeline/compact`).
+ */
+describe("session handle — per-method merge of a claimed namespace", () => {
+  it("keeps the handle's OWN members", () => {
+    expectTypeOf<SessionHandle["merged"]["close"]>().toEqualTypeOf<() => void>();
+  });
+
+  it("THE LAW: a handle method wins over a same-named wire row", () => {
+    // `merged/get` is `(params: { id: string }) => Promise<{ row: string }>`; the
+    // handle's sync snapshot read is what survives the merge. Same name, different
+    // contract — the row stays shadowed, deliberately (state/skills/prompts `get`).
+    expectTypeOf<SessionHandle["merged"]["get"]>().toEqualTypeOf<
+      (id: string) => { row: string; from: "snapshot" } | undefined
+    >();
+  });
+
+  it("the namespace's UNMIRRORED rows fall through, typed from the row", () => {
+    expectTypeOf<SessionHandle["merged"]["compact"]>().toEqualTypeOf<
+      (params: { keep: number }) => Promise<{ removed: number }>
+    >();
+    expectTypeOf<SessionHandle["merged"]["commands"]>().toEqualTypeOf<
+      (params: Record<never, never>) => Promise<readonly string[]>
+    >();
+  });
+
+  it("a sub-handle slot with no wire namespace rides through untouched", () => {
+    expectTypeOf<SessionHandle["slotOnly"]>().toEqualTypeOf<{
+      readonly marker: "no-wire-namespace";
+    }>();
+  });
+
+  it("still rejects a name that is neither a handle member nor a row", () => {
+    // @ts-expect-error — `merged/purge` does not exist and the handle has no `purge`.
+    type _Nope = SessionHandle["merged"]["purge"];
   });
 });

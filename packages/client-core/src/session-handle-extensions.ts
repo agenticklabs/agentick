@@ -15,10 +15,41 @@
 
 import { AgentickError, registerAgentickError, type ClientProtocol } from "@agentick/spec";
 
+import { wireFallthrough } from "./wire-namespace.js";
+
 /** Builds one sub-handle for a session. Registered by a harness `/client` package. */
 export type SessionSubHandleFactory = (client: ClientProtocol, sessionId: string) => unknown;
 
-const registry = new Map<string, SessionSubHandleFactory>();
+/** What a harness declares about its slot beyond the factory. */
+export interface SessionSubHandleOptions {
+  /**
+   * The method names of this slot's WIRE namespace (`"timeline"` → the
+   * `timeline/*` rows) that should fall through to the wire when the handle
+   * itself does not define them — the runtime twin of the per-namespace type
+   * merge on `SessionHandle`. Declare the namespace's rows in full and let
+   * precedence sort it out: a row the handle already implements stays shadowed
+   * by the handle (see {@link wireFallthrough}).
+   *
+   * A LIST, not blind synthesis, because a proxy that answered every name would
+   * make every handle duck-type as `Respondable`/`Enumerable`. Type it against
+   * the namespace so a typo or a removed row is a compile error:
+   *
+   * ```ts
+   * wireMethods: ["commands", "compact", "history"] satisfies readonly (keyof
+   *   WireNamespaceMethods<"timeline">)[]
+   * ```
+   *
+   * Omitted → no fallthrough (the slot's own members are the whole surface).
+   */
+  readonly wireMethods?: readonly string[];
+}
+
+interface RegistryEntry {
+  readonly make: SessionSubHandleFactory;
+  readonly options: SessionSubHandleOptions;
+}
+
+const registry = new Map<string, RegistryEntry>();
 
 /**
  * Register a per-session sub-handle under `name` (e.g. `"tasks"`, `"knobs"`).
@@ -27,8 +58,12 @@ const registry = new Map<string, SessionSubHandleFactory>();
  * types the slot. Idempotent-by-last-write; a second registration of the same
  * name wins (dev/HMR-friendly).
  */
-export function registerSessionHandleExtension(name: string, make: SessionSubHandleFactory): void {
-  registry.set(name, make);
+export function registerSessionHandleExtension(
+  name: string,
+  make: SessionSubHandleFactory,
+  options: SessionSubHandleOptions = {},
+): void {
+  registry.set(name, { make, options });
 }
 
 /** Test/introspection hook — the currently-registered sub-handle names. */
@@ -112,30 +147,69 @@ export class SessionSubHandleNotRegistered extends AgentickError {
 registerAgentickError("SessionSubHandleNotRegistered", SessionSubHandleNotRegistered);
 
 /**
+ * Tear down every sub-handle that was actually BUILT, in build order. Returns
+ * the errors thrown (empty when clean) rather than throwing, so the caller can
+ * finish its own teardown — `session.close()` still has a `session/close` RPC to
+ * send. Idempotent: a second call is a no-op.
+ */
+export type SessionSubHandleTeardown = () => readonly unknown[];
+
+/**
  * Define a lazy, cached getter on `handle` for every registered sub-handle.
  * Called by `makeSessionHandle` after the base handle is built. The factory runs
  * on first property access (opening any subscription then, not at handle
- * construction), and the result is memoized for the handle's lifetime.
+ * construction), and the result is memoized for the handle's lifetime. A built
+ * sub-handle whose harness declared `wireMethods` is wrapped in the namespace
+ * {@link wireFallthrough} proxy before it is handed out.
+ *
+ * Returns the {@link SessionSubHandleTeardown} for the handles this call
+ * installs. It closes what was BUILT and nothing else — an untouched getter is
+ * never materialized by teardown, so closing a session does not open the
+ * subscriptions it is about to abandon.
  */
 export function applySessionHandleExtensions(
   handle: object,
   client: ClientProtocol,
   sessionId: string,
-): void {
-  for (const [name, make] of registry) {
+): SessionSubHandleTeardown {
+  const built: unknown[] = [];
+  for (const [name, entry] of registry) {
     if (name in handle) continue; // never shadow a real handle member
-    let built: unknown;
+    let instance: unknown;
     let done = false;
     Object.defineProperty(handle, name, {
       configurable: true,
       enumerable: true,
       get() {
         if (!done) {
-          built = make(client, sessionId);
+          const made = entry.make(client, sessionId);
+          const rows = entry.options.wireMethods;
+          instance =
+            rows !== undefined && rows.length > 0 && typeof made === "object" && made !== null
+              ? wireFallthrough(made, client, sessionId, name, rows)
+              : made;
           done = true;
+          built.push(instance);
         }
-        return built;
+        return instance;
       },
     });
   }
+
+  let torndown = false;
+  return () => {
+    if (torndown) return [];
+    torndown = true;
+    const errors: unknown[] = [];
+    for (const instance of built) {
+      const close = (instance as { close?: unknown }).close;
+      if (typeof close !== "function") continue;
+      try {
+        (close as () => void).call(instance);
+      } catch (err) {
+        errors.push(err);
+      }
+    }
+    return errors;
+  };
 }
