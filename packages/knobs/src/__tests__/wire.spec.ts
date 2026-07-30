@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { AppNotFoundError } from "@agentick/spec";
+import { SessionNotFoundError } from "@agentick/spec";
 import type {
   AppHarnessProtocol,
   GatewayHarnessProtocol,
@@ -74,11 +74,11 @@ describe("knobs/set — write command (slice 4)", () => {
     expect(calls[0]).not.toHaveProperty("key");
   });
 
-  it("throws AppNotFoundError when the session does not resolve", async () => {
+  it("throws SessionNotFoundError when the session does not resolve", async () => {
     const ctx = stubCtx(stubGateway(undefined));
 
     await expect(
       set({ sessionId: "no-such", id: "temperature", value: 0.9 }, ctx),
-    ).rejects.toBeInstanceOf(AppNotFoundError);
+    ).rejects.toBeInstanceOf(SessionNotFoundError);
   });
 });

@@ -33,7 +33,12 @@
 
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import { WebSocketServer, type WebSocket as WSConnection } from "ws";
-import { ErrorCode, type IngressIdentity, type JsonRpcFrame } from "@agentick/spec";
+import {
+  ErrorCode,
+  type IngressIdentity,
+  type JsonRpcFrame,
+  type WireServerDescriptor,
+} from "@agentick/spec";
 import {
   authenticateIngress,
   BaseConnectionContext,
@@ -42,6 +47,17 @@ import {
   type WebSecurityOptions,
 } from "@agentick/transport";
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
+
+/**
+ * What this transport tells `initialize` callers about the wire they reached.
+ * `batch` is true because {@link ConnectionContext.handleMessage} decodes
+ * array frames; `streamableHttp` is absent — a WS connection is not one.
+ */
+const SERVER_DESCRIPTOR: WireServerDescriptor = Object.freeze({
+  name: "@agentick/transport-websocket",
+  version: "0.0.0",
+  batch: true,
+});
 
 // A WS upgrade is not classic-CSRF-vulnerable (the browser sends an
 // unforgeable Origin), so the origin/host gate is the defense — `csrf` (a
@@ -291,7 +307,7 @@ class ConnectionContext extends BaseConnectionContext {
     gateway: DispatchHost,
     identity?: import("@agentick/spec").IngressIdentity,
   ) {
-    super(gateway, identity);
+    super(gateway, identity, SERVER_DESCRIPTOR);
   }
 
   async handleMessage(raw: unknown): Promise<void> {

@@ -23,6 +23,7 @@ import type {
   JsonRpcId,
   JsonRpcRequest,
   JsonRpcResponse,
+  WireServerDescriptor,
 } from "@agentick/spec";
 import { intersectScopes, type IngressIdentity } from "@agentick/spec";
 
@@ -43,6 +44,13 @@ export abstract class BaseConnectionContext {
      * DOWNSCOPES it (#198) — effective scopes = claims ∩ requested.
      */
     protected identity?: IngressIdentity,
+    /**
+     * What the transport serving THIS connection says about itself — the
+     * source of the `initialize` answer's `serverInfo` and its framing flags.
+     * Each transport passes its own; omitted leaves `dispatchRequest` to name
+     * the dispatcher itself.
+     */
+    protected readonly server?: WireServerDescriptor,
   ) {}
 
   /**
@@ -85,6 +93,7 @@ export abstract class BaseConnectionContext {
         frame as JsonRpcRequest,
         this.defaultSink(),
         this.identity,
+        this.server,
       );
     }
     return null;

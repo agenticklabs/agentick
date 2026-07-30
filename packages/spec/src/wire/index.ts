@@ -17,5 +17,6 @@ export * from "./params.js";
 export * from "./notifications.js";
 export * from "./validate.js";
 export * from "./extension.js";
+export * from "./find-session.js";
 export * from "./registry.js";
 export * from "./authorizer.js";

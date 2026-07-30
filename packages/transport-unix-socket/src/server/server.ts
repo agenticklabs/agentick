@@ -21,9 +21,21 @@ import {
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
+  type WireServerDescriptor,
 } from "@agentick/spec";
 import { authenticateIngress, dispatchRequest, type DispatchHost } from "@agentick/transport";
 import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
+
+/**
+ * What this transport tells `initialize` callers about the wire they reached.
+ * `batch` is true because the NDJSON read loop decodes array frames;
+ * `streamableHttp` is absent — a socket is not an HTTP response.
+ */
+const SERVER_DESCRIPTOR: WireServerDescriptor = Object.freeze({
+  name: "@agentick/transport-unix-socket",
+  version: "0.0.0",
+  batch: true,
+});
 
 export interface UnixSocketServerOptions {
   readonly path: string;
@@ -295,6 +307,7 @@ class ConnectionContext {
           },
         },
         this.identity,
+        SERVER_DESCRIPTOR,
       );
     }
     return null;

@@ -7,6 +7,7 @@ export * from "./map-concurrent.js";
 export * from "./match-filter.js";
 export * from "./merge-layered.js";
 export * from "./omit-undefined.js";
+export * from "./paginate.js";
 export * from "./predicates.js";
 export * from "./resolvable.js";
 export * from "./split-message.js";

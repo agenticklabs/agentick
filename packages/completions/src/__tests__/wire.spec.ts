@@ -21,7 +21,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
-  AppNotFoundError,
+  SessionNotFoundError,
   CompletionNotFound,
   CompletionResolveFailed,
   PromptNotFound,
@@ -214,9 +214,9 @@ describe("completions/complete — hop 2, the registry", () => {
 });
 
 describe("completions/complete — session resolution", () => {
-  it("throws AppNotFoundError when the session does not resolve", async () => {
+  it("throws SessionNotFoundError when the session does not resolve", async () => {
     await expect(complete(PHASE_PARAMS, stubCtx(undefined))).rejects.toBeInstanceOf(
-      AppNotFoundError,
+      SessionNotFoundError,
     );
   });
 });

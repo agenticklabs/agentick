@@ -293,6 +293,22 @@ export interface PromptsGetResult {
    * it onto the wire).
    */
   readonly messages: readonly MessageEntry[];
+  /**
+   * The DECLARATION's adopter metadata bag, surfaced on the render result.
+   *
+   * Deliberately not a per-render bag: a render produces messages, and anything
+   * it wants to say about them belongs on a message. What a caller holding only
+   * a result cannot otherwise reach is what the DECLARATION said about itself —
+   * a wire projection reading `prompts/get` has no list record in hand and would
+   * otherwise have to look the declaration up again to answer "what did the
+   * author attach to this prompt".
+   *
+   * Same carriage convention as everywhere else metadata travels: a namespaced
+   * sub-bag per consumer. MCP's `GetPromptResult._meta` rides
+   * `metadata.mcp.meta`, which is the same key `prompts/list` projects from —
+   * one authored place, two wire slots.
+   */
+  readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 // ============================================================================

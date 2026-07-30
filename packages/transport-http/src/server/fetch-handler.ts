@@ -81,6 +81,7 @@ import {
   type WebSecurityPolicy,
 } from "@agentick/transport";
 import { encodeSseFrame } from "../shared/sse.js";
+import { SERVER_DESCRIPTOR } from "./descriptor.js";
 
 /**
  * The resolved caller identity the host's auth hands us — the SAME shape as
@@ -332,7 +333,9 @@ class FetchSessionConnection extends BaseConnectionContext {
   private readonly encoder = new TextEncoder();
 
   constructor(id: string, gateway: DispatchHost) {
-    super(gateway);
+    // Identity is PER REQUEST on HTTP, so the connection carries none; the
+    // serving transport is constant, so it does.
+    super(gateway, undefined, SERVER_DESCRIPTOR);
     this.id = id;
   }
 
@@ -468,6 +471,7 @@ async function handlePost(
               ),
           },
           identity,
+          SERVER_DESCRIPTOR,
         );
         controller.enqueue(encoder.encode(encodeSseFrame(response)));
         controller.close();
@@ -476,7 +480,13 @@ async function handlePost(
     return new Response(stream, { status: 200, headers: respond.sse(sessionId) });
   }
 
-  const response = await dispatchRequest(gateway, request, session.defaultSink(), identity);
+  const response = await dispatchRequest(
+    gateway,
+    request,
+    session.defaultSink(),
+    identity,
+    SERVER_DESCRIPTOR,
+  );
   return respond.json(response, sessionId);
 }
 
@@ -494,7 +504,13 @@ async function dispatchSingle(
     return null;
   }
   if ("id" in frame && "method" in frame) {
-    return dispatchRequest(gateway, frame as JsonRpcRequest, session.defaultSink(), identity);
+    return dispatchRequest(
+      gateway,
+      frame as JsonRpcRequest,
+      session.defaultSink(),
+      identity,
+      SERVER_DESCRIPTOR,
+    );
   }
   return null;
 }

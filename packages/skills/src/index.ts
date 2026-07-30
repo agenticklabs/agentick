@@ -17,7 +17,7 @@ export { SkillsHarness, type SkillsHarnessOptions } from "./harness.js";
 // messages it composes. The augmentation itself rides the `./augment.js` side
 // effect above; this is the payload type a reader narrows to.
 export type { SkillMessageSource } from "./message-source.js";
-export type { SkillsHandle, SkillRunCompose, SkillRunOptions } from "./handle.js";
+export type { SkillsHandle, SkillRunCompose, SkillRunOptions, SkillsRunInput } from "./handle.js";
 export { defaultComposeRun } from "./compose-run.js";
 export { withSkills, type WithSkillsOptions } from "./extension.js";
 // ADR 93 — the namespace definition: the store, the genesis seam, this

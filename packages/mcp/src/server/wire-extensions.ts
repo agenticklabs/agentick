@@ -264,6 +264,15 @@ export function readMcpDeclarationExtensions(
  *
  * The convention is structural (`describe.ts`'s `IconDescriptor`), so a
  * malformed value is dropped rather than emitted onto the wire.
+ *
+ * A pass-through with no per-field mapping, and that is the point: the
+ * convention's field types now match `Icon`'s exactly (`sizes` is `string[]` on
+ * both sides since #259). Were they to diverge again, four projection sites
+ * would each need the same fix-up — the reason the convention moved rather than
+ * the wire.
+ *
+ * @verifiedBy packages/mcp/src/server/__tests__/wire-extensions.spec.ts
+ *   §"projected icons parse under the SDK Icon schema"
  */
 export function readMetadataIcons(
   metadata: Readonly<Record<string, unknown>> | undefined,

@@ -64,6 +64,7 @@ import {
   type WebSecurityOptions,
 } from "@agentick/transport";
 import { encodeSseFrame } from "../shared/sse.js";
+import { SERVER_DESCRIPTOR } from "./descriptor.js";
 
 export interface HttpServerOptions extends WebSecurityOptions {
   readonly httpServer: HttpServerNode;
@@ -242,7 +243,9 @@ class SessionConnection extends BaseConnectionContext {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(id: string, gateway: DispatchHost) {
-    super(gateway);
+    // Identity is PER REQUEST on HTTP, so the connection carries none; the
+    // serving transport is constant, so it does.
+    super(gateway, undefined, SERVER_DESCRIPTOR);
     this.id = id;
   }
 
@@ -429,6 +432,7 @@ async function handlePost(
         },
       },
       identity,
+      SERVER_DESCRIPTOR,
     );
     try {
       res.write(encodeSseFrame(response));
@@ -440,7 +444,13 @@ async function handlePost(
   }
 
   // Non-streaming — single JSON response.
-  const response = await dispatchRequest(gateway, request, session.defaultSink(), identity);
+  const response = await dispatchRequest(
+    gateway,
+    request,
+    session.defaultSink(),
+    identity,
+    SERVER_DESCRIPTOR,
+  );
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(response));
 }
@@ -461,7 +471,13 @@ async function dispatchSingle(
     return null;
   }
   if ("id" in frame && "method" in frame) {
-    return dispatchRequest(gateway, frame as JsonRpcRequest, session.defaultSink(), identity);
+    return dispatchRequest(
+      gateway,
+      frame as JsonRpcRequest,
+      session.defaultSink(),
+      identity,
+      SERVER_DESCRIPTOR,
+    );
   }
   return null;
 }

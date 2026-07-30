@@ -93,7 +93,7 @@ import {
   PromptsHydrateFailed,
 } from "@agentick/spec";
 import { View } from "@agentick/store";
-import { omitUndefined, ulid } from "@agentick/utils";
+import { omitUndefined, paginate, ulid } from "@agentick/utils";
 
 import type { PromptMessageSource } from "./message-source.js";
 import {
@@ -112,6 +112,7 @@ import type {
 } from "./definition.js";
 import { isMessageEntryArray, stringToSystemMessage, type PromptRenderer } from "./renderer.js";
 import { InMemoryPromptStore } from "./store.js";
+import type { PromptsListInput, PromptsListResult } from "./wire-augment.js";
 
 /**
  * The NON-serializable runtime augmentation of a prompt — the fields the store
@@ -149,7 +150,7 @@ declare module "@agentick/runtime" {
     "prompts:invoke": { input: PromptsInvokeInput; output: PromptsGetResult };
     "prompts:render": { input: PromptsGetInput; output: PromptsGetResult };
     "prompts:get": { input: { readonly name: string }; output: PromptDeclaration | null };
-    "prompts:list": { input: undefined; output: readonly PromptDeclaration[] };
+    "prompts:list": { input: PromptsListInput; output: PromptsListResult };
   }
 }
 
@@ -381,17 +382,25 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       exposure: "wire",
       handler: (i: { name: string }) => Effect.sync(() => this.view.getSync(i.name) ?? null),
     });
-    // `prompts:list` — every declaration as wire-safe records (name-sorted).
+    // `prompts:list` — declarations as wire-safe records (name-sorted), paged.
+    // Paginated on the WIRE only: the sync `list()` stays the bounded in-process
+    // snapshot. Pages slice the same sorted array, so a cursor walk and a
+    // snapshot agree.
+    // TODO(page-size-seam): page size is the shared DEFAULT_PAGE_SIZE. Only
+    // `@agentick/resources` has a per-harness `pageSize` option today; give
+    // skills/prompts/tools one when a second adopter asks, not before.
     this.command({
       name: "prompts:list",
       exposure: "wire",
-      handler: () =>
-        Effect.sync(() =>
-          this.view
+      handler: (i: PromptsListInput) =>
+        Effect.sync(() => {
+          const sorted = this.view
             .listSync()
             .slice()
-            .sort((a, b) => a.name.localeCompare(b.name)),
-        ),
+            .sort((a, b) => a.name.localeCompare(b.name));
+          const { page, nextCursor } = paginate(sorted, i?.cursor);
+          return { prompts: page, ...omitUndefined({ nextCursor }) };
+        }),
     });
 
     // ─── The definition's `hooks:` / `guards:` bags (ADR 93) ───
@@ -1188,7 +1197,16 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     // 3. Dispatch to native handler or matching renderer.
     const messages = await this.dispatchContent(name, content, args);
 
-    return { description: decl.description, messages };
+    // 4. Surface the DECLARATION's metadata bag on the result. Nothing is
+    // invented per-render: this is the author's bag, copied verbatim, so a
+    // consumer holding only a result can read what the declaration said about
+    // itself (MCP's `GetPromptResult._meta` rides `metadata.mcp.meta`, the same
+    // key `prompts/list` projects from). Absent stays absent.
+    return omitUndefined({
+      description: decl.description,
+      messages,
+      metadata: decl.metadata,
+    }) as PromptsGetResult;
   }
 
   private async dispatchContent(

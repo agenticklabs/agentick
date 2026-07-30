@@ -16,6 +16,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { WIRE_PROTOCOL_VERSION } from "@agentick/spec";
 import type {
   ClientState,
   ClientTransport,
@@ -114,7 +115,10 @@ function pendingSendTransport() {
       if (method === "session/send") return new Promise<never>(() => {});
       if (method === "initialize") {
         return {
-          protocolVersion: "1.0",
+          // The wire's one version. A fixture claiming anything else now fails
+          // the client's handshake check (#252) — which is how this typo was
+          // found: `"1.0"` was never a version this protocol had.
+          protocolVersion: WIRE_PROTOCOL_VERSION,
           capabilities: {},
           serverInfo: { name: "fake", version: "0" },
         };

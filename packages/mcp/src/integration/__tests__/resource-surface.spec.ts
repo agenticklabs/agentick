@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ResourcesHarness } from "@agentick/resources";
+import { ResourceAliasAmbiguous } from "@agentick/spec";
 import type { ResourceContents } from "@agentick/spec";
 
 import {
@@ -182,7 +183,21 @@ describe("surfaceRemoteResources", () => {
       text: "from-b",
     });
 
-    await expect(resources.read("config://app")).rejects.toThrow(/ambiguous/i);
+    // The TAG and the payload, not the message: a `/ambiguous/i` regex was also
+    // satisfied by the `ResourceResolverFailed` wrapper that swallowed this error
+    // for an entire release (#245). What a caller needs is the branchable tag and
+    // the named claimants it can read directly.
+    const err = await resources.read("config://app").then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ResourceAliasAmbiguous);
+    expect((err as ResourceAliasAmbiguous)._tag).toBe("ResourceAliasAmbiguous");
+    expect((err as ResourceAliasAmbiguous).uri).toBe("config://app");
+    expect((err as ResourceAliasAmbiguous).candidates).toEqual([
+      "mcp://srv-a/config://app",
+      "mcp://srv-b/config://app",
+    ]);
   });
 
   it("an alias becomes unambiguous again when the other claimant goes away", async () => {

@@ -33,7 +33,7 @@
  * @verifiedBy packages/prompts/src/client/__tests__/session-prompts.spec.ts
  */
 
-import type { ClientHandle, Enumerable } from "@agentick/client-core";
+import { polledView, type ClientHandle, type Enumerable } from "@agentick/client-core";
 import type {
   ClientTransport,
   PromptDeclarationRecord,
@@ -43,7 +43,6 @@ import type {
   PromptsRegisterInput,
   PromptsRemoveInput,
   PromptsUpdateInput,
-  Unsubscribe,
 } from "@agentick/spec";
 
 /** Command client: the `request` surface the prompts handle rides (RPC-only). */
@@ -88,46 +87,15 @@ export function promptsHandle(
   client: PromptsCommandClient,
   sessionId: string,
 ): PromptsClientHandle {
-  let snapshot: readonly PromptDeclarationRecord[] = [];
-  let byName = new Map<string, PromptDeclarationRecord>();
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const cb of listeners) cb();
-  };
-
-  const refresh = async (): Promise<readonly PromptDeclarationRecord[]> => {
-    const rows = (await client.transport.request("prompts/list", { sessionId })) as
-      | readonly PromptDeclarationRecord[]
-      | null
-      | undefined;
-    snapshot = rows ?? [];
-    byName = new Map(snapshot.map((p) => [p.name, p]));
-    notify();
-    return snapshot;
-  };
-
-  // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected", so the snapshot fills itself and NOTIFIES when
-  // it lands — a caller binds `list()` + `subscribe()` and has nothing to await
-  // and no boot-time fetch to issue. A poll that fails before the session is
-  // reachable leaves the snapshot empty (never half-filled); the next mutation's
-  // re-fetch or an explicit `refresh()` recovers it.
-  void refresh().catch(() => undefined);
+  const view = polledView<PromptDeclarationRecord>({
+    // Only the FIRST page seeds the snapshot — walking cursors is the power-user
+    // path (`refresh` re-polls page one), matching the resources handle.
+    fetch: async () => (await client.transport.request("prompts/list", { sessionId }))?.prompts,
+    key: (p) => p.name,
+  });
 
   return {
-    list: () => snapshot,
-    get: (name) => byName.get(name),
-    subscribe: (cb: () => void): Unsubscribe => {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-    close: () => {
-      listeners.clear();
-    },
-    refresh,
+    ...view,
     render: async (input) =>
       (await client.transport.request("prompts/render", {
         sessionId,
@@ -140,15 +108,15 @@ export function promptsHandle(
       })) as PromptsGetResult,
     register: async (input) => {
       await client.transport.request("prompts/register", { sessionId, ...input });
-      await refresh();
+      await view.refresh();
     },
     update: async (input) => {
       await client.transport.request("prompts/update", { sessionId, ...input });
-      await refresh();
+      await view.refresh();
     },
     remove: async (input) => {
       await client.transport.request("prompts/remove", { sessionId, ...input });
-      await refresh();
+      await view.refresh();
     },
   };
 }

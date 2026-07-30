@@ -26,12 +26,15 @@ import { describe, expect, it } from "vitest";
 import {
   defineWireExtension,
   ErrorCode,
+  WIRE_PROTOCOL_VERSION,
   type AppHarnessProtocol,
   type GatewayHarnessProtocol,
+  type InitializeResult,
   type JsonRpcRequest,
   type SessionHarnessProtocol,
   type WireExtension,
   type WireExtensionRegistry,
+  type WireServerDescriptor,
 } from "@agentick/spec";
 import { createWireExtensionRegistry } from "@agentick/gateway";
 
@@ -357,6 +360,98 @@ describe("dispatchRequest — wire extension registry integration", () => {
         }),
       },
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// initialize — the handshake answers with what is wired, not a constant (#252)
+// ---------------------------------------------------------------------------
+
+describe("dispatchRequest — initialize", () => {
+  const clientHello = {
+    protocolVersion: WIRE_PROTOCOL_VERSION,
+    capabilities: {},
+    clientInfo: { name: "t", version: "0" },
+  };
+
+  async function initializeAgainst(
+    gw: DispatchHost,
+    server?: WireServerDescriptor,
+    params: unknown = clientHello,
+  ) {
+    const resp = await dispatchRequest(
+      gw,
+      req("initialize", params),
+      stubSink(),
+      undefined,
+      server,
+    );
+    return resp as { result?: InitializeResult; error?: { code: number; data?: unknown } };
+  }
+
+  it("derives `subscriptions` from the registry — false with no sub/* extension", async () => {
+    // The flag is a promise that `sub/subscribe` will answer. This host
+    // registers only `myExt/*`, so the honest answer is no.
+    const { result } = await initializeAgainst(fakeGateway([echoExt]));
+    expect(result?.capabilities.subscriptions).toBe(false);
+    // Not implemented anywhere on the server yet — see TODO(wire-resume).
+    expect(result?.capabilities.cursorResume).toBe(false);
+    expect(result?.capabilities.mcpSurface).toBe(false);
+    // Dispatcher-intrinsic: `wire.progress` and `registerInFlight` are handed
+    // to every handler by this dispatcher, so both hold for any host.
+    expect(result?.capabilities.progress).toBe(true);
+    expect(result?.capabilities.cancellation).toBe(true);
+  });
+
+  it("derives `subscriptions: true` once the sub/* methods resolve", async () => {
+    const subExt = defineWireExtension({
+      name: "test#sub",
+      namespace: "sub",
+      methods: {
+        "sub/subscribe": async () => ({ subscriptionId: "s-1" }),
+        "sub/unsubscribe": async () => null,
+      },
+    });
+    const { result } = await initializeAgainst(fakeGateway([subExt]));
+    expect(result?.capabilities.subscriptions).toBe(true);
+  });
+
+  it("takes serverInfo + framing flags from the SERVING transport", async () => {
+    const { result } = await initializeAgainst(fakeGateway([echoExt]), {
+      name: "@agentick/transport-unix-socket",
+      version: "9.9.9",
+      batch: true,
+    });
+    expect(result?.serverInfo).toEqual({
+      name: "@agentick/transport-unix-socket",
+      version: "9.9.9",
+    });
+    expect(result?.capabilities.batch).toBe(true);
+    // Declared nothing about SSE ⇒ not advertised.
+    expect(result?.capabilities.streamableHttp).toBe(false);
+  });
+
+  it("names the dispatcher when no transport declared itself", async () => {
+    // A bare host calling `dispatchRequest` directly. The one true thing
+    // available is that the dispatcher answered.
+    const { result } = await initializeAgainst(fakeGateway([echoExt]));
+    expect(result?.serverInfo.name).toBe("@agentick/transport");
+    expect(result?.capabilities.batch).toBe(false);
+  });
+
+  it("rejects a protocolVersion it does not speak", async () => {
+    const { error } = await initializeAgainst(fakeGateway([echoExt]), undefined, {
+      ...clientHello,
+      protocolVersion: "v2",
+    });
+    expect(error?.code).toBe(ErrorCode.InvalidParams);
+    expect(error?.data).toMatchObject({ received: "v2", expected: WIRE_PROTOCOL_VERSION });
+  });
+
+  it("tolerates params with no protocolVersion at all", async () => {
+    // Absent is not a mismatch: nothing was claimed, so nothing conflicts.
+    const { result } = await initializeAgainst(fakeGateway([echoExt]), undefined, {});
+    expect(result?.protocolVersion).toBe(WIRE_PROTOCOL_VERSION);
   });
 });
 

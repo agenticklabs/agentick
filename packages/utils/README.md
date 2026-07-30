@@ -20,6 +20,7 @@ That is the package's job, and it is the rule that matters more than any single 
 | `err instanceof Error ? err.message : String(err)`                   | `reasonOf(err)`                        |
 | `Date.now().toString(36) + Math.random().toString(36)`               | `ulid()`                               |
 | a semaphore loop to cap in-flight work                               | `mapConcurrent(items, n, fn)`          |
+| `all.slice(offset, offset + size)` + a hand-rolled cursor string     | `paginate(all, cursor, pageSize?)`     |
 | an `AbortController` wired to listen to two other signals            | `mergeAbortSignals(a, b)`              |
 | `v instanceof Promise`                                               | `isThenable(v)`                        |
 | `.catch(() => undefined)` to silence an expected rejection in a test | `drainRejection(p)` (`/testing`)       |
@@ -416,6 +417,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 | `ulid()`                                                                                    | function  | lexicographically sortable, monotonic-within-ms id           |
 | `splitMessage(text, options)` · `SplitOptions`                                              | function  | chunk text to a hard cap on semantic boundaries              |
 | `cartesian(axes)`                                                                           | function  | full product of axis values, one record per cell             |
+| `paginate(all, cursor, pageSize?)` · `Page<T>` · `DEFAULT_PAGE_SIZE`                        | function  | one page of a list + the cursor that follows it              |
 
 ### `@agentick/utils/testing`
 
@@ -488,6 +490,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 - `src/__tests__/abort-signals.spec.ts` — no-signal `undefined`, a lone signal returned unwrapped, an already-aborted source handed back so `.aborted` reads synchronously, and reason propagation from whichever source fires first.
 - `src/__tests__/resolvable.spec.ts` — literal pass-through, thunk invocation with no memoization, errors surfacing at the resolution site, narrow literal types preserved, and the async arms.
 - `src/__tests__/match-scope.spec.ts` — empty filter matches everything, every present dimension must strictly equal, explicit `undefined` is not a constraint, no coercion, and `compileScopeMatcher` semantically identical to `matchesScope` across a filter sweep while reusable across many values.
+- `src/__tests__/paginate.spec.ts` — the cursor contract every wire and projection surface shares: a single page carrying no cursor, a full walk seeing each item exactly once, the cursor being the next OFFSET, no empty trailing page at an exact boundary, garbage / negative / empty cursors starting over rather than throwing, `parseInt` prefix decoding, an empty page past the end, and the `DEFAULT_PAGE_SIZE` default.
 - `src/__tests__/cartesian.spec.ts` — the mathematical edges (`{}` → one empty cell, an empty axis → zero cells), rightmost-axis-varies-fastest ordering, reference identity of axis values, and fresh mutation-safe cells.
 - `src/__tests__/split-message.spec.ts` — no chunk over the cap, boundary priority, hard break when no boundary exists, continuation-suffix headroom, a 4096-cap payload, and the throw when the continuation is as long as the limit.
 - `src/__tests__/drain-rejection.spec.ts` — value and rejection pass-through, no unhandled-rejection event when another `await` races, a session-lifecycle pattern staying warning-free, repeated awaits yielding the same resolution, and that it does not absorb other promises' rejections in the same tick.

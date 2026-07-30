@@ -111,6 +111,12 @@ export interface DefineSessionInput<P = unknown> {
    * session that captures state but can't take it back).
    */
   readonly restore?: (input: RestoreSnapshotInput) => Promise<void>;
+  /**
+   * Cancel the current execution. Optional — omit to get a façade that
+   * rejects `abort()` with "not configured" (a callback session that runs
+   * work but exposes no way to stop it).
+   */
+  readonly abort?: (reason?: string) => Promise<void>;
   readonly close?: () => Promise<void>;
 
   // ── Required: state applicator (the loop calls these) ────────────────
@@ -266,6 +272,20 @@ class CallbackSessionHarness<P = unknown>
         }),
       ),
     ) as Promise<SessionExecutionHandle<T>>;
+  }
+
+  abort(reason?: string): Promise<void> {
+    if (this.spec.abort) return this.spec.abort(reason);
+    // Rejects rather than resolving quietly: a caller that asked to cancel and
+    // got a success from a session that cancelled nothing is the exact defect
+    // the `session/abort` wire verb had. "Nothing running" is the SESSION's
+    // no-op to make (see `SessionHarness.abort`); "I never wired cancellation"
+    // is a configuration gap and says so.
+    return Promise.reject(
+      new ExecutionFailed({
+        cause: new Error("defineSession: abort() not configured"),
+      }) satisfies SessionError,
+    );
   }
 
   async snapshot(): Promise<SessionSnapshot> {

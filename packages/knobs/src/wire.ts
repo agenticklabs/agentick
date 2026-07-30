@@ -12,23 +12,17 @@
  * `knobs` namespace is declared (augment.ts) but unowned here — a wire
  * extension may implement a subset of its namespace's declared methods.
  *
- * Session resolution mirrors the `session` branch of
- * `subscriptionsWireExtension`'s `openScopeEvents`: iterate the gateway's
- * apps, take the first whose `getSession(sessionId)` resolves. An
- * unresolved id throws `AppNotFoundError` — the same "scope target not
- * found" failure the subscriptions extension raises.
+ * Session resolution is spec's shared `findSession(ctx, sessionId)` — an
+ * unresolved id throws `SessionNotFoundError`.
  *
- * @see packages/gateway/src/wire/subscriptions-extension.ts
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  * @verifiedBy packages/knobs/src/__tests__/wire.spec.ts
  */
 
 import {
-  AppNotFoundError,
   defineWireExtension,
-  type AppHarnessProtocol,
+  findSession,
   type KnobPrimitive,
-  type SessionHarnessProtocol,
   type WireExtension,
 } from "@agentick/spec";
 
@@ -38,22 +32,7 @@ export const knobsWireExtension: WireExtension = defineWireExtension({
   version: "1.0.0",
   methods: {
     "knobs/set": async (params, ctx) => {
-      // Resolve the owning session — mirrors the `session` branch of the
-      // subscriptions extension's `openScopeEvents`.
-      let session: SessionHarnessProtocol | undefined;
-      for (const app of ctx.gateway.apps() as readonly AppHarnessProtocol[]) {
-        const sess = app.getSession(params.sessionId);
-        if (sess) {
-          session = sess;
-          break;
-        }
-      }
-      if (!session) {
-        // No AgentickError class covers "session not found" precisely;
-        // AppNotFoundError is the fit the subscriptions extension uses for
-        // unresolved scope targets (session resolution traverses apps).
-        throw new AppNotFoundError({ appId: params.sessionId });
-      }
+      const session = ctx.session ?? findSession(ctx, params.sessionId);
 
       // The wire row (`id`/`value`) IS the handle's `KnobsSetInput` shape
       // (friction #13: one name — `id` — client to server, no rename at the

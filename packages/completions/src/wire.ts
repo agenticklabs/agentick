@@ -47,10 +47,9 @@
  */
 
 import {
-  AppNotFoundError,
   CompletionNotFound,
   defineWireExtension,
-  type AppHarnessProtocol,
+  findSession,
   type CompletionResult,
   type PromptsCompleteInput,
   type PromptsCompleteOutcome,
@@ -98,22 +97,7 @@ export const completionsWireExtension: WireExtension = defineWireExtension({
   journal: { "completions/complete": "bus-only" },
   methods: {
     "completions/complete": async (params, ctx) => {
-      // Resolve the owning session — open-coded, mirroring `knobsWireExtension`
-      // (and carrying the same caveat its doc-block does: no AgentickError class
-      // covers "session not found" precisely, so an unresolved id raises the
-      // `AppNotFoundError` the subscriptions extension uses for unresolved scope
-      // targets, since session resolution traverses apps).
-      let session: SessionHarnessProtocol | undefined;
-      for (const app of ctx.gateway.apps() as readonly AppHarnessProtocol[]) {
-        const sess = app.getSession(params.sessionId);
-        if (sess) {
-          session = sess;
-          break;
-        }
-      }
-      if (!session) {
-        throw new AppNotFoundError({ appId: params.sessionId });
-      }
+      const session = ctx.session ?? findSession(ctx, params.sessionId);
 
       // No prompts surface on this session — a question this deployment cannot
       // answer, which is silence rather than a protocol error.

@@ -482,6 +482,33 @@ errors.close(); // detaches only this projection
 `useSyncExternalStore` consumer, so the projection is cached and invalidated on
 the next source change.
 
+**`polledView` — the read core of an RPC-backed handle.** Where `channelView` folds
+a channel, `polledView` folds a poll: it fetches once eagerly, notifies when the
+seed lands, indexes rows by id, and re-fetches on `refresh()`. Six bundled handles
+(`gates`, `state`, `skills`, `prompts`, `resources`, `tools`) are exactly this plus
+their own write verbs, because none of them has a delta channel yet.
+
+```ts
+import { polledView } from "@agentick/client-core";
+
+const view = polledView<Row>({
+  fetch: async () => (await client.transport.request("rows/list", { sessionId }))?.rows,
+  key: (r) => r.id,
+});
+
+return {
+  ...view, // list / get / subscribe / close / refresh
+  async archive(id: string) {
+    await client.transport.request("rows/archive", { sessionId, id });
+    await view.refresh(); // fire-and-refetch — the RPC analog of fire-and-observe
+  },
+};
+```
+
+A failed fetch — including the eager seed — leaves the snapshot empty rather than
+half-filled, and a `null` / `undefined` reply reads as empty. `refresh(query)` passes
+its argument to `fetch`, which is how `tools` filters by exposure over the wire.
+
 **`liveStore`** is the fan-out core all of them share: one held state, the two
 feeds, the store contract, and an imperative `set` seam for owners that mutate
 locally as well as fold.
@@ -611,6 +638,7 @@ auto-connect; call `connect()` when you want the wire open.
 | `channelStream` / `channelView`                                        | Channel-pinned stream and fold                                 |
 | `eventStream` / `eventView`                                            | The generic stream and fold beneath them                       |
 | `liveStore` / `filteredView`                                           | Fan-out core; shared-subscription projections                  |
+| `polledView`                                                           | Poll-backed read core (eager seed + by-id index + `refresh`)   |
 | `composeRequest` / `composeSubscribe`                                  | The middleware composers                                       |
 | `effectMiddleware`                                                     | Effect ↔ Promise middleware adapter                            |
 | `ClientHandlerRegistry`                                                | Lifecycle-handler merge rules                                  |
@@ -689,6 +717,10 @@ transport changes the `createClient` call and nothing else.
 - **Cross-runtime is claimed, not tested.** The code has no DOM or Node-specific
   imports, but CI exercises Node only. Browser, Bun, Deno, and edge runtimes are
   unverified.
+- **`polledView` has no built-in retry or de-dup.** A failed poll is swallowed and
+  recovered by the next `refresh()`; concurrent `refresh()` calls each issue their own
+  fetch, and the last to resolve wins. Both are fine for the mutation-triggered
+  re-fetch the bundled handles do, and neither is asserted for anything else.
 - **The fold kit isn't behind its own subpath.** `channelView`, `eventView`,
   `liveStore`, and friends sit on the main barrel next to the application surface,
   which under-signals that they're the extension-author tier.
@@ -726,6 +758,11 @@ transport changes the `createClient` call and nothing else.
 - `src/__tests__/view-source.spec.ts` — independent per-view filters, independent
   close, referential stability of `list()`, and that a projection opens no second
   upstream subscription.
+- `src/__tests__/polled-view.spec.ts` — the eager seed notifying a subscriber that
+  attached while it was in flight, a failed seed settling empty and `refresh()`
+  recovering it, `null` replies reading as empty, referential stability of `list()`,
+  the refresh query reaching `fetch` (and the seed passing none), and per-listener
+  unsubscribe vs `close()` dropping the whole fan-out.
 - `src/__tests__/wire-errors.spec.ts` — typed error rehydration across the wire,
   field round-trip, unknown-tag degradation, and pass-through of protocol-level and
   non-object rejections.

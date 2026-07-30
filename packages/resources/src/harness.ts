@@ -109,7 +109,7 @@ import {
   type KeyedNotifier,
   type Notifier,
 } from "@agentick/pubsub";
-import { omitUndefined } from "@agentick/utils";
+import { DEFAULT_PAGE_SIZE, omitUndefined, paginate } from "@agentick/utils";
 import { View } from "@agentick/store";
 
 import type { ResourceLoader, ResourceLoaderItem } from "./loaders.js";
@@ -118,9 +118,6 @@ import { compileUriTemplate, matchesTemplate } from "./uri-template.js";
 
 const SURFACE = "resources" as const;
 type ResourcesSurface = typeof SURFACE;
-
-/** Default pagination page size when the caller doesn't override it. */
-const DEFAULT_PAGE_SIZE = 100;
 
 /** A template's non-serializable sidecar entry: the resolver + its compiled pattern. */
 interface TemplateResolverEntry {
@@ -687,6 +684,11 @@ export class ResourcesHarness
 const RESOURCES_ERROR_TAGS = [
   "ResourceNotFound",
   "ResourceAlreadyRegistered",
+  // Thrown by `resolverFor` INSIDE `applyRead`'s try block. Omitting it here
+  // meant the typed error and its `candidates` were re-wrapped as
+  // `ResourceResolverFailed` on the way out — the caller could read the
+  // interpolated message but could not `catchTag` the ambiguity (#245).
+  "ResourceAliasAmbiguous",
   "ResourceResolverFailed",
   "ResourcesBackendError",
 ] as const;
@@ -696,26 +698,4 @@ function isResourcesError(value: unknown): value is ResourcesError {
   const tag = (value as { _tag?: unknown })._tag;
   if (typeof tag !== "string") return false;
   return (RESOURCES_ERROR_TAGS as readonly string[]).includes(tag);
-}
-
-// ============================================================================
-// Pagination — opaque, offset-based cursor
-// ============================================================================
-
-/**
- * Slice `all` into a page starting at the offset encoded by `cursor`.
- * The cursor is the decimal string of the next offset — opaque to
- * callers, cheap to produce, and stable for a stable sort order.
- */
-function paginate<T>(
-  all: readonly T[],
-  cursor: string | undefined,
-  pageSize: number,
-): { readonly page: readonly T[]; readonly nextCursor: string | undefined } {
-  const start = cursor !== undefined ? Number.parseInt(cursor, 10) : 0;
-  const offset = Number.isNaN(start) || start < 0 ? 0 : start;
-  const page = all.slice(offset, offset + pageSize);
-  const nextOffset = offset + pageSize;
-  const nextCursor = nextOffset < all.length ? String(nextOffset) : undefined;
-  return { page, nextCursor };
 }

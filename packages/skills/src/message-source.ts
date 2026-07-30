@@ -23,16 +23,6 @@
 /**
  * What a skill run knows about itself at the moment it composes the send — and
  * NOTHING more. No hashing, no computed revision, no second lookup.
- *
- * **No `opId`, deliberately.** Unlike prompts' `invoke`, `skills.run` is a plain
- * method, not a declared command: it mints no operation, so there is no
- * operation id to link back to and we refuse to fabricate one. The run's SEND is
- * journaled by the session, which is the record such as it is.
- *
- * TODO(skills-run-op): promoting `skills:run` to a declared command (ADR 51)
- * would give the run its own journal envelope, guard seam, and an `opId` this
- * stamp could carry — the same navigable entry → journal link prompts has. It is
- * a real gap, not an oversight, and out of scope for this slice.
  */
 export interface SkillMessageSource {
   /** The run skill's declared name. */
@@ -42,6 +32,17 @@ export interface SkillMessageSource {
    * the adopter declared none — the framework never computes one.
    */
   readonly version?: string;
+  /**
+   * The `skills:run` operation that composed this message — the navigable link
+   * from a timeline entry back to its journal envelope, the same one
+   * `PromptMessageSource.opId` provides.
+   *
+   * Present on every run since `skills:run` became a declared command (#249).
+   * Optional because a `SkillMessageSource` READ off a restored timeline may
+   * predate that, and because the framework never fabricates an id it does not
+   * have.
+   */
+  readonly opId?: string;
 }
 
 declare module "@agentick/spec" {

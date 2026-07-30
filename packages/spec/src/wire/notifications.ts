@@ -34,6 +34,17 @@ export interface ProgressNotificationParams {
   readonly envelope: EventEnvelope;
 }
 
+/**
+ * End-of-stream marker for one progress token, sent after the last
+ * `notifications/progress` frame carrying it. Carries the token and nothing
+ * else: a bounded stream reaching its end is not a failure and has no reason
+ * (contrast {@link SubscriptionClosedParams}, which reports server-initiated
+ * teardown of an OPEN-ENDED stream).
+ */
+export interface ProgressCompleteParams {
+  readonly progressToken: string;
+}
+
 // ============================================================================
 // notifications/subscription/* — persistent subscription event delivery
 // ============================================================================
@@ -45,6 +56,20 @@ export interface SubscriptionEventParams {
   readonly envelope: EventEnvelope;
 }
 
+/**
+ * RESERVED — declared, registered, and deliberately unproduced. Nothing on
+ * the server sends this frame, and nothing will until subscriptions retain
+ * events at all: eviction is a statement about a retention window
+ * ("your cursor fell out of the buffer"), and today's fan-out has no buffer
+ * to fall out of — it is live-only, and a client that drops simply misses
+ * what it was not connected for.
+ *
+ * The shape is kept because it is what the eviction frame WILL carry once
+ * retention lands, and the client already discriminates it (a
+ * `cursorEvicted` transport error, ADR 29 Phase C). See the
+ * `TODO(wire-resume)` trailhead on `subscriptionsWireExtension` in
+ * `@agentick/gateway` for the design this is the last step of.
+ */
 export interface SubscriptionEvictedParams {
   readonly subscriptionId: string;
   /** Last cursor the client received before eviction. */
@@ -101,6 +126,7 @@ export interface AuthChallengeNotificationParams {
 export interface WireNotifications {
   "notifications/initialized": InitializedNotificationParams;
   "notifications/progress": ProgressNotificationParams;
+  "notifications/progress/complete": ProgressCompleteParams;
   "notifications/subscription/event": SubscriptionEventParams;
   "notifications/subscription/evicted": SubscriptionEvictedParams;
   "notifications/subscription/closed": SubscriptionClosedParams;

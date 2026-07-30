@@ -222,10 +222,20 @@ export interface SessionListToolsParams extends WireRequestParams {
   readonly sessionId: string;
   /** Optional exposure filter — mirrors `ToolsHandle.list({ exposure })`. */
   readonly exposure?: ToolExposure;
+  /** Opaque cursor from a prior reply's `nextCursor`; absent starts at page one. */
+  readonly cursor?: string;
 }
 
+/**
+ * One page of tools — MCP-shaped (named collection key + `nextCursor`), the
+ * envelope `resources/list` established. The session's in-process
+ * `tools.list(query)` stays an unpaginated bounded snapshot; paging is a WIRE
+ * concern and lives only here.
+ */
 export interface SessionListToolsResult {
   readonly tools: readonly ToolInfo[];
+  /** Opaque cursor for the next page; absent on the last page. */
+  readonly nextCursor?: string;
 }
 
 export interface SessionAbortParams extends WireRequestParams {
@@ -415,6 +425,15 @@ export type AuthSignOutResult = null;
 // ============================================================================
 
 /**
+ * The one wire protocol version this build speaks. Both ends compare against
+ * it — the server against `InitializeParams.protocolVersion`, the client
+ * against `InitializeResult.protocolVersion` — and a mismatch fails the
+ * handshake with `WireRpcError.protocolVersionMismatch`. Bump on an
+ * incompatible frame change.
+ */
+export const WIRE_PROTOCOL_VERSION = "v1";
+
+/**
  * Capability handshake. First RPC after a connection opens. Mirrors
  * MCP's `initialize` — client advertises what it speaks; server
  * responds with what it speaks. The wire-version-negotiation parallel
@@ -486,6 +505,33 @@ export interface ServerCapabilities {
   /** Server hosts MCP methods (`tools/*`, `resources/*`, `prompts/*`) via
    *  `@agentick/mcp-surface` or equivalent. */
   readonly mcpSurface?: boolean;
+}
+
+/**
+ * What the transport SERVING a connection says about itself, supplied to the
+ * wire dispatcher so `initialize` answers with the truth about the wire the
+ * caller actually reached rather than a constant.
+ *
+ * Two kinds of fact live here, and only these two: the transport's identity
+ * (→ `InitializeResult.serverInfo`) and the wire features the transport
+ * itself implements — framing concerns the dispatcher cannot see, because
+ * they are decided in the connection's decode path. Every other
+ * {@link ServerCapabilities} flag is derived by the dispatcher from what is
+ * actually registered on the host, so it does NOT appear here.
+ *
+ * TODO(wire-serverinfo-version): `version` is hand-declared per transport
+ * package (matching `@agentick/client-core`'s `CLIENT_VERSION`). It becomes
+ * real when the build injects each package's version; the plain-`tsc` build
+ * has no define seam today.
+ */
+export interface WireServerDescriptor {
+  /** Package name of the serving transport, e.g. `@agentick/transport-http`. */
+  readonly name: string;
+  readonly version: string;
+  /** This wire decodes JSON-RPC batch arrays. */
+  readonly batch?: boolean;
+  /** This wire answers RPCs as Streamable-HTTP SSE. */
+  readonly streamableHttp?: boolean;
 }
 
 // ============================================================================

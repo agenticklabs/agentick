@@ -118,6 +118,33 @@ export function runSkillStoreConformance(opts: SkillStoreConformanceOptions): vo
         expect(none).toEqual([]);
       });
 
+      /**
+       * `version` is a DECLARED CONTRACT, not an incidental field (#249). It is
+       * the string the run's provenance stamp copies verbatim into the timeline,
+       * so "which revision of this skill produced this message" is answerable
+       * from the entry alone — and that answer is only as good as the store's
+       * fidelity. An adapter that drops or normalizes `version` silently breaks
+       * provenance for every skill it holds, with nothing else failing. Hence a
+       * conformance case: every adapter must satisfy it.
+       *
+       * Absence is part of the contract too. The framework NEVER computes a
+       * version, so a record that declared none must come back declaring none —
+       * an adapter defaulting it to `""` or `"1"` would invent history.
+       */
+      it("round-trips `version` verbatim, and absence stays absence", async () => {
+        const store = await setup();
+        await store.put(skill("stamped", { version: "2026.07.30-a3f1c9" }), stubStoreCtx());
+        await store.put(skill("unstamped"), stubStoreCtx());
+
+        expect((await store.get("stamped", stubStoreCtx()))?.version).toBe("2026.07.30-a3f1c9");
+        expect((await store.get("unstamped", stubStoreCtx()))?.version).toBeUndefined();
+
+        // And through the enumerate lane, not just the single read.
+        const listed = await store.list(undefined, stubStoreCtx());
+        expect(listed.find((s) => s.name === "stamped")?.version).toBe("2026.07.30-a3f1c9");
+        expect(listed.find((s) => s.name === "unstamped")?.version).toBeUndefined();
+      });
+
       it("delete() removes a record and is idempotent", async () => {
         const store = await setup();
         await store.put(skill("fade"), stubStoreCtx());

@@ -450,7 +450,7 @@ function loopbackSections(factories: McpConformanceFactories, era: McpSpecEra): 
     // ─── tools ───
     describe("tools", () => {
       it("tools/list returns the advertised catalog", async () => {
-        const tools = await lb.client.listTools();
+        const { tools } = await lb.client.listTools();
         expect(tools.map((t) => t.name).sort()).toEqual([
           "ask_consent",
           "ask_name",
@@ -470,14 +470,14 @@ function loopbackSections(factories: McpConformanceFactories, era: McpSpecEra): 
         lb.client.onListChanged((e) => events.push(e.kind));
         lb.server.catalog.register(decl("late", "added after connect", echoSchema));
         await until(() => events.includes("tools"));
-        const tools = await lb.client.listTools();
+        const { tools } = await lb.client.listTools();
         expect(tools.map((t) => t.name)).toContain("late");
 
         const before = events.filter((k) => k === "tools").length;
         lb.server.catalog.remove("late");
         await until(() => events.filter((k) => k === "tools").length > before);
         const after = await lb.client.listTools();
-        expect(after.map((t) => t.name)).not.toContain("late");
+        expect(after.tools.map((t) => t.name)).not.toContain("late");
       });
     });
 

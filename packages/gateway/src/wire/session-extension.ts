@@ -14,15 +14,15 @@
 
 import {
   defineWireExtension,
+  findSession,
   progressEventQuery,
-  SessionNotFoundError,
   toClientToolRegistration,
   type ProtocolEvent,
   type SessionHarnessProtocol,
   type ToolExecutorProtocol,
   type WireExtension,
 } from "@agentick/spec";
-import { omitUndefined } from "@agentick/utils";
+import { omitUndefined, paginate } from "@agentick/utils";
 
 /**
  * Structural view of the session's tool executor seam. The gateway is
@@ -34,17 +34,6 @@ import { omitUndefined } from "@agentick/utils";
 type SessionWithTools = SessionHarnessProtocol & {
   readonly toolExecutor: ToolExecutorProtocol;
 };
-
-function findSession(
-  ctx: { gateway: { apps(): readonly { getSession(id: string): unknown }[] } },
-  sessionId: string,
-): SessionHarnessProtocol {
-  for (const app of ctx.gateway.apps()) {
-    const s = app.getSession(sessionId) as SessionHarnessProtocol | undefined;
-    if (s) return s;
-  }
-  throw new SessionNotFoundError({ sessionId });
-}
 
 export const sessionWireExtension: WireExtension = defineWireExtension({
   name: "@agentick/gateway#session",
@@ -184,25 +173,34 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const content = await sess.tools.dispatch(tool, input as Record<string, unknown>);
       return { content };
     },
-    "session/list_tools": async ({ sessionId, exposure }, ctx) => {
+    "session/list_tools": async ({ sessionId, exposure, cursor }, ctx) => {
       // Dedicated wire read behind the client `ToolsClientHandle` enumeration
       // (three-audiences-plan §F). `session.tools.list` is a sync View read; the
       // handler just projects the query and returns the wire-safe ToolInfo rows.
       // Gateway-resident + harness-agnostic (`tools` is on SessionHarnessProtocol),
       // mirroring session/set_client_tools — the tool executor's `tool:<sessionId>`
       // address does not fit the dynamic-command lane pattern.
+      //
+      // Paged on the WIRE only, over the snapshot the sync read already serves,
+      // with the shared `paginate` every catalog surface uses.
       const sess = ctx.session ?? findSession(ctx, sessionId);
-      const tools = sess.tools.list(exposure !== undefined ? { exposure } : undefined);
-      return { tools };
+      const all = sess.tools.list(exposure !== undefined ? { exposure } : undefined);
+      const { page, nextCursor } = paginate(all, cursor);
+      return { tools: page, ...omitUndefined({ nextCursor }) };
     },
-    "session/abort": async ({ sessionId }, ctx) => {
-      // Stub-only today: SessionHarnessProtocol exposes abort() on the
-      // returned SessionExecutionHandle, not on the session itself.
-      // Full wiring requires per-session active-handle tracking on the
-      // transport server adapter — see #303 for the streaming
-      // primitives that will land the tracking.
+    "session/abort": async ({ sessionId, reason }, ctx) => {
+      // The STANDALONE cancellation verb — reaches a session by id, with no
+      // in-flight RPC to correlate against. (`notifications/cancelled` is the
+      // other cancellation path: it aborts the execution behind a specific
+      // in-flight `session/send`, via the cancel callback that handler
+      // registers. A caller holding only a sessionId — a second connection, a
+      // supervisor, a UI that reconnected — has this one.)
+      //
+      // `session.abort` targets the session's CURRENT execution and no-ops on
+      // an idle session, so a race with a naturally-finishing execution is a
+      // success, not an error.
       const sess = ctx.session ?? findSession(ctx, sessionId);
-      void sess;
+      await sess.abort(reason);
       return null;
     },
     "session/close": async ({ sessionId }, ctx) => {

@@ -22,7 +22,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtim
 import type { MessageEntry } from "@agentick/spec";
 import { PromptsHarness } from "@agentick/prompts";
 
-import { inMemoryServerTransport, McpServerHarness } from "../index.js";
+import { inMemoryServerTransport, McpServerHarness, mcpPromptExtensions } from "../index.js";
 
 function makeMessageEntries(text: string): readonly MessageEntry[] {
   return [{ kind: "message", role: "user", content: [{ type: "text", text }] }];
@@ -149,6 +149,56 @@ describe("prompts projection — list + get", () => {
     await prompts.close();
   });
 
+  it("prompts/list pages past DEFAULT_PAGE_SIZE and honors the client's cursor", async () => {
+    const prompts = await makePromptsHarness();
+    for (let i = 0; i < 150; i++) {
+      await prompts.register({
+        declaration: {
+          name: `p_${String(i).padStart(3, "0")}`,
+          description: "filler",
+          template: makeMessageEntries("x"),
+        },
+      });
+    }
+
+    const { harness, transport } = await makeServer(prompts);
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const first = await client.listPrompts();
+    expect(first.prompts).toHaveLength(100);
+    expect(first.nextCursor).toBe("100");
+
+    const second = await client.listPrompts({ cursor: first.nextCursor });
+    expect(second.prompts).toHaveLength(50);
+    expect(second.nextCursor).toBeUndefined();
+
+    const names = new Set([...first.prompts, ...second.prompts].map((p) => p.name));
+    expect(names.size).toBe(150);
+
+    await client.close();
+    await harness.close();
+    await prompts.close();
+  });
+
+  it("a prompt catalog inside one page carries no cursor", async () => {
+    const prompts = await makePromptsHarness();
+    await prompts.register({
+      declaration: { name: "solo", description: "one", template: makeMessageEntries("x") },
+    });
+    const { harness, transport } = await makeServer(prompts);
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const result = await client.listPrompts();
+    expect(result.prompts).toHaveLength(1);
+    expect(result).not.toHaveProperty("nextCursor");
+
+    await client.close();
+    await harness.close();
+    await prompts.close();
+  });
+
   it("prompts/get renders messages via the harness", async () => {
     const prompts = await makePromptsHarness();
     await prompts.register({
@@ -168,6 +218,47 @@ describe("prompts projection — list + get", () => {
     expect(result.messages).toEqual([
       { role: "user", content: { type: "text", text: "Hello, Ada!" } },
     ]);
+
+    await client.close();
+    await harness.close();
+    await prompts.close();
+  });
+
+  /**
+   * `GetPromptResult._meta` now has a source: the declaration's own metadata
+   * bag, surfaced on the render result (spec `PromptsGetResult.metadata`) and
+   * read here with the SAME reader `prompts/list` uses. One authored place
+   * reaches both wire slots — an MCP Apps `ui://` linkage declared once shows up
+   * on the listing AND on the fetched prompt, which is where a client that
+   * fetched without listing needs it.
+   */
+  it("prompts/get carries the declaration's metadata.mcp.meta as _meta", async () => {
+    const prompts = await makePromptsHarness();
+    await prompts.register({
+      declaration: {
+        name: "widget",
+        description: "Has a UI template",
+        template: "hi",
+        metadata: mcpPromptExtensions({ meta: { "openai/outputTemplate": "ui://widget/jobs" } }),
+      },
+    });
+    await prompts.register({
+      declaration: { name: "bare", description: "No extensions", template: "hi" },
+    });
+
+    const { harness, transport } = await makeServer(prompts);
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const withMeta = await client.getPrompt({ name: "widget" });
+    expect(withMeta._meta).toEqual({ "openai/outputTemplate": "ui://widget/jobs" });
+    // The same declaration bag reaches `prompts/list` — one authored place.
+    const listed = (await client.listPrompts()).prompts.find((p) => p.name === "widget");
+    expect(listed?._meta).toEqual({ "openai/outputTemplate": "ui://widget/jobs" });
+
+    // A declaration with no `mcp` block projects byte-identically to before.
+    const bare = await client.getPrompt({ name: "bare" });
+    expect(bare._meta).toBeUndefined();
 
     await client.close();
     await harness.close();

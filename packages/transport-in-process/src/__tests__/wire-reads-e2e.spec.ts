@@ -33,7 +33,20 @@ import { ErrorCode, type ContentBlock, type Skill, type WireMethod } from "@agen
 
 import { inProcessTransport } from "../index.js";
 
-async function makeStack() {
+/** `n` filler skills / prompts — enough to push a wire read past one page. */
+function fillerSkills(n: number): ReadonlyArray<{
+  name: string;
+  description: string;
+  content: string;
+}> {
+  return Array.from({ length: n }, (_, i) => ({
+    name: `filler-${String(i).padStart(3, "0")}`,
+    description: "filler",
+    content: "…",
+  }));
+}
+
+async function makeStack(bulk = 0) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -64,6 +77,7 @@ async function makeStack() {
         withSkills({
           hydrate: hydrateSkillsFrom([
             { name: "review", description: "Review changes", content: "# Review\nCheck it." },
+            ...fillerSkills(bulk),
           ]),
         }),
         withPrompts({
@@ -71,6 +85,9 @@ async function makeStack() {
             {
               declaration: { name: "greet", description: "Greet the user", template: "Hi {name}" },
             },
+            ...fillerSkills(bulk).map((f) => ({
+              declaration: { name: f.name, description: f.description, template: "x" },
+            })),
           ]),
         }),
       ],
@@ -102,8 +119,11 @@ describe("wire reads end-to-end — client ↔ gateway (dynamic lane) ↔ sessio
   it("skills/list enumerates the seeded skill (content included)", async () => {
     const { request, sessionId, cleanup } = await makeStack();
 
-    const rows = (await request("skills/list", { sessionId })) as readonly Skill[];
-    const review = rows.find((s) => s.name === "review");
+    const { skills } = (await request("skills/list", { sessionId })) as {
+      skills: readonly Skill[];
+      nextCursor?: string;
+    };
+    const review = skills.find((s) => s.name === "review");
     expect(review).toMatchObject({ name: "review", description: "Review changes" });
     expect(review?.content).toContain("Check it.");
 
@@ -125,17 +145,57 @@ describe("wire reads end-to-end — client ↔ gateway (dynamic lane) ↔ sessio
   it("prompts/list enumerates the seeded prompt as a wire-safe record", async () => {
     const { request, sessionId, cleanup } = await makeStack();
 
-    const rows = (await request("prompts/list", { sessionId })) as ReadonlyArray<{
-      name: string;
-      description: string;
-      template?: unknown;
-      render?: unknown;
-    }>;
-    const greet = rows.find((p) => p.name === "greet");
+    const { prompts } = (await request("prompts/list", { sessionId })) as {
+      prompts: ReadonlyArray<{
+        name: string;
+        description: string;
+        template?: unknown;
+        render?: unknown;
+      }>;
+      nextCursor?: string;
+    };
+    const greet = prompts.find((p) => p.name === "greet");
     expect(greet).toMatchObject({ name: "greet", description: "Greet the user" });
     // The wire projection is the record slice — no non-serializable fields.
     expect(greet).not.toHaveProperty("template");
     expect(greet).not.toHaveProperty("render");
+
+    await cleanup();
+  });
+
+  it("skills/list + prompts/list page with an opaque cursor; a walk sees each row once", async () => {
+    // 150 filler rows + the fixture — past the shared DEFAULT_PAGE_SIZE of 100,
+    // so page one carries a cursor and page two closes the walk.
+    const { request, sessionId, cleanup } = await makeStack(150);
+
+    for (const [method, key] of [
+      ["skills/list", "skills"],
+      ["prompts/list", "prompts"],
+    ] as const) {
+      const first = (await request(method, { sessionId })) as {
+        readonly [k: string]: readonly { name: string }[] | string | undefined;
+      };
+      const firstRows = first[key] as readonly { name: string }[];
+      expect(firstRows).toHaveLength(100);
+      expect(first.nextCursor).toBe("100");
+
+      const second = (await request(method, { sessionId, cursor: "100" })) as typeof first;
+      const secondRows = second[key] as readonly { name: string }[];
+      expect(secondRows).toHaveLength(51);
+      expect(second.nextCursor).toBeUndefined();
+
+      const names = new Set([...firstRows, ...secondRows].map((r) => r.name));
+      expect(names.size).toBe(151);
+    }
+
+    await cleanup();
+  });
+
+  it("a small catalog carries no cursor (wire-stable for the common case)", async () => {
+    const { request, sessionId, cleanup } = await makeStack();
+
+    expect(await request("skills/list", { sessionId })).not.toHaveProperty("nextCursor");
+    expect(await request("prompts/list", { sessionId })).not.toHaveProperty("nextCursor");
 
     await cleanup();
   });

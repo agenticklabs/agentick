@@ -41,7 +41,7 @@ function fakeCommandClient(captured: Captured[], rows: () => readonly Skill[]) {
     transport: {
       async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
         captured.push({ method, params });
-        if (method === "skills/list") return rows();
+        if (method === "skills/list") return { skills: rows() };
         if (method === "skills/search") return [rows()[0]];
         return null;
       },

@@ -948,6 +948,7 @@ registerAgentickError("ResourcesBackendError", ResourcesBackendError);
 export type ResourcesErrorChannel =
   | ResourceNotFound
   | ResourceAlreadyRegistered
+  | ResourceAliasAmbiguous
   | ResourceResolverFailed
   | ResourcesBackendError;
 

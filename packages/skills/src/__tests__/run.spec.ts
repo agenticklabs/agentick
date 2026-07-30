@@ -24,9 +24,12 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { Effect, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { waitFor } from "@agentick/utils/testing";
 import type {
   MessageSource,
+  ProtocolEvent,
   SendInput,
   SendResult,
   SessionExecutionHandle,
@@ -329,9 +332,10 @@ describe("skills.run — guards", () => {
  *
  * A skill run is a `session.send` primed with the skill document, so without a
  * stamp a chat projection has to render the whole document as if the human typed
- * it. The stamp is `metadata.source.skill`: the name and the adopter's declared
- * `version`, both already in hand. No `opId` — `run` mints no operation, and we
- * refuse to fabricate one (see `SkillMessageSource`).
+ * it. The stamp is `metadata.source.skill`: the name, the adopter's declared
+ * `version`, and — since `skills:run` became a declared command (#249) — the
+ * `opId` linking the entry back to its journal envelope. Every field is a fact
+ * already in hand; nothing is derived or hashed.
  *
  * @see docs/proposals/v2/materialization-provenance.md §3
  */
@@ -350,7 +354,12 @@ describe("skills.run — materialization provenance", () => {
 
     const messages = captured[0]!.messages!;
     expect(messages).toHaveLength(2); // default composition: system body + user args
-    for (const m of messages) expect(skillSourceOf(m)).toEqual({ name: "s", version: "3" });
+    for (const m of messages) {
+      expect(skillSourceOf(m)).toMatchObject({ name: "s", version: "3" });
+      // Every message on ONE run carries THAT run's op — one operation, one id.
+      expect(skillSourceOf(m)?.opId).toBe(skillSourceOf(messages[0]!)?.opId);
+      expect(skillSourceOf(m)?.opId).toMatch(/^skills:run:/);
+    }
 
     await h.close();
   });
@@ -363,7 +372,9 @@ describe("skills.run — materialization provenance", () => {
 
     await h.run("s");
 
-    expect(skillSourceOf(captured[0]!.messages![0]!)).toEqual({ name: "s" });
+    const source = skillSourceOf(captured[0]!.messages![0]!);
+    expect(source?.version).toBeUndefined();
+    expect(source).toMatchObject({ name: "s" });
 
     await h.close();
   });
@@ -386,8 +397,8 @@ describe("skills.run — materialization provenance", () => {
 
     const [first, second] = captured[0]!.messages!;
     expect(first!.metadata?.adopterKey).toBe(7);
-    expect(skillSourceOf(first!)).toEqual({ name: "s", version: "9" });
-    expect(skillSourceOf(second!)).toEqual({ name: "s", version: "9" });
+    expect(skillSourceOf(first!)).toMatchObject({ name: "s", version: "9" });
+    expect(skillSourceOf(second!)).toMatchObject({ name: "s", version: "9" });
 
     await h.close();
   });
@@ -407,6 +418,125 @@ describe("skills.run — materialization provenance", () => {
     expect(skillSourceOf(message)).toBeUndefined();
     expect(message.metadata?.source).toEqual({ telegram: 42 });
 
+    await h.close();
+  });
+});
+
+/**
+ * `skills:run` is an OPERATION (#249) — the hole this closed.
+ *
+ * `run` used to be a plain method: it composed a whole skill document into the
+ * timeline and left no journal envelope, no guard seam, and no opId for the
+ * provenance stamp to carry. Prompt materialization (`prompts:invoke`) was a
+ * journaled op the entire time; the exactly-analogous skill materialization was
+ * invisible to the same machinery. The verb is now declared, so the run gets
+ * what every other skills verb already had.
+ *
+ * The public signature is unchanged — `run(name, opts)` still returns the live
+ * handle — which is also why the command is `exposure: "internal"`: the result
+ * is an event stream plus an `abort()`, not data, so it cannot honestly cross
+ * the inbox or the wire. The VERB-MATRIX parks `session:send` (which a run IS)
+ * on that same blocker.
+ *
+ * @see https://github.com/agenticklabs/agentick/issues/249
+ */
+describe("skills:run — the op is the record", () => {
+  /**
+   * Subscribe to the skills surface and return the collecting array. Awaits one
+   * macrotask so the Stream subscription is attached before the caller acts —
+   * the same yield `harness.spec.ts` uses for its envelope assertions.
+   */
+  async function watch(bus: LocalEventBus): Promise<ProtocolEvent[]> {
+    const observed: ProtocolEvent[] = [];
+    Effect.runFork(
+      Stream.runForEach(bus.subscribe({ surface: "skills" }), (e) =>
+        Effect.sync(() => {
+          observed.push(e);
+        }),
+      ),
+    );
+    await new Promise((r) => setImmediate(r));
+    return observed;
+  }
+
+  const runEnvelopes = (observed: readonly ProtocolEvent[]): readonly ProtocolEvent[] =>
+    observed.filter((e) => e.name === "skills:command:run");
+
+  it("mints requested → terminal envelopes for the run", async () => {
+    const bus = new LocalEventBus();
+    const h = new SkillsHarness(`op:${ulid()}`, new MemoryJournal(), bus, new LocalInbox());
+    await h.ready;
+    const observed = await watch(bus);
+
+    await h.register({ name: "s", description: "d", content: "body" });
+    h.bindRunner(stubRunner({ result: mkSendResult() }).send);
+    await h.run("s");
+
+    await waitFor(() => runEnvelopes(observed).some((e) => e.phase === "terminal"));
+    const phases = runEnvelopes(observed).map((e) => e.phase);
+    expect(phases[0]).toBe("requested");
+    expect(phases.at(-1)).toBe("terminal");
+    expect(runEnvelopes(observed).at(-1)?.outcome).toBe("succeeded");
+    // ONE operation, so one id across both phases.
+    expect(new Set(runEnvelopes(observed).map((e) => e.opId)).size).toBe(1);
+    await h.close();
+  });
+
+  it("a FAILED run is journaled too — the record is not success-only", async () => {
+    const bus = new LocalEventBus();
+    const h = new SkillsHarness(`op:${ulid()}`, new MemoryJournal(), bus, new LocalInbox());
+    await h.ready;
+    const observed = await watch(bus);
+
+    h.bindRunner(stubRunner({ result: mkSendResult() }).send);
+    await expect(h.run("nope")).rejects.toMatchObject({ _tag: "SkillNotFound" });
+
+    const terminal = await waitFor(() =>
+      runEnvelopes(observed).find((e) => e.phase === "terminal"),
+    );
+    expect(terminal.outcome).toBe("failed");
+    await h.close();
+  });
+
+  it("a guard VETOES the run — no send is composed, nothing reaches the timeline", async () => {
+    const h = await mkHarness({
+      guards: {
+        run: (input) =>
+          input.name === "dangerous" ? { kind: "veto", reason: "not allowed" } : undefined,
+      },
+    });
+    await h.register({ name: "dangerous", description: "d", content: "body" });
+    await h.register({ name: "safe", description: "d", content: "body" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+
+    await expect(h.run("dangerous")).rejects.toMatchObject({
+      outcome: "vetoed",
+      terminal: { outcome: "vetoed", reason: "not allowed" },
+    });
+    // What a guard is FOR: the skill document never became a send.
+    expect(captured).toHaveLength(0);
+
+    await h.run("safe");
+    expect(captured).toHaveLength(1);
+    await h.close();
+  });
+
+  it("the stamp's opId IS the run op's id — an entry navigates back to the journal", async () => {
+    const bus = new LocalEventBus();
+    const h = new SkillsHarness(`op:${ulid()}`, new MemoryJournal(), bus, new LocalInbox());
+    await h.ready;
+    const observed = await watch(bus);
+
+    await h.register({ name: "s", description: "d", content: "body" });
+    const { send, captured } = stubRunner({ result: mkSendResult() });
+    h.bindRunner(send);
+    await h.run("s");
+
+    const requested = await waitFor(() => runEnvelopes(observed)[0]);
+    const stamped = (captured[0]!.messages![0]!.metadata?.source as MessageSource | undefined)
+      ?.skill;
+    expect(stamped?.opId).toBe(requested.opId);
     await h.close();
   });
 });

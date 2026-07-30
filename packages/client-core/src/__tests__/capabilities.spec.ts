@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   ErrorCode,
   isClientStateOpen,
+  WIRE_PROTOCOL_VERSION,
   type ClientState,
   type ClientTransport,
   type InitializeResult,
@@ -218,6 +219,57 @@ describe("client capabilities", () => {
     // Capabilities remain empty on failed connect.
     expect(client.serverInfo).toBeUndefined();
     expect(client.capabilities.extensions).toEqual([]);
+  });
+
+  it("rejects connect when the server answers with another protocol version", async () => {
+    // The client's half of version negotiation (#252). The server rejects a
+    // request it cannot serve; this rejects an ANSWER it cannot read — before
+    // anything is committed, so capabilities stay empty.
+    const transport = fakeTransport(async (method) => {
+      if (method === "initialize") {
+        return buildInitializeResult({
+          protocolVersion: "v9" as InitializeResult["protocolVersion"],
+        }) as never;
+      }
+      if (method === "_extensions/list") return buildExtensionsList() as never;
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const client = await createClient({ transport });
+    await expect(client.connect()).rejects.toMatchObject({
+      code: ErrorCode.InvalidParams,
+      data: { received: "v9", expected: WIRE_PROTOCOL_VERSION },
+    });
+    expect(client.serverInfo).toBeUndefined();
+    expect(client.capabilities.extensions).toEqual([]);
+  });
+
+  it("advertises the handshake capabilities it actually implements", async () => {
+    // `capabilities: {}` was a producer-less wire surface: the field existed,
+    // typed, and the client never filled it (#252 §4). `cursorResume` is the
+    // one claim — every client transport tracks each subscription's cursor and
+    // resends it on reconnect. Per-wire framing flags stay unclaimed because
+    // client-core cannot answer for whichever transport it was handed.
+    let sentParams: unknown;
+    const transport = fakeTransport(async (method, params) => {
+      if (method === "initialize") {
+        sentParams = params;
+        return buildInitializeResult() as never;
+      }
+      if (method === "_extensions/list") return buildExtensionsList() as never;
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const client = await createClient({ transport });
+    await client.connect();
+
+    expect(sentParams).toMatchObject({
+      protocolVersion: WIRE_PROTOCOL_VERSION,
+      capabilities: { cursorResume: true },
+    });
+    const sentCapabilities = (sentParams as { capabilities: Record<string, unknown> }).capabilities;
+    expect(sentCapabilities).not.toHaveProperty("batch");
+    expect(sentCapabilities).not.toHaveProperty("streamableHttp");
   });
 
   it("clears capabilities on transport state transition away from open", async () => {

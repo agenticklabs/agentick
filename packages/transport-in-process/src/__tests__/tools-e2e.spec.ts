@@ -44,7 +44,18 @@ const dispatchTool: ToolDeclaration = {
   exposure: ["dispatch"],
 };
 
-async function makeStack() {
+/** `n` filler model tools — enough to push the wire read past one page. */
+function fillerTools(n: number): readonly ToolDeclaration[] {
+  return Array.from({ length: n }, (_, i) => ({
+    id: `filler_${String(i).padStart(3, "0")}`,
+    name: `filler_${String(i).padStart(3, "0")}`,
+    description: "filler",
+    inputSchema: jsonSchema(SCHEMA),
+    exposure: ["model"] as const,
+  }));
+}
+
+async function makeStack(extraTools: readonly ToolDeclaration[] = []) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -62,7 +73,7 @@ async function makeStack() {
   });
   const session = await app.createSession({
     sessionId: "tools-session",
-    tools: [modelTool, dispatchTool],
+    tools: [modelTool, dispatchTool, ...extraTools],
   });
 
   const client = await createClient({ transport: inProcessTransport({ gateway }) });
@@ -101,6 +112,41 @@ describe("tools end-to-end — client ↔ gateway ↔ session (session/list_tool
     // The Enumerable snapshot is populated after the poll.
     expect(tools.get("search")?.name).toBe("search");
 
+    await cleanup();
+  });
+
+  it("session/list_tools pages with an opaque cursor; the walk sees every tool once", async () => {
+    // 150 tools + the two fixtures — past the shared DEFAULT_PAGE_SIZE of 100,
+    // so the first reply must carry a cursor and the second must not.
+    const { client, sessionId, cleanup } = await makeStack(fillerTools(150));
+    const request = client.transport.request.bind(client.transport);
+
+    const first = await request("session/list_tools", { sessionId });
+    expect(first.tools).toHaveLength(100);
+    expect(first.nextCursor).toBe("100");
+
+    const second = await request("session/list_tools", { sessionId, cursor: first.nextCursor });
+    expect(second.tools).toHaveLength(52);
+    expect(second.nextCursor).toBeUndefined();
+
+    const names = new Set([...first.tools, ...second.tools].map((t) => t.name));
+    expect(names.size).toBe(152);
+    expect(names.has("search")).toBe(true);
+    expect(names.has("admin_reset")).toBe(true);
+
+    // The client handle seeds from the FIRST page only — cursored walking is the
+    // power-user path, so `refresh()` is page one, not the whole catalog.
+    const tools = client.session(sessionId).tools;
+    expect(await tools.refresh()).toHaveLength(100);
+
+    await cleanup();
+  });
+
+  it("a small catalog carries no cursor (wire-stable for the common case)", async () => {
+    const { client, sessionId, cleanup } = await makeStack();
+    const reply = await client.transport.request("session/list_tools", { sessionId });
+    expect(reply.tools).toHaveLength(2);
+    expect(reply).not.toHaveProperty("nextCursor");
     await cleanup();
   });
 

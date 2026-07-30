@@ -189,14 +189,16 @@ describe("McpClientHarness — protocol", () => {
     const f = await makeFixture();
     try {
       await f.harness.connect();
-      const tools = await f.harness.listTools();
-      expect(tools).toHaveLength(1);
-      expect(tools[0]?.name).toBe("echo");
-      expect(tools[0]?.description).toBe("echoes the input");
-      expect(tools[0]?.inputSchema).toMatchObject({
+      const page = await f.harness.listTools();
+      expect(page.tools).toHaveLength(1);
+      expect(page.tools[0]?.name).toBe("echo");
+      expect(page.tools[0]?.description).toBe("echoes the input");
+      expect(page.tools[0]?.inputSchema).toMatchObject({
         type: "object",
         required: ["message"],
       });
+      // A single-page catalog advertises no cursor.
+      expect(page.nextCursor).toBeUndefined();
     } finally {
       await f.close();
     }

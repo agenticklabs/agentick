@@ -34,6 +34,7 @@ import {
   type McpRequestContext,
   type TaskHandle,
 } from "@agentick/spec";
+import { paginate } from "@agentick/utils";
 import { applyTransform, composeTransforms } from "@agentick/tool/transforms";
 import type { ToolTransform } from "@agentick/tool/transforms";
 
@@ -167,14 +168,21 @@ export function installToolsHandlers(
   // ─────────── tools/list ───────────
   sdkServer.setRequestHandler(
     ListToolsRequestSchema,
-    async (_request: ListToolsRequest, extra: McpHandlerExtra): Promise<ListToolsResult> =>
+    async (request: ListToolsRequest, extra: McpHandlerExtra): Promise<ListToolsResult> =>
       options.runCrossing({
         verb: "list-tools",
         operation: { type: "tool_list" },
         signal: extra.signal,
         run: async (_input, ctx): Promise<ListToolsResult> => {
+          // Paginate AFTER the per-connection filter + transforms: pages must be
+          // cut from what THIS connection can see, or a filtered-out tool would
+          // leave a hole in someone's page. Catalogs at or under the page size
+          // are byte-identical to the unpaginated reply (no `nextCursor` key).
           const projected = projectTools(options.registry.list(), filter, composed, ctx);
-          return { tools: projected.map(toWireTool) };
+          const { page, nextCursor } = paginate(projected, request.params?.cursor);
+          const result: ListToolsResult = { tools: page.map(toWireTool) };
+          if (nextCursor !== undefined) result.nextCursor = nextCursor;
+          return result;
         },
       }),
   );

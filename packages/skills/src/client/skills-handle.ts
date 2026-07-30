@@ -31,7 +31,7 @@
  * @verifiedBy packages/skills/src/client/__tests__/session-skills.spec.ts
  */
 
-import type { ClientHandle, Enumerable } from "@agentick/client-core";
+import { polledView, type ClientHandle, type Enumerable } from "@agentick/client-core";
 import type {
   ClientTransport,
   Skill,
@@ -39,7 +39,6 @@ import type {
   SkillsRemoveInput,
   SkillsSearchInput,
   SkillsUpdateInput,
-  Unsubscribe,
 } from "@agentick/spec";
 
 /** Command client: the `request` surface the skills handle rides (RPC-only). */
@@ -82,46 +81,15 @@ export interface SkillsClientHandle extends ClientHandle, Enumerable<Skill> {
  * the `skills/*` commands.
  */
 export function skillsHandle(client: SkillsCommandClient, sessionId: string): SkillsClientHandle {
-  let snapshot: readonly Skill[] = [];
-  let byName = new Map<string, Skill>();
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const cb of listeners) cb();
-  };
-
-  const refresh = async (): Promise<readonly Skill[]> => {
-    const rows = (await client.transport.request("skills/list", { sessionId })) as
-      | readonly Skill[]
-      | null
-      | undefined;
-    snapshot = rows ?? [];
-    byName = new Map(snapshot.map((s) => [s.name, s]));
-    notify();
-    return snapshot;
-  };
-
-  // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected", so the snapshot fills itself and NOTIFIES when
-  // it lands — a caller binds `list()` + `subscribe()` and has nothing to await
-  // and no boot-time fetch to issue. A poll that fails before the session is
-  // reachable leaves the snapshot empty (never half-filled); the next mutation's
-  // re-fetch or an explicit `refresh()` recovers it.
-  void refresh().catch(() => undefined);
+  const view = polledView<Skill>({
+    // Only the FIRST page seeds the snapshot — walking cursors is the power-user
+    // path (`refresh` re-polls page one), matching the resources handle.
+    fetch: async () => (await client.transport.request("skills/list", { sessionId }))?.skills,
+    key: (s) => s.name,
+  });
 
   return {
-    list: () => snapshot,
-    get: (name) => byName.get(name),
-    subscribe: (cb: () => void): Unsubscribe => {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-    close: () => {
-      listeners.clear();
-    },
-    refresh,
+    ...view,
     search: async (input) => {
       const rows = (await client.transport.request("skills/search", { sessionId, ...input })) as
         | readonly Skill[]
@@ -131,15 +99,15 @@ export function skillsHandle(client: SkillsCommandClient, sessionId: string): Sk
     },
     register: async (input) => {
       await client.transport.request("skills/register", { sessionId, ...input });
-      await refresh();
+      await view.refresh();
     },
     update: async (input) => {
       await client.transport.request("skills/update", { sessionId, ...input });
-      await refresh();
+      await view.refresh();
     },
     remove: async (input) => {
       await client.transport.request("skills/remove", { sessionId, ...input });
-      await refresh();
+      await view.refresh();
     },
   };
 }

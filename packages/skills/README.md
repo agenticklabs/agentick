@@ -161,10 +161,23 @@ await session.skills.run("refund_flow", { args: { orderId: "A-1" } });
 // on each message the run put on the timeline — `metadata` is an open bag, so a
 // reader casts to the typed `MessageSource` seam and keys off the slot:
 const source = entry.metadata?.source as MessageSource | undefined;
-source?.skill; // → { name: "refund_flow", version: "2026-01-14" }
+source?.skill; // → { name: "refund_flow", version: "2026-01-14", opId: "skills:run:01J…" }
 ```
 
-`version` is yours — a semver, a deploy hash, a date, the frontmatter `version:` of the file it was hydrated from. Nothing computes it and nothing defaults it. A message your composition already stamped with its own `source` keeps it: the closer authority wins. There is no operation id in the stamp, because `run` is a plain method and mints no operation — the send it drives is what the journal records.
+`version` is yours — a semver, a deploy hash, a date, the frontmatter `version:` of the file it was hydrated from. Nothing computes it and nothing defaults it. A message your composition already stamped with its own `source` keeps it: the closer authority wins.
+
+`opId` is the run's own operation, because `run` is a declared command: the entry navigates back to a `skills:command:run` envelope in the journal, and a guard sees the run before any content reaches the timeline.
+
+```ts
+withSkills({
+  guards: {
+    run: (input) =>
+      input.name === "refund_flow" ? { kind: "veto", reason: "needs approval" } : undefined,
+  },
+});
+```
+
+A veto means nothing was composed and nothing was sent.
 
 ## Where skills come from
 
@@ -348,14 +361,16 @@ type SkillsError =
 
 Skills project both a read lane and a write lane onto the dynamic-command wire. Every verb is individually grantable and deny-by-default — an undeclared verb is indistinguishable from an absent method.
 
-| Method                                                | Lane  | Result                             |
-| ----------------------------------------------------- | ----- | ---------------------------------- |
-| `skills/list`                                         | read  | `Skill[]` — **`content` included** |
-| `skills/get`                                          | read  | `Skill \| null` by name            |
-| `skills/search`                                       | read  | `Skill[]`                          |
-| `skills/register` · `skills/update` · `skills/remove` | write | The admin-curation lane            |
+| Method                                                | Lane  | Result                                                       |
+| ----------------------------------------------------- | ----- | ------------------------------------------------------------ |
+| `skills/list`                                         | read  | `{ skills, nextCursor? }` — one page; **`content` included** |
+| `skills/get`                                          | read  | `Skill \| null` by name                                      |
+| `skills/search`                                       | read  | `Skill[]`                                                    |
+| `skills/register` · `skills/update` · `skills/remove` | write | The admin-curation lane                                      |
 
 Because a `Skill` is fully serializable, the wire projection _is_ the record — the body crosses, since a client managing skills needs it. It's also unbounded, so prefer `skills/search` over `skills/list` for large libraries.
+
+`skills/list` is paged, MCP-shaped: pass the previous reply's `nextCursor` to continue, and its absence means you have the last page. The in-process `list()` is unchanged — a bounded snapshot, no cursor. That split is the rule across the framework: iterating a collection in-process is bounded by construction, while a wire read has to bound itself, so pagination lives at the wire and at projections, never on the harness's own sync read.
 
 ### The client handle
 
@@ -370,7 +385,7 @@ await s.register({ name: "new_skill", description: "…", content: "…" }); // 
 await s.refresh(); // force a re-poll
 ```
 
-This handle is RPC-backed, not channel-backed — a deliberate divergence from knobs and tasks. There is no delta channel for skills, so the read side keeps a local snapshot seeded by an eager `skills/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop straight into `useSyncExternalStore`.
+This handle is RPC-backed, not channel-backed — a deliberate divergence from knobs and tasks. There is no delta channel for skills, so the read side keeps a local snapshot seeded by an eager `skills/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop straight into `useSyncExternalStore`. Only the FIRST page seeds the snapshot; walking cursors is the power-user path, issued against `skills/list` directly.
 
 The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it.
 
@@ -434,7 +449,7 @@ The stub brings its own in-memory substrate, so unit tests need no session machi
 
 - **Search is substring-only** over name and description. Embedding-based retrieval isn't built; adopters needing more supply a custom implementation.
 - **No durable backend ships.** SQLite (single-process durability) and a remote registry compatible with `agentskills.io` are both planned; today, bring your own store adapter.
-- **`skills:run` isn't a wire command.** It needs a declarative output form that's serializable by construction.
+- **`skills:run` is in-process only.** It's a declared command — journaled, guard-vetoable, carrying an opId — but `exposure: "internal"`, because a run returns a live execution handle (an event stream and an `abort()`), which is not data and cannot cross the inbox or the wire. It widens when `session:send` gets the serializable output form it's parked on.
 - **Reference re-sync.** Supporting files are wired once at install. A later `reload()` or a snapshot restore doesn't re-sync them, because the lazy resolver closures don't serialize.
 - **npm-packaged skills** (`fromPackage`) aren't implemented.
 - **Layered precedence across sources is manual.** `composeHydrators` resolves a duplicate name last-wins, which gives you a cascade if you order the sources yourself. A first-class user-over-project-over-bundled ladder isn't built; it's coupled to the `skill://` uri shape, since layering keeps it single-winner while namespacing by source would force `skill://<source>/<name>/…`.
@@ -452,8 +467,8 @@ Markdown files are the primary authoring form on purpose. Portability is the for
 - `src/__tests__/genesis.spec.ts` — the seed law (no store write, no `register` operation), timestamp preservation, typed `SkillsHydrateFailed` including through the extension install, the `ctx.store` / `ctx.principal` / journal-reader facets, no-genesis-on-fork, and the app-wraps-plan ordering for hooks and guards.
 - `src/__tests__/hydrators.spec.ts` + `hydrators-node.spec.ts` — each named source, `composeHydrators` ordering and last-wins, directory discovery, the `name` default, missing-description skips, missing-root-loads-empty, symlink rejection, `allowed-tools` in both array and comma-string form, and reference files registering and reading back.
 - `src/__tests__/source-surface.spec.ts` — `reload` adds/updates/prunes, `resolve` and `require` on hit and miss, a source-less harness touching nothing, and reload-writes-while-genesis-does-not.
-- `src/__tests__/run.spec.ts` — default composition, the `composeRun` override, handle pass-through with and without `output`, failures riding `handle.result`, `allowedTools` round-trip and threading, isolated runs routing through the bound runner, the typed unbound/missing-skill errors, and the provenance stamp on every composed message (name and declared version, present on an override's messages too, merged into their metadata, and never overwriting a source the composition set itself).
-- `src/__tests__/harness.spec.ts` §declared version + `hydrators-node.spec.ts` §version mapping — `version` through register / get / list / snapshot / import and a silent patch, and the frontmatter `version:` landing on the field rather than the metadata bag.
+- `src/__tests__/run.spec.ts` — default composition, the `composeRun` override, handle pass-through with and without `output`, failures riding `handle.result`, `allowedTools` round-trip and threading, isolated runs routing through the bound runner, the typed unbound/missing-skill errors, the provenance stamp on every composed message (name, declared version, and the run's opId — present on an override's messages too, merged into their metadata, and never overwriting a source the composition set itself), and `skills:run` as an operation: requested and terminal envelopes on a success, a terminal `failed` on a missing skill, a guard veto composing no send at all, and the stamped opId matching the envelope's.
+- `src/conformance.ts` §declared version is a contract + `src/store-conformance.ts` — `version` is a contract every implementation and every store adapter must satisfy, not a field that happens to survive: verbatim through register / get / list / snapshot / import and through the store's single-read and enumerate lanes, patchable by `update`, left alone by a patch that omits it, and staying absent when undeclared (nothing defaults it). `hydrators-node.spec.ts` §version mapping pins the frontmatter `version:` landing on the field rather than the metadata bag.
 - `src/__tests__/tools.spec.ts` — `skill_list` enumeration, `skill_read` content, honest degradation on an unknown name and with no library mounted, and the `registerModelTools: false` opt-out.
 - `src/__tests__/projection.spec.ts` — `skill://<name>` register-then-read, live update reflection, registration after install, unregister on removal, the `exposeAsResources: false` opt-out, degradation with no resource registry, and coexistence with reference uris.
 - `src/client/__tests__/skills-handle.spec.ts` + `session-skills.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, `search` leaving the snapshot alone, and the zero-argument subscribe contract.

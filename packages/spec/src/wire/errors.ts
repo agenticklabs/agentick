@@ -124,4 +124,19 @@ export class WireRpcError extends Error {
       method,
     });
   }
+
+  /**
+   * Handshake version mismatch — the peer speaks a wire version this build
+   * does not. Thrown by BOTH ends: the server when `initialize.params`
+   * requests an unknown version, the client when the `initialize` result
+   * answers with one. There is no negotiation (one version exists); the
+   * connection fails loudly instead of proceeding on a guess.
+   */
+  static protocolVersionMismatch(received: unknown, expected: string): WireRpcError {
+    return new WireRpcError(
+      ErrorCode.InvalidParams,
+      `unsupported wire protocol version ${JSON.stringify(received)} — this peer speaks "${expected}"`,
+      { received, expected },
+    );
+  }
 }

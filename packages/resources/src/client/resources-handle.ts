@@ -27,7 +27,7 @@
  * @verifiedBy packages/resources/src/client/__tests__/session-resources.spec.ts
  */
 
-import type { ClientHandle, Enumerable } from "@agentick/client-core";
+import { polledView, type ClientHandle, type Enumerable } from "@agentick/client-core";
 import type {
   ClientTransport,
   ResourceContents,
@@ -35,7 +35,6 @@ import type {
   ResourceTemplateDescriptor,
   ResourcesListResult,
   ResourcesListTemplatesResult,
-  Unsubscribe,
 } from "@agentick/spec";
 
 /** Command client: the `request` surface the resources handle rides (RPC-only). */
@@ -73,46 +72,19 @@ export function resourcesHandle(
   client: ResourcesCommandClient,
   sessionId: string,
 ): ResourcesClientHandle {
-  let snapshot: readonly ResourceDescriptor[] = [];
-  let byUri = new Map<string, ResourceDescriptor>();
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const cb of listeners) cb();
-  };
-
-  const refresh = async (): Promise<readonly ResourceDescriptor[]> => {
-    const result = (await client.transport.request("resources/list", { sessionId })) as
-      | ResourcesListResult
-      | null
-      | undefined;
-    snapshot = result?.resources ?? [];
-    byUri = new Map(snapshot.map((r) => [r.uri, r]));
-    notify();
-    return snapshot;
-  };
-
-  // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected", so the snapshot fills itself and NOTIFIES when
-  // it lands — a caller binds `list()` + `subscribe()` and has nothing to await
-  // and no boot-time fetch to issue. A poll that fails before the session is
-  // reachable leaves the snapshot empty (never half-filled); the next mutation's
-  // re-fetch or an explicit `refresh()` recovers it.
-  void refresh().catch(() => undefined);
+  const view = polledView<ResourceDescriptor>({
+    fetch: async () => {
+      const result = (await client.transport.request("resources/list", { sessionId })) as
+        | ResourcesListResult
+        | null
+        | undefined;
+      return result?.resources;
+    },
+    key: (r) => r.uri,
+  });
 
   return {
-    list: () => snapshot,
-    get: (uri) => byUri.get(uri),
-    subscribe: (cb: () => void): Unsubscribe => {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-    close: () => {
-      listeners.clear();
-    },
-    refresh,
+    ...view,
     listTemplates: async () => {
       const result = (await client.transport.request("resources/listTemplates", { sessionId })) as
         | ResourcesListTemplatesResult

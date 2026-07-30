@@ -37,7 +37,11 @@ export function buildHandshakeInitializeResult(): InitializeResult {
   return {
     protocolVersion: "v1",
     capabilities: {
-      cursorResume: true,
+      // Mirrors what the real dispatcher answers (`initialize` in
+      // `@agentick/transport`): resume is not implemented server-side, so it
+      // is never advertised — a stub that claimed it would teach tests to
+      // feature-gate on a flag production never sets.
+      cursorResume: false,
       subscriptions: true,
       progress: true,
       cancellation: true,

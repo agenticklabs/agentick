@@ -22,6 +22,23 @@
 
 import type { CommandInfo, PromptDeclarationRecord } from "@agentick/spec";
 
+/**
+ * One page of `prompts/list` — MCP-shaped (named collection key + `nextCursor`),
+ * the same envelope `resources/list` serves. The in-process `PromptsHarness.list()`
+ * stays an unpaginated bounded snapshot; paging is a WIRE concern, so the envelope
+ * exists only here and on the `prompts:list` command it routes to.
+ */
+export interface PromptsListResult {
+  readonly prompts: readonly PromptDeclarationRecord[];
+  /** Opaque cursor for the next page; absent on the last page. */
+  readonly nextCursor?: string;
+}
+
+/** The `prompts:list` command input — `cursor` is optional-ABSENT, never `undefined`. */
+export interface PromptsListInput {
+  readonly cursor?: string;
+}
+
 declare module "@agentick/spec" {
   interface WireMethods {
     "prompts/register": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
@@ -33,8 +50,14 @@ declare module "@agentick/spec" {
       params: { sessionId: string; name: string };
       result: PromptDeclarationRecord | null;
     };
-    /** Every declaration as wire-safe records (name-sorted). */
-    "prompts/list": { params: { sessionId: string }; result: readonly PromptDeclarationRecord[] };
+    /**
+     * Declarations as wire-safe records (name-sorted), one page at a time. Pass
+     * the previous reply's `nextCursor` to continue.
+     */
+    "prompts/list": {
+      params: { sessionId: string; cursor?: string };
+      result: PromptsListResult;
+    };
     /** Render a prompt to messages WITHOUT queueing (the MCP `prompts/get` analog). */
     "prompts/render": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
     "prompts/invoke": { params: { sessionId: string; [key: string]: unknown }; result: unknown };

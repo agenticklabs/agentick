@@ -28,14 +28,8 @@
  * @verifiedBy packages/tool-executor/src/client/__tests__/session-tools.spec.ts
  */
 
-import type { ClientHandle, Enumerable } from "@agentick/client-core";
-import type {
-  ClientTransport,
-  ContentBlock,
-  ToolExposure,
-  ToolInfo,
-  Unsubscribe,
-} from "@agentick/spec";
+import { polledView, type ClientHandle, type Enumerable } from "@agentick/client-core";
+import type { ClientTransport, ContentBlock, ToolExposure, ToolInfo } from "@agentick/spec";
 
 /** Command client: the `request` surface the tools handle rides (RPC-only). */
 export interface ToolsCommandClient {
@@ -74,48 +68,21 @@ export interface ToolsClientHandle extends ClientHandle, Enumerable<ToolInfo> {
  * dispatch verb issues `session/dispatch`.
  */
 export function toolsHandle(client: ToolsCommandClient, sessionId: string): ToolsClientHandle {
-  let snapshot: readonly ToolInfo[] = [];
-  let byName = new Map<string, ToolInfo>();
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const cb of listeners) cb();
-  };
-
-  const refresh = async (query?: {
-    readonly exposure?: ToolExposure;
-  }): Promise<readonly ToolInfo[]> => {
-    const reply = (await client.transport.request("session/list_tools", {
-      sessionId,
-      ...(query?.exposure !== undefined ? { exposure: query.exposure } : {}),
-    })) as { tools?: readonly ToolInfo[] } | null | undefined;
-    snapshot = reply?.tools ?? [];
-    byName = new Map(snapshot.map((t) => [t.name, t]));
-    notify();
-    return snapshot;
-  };
-
-  // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected", so the snapshot fills itself and NOTIFIES when
-  // it lands — a caller binds `list()` + `subscribe()` and has nothing to await
-  // and no boot-time fetch to issue. A poll that fails before the session is
-  // reachable leaves the snapshot empty (never half-filled); the next mutation's
-  // re-fetch or an explicit `refresh()` recovers it.
-  void refresh().catch(() => undefined);
+  const view = polledView<ToolInfo, { readonly exposure?: ToolExposure }>({
+    // Only the FIRST page seeds the snapshot — walking cursors is the power-user
+    // path (`refresh` re-polls page one), matching the resources handle.
+    fetch: async (query) =>
+      (
+        await client.transport.request("session/list_tools", {
+          sessionId,
+          ...(query?.exposure !== undefined ? { exposure: query.exposure } : {}),
+        })
+      )?.tools,
+    key: (t) => t.name,
+  });
 
   return {
-    list: () => snapshot,
-    get: (name) => byName.get(name),
-    subscribe: (cb: () => void): Unsubscribe => {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-    close: () => {
-      listeners.clear();
-    },
-    refresh,
+    ...view,
     dispatch: async (name, input) => {
       const reply = (await client.transport.request("session/dispatch", {
         sessionId,

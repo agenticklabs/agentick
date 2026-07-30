@@ -27,8 +27,8 @@
  * @verifiedBy packages/state/src/client/__tests__/session-state.spec.ts
  */
 
-import type { ClientHandle, Enumerable } from "@agentick/client-core";
-import type { ClientTransport, StateListEntry, Unsubscribe } from "@agentick/spec";
+import { polledView, type ClientHandle, type Enumerable } from "@agentick/client-core";
+import type { ClientTransport, StateListEntry } from "@agentick/spec";
 
 /** Command client: the `request` surface the state handle rides (RPC-only). */
 export interface StateCommandClient {
@@ -66,52 +66,23 @@ export interface StateClientHandle extends ClientHandle, Enumerable<StateListEnt
  * the `state/*` commands.
  */
 export function stateHandle(client: StateCommandClient, sessionId: string): StateClientHandle {
-  let snapshot: readonly StateListEntry[] = [];
-  let byKey = new Map<string, StateListEntry>();
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const cb of listeners) cb();
-  };
-
-  const refresh = async (): Promise<readonly StateListEntry[]> => {
-    const rows = (await client.transport.request("state/list", { sessionId })) as
-      | readonly StateListEntry[]
-      | null
-      | undefined;
-    snapshot = rows ?? [];
-    byKey = new Map(snapshot.map((e) => [e.key, e]));
-    notify();
-    return snapshot;
-  };
-
-  // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected" — populate up front so `list()` reflects
-  // pre-connection entries once the fetch lands. Fire-and-forget; a poll that
-  // fails before the session is reachable recovers on the next mutation's
-  // re-fetch or an explicit `refresh()`.
-  void refresh().catch(() => undefined);
+  const view = polledView<StateListEntry>({
+    fetch: () =>
+      client.transport.request("state/list", { sessionId }) as Promise<
+        readonly StateListEntry[] | null | undefined
+      >,
+    key: (e) => e.key,
+  });
 
   return {
-    list: () => snapshot,
-    get: (key) => byKey.get(key),
-    subscribe: (cb: () => void): Unsubscribe => {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-    close: () => {
-      listeners.clear();
-    },
-    refresh,
+    ...view,
     set: async (key, value) => {
       await client.transport.request("state/set", { sessionId, key, value });
-      await refresh();
+      await view.refresh();
     },
     delete: async (key) => {
       await client.transport.request("state/delete", { sessionId, key });
-      await refresh();
+      await view.refresh();
     },
   };
 }

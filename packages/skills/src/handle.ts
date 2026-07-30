@@ -67,6 +67,18 @@ export interface SkillRunOptions<T = unknown> {
 }
 
 /**
+ * The `skills:run` command input — {@link SkillRunOptions} plus the skill name.
+ *
+ * `run(name, opts)` keeps the two-argument call shape adopters read best; the
+ * COMMAND takes one payload, because a declared command's input is one value
+ * (it is also the inbox message body and the guard's subject).
+ */
+export interface SkillsRunInput<T = unknown> extends SkillRunOptions<T> {
+  /** The skill to run. Resolved lookup-on-miss; `SkillNotFound` if no source has it. */
+  readonly name: string;
+}
+
+/**
  * The run-composition seam (`withSkills({ composeRun })`). Maps a resolved
  * skill + run options to the `SendInput` the runner executes. The framework
  * ships a default (system-role skill message + user-role args message); this

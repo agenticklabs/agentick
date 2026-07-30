@@ -117,7 +117,7 @@ import type {
   McpResourcePage,
   McpResourceTemplatePage,
   McpRoot,
-  McpToolDescriptor,
+  McpToolPage,
   ResourceContents,
 } from "./types.js";
 import type { McpConnectionStatus, StatusUnsubscribe } from "./connection-status.js";
@@ -429,7 +429,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   private inFlightDisconnect: Promise<void> | undefined;
 
   // ─── Declared commands (ADR 51) — assigned in the constructor ───
-  private readonly listToolsCmd: Cmd<undefined, readonly McpToolDescriptor[]>;
+  private readonly listToolsCmd: Cmd<McpCursorInput, McpToolPage>;
   private readonly callToolCmd: Cmd<McpCallToolInput, CallToolResult>;
   private readonly callToolAsTaskCmd: Cmd<CallToolAsTaskParams, CallToolOrTaskOutcome>;
   private readonly getTaskCmd: Cmd<{ readonly taskId: string }, GetTaskResult>;
@@ -504,7 +504,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       name: "mcp:list-tools",
       // VERB-MATRIX ratified wire row (#140/#141) — grantable, deny-by-default.
       exposure: "wire",
-      handler: () => this.listToolsBody(),
+      handler: (i: McpCursorInput) => this.listToolsBody(i),
     });
     this.callToolCmd = this.command({
       name: "mcp:call-tool",
@@ -867,21 +867,31 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   }
 
   /**
-   * Discover the server's tools. Era codec normalizes each entry to
-   * the canonical {@link McpToolDescriptor} shape.
+   * Discover the server's tools, ONE PAGE at a time. Era codec normalizes each
+   * entry to the canonical descriptor shape ({@link McpToolPage}).
+   *
+   * Same pagination contract as {@link listPrompts} / {@link listResources}: the
+   * `cursor` passes through untouched and the returned `nextCursor` (when
+   * present) feeds the next call. A caller that wants the whole catalog walks
+   * until `nextCursor` is absent — which is what tool discovery does
+   * (`discoverAndRegisterTools`), because a server with more tools than one page
+   * would otherwise register a truncated set with no error to explain it.
    */
-  listTools(): Promise<readonly McpToolDescriptor[]> {
-    return this.listToolsCmd(undefined);
+  listTools(cursor?: string): Promise<McpToolPage> {
+    return this.listToolsCmd({ cursor });
   }
 
-  private listToolsBody(): Effect.Effect<readonly McpToolDescriptor[], McpClientError, never> {
+  private listToolsBody(i: McpCursorInput): Effect.Effect<McpToolPage, McpClientError, never> {
     return Effect.tryPromise({
-      try: async () => {
+      try: async (): Promise<McpToolPage> => {
         const c = this.requireReadyClient();
-        const res = await c.listTools();
-        return (res.tools as Tool[]).map((t) =>
-          this.codec.decodeTool(t as unknown as Readonly<Record<string, unknown>>),
-        );
+        const res = await c.listTools(i.cursor !== undefined ? { cursor: i.cursor } : undefined);
+        return {
+          tools: (res.tools as Tool[]).map((t) =>
+            this.codec.decodeTool(t as unknown as Readonly<Record<string, unknown>>),
+          ),
+          ...(res.nextCursor !== undefined ? { nextCursor: res.nextCursor } : {}),
+        };
       },
       catch: (cause) => cause as McpClientError,
     });

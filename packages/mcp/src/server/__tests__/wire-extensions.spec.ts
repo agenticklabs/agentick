@@ -21,7 +21,9 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { IconSchema, IconsSchema } from "@modelcontextprotocol/sdk/types.js";
 import { jsonSchema, type ToolDeclaration } from "@agentick/spec";
+import type { IconDescriptor } from "@agentick/tool/transforms";
 
 import { toWirePrompt } from "../projection/prompts.js";
 import { toWireResource, toWireResourceTemplate } from "../projection/resources.js";
@@ -231,6 +233,49 @@ describe("toWireResource / toWireResourceTemplate — title / icons / _meta", ()
       uriTemplate: "file:///{x}",
       name: "t",
     });
+  });
+});
+
+describe("icons — the convention parses as the wire type", () => {
+  // The gap #259 closed: `IconDescriptor.sizes` was a space-separated string
+  // (the HTML `<link rel="icon">` shape) cast straight onto MCP's `string[]`,
+  // so a declared `sizes` reached the wire in a shape the schema rejects — and
+  // no test noticed, because nothing validated a projection against the SDK's
+  // own schema. Validate against `IconSchema` itself, not a hand-copy of it,
+  // so an SDK tightening surfaces here rather than at a connected client.
+  const icons: readonly IconDescriptor[] = [
+    { src: "https://example.com/i.svg", sizes: ["any"], mimeType: "image/svg+xml" },
+    { src: "https://example.com/i-64.png", sizes: ["16x16", "64x64"], mimeType: "image/png" },
+  ];
+
+  it("projected icons parse under the SDK Icon schema, on all four surfaces", () => {
+    // `IconsSchema` is the `{ icons?: Icon[] }` MIXIN, so the whole projected
+    // record goes in — which also pins that each surface emits the icons under
+    // the key the wire reads.
+    const projected = {
+      tool: toWireTool(decl("t", { icons })),
+      prompt: toWirePrompt({ name: "p", description: "d", metadata: { icons } }),
+      resource: toWireResource({ uri: "file:///a", name: "a", metadata: { icons } }),
+      template: toWireResourceTemplate({
+        uriTemplate: "file:///{x}",
+        name: "t",
+        metadata: { icons },
+      }),
+    };
+    for (const [surface, wire] of Object.entries(projected)) {
+      const parsed = IconsSchema.safeParse(wire);
+      // Assert on a surface-tagged message rather than a bare boolean, so a
+      // failure names WHICH projection broke and what the schema objected to.
+      expect(`${surface}: ${parsed.success ? "ok" : parsed.error.message}`).toBe(`${surface}: ok`);
+      expect(parsed.data?.icons).toHaveLength(2);
+    }
+  });
+
+  it("the pre-#259 string form is what the schema rejects", () => {
+    // Pins WHY the convention changed rather than the projections splitting the
+    // string: the old authoring shape was never wire-valid.
+    expect(IconSchema.safeParse({ src: "/i.png", sizes: "16x16 64x64" }).success).toBe(false);
+    expect(IconSchema.safeParse({ src: "/i.png", sizes: ["16x16", "64x64"] }).success).toBe(true);
   });
 });
 

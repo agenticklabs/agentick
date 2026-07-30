@@ -22,14 +22,37 @@
 
 import type { CommandInfo, Skill, SkillsSearchInput } from "@agentick/spec";
 
+/**
+ * One page of `skills/list` — MCP-shaped (named collection key + `nextCursor`),
+ * the same envelope `resources/list` serves. The in-process `SkillsHarness.list()`
+ * stays an unpaginated bounded snapshot; paging is a WIRE concern, so the
+ * envelope exists only here and on the `skills:list` command it routes to.
+ */
+export interface SkillsListResult {
+  readonly skills: readonly Skill[];
+  /** Opaque cursor for the next page; absent on the last page. */
+  readonly nextCursor?: string;
+}
+
+/** The `skills:list` command input — `cursor` is optional-ABSENT, never `undefined`. */
+export interface SkillsListInput {
+  readonly cursor?: string;
+}
+
 declare module "@agentick/spec" {
   interface WireMethods {
     "skills/register": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
     "skills/update": { params: { sessionId: string; [key: string]: unknown }; result: unknown };
     // The handler reads `SkillsRemoveInput` (`{ name }`) — the wire key is `name`.
     "skills/remove": { params: { sessionId: string; name: string }; result: unknown };
-    /** Enumerate every skill (wire-safe records — `content` INCLUDED). */
-    "skills/list": { params: { sessionId: string }; result: readonly Skill[] };
+    /**
+     * Enumerate skills (wire-safe records — `content` INCLUDED), one page at a
+     * time. Pass the previous reply's `nextCursor` to continue.
+     */
+    "skills/list": {
+      params: { sessionId: string; cursor?: string };
+      result: SkillsListResult;
+    };
     /** Read one skill by name; `null` on miss. */
     "skills/get": { params: { sessionId: string; name: string }; result: Skill | null };
     /** Substring + tag filter (mirrors `SkillsSearchInput`). */

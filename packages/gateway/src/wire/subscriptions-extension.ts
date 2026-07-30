@@ -103,6 +103,28 @@ async function* withSnapshot(
   yield* live;
 }
 
+// TODO(wire-resume): `SubscribeParams.fromCursor` is ACCEPTED AND IGNORED
+// here — `openScopeEvents` builds its query from `scope` + `query` only, and
+// the stream opens at head. The client half is complete (it tracks each
+// subscription's `lastCursor` and resends it as `fromCursor` on reconnect,
+// `BaseClientTransport`), and it keeps sending it so the day this is
+// implemented needs no client change. Until then the server answers
+// `initialize` with `cursorResume: false`; the gap-free cold start a client
+// DOES get is the channel snapshot frame below, not replay.
+//
+// Real resume is a subsystem, not a parameter, and needs three things that do
+// not exist:
+//   1. RETENTION — a bounded per-scope ring on the bus (`gateway.events` is a
+//      live fan-out today), with a declared window and a memory ceiling.
+//   2. REPLAY — open at `fromCursor` by draining retained events before
+//      splicing the live tail, without dropping or duplicating across the
+//      seam (the same overlap the snapshot path already reasons about).
+//   3. EVICTION — when the requested cursor predates the window, tell the
+//      client rather than silently starting at head: that is the reserved
+//      `notifications/subscription/evicted` frame (`SubscriptionEvictedParams`
+//      in `@agentick/spec`), whose producer is precisely this step.
+// Landing 1+2 without 3 is the dangerous half: a client that asked to resume
+// and was quietly given head believes it has a gap-free stream.
 export const subscriptionsWireExtension: WireExtension = defineWireExtension({
   name: "@agentick/gateway#subscriptions",
   namespace: "sub",

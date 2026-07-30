@@ -414,13 +414,15 @@ await session.resources.read(promptUri("weekly_status"));
 
 Every verb is individually grantable and deny-by-default — an undeclared verb is indistinguishable from an absent method. Wire reads project the serializable record slice; `template` and `render` never cross.
 
-| Method                                                   | Lane  | Result                            |
-| -------------------------------------------------------- | ----- | --------------------------------- |
-| `prompts/list`                                           | read  | declaration records, name-sorted  |
-| `prompts/get`                                            | read  | one declaration record, or `null` |
-| `prompts/render`                                         | read  | `{ description, messages }`       |
-| `prompts/invoke`                                         | write | render + append to the timeline   |
-| `prompts/register` · `prompts/update` · `prompts/remove` | write | the admin-curation lane           |
+| Method                                                   | Lane  | Result                                                        |
+| -------------------------------------------------------- | ----- | ------------------------------------------------------------- |
+| `prompts/list`                                           | read  | `{ prompts, nextCursor? }` — one page of records, name-sorted |
+| `prompts/get`                                            | read  | one declaration record, or `null`                             |
+| `prompts/render`                                         | read  | `{ description, messages }`                                   |
+| `prompts/invoke`                                         | write | render + append to the timeline                               |
+| `prompts/register` · `prompts/update` · `prompts/remove` | write | the admin-curation lane                                       |
+
+`prompts/list` is paged, MCP-shaped: pass the previous reply's `nextCursor` to continue, and its absence means you have the last page. The in-process `list()` is unchanged — a bounded snapshot, no cursor. Pagination is a wire and projection concern; a sync read is bounded by construction and has nothing to page.
 
 ### Inbox addressing
 
@@ -468,6 +470,8 @@ type PromptsError =
 
 `update` is a shallow patch, and `arguments` replaces wholesale rather than merging element-wise.
 
+Both `invoke` and `render` return `{ description, messages, metadata? }`, where `metadata` is the DECLARATION's own bag copied verbatim. That is deliberate — a render produces messages, and anything it wants to say about _them_ belongs on a message; what a caller holding only a result cannot otherwise reach is what the author attached to the prompt. It is the source MCP's `GetPromptResult._meta` projects from (`metadata.mcp.meta`, the same key `prompts/list` reads), so an MCP Apps `ui://` linkage authored once reaches both wire slots.
+
 ### Package exports
 
 | Export                                                                                                 | Purpose                                              |
@@ -496,7 +500,7 @@ await p.render({ name: "weekly_status", args: { week: "2026-06-28" } });
 await p.refresh();
 ```
 
-RPC-backed, not channel-backed: there is no delta channel for prompts, so the read side keeps a local snapshot seeded by an eager `prompts/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop into `useSyncExternalStore`.
+RPC-backed, not channel-backed: there is no delta channel for prompts, so the read side keeps a local snapshot seeded by an eager `prompts/list` and re-fetches after every mutation. `list()` and `get()` read that snapshot synchronously, which is what lets the handle drop into `useSyncExternalStore`. Only the FIRST page seeds the snapshot; walking cursors is the power-user path, issued against `prompts/list` directly.
 
 The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it.
 
@@ -522,7 +526,7 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — register / update / remove, invoke and render, the sync declaration read, native and custom content dispatch, argument validation, snapshot round-trip, and the typed errors.
+- `src/__tests__/harness.spec.ts` — register / update / remove, invoke and render, the sync declaration read, native and custom content dispatch, argument validation, snapshot round-trip, the typed errors, and the declaration's metadata bag reaching the render result verbatim on both `render` and `invoke` while a bare declaration yields a result with no `metadata` key at all.
 - `src/__tests__/definition.spec.ts` — `definePrompts` identity, the non-enumerable brand, inertness (no store touch, no hydrator run), the plan-or-instance shapes, and `store` reaching the harness through the one options shape.
 - `src/__tests__/genesis.spec.ts` — the seed law (no store write, no `register` operation) with the content sidecar still populated so a seeded prompt renders, typed `PromptsHydrateFailed` including through the extension install, the `ctx.store` / `ctx.principal` / journal-reader facets, no-genesis-on-fork, and the app-wraps-plan ordering for hooks and guards.
 - `src/__tests__/hydrators.spec.ts` — each named source, the module picker conventions, the template-only rejection on a URL source carrying `render`, the record-only store read, and `composeHydrators` ordering and last-wins.

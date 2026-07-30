@@ -562,78 +562,87 @@ async function discoverAndRegisterTools(
   harness: McpClientHarness,
   defaultNarrate: boolean | undefined,
 ): Promise<readonly Unsubscribe[]> {
-  const tools = await harness.listTools();
   const prefix = config.toolPrefix ?? `${config.serverId}__`;
   // Per-server `narrate` overrides the `withMCP`-level default; `undefined`
   // at both levels = narration ON (the framework default).
   const narrate = config.narrate ?? defaultNarrate;
   const unsubscribes: Unsubscribe[] = [];
-  for (const tool of tools) {
-    const localName = `${prefix}${tool.name}`;
-    const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
-    // Detect REMOTE task support from MCP's canonical
-    // `execution.taskSupport` (per SDK 1.29.0 ToolSchema), translated
-    // via {@link mapMcpTaskSupport} to our framework vocabulary.
-    // The three branches mirror the three MCP enum values:
-    //
-    //   "required" (= local "required")  — every call goes through the
-    //     task wire. Handler always submits via `ctx.tasks.submit`;
-    //     the executor's Pattern A/B branching governs whether the
-    //     model sees a `task_ref` or the eventual blocks.
-    //   "optional" (= local "supported", #174) — server CAN run as a
-    //     task; client picks per call. Handler reads the resolved
-    //     dispatch task mode from `ctx.task`:
-    //       - `"ref"`              → use task wire + return TaskHandle.
-    //       - `"auto"` / `"inline"` → call inline + return blocks.
-    //     Default behavior is inline — matches the framework-wide
-    //     decision that `supported` tools behave like every other
-    //     tool unless the adopter explicitly opts in.
-    //   "forbidden" / undefined (= local "unsupported" / undefined) —
-    //     handler always calls inline; the task wire is never
-    //     exercised. Pre-flight rejects `task: "ref"` for these.
-    const localTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
-    const handler: ToolHandler =
-      localTaskSupport === "required"
-        ? (input, { ctx }) =>
-            ctx.tasks!.submit<readonly ContentBlock[]>((workCtx) =>
-              mcpTaskEffect(
-                harness,
-                {
-                  name: tool.name,
-                  args: input as Readonly<Record<string, unknown>>,
-                  taskOptions:
-                    config.defaultTaskTtl !== undefined ? { ttl: config.defaultTaskTtl } : {},
-                },
-                workCtx,
-              ),
-            )
-        : localTaskSupport === "supported"
-          ? makeSupportedHandler(harness, tool, config)
-          : async (input): Promise<ToolResultEnvelope> => {
-              const result = await harness.callTool(
-                tool.name,
-                input as Readonly<Record<string, unknown>>,
-              );
-              // The FULL result, not just its blocks: `_meta` (the MCP-Apps
-              // `ui` descriptor's carriage), `structuredContent`, and the
-              // domain-error flag all belong on the DispatchResult. The
-              // mapped shape IS a `ToolResultEnvelope`.
-              return mapCallToolResult(result);
-            };
-    unsubscribes.push(installer.registerToolHandler(handlerRef, handler));
-    unsubscribes.push(
-      installer.registerExtensionTool(
-        toRegistration(
-          mcpDeclaration(installer.sessionId, config.serverId, tool, localName, narrate),
-          {
-            scope: "extension",
-            extensionName: EXTENSION_NAME,
-            level: "session",
-          },
+
+  // Paginated, like the prompt and resource surfaces: a server with more tools
+  // than one page advertises them across pages, and stopping at the first would
+  // register a silently truncated tool set — the model would simply never see
+  // the rest, with no error to explain it.
+  let cursor: string | undefined;
+  do {
+    const page = await harness.listTools(cursor);
+    for (const tool of page.tools) {
+      const localName = `${prefix}${tool.name}`;
+      const handlerRef = mcpHandlerRef(installer.sessionId, config.serverId, tool.name);
+      // Detect REMOTE task support from MCP's canonical
+      // `execution.taskSupport` (per SDK 1.29.0 ToolSchema), translated
+      // via {@link mapMcpTaskSupport} to our framework vocabulary.
+      // The three branches mirror the three MCP enum values:
+      //
+      //   "required" (= local "required")  — every call goes through the
+      //     task wire. Handler always submits via `ctx.tasks.submit`;
+      //     the executor's Pattern A/B branching governs whether the
+      //     model sees a `task_ref` or the eventual blocks.
+      //   "optional" (= local "supported", #174) — server CAN run as a
+      //     task; client picks per call. Handler reads the resolved
+      //     dispatch task mode from `ctx.task`:
+      //       - `"ref"`              → use task wire + return TaskHandle.
+      //       - `"auto"` / `"inline"` → call inline + return blocks.
+      //     Default behavior is inline — matches the framework-wide
+      //     decision that `supported` tools behave like every other
+      //     tool unless the adopter explicitly opts in.
+      //   "forbidden" / undefined (= local "unsupported" / undefined) —
+      //     handler always calls inline; the task wire is never
+      //     exercised. Pre-flight rejects `task: "ref"` for these.
+      const localTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
+      const handler: ToolHandler =
+        localTaskSupport === "required"
+          ? (input, { ctx }) =>
+              ctx.tasks!.submit<readonly ContentBlock[]>((workCtx) =>
+                mcpTaskEffect(
+                  harness,
+                  {
+                    name: tool.name,
+                    args: input as Readonly<Record<string, unknown>>,
+                    taskOptions:
+                      config.defaultTaskTtl !== undefined ? { ttl: config.defaultTaskTtl } : {},
+                  },
+                  workCtx,
+                ),
+              )
+          : localTaskSupport === "supported"
+            ? makeSupportedHandler(harness, tool, config)
+            : async (input): Promise<ToolResultEnvelope> => {
+                const result = await harness.callTool(
+                  tool.name,
+                  input as Readonly<Record<string, unknown>>,
+                );
+                // The FULL result, not just its blocks: `_meta` (the MCP-Apps
+                // `ui` descriptor's carriage), `structuredContent`, and the
+                // domain-error flag all belong on the DispatchResult. The
+                // mapped shape IS a `ToolResultEnvelope`.
+                return mapCallToolResult(result);
+              };
+      unsubscribes.push(installer.registerToolHandler(handlerRef, handler));
+      unsubscribes.push(
+        installer.registerExtensionTool(
+          toRegistration(
+            mcpDeclaration(installer.sessionId, config.serverId, tool, localName, narrate),
+            {
+              scope: "extension",
+              extensionName: EXTENSION_NAME,
+              level: "session",
+            },
+          ),
         ),
-      ),
-    );
-  }
+      );
+    }
+    cursor = page.nextCursor;
+  } while (cursor !== undefined);
   return unsubscribes;
 }
 

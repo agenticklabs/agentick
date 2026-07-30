@@ -1200,6 +1200,22 @@ export class SessionHarness<P = unknown>
     ) as Promise<SessionExecutionHandle<T>>;
   }
 
+  /**
+   * Cancel the current execution. Delegates to the live handle's `abort` —
+   * the SAME path `handle.abort(reason)` takes (`loop.abort({ executionId,
+   * reason })`), so the reason lands on the execution's merged signal and the
+   * terminal reports `canceled` with it. No handle in flight ⇒ nothing to
+   * cancel; a session that is idle (or whose execution settled while this
+   * call was in flight) resolves quietly.
+   *
+   * Not a session op of its own: the abort it delegates to IS an op
+   * (`loop:abort`), so wrapping it here would mint a second envelope for one
+   * cancellation.
+   */
+  async abort(reason?: string): Promise<void> {
+    await this._currentHandle?.abort(reason);
+  }
+
   // ──────── Top-level harness handles (ADR 27 augmentations) ────────
 
   /**

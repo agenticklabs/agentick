@@ -148,7 +148,7 @@ describe("httpTransport — round-trip over real loopback HTTP", () => {
 
     const client = await makeHttpClient(clientTransport, "echo-srv");
 
-    const tools = await client.listTools();
+    const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toContain("echo");
 
     const result = await client.callTool("echo", { q: "hello" });
@@ -467,7 +467,7 @@ describe("httpTransport — HTTP auth pre-gate (RFC 9728 challenge)", () => {
 
     // The crossing authenticated at the pre-gate; the full round-trip
     // then proceeds through the SDK + per-operation pipeline.
-    const tools = await client.listTools();
+    const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toContain("echo");
     const result = await client.callTool("echo", { q: "gated" });
     expect((result.content as { text: string }[])[0]!.text).toBe("echo: gated");
@@ -576,7 +576,7 @@ describe("httpTransport — HTTP auth pre-gate (RFC 9728 challenge)", () => {
     // initialize succeeded (SDK session opened) — the pre-gate did not
     // intercept the crossing because oauth is unconfigured.
     expect(harness.connections()).toHaveLength(1);
-    const tools = await client.listTools();
+    const { tools } = await client.listTools();
     expect(tools.map((t) => t.name)).toContain("echo");
 
     await client.close();

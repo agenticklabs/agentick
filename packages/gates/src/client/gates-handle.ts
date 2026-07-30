@@ -26,8 +26,8 @@
  * @verifiedBy packages/gates/src/client/__tests__/session-gates.spec.ts
  */
 
-import type { ClientHandle, Enumerable } from "@agentick/client-core";
-import type { ClientTransport, Unsubscribe } from "@agentick/spec";
+import { polledView, type ClientHandle, type Enumerable } from "@agentick/client-core";
+import type { ClientTransport } from "@agentick/spec";
 
 import type { GateInfo } from "../controller.js";
 import type { GateValue } from "../descriptor.js";
@@ -70,48 +70,19 @@ export interface GatesClientHandle extends ClientHandle, Enumerable<GateInfo> {
  * the `gates/*` commands.
  */
 export function gatesHandle(client: GatesCommandClient, sessionId: string): GatesClientHandle {
-  let snapshot: readonly GateInfo[] = [];
-  let byName = new Map<string, GateInfo>();
-  const listeners = new Set<() => void>();
-
-  const notify = (): void => {
-    for (const cb of listeners) cb();
-  };
-
-  const refresh = async (): Promise<readonly GateInfo[]> => {
-    const rows = (await client.transport.request("gates/list", { sessionId })) as
-      | readonly GateInfo[]
-      | null
-      | undefined;
-    snapshot = rows ?? [];
-    byName = new Map(snapshot.map((g) => [g.name, g]));
-    notify();
-    return snapshot;
-  };
-
-  // Eager seed: the Enumerable contract is "current state, including what
-  // happened before I connected" — populate the snapshot up front so `list()`
-  // reflects pre-connection gates once the fetch lands. Fire-and-forget; errors
-  // are swallowed (a poll may fail before the session is reachable — the next
-  // mutation's re-fetch, or an explicit `refresh()`, recovers).
-  void refresh().catch(() => undefined);
+  const view = polledView<GateInfo>({
+    fetch: () =>
+      client.transport.request("gates/list", { sessionId }) as Promise<
+        readonly GateInfo[] | null | undefined
+      >,
+    key: (g) => g.name,
+  });
 
   return {
-    list: () => snapshot,
-    get: (name) => byName.get(name),
-    subscribe: (cb: () => void): Unsubscribe => {
-      listeners.add(cb);
-      return () => {
-        listeners.delete(cb);
-      };
-    },
-    close: () => {
-      listeners.clear();
-    },
-    refresh,
+    ...view,
     clear: async (name) => {
       await client.transport.request("gates/clear", { sessionId, name });
-      await refresh();
+      await view.refresh();
     },
     defer: async (name, reason) => {
       await client.transport.request("gates/defer", {
@@ -119,11 +90,11 @@ export function gatesHandle(client: GatesCommandClient, sessionId: string): Gate
         name,
         ...(reason !== undefined ? { reason } : {}),
       });
-      await refresh();
+      await view.refresh();
     },
     override: async (name, value, reason) => {
       await client.transport.request("gates/override", { sessionId, name, value, reason });
-      await refresh();
+      await view.refresh();
     },
   };
 }

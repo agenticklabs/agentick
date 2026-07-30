@@ -20,7 +20,7 @@ function fakeInternalClient(calls: Array<{ method: WireMethod; params: unknown }
   const transport = {
     async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
       calls.push({ method, params });
-      if (method === "prompts/list") return PROMPTS;
+      if (method === "prompts/list") return { prompts: PROMPTS };
       return null;
     },
   };

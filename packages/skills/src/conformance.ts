@@ -250,4 +250,50 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
       await h2.close();
     });
   });
+
+  /**
+   * `Skill.version` — a DECLARED CONTRACT every implementation must satisfy
+   * (#249), not a field that happens to survive.
+   *
+   * `skills:run` copies this string verbatim into the provenance stamp on every
+   * message it composes, so a timeline entry answers "which revision of this
+   * skill produced this" on its own. An implementation that drops `version`
+   * anywhere along register → read → enumerate → snapshot breaks that for every
+   * skill it holds, and nothing else fails — the run still works, the messages
+   * still arrive, the provenance is just quietly wrong.
+   *
+   * Absence is equally contractual: the framework never computes a version, so a
+   * skill that declared none must read back declaring none. An implementation
+   * that defaults it invents history.
+   */
+  describe("SkillsHarness — declared version is a contract", () => {
+    it("survives register → get → list → snapshot → import, and stays absent when undeclared", async () => {
+      const h = await deps.make();
+      await h.register({ name: "v", description: "V", content: "body", version: "1.4.0" });
+      await h.register({ name: "none", description: "N", content: "body" });
+
+      expect(h.get("v")?.version).toBe("1.4.0");
+      expect(h.get("none")?.version).toBeUndefined();
+      expect(h.list().find((s) => s.name === "v")?.version).toBe("1.4.0");
+
+      const snap = h.exportSnapshot();
+      await h.close();
+
+      const restored = await deps.make();
+      restored.importSnapshot(snap);
+      expect(restored.get("v")?.version).toBe("1.4.0");
+      expect(restored.get("none")?.version).toBeUndefined();
+      await restored.close();
+    });
+
+    it("update patches the version, and a patch that omits it leaves it alone", async () => {
+      const h = await deps.make();
+      await h.register({ name: "v", description: "V", content: "body" });
+
+      expect((await h.update({ name: "v", version: "2" })).version).toBe("2");
+      // A description-only patch is not a claim about the revision.
+      expect((await h.update({ name: "v", description: "V2" })).version).toBe("2");
+      await h.close();
+    });
+  });
 }

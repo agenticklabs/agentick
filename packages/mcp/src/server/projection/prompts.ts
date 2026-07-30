@@ -52,6 +52,7 @@ import type {
   PromptsGetResult,
 } from "@agentick/spec";
 import type { Unsubscribe } from "@agentick/runtime";
+import { paginate } from "@agentick/utils";
 
 import { toWireContentBlock } from "../../protocol/content.js";
 import {
@@ -87,14 +88,20 @@ export function installPromptsHandlers(
   // ─────────── prompts/list ───────────
   sdkServer.setRequestHandler(
     ListPromptsRequestSchema,
-    async (_request: ListPromptsRequest, extra: McpHandlerExtra): Promise<ListPromptsResult> =>
+    async (request: ListPromptsRequest, extra: McpHandlerExtra): Promise<ListPromptsResult> =>
       options.runCrossing({
         verb: "list-prompts",
         operation: { type: "prompt_list" },
         signal: extra.signal,
         run: async (_input, ctx): Promise<ListPromptsResult> => {
+          // Paginate AFTER the per-connection filter: pages must be cut from what
+          // THIS connection can see. A catalog at or under the page size is
+          // byte-identical to the unpaginated reply (no `nextCursor` key).
           const projected = projectPrompts(options.source.list(), filter, ctx);
-          return { prompts: projected.map(toWirePrompt) };
+          const { page, nextCursor } = paginate(projected, request.params?.cursor);
+          const result: ListPromptsResult = { prompts: page.map(toWirePrompt) };
+          if (nextCursor !== undefined) result.nextCursor = nextCursor;
+          return result;
         },
       }),
   );
@@ -144,15 +151,17 @@ export function installPromptsHandlers(
             }),
           );
 
-          // TODO(spec): `GetPromptResult._meta` has no source. The wire slot
-          // exists, but `PromptsGetResult` ({ description, messages }) carries
-          // no metadata bag, so a render has nowhere to put result-scoped
-          // `_meta` — the declaration's `metadata.mcp.meta` is declaration-
-          // scoped and already rides `prompts/list`. Give `PromptsGetResult` a
-          // `metadata?` bag and project `metadata.mcp.meta` here.
+          // `GetPromptResult._meta` — sourced from the render result's
+          // `metadata` bag, which the harness fills with the DECLARATION's own
+          // (spec `PromptsGetResult.metadata`). Same reader as `prompts/list`
+          // because it is the same bag under the same key: one authored place
+          // reaching both wire slots. A prompt whose declaration carries no
+          // `mcp` block projects byte-identically to before.
+          const meta = readMcpDeclarationExtensions(result.metadata)?.meta;
           return {
             description: result.description,
             messages: result.messages.flatMap(toWirePromptMessages),
+            ...(meta !== undefined ? { _meta: meta } : {}),
           };
         },
       }),

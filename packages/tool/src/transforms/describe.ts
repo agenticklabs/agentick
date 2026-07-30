@@ -60,14 +60,21 @@ export function setTitle<C = unknown>(map: Readonly<Record<string, string>>): To
  *
  *   {
  *     src: "https://example.com/icon.png" | "data:image/svg+xml;base64,...",
- *     sizes?: "16x16 32x32",          // space-separated WxH list per W3C
+ *     sizes?: ["16x16", "32x32"],     // one WxH (or "any") per entry
  *     mimeType?: "image/png",
  *     theme?: "light" | "dark"        // adopter convention; not in MCP core
  *   }
+ *
+ * `sizes` is an ARRAY, matching MCP's `Icon.sizes` exactly. It was a
+ * space-separated string (the HTML `<link rel="icon">` convention), which every
+ * projection then cast straight onto the wire's `string[]` — a shape the MCP
+ * schema rejects (#259). The wire is the authority here: an authoring shape that
+ * has to be parsed at four projection sites to become the wire shape is one
+ * shape too many.
  */
 export interface IconDescriptor {
   readonly src: string;
-  readonly sizes?: string;
+  readonly sizes?: readonly string[];
   readonly mimeType?: string;
   readonly theme?: "light" | "dark";
   readonly [key: string]: unknown;
@@ -80,8 +87,8 @@ export interface IconDescriptor {
  *
  *   setIcons({
  *     "search": [
- *       { src: "/icons/search.svg", sizes: "any", mimeType: "image/svg+xml" },
- *       { src: "/icons/search-64.png", sizes: "64x64", mimeType: "image/png" },
+ *       { src: "/icons/search.svg", sizes: ["any"], mimeType: "image/svg+xml" },
+ *       { src: "/icons/search-64.png", sizes: ["64x64"], mimeType: "image/png" },
  *     ],
  *   })
  */

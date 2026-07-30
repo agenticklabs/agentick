@@ -143,11 +143,78 @@ async function mkMcpServer(): Promise<{
   return { server, clientTransport };
 }
 
+/**
+ * A server that advertises its catalog across TWO pages — page one carries a
+ * `nextCursor`, page two closes the walk. Discovery must follow the cursor or the
+ * second page's tools are never registered (#250).
+ */
+async function mkPagedMcpServer(): Promise<{
+  readonly server: Server;
+  readonly clientTransport: InMemoryMcpTransport;
+  readonly listCursors: readonly (string | undefined)[];
+}> {
+  const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
+  const server = new Server(
+    { name: "paged-mcp-server", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  const listCursors: (string | undefined)[] = [];
+  const decl = (name: string) => ({
+    name,
+    description: name,
+    inputSchema: { type: "object" as const, properties: {} },
+  });
+
+  server.setRequestHandler(ListToolsRequestSchema, async (req) => {
+    const cursor = req.params?.cursor;
+    listCursors.push(cursor);
+    return cursor === undefined
+      ? { tools: [decl("first_page_tool")], nextCursor: "page-2" }
+      : { tools: [decl("second_page_tool")] };
+  });
+  server.setRequestHandler(CallToolRequestSchema, async (req) => ({
+    content: [{ type: "text", text: `ran ${req.params.name}` }],
+  }));
+
+  await server.connect(serverTransport);
+  return { server, clientTransport, listCursors };
+}
+
 // ---------------------------------------------------------------------------
 // Suite
 // ---------------------------------------------------------------------------
 
 describe("withMCP — end-to-end", () => {
+  it("registers tools from EVERY page of a paginated tools/list (#250)", async () => {
+    const { server, clientTransport, listCursors } = await mkPagedMcpServer();
+
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "paged", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = await app.createSession();
+
+    // The drain followed the cursor: page one with none, page two with the
+    // server's `nextCursor`, and then it stopped.
+    expect(listCursors).toEqual([undefined, "page-2"]);
+
+    // Both pages' tools are dispatchable — the second page is not silently lost.
+    expect(await session.tools.dispatch("paged__first_page_tool", {})).toEqual([
+      { type: "text", text: "ran first_page_tool" },
+    ]);
+    expect(await session.tools.dispatch("paged__second_page_tool", {})).toEqual([
+      { type: "text", text: "ran second_page_tool" },
+    ]);
+
+    await session.close();
+    await app.closeApp();
+    await server.close();
+  });
+
   it("dispatches an MCP tool through the session and gets the server's response", async () => {
     const { server, clientTransport } = await mkMcpServer();
 

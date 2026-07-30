@@ -56,6 +56,7 @@ export {
   type Enumerable,
   type Respondable,
 } from "./handle-contract.js";
+export { polledView, type PolledView, type PolledViewConfig } from "./polled-view.js";
 export {
   filteredView,
   type CollectionViewSource,

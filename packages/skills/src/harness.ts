@@ -5,10 +5,14 @@
  *   - Audit envelopes for every register / update / remove
  *   - Snapshot/restore via `SnapshotCapable` feature detection
  *   - Inbox-addressable for cross-actor mutations (cluster peers,
- *     admin dashboards, sibling harnesses) — all three verbs are
+ *     admin dashboards, sibling harnesses) — the mutation verbs are
  *     declared commands (ADR 51): `skills:register` / `skills:update`
  *     / `skills:remove` route through the BaseHarness command
  *     registry with zero routing code
+ *   - `skills:run` is a declared command too, but `exposure: "internal"`
+ *     (#249): the run owes the journal an envelope and a guard a veto
+ *     point, while its live `SessionExecutionHandle` result is not data
+ *     and so cannot cross the inbox or the wire
  *   - Substrate slot pattern inherited from BaseHarness
  *
  * In-memory reference impl. Durable backends (sqlite, remote
@@ -40,7 +44,6 @@ import type {
   SessionSendCapability,
   Skill,
   SkillStoreQuery,
-  SkillsError,
   SkillsHarnessProtocol,
   SkillsRegisterInput,
   SkillsRemoveInput,
@@ -54,10 +57,17 @@ import {
   SkillIsolationUnavailable,
   SkillNotFound,
   SkillRunnerUnbound,
+  // A VALUE import: `applyRun` discriminates with `instanceof SkillsError`
+  // rather than the hand-maintained tag-list predicate the prompts and
+  // resources harnesses use. Every skills error extends this class by
+  // construction, so the check cannot go stale — which a tag list demonstrably
+  // can (#245 was exactly that list missing a member for a release).
+  SkillsError,
+  SkillsBackendError,
   SkillsHydrateFailed,
 } from "@agentick/spec";
 import { View } from "@agentick/store";
-import { omitUndefined } from "@agentick/utils";
+import { omitUndefined, paginate } from "@agentick/utils";
 
 import type {
   SkillSeed,
@@ -66,7 +76,8 @@ import type {
   SkillsHydrator,
   SkillsStore,
 } from "./definition.js";
-import type { SkillRunCompose, SkillRunOptions } from "./handle.js";
+import type { SkillRunCompose, SkillRunOptions, SkillsRunInput } from "./handle.js";
+import type { SkillsListInput, SkillsListResult } from "./wire-augment.js";
 import type { SkillMessageSource } from "./message-source.js";
 import { defaultComposeRun } from "./compose-run.js";
 import { InMemorySkillStore, matchesSkillQuery } from "./store.js";
@@ -160,7 +171,8 @@ declare module "@agentick/runtime" {
     "skills:register": { input: SkillsRegisterInput; output: Skill };
     "skills:update": { input: SkillsUpdateInput; output: Skill };
     "skills:remove": { input: SkillsRemoveInput; output: void };
-    "skills:list": { input: undefined; output: readonly Skill[] };
+    "skills:run": { input: SkillsRunInput; output: SessionExecutionHandle };
+    "skills:list": { input: SkillsListInput; output: SkillsListResult };
     "skills:get": { input: { readonly name: string }; output: Skill | null };
     "skills:search": { input: SkillsSearchInput; output: readonly Skill[] };
   }
@@ -253,6 +265,14 @@ export class SkillsHarness
   readonly update: (input: SkillsUpdateInput) => Promise<Skill>;
   readonly remove: (input: SkillsRemoveInput) => Promise<void>;
 
+  /**
+   * The `skills:run` command callable. PRIVATE — the public door stays
+   * {@link run}`(name, opts)`, which is the shape adopters read and the one
+   * `SkillsHandle` declares. This holds the one-payload form the command
+   * registry manufactures.
+   */
+  private readonly runCommand: (input: SkillsRunInput) => Promise<SessionExecutionHandle>;
+
   get id(): string {
     return this.scopeId;
   }
@@ -303,6 +323,25 @@ export class SkillsHarness
           this.applyRemove(i);
         }),
     });
+    // `skills:run` — the materialization verb, a declared command for the same
+    // reason `prompts:invoke` is: it puts content into the timeline that the
+    // user never typed, so it owes the journal an envelope, an app guard a veto
+    // point, and the provenance stamp an `opId` to link back to (#249).
+    //
+    // EXPOSURE `internal`, and the narrowing is deliberate — every other skills
+    // verb is `wire`. A run RETURNS a live `SessionExecutionHandle`: an event
+    // stream, an `abort()`, an awaitable result. That is not data, and ADR 51
+    // §1.2's boundary is about data. An addressable declaration would run the
+    // skill (a real, irreversible timeline mutation) and then have nothing
+    // truthful to hand back over the ask contract. The VERB-MATRIX parks the
+    // exact analog — `session:send`, which `run` IS — on the same blocker:
+    // "needs the designed serializable form (#142)". `skills:run` widens when
+    // that form lands, not before.
+    this.runCommand = this.command({
+      name: "skills:run",
+      exposure: "internal",
+      handler: (i: SkillsRunInput) => this.applyRun(i),
+    });
 
     // ─── Wire read commands (three-audiences-plan G-prep) — skills had
     // register/update/remove only, NO wire read, so enumeration was
@@ -316,7 +355,17 @@ export class SkillsHarness
     this.command({
       name: "skills:list",
       exposure: "wire",
-      handler: () => Effect.sync(() => this.list()),
+      // Paginated on the WIRE only — `list()` itself stays the bounded
+      // in-process snapshot. Pages slice the same name-sorted array the sync
+      // read serves, so a cursor walk and a snapshot agree.
+      // TODO(page-size-seam): page size is the shared DEFAULT_PAGE_SIZE. Only
+      // `@agentick/resources` has a per-harness `pageSize` option today; give
+      // skills/prompts/tools one when a second adopter asks, not before.
+      handler: (i: SkillsListInput) =>
+        Effect.sync(() => {
+          const { page, nextCursor } = paginate(this.list(), i?.cursor);
+          return { skills: page, ...omitUndefined({ nextCursor }) };
+        }),
     });
     this.command({
       name: "skills:get",
@@ -404,37 +453,71 @@ export class SkillsHarness
     name: string,
     opts: SkillRunOptions<T> = {},
   ): Promise<SessionExecutionHandle<T>> {
-    // C2 — an isolation request routes through the isolation runner (a
-    // `session.fork()`-backed send) when one is bound; with none it STILL
-    // throws (never silently degrade to a same-session run).
-    const isolate = opts.isolate === true;
-    if (isolate && this.isolationRunner === undefined) {
-      throw new SkillIsolationUnavailable({ skillName: name });
-    }
-    const runner = isolate ? this.isolationRunner : this.runner;
-    if (runner === undefined) {
-      throw new SkillRunnerUnbound({ skillName: name });
-    }
-    // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
-    const skill = await this.require(name);
-    const input: SendInput = this.composeRun(skill, opts as SkillRunOptions);
-    // MATERIALIZATION PROVENANCE — stamp AFTER composition, deliberately: the
-    // framework is what put this content in the timeline, so the stamp must
-    // survive a `composeRun` override that knows nothing about it. Both facts
-    // (name, the record's declared version) are already in hand.
-    const stamped = stampSkillRun(input, {
-      name: skill.name,
-      ...omitUndefined({ version: skill.version }),
+    // Routes through the DECLARED `skills:run` command (#249) — the signature
+    // and every throw above are unchanged for callers, but the run now mints an
+    // operation: a journal envelope, a guard that can veto it before any
+    // content reaches the timeline, `onBeforeSkillsRun`/`onAfterSkillsRun`, and
+    // the `opId` the provenance stamp carries. The failure paths gain the same
+    // record — a run that throws `SkillNotFound` now leaves a `terminal:failed`
+    // instead of nothing.
+    return (await this.runCommand({
+      name,
+      ...opts,
+    } as SkillsRunInput)) as SessionExecutionHandle<T>;
+  }
+
+  /**
+   * The `skills:run` body — everything {@link run} used to do inline, now
+   * inside the operation so its preconditions fail the OP (not just the call)
+   * and its stamp can carry `ctx.opId`.
+   */
+  private applyRun(
+    input: SkillsRunInput,
+  ): Effect.Effect<SessionExecutionHandle, SkillsError, never> {
+    // ADR 91 §2 — derive the running op's branded ctx in-fiber, the same way
+    // `prompts:invoke` does, so `ctx.opId` is THIS operation's.
+    return Effect.gen(this, function* () {
+      const ctx = yield* this.currentOperationCtx();
+      return yield* Effect.tryPromise({
+        try: async () => {
+          const { name } = input;
+          // C2 — an isolation request routes through the isolation runner (a
+          // `session.fork()`-backed send) when one is bound; with none it STILL
+          // throws (never silently degrade to a same-session run).
+          const isolate = input.isolate === true;
+          if (isolate && this.isolationRunner === undefined) {
+            throw new SkillIsolationUnavailable({ skillName: name });
+          }
+          const runner = isolate ? this.isolationRunner : this.runner;
+          if (runner === undefined) {
+            throw new SkillRunnerUnbound({ skillName: name });
+          }
+          // Throws SkillNotFound on a miss — let it propagate (must-exist contract).
+          const skill = await this.require(name);
+          const sendInput: SendInput = this.composeRun(skill, input);
+          // MATERIALIZATION PROVENANCE — stamp AFTER composition, deliberately:
+          // the framework is what put this content in the timeline, so the stamp
+          // must survive a `composeRun` override that knows nothing about it.
+          // Every field is a fact already in hand: the name and the record's
+          // declared version, plus this operation's own `opId`. Nothing derived.
+          const stamped = stampSkillRun(sendInput, {
+            name: skill.name,
+            ...omitUndefined({ version: skill.version, opId: ctx.opId }),
+          });
+          // The run IS a send — the handle passes through untouched (streaming
+          // via `for await (const ev of handle.events())`, `abort()`, `status`,
+          // and the typed `result`: `data` is validated against `opts.output` by
+          // the send path). `.result` may reject (steer-conflict, validation,
+          // incomplete) — the typed error propagates to whoever awaits it, NOT
+          // to this operation, which terminates the moment the handle exists.
+          // The isolation runner threads the same composed send through a forked
+          // child and disposes it after the handle settles.
+          return await runner(stamped);
+        },
+        catch: (cause): SkillsError =>
+          cause instanceof SkillsError ? cause : new SkillsBackendError({ cause }),
+      });
     });
-    // The run IS a send — the handle passes through untouched (streaming via
-    // `for await (const ev of handle.events())`, `abort()`, `status`, and the
-    // typed `result`: `data` is validated against `opts.output` by the send
-    // path, so the cast narrows what validation already guarantees).
-    // `.result` may reject (steer-conflict, validation, incomplete) — the
-    // typed error propagates to whoever awaits it. The isolation runner threads
-    // the same composed send through a forked child and disposes it after the
-    // handle settles.
-    return (await runner(stamped)) as SessionExecutionHandle<T>;
   }
 
   // ─────────── Dynamic surface ───────────

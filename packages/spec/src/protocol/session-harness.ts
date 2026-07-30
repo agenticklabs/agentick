@@ -828,6 +828,22 @@ export interface SessionHarnessProtocol<P = unknown> {
   send<T = unknown>(input: SendInput<P, T>): Promise<SessionExecutionHandle<T>>;
 
   /**
+   * Cancel the session's CURRENT execution, if one is running. The
+   * session-scoped twin of {@link SessionExecutionHandle.abort} — same
+   * `reason`, same teardown — for a caller that holds the session but not the
+   * handle: the `session/abort` wire verb, a supervisor, a UI that reconnected
+   * after the `send` RPC's connection dropped.
+   *
+   * Idempotent and quiet: aborting an idle session is a no-op, and an
+   * execution that finishes naturally while the abort is in flight is a
+   * success. It cancels ONE execution — it does not refuse future sends (that
+   * is `close()`, or the construction-bound signal).
+   *
+   * @throws {SessionError}
+   */
+  abort(reason?: string): Promise<void>;
+
+  /**
    * Capture the current state as a serializable snapshot. Routed through
    * the `session:snapshot` command, so it mints `onBeforeSessionSnapshot`
    * (veto/observe) and `onAfterSessionSnapshot` (the v1 `onPersist`

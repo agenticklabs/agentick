@@ -30,6 +30,7 @@ export {
   type McpPromptArgumentDescriptor,
   type McpPromptDescriptor,
   type McpPromptPage,
+  type McpToolPage,
   type McpPromptMessage,
   type McpGetPromptResult,
   type ResourceContents,

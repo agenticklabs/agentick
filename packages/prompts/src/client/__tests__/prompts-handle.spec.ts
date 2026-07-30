@@ -35,7 +35,7 @@ function fakeCommandClient(captured: Captured[], rows: () => readonly PromptDecl
     transport: {
       async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
         captured.push({ method, params });
-        if (method === "prompts/list") return rows();
+        if (method === "prompts/list") return { prompts: rows() };
         if (method === "prompts/render" || method === "prompts/invoke") return RENDERED;
         return null;
       },

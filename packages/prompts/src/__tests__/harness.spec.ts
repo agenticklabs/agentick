@@ -313,3 +313,36 @@ describe("PromptsHarness — snapshot round-trip", () => {
     expect(decl?.render).toBeUndefined();
   });
 });
+
+/**
+ * `PromptsGetResult.metadata` — the render result surfaces the DECLARATION's
+ * bag, which is what gives MCP's `GetPromptResult._meta` a spec-side source.
+ *
+ * Deliberately not a per-render bag: a render produces messages, and anything
+ * it wants to say about them belongs on a message. What a caller holding only a
+ * result cannot otherwise reach is what the AUTHOR attached to the prompt — an
+ * MCP Apps `ui://` template linkage, a client-understood descriptor — and a
+ * wire projection answering `prompts/get` has no list record in hand.
+ */
+describe("PromptsHarness — the render result carries the declaration's metadata", () => {
+  it("surfaces the declaration's bag verbatim on render and invoke alike", async () => {
+    const h = await makeHarness();
+    const metadata = { mcp: { meta: { "openai/outputTemplate": "ui://widget/jobs" } }, tag: 7 };
+    await h.register({
+      declaration: { name: "p", description: "P", template: "hi", metadata },
+    });
+
+    // Verbatim — the harness copies the author's bag, it does not rebuild it.
+    expect((await h.render({ name: "p" })).metadata).toEqual(metadata);
+    expect((await h.invoke({ name: "p" })).metadata).toEqual(metadata);
+  });
+
+  it("a declaration with no metadata yields a result with no metadata key", async () => {
+    const h = await makeHarness();
+    await h.register({ declaration: { name: "bare", description: "B", template: "hi" } });
+
+    const result = await h.render({ name: "bare" });
+    // Absent, not `undefined`-valued: the result stays byte-identical to before.
+    expect("metadata" in result).toBe(false);
+  });
+});

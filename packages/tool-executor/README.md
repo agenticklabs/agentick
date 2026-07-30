@@ -411,14 +411,17 @@ await tools.refresh({ exposure: "model" }); // re-poll on demand
 await tools.dispatch("read_file", { path: "notes.md" }); // host door, over the wire
 ```
 
-The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it.
+The snapshot fills itself: the handle polls once on construction and fires `subscribe` when the answer lands, so the right shape is to bind both — render what `list()` has, re-render on change — and there is nothing to await and no boot-time `refresh()` to issue. `refresh()` is for invalidating a snapshot you already have. A first poll that fails leaves the snapshot empty rather than half-filled; the next mutation's re-fetch or an explicit `refresh()` recovers it. Only the FIRST page of the wire read seeds the snapshot; a catalog past one page is walked by calling `session/list_tools` with a cursor directly.
 
-The two wire methods behind all of this:
+The wire methods behind all of this:
 
 | Wire method                    | Params                                 | Effect                                                                                              |
 | ------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `session/list_tools`           | `{ sessionId, exposure?, cursor? }`    | One page of the registry projection: `{ tools, nextCursor? }`. `nextCursor` absent ⇒ last page.     |
 | `session/set_client_tools`     | `{ sessionId, declarations }`          | Clears the `{ scope: "client", sessionId }` slice, then registers the new set. Returns `{ count }`. |
 | `session/respond_to_tool_call` | `{ sessionId, correlationId, result }` | Resumes the suspended dispatch. Idempotent — an unknown or answered id is a silent no-op.           |
+
+`session.tools.list(query)` in-process is unpaginated — a bounded snapshot. Pagination is a wire concern, so the cursor exists only on the wire read.
 
 The client slice is its own binding, held distinct from `{ scope: "session" }`, so replacing it never clobbers app-declared tools, and session close reaps it.
 

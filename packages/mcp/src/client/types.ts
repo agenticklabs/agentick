@@ -398,3 +398,14 @@ export interface McpToolDescriptor {
     readonly taskSupport?: "optional" | "required" | "forbidden";
   };
 }
+
+/**
+ * One page of a `tools/list` response (cursor first-class — the same envelope
+ * {@link McpResourcePage} and {@link McpPromptPage} carry). A server with a large
+ * catalog advertises it across pages; stopping at the first would silently drop
+ * tools from the local registry.
+ */
+export interface McpToolPage {
+  readonly tools: readonly McpToolDescriptor[];
+  readonly nextCursor?: string;
+}

@@ -1806,6 +1806,50 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 (evening) — the consolidation wave
+
+Three parallel workstreams, gated as one tree (3,827 tests green):
+
+**Wire honesty** — #251 `session/abort` is real (`SessionHarnessProtocol.abort`
+added; delegates to the current handle's abort — the notifications/cancelled
+path; e2e: reason observed at the model call). #252 `initialize` derives every
+capability flag from actual wiring (per-flag source-of-truth table in the
+handler; `WireServerDescriptor` threads real serverInfo per transport;
+`WIRE_PROTOCOL_VERSION` validated BOTH ends — the check immediately caught a
+lying fixture). `cursorResume: false` (honest) + `TODO(wire-resume)` trailhead
+(retention → replay → eviction, in that order). `notifications/progress/complete`
+registered; `SubscriptionEvictedParams` documented as reserved-no-producer;
+client handshake claims `cursorResume: true` (the one true flag). findSession:
+three copies → one spec helper — both apologetic doc-blocks were WRONG
+(SessionNotFoundError existed all along; knobs/completions were mislabeling
+session ids as appIds). Reported-not-fixed: the loop-abort string vs
+ToolAbortedError asymmetry (14 sites, 5 packages — needs its own ticket).
+
+**Pagination consistency** — shared `paginate()` in @agentick/utils (resources'
+hand-rolled impl deleted); `prompts/list` + `skills/list` + `session/list_tools`
+gain cursors with MCP-shaped envelopes (breaking: bare arrays → named
+collections); MCP tools/prompts projections honor request cursors (paginating
+AFTER per-connection filters); #250 client listTools drains all pages; the six
+poll handles collapse into client-core `polledView` (804 → 621 LOC; public
+surfaces unchanged). Law kept: sync `list()` stays a bounded snapshot —
+pagination is a wire/projection concern. No per-harness pageSize seam until a
+second adopter asks (TODO trailheads).
+
+**Primitive consistency** — #249 `skills:run` is a declared command (exposure
+INTERNAL — a run returns a live handle, which cannot cross a wire truthfully;
+same blocker as session:send, widen when the serializable form lands); opId
+threads into SkillMessageSource; guard can veto a run; conformance suites
+assert the version round-trip (absence contractual — the framework never
+invents history). #245 ResourceAliasAmbiguous joins the error channel + tag
+list (the masking regex test now asserts the tag + candidates). #259
+IconDescriptor.sizes → readonly string[] (sweep: only describe.ts ever used
+the string form); projected icons validated against the SDK's own schema on
+all four surfaces. PromptsGetResult.metadata gives GetPromptResult.\_meta its
+source (declaration bag surfaces on render; no per-render invention).
+
+mcp-parity.md updated in place (pagination rows → have; #250 closed).
+Released as next.46.
+
 ### 2026-07-30 (later) — era discovery, defect wave, #257
 
 **MCP 2026-07-28 era**: current-official MCP is a protocol REWRITE (stateless,

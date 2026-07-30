@@ -21,6 +21,7 @@ import type {
   ClientEvent,
   ClientEventFilter,
   ClientExtension,
+  ClientHandshakeCapabilities,
   ClientInstaller,
   ClientProtocol,
   ClientState,
@@ -49,6 +50,8 @@ import type {
 import {
   EMPTY_CLIENT_CAPABILITIES,
   ErrorCode,
+  WIRE_PROTOCOL_VERSION,
+  WireRpcError,
   deserializeAgentickError,
   parseHookKey,
 } from "@agentick/spec";
@@ -65,6 +68,29 @@ import { composeRequest } from "./pipeline.js";
 /** Fixed client identity broadcast in `initialize.clientInfo`. */
 const CLIENT_NAME = "@agentick/client-core";
 const CLIENT_VERSION = "0.0.0";
+
+/**
+ * What this client tells the server it can do — the client's half of the
+ * handshake, and only what is actually implemented here.
+ *
+ * `cursorResume` is the one claim: every client transport extends
+ * `BaseClientTransport`, which tracks each live subscription's `lastCursor`
+ * and resends it as `fromCursor` when the wire comes back. That half is real
+ * and stays real whether or not the peer honors it (no server does yet —
+ * `ServerCapabilities.cursorResume` is false; see the `TODO(wire-resume)`
+ * trailhead in `@agentick/gateway`).
+ *
+ * `batch` and `streamableHttp` are unclaimed on purpose. They are facts about
+ * a WIRE, not about this object — the HTTP transport speaks SSE and the
+ * WebSocket one does not — and `ClientTransport.capabilities` has no slot for
+ * either, so client-core cannot answer for whichever transport it was handed.
+ * TODO(wire-client-handshake-flags): give `TransportCapabilities` the two
+ * flags (the server-side twin exists — `WireServerDescriptor`) and derive
+ * them from `this.transport.capabilities` here.
+ */
+const CLIENT_HANDSHAKE_CAPABILITIES: ClientHandshakeCapabilities = Object.freeze({
+  cursorResume: true,
+});
 
 let clientCounter = 0;
 
@@ -326,12 +352,23 @@ class AgentickClient implements ClientProtocol {
     let initResult: InitializeResult | undefined;
     try {
       initResult = await this.request("initialize", {
-        protocolVersion: "v1",
-        capabilities: {},
+        protocolVersion: WIRE_PROTOCOL_VERSION,
+        capabilities: CLIENT_HANDSHAKE_CAPABILITIES,
         clientInfo: { name: CLIENT_NAME, version: CLIENT_VERSION },
       });
     } catch (err) {
       if (!isMethodNotFound(err)) throw err;
+    }
+
+    // The client's half of version negotiation. The server rejects a request
+    // it can't serve; this rejects an ANSWER it can't read — a server that
+    // replies with another version has told us its frames may not match what
+    // this build parses, and proceeding on that is how a protocol skew
+    // becomes a mystery decode failure ten calls later. Thrown before
+    // anything is committed, so it rejects `connect()` with capabilities
+    // still empty.
+    if (initResult && initResult.protocolVersion !== WIRE_PROTOCOL_VERSION) {
+      throw WireRpcError.protocolVersionMismatch(initResult.protocolVersion, WIRE_PROTOCOL_VERSION);
     }
 
     // Framework flags from `initialize` are held aside; the definitive

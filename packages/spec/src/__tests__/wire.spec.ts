@@ -9,6 +9,8 @@ import {
   isJsonRpcResponse,
   isJsonRpcSuccess,
   isSessionScope,
+  findSession,
+  SessionNotFoundError,
   validateJsonRpcFrame,
   validateJsonRpcInput,
   type InitializeParams,
@@ -27,6 +29,8 @@ import {
   type SubscribeResult,
   type SubscriptionEventParams,
   type SubscriptionScope,
+  type AppHarnessProtocol,
+  type SessionHarnessProtocol,
   type WireMethod,
   type WireMethods,
   type WireNotificationMethod,
@@ -431,6 +435,10 @@ describe("@agentick/spec — wire structural tests", () => {
   describe("WireNotifications registry", () => {
     it("WireNotifications exposes every notification method", () => {
       type _progress = WireNotifications["notifications/progress"];
+      // The dispatcher emits this frame to end a progress token's stream; it
+      // was absent from the registry until #252, so `ctx.publish` could not
+      // name it and no consumer could type it.
+      type _progressComplete = WireNotifications["notifications/progress/complete"];
       type _subEvent = WireNotifications["notifications/subscription/event"];
       type _subEvicted = WireNotifications["notifications/subscription/evicted"];
       type _cancelled = WireNotifications["notifications/cancelled"];
@@ -456,6 +464,39 @@ describe("@agentick/spec — wire structural tests", () => {
         },
       };
       expect(subEvent.cursor.value).toBe(7);
+    });
+  });
+
+  describe("findSession", () => {
+    // Session ids are gateway-unique but app-OWNED, so every wire handler
+    // taking a `sessionId` has to walk `gateway.apps()`. Three packages had
+    // hand-rolled that walk and two raised `AppNotFoundError` with the SESSION
+    // id in the `appId` slot, each apologizing in a doc-block that no error
+    // covered the case. This is the one implementation.
+    const fakeGatewayOver = (sessions: Record<string, SessionHarnessProtocol>) => ({
+      gateway: {
+        apps: () =>
+          [
+            { getSession: () => undefined },
+            { getSession: (id: string) => sessions[id] },
+          ] as unknown as readonly AppHarnessProtocol[],
+      },
+    });
+
+    it("resolves a session held by any of the gateway's apps", () => {
+      const sess = { id: "sess-1" } as SessionHarnessProtocol;
+      expect(findSession(fakeGatewayOver({ "sess-1": sess }), "sess-1")).toBe(sess);
+    });
+
+    it("throws SessionNotFoundError naming the SESSION id", () => {
+      let thrown: unknown;
+      try {
+        findSession(fakeGatewayOver({}), "ghost");
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(SessionNotFoundError);
+      expect(thrown).toMatchObject({ sessionId: "ghost" });
     });
   });
 });

@@ -44,12 +44,12 @@ exactly one genuine architectural question (sampling).
 | Tool `_meta` — declaration and result (MCP Apps `ui://`, step-up auth) | **have**                                                | `wire-extensions.ts:78`, `:95`; projected `projection/tools.ts:369` and `:286`; result read `server/config.ts:982` |
 | Tool `taskSupport` → wire `execution`                                  | **have**                                                | `projection/tools.ts:392`                                                                                          |
 | Tool result content blocks → MCP content union                         | **partial** (defect)                                    | raw cast, `projection/tools.ts:278` — see §1                                                                       |
-| `tools/list` pagination                                                | **missing**                                             | `packages/tool/src/catalog.ts:53` — `list()` returns a plain array                                                 |
+| `tools/list` pagination                                                | **have** (2026-07-30)                                   | pages the post-filter view via the shared `paginate`, `projection/tools.ts:182`                                    |
 | `prompts/list` · `prompts/get` · `list_changed`                        | **have**                                                | `projection/prompts.ts:79`, `:93`, `:149`                                                                          |
 | Prompt `title`                                                         | **partial** (defect)                                    | declared `packages/spec/src/protocol/prompts-harness.ts:154`, dropped by `projection/prompts.ts:178` — see §2      |
 | Prompt `icons` / `_meta`                                               | **missing**                                             | no field emitted, `projection/prompts.ts:178`                                                                      |
 | Prompt message content beyond text                                     | **partial**                                             | non-text blocks `JSON.stringify`'d, `projection/prompts.ts:213`                                                    |
-| `prompts/list` pagination                                              | **missing**                                             | no `cursor` anywhere in `spec/src/protocol/prompts-harness.ts`                                                     |
+| `prompts/list` pagination                                              | **have** (2026-07-30)                                   | projection `projection/prompts.ts:101`; native wire row `prompts/wire-augment.ts` → `{ prompts, nextCursor? }`     |
 | `resources/list` · `read` · `templates/list` · `list_changed`          | **have**                                                | `projection/resources.ts:95`, `:130`, `:112`, `:217`                                                               |
 | `resources/subscribe` · `unsubscribe` · `updated`                      | **have**                                                | `projection/resources.ts:175`, `:198`, `:186`                                                                      |
 | Resource pagination (cursors, both list verbs)                         | **have** — the only paginated harness                   | `spec/src/protocol/resources-harness.ts:159`; threaded `projection/resources.ts:102`, `:119`                       |
@@ -60,7 +60,7 @@ exactly one genuine architectural question (sampling).
 | `completion/complete` — `ref/resource`                                 | **partial** — config handlers only, no declaration seam | `projection/completions.ts:33`, `:303`                                                                             |
 | Completion 100-value cap at the wire                                   | **have**, and correctly located                         | `projection/completions.ts:87`                                                                                     |
 | `logging/setLevel` + `notifications/message`, RFC-5424 severities      | **have**                                                | `projection/logging.ts:89`, `:113`, severities `:55`                                                               |
-| Pagination generally                                                   | **partial** — resources only                            | see §3                                                                                                             |
+| Pagination generally                                                   | **have** — one shared helper                            | see §3                                                                                                             |
 
 ## Client features
 
@@ -191,6 +191,21 @@ _encodings_ live at the wire", and pagination is not one.
 **Verdict: build the client-side `listTools(cursor)` fix (S, correctness). Build
 tools + prompts native cursors (M). Defer skills/completions/elicitation — no
 consumer.**
+
+**RESOLVED 2026-07-30 (pagination-consistency workstream).** The mechanism itself
+was the first thing to fix: resources' hand-rolled `paginate()` moved to
+`@agentick/utils` (`paginate(all, cursor, pageSize?)` + `DEFAULT_PAGE_SIZE`, opaque
+decimal-offset cursors, garbage cursor ⇒ page one) and resources now imports it. On
+top of that one helper: `listTools(cursor)` on the client harness returning
+`McpToolPage`, with tool discovery draining every page (#250 closed); MCP server
+`tools/list` and `prompts/list` honoring the request cursor and emitting
+`nextCursor`; and native wire cursors on `prompts/list`, `skills/list`, and
+`session/list_tools`, each returning an MCP-shaped envelope. Skills was included
+rather than deferred — it is the same three-line change once the helper exists, and
+leaving one native list unpaginated is the inconsistency the audit was about. The
+LAW the work is built on: an in-process sync `list()` stays an unpaginated bounded
+snapshot (the `Enumerable` contract), and pagination lives at the wire and at
+projections. Completions and elicitation stay unpaginated — still no consumer.
 
 ## §4 — Sampling: the one real architectural question
 
@@ -383,15 +398,15 @@ The audit's fan-out (three background sweeps: sampling/roots/outward
 projection, pagination, protocol features) surfaced concrete defects that were
 filed immediately rather than left in prose. The shortlist ↔ tracker mapping:
 
-| Shortlist | Issue | Title                                                                         |
-| --------- | ----- | ----------------------------------------------------------------------------- |
-| #1        | #254  | MCP server `ctx.signal` is a throwaway — SDK per-request abort never threaded |
-| #2        | #255  | Outbound tool-result content is an unchecked cast onto MCP's 5-member union   |
-| #3 (half) | #253  | MCP server prompts projection drops `title` (and prompt/result `_meta`)       |
-| #4        | #250  | MCP client `listTools()` ignores pagination — page-two tools silently lost    |
-| —         | #251  | `session/abort` wire verb is a no-op stub (native wire, found en route)       |
-| —         | #252  | `initialize` advertises a hardcoded capability bag — `cursorResume: true` is  |
-|           |       | false; version never validated; `serverInfo` wrong (native wire)              |
+| Shortlist | Issue | Title                                                                                              |
+| --------- | ----- | -------------------------------------------------------------------------------------------------- |
+| #1        | #254  | MCP server `ctx.signal` is a throwaway — SDK per-request abort never threaded                      |
+| #2        | #255  | Outbound tool-result content is an unchecked cast onto MCP's 5-member union                        |
+| #3 (half) | #253  | MCP server prompts projection drops `title` (and prompt/result `_meta`)                            |
+| #4        | #250  | MCP client `listTools()` ignores pagination — page-two tools silently lost — **CLOSED 2026-07-30** |
+| —         | #251  | `session/abort` wire verb is a no-op stub (native wire, found en route)                            |
+| —         | #252  | `initialize` advertises a hardcoded capability bag — `cursorResume: true` is                       |
+|           |       | false; version never validated; `serverInfo` wrong (native wire)                                   |
 
 Shortlist #5 (inbound sampling default) and #6 (native cursors + `eventStore`)
 are design-first items — file on pickup, not before.

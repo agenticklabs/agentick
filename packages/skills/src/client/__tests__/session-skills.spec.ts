@@ -30,7 +30,7 @@ function fakeInternalClient(calls: Array<{ method: WireMethod; params: unknown }
   const transport = {
     async request<M extends WireMethod>(method: M, params: WireParams<M>): Promise<unknown> {
       calls.push({ method, params });
-      if (method === "skills/list") return SKILLS;
+      if (method === "skills/list") return { skills: SKILLS };
       return null;
     },
   };

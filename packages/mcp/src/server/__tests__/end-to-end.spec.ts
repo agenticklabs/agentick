@@ -159,6 +159,42 @@ describe("end-to-end: initialize + tools/list + tools/call", () => {
     await harness.close();
   });
 
+  it("tools/list pages past DEFAULT_PAGE_SIZE and honors the client's cursor", async () => {
+    // 150 tools — the projection must cut pages from the POST-filter view and
+    // hand back an opaque cursor, exactly like resources/list.
+    const many = Array.from({ length: 150 }, (_, i) => tool(`t_${String(i).padStart(3, "0")}`));
+    const { harness, transport } = await makeServer(many, {});
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const first = await client.listTools();
+    expect(first.tools).toHaveLength(100);
+    expect(first.nextCursor).toBe("100");
+
+    const second = await client.listTools({ cursor: first.nextCursor });
+    expect(second.tools).toHaveLength(50);
+    expect(second.nextCursor).toBeUndefined();
+
+    const names = new Set([...first.tools, ...second.tools].map((t) => t.name));
+    expect(names.size).toBe(150);
+
+    await client.close();
+    await harness.close();
+  });
+
+  it("a catalog inside one page carries no cursor (wire-stable for the common case)", async () => {
+    const { harness, transport } = await makeServer([tool("search")], {});
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const result = await client.listTools();
+    expect(result.tools).toHaveLength(1);
+    expect(result).not.toHaveProperty("nextCursor");
+
+    await client.close();
+    await harness.close();
+  });
+
   it("tools/call dispatches to the resolved handler", async () => {
     const { harness, transport } = await makeServer([tool("search")], {
       "handler:search": async (input) => [

@@ -22,13 +22,13 @@ import {
   ErrorCode,
   isAgentickError,
   createLog,
+  WIRE_PROTOCOL_VERSION,
   type Observability,
   type Ops,
   type Span,
   type ExtensionsListResult,
   type GatewayHarnessProtocol,
   type HookBridges,
-  type InitializeParams,
   type InitializeResult,
   type JsonRpcId,
   type JsonRpcRequest,
@@ -43,6 +43,7 @@ import {
   type WireExtensionContext,
   type WireExtensionTransport,
   type WireNotificationMethod,
+  type WireServerDescriptor,
 } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
@@ -115,6 +116,18 @@ export async function dispatchRequest(
   sink: DispatchSink,
   /** Ingress identity established at connection/request time (ADR 34/51). */
   identity?: IngressIdentity,
+  /**
+   * What the SERVING transport says about itself — its identity and the wire
+   * features it frames. The `initialize` answer is built from it (plus the
+   * host's registry); every other method ignores it. Omitted ⇒
+   * {@link DISPATCHER_DESCRIPTOR}.
+   *
+   * Per-connection like `identity`, and supplied by the same edge.
+   * TODO(wire-dispatch-context): the two belong in one `DispatchContext` bag
+   * — a third per-connection fact is the point at which positional stops
+   * paying.
+   */
+  server?: WireServerDescriptor,
 ): Promise<JsonRpcResponse> {
   // ROADMAP A3 — client tool-output projection, STRICTLY OPT-IN. The gateway
   // configures ONE policy; every transport attached to it inherits it here
@@ -145,7 +158,7 @@ export async function dispatchRequest(
     // is stateless keepalive).
     switch (req.method) {
       case "initialize":
-        return success(req.id, initialize(req.params as InitializeParams));
+        return success(req.id, initialize(req.params, host, server ?? DISPATCHER_DESCRIPTOR));
       case "ping":
         return success(req.id, {});
       case "_extensions/list": {
@@ -304,19 +317,65 @@ function agentickErrorToWireCode(err: { readonly _tag: string }): number {
 // initialize
 // ============================================================================
 
-function initialize(_params: InitializeParams): InitializeResult {
+/**
+ * Identity used when the serving transport declared none — a bare test host,
+ * or an adopter calling `dispatchRequest` directly. Names the dispatcher
+ * itself, which is the only thing true in that case.
+ */
+const DISPATCHER_DESCRIPTOR: WireServerDescriptor = Object.freeze({
+  name: "@agentick/transport",
+  version: "0.0.0",
+});
+
+/**
+ * The handshake. Every flag in the answer is DERIVED from something that is
+ * actually wired — the advertised bag is a promise the connection then has to
+ * keep, and each promise here has exactly one source of truth:
+ *
+ *   - `batch` / `streamableHttp` ← the serving transport's
+ *     {@link WireServerDescriptor}. Framing is decided in the connection's
+ *     decode path, which this dispatcher never sees.
+ *   - `subscriptions` / `mcpSurface` ← the host's wire-extension registry.
+ *     `sub/subscribe` resolves iff `subscriptionsWireExtension` is
+ *     registered; `tools/call` iff something projects the MCP surface onto
+ *     this wire.
+ *   - `progress` / `cancellation` ← dispatcher-intrinsic. `buildTransportSlot`
+ *     hands every handler a `wire.progress(token)` reporter, and
+ *     `DispatchSink.registerInFlight` is a REQUIRED sink member that
+ *     `wire.registerCancel` writes to — a host reaching this code has both.
+ *   - `cursorResume` ← constant `false`. The client half is complete (it
+ *     tracks `lastCursor` and resends `fromCursor` on reconnect) but the
+ *     server ignores it — see the `TODO(wire-resume)` trailhead on
+ *     `subscriptionsWireExtension`. It stays false until replay exists.
+ */
+function initialize(
+  rawParams: unknown,
+  host: DispatchHost,
+  server: WireServerDescriptor,
+): InitializeResult {
+  // Untrusted input: `InitializeParams.protocolVersion` is typed to the one
+  // literal, so read it wide and compare, rather than trusting the cast.
+  const requested = (rawParams as { readonly protocolVersion?: unknown } | undefined)
+    ?.protocolVersion;
+  if (requested !== undefined && requested !== WIRE_PROTOCOL_VERSION) {
+    throw WireRpcError.protocolVersionMismatch(requested, WIRE_PROTOCOL_VERSION);
+  }
+
+  const registry = host.wireExtensions?.();
+  const serves = (method: string): boolean => registry?.resolve(method) !== undefined;
+
   return {
-    protocolVersion: "v1",
+    protocolVersion: WIRE_PROTOCOL_VERSION,
     capabilities: {
-      cursorResume: true,
-      streamableHttp: false,
-      batch: true,
-      subscriptions: true,
+      cursorResume: false,
+      streamableHttp: server.streamableHttp ?? false,
+      batch: server.batch ?? false,
+      subscriptions: serves("sub/subscribe") && serves("sub/unsubscribe"),
       progress: true,
       cancellation: true,
-      mcpSurface: false,
+      mcpSurface: serves("tools/call"),
     },
-    serverInfo: { name: "@agentick/transport-websocket", version: "0.0.0" },
+    serverInfo: { name: server.name, version: server.version },
     connectionId: `conn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   };
 }
