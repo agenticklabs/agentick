@@ -444,9 +444,9 @@ const crmExt = defineWireExtension({
 
 Each row also mints typed gateway hooks: `gateway.hook({ onBeforeWireCrmDeleteContact })` is typed params-in, result-out, and a before-hook may reshape the params the handler receives.
 
-### Discovery
+### Advertising the namespace
 
-`_extensions/list` returns every registered extension. It is one of only three methods that dispatch outside the registry — with `initialize` and `ping` — because they must resolve before the registry is queryable.
+`_extensions/list` returns every registered extension. It is one of only three methods that dispatch outside the registry — with `initialize` and `ping` — because they must resolve before the registry is queryable. It is one of [two discovery doors](#discovery--two-doors): the one that answers what this _server_ registered.
 
 ```ts
 const { extensions } = await client.request("_extensions/list", {});
@@ -474,6 +474,30 @@ Resolution is **exact-beats-dynamic**: the resolver is consulted only when no na
 
 > [!IMPORTANT]
 > The lane never ships without the gate. A verb not declared `exposure: "wire"` is indistinguishable from an absent method — `MethodNotFound`, not `Forbidden`, so probing reveals nothing. An exposed verb still requires a grant. And `commands/list` filters by what the caller holds, so discovery itself leaks nothing: a denied caller sees an empty list rather than a list of things they cannot call.
+
+## Discovery — two doors
+
+Methods reach the wire through two lanes — exact routes registered as wire extensions, and commands a harness declares `exposure: "wire"` — so there are two doors to knock on. Which one answers your question depends on whether you are asking about the **server** or about a **session**.
+
+**`_extensions/list` — what did this server register.** Every exact route, framework or adopter, with its version, methods, and notifications. Server-wide and per-connection: the same answer for every session on it. [@agentick/client-core](../client-core) folds the reply into capability predicates during `connect()`:
+
+```ts
+await client.connect();
+
+client.capabilities.hasNamespace("completions"); // is the feature deployed at all?
+client.capabilities.hasMethod("knobs/set");
+```
+
+**`<ns>/commands` — what can this namespace do on this session.** Every harness serves its own declared-command list as a meta-verb on the dynamic lane, so the reply describes the harness actually mounted on _that_ session, each row carrying its `exposure` — which is how a caller tells a wire-reachable verb from an in-process-only one. It is an ordinary wire row, so it needs no client code:
+
+```ts
+const { commands } = await client.session(sessionId).prompts.commands();
+// [{ name: "prompts:list", exposure: "wire", hasInput: true, description: "…" }, …]
+```
+
+Seven namespaces serve the per-namespace door today — `gates`, `knobs`, `mcp`, `prompts`, `resources`, `skills`, `timeline` — and `commands/list` is the cross-surface form of the same read: one call, every wire-exposed command across a session's surfaces. Reach for it from a client with no augmented method registry to read, which is every non-TypeScript one.
+
+Use the first door for the build-time question — is this capability deployed at all — and the second for the runtime one: what is mounted on this session, and what may I call on it.
 
 ## Extensions and bundles
 
@@ -682,6 +706,10 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - **`bridges()` on the wire-extension context is empty.** No framework-supplied extension needs bridges yet, so nothing resolves them from a target session.
 - **The wire registry seals at construction**, so `gateway:capabilities:changed` cannot fire during normal operation — the emit seam and its end-to-end delivery are proven, but dynamic extension registration is not built. Relatedly, a client does not yet re-sync its own `capabilities` when the event arrives.
 - **`_extensions/list` is unauthenticated.** Discovery is intended to be open, since clients need it to know what they can reach. Gated discovery would need an auth entry on the method.
+- **No verb answers "which namespaces does THIS session mount".** `_extensions/list` is server-wide and `<ns>/commands` presumes you already know the namespace to ask, so a client discovers an optional harness by calling into it and reading a `MethodNotFound` — inference from silence, not an enumeration.
+- **`commands/list` walks a fixed surface list.** It enumerates the session-scoped surfaces the framework ships, so a namespace outside that list — `mcp`, or a harness you wrote — is absent from the cross-surface answer even though its own `<ns>/commands` door works.
+- **`state` and `tasks` project wire verbs but no typed `commands` row.** Both answer the meta-verb at runtime, and `commands/list` includes them; what is missing is the `WireMethods` declaration, so `session.state.commands()` does not typecheck the way `session.prompts.commands()` does.
+- **Nothing on the client consumes the per-namespace door yet.** Every shipped client handle polls its own reads instead of asking what the session can do, so `<ns>/commands` exists today for adopters and dynamic clients rather than for the framework's own UI.
 - **`createApp` is on the concrete class, not the protocol interface.** Typing its input in the shapes package would drag app types into the protocol, so protocol consumers can enumerate apps but not construct them.
 - **The dynamic lane costs two inbox asks per invocation** — one to enumerate the surface's commands, one to dispatch. Declarations are construction-stable, so a per-address cache with close-invalidation is the obvious follow-up.
 - **`telemetryNamespace` does not cascade.** Each app whitelabels its own attribute prefix; set it per app if you need a non-default one.

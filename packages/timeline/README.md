@@ -471,6 +471,8 @@ Definition slots: `store` · `hydrate` · `compact` · `writePolicy` · `turnBou
 
 Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timeline:compact`, `timeline:replaceProjection`, `timeline:resetProjection`, `timeline:history`. Two are wire-exposable and therefore grantable — `timeline:compact` and `timeline:history`; the rest are reachable only from the trusted domains (in-process, inbox, cluster).
 
+That enumeration is itself a wire door: `await client.session(id).timeline.commands()` returns the same rows with their exposure, which is how a client learns the write verbs are unreachable rather than inferring it from a `MethodNotFound`. See [@agentick/gateway](../gateway#discovery--two-doors).
+
 ### `@agentick/timeline/react`
 
 | Export                              | Purpose                                                      |

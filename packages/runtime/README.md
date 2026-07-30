@@ -117,6 +117,8 @@ ledger.hooks.onBeforeLedgerCredit((input) => ({ amount: Math.min(input.amount, 5
 
 The name is load-bearing in four places at once: it is the inbox message type, the op-name root, the authz scope label, and (via `:` → `/`) the wire method. Declaring also enumerates the verb through `harness.commands()` and the `<surface>:commands` meta-verb, and validates an inbound payload against `input` exactly once — the wire never re-validates.
 
+That meta-verb is what makes a declaration self-describing rather than something a client has to be told about: a remote caller asks `<surface>/commands` and gets back every declared verb with its `exposure`, so a harness mounted on a session announces its own capability. It is one of the two discovery doors — [@agentick/gateway](../gateway#discovery--two-doors) documents it alongside `_extensions/list`, which answers the different question of what the server registered.
+
 Hook names are a total function of the verb: `on` + `Before|After` + PascalCase of the id. `ledger:credit` mints `onBeforeLedgerCredit` / `onAfterLedgerCredit` plus the bare `onLedgerCredit` full-middleware key. Only augmented verbs are typed keys, so a typo does not compile.
 
 > [!IMPORTANT]

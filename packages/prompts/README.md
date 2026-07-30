@@ -421,6 +421,9 @@ Every verb is individually grantable and deny-by-default — an undeclared verb 
 | `prompts/render`                                         | read  | `{ description, messages }`                                   |
 | `prompts/invoke`                                         | write | render + append to the timeline                               |
 | `prompts/register` · `prompts/update` · `prompts/remove` | write | the admin-curation lane                                       |
+| `prompts/commands`                                       | read  | the declared verbs with their exposure — the discovery door   |
+
+`prompts/commands` is served by the base, not declared here, and it is how a client asks what this session's prompt surface can do: `await client.session(id).prompts.commands()`. See [@agentick/gateway](../gateway#discovery--two-doors).
 
 `prompts/list` is paged, MCP-shaped: pass the previous reply's `nextCursor` to continue, and its absence means you have the last page. The in-process `list()` is unchanged — a bounded snapshot, no cursor. Pagination is a wire and projection concern; a sync read is bounded by construction and has nothing to page.
 

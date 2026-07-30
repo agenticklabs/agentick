@@ -574,6 +574,20 @@ export type WireExtensionInput = Omit<WireExtension, "methods" | "ops"> & {
  * runtime cost is one walk over the methods object at definition;
  * after that, the returned value is structurally identical.
  *
+ * DISCOVERY — an extension defined here is an EXACT route, and its
+ * discovery door is `_extensions/list` (namespace + version + methods
+ * + notifications, enumerated server-wide; `@agentick/client-core`
+ * folds it into `capabilities.hasMethod` / `hasNamespace`). That is
+ * only one of two doors: a harness command declared `exposure: "wire"`
+ * reaches the wire through the gateway's dynamic lane instead, and its
+ * door is the per-namespace `<ns>/commands` meta-verb every
+ * `BaseHarness` serves (`session.<ns>.commands()` from a client) —
+ * which answers what is mounted on THIS session, not what the server
+ * registered. Define a wire extension only for a route that must be
+ * exact; declaring a command needs no plumbing here.
+ *
+ * @see packages/gateway/src/dynamic-commands.ts — the other lane and door
+ *
  * Type-level alignment with `WireMethods` / `WireNotifications` is
  * enforced by TypeScript's index-signature constraint on the
  * `WireExtension` shape — definitions referencing unknown method

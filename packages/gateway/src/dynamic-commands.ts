@@ -34,7 +34,20 @@ import {
   type WireExtensionContext,
 } from "@agentick/spec";
 
-/** Session-scoped surfaces the dynamic lane can address (VERB-MATRIX). */
+/**
+ * Session-scoped surfaces the dynamic lane can address (VERB-MATRIX).
+ *
+ * This list bounds ADDRESSING (`resolveAddress`) and, with it, the
+ * cross-surface enumeration in {@link createCommandsListHandler} — a
+ * namespace absent from it is invisible to `commands/list` even though
+ * its own `<ns>/commands` door works (`mcp` is exactly that case; it
+ * gets addressing below but is not enumerated). An adopter harness is
+ * unreachable through this lane entirely.
+ *
+ * // TODO(#258): derive the addressable set from the session's mounted
+ * // harnesses instead of hardcoding it here, so a new surface — or an
+ * // adopter's — is discoverable without editing the gateway.
+ */
 const SESSION_SURFACES = [
   "timeline",
   "knobs",
@@ -142,6 +155,15 @@ export function createDynamicCommandResolver(
  * non-TS clients (ADR 51 §3.2). Enumerates the WIRE-EXPOSED commands
  * across a session's surfaces; surfaces whose harness is absent are
  * skipped.
+ *
+ * The cross-surface form of the per-namespace `<ns>/commands` read
+ * served above — both answer what is mounted on THIS session. The other
+ * lane has its own door: `_extensions/list` (ADR 46) enumerates the
+ * EXACT wire-extension routes a server registered, server-wide, which
+ * is the question a client's `capabilities.hasNamespace` answers. A
+ * client that needs both asks both.
+ *
+ * @see packages/spec/src/wire/extension.ts — `defineWireExtension`, the other lane
  */
 export function createCommandsListHandler(options: DynamicCommandResolverOptions) {
   const resolver = createDynamicCommandResolver(options);

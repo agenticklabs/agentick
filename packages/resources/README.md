@@ -221,6 +221,8 @@ resources.subscribe(() => rerender());
 
 The descriptor snapshot seeds itself with an eager poll and fires subscribers when it lands, so binding `list()` plus `subscribe()` is the entire read path — there is nothing to await at boot. A first poll that fails settles empty rather than half-filled; `refresh()` or the next mutation recovers it. `read` and `listTemplates` are pure RPC with no local mirror.
 
+One more `resources/*` row is reachable without any handle code: `await resources.commands()` returns the declared verbs with their exposure — the discovery door every harness serves, described in [@agentick/gateway](../gateway#discovery--two-doors).
+
 ## API
 
 ### `@agentick/resources`

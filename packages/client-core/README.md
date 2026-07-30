@@ -392,6 +392,25 @@ with the fresh view. `whenReady()` awaits an in-flight post-reconnect handshake.
 `capabilities.framework` is declaration-merge extensible if you want typed flags
 of your own.
 
+The three predicates read one source: the extensions the server registered. They
+answer whether a capability is **deployed**, not what a given session mounts —
+`hasMethod` is silent about verbs a harness declares for the dynamic command
+lane, because those are never wire-extension rows. For the per-session question,
+ask the namespace itself:
+
+```ts
+if (client.capabilities.hasNamespace("prompts")) mountPromptsPanel();
+
+// What this session's prompts harness actually declares, with each verb's exposure.
+const { commands } = await client.session(sessionId).prompts.commands();
+```
+
+`commands` is one of the namespace's own wire rows, synthesized by the same
+fallthrough as [any namespace you never wrote](#namespaces-you-never-wrote), so
+no handle implements it. See
+[@agentick/gateway](../gateway#discovery--two-doors) for how the two doors
+divide the question.
+
 ## Runtime signals
 
 Tools and session capabilities emit `log` and `progress` as bus events; the

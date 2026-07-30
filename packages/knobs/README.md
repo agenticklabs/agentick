@@ -218,6 +218,8 @@ knobs.close();
 
 `set` issues `knobs/set` and resolves `void`. It does **not** patch the local view — the new value comes back as a delta on the same channel and re-folds it. One write path, one read path.
 
+`await knobs.commands()` is the other `knobs/*` row a client can reach: the declared verbs with their exposure, so a UI can ask what this session's knobs surface accepts rather than assume `set` is granted. Nothing on the handle implements it — it is the discovery door every harness serves, described in [@agentick/gateway](../gateway#discovery--two-doors).
+
 `knobs.use(middleware)` scopes a client middleware to the `knobs/*` verbs. `knobsHandle(client, sessionId)` is the same handle as a free factory when you'd rather compose than rely on the registered slot, and `knobsStateView(client, sessionId)` is the lower-level values-only fold (`Record<id, value>`) for consumers that don't want descriptors.
 
 > [!IMPORTANT]

@@ -144,7 +144,9 @@ A gate holds the loop open the same way steering does, under the loop's `maxTick
 | `gates:defer`    | `{ name, reason? }`       |
 | `gates:override` | `{ name, value, reason }` |
 
-Each delegates straight to the one owned controller. A verb naming a missing gate rejects with a typed `GateNotFound` rather than returning null, and deny-by-default holds — an undeclared verb is indistinguishable from an absent method.
+A fifth read comes from the base rather than from here: `gates/commands` returns every declared verb with its exposure, so `await client.session(id).gates.commands()` is how a client asks what this surface can do instead of assuming. See [@agentick/gateway](../gateway#discovery--two-doors).
+
+Each of the four delegates straight to the one owned controller. A verb naming a missing gate rejects with a typed `GateNotFound` rather than returning null, and deny-by-default holds — an undeclared verb is indistinguishable from an absent method.
 
 Importing `@agentick/gates/client` registers `session.gates` on the wire client:
 

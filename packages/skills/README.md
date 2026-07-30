@@ -367,6 +367,9 @@ Skills project both a read lane and a write lane onto the dynamic-command wire. 
 | `skills/get`                                          | read  | `Skill \| null` by name                                      |
 | `skills/search`                                       | read  | `Skill[]`                                                    |
 | `skills/register` · `skills/update` · `skills/remove` | write | The admin-curation lane                                      |
+| `skills/commands`                                     | read  | The declared verbs with their exposure — the discovery door  |
+
+`skills/commands` is served by the base rather than declared here, and it answers what this session's skill surface can do — including which verbs are wire-exposed at all, so a client learns that `skills:run` is in-process only instead of discovering it as a `MethodNotFound`. See [@agentick/gateway](../gateway#discovery--two-doors).
 
 Because a `Skill` is fully serializable, the wire projection _is_ the record — the body crosses, since a client managing skills needs it. It's also unbounded, so prefer `skills/search` over `skills/list` for large libraries.
 
