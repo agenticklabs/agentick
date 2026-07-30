@@ -382,7 +382,8 @@ The snapshot is empty before `connect()` and after the wire drops, and is swappe
 atomically per handshake — subscribers never observe a half-populated
 intermediate. Extension sets are per-connection: a reconnect clears the snapshot,
 re-runs the handshake against whoever answered, and fires `onCapabilitiesChange`
-with the fresh view. `whenReady()` awaits an in-flight post-reconnect handshake.
+with the fresh view. `whenReady()` resolves when a handshake has succeeded — see
+[An open wire is not a usable client](#an-open-wire-is-not-a-usable-client).
 
 > [!NOTE]
 > If the server answers `MethodNotFound` for `_extensions/list`, that half is
@@ -391,6 +392,59 @@ with the fresh view. `whenReady()` awaits an in-flight post-reconnect handshake.
 
 `capabilities.framework` is declaration-merge extensible if you want typed flags
 of your own.
+
+### An open wire is not a usable client
+
+Two things can be wrong, and only one of them is the wire's. A gateway can accept
+a socket before it can serve `initialize` — mid-boot, mid-restart, mid-deploy —
+and then `state` reads `open`, `capabilities` is empty, and every namespaced call
+fails as "capability missing" with nothing saying why. That is a **handshake**
+failure on a **healthy** wire, and the transport's reconnect loop will never fire
+for it, because nothing dropped.
+
+So the client reports both dimensions, and retries the one it owns:
+
+```ts
+const client = await createClient({
+  transport,
+  onReadinessChange: (r) => {
+    if (r === "ready") hideBanner();
+    else if (isHandshakeFailed(r)) showBanner(`server not answering (attempt ${r.attempts})`);
+  },
+});
+
+await client.connect(); // rejects if the FIRST handshake fails — an answer, not a verdict
+await client.whenReady(); // resolves when one has SUCCEEDED
+```
+
+| `state`        | `readiness`        | What it means                                                      |
+| -------------- | ------------------ | ------------------------------------------------------------------ |
+| `open`         | `ready`            | Usable.                                                            |
+| `open`         | `handshaking`      | Wire up, handshake in flight.                                      |
+| `open`         | `handshake-failed` | Wire up, server not answering the handshake — retrying underneath. |
+| `reconnecting` | `idle`             | Wire down; a handshake is owed on the way back.                    |
+
+`whenReady()` **resolves on success only**. It used to resolve once an attempt
+finished, which is how an adopter could `await` their way into an open wire with
+empty capabilities and no reason — the failure was swallowed on the grounds that
+nobody had awaited it, which is precisely what `whenReady()` is. It now stays
+pending while the retry loop works, and rejects for exactly one reason: nothing
+further can ever resolve it, because the client was closed or the transport went
+terminal. Race it against your own deadline if you need one.
+
+The retry follows the same curve as the transports (full jitter, 100ms → 30s) and
+the same default budget: `Infinity`. A wire that drops supersedes it rather than
+competing with it — the transport owns recovery from there, and the `open`
+transition on the way back arms a fresh handshake. A deliberate `close()` stops
+it; "never stops trying" is a promise about failures, not about instructions.
+
+```ts
+createClient({ transport, handshakeRetry: { maxAttempts: 5 } });
+```
+
+A spent budget is reported, not silent: `readiness` settles on
+`{ kind: "handshake-failed", retrying: false }`. Verified by
+[`src/__tests__/handshake-retry.spec.ts`](src/__tests__/handshake-retry.spec.ts).
 
 The three predicates read one source: the extensions the server registered. They
 answer whether a capability is **deployed**, not what a given session mounts —
@@ -632,7 +686,8 @@ auto-connect; call `connect()` when you want the wire open.
 | `state` / `onStateChange(fn)`           | Connection state, and transitions                  |
 | `capabilities` / `serverInfo`           | What the connected gateway supports, and who it is |
 | `onCapabilitiesChange(fn)`              | Fires on every capability-snapshot swap            |
-| `whenReady()`                           | Await an in-flight post-reconnect handshake        |
+| `whenReady()`                           | Resolve when a handshake has SUCCEEDED             |
+| `readiness` / `onReadinessChange(fn)`   | Whether the client is usable, not just wired up    |
 | `request(method, params, signal?)`      | Typed JSON-RPC dispatch                            |
 | `use(middleware)`                       | The interception seam; returns an `Unsubscribe`    |
 | `hook(config)` / `hooks.on…(fn)`        | Method-scoped before/after sugar over `use`        |

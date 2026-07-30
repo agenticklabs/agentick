@@ -146,7 +146,20 @@ export function timelineView(
       if (incoming.length === 0) continue;
       store.set([...store.get(), ...incoming], append);
     }
-  })();
+  })().catch(() => {
+    // The subscription died rather than went quiet — the server refused it
+    // (an ungranted principal), or it did not survive a reconnect, and the
+    // transport ends the stream with the reason instead of letting it hang
+    // (#263). This loop FLOATS, so an uncaught rejection here is fatal under
+    // Node's default policy.
+    //
+    // Closing the store is the honest report available at this layer: `status`
+    // becomes `"closed"`, so a consumer can tell a dead tail from a quiet one.
+    // The held window is left intact — what was already read stays readable.
+    // TODO(dead-feed-notify): `liveStore.close()` clears its listeners without
+    // notifying them, so a subscribed consumer is not woken.
+    store.close();
+  });
 
   return {
     get: () => store.get(),

@@ -260,24 +260,60 @@ export class StreamAccumulator {
    * Helper: assemble the canonical assistant-message `ContentBlock[]`
    * from accumulator state. Used by providers to synthesize the
    * `message` summary event during `reconstructRaw`.
+   *
+   * **One block per block index, in block-index order.** The provider already
+   * told us where the seams are — `content-start` / `reasoning-start` open a
+   * block and carry its index — and this is the function that either preserves
+   * that structure or throws it away. It used to throw it away three times over:
+   *
+   * 1. **Reasoning was dropped entirely.** Adapters route thinking to the
+   *    reasoning channel (Gemini's `part.thought`, Anthropic's thinking blocks,
+   *    OpenAI's reasoning), `defaultFinalizeStream` emits `reasoning` summaries,
+   *    and then this function discarded every one — so no reasoning block was
+   *    ever assembled, stored, or sent. That is not "the client hides internals";
+   *    the client never received them. **Delivery is not visibility:** what to
+   *    show is the renderer's call, and it cannot make that call about data it
+   *    does not have.
+   *
+   * 2. **All text was concatenated into one block** via `totalText()`. A model
+   *    that emits prose, calls a tool, then emits more prose produced a single
+   *    text blob with the tool call after it — the order in which any of it
+   *    happened, unrecoverable. Anything reconstructing a turn then has to guess
+   *    at seams the provider had already marked.
+   *
+   * 3. **Tool calls were appended last**, after text, regardless of their own
+   *    `blockIndex`. So even the coarse ordering was wrong whenever a call came
+   *    before the text that explained it.
+   *
+   * `totalText()` / `totalReasoning()` remain for callers that genuinely want
+   * the flattened string; they are the wrong default for content assembly.
    */
   toContentBlocks(): ContentBlock[] {
-    const blocks: ContentBlock[] = [];
-    const text = this.totalText();
-    if (text.length > 0) {
-      blocks.push({ type: "text", text });
+    // Every index the provider opened, from any channel, walked in order — the
+    // same shape `reconstructRaw` uses to rebuild a provider-native response.
+    const byIndex = new Map<number, ContentBlock>();
+
+    for (const [blockIndex, text] of this.textByBlock) {
+      if (text.length > 0) byIndex.set(blockIndex, { type: "text", text });
     }
+
+    // `ReasoningBlock.text`, not `.reasoning` — the DELTA channel is named
+    // `reasoning`, the BLOCK field is `text` (same as a text block, so a renderer
+    // reads any prose block the same way and only the `type` decides treatment).
+    for (const [blockIndex, text] of this.reasoningByBlock) {
+      if (text.length > 0) byIndex.set(blockIndex, { type: "reasoning", text });
+    }
+
     for (const entry of this.toolCalls.values()) {
-      const input = this.toolCallInput(entry.callId);
-      const block: ContentBlock = {
+      byIndex.set(entry.blockIndex, {
         type: "tool_use",
         toolUseId: entry.callId,
         name: entry.name,
-        input,
+        input: this.toolCallInput(entry.callId),
         ...(entry.providerMetadata ? { providerMetadata: entry.providerMetadata } : {}),
-      };
-      blocks.push(block);
+      });
     }
-    return blocks;
+
+    return [...byIndex.keys()].sort((a, b) => a - b).map((i) => byIndex.get(i)!);
   }
 }

@@ -108,7 +108,21 @@ function subscribeSignal(
         // Isolate handler faults — never tear down the subscription.
       }
     }
-  })();
+  })().catch(() => {
+    // The subscription itself died — the server refused it, or it did not
+    // survive a reconnect (the transport ends the stream with the reason
+    // rather than letting it hang; see `dispatchSubscribeFrame`). This is a
+    // FLOATING loop, so an uncaught rejection here is fatal under Node's
+    // default policy.
+    //
+    // TODO(signal-subscription-failure): the handler signature
+    // (`(event) => void`) has nowhere to put a failure, so all that is
+    // possible here is to stop cleanly — an adopter still cannot tell "quiet"
+    // from "dead". Widening `OnSignalOptions` with an `onError` is the fix,
+    // and it belongs with the wider client-side subscription-failure surface
+    // (#263 follow-up), not in a drive-by.
+    closed = true;
+  });
   return () => {
     closed = true;
     void sub.close();

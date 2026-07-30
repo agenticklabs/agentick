@@ -22,7 +22,7 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
-import type { TransportError } from "@agentick/spec";
+import { isTransportError, type TransportError } from "@agentick/spec";
 
 /**
  * The class behind every {@link transportError} value. Not exported for
@@ -43,6 +43,27 @@ export function transportError<T extends TransportError>(shape: T): T & Error {
   // `message` is an own, writable property on an Error instance, so the assign
   // below carries the shape's own message when it has one.
   return Object.assign(new TransportFailure(describeFailure(shape)), shape) as T & Error;
+}
+
+/**
+ * Coerce ANYTHING thrown into a {@link TransportError} that is also an
+ * `Error`. For the paths that catch a rejection they did not construct — a
+ * `fetch` that threw a `TypeError`, a socket write that threw an `EPIPE`,
+ * a server rejection already shaped as a `TransportError` — and still have to
+ * hand a caller something with a `kind` it can switch on.
+ *
+ * A value that is already both is returned untouched, so a rejection never
+ * loses the stack it was born with.
+ */
+export function toTransportError(err: unknown): TransportError & Error {
+  if (isTransportError(err)) {
+    return err instanceof Error ? (err as TransportError & Error) : transportError(err);
+  }
+  return transportError({
+    kind: "connection",
+    message: err instanceof Error ? err.message : String(err),
+    cause: err,
+  });
 }
 
 /**

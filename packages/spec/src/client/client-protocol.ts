@@ -29,7 +29,7 @@ import type {
   SessionHandle,
 } from "./handles.js";
 import type { ClientCapabilities, ServerInfo } from "./capabilities.js";
-import type { ClientState } from "./state.js";
+import type { ClientReadiness, ClientState } from "./state.js";
 import type { ClientTransport } from "./transport.js";
 
 /**
@@ -156,15 +156,43 @@ export interface ClientProtocol {
   channelView<T = unknown>(scope: SubscriptionScope, channel: string): ChannelView<T | undefined>;
 
   /**
-   * Resolve once any in-flight post-reconnect handshake completes.
-   * The initial `connect()` handshake is awaited by `connect()`
-   * itself — this method matters only for the reconnect path where
-   * the transport transitions `open → reconnecting → open` without
-   * an explicit `connect()` call.
+   * Resolve when the client is USABLE — that is, when a handshake has
+   * SUCCEEDED and `capabilities` / `serverInfo` reflect the peer currently on
+   * the other end. Resolves immediately when {@link readiness} is already
+   * `"ready"`.
    *
-   * Resolves immediately when nothing is in flight.
+   * **Resolve-on-success only.** It does not resolve because an attempt
+   * finished; it resolves because an attempt worked. A handshake that fails
+   * while the wire stays up leaves this pending and retries underneath (#263) —
+   * the alternative, resolving anyway, is what let adopters `await` their way
+   * into an open wire with empty capabilities and no stated reason.
+   *
+   * It rejects for exactly one reason: nothing further will ever make it
+   * resolve — the client was closed, or the transport reached a terminal
+   * state (`closed`, or `failed` with its reconnect budget spent). It does NOT
+   * reject on a failed handshake, because another attempt is coming.
+   *
+   * Pending until the first success, so `await client.whenReady()` on a client
+   * that has never connected waits for `connect()`. Race it against your own
+   * deadline if you need one; watch {@link onReadinessChange} to show progress
+   * meanwhile.
    */
   whenReady(): Promise<void>;
+
+  /**
+   * Whether the client is usable, as opposed to merely wired up — see
+   * {@link ClientReadiness} for why that is a separate question from
+   * {@link state}.
+   */
+  readonly readiness: ClientReadiness;
+
+  /**
+   * Subscribe to {@link readiness} transitions. Returns an unsubscribe.
+   * Symmetric with {@link onStateChange}, and the pair a status indicator
+   * wants: `state` says whether the wire is up, this says whether the client
+   * behind it can be used.
+   */
+  onReadinessChange(handler: (readiness: ClientReadiness) => void): () => void;
 
   // ── generic RPC dispatch (typed via WireMethods) ───────────────────────
   /**

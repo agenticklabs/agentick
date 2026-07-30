@@ -393,35 +393,45 @@ describe("client capabilities", () => {
     await client.close();
   });
 
-  it("post-reconnect handshake failure leaves capabilities empty (best-effort)", async () => {
-    // If the post-reconnect handshake fails hard (server unreachable
-    // on the way back), we can't propagate to a caller — nobody
-    // awaited it. Behavior: swallow the failure, capabilities stay
-    // empty until the next explicit `connect()` succeeds.
+  it("a post-reconnect handshake failure RETRIES instead of leaving the client silently unusable", async () => {
+    // #263. This test used to assert the opposite — that the failure was
+    // swallowed, `whenReady()` resolved anyway, and capabilities stayed empty
+    // "because nobody awaited it". `whenReady()` is precisely who awaited it.
+    // A handshake that fails on a live wire is a transient server condition (a
+    // gateway that accepted the socket before it could serve `initialize`), so
+    // it retries under backoff and `whenReady()` resolves only on success.
     let initCount = 0;
     const transport = fakeTransport(async (method) => {
       if (method === "initialize") {
         initCount++;
-        if (initCount === 1) return buildInitializeResult() as never;
-        throw { kind: "rpc", error: { code: ErrorCode.InternalError, message: "boom" } };
+        // Fails once on the way back, then recovers.
+        if (initCount === 2) {
+          throw { kind: "rpc", error: { code: ErrorCode.InternalError, message: "boom" } };
+        }
+        return buildInitializeResult({ connectionId: `conn-${initCount}` }) as never;
       }
       if (method === "_extensions/list") return buildExtensionsList() as never;
       throw new Error(`unexpected method: ${method}`);
     });
 
-    const client = await createClient({ transport });
+    const client = await createClient({
+      transport,
+      handshakeRetry: { initialDelayMs: 1, maxDelayMs: 2 },
+    });
     await client.connect();
-    expect(client.capabilities.extensions.length).toBeGreaterThan(0);
+    expect(client.readiness).toBe("ready");
 
     transport.setState("reconnecting");
+    expect(client.readiness).toBe("idle");
     transport.setState("open");
+
+    // The retry, not the failure, is what `whenReady()` waits for.
     await client.whenReady();
 
-    // Handshake failed on the way back — capabilities remain empty.
-    // `whenReady()` still resolves (best-effort, no propagation).
-    expect(client.capabilities.extensions).toEqual([]);
-    expect(client.serverInfo).toBeUndefined();
-    expect(initCount).toBe(2);
+    expect(client.readiness).toBe("ready");
+    expect(initCount).toBe(3); // connect, the failure, the successful retry
+    expect(client.capabilities.extensions.length).toBeGreaterThan(0);
+    expect(client.serverInfo?.connectionId).toBe("conn-3");
 
     await client.close();
   });

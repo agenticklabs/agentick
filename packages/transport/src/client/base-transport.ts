@@ -50,10 +50,14 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec";
+import { isClientStateFailed } from "@agentick/spec";
 import { createNotifier } from "@agentick/pubsub";
+import { computeFullJitterBackoff } from "@agentick/utils";
 
 import { MultiplexedStream } from "./multiplexed-stream.js";
-import { transportError } from "./transport-failure.js";
+import { toTransportError, transportError } from "./transport-failure.js";
+
+export { computeFullJitterBackoff };
 
 /** Render a `ClientState` for an error message (the failed variant is an object). */
 function describeState(state: ClientState): string {
@@ -149,25 +153,6 @@ export const DEFAULT_KEEPALIVE_POLICY: Required<KeepalivePolicy> = {
   timeoutMs: 10_000,
 };
 
-/**
- * Exponential backoff with full jitter per AWS Builder's Library
- * "Timeouts, retries, and backoff with jitter" (Marc Brooker).
- *
- * Returns a uniform random delay in `[0, min(maxDelayMs, initialDelayMs * 2^attempt))`.
- * Free function form for property-based testing — the protected
- * `BaseClientTransport.computeBackoff` is a thin wrapper.
- *
- * @verifiedBy src/__tests__/backoff-jitter.spec.ts
- */
-export function computeFullJitterBackoff(
-  attempt: number,
-  policy: Pick<Required<ReconnectPolicy>, "initialDelayMs" | "maxDelayMs">,
-  random: () => number = Math.random,
-): number {
-  const exp = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** attempt);
-  return random() * exp;
-}
-
 export abstract class BaseClientTransport implements ClientTransport {
   abstract readonly id: string;
   abstract readonly capabilities: TransportCapabilities;
@@ -196,6 +181,12 @@ export abstract class BaseClientTransport implements ClientTransport {
   protected explicitClose = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Stamp identifying the CURRENT dial attempt. Bumped by every arm, so a
+   * late failure from a superseded dial can recognise itself and stay out of
+   * the way — see {@link onDialFailed}.
+   */
+  private dialGeneration = 0;
 
   // Liveness machinery — armed by `markWireUp()`, disarmed on drop/close.
   protected keepalivePolicy: Required<KeepalivePolicy> = DEFAULT_KEEPALIVE_POLICY;
@@ -229,9 +220,28 @@ export abstract class BaseClientTransport implements ClientTransport {
    */
   protected abstract sendFrame(frame: JsonRpcFrame): void | Promise<void>;
 
+  /**
+   * Dial the wire. Rejects with the dial's own failure so a caller gets an
+   * answer instead of blocking on a loop whose default `maxAttempts` is
+   * `Infinity` — but rejecting is not giving up: the backoff loop is armed by
+   * that same failure and keeps dialing (see {@link ReconnectPolicy}).
+   *
+   * Arming it HERE rather than leaving it to each subclass's wire-failure path
+   * is what makes the guarantee uniform. A dial that fails before a socket
+   * exists (`ENOENT` on a Unix socket path, a `fetch` that never got a
+   * response) has no close event to report it, and a transport whose only
+   * re-arm trigger is that event stops trying after one failure — the
+   * "connects, then silently stops" mode. {@link armLoopAfterFailedDial}
+   * no-ops when the wire's own path already armed it.
+   */
   async connect(): Promise<void> {
     if (this.currentState === "open") return;
-    await this.openConnection();
+    try {
+      await this.openConnection();
+    } catch (err) {
+      this.armLoopAfterFailedDial();
+      throw err;
+    }
   }
 
   async close(): Promise<void> {
@@ -302,11 +312,14 @@ export abstract class BaseClientTransport implements ClientTransport {
         onAbort = (): void => {
           if (!this.pending.has(id)) return; // already settled
           this.pending.delete(id);
-          // MCP convention — see ADR 33 §wire/cancellation.
+          // MCP convention — see ADR 33 §wire/cancellation. Best-effort: the
+          // caller already has its answer (the reject below), and a wire that
+          // cannot carry the courtesy notification must not turn an abort
+          // into an unhandled rejection.
           void this.sendNotification("notifications/cancelled", {
             requestId: id,
             reason: "aborted",
-          });
+          }).catch(() => {});
           settle("reject", transportError({ kind: "cancelled", message: "aborted" }));
         };
         signal.addEventListener("abort", onAbort, { once: true });
@@ -367,14 +380,25 @@ export abstract class BaseClientTransport implements ClientTransport {
     // synchronously in sequence; microtasks don't drain between them, so a
     // `.then()` re-key runs AFTER any same-tick notification frames have
     // already missed the stream lookup and been silently dropped.
-    this.dispatchSubscribeFrame({ scope, query, fromCursor }, (serverId) => {
-      if (serverId !== tentativeId) {
+    this.dispatchSubscribeFrame(
+      { scope, query, fromCursor },
+      (serverId) => {
+        if (serverId !== tentativeId) {
+          this.subscriptionStreams.delete(tentativeId);
+          stream.rekey(serverId);
+          this.subscriptionStreams.set(serverId, stream);
+        }
+        this.activeSubscriptions.set(serverId, { stream, scope, query, lastCursor: fromCursor });
+      },
+      (error) => {
+        // A subscription the server never acknowledged receives nothing, ever
+        // — it is not in `activeSubscriptions`, so no reconnect will revive
+        // it. Ending the stream is what turns a permanent silent hang into an
+        // error the caller's `for await` can act on.
         this.subscriptionStreams.delete(tentativeId);
-        stream.rekey(serverId);
-        this.subscriptionStreams.set(serverId, stream);
-      }
-      this.activeSubscriptions.set(serverId, { stream, scope, query, lastCursor: fromCursor });
-    });
+        void stream.end(error);
+      },
+    );
 
     return Object.assign(stream, { subscriptionId: tentativeId });
   }
@@ -395,8 +419,17 @@ export abstract class BaseClientTransport implements ClientTransport {
   private dispatchSubscribeFrame(
     params: SubscribeParams,
     onResolved: (serverId: string) => void,
+    onFailed: (error: TransportError & Error) => void,
   ): void {
-    if (this.currentState !== "open") return;
+    if (this.currentState !== "open") {
+      onFailed(
+        transportError({
+          kind: "connection",
+          message: `cannot subscribe: transport ${this.id} is not open (state: ${describeState(this.currentState)})`,
+        }),
+      );
+      return;
+    }
 
     const id = this.nextRequestId++ as JsonRpcId;
     const frame: JsonRpcFrame = {
@@ -413,13 +446,38 @@ export abstract class BaseClientTransport implements ClientTransport {
       resolve: (res: unknown) => {
         const serverId = (res as { subscriptionId?: string } | null | undefined)?.subscriptionId;
         if (typeof serverId === "string") onResolved(serverId);
+        else {
+          onFailed(
+            transportError({
+              kind: "protocol",
+              message: "subscribe response carried no subscriptionId",
+              cause: res,
+            }),
+          );
+        }
       },
-      reject: () => {
-        /* swallow — caller doesn't wait on this Promise */
-      },
+      // Nobody awaits this Promise, which is exactly why the rejection has to
+      // go somewhere: a subscribe that fails and says nothing is a stream that
+      // hangs for the life of the process.
+      reject: (err: unknown) => onFailed(toTransportError(err)),
     });
 
-    void this.sendFrame(frame);
+    // `sendFrame` is `void | Promise<void>` — HTTP POSTs it. Both a
+    // synchronous throw and a rejected promise have to reach `onFailed`, or a
+    // wire-write failure becomes another silent permanent hang (and, for the
+    // promise, an unhandled rejection).
+    try {
+      const written = this.sendFrame(frame);
+      if (written instanceof Promise) {
+        void written.catch((err: unknown) => {
+          if (!this.pending.delete(id)) return; // already settled by a response
+          onFailed(toTransportError(err));
+        });
+      }
+    } catch (err) {
+      this.pending.delete(id);
+      onFailed(toTransportError(err));
+    }
   }
 
   progress(progressToken: string): ProgressStream {
@@ -550,17 +608,19 @@ export abstract class BaseClientTransport implements ClientTransport {
    * Consolidated in Phase 33.C.2 — was duplicated identically in
    * WS / UDS / HTTP transports.
    *
-   * **Call this exactly once per dead wire.** Twice for the same wire arms two
-   * competing dial loops (the second `scheduleReconnect` overwrites
-   * `reconnectTimer`, orphaning the first timer's socket). That is easy to trip
-   * now that {@link declareWireDead} can report a death the wire itself will
-   * ALSO report a moment later via its close event. Deduplicating belongs at
-   * the wire, not here: only the subclass knows whether an inbound event came
-   * from the socket it still holds or from one it already discarded, and a
-   * latch in this method cannot tell that apart from the next dial's failure
-   * (which MUST re-arm the loop). Every subclass therefore drops events from a
-   * wire it no longer holds — see the staleness guards in the WS transport's
-   * `openSocket`, the UDS `close` listener, and HTTP's `signal.aborted` check.
+   * **Reporting the same dead wire twice is harmless, by construction.** A
+   * second report arrives while a dial is already scheduled, and this method
+   * returns early on exactly that condition — otherwise the second
+   * `scheduleReconnect` would overwrite `reconnectTimer` and orphan the timer
+   * already counting down, leaving two competing dial loops. Two reports for
+   * one death is not exotic: {@link declareWireDead} reports a wire the socket
+   * will ALSO report a moment later via its close event, and a failed dial
+   * surfaces both as a rejected promise ({@link onDialFailed}) and as a close
+   * event. Subclasses still drop events from a wire they no longer hold — see
+   * the staleness guards in the WS and UDS `openSocket`, and HTTP's
+   * `signal.aborted` check — because a zombie's events must not disturb the
+   * healthy connection that replaced it; but the dial loop no longer depends
+   * on their getting the count exactly right.
    */
   protected handleConnectionDrop(cause?: TransportError): void {
     this.stopKeepalive();
@@ -568,6 +628,16 @@ export abstract class BaseClientTransport implements ClientTransport {
     const failure = transportError(cause ?? { kind: "closed", message: "wire closed mid-request" });
     for (const p of this.pending.values()) p.reject(failure);
     this.pending.clear();
+
+    // A dial is ALREADY scheduled, so this wire's death is old news: while the
+    // backoff timer counts down there is no wire, and the only thing that can
+    // report one dying is a zombie or a second reporter for the same death (a
+    // failed dial that surfaces both as a rejected promise and as a `close`
+    // event). Re-arming would overwrite `reconnectTimer` and orphan the timer
+    // already counting down — two dial loops, one of them invisible. Note this
+    // is NOT a latch: an in-flight dial clears the timer before it runs, so a
+    // drop during a dial still arms the next attempt.
+    if (this.reconnectTimer !== null) return;
 
     if (this.explicitClose) {
       this.setState("closed");
@@ -578,13 +648,36 @@ export abstract class BaseClientTransport implements ClientTransport {
       return;
     }
     if (this.reconnectAttempts >= this.reconnectPolicy.maxAttempts) {
+      // TERMINAL, and deliberately loud: `maxAttempts` is `Infinity` by
+      // default, so reaching this line means an adopter asked for a finite
+      // budget and spent it. The `failed` state is the only signal that the
+      // transport has stopped trying — nothing else fires afterwards.
       this.setState({
         kind: "failed",
-        error: { kind: "connection", message: "reconnect attempts exhausted" },
+        error: {
+          kind: "connection",
+          message: `reconnect attempts exhausted after ${this.reconnectAttempts} dial(s); transport ${this.id} has stopped trying (reconnect.maxAttempts = ${this.reconnectPolicy.maxAttempts})`,
+        },
       });
       return;
     }
     this.scheduleReconnect();
+  }
+
+  /**
+   * Arm the dial loop for a dial that failed WITHOUT the wire reporting it.
+   * No-ops when the wire's own failure path already got there (the common
+   * case: a WS `close` event runs `handleConnectionDrop` synchronously before
+   * the dial promise settles), when the caller closed deliberately, when a
+   * later dial already won, or when the loop is already terminal.
+   */
+  private armLoopAfterFailedDial(): void {
+    if (this.explicitClose) return;
+    if (this.currentState === "open") return;
+    if (isClientStateFailed(this.currentState)) return;
+    // Already armed — either mid-backoff or a timer is pending.
+    if (this.reconnectTimer !== null || this.currentState === "reconnecting") return;
+    this.handleConnectionDrop({ kind: "connection", message: "dial failed" });
   }
 
   /**
@@ -608,7 +701,11 @@ export abstract class BaseClientTransport implements ClientTransport {
     this.stopKeepalive();
     const { enabled, intervalMs } = this.keepalivePolicy;
     if (!enabled || !Number.isFinite(intervalMs) || intervalMs <= 0) return;
-    const timer = setInterval(() => void this.probeLiveness(), intervalMs);
+    // A probe that rejects must not take the interval — or, under Node's
+    // default unhandled-rejection policy, the process — with it. The probe
+    // handles its own wire failures; this catch is for the ones it can't
+    // (a `discardWire` that throws, a listener that throws under `setState`).
+    const timer = setInterval(() => void this.probeLiveness().catch(() => {}), intervalMs);
     // A keepalive must never be the reason a process refuses to exit; the
     // open socket it is probing already holds the loop.
     (timer as { unref?: () => void }).unref?.();
@@ -654,7 +751,13 @@ export abstract class BaseClientTransport implements ClientTransport {
    */
   protected declareWireDead(reason: string): void {
     this.stopKeepalive();
-    this.discardWire();
+    try {
+      this.discardWire();
+    } catch {
+      // Releasing a wire that is already unusable is best-effort. What must
+      // not happen is the throw skipping the drop path below and leaving the
+      // transport parked in `open` on a wire nobody is listening to.
+    }
     this.handleConnectionDrop({ kind: "connection", message: reason });
   }
 
@@ -670,12 +773,43 @@ export abstract class BaseClientTransport implements ClientTransport {
     this.setState("reconnecting");
     const delay = this.computeBackoff(this.reconnectAttempts);
     this.reconnectAttempts++;
+    const generation = ++this.dialGeneration;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      void this.openConnection().catch(() => {
-        /* subclass's wire close handler retries via handleConnectionDrop */
-      });
+      // A subclass whose `openConnection` throws SYNCHRONOUSLY would otherwise
+      // escape this timer callback as an uncaught exception, taking the loop
+      // (and, under Node's default policy, the process) with it.
+      let dial: Promise<void>;
+      try {
+        dial = Promise.resolve(this.openConnection());
+      } catch (err) {
+        this.onDialFailed(generation, err);
+        return;
+      }
+      void dial.catch((err: unknown) => this.onDialFailed(generation, err));
     }, delay);
+  }
+
+  /**
+   * A dial armed by the backoff loop failed. The wire's own close event
+   * normally reports this and re-arms the loop, which is why the failure is
+   * not rethrown — but "normally" is not "always": a dial that fails before
+   * there is a socket to close reports nothing, and a loop that stops because
+   * nobody told it to continue is precisely the never-reconnects bug.
+   *
+   * So the loop re-arms itself here, guarded by a `dialGeneration` stamp: the
+   * close path bumps the generation on its way through `scheduleReconnect`, so
+   * whichever path gets there first wins and the other becomes a no-op. That
+   * is what keeps two competing dial loops (and the orphaned timer they leave
+   * behind) from being the cure for the wedge.
+   */
+  private onDialFailed(generation: number, _error: unknown): void {
+    if (generation !== this.dialGeneration) return; // superseded by another arm
+    if (this.reconnectTimer !== null) return; // the wire's path already re-armed
+    if (this.currentState === "open") return; // a later dial won
+    if (this.explicitClose) return;
+    if (isClientStateFailed(this.currentState)) return; // budget already spent
+    this.handleConnectionDrop({ kind: "connection", message: "reconnect dial failed" });
   }
 
   /**
@@ -702,21 +836,71 @@ export abstract class BaseClientTransport implements ClientTransport {
    */
   protected resubscribeAfterReconnect(): void {
     if (this.activeSubscriptions.size === 0) return;
-    for (const [oldId, sub] of this.activeSubscriptions) {
+    // Snapshot: the resolve callback re-keys `activeSubscriptions` SYNCHRONOUSLY
+    // (see `dispatchSubscribeFrame`), which would otherwise mutate the map
+    // being iterated.
+    for (const [oldId, sub] of [...this.activeSubscriptions]) {
+      this.subscriptionStreams.set(oldId, sub.stream);
+      // Runs inside the subclass's `open` handler. A throw here would abort
+      // that handler — leaving `connect()`'s promise unsettled and, on a
+      // socket-event path, surfacing as an uncaught exception. One bad
+      // subscription must not cost the connection.
+      try {
+        // Same synchronous-rekey discipline as subscribe() — see the
+        // comment on dispatchSubscribeFrame.
+        this.dispatchSubscribeFrame(
+          { scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
+          (newId) => {
+            if (newId === oldId) return;
+            this.activeSubscriptions.delete(oldId);
+            this.subscriptionStreams.delete(oldId);
+            sub.stream.rekey(newId);
+            this.subscriptionStreams.set(newId, sub.stream);
+            this.activeSubscriptions.set(newId, sub);
+          },
+          (error) => this.onResubscribeFailed(oldId, sub, error),
+        );
+      } catch (err) {
+        this.onResubscribeFailed(oldId, sub, toTransportError(err));
+      }
+    }
+  }
+
+  /**
+   * A subscription did not survive the reconnect. Which of the two things that
+   * means is decided by the failure:
+   *
+   *   - The WIRE went again (`connection` / `closed` / `timeout`). Nothing is
+   *     wrong with the subscription, so it stays registered under its old id
+   *     and the NEXT successful reconnect resubscribes it. Deleting it here —
+   *     which is what the pre-#263 code did by removing it before the response
+   *     arrived — is how a subscription disappears permanently after a drop
+   *     that happens to land mid-resubscribe.
+   *   - The SERVER refused it (`rpc`) or answered something unusable
+   *     (`protocol`). Redialing will not change that answer, and a consumer
+   *     blocked on `for await` would wait forever, so the stream ends with the
+   *     reason.
+   *
+   * TODO(wire-resume): the honest fix for the first case is server-side resume
+   * (`ServerCapabilities.cursorResume` is still false — see the
+   * `TODO(wire-resume)` trailhead in `@agentick/gateway`). Until a server can
+   * replay from a cursor, a subscription that survives a drop can still MISS
+   * events emitted while the wire was down; only its liveness is restored here,
+   * not its continuity.
+   */
+  private onResubscribeFailed(
+    oldId: string,
+    sub: ActiveSubscription,
+    error: TransportError & Error,
+  ): void {
+    if (error.kind === "rpc" || error.kind === "protocol") {
       this.activeSubscriptions.delete(oldId);
       this.subscriptionStreams.delete(oldId);
-      this.subscriptionStreams.set(oldId, sub.stream);
-      // Same synchronous-rekey discipline as subscribe() — see the
-      // comment on dispatchSubscribeFrame.
-      this.dispatchSubscribeFrame(
-        { scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
-        (newId) => {
-          this.subscriptionStreams.delete(oldId);
-          sub.stream.rekey(newId);
-          this.subscriptionStreams.set(newId, sub.stream);
-          this.activeSubscriptions.set(newId, sub);
-        },
-      );
+      void sub.stream.end(error);
+      return;
     }
+    // Transient — keep it for the next reconnect. `lastCursor` is untouched,
+    // so the retry still asks from where the consumer left off.
+    this.activeSubscriptions.set(oldId, sub);
   }
 }

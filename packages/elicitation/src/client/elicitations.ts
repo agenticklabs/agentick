@@ -178,7 +178,20 @@ export function elicitationsHandle(
       add(parsed);
       notify();
     }
-  })();
+  })().catch(() => {
+    // The subscription died rather than went quiet — the server refused it, or
+    // it did not survive a reconnect, and the transport ends the stream with
+    // the reason instead of letting it hang (#263). This loop FLOATS, so an
+    // uncaught rejection here is fatal under Node's default policy.
+    //
+    // Closing the store is the honest report available at this layer: `status`
+    // becomes `"closed"`, so a consumer polling the view can tell a dead feed
+    // from an idle one instead of waiting forever for asks that will never
+    // arrive. TODO(dead-feed-notify): `liveStore.close()` clears its listeners
+    // without notifying them, so a subscribed consumer is not woken — the
+    // reason lands on `status` but nothing pushes it.
+    store.close();
+  });
 
   return {
     list: () => store.get(),

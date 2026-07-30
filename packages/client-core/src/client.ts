@@ -24,6 +24,7 @@ import type {
   ClientHandshakeCapabilities,
   ClientInstaller,
   ClientProtocol,
+  ClientReadiness,
   ClientState,
   ClientTransport,
   Cursor,
@@ -53,8 +54,10 @@ import {
   WIRE_PROTOCOL_VERSION,
   WireRpcError,
   deserializeAgentickError,
+  isClientStateFailed,
   parseHookKey,
 } from "@agentick/spec";
+import { computeFullJitterBackoff } from "@agentick/utils";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub";
@@ -94,6 +97,43 @@ const CLIENT_HANDSHAKE_CAPABILITIES: ClientHandshakeCapabilities = Object.freeze
 
 let clientCounter = 0;
 
+/**
+ * How a handshake that failed on a LIVE wire is retried.
+ *
+ * The wire's own {@link ReconnectPolicy} does not cover this. That loop is
+ * armed by the wire dying; a handshake can fail with the socket perfectly
+ * healthy — a gateway that accepted the connection before it could serve
+ * `initialize`, a peer mid-restart, a transient `InternalError`. Left alone
+ * that state never heals, which is the whole of #263.
+ *
+ * Same curve as the transports (exponential backoff with full jitter, 100ms →
+ * 30s), and the same default budget: `Infinity`. The client does not stop
+ * trying while the wire is up.
+ *
+ * A wire that DROPS supersedes this loop rather than competing with it: the
+ * transport's reconnect owns recovery from there, and the `open` transition on
+ * the way back arms a fresh handshake.
+ */
+export interface HandshakeRetryPolicy {
+  readonly enabled?: boolean;
+  readonly initialDelayMs?: number;
+  readonly maxDelayMs?: number;
+  /**
+   * Finite budgets are for adopters who prefer a hard stop to an indefinite
+   * retry. Spending one is observable: `readiness` settles on
+   * `{ kind: "handshake-failed", retrying: false }` and `whenReady()` stays
+   * pending until the next `connect()`.
+   */
+  readonly maxAttempts?: number;
+}
+
+export const DEFAULT_HANDSHAKE_RETRY_POLICY: Required<HandshakeRetryPolicy> = {
+  enabled: true,
+  initialDelayMs: 100,
+  maxDelayMs: 30_000,
+  maxAttempts: Infinity,
+};
+
 export interface CreateClientOptions {
   readonly transport: ClientTransport;
   readonly extensions?: readonly ClientExtension[];
@@ -111,6 +151,13 @@ export interface CreateClientOptions {
    * Fires after each handshake / reconnect with the fresh snapshot.
    */
   readonly onCapabilitiesChange?: (caps: ClientCapabilities) => void;
+  /**
+   * Client-LOCAL observer of readiness transitions. Registered for the
+   * client's lifetime via {@link ClientProtocol.onReadinessChange}.
+   */
+  readonly onReadinessChange?: (readiness: ClientReadiness) => void;
+  /** See {@link HandshakeRetryPolicy}. Defaults to retry-forever with jitter. */
+  readonly handshakeRetry?: HandshakeRetryPolicy;
 }
 
 /**
@@ -136,6 +183,7 @@ export async function createClient(options: CreateClientOptions): Promise<Client
   // surfaced — the client owning them is the lifetime boundary).
   if (options.onStateChange) client.onStateChange(options.onStateChange);
   if (options.onCapabilitiesChange) client.onCapabilitiesChange(options.onCapabilitiesChange);
+  if (options.onReadinessChange) client.onReadinessChange(options.onReadinessChange);
   await client.installExtensions();
   return client as unknown as Client;
 }
@@ -182,17 +230,34 @@ class AgentickClient implements ClientProtocol {
   /** Set when a `reconnecting` transition fires; cleared when the
    *  post-reconnect handshake kicks off. */
   private reconnectHandshakePending = false;
+
+  // ── handshake readiness + retry (#263) ────────────────────────────────
+  private readonly handshakeRetry: Required<HandshakeRetryPolicy>;
+  private readonly readinessListeners = createNotifier<ClientReadiness>();
+  private _readiness: ClientReadiness = "idle";
+  private handshakeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Consecutive handshake failures on the CURRENT wire. */
+  private handshakeAttempts = 0;
   /**
-   * Promise for the in-flight post-reconnect handshake, exposed on the
-   * `whenReady()` seam so tests (and adopters that care) can await
-   * it. Undefined when no post-reconnect handshake has ever fired.
+   * Stamp identifying the handshake attempt sequence for the current wire.
+   * Bumped by everything that invalidates one — a wire drop, a deliberate
+   * close, a fresh `connect()` — so an attempt that was in flight across the
+   * change can recognise itself as superseded and neither commit its result
+   * nor schedule a successor.
    */
-  private postReconnectHandshake: Promise<void> | undefined = undefined;
+  private handshakeEpoch = 0;
+  /** Callers parked in `whenReady()`, settled only by success or by a terminal wire. */
+  private readyWaiters: Array<{ resolve(): void; reject(error: unknown): void }> = [];
+  private closed = false;
 
   constructor(options: CreateClientOptions) {
     this.id = options.id ?? `client-${++clientCounter}`;
     this.transport = options.transport;
     this.extensions = options.extensions ?? [];
+    this.handshakeRetry = {
+      ...DEFAULT_HANDSHAKE_RETRY_POLICY,
+      ...(options.handshakeRetry ?? {}),
+    };
 
     this.clientBus = new LocalEventBus();
     // closeDrainTimeoutMs: 0 — client-event delivery is best-effort
@@ -240,13 +305,26 @@ class AgentickClient implements ClientProtocol {
       if (s === "reconnecting") {
         this._serverInfo = undefined;
         this.reconnectHandshakePending = true;
+        // The wire owns recovery from here; a handshake retry against a dead
+        // socket would only fail. Invalidating drops the pending timer AND
+        // stamps a new epoch, so an in-flight attempt cannot commit stale
+        // capabilities against whatever we come back to.
+        this.invalidateHandshake();
         this.commitCapabilities({}, []);
       }
-      if (s === "closed" || isFailedState(s)) {
+      if (s === "closed" || isClientStateFailed(s)) {
         this._serverInfo = undefined;
         // Terminal — no reconnect coming, no handshake to owe.
         this.reconnectHandshakePending = false;
+        this.invalidateHandshake();
         this.commitCapabilities({}, []);
+        // Nothing further can make `whenReady()` resolve without a fresh
+        // `connect()`, so parked callers are told rather than left hanging.
+        this.rejectReadyWaiters(
+          new Error(
+            `client ${this.id}: transport reached a terminal state (${describeClientState(s)}) before a handshake succeeded`,
+          ),
+        );
       }
       // Post-reconnect: re-run the handshake so `capabilities` +
       // `serverInfo` reflect whoever we came back to. Initial connect
@@ -256,31 +334,11 @@ class AgentickClient implements ClientProtocol {
       // transition above.
       if (s === "open" && this.reconnectHandshakePending) {
         this.reconnectHandshakePending = false;
-        // TODO(whenReady-honesty): this swallow makes unreadiness SILENT.
-        // `whenReady()` resolves after a handshake that failed, so an adopter
-        // that awaited it sees an open wire with empty capabilities and no
-        // reason why — every namespaced call then fails as "capability
-        // missing". The asserting test
-        // (`__tests__/capabilities.spec.ts` → "post-reconnect handshake failure
-        // leaves capabilities empty") justifies it with "nobody awaited it",
-        // which `whenReady()` exists to contradict.
-        //
-        // Note this is NOT the reconnect hazard it looks like: when the
-        // handshake fails because the WIRE went again, the transport drops,
-        // redials, and the `reconnecting → open` transition below re-arms this
-        // handshake — that case self-heals. What does not self-heal is a
-        // handshake that fails while the wire STAYS up (a gateway that accepted
-        // the socket before it could serve `initialize`, or a
-        // protocolVersionMismatch). Fix is to surface the failure — reject
-        // `whenReady()`, or expose it as a `ClientEvent` — which flips a
-        // documented contract, so it wants a deliberate call, not a drive-by.
-        this.postReconnectHandshake = this.runHandshake().catch(() => {
-          // Best-effort — a failed post-reconnect handshake leaves
-          // capabilities empty, but the wire is otherwise open.
-          // Adopters observe the empty capabilities via `hasMethod`
-          // returning `false`. Rethrowing would swallow into an
-          // uncaught rejection on a state-change tick.
-        });
+        // Nobody is awaiting THIS promise — the retry loop underneath is what
+        // carries the failure forward, and `readiness` / `whenReady()` are
+        // where an adopter observes it. The catch only keeps a failed attempt
+        // from surfacing as an unhandled rejection on a state-change tick.
+        void this.startHandshake().catch(() => {});
       }
     });
 
@@ -335,19 +393,30 @@ class AgentickClient implements ClientProtocol {
    *     extension list stays empty and `hasMethod`/`hasNamespace`
    *     return false.
    *
+   * **A rejected `connect()` is an answer, not a verdict.** Same contract the
+   * transports state for a failed dial: the caller gets the failure
+   * immediately rather than blocking on a loop whose budget is `Infinity`, and
+   * the client keeps retrying the handshake underneath (see
+   * {@link HandshakeRetryPolicy}). Watch {@link onReadinessChange}, or
+   * `await whenReady()`, for the recovery. Pass
+   * `handshakeRetry: { enabled: false }` if you want one attempt and nothing
+   * more.
+   *
    * @verifiedBy src/__tests__/capabilities.spec.ts
+   * @verifiedBy src/__tests__/handshake-retry.spec.ts
    */
   async connect(): Promise<void> {
+    this.closed = false;
     await this.transport.connect();
-    await this.runHandshake();
+    await this.startHandshake();
   }
 
   /**
-   * Await any in-flight post-reconnect handshake. Resolves immediately
-   * when none is pending. The initial `connect()` handshake is awaited
-   * by `connect()` itself; this covers the reconnect path where the
-   * transport transitions `open → reconnecting → open` without an
-   * explicit `connect()` call.
+   * Resolve when a handshake has SUCCEEDED — see
+   * {@link ClientProtocol.whenReady} for the contract. Resolve-on-success
+   * only: a failed handshake leaves this pending while the retry loop works,
+   * and it rejects only when nothing further can resolve it (the client closed
+   * or the transport went terminal).
    *
    * (Live runtime capability-change reactivity — a client-side
    * subscription that refetches on `gateway:capabilities:changed` —
@@ -357,7 +426,125 @@ class AgentickClient implements ClientProtocol {
    * which this covers. See ADR 47.)
    */
   async whenReady(): Promise<void> {
-    if (this.postReconnectHandshake) await this.postReconnectHandshake;
+    if (this._readiness === "ready") return;
+    if (this.closed) {
+      throw new Error(`client ${this.id} is closed; whenReady() will never resolve`);
+    }
+    if (this.currentState === "closed" || isClientStateFailed(this.currentState)) {
+      throw new Error(
+        `client ${this.id}: transport is in a terminal state (${describeClientState(this.currentState)}); call connect() again`,
+      );
+    }
+    return new Promise<void>((resolve, reject) => {
+      this.readyWaiters.push({ resolve, reject });
+    });
+  }
+
+  get readiness(): ClientReadiness {
+    return this._readiness;
+  }
+
+  onReadinessChange(handler: (readiness: ClientReadiness) => void): () => void {
+    return this.readinessListeners.subscribe(handler);
+  }
+
+  /**
+   * Begin a handshake attempt sequence on the CURRENT wire, cancelling any
+   * sequence already running. Returns the FIRST attempt's outcome so
+   * `connect()` can hand its caller an answer; the retry loop continues
+   * regardless of what that caller does with it.
+   */
+  private startHandshake(): Promise<void> {
+    this.clearHandshakeTimer();
+    this.handshakeAttempts = 0;
+    return this.attemptHandshake(++this.handshakeEpoch);
+  }
+
+  /**
+   * One handshake attempt. On success the capability commit happens and
+   * readiness goes `ready`; on failure the next attempt is scheduled and the
+   * error is rethrown for whoever asked for THIS attempt.
+   */
+  private async attemptHandshake(epoch: number): Promise<void> {
+    if (epoch !== this.handshakeEpoch) return;
+    this.setReadiness("handshaking");
+    try {
+      await this.runHandshake(epoch);
+    } catch (err) {
+      // Superseded mid-flight (the wire dropped, or `connect()` was called
+      // again): the sequence that replaced this one owns what happens next.
+      if (epoch !== this.handshakeEpoch) throw err;
+      this.handshakeAttempts++;
+      const retrying = this.scheduleHandshakeRetry(epoch);
+      this.setReadiness({
+        kind: "handshake-failed",
+        error: err,
+        attempts: this.handshakeAttempts,
+        retrying,
+      });
+      throw err;
+    }
+    if (epoch !== this.handshakeEpoch) return;
+    this.handshakeAttempts = 0;
+    this.setReadiness("ready");
+  }
+
+  /**
+   * Arm the next attempt. Returns whether one is coming — which is what
+   * `readiness` reports, so "the client has stopped trying" is never something
+   * an adopter has to infer from silence.
+   */
+  private scheduleHandshakeRetry(epoch: number): boolean {
+    if (this.closed) return false;
+    const policy = this.handshakeRetry;
+    if (!policy.enabled) return false;
+    if (this.handshakeAttempts >= policy.maxAttempts) return false;
+
+    const delay = computeFullJitterBackoff(this.handshakeAttempts - 1, policy);
+    this.clearHandshakeTimer();
+    const timer = setTimeout(() => {
+      this.handshakeTimer = null;
+      if (epoch !== this.handshakeEpoch) return;
+      // The wire went away while we waited. The transport's reconnect owns
+      // recovery, and the `open` transition on the way back arms a fresh
+      // sequence — retrying here would race it and fail on a dead socket.
+      if (this.currentState !== "open") return;
+      void this.attemptHandshake(epoch).catch(() => {});
+    }, delay);
+    // A retry timer must never be the reason a process refuses to exit.
+    (timer as { unref?: () => void }).unref?.();
+    this.handshakeTimer = timer;
+    return true;
+  }
+
+  /**
+   * Cancel any in-flight or scheduled handshake for the current wire. The
+   * epoch bump is what makes an attempt already awaiting an RPC harmless: it
+   * will neither commit its result nor schedule a successor.
+   */
+  private invalidateHandshake(): void {
+    this.handshakeEpoch++;
+    this.clearHandshakeTimer();
+    this.handshakeAttempts = 0;
+    this.setReadiness("idle");
+  }
+
+  private clearHandshakeTimer(): void {
+    if (this.handshakeTimer === null) return;
+    clearTimeout(this.handshakeTimer);
+    this.handshakeTimer = null;
+  }
+
+  private setReadiness(next: ClientReadiness): void {
+    if (next === this._readiness) return;
+    this._readiness = next;
+    this.readinessListeners.notify(next);
+    if (next !== "ready") return;
+    for (const w of this.readyWaiters.splice(0)) w.resolve();
+  }
+
+  private rejectReadyWaiters(error: Error): void {
+    for (const w of this.readyWaiters.splice(0)) w.reject(error);
   }
 
   /**
@@ -365,8 +552,12 @@ class AgentickClient implements ClientProtocol {
    * Shared between the initial `connect()` and the post-reconnect
    * state-change hook. Tolerates `MethodNotFound` on either RPC —
    * see the failure-semantics doc on `connect()`.
+   *
+   * `epoch` guards the COMMIT: an attempt that was in flight when the wire
+   * dropped must not publish capabilities describing a peer we are no longer
+   * talking to.
    */
-  private async runHandshake(): Promise<void> {
+  private async runHandshake(epoch: number): Promise<void> {
     let initResult: InitializeResult | undefined;
     try {
       initResult = await this.request("initialize", {
@@ -394,14 +585,6 @@ class AgentickClient implements ClientProtocol {
     // subscribers see one atomic snapshot per handshake instead of a
     // "framework-only, no extensions" intermediate.
     const framework = initResult?.capabilities ?? {};
-    if (initResult) {
-      this._serverInfo = {
-        name: initResult.serverInfo.name,
-        version: initResult.serverInfo.version,
-        protocolVersion: initResult.protocolVersion,
-        connectionId: initResult.connectionId,
-      };
-    }
 
     let extensions: readonly import("@agentick/spec").WireExtensionInfo[] = [];
     try {
@@ -411,6 +594,19 @@ class AgentickClient implements ClientProtocol {
       if (!isMethodNotFound(err)) throw err;
       // Old server; leave extensions empty and commit the framework-only
       // snapshot below so subscribers still fire exactly once.
+    }
+
+    // ONE commit point, and it is the last thing that happens: `serverInfo`
+    // and `capabilities` describe the same peer at the same instant, and an
+    // attempt superseded while it awaited either RPC publishes nothing.
+    if (epoch !== this.handshakeEpoch) return;
+    if (initResult) {
+      this._serverInfo = {
+        name: initResult.serverInfo.name,
+        version: initResult.serverInfo.version,
+        protocolVersion: initResult.protocolVersion,
+        connectionId: initResult.connectionId,
+      };
     }
     this.commitCapabilities(framework, extensions);
   }
@@ -430,6 +626,10 @@ class AgentickClient implements ClientProtocol {
   }
 
   async close(): Promise<void> {
+    // A deliberate close cancels the handshake retry loop — "never stops
+    // trying" is a promise about failures, not about instructions.
+    this.closed = true;
+    this.invalidateHandshake();
     // Fire onClose handlers (LIFO so extensions clean up in reverse install order).
     for (const handler of this.closeHandlers.slice().reverse()) {
       try {
@@ -442,6 +642,7 @@ class AgentickClient implements ClientProtocol {
     // `events()` iterators end and no subscription leaks.
     await this.clientEvents.close();
     await this.transport.close();
+    this.rejectReadyWaiters(new Error(`client ${this.id} was closed while waiting for readiness`));
   }
 
   onStateChange(handler: (state: ClientState) => void): () => void {
@@ -769,9 +970,11 @@ function readSessionId(params: unknown): string | undefined {
   return undefined;
 }
 
-/** True when the ClientState value is the failed-object variant. */
-function isFailedState(s: ClientState): boolean {
-  return typeof s === "object" && s !== null && "kind" in s && s.kind === "failed";
+/** Render a `ClientState` for an error message (the failed variant is an object). */
+function describeClientState(s: ClientState): string {
+  if (typeof s === "string") return s;
+  const e = s.error;
+  return "message" in e ? `failed: ${e.kind} — ${e.message}` : `failed: ${e.kind}`;
 }
 
 /**

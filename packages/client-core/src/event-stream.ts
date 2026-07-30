@@ -71,7 +71,18 @@ export function eventStream<F = unknown>(
             // Isolate listener faults — one bad reaction can't stop delivery.
           }
         }
-      })();
+      })().catch(() => {
+        // The SUBSCRIPTION died — refused by the server, or not resurrected by
+        // a reconnect; the transport ends the stream with the reason rather
+        // than letting it hang (#263). Distinct from a listener fault, which
+        // is isolated above. This loop floats, so an uncaught rejection here
+        // is fatal under Node's default policy.
+        //
+        // TODO(dead-feed-notify): `onChange` hands back only an `Unsubscribe`,
+        // so a dead feed cannot be reported to its listener. Callers that need
+        // to know iterate the stream directly, where the error surfaces.
+        active = false;
+      });
       return () => {
         active = false;
       };

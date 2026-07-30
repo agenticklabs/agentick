@@ -107,36 +107,46 @@ class UnixSocketTransport extends BaseClientTransport {
     this.setState("connecting");
     return new Promise<void>((resolve, reject) => {
       const socket = netConnect(this.socketPath);
+      // Held from the moment the dial starts, exactly as the WS transport
+      // does. A socket this transport does not hold is a socket whose events
+      // it must ignore, and `isCurrent` below is the whole of that rule —
+      // which is what lets the `close` listener stay installed on a FAILED
+      // dial and drive the reconnect loop uniformly.
+      this.socket = socket;
 
-      // TODO(uds-redial): this path wedges the reconnect loop. `removeAllListeners`
-      // takes the `close` listener with it, so a FAILED redial reports nothing to
-      // `handleConnectionDrop` — the transport is left in `connecting` forever and
-      // never schedules another attempt (`scheduleReconnect` swallows the
-      // rejection by design). The WS transport dodges this by assigning
-      // `this.socket` before the dial settles and letting `close` drive the loop
-      // uniformly; mirror that here (assign eagerly, drop the
-      // `removeAllListeners`, keep the staleness guard below) and cover it with a
-      // UDS twin of `transport-websocket/src/__tests__/reconnect-e2e.spec.ts`.
+      const isCurrent = (): boolean => this.socket === socket;
+
+      // A failed dial reports through `close`, not here: `net` emits `error`
+      // and then `close` on the same socket, and letting the drop path own the
+      // reconnect keeps one loop instead of two. This listener's only job is
+      // to settle the caller's promise with a reason.
       const onError = (err: unknown) => {
-        if (this.currentState !== "open") {
-          socket.removeAllListeners();
-          // An `Error` (stack, `instanceof`, logger-friendly) that is still
-          // structurally a `TransportError` — callers keep switching on `kind`.
-          reject(
-            transportError({
-              kind: "connection",
-              message: `unix socket connect failed (${String(err)})`,
-              cause: err,
-            }),
-          );
-        }
+        if (!isCurrent() || this.currentState === "open") return;
+        // An `Error` (stack, `instanceof`, logger-friendly) that is still
+        // structurally a `TransportError` — callers keep switching on `kind`.
+        reject(
+          transportError({
+            kind: "connection",
+            // A rejected dial does not mean the transport gave up — with
+            // reconnect enabled the backoff loop is armed and keeps dialing.
+            // Say so, or adopters read this as terminal.
+            message: this.reconnectPolicy.enabled
+              ? `unix socket dial to ${this.socketPath} failed (${String(err)}); reconnect is armed and will keep retrying (watch onStateChange)`
+              : `unix socket dial to ${this.socketPath} failed (${String(err)}) and reconnect is disabled`,
+            cause: err,
+          }),
+        );
       };
 
       socket.once("error", onError);
 
       socket.once("connect", () => {
-        socket.removeListener("error", onError);
-        this.socket = socket;
+        if (!isCurrent()) {
+          // A dial that lost the race to a later one. Release it rather than
+          // leaking the fd.
+          socket.destroy();
+          return;
+        }
         this.markWireUp();
         this.decoder = new NdjsonDecoder(this.decoderOptions);
         this.setState("open");
@@ -145,6 +155,7 @@ class UnixSocketTransport extends BaseClientTransport {
       });
 
       socket.on("data", (chunk: Buffer) => {
+        if (!isCurrent()) return;
         for (const result of this.decoder.push(chunk)) {
           if (!result.ok) {
             // Framing lost (an oversized line) — nothing further on this socket
@@ -169,7 +180,14 @@ class UnixSocketTransport extends BaseClientTransport {
         // Ignore a socket we no longer hold: `discardWire` already reported
         // this wire's death, and a second report would arm a competing dial
         // loop. See the note on `handleConnectionDrop`.
-        if (this.socket !== socket) return;
+        if (!isCurrent()) return;
+        // `reject` after `resolve` is a no-op, so an established connection
+        // closing settles nothing here — it just runs the drop path. A dial
+        // that never connected settles the caller's promise with the reason
+        // the socket gave (ENOENT, ECONNREFUSED) via `onError` above, and
+        // reaches the drop path here — which is what keeps ONE failed redial
+        // from parking the transport in `connecting` forever (#262).
+        this.socket = null;
         this.handleConnectionDrop();
       });
     });

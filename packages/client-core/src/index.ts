@@ -9,7 +9,12 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
-export { createClient, type CreateClientOptions } from "./client.js";
+export {
+  createClient,
+  DEFAULT_HANDSHAKE_RETRY_POLICY,
+  type CreateClientOptions,
+  type HandshakeRetryPolicy,
+} from "./client.js";
 export { composeRequest, composeSubscribe } from "./pipeline.js";
 export { ClientHandlerRegistry } from "./handler-registry.js";
 export { commandForMethod } from "./hook-keys.js";

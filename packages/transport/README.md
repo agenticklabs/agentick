@@ -103,16 +103,16 @@ That is the whole surface. `close()` on the context iterates both registries and
 
 ## What the client base class already did for you
 
-| Concern                  | Behavior                                                                                                      |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| **State machine**        | `connecting` → `open` → `closed`, observable via `onStateChange`.                                             |
-| **RPC correlation**      | Request ids allocated, responses matched, errors rejected as typed failures.                                  |
-| **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.                                      |
-| **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`, ended by `notifications/progress/complete`. |
-| **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.                                    |
-| **Reconnect backoff**    | Full-jitter, capped, and it covers the first dial too. `DEFAULT_RECONNECT_POLICY` is the shared shape.        |
-| **Liveness**             | A `ping` probe declares a silently-dead wire dead. `DEFAULT_KEEPALIVE_POLICY` is the shared shape.            |
-| **Resubscribe**          | After a reconnect, re-issues each live subscription from its last-seen cursor.                                |
+| Concern                  | Behavior                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **State machine**        | `connecting` → `open` → `closed`, observable via `onStateChange`.                                                                                     |
+| **RPC correlation**      | Request ids allocated, responses matched, errors rejected as typed failures.                                                                          |
+| **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.                                                                              |
+| **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`, ended by `notifications/progress/complete`.                                         |
+| **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.                                                                            |
+| **Reconnect backoff**    | Full-jitter, capped, and it covers the first dial too. `DEFAULT_RECONNECT_POLICY` is the shared shape.                                                |
+| **Liveness**             | A `ping` probe declares a silently-dead wire dead. `DEFAULT_KEEPALIVE_POLICY` is the shared shape.                                                    |
+| **Resubscribe**          | After a reconnect, re-issues each live subscription from its last-seen cursor — and ends the stream, rather than hanging it, when the server refuses. |
 
 ### Reconnect covers the first dial, and `connect()` still rejects
 
@@ -135,7 +135,41 @@ Two notes for anyone implementing a transport on this base:
 - The WS protocol's own ping/pong is **not** a substitute. The browser `WebSocket` API cannot send a ping, and a server-side ping into a blackholed path detects the death only on the server's side — which cannot then tell a client that cannot hear it. Both ends need their own detection.
 - Override `discardWire()` if your subclass holds a handle the probe can find dead. A graceful close is the wrong tool: it waits for a peer close-frame a blackholed path will never send. The WS transport prefers `terminate()`, UDS `destroy()`, HTTP aborts the SSE fetch.
 
-Call `markWireUp()` from your successful-open path (it resets the backoff counter and arms the probe), and call `handleConnectionDrop()` **exactly once per dead wire** — twice arms two competing dial loops. That last part is on the subclass, because only the subclass can tell an event from the socket it still holds apart from one it already discarded; a latch in the base cannot distinguish that from the next dial's failure, which must re-arm the loop.
+Call `markWireUp()` from your successful-open path — it resets the backoff counter and arms the probe. Reporting the same dead wire twice is harmless: `handleConnectionDrop()` returns early when a dial is already scheduled, so a subclass that reports a death the socket will also report a moment later cannot arm two competing loops. Still guard your listeners against a wire you no longer hold (`this.socket === socket`), because a zombie's _events_ must not disturb the healthy connection that replaced it — but the dial loop no longer depends on getting the count exactly right.
+
+### The client never stops trying
+
+That is the guarantee, and it is worth stating as a list of the ways a retry loop can die, because every one of them has been closed and pinned by a test.
+
+| Way the loop could stop                                        | What actually happens                                                                                                                                                       |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The first dial fails, and there is no socket to emit a `close` | `connect()` arms the loop itself before rethrowing. A transport whose only re-arm trigger is a close event no longer stops after one failure.                               |
+| A redial fails                                                 | The rejected dial re-arms the loop (`onDialFailed`), generation-stamped so it defers to the close path when that got there first.                                           |
+| `openConnection()` throws **synchronously**                    | Caught inside the timer callback. It would otherwise escape as an uncaught exception and take the loop — and, under Node's default policy, the process — with it.           |
+| The wire dies silently, with no FIN, RST, or close frame       | The `ping` liveness probe declares it dead (see above) and hands it to the loop.                                                                                            |
+| The liveness probe itself throws                               | `declareWireDead` runs the drop path even when `discardWire()` throws, and the interval survives a rejected probe.                                                          |
+| A drop is reported twice for one death                         | The second report is a no-op — one loop, no orphaned timer.                                                                                                                 |
+| `resubscribeAfterReconnect()` throws                           | Isolated per subscription. It runs inside the subclass's `open` handler, where a throw would leave `connect()` unsettled and surface as an uncaught socket-event exception. |
+| The reconnect budget runs out                                  | **This one does stop** — see below. It is the only one, and it is loud.                                                                                                     |
+
+Verified by [`transport-websocket/src/__tests__/reconnect-e2e.spec.ts`](../transport-websocket/src/__tests__/reconnect-e2e.spec.ts) and [`transport-unix-socket/src/__tests__/reconnect-e2e.spec.ts`](../transport-unix-socket/src/__tests__/reconnect-e2e.spec.ts) — real wires, servers that actually go away and stay away across several backoff cycles.
+
+### A spent `maxAttempts` budget is terminal, and says so
+
+`maxAttempts` defaults to `Infinity`, which is what "never stops trying" means in practice. Set a finite one and the transport will stop — that is the point of asking — so the stop is reported rather than left to be inferred from silence: the state goes to `{ kind: "failed", error: { kind: "connection", message } }`, the message names the budget it spent, and nothing fires afterwards. `client.whenReady()` rejects on the same transition instead of hanging.
+
+A `failed` transport is not a dead object. Calling `connect()` again dials afresh.
+
+### A subscription that does not come back says so
+
+Reconnecting the wire is not the same as reconnecting what was riding on it. After a redial the base re-issues every live subscription from its last-seen cursor, and that resubscribe can fail on its own. Which of two things that means is decided by the failure, because they want opposite treatment:
+
+- **The wire went again** (`connection` / `closed` / `timeout`). Nothing is wrong with the subscription, so it stays registered and the next successful reconnect resubscribes it — from the same cursor. Dropping it here is how a subscription used to disappear permanently after a drop that happened to land mid-resubscribe.
+- **The server refused it** (`rpc`), or answered something unusable (`protocol`). Redialing will not change that answer, and a consumer blocked on `for await` would wait forever, so the stream **ends with the reason**. Same treatment for a fresh `subscribe()` the server never acknowledges: a stream that will never produce anything must not look like a stream that is merely quiet.
+
+Consumers that fold a subscription into a store rather than iterating it (`eventView`, the timeline view, the elicitation and client-tool feeds) turn that error into `status === "closed"`, so a dead feed is distinguishable from an idle one.
+
+What this does **not** yet give you is continuity. A subscription that survives a drop can still miss events emitted while the wire was down — server-side cursor resume is unbuilt (`ServerCapabilities.cursorResume` is `false`; see the `TODO(wire-resume)` trailhead in [@agentick/gateway](../gateway)). Liveness is restored; the gap is not filled.
 
 ### A failed RPC rejects with the server's own words
 

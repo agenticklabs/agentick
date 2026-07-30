@@ -77,7 +77,20 @@ export function eventView<T, F>(
       }
       store.set(folded, frame);
     }
-  })();
+  })().catch(() => {
+    // The SUBSCRIPTION died rather than went quiet — refused by the server, or
+    // not resurrected by a reconnect; the transport ends the stream with the
+    // reason instead of letting it hang (#263). Distinct from a malformed
+    // frame, which is skipped above. This loop floats, so an uncaught
+    // rejection here is fatal under Node's default policy.
+    //
+    // Closing the store is the honest report at this layer: `status` becomes
+    // `"closed"`, so a consumer can tell a dead view from an idle one instead
+    // of rendering a snapshot that will never update again. The held state is
+    // left intact. TODO(dead-feed-notify): `liveStore.close()` clears its
+    // listeners without notifying them, so a subscribed consumer is not woken.
+    store.close();
+  });
 
   return store;
 }

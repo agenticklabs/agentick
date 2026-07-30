@@ -80,7 +80,15 @@ export function confirmClientTools(
         const approved = await evaluate(policy, req);
         if (approved) await elic.accept({ approved: true });
         else await elic.decline();
-      })();
+      })().catch(() => {
+        // The reply did not reach the server — the wire dropped under it, or
+        // the policy threw. Nothing here can retry it (the ask is
+        // server-owned; when the session comes back the snapshot re-seeds the
+        // pending set), but this loop floats, and an uncaught rejection is
+        // fatal under Node's default policy. Forget that we acted so the
+        // re-seeded ask is evaluated again rather than silently ignored.
+        acted.delete(elic.correlationId);
+      });
     }
   });
   return () => {

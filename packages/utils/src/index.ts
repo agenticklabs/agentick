@@ -1,4 +1,5 @@
 export * from "./abort-signals.js";
+export * from "./backoff.js";
 export * from "./cartesian.js";
 export * from "./cause.js";
 export * from "./effect-lift.js";
