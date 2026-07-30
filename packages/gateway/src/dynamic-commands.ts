@@ -22,7 +22,7 @@
  * // the follow-up.
  */
 
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 
 import {
   WireRpcError,
@@ -92,6 +92,27 @@ const DYNAMIC_EXTENSION: WireExtension = {
 };
 
 /**
+ * Run an inbox `ask` and reject with the FAILURE VALUE — never with Effect's
+ * `FiberFailure` envelope.
+ *
+ * `Effect.runPromise` rejects with a `FiberFailure`, a plain `Error` whose
+ * message is the pretty-printed cause. Everything the dispatcher needs to
+ * project a typed failure honestly — the `_tag`, the fields, `toJSON()` — is
+ * gone by the time it lands in the `catch`, so `isAgentickError` is false and a
+ * `PromptArgumentMissing` reached clients as `-32603 "internal error"` with the
+ * real message smuggled into `data.reason` as free text. Running to an `Exit`
+ * and squashing the cause hands back the value the effect actually failed with
+ * (or the defect it died with), which is what the wire edge knows how to map.
+ *
+ * @verifiedBy packages/transport-in-process/src/__tests__/typed-error-e2e.spec.ts
+ */
+async function runAsk<A>(effect: Effect.Effect<A, unknown, never>): Promise<A> {
+  const exit = await Effect.runPromiseExit(effect);
+  if (Exit.isSuccess(exit)) return exit.value;
+  throw Cause.squash(exit.cause);
+}
+
+/**
  * Build the ONE dynamic fallthrough resolver. Registered by the
  * gateway before the registry seals.
  */
@@ -102,7 +123,7 @@ export function createDynamicCommandResolver(
 
   const askCommands = async (address: string): Promise<readonly CommandInfo[]> => {
     const surface = address.slice(0, address.indexOf(":"));
-    const reply = await Effect.runPromise(
+    const reply = await runAsk(
       inbox.ask<unknown, { commands?: readonly CommandInfo[] } | readonly CommandInfo[]>(address, {
         type: `${surface}:commands`,
         origin: "wire",
@@ -143,7 +164,7 @@ export function createDynamicCommandResolver(
       // Authorization happened at the dispatch choke point (ADR 51
       // §3.3 — ONE gate, both lanes); this handler owns only exposure
       // semantics (deny-by-default: non-wire == absent).
-      return Effect.runPromise(inbox.ask(address, { type: verb, origin: "wire", payload: p }));
+      return runAsk(inbox.ask(address, { type: verb, origin: "wire", payload: p }));
     };
 
     return { extension: DYNAMIC_EXTENSION, handler };

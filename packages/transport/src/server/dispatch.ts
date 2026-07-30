@@ -23,6 +23,7 @@ import {
   isAgentickError,
   createLog,
   WIRE_PROTOCOL_VERSION,
+  type AgentickError,
   type Observability,
   type Ops,
   type Span,
@@ -254,9 +255,14 @@ export async function dispatchRequest(
     if (e instanceof WireRpcError) {
       return errorResponse(req.id, e.code, e.message, e.data);
     }
-    if (isAgentickError(e)) {
-      const wireCode = agentickErrorToWireCode(e);
-      return errorResponse(req.id, wireCode, e.message, e.toJSON());
+    const domain = domainErrorOf(e);
+    if (domain !== undefined) {
+      return errorResponse(
+        req.id,
+        agentickErrorToWireCode(domain),
+        domain.message,
+        domain.toJSON(),
+      );
     }
     return errorResponse(req.id, ErrorCode.InternalError, "internal error", {
       reason: e instanceof Error ? e.message : String(e),
@@ -265,9 +271,52 @@ export async function dispatchRequest(
 }
 
 /**
+ * The typed error a failure should be REPORTED as, dug out from under whatever
+ * wrapped it on the way here.
+ *
+ * A domain error rarely arrives bare. `BaseHarness` wraps every command failure
+ * that crosses the inbox in a `HandlerError` (its channel is typed to
+ * `MessageHandlerError`), so the thing that reaches this catch says only "inbox
+ * message handler failed" while the `PromptArgumentMissing` underneath — the
+ * one sentence the caller can act on — hangs off `.cause`. Reporting the
+ * wrapper is how a missing argument became `-32603 "internal error"`.
+ *
+ * The rule is "a wrapper that tells us nothing gets skipped":
+ *
+ *   - Walk the `cause` chain, collecting every {@link AgentickError} on it.
+ *   - Report the FIRST one the code table has a specific answer for. That keeps
+ *     an outer error that genuinely knows better — `OperationOutcomeError`,
+ *     whose verdict maps to Forbidden / RateLimited — from being unwrapped into
+ *     the failure it happens to carry.
+ *   - Otherwise report the INNERMOST one, which is the closest thing to the
+ *     actual fault, and whose message names it.
+ *
+ * `undefined` when nothing on the chain is typed — the caller falls back to a
+ * generic internal error.
+ */
+function domainErrorOf(e: unknown): AgentickError | undefined {
+  const typed: AgentickError[] = [];
+  let current: unknown = e;
+  // Bounded: a self-referential `cause` must not spin here.
+  for (let depth = 0; current !== undefined && current !== null && depth < 8; depth += 1) {
+    if (isAgentickError(current)) typed.push(current);
+    const next: unknown = (current as { readonly cause?: unknown }).cause;
+    if (next === current) break;
+    current = next;
+  }
+  if (typed.length === 0) return undefined;
+  return typed.find((t) => agentickErrorToWireCode(t) !== ErrorCode.InternalError) ?? typed.at(-1);
+}
+
+/**
  * Map an {@link AgentickError} subclass to the matching JSON-RPC
  * error code. Explicit table keeps the mapping tight — new tags
  * default to `InternalError` until wired.
+ *
+ * `InternalError` is therefore two things at once: the honest answer for a
+ * genuine server fault, and "not classified yet". {@link domainErrorOf} reads it
+ * as the second, so adding a row here also stops the tag being skipped over as
+ * an uninformative wrapper.
  */
 function agentickErrorToWireCode(err: { readonly _tag: string }): number {
   switch (err._tag) {
@@ -293,7 +342,16 @@ function agentickErrorToWireCode(err: { readonly _tag: string }): number {
       return ErrorCode.AppNotFound;
     case "SessionNotFoundError":
       return ErrorCode.SessionNotFound;
+    // Caller-supplied input the server refused: a required argument absent, a
+    // value that failed its schema, a name already taken. All InvalidParams —
+    // the caller can fix every one of them from the message, and none is a
+    // server fault.
     case "AppAlreadyExistsError":
+    case "PromptAlreadyExists":
+    case "SkillAlreadyExists":
+    case "PromptArgumentMissing":
+    case "PromptArgumentInvalid":
+    case "ToolValidationError":
       return ErrorCode.InvalidParams;
     case "AppClosedError":
     case "SessionClosedError":

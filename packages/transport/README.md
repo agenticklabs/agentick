@@ -205,6 +205,17 @@ Per-connection state — identity, subscriptions, in-flight ids — lives on the
 
 Handlers reach the client through their context: `ctx.publish` emits a notification, and it **rejects any notification the extension did not declare** — including the case where it declared none at all. An undeclared notification is a bug at the wire, not a frame to be forwarded.
 
+### A thrown error is projected as what it IS
+
+A handler that throws a typed `AgentickError` produces a JSON-RPC error carrying the error's own message, the code its tag maps to, and its `toJSON()` — which is what lets [@agentick/client](../client) rehydrate the same class on the far side, so `catch (e) { e instanceof PromptArgumentMissing }` holds on both sides of the wire.
+
+The part worth knowing is what happens when the error arrives **wrapped**. Almost nothing throws bare: a command failure crossing the inbox comes back inside a `HandlerError`, because that channel is typed to `MessageHandlerError`. Report the wrapper and a caller's missing argument becomes `-32603 "internal error"` with the only useful sentence buried in `data.reason` — which is exactly what shipped. So the dispatcher walks the `cause` chain and reports the error that has something to say:
+
+- the first one the code table answers specifically — which keeps a wrapper that genuinely knows better, like an `OperationOutcomeError` whose verdict maps to Forbidden or RateLimited, from being unwrapped into whatever it carries;
+- otherwise the innermost typed error, the closest thing to the actual fault.
+
+A tag with no row in the table maps to `InternalError`, and that doubles as "not classified yet" — adding a row both fixes the code and stops the tag being treated as an uninformative wrapper. Caller-input faults (a missing or invalid argument, a name already taken) map to `InvalidParams`; unknown names to `MethodNotFound`.
+
 ## Ingress authentication
 
 Every transport edge authenticates its trust-boundary crossing through one helper:
@@ -403,6 +414,7 @@ runIngressAuthnConformance({
 - `src/__tests__/wire-command-e2e.spec.ts` — a wire method as a full command: journaled operation, typed hook transform, middleware, span attributes, live context facets, and define-time guard verdicts mapping to Forbidden and rate-limited at the JSON-RPC edge with the handler never running.
 - `src/__tests__/client-projection.spec.ts` — each bounded path for results and notifications, unknown methods passing through by reference, no input mutation, the default-off zero-overhead path, raised and infinite ceilings, and the two-tier proof that the client copy is bounded while store and model views keep full bytes.
 - `src/__tests__/multiplexed-stream-backpressure.spec.ts` — unbounded never dropping, capacity validation, drop-oldest and drop-newest eviction order, close-on-overflow terminating with a backpressure error and ignoring later pushes, and a parked consumer bypassing the buffer.
+- `packages/transport-in-process/src/__tests__/typed-error-e2e.spec.ts` — the server half, against a real gateway and session: a `prompts/invoke` missing a required argument answering `InvalidParams` with the domain error's own message (no wrapper text), the tag and its fields in `error.data`, the failure rehydrating to its typed class through `client.request`, and an unknown prompt still mapping to `MethodNotFound`.
 - `src/__tests__/rpc-error-fidelity.spec.ts` — a JSON-RPC error response reaching the caller with the server's message and code in `Error.message`, the structured `kind`/`error.code`/`error.data` still reachable for typed rehydration, a message-less server error naming its code, and message-carrying kinds used verbatim.
 - `src/__tests__/backoff-jitter.spec.ts` — full-jitter shape: per-attempt bounds, cap doubling to the maximum, never exceeding it, uniform distribution across the range, and reproducibility under an injected RNG.
 - `src/testing/index.ts` (`runIngressAuthnConformance`) and `@agentick/spec-conformance`'s `runTransportConformance` — run by every concrete transport against a real server; see [@agentick/transport-websocket](../transport-websocket) and [@agentick/transport-in-process](../transport-in-process) for the invocations.
