@@ -36,6 +36,7 @@ import { WireExtensionDefinitionError } from "../errors/remaining.js";
 // without digging into the errors subpath.
 export { WireExtensionDefinitionError } from "../errors/remaining.js";
 
+import type { EventNameOverride } from "../data/journaling-policy.js";
 import type { AppHarnessProtocol } from "../protocol/app-harness.js";
 import type { GatewayHarnessProtocol } from "../protocol/gateway-harness.js";
 import type { HookBridges } from "../protocol/hook-bridges.js";
@@ -518,6 +519,30 @@ export interface WireExtension {
   readonly clusterRoute?: {
     readonly [K in WireMethod]?: WireClusterRoute;
   };
+
+  /**
+   * Per-method DURABILITY disposition for the `wire:<method>` boundary op the
+   * gateway mints around every dispatch. Missing entries keep the gateway's
+   * phase rules, under which a dispatch appends its `requested` + `terminal`
+   * envelopes to the journal.
+   *
+   * The seam exists because "is this dispatch a thing that happened?" is the
+   * METHOD's question, not the gateway's. A typeahead verb answers a keystroke:
+   * it fires tens of times per filled-in field, carries no durable effect, and
+   * journaling it buries the recovery/audit spine in ephemeral queries — the
+   * same argument that keeps completion off the declared-command path in the
+   * first place. Declaring `"bus-only"` keeps the traffic visible to live
+   * observers (a debugger, a metrics bridge) and out of the journal; `"drop"`
+   * hides it from both.
+   *
+   * The gateway folds these into its journaling policy's `override` map keyed by
+   * the derived op name, so the method declares its own disposition and the
+   * gateway never names a namespace. An adopter's `policy.override` still wins —
+   * the declaration is a default, not a lock.
+   */
+  readonly journal?: {
+    readonly [K in WireMethod]?: EventNameOverride;
+  };
 }
 
 /**
@@ -563,6 +588,7 @@ export type WireExtensionInput = Omit<WireExtension, "methods" | "ops"> & {
  *   6. every notification starts with `${namespace}/`
  *   7. auth entries reference declared methods
  *   8. clusterRoute entries reference declared methods
+ *   9. journal entries reference declared methods
  *
  * @example
  *   export const myExtension = defineWireExtension({
@@ -707,6 +733,18 @@ export function defineWireExtension(input: WireExtensionInput): WireExtension {
       throw new WireExtensionDefinitionError({
         extensionName: ext.name,
         reason: `\`clusterRoute\` references method "${routeMethod}" but no handler is declared for it. Add the handler or remove the route entry.`,
+      });
+    }
+  }
+
+  // 9. `journal` entries reference methods that exist in `methods` — a
+  // disposition declared for a method this extension does not implement would
+  // silently exempt someone else's verb.
+  for (const journalMethod of Object.keys(ext.journal ?? {})) {
+    if (!(journalMethod in ext.methods)) {
+      throw new WireExtensionDefinitionError({
+        extensionName: ext.name,
+        reason: `\`journal\` references method "${journalMethod}" but no handler is declared for it. Add the handler or remove the journal entry.`,
       });
     }
   }

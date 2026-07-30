@@ -14,7 +14,19 @@
  * Add a built-in's wire-extension here as it gains a client-reachable command:
  *   - `knobs/set` (knobs) — landed.
  *   - `tasks/cancel` (tasks) — landed.
+ *   - `completions/complete` (completions) — landed.
  *   - state / gates — when they add write commands.
+ *
+ * `completions/complete` is the one entry whose harness is NOT always present,
+ * and it is here on purpose rather than self-installed from `withCompletions`
+ * (the optional-package pattern `@agentick/mcp` follows). The route's PRIMARY
+ * path does not need the completions namespace at all: an inline `complete:`
+ * resolver on a prompt argument rides the prompts sidecar, so an app that
+ * installs prompts and never mentions completions still completes over the wire.
+ * Self-installing the route from `withCompletions` would make that case
+ * unreachable. Unresolvable requests answer `{ values: [] }` rather than
+ * faulting, so a deployment with neither harness installed sees a route that
+ * politely knows nothing.
  *
  * NOTE: these are WRITE surfaces (client → server mutations). They are
  * registered in the bundled tier (not the framework-privileged tier), so an
@@ -27,10 +39,12 @@
  */
 
 import type { WireExtension } from "@agentick/spec";
+import { completionsWireExtension } from "@agentick/completions";
 import { knobsWireExtension } from "@agentick/knobs";
 import { tasksWireExtension } from "@agentick/tasks";
 
 export const builtinWireExtensions: readonly WireExtension[] = [
+  completionsWireExtension,
   knobsWireExtension,
   tasksWireExtension,
 ];

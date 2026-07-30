@@ -2061,6 +2061,12 @@ export class AppHarness<P = unknown>
     if (sandboxNamespace !== undefined) ctxExtensionEntries.sandbox = sandboxNamespace;
     const skillsNamespace = sessionExtensionBridges.get("skills");
     if (skillsNamespace !== undefined) ctxExtensionEntries.skills = skillsNamespace;
+    // `completions` rides for the same reason `skills` does — `withCompletions`
+    // registers under the `completions` namespace before this site runs. A tool
+    // handler reaches `ctx.completions?.resolve(name, { value })` when it wants
+    // candidates for something it is about to ask a human about.
+    const completionsNamespace = sessionExtensionBridges.get("completions");
+    if (completionsNamespace !== undefined) ctxExtensionEntries.completions = completionsNamespace;
     const ctxExtensions: Readonly<Record<string, unknown>> | undefined =
       Object.keys(ctxExtensionEntries).length > 0 ? ctxExtensionEntries : undefined;
 

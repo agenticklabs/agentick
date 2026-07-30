@@ -46,6 +46,7 @@ import {
 } from "@agentick/runtime";
 import type {
   CollectionMutation,
+  CompletionCtx,
   CompletionResolver,
   EventBus,
   MessageEntry,
@@ -57,6 +58,8 @@ import type {
   PromptDeclaration,
   PromptDeclarationRecord,
   PromptStoreQuery,
+  PromptsCompleteInput,
+  PromptsCompleteOutcome,
   PromptsError,
   PromptsFx,
   PromptsGetInput,
@@ -73,6 +76,7 @@ import type {
   TimelineHarnessProtocol,
 } from "@agentick/spec";
 import {
+  CompletionResolveFailed,
   HandlerError,
   PromptAlreadyExists,
   PromptArgumentInvalid,
@@ -87,7 +91,9 @@ import { View } from "@agentick/store";
 import { omitUndefined, ulid } from "@agentick/utils";
 
 import {
+  foldCompletionValues,
   normalizePromptArguments,
+  promptCompletionRef,
   restorePromptArguments,
   type NormalizedPromptArguments,
 } from "./completion.js";
@@ -312,13 +318,9 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
       exposure: "wire",
       handler: (i: PromptsGetInput) => this.applyGet(i),
     });
-    // TODO(completions-p2): resolve door — sidecar-first, else ctx completions
-    // registry. `prompts:complete` belongs HERE, beside `prompts:render`: given
-    // `{ name, argument, value, resolvedArguments }`, look the argument's resolver
-    // up in `augmentations.get(name)?.completions` (the inline form, already in
-    // hand) and fall back to resolving the record's `completeRef` through the
-    // session's completions harness (the named form). P1 threads the DECLARATION
-    // only — nothing here invokes a resolver yet.
+    // NO `prompts:complete` command. The completion door is the plain
+    // `complete()` method below, beside these verbs but deliberately not among
+    // them — a keystroke must not mint a journaled operation. See its doc-block.
 
     // ─── Wire read commands (three-audiences-plan G-prep) — the enumeration +
     // read lane a client prompts handle needs. Registered for their side effect
@@ -487,6 +489,126 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     const resolved = await this.resolve(name);
     if (resolved !== null) return resolved;
     throw new PromptNotFound({ promptName: name });
+  }
+
+  // ─────────── The completion door ───────────
+
+  /**
+   * Complete one ARGUMENT of one prompt — what a composer offers while the user
+   * types into a slot.
+   *
+   * ## Not a command, on purpose
+   *
+   * Every other verb on this harness is a `this.command(...)`: a journaled
+   * operation with `requested → terminal` envelopes, an inbox address, a wire
+   * name. This one is a plain async method, for the reason the completions harness
+   * gives for its own `resolve` — completion fires PER KEYSTROKE, and one
+   * operation per character typed floods the recovery/audit spine with ephemeral
+   * queries for zero durability benefit (completions.md §5). The ctx is still
+   * MINTED rather than hand-assembled, so a resolver sees the owning session's
+   * identity and the `log`/`trace`/`metrics`/`run` facets exactly as `render` does.
+   *
+   * ## The three answers, and why they fall out of the re-join
+   *
+   * It reads the RE-JOINED declaration ({@link declarationOf}), so the three
+   * shapes `restorePromptArguments` can hand back are already the three arms of
+   * {@link PromptsCompleteOutcome}: a FUNCTION is an inline resolver and runs here
+   * (`resolved`); a STRING is a registry address this package will not chase —
+   * prompts holds resolvers, it does not own the registry that runs them — so the
+   * name goes back to the caller (`ref`); NOTHING means either the argument
+   * declares no completion or its sidecar did not survive a restore
+   * (`unavailable`).
+   *
+   * An unknown ARGUMENT name is `unavailable`, not an error: completion never
+   * protocol-errors on an unknown argument (MCP parity). An unknown PROMPT does
+   * throw — the caller named something that does not exist.
+   *
+   * Lookup-on-miss runs first, the same source seam `invoke` / `render` use, so
+   * completing an argument of a lazily-catalogued prompt works. A miss costs one
+   * full hydrator read; it happens once, because the lookup registers what it finds.
+   *
+   * @throws {PromptNotFound} no prompt by that name, and no source has it.
+   * @throws {CompletionResolveFailed} an inline resolver threw or rejected.
+   * @verifiedBy packages/prompts/src/__tests__/complete.spec.ts
+   */
+  async complete(input: PromptsCompleteInput): Promise<PromptsCompleteOutcome> {
+    if (!this.view.hasSync(input.name) && this.hydrator !== undefined) {
+      await this.resolve(input.name);
+    }
+    const decl = this.declarationOf(input.name);
+    if (decl === undefined) throw new PromptNotFound({ promptName: input.name });
+
+    // ONE ctx mint, shared by the resolver invocation and the counter on every
+    // arm. Metrics is the honest observability answer for a door that writes no
+    // journal envelope: the tally survives, the per-keystroke event does not.
+    const ctx = this.completionCtx(input);
+    const tally = (outcome: PromptsCompleteOutcome["kind"]): void => {
+      ctx.metrics.count("prompts.complete", 1, { prompt: input.name, outcome });
+    };
+
+    const arg = decl.arguments?.find((a) => a.name === input.argument.name);
+    const complete = arg?.complete;
+
+    if (typeof complete === "string") {
+      tally("ref");
+      return { kind: "ref", completeRef: complete };
+    }
+    if (typeof complete !== "function") {
+      tally("unavailable");
+      return { kind: "unavailable" };
+    }
+    try {
+      const raw = await complete(input.argument.value, ctx);
+      tally("resolved");
+      return { kind: "resolved", result: foldCompletionValues(raw) };
+    } catch (cause) {
+      throw new CompletionResolveFailed({
+        completionName: this.completeRefOf(input.name, input.argument.name),
+        cause,
+      });
+    }
+  }
+
+  /**
+   * The failing resolver's ADDRESS, read off the RECORD where the split put it:
+   * its own registry name for a `defineCompletion` source, else the derived
+   * `prompt:<prompt>:<arg>`. Never a fabricated label — the ref in the error is
+   * the ref a caller can go look up.
+   *
+   * It comes from the record rather than the re-joined declaration because
+   * `completeRef` is a `PromptArgumentRecord` field: the author-facing
+   * `PromptArgument` types `complete`, not its projections.
+   */
+  private completeRefOf(promptName: string, argName: string): string {
+    const record = this.view.getSync(promptName);
+    return (
+      record?.arguments?.find((a) => a.name === argName)?.completeRef ??
+      promptCompletionRef(promptName, argName)
+    );
+  }
+
+  /**
+   * Mint the resolver's {@link CompletionCtx} (ADR 91) — through
+   * `deriveOperationCtx`, the one branded boundary constructor, never a
+   * hand-assembled bag, so the ctx carries the trunk (the owning session's
+   * `sessionId` / `principal`), the lazy `log`/`trace`/`metrics`/`run` facets, and
+   * the `Derived` brand.
+   *
+   * The two boundary facets compose INTO the same branded mint rather than being
+   * spread over it afterwards, which would erase the brand. `resolvedArguments`
+   * is MCP's `context.arguments` flattened onto the name the seam itself uses —
+   * the sibling values that make conditional completion possible.
+   *
+   * The trunk is this harness's construction-bound `parentScope`
+   * (`{ sessionId }` for a session-installed harness), NOT an ambient fiber:
+   * `complete` is a plain async door with no enclosing Effect. That is the one
+   * asymmetry with `render`, which derives in-fiber from the invoking op.
+   */
+  private completionCtx(input: PromptsCompleteInput): CompletionCtx {
+    return this.deriveOperationCtx(this.parentScope ?? {}, {
+      resolvedArguments: input.context?.arguments ?? {},
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
+    });
   }
 
   // ─────────── Sync surface ───────────

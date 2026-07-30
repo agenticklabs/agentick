@@ -20,6 +20,12 @@ import type { Completions } from "@agentick/spec";
 import type { CompletionsConfig } from "./definition.js";
 import { withCompletions } from "./extension.js";
 
+// The `WireMethods` row (`completions/complete`) lives in its own type-only file
+// so a browser bundle can type the verb without the server-bridge augmentations.
+// Re-imported here for its side effect, so importing `@agentick/completions`
+// contributes the row either way (the knobs precedent).
+import "./wire-augment.js";
+
 declare module "@agentick/spec" {
   interface HookBridges {
     /**
@@ -62,14 +68,6 @@ declare module "@agentick/spec" {
      * a tool handler reads to resolve a named source itself
      * (`ctx.completions?.resolve("knowify.jobs", { value })`). Present iff
      * `withCompletions()` is installed, so handlers MUST guard.
-     *
-     * TODO(completions-p2): the AppHarness's `ctxExtensions` site
-     * (`packages/app/src/harness.ts`, one line per tool-shipping harness) does
-     * NOT yet pull the `completions` namespace, so this slot is typed but
-     * `undefined` at runtime. Add
-     * `sessionExtensionBridges.get("completions")` there alongside the `skills`
-     * line when the wire verb lands and a handler has a reason to reach it.
-     * Recorded in the README's known gaps rather than claimed as working.
      */
     readonly completions?: Completions;
   }

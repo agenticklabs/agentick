@@ -127,6 +127,50 @@ completeFromAsync(async (typed, ctx) => {
 
 It is deliberately **not** a tool-handler ctx. A keystroke query has no `toolCallId`, no task mode, and no transport discriminator, so a tool ctx would have to be fabricated — and fabricating one is a compile error by design.
 
+## Over the wire
+
+A composer runs in a browser, so the seam that matters most is the one a client
+can reach. `completions/complete` is that verb, and the client method for it is
+derived rather than written — declaring the wire row is the whole of the client
+work:
+
+```ts
+const session = client.session(sessionId);
+
+const r = await session.completions.complete({
+  ref: { type: "prompt", name: "tm_change_order_actual_cost" },
+  argument: { name: "phase", value: "fra" },
+  context: { arguments: { job: "Miller Residence" } },
+});
+// → { values: ["Miller Residence — Framing CO #2"] }
+```
+
+`ref` is MCP's shape on purpose, so squaring up with `completion/complete` costs a
+projection instead of a translation. It carries one arm today (`"prompt"`) and it
+is a literal union, not a string — naming `"resource"` before that arm exists is a
+compile error, not a 404.
+
+The route composes two hops, because a prompt argument's resolver may live on
+either side of the split: it asks the prompts harness first (an **inline**
+resolver runs there), and resolves a returned name against this registry (a
+**named** ref). One consequence is worth knowing: the inline path needs no
+completions namespace at all. An app that installs [@agentick/prompts](../prompts)
+with inline `complete:` resolvers and never mentions `withCompletions` still
+completes over the wire.
+
+Everything unanswerable answers `{ values: [] }` — no prompts surface, an argument
+that declares no completion, a ref nobody bound, a restored session whose
+resolvers did not survive. An unanswered question is not a protocol fault, and
+zero candidates is the right thing for a composer to show in every one of those
+cases. The single real error is an unknown PROMPT: the client named something that
+does not exist.
+
+Server-side, a tool handler reaches the same registry through its ctx:
+
+```ts
+const r = await ctx.completions?.resolve("crm.accounts", { value: "north" });
+```
+
 ## A keystroke is not an event
 
 Every other read surface in the framework is a declared command: it mints a journaled operation with request and terminal envelopes, addressable over the inbox and enumerable on the wire. `resolve` is a plain async method instead. One operation per character typed would flood the recovery and audit spine with ephemeral queries for no durability benefit — which is the same reason completion is not routed through tool dispatch.
@@ -148,6 +192,20 @@ journal.totalAppended(); // → 0
 ```
 
 `register` is likewise a plain synchronous insert. It takes a required function argument, which makes it unaddressable over any wire by construction.
+
+The wire verb holds the same line one layer up, which took a new seam to do
+honestly. Every wire dispatch mints a `wire:<method>` boundary op at the gateway,
+and its request and terminal envelopes journal by default — so serving completion
+over the wire would have moved the flood from here to there. A wire method can now
+declare its own durability disposition (`journal: { "completions/complete":
+"bus-only" }`), and the gateway folds that into its journaling policy. Live
+observers still see every request; the durable spine sees none of them. A
+deployment that wants them durable anyway says so in its own policy and wins — the
+declaration is a default, not a lock.
+
+What still lands per keystroke is the gateway's own contextual-authorization op.
+That is a security audit record with a different owner and its own hook seam, and
+turning off authorization audit is not this verb's call to make.
 
 ## Registration is an upsert
 
@@ -202,6 +260,7 @@ There is no interceptor cascade from the app into this namespace. That cascade e
 | `defineCompletion(name, resolver)`                                | Name one source — the per-file singular; dual-use   |
 | `defineCompletions({ sources })`                                  | Name the definition: identity + brand               |
 | `withCompletions(config?)`                                        | Session extension — definition or live instance     |
+| `completionsWireExtension`                                        | The `completions/complete` wire route               |
 | `sourcesMapOf(sources)`                                           | Fold a barrel / map into the registry map           |
 | `CompletionsHarness`                                              | The implementation, for direct construction         |
 | `completeFromList` / `completeFromEnum`                           | Static-list builders                                |
@@ -251,7 +310,7 @@ await contacts("ada", fakeCompletionCtx({ resolvedArguments: { account: "Northwi
 
 ## Patterns
 
-**Prompt arguments.** A prompt argument declares how it completes: either an inline resolver or a name into this registry. [@agentick/prompts](../prompts) performs the split — the function stays with the declaration, and the record carries the resolver's name plus its `requires` — so a palette can read what a slot needs before offering it. Joining the two halves at resolve time is adopter code today; see the gaps below.
+**Prompt arguments.** A prompt argument declares how it completes: either an inline resolver or a name into this registry. [@agentick/prompts](../prompts) performs the split — the function stays with the declaration, and the record carries the resolver's name plus its `requires` — so a palette can read what a slot needs before offering it. Joining the two halves is the wire route's job, above.
 
 **MCP.** [@agentick/mcp](../mcp) re-exports the five builders from its protocol surface so a server adopter authors handlers from one import path, and it adds the MCP boundary facet to the resolver ctx (`ctx.mcp`, carrying the connection's authenticated user). The 100-value ceiling lives at that package's projection.
 
@@ -259,9 +318,10 @@ await contacts("ada", fakeCompletionCtx({ resolvedArguments: { account: "Northwi
 
 ## Roadmap & known gaps
 
-- **No wire verb.** There is no `complete` session RPC, no client handle, and no gateway route, so a client speaking the agentick wire cannot reach a completion source; only in-process callers can. Whatever lands must stay off the declared-command path, for the same journal reason `resolve` is not one.
-- **`ctx.completions` is typed but not populated.** The tool-handler ctx slot is declared, but nothing wires the namespace into it yet, so a handler reading `ctx.completions` gets `undefined`. Reach the registry through `session.completions` until it does.
-- **Nothing resolves a prompt argument for you.** The declaration side exists in [@agentick/prompts](../prompts), and a resolver named in this registry can be resolved by name from the record. But an _inline_ resolver on a prompt argument is held by prompts under a derived name that is not registered here, so there is no framework path from "the user is typing in this argument" to the answer.
+- **Only prompt arguments complete.** `ref.type` has one arm. Resource-template variables and tool arguments are additive — the ref shape was chosen so they cost a new arm and nothing else — but neither is built.
+- **No enumeration over the wire.** A client can ask for candidates but cannot ask what is completable: `list()` is in-process only, and there is no `added` / `removed` topology notification, so a composer learns a slot is completable from the prompt record's `completeRef` rather than from this registry.
+- **A named ref is never validated.** A prompt argument may name a source nobody bound, and nothing says so at registration; the request answers `{ values: [] }` and a typo looks exactly like an unmounted source.
+- **A late-registered wire extension's `journal` declaration is ignored.** The gateway binds its journaling policy at construction, so a wire extension registered by a gateway extension's `install()` misses the fold. Nothing declares `journal` from a gateway extension today; the marker is `TODO(wire-journal-late-registration)`.
 - **MCP is not squared with this seam.** An MCP server's `completion/complete` still routes to its own per-server config and threads its own ctx at its own projection, so a resolver invoked from MCP does not pass through `resolve` here. Closing that needs an in-fiber twin of `resolve`, so the completion parents under the MCP crossing and sees the connection's identity.
 - **Tool-argument completion is not built.** The shape is additive, and the framework could exceed MCP here — MCP completes prompts and resource templates only — but it needs a flat-argument projection of a tool's input schema first.
 - **No snapshot or restore.** A resolver is a function; it does not serialize. A restored session re-registers from its definition or its tree.
@@ -272,6 +332,10 @@ await contacts("ada", fakeCompletionCtx({ resolvedArguments: { account: "Northwi
 - `src/__tests__/harness.spec.ts` — `resolve` writing **nothing** to the journal across three keystrokes; `defineCompletions` as identity plus a non-enumerable brand; an inline `{ sources }` bag being a valid unbranded definition and not mistaken for a live instance; `withCompletions`'s definition arm constructing, binding, and owning teardown while its instance arm registers without closing; the installing session's scope reaching the resolver ctx.
 - `src/__tests__/definition.spec.ts` — `defineCompletion` naming a resolver without it ceasing to be one (the named source is directly callable), the name staying out of enumeration and `JSON.stringify`, a dependent resolver's `requires` and its gating surviving the naming, wrapping rather than mutating so one resolver can be named twice, the array arm folding into the map, and a duplicate name throwing at define time.
 - `src/conformance.ts` — the exported protocol suite: register / `has` / sorted `list` / `Unsubscribe`; upsert with a stale handle; `subscribeAll` on register and unregister; both return shapes; `resolvedArguments` reaching the ctx (and `{}` when omitted); the operation trunk plus `log` / `run` facets; `AbortSignal` passthrough; `CompletionNotFound` and `CompletionResolveFailed` with its cause; **250 values in, 250 out**; and `completeDependent` gating without invoking its loader.
+- `src/__tests__/wire.spec.ts` — the route's two-hop join driven directly: a `resolved` outcome passing through with the ref's name and nested `context.arguments` intact, a `ref` outcome triggering the registry hop with the sibling values flattened onto `resolvedArguments`, empty answers for no prompts surface / an unavailable argument / no registry mounted / an unbound name, a throwing resolver surfacing as the failure it is, `PromptNotFound` propagating, an unresolved session throwing, and the `bus-only` declaration itself.
+- `src/__tests__/wire-proxy.type.spec.ts` — the derived client method: `completions` enumerating as a session-scoped namespace, `sessionId` bound out of the caller's params, `ref.type` typed as a one-member literal union rather than `string`, the `CompletionResult` return, and a typo'd method not existing.
+- `../transport-in-process/src/__tests__/completions-complete-e2e.spec.ts` — the round trip through the real gateway and transport: the inline-sidecar path narrowing as the user types, the named-registry path gated on an unfilled sibling and then answering, empty answers for an argument with nothing to ask and for one that does not exist, an unknown prompt surfacing as an error, and **no wire, prompts, or completions envelope in the journal across four keystrokes**.
+- `../gateway/src/__tests__/wire-journaling.spec.ts` — the durability declaration: an undeclared method journaling two envelopes per dispatch, a `bus-only` one journaling none, `completions/complete` silent while `knobs/set` stays durable, and an adopter's explicit policy outranking the declaration.
 - `src/__tests__/builders.spec.ts` — each builder's semantics, `normalizeCompletionResult` folding both shapes, `requires` non-enumerability, `isDependentResolver` discrimination, the full ctx (trunk, facets, siblings) reaching a resolver, and the no-cap claim at 150 and 250 values.
 - The top-level slot plumbing — a namespace-config key forwarded to its extension without the app importing this package — is covered generically in [@agentick/runtime](../runtime).
 - The relocated wire cap is covered in [@agentick/mcp](../mcp): a builder returns all 150 values while the MCP response is capped at 100 with `hasMore: true`, a source-reported `total` survives the clamp, and the builders resolve through that package's barrel against its own ctx type.

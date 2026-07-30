@@ -30,6 +30,7 @@
 import "./augment.js";
 
 export { CompletionsHarness, type CompletionsHarnessOptions } from "./harness.js";
+export { completionsWireExtension } from "./wire.js";
 export { withCompletions, type WithCompletionsOptions } from "./extension.js";
 export {
   defineCompletion,

@@ -8,6 +8,8 @@
 
 import type {
   PromptDeclaration,
+  PromptsCompleteInput,
+  PromptsCompleteOutcome,
   PromptsGetInput,
   PromptsGetResult,
   PromptsInvokeInput,
@@ -28,6 +30,18 @@ export interface PromptsHandle {
   invoke(input: PromptsInvokeInput): Promise<PromptsGetResult>;
   /** Render a prompt to messages WITHOUT queueing (the async render). */
   render(input: PromptsGetInput): Promise<PromptsGetResult>;
+  /**
+   * Complete one ARGUMENT of a prompt — the candidates a composer offers while
+   * the user types. A plain method, never a journaled command: completion fires
+   * per keystroke.
+   *
+   * Answers a three-arm outcome, because prompts holds only one half of the
+   * completion split: an inline resolver runs here (`resolved`), a named registry
+   * ref comes back as a name for the caller to resolve (`ref`), and an argument
+   * with nothing to ask is `unavailable`. The `completions/complete` wire route
+   * composes both hops; reach for this directly when you hold both harnesses.
+   */
+  complete(input: PromptsCompleteInput): Promise<PromptsCompleteOutcome>;
   subscribe(name: string, listener: () => void): Unsubscribe;
   subscribeAll(listener: () => void): Unsubscribe;
 

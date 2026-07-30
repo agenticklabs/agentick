@@ -24,14 +24,23 @@
  * `template`/`render` get, where a restored prompt has no content until the
  * adopter re-registers it.
  *
- * **No resolve door here.** P1 stops at declaration threading; nothing in this
- * package invokes a resolver yet.
+ * The resolve door itself is `PromptsHarness.complete` — it reads the re-joined
+ * declaration, so the three shapes `restorePromptArguments` can hand back (a
+ * function, a string, nothing) ARE the three arms of `PromptsCompleteOutcome`.
+ * This file owns the grammar and the structural readers it needs; it runs
+ * nothing.
  *
  * @see docs/proposals/v2/completions.md §2.1–§2.2, §4
  * @verifiedBy packages/prompts/src/__tests__/completion.spec.ts
  */
 
-import type { CompletionResolver, PromptArgument, PromptArgumentRecord } from "@agentick/spec";
+import type {
+  CompletionResolver,
+  CompletionResult,
+  CompletionValues,
+  PromptArgument,
+  PromptArgumentRecord,
+} from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
 /**
@@ -99,6 +108,24 @@ function completeRequiresOf(resolver: CompletionResolver): readonly string[] | u
 function completionNameOf(resolver: CompletionResolver): string | undefined {
   const name: unknown = (resolver as { readonly completionName?: unknown }).completionName;
   return typeof name === "string" && name !== "" ? name : undefined;
+}
+
+/**
+ * Fold a resolver's return value into the full {@link CompletionResult} — a bare
+ * `readonly string[]` is sugar for `{ values }`.
+ *
+ * The canonical fold is `normalizeCompletionResult` in `@agentick/completions`,
+ * and this duplicates three lines of it for the same reason
+ * {@link completeRequiresOf} duplicates `isDependentResolver`: importing it would
+ * pull that package's four-interface module augmentation and its
+ * `registerNamespaceSlot` side effect into every prompts consumer, installing the
+ * completions namespace as a side effect of using prompts. The two-shape return
+ * contract lives in spec ({@link CompletionValues}), which is what both readings
+ * are pinned against — and `@agentick/completions` is a devDependency, so a test
+ * asserts the two folds agree.
+ */
+export function foldCompletionValues(raw: CompletionValues): CompletionResult {
+  return Array.isArray(raw) ? { values: raw } : (raw as CompletionResult);
 }
 
 /** The two halves {@link normalizePromptArguments} splits a declaration into. */

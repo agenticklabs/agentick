@@ -44,6 +44,7 @@ import type {
   ConnectionInfo,
   CreateAppInput,
   EventBus,
+  EventNameOverride,
   EventQuery,
   Extension,
   ExtensionBundle,
@@ -409,6 +410,19 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     const inbox =
       options.inbox instanceof Function ? undefined : (options.inbox as MessageInbox | undefined);
 
+    // Distribute the ADR 50 extension surface into its scopes. HOISTED above
+    // `super(...)` because the wire extensions carry the per-method journaling
+    // dispositions the policy below folds in. Pure data shuffling — nothing here
+    // touches `this`, which is what makes a pre-super statement legal.
+    const { gatewayExts, wireFromBundles, cascade } = splitExtensions(options.extensions ?? []);
+    // The bundled-tier wire extensions, in registration order (adopter raw
+    // extensions, bundle `wire` parts, then the built-ins `@agentick/app` names).
+    const bundledWireExtensions: readonly WireExtension[] = [
+      ...(options.wireExtensions ?? []),
+      ...wireFromBundles,
+      ...builtinWireExtensions,
+    ];
+
     // Merge close-op policy override into adopter-supplied policy.
     // `gateway:command:close` envelopes route bus-only — same Option G
     // pattern AppHarness/SessionHarness use to prevent "writing to a closed
@@ -417,9 +431,17 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // automatically; adding fields to JournalingPolicy doesn't require
     // touching this site. `gateway:start` needs NO override — it does not
     // tear down the substrate, so its envelopes journal normally.
-    const policy = mergeLayered<JournalingPolicy>(DEFAULT_JOURNALING_POLICY, options.policy, {
-      override: { "gateway:command:close": "bus-only" },
-    });
+    //
+    // The wire-declared dispositions go in the layer BEFORE `options.policy`:
+    // a method's `journal` declaration is a DEFAULT the framework ships, so an
+    // adopter's explicit `policy.override` outranks it. The close-op override
+    // stays last because it is a substrate-safety invariant, not a default.
+    const policy = mergeLayered<JournalingPolicy>(
+      DEFAULT_JOURNALING_POLICY,
+      { override: wireJournalOverrides(bundledWireExtensions) },
+      options.policy,
+      { override: { "gateway:command:close": "bus-only" } },
+    );
 
     super(
       SURFACE,
@@ -475,8 +497,6 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     const normalized = normalizeTelemetry(options.telemetry);
     this.telemetryReady = this.initTelemetryExport(normalized);
 
-    // Distribute the ADR 50 extension surface into its scopes.
-    const { gatewayExts, wireFromBundles, cascade } = splitExtensions(options.extensions ?? []);
     this.cascadeExtensions = cascade;
 
     // Build the wire-extension registry. Framework-supplied extensions
@@ -493,15 +513,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     ]) {
       this._wireExtensions.register(ext);
     }
-    // Built-in wire-extensions (knobs/set, …) — the always-present harnesses'
-    // client commands. Registered in the bundled tier (not framework-privileged)
-    // so an adopter may still gate or override them. `@agentick/app` names them so
-    // the gateway stays harness-agnostic (never imports a built-in directly).
-    for (const ext of [
-      ...(options.wireExtensions ?? []),
-      ...wireFromBundles,
-      ...builtinWireExtensions,
-    ]) {
+    // Built-in wire-extensions (knobs/set, …) — the bundled harnesses' client
+    // commands. Registered in the bundled tier (not framework-privileged) so an
+    // adopter may still gate or override them. `@agentick/app` names them so the
+    // gateway stays harness-agnostic (never imports a built-in directly).
+    for (const ext of bundledWireExtensions) {
       this._wireExtensions.register(ext);
     }
 
@@ -1414,4 +1430,35 @@ function splitExtensions(extensions: readonly AnyExtension[]): {
   }
 
   return { gatewayExts, wireFromBundles, cascade };
+}
+
+/**
+ * Fold every wire extension's per-method `journal` declaration into a
+ * {@link JournalingPolicy} `override` map, keyed by the OP NAME
+ * `runWireDispatch` mints (`wire:<method>`) rather than the method name.
+ *
+ * That translation is the reason this lives here: an extension declares "this
+ * verb is a query, not an event" in its own vocabulary, and the gateway — which
+ * owns the `wire:` op-naming convention — is the only party that can say which
+ * envelope name that becomes. So a high-cadence verb keeps its traffic out of
+ * the journal without the gateway ever naming a namespace (ADR 27).
+ *
+ * TODO(wire-journal-late-registration): a wire extension registered by a GATEWAY
+ * EXTENSION's `install()` (via `registerWireExtension`) arrives after the policy
+ * is bound at construction, so its declaration is ignored. Making that work
+ * needs a mutable-policy seam on `BaseHarness`; nothing declares `journal` from
+ * a gateway extension today.
+ *
+ * @verifiedBy packages/gateway/src/__tests__/wire-journaling.spec.ts
+ */
+function wireJournalOverrides(
+  extensions: readonly WireExtension[],
+): Readonly<Record<string, EventNameOverride>> {
+  const out: Record<string, EventNameOverride> = {};
+  for (const ext of extensions) {
+    for (const [method, disposition] of Object.entries(ext.journal ?? {})) {
+      if (disposition !== undefined) out[`wire:${method}`] = disposition;
+    }
+  }
+  return out;
 }

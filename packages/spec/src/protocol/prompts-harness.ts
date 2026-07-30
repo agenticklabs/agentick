@@ -23,7 +23,7 @@
 import type { Effect } from "effect";
 import type { MessageEntry } from "../data/entries.js";
 import type { SubstrateError } from "../data/errors.js";
-import type { CompletionResolver } from "./completions-harness.js";
+import type { CompletionResolver, CompletionResult } from "./completions-harness.js";
 import type { PromptsErrorChannel } from "../errors/harnesses.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
@@ -214,6 +214,55 @@ export interface PromptsGetInput {
   readonly args?: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Ask what a prompt ARGUMENT completes to — the input to
+ * {@link PromptsHarnessProtocol.complete}.
+ *
+ * `context.arguments` is nested rather than flat, and that is MCP parity on
+ * purpose: `completion/complete` carries the sibling values under
+ * `context.arguments`, so an MCP projection copies the field instead of
+ * repacking it. The harness flattens it onto the resolver ctx's
+ * `resolvedArguments` (the name the seam itself uses).
+ */
+export interface PromptsCompleteInput {
+  /** The prompt whose argument is being completed. Unknown → `PromptNotFound`. */
+  readonly name: string;
+  /** Which argument, and the partial value typed so far. */
+  readonly argument: { readonly name: string; readonly value: string };
+  /** Sibling arguments already filled — what makes conditional completion work. */
+  readonly context?: { readonly arguments: Readonly<Record<string, string>> };
+  /** Latest-wins cancellation; forwarded to the resolver's ctx. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * What {@link PromptsHarnessProtocol.complete} answers with — a three-arm
+ * discriminated union rather than a bare {@link CompletionResult}, because
+ * prompts holds only ONE of the two halves of the completion split.
+ *
+ * The prompts harness never runs a registry lookup itself: it declares no
+ * runtime dependency on `@agentick/completions` (it holds resolvers, it does not
+ * own them), so an argument that names a registry source is answered by handing
+ * the NAME back to the caller. The caller — the `completions/complete` wire
+ * route, or an adopter with both harnesses in hand — composes the second hop.
+ */
+export type PromptsCompleteOutcome =
+  /** An INLINE resolver from the declaration's sidecar ran; this is its answer. */
+  | { readonly kind: "resolved"; readonly result: CompletionResult }
+  /**
+   * The argument names a registry source this side does not hold. `completeRef`
+   * is the name to resolve against the completions registry.
+   */
+  | { readonly kind: "ref"; readonly completeRef: string }
+  /**
+   * Nothing to ask. Either the argument declares no completion at all (including
+   * an argument name this prompt does not have — completion never
+   * protocol-errors on an unknown argument, MCP parity), or it declared an inline
+   * resolver whose sidecar entry is gone (a restored session) — the same silence
+   * `render` keeps rather than pointing at a ref nothing answers to.
+   */
+  | { readonly kind: "unavailable" };
+
 export interface PromptsGetResult {
   /** The declaration's own description — useful for MCP `prompts/get` wire shape. */
   readonly description: string;
@@ -377,6 +426,25 @@ export interface PromptsHarnessProtocol {
    * declaration read — this is the render, hence `render`.)
    */
   render(input: PromptsGetInput): Promise<PromptsGetResult>;
+  /**
+   * Complete one ARGUMENT of a prompt — what a composer offers while the user
+   * types into a slot.
+   *
+   * A plain async method, NOT a declared command, and for the same reason
+   * `CompletionsHarnessProtocol.resolve` is not one: completion fires per
+   * keystroke, so one journaled operation per character typed would flood the
+   * recovery/audit spine with ephemeral queries. See the doc-block on
+   * {@link import("./completions-harness.js").CompletionsHarnessProtocol}.
+   *
+   * Answers the {@link PromptsCompleteOutcome} union — inline resolvers run here,
+   * a named registry ref comes back as a name for the caller to resolve, and an
+   * argument with nothing to ask is `unavailable`.
+   *
+   * @throws {PromptNotFound} no prompt is registered under `input.name`. An
+   *   unknown ARGUMENT name is NOT an error — it is `unavailable`.
+   * @throws {CompletionResolveFailed} an inline resolver threw or rejected.
+   */
+  complete(input: PromptsCompleteInput): Promise<PromptsCompleteOutcome>;
 
   // ─── Snapshot / restore (SnapshotCapable feature) ──────────────
 

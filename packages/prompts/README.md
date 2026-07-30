@@ -157,7 +157,22 @@ A string is durable and a function is not, so the two forms part ways at the sto
 
 `definePrompt` (singular) is worth the import here: it types `render`'s `args` from the argument list — required arguments as their value, optional ones as the value or `undefined`, and a schema's inferred output where one is declared. **No schema means the argument is a `string`**, which is MCP's shape on the wire; declare a schema when you want anything else.
 
-Resolving a completion is not wired yet — see the known gaps.
+Asking for the candidates is `complete`, and it answers three ways because the harness holds only one half of that split:
+
+```ts
+const outcome = await session.prompts?.complete({
+  name: "tm_change_order_actual_cost",
+  argument: { name: "phase", value: "fra" },
+  context: { arguments: { job: "Miller Residence" } },
+});
+// { kind: "resolved", result: { values: [...] } }  — an inline resolver ran
+// { kind: "ref", completeRef: "knowify.phases" }   — resolve that name yourself
+// { kind: "unavailable" }                          — nothing to ask
+```
+
+An inline resolver runs here, with the sibling arguments on its ctx. A **named** ref comes back as a name rather than an answer: this package holds resolvers, it does not own the registry that runs them, so chasing the ref is the caller's hop. An argument with no `complete`, an argument name the prompt does not have, and a restored declaration whose sidecar did not survive all answer `unavailable` — an unknown argument is never an error, matching MCP. An unknown _prompt_ throws.
+
+Like every other completion door, this one is a plain method rather than a command: it fires per keystroke, and one journaled operation per character typed buys nothing. A client does not call it directly — the `completions/complete` wire verb composes both hops, so `session.completions.complete(...)` from a browser resolves an inline resolver and a named source through one call. See [@agentick/completions](../completions).
 
 ## Where prompts come from
 
@@ -413,18 +428,19 @@ type PromptsError =
 
 ### `session.prompts`
 
-| Method                                     | Async | Effect                                                   |
-| ------------------------------------------ | ----- | -------------------------------------------------------- |
-| `get(name)` / `has(name)`                  | sync  | Read one declaration; existence check                    |
-| `list()`                                   | sync  | Every declaration, name-sorted                           |
-| `register({ declaration })`                | async | Create. Throws `PromptAlreadyExists` on a duplicate      |
-| `update({ name, declaration })`            | async | Patch fields. Throws `PromptNotFound`                    |
-| `remove({ name })`                         | async | Delete. Idempotent                                       |
-| `invoke({ name, args? })`                  | async | Render + append to the timeline                          |
-| `render({ name, args? })`                  | async | Render only                                              |
-| `reload({ pruneMissing? })`                | async | Re-run the source; returns `{ added, updated, removed }` |
-| `resolve(name)` / `require(name)`          | async | Lookup-on-miss; `null` vs. throw                         |
-| `subscribe(name, fn)` / `subscribeAll(fn)` | sync  | Per-prompt or any-mutation notifications                 |
+| Method                                     | Async | Effect                                                          |
+| ------------------------------------------ | ----- | --------------------------------------------------------------- |
+| `get(name)` / `has(name)`                  | sync  | Read one declaration; existence check                           |
+| `list()`                                   | sync  | Every declaration, name-sorted                                  |
+| `register({ declaration })`                | async | Create. Throws `PromptAlreadyExists` on a duplicate             |
+| `update({ name, declaration })`            | async | Patch fields. Throws `PromptNotFound`                           |
+| `remove({ name })`                         | async | Delete. Idempotent                                              |
+| `invoke({ name, args? })`                  | async | Render + append to the timeline                                 |
+| `render({ name, args? })`                  | async | Render only                                                     |
+| `complete({ name, argument, context? })`   | async | Candidates for one argument: `resolved` / `ref` / `unavailable` |
+| `reload({ pruneMissing? })`                | async | Re-run the source; returns `{ added, updated, removed }`        |
+| `resolve(name)` / `require(name)`          | async | Lookup-on-miss; `null` vs. throw                                |
+| `subscribe(name, fn)` / `subscribeAll(fn)` | sync  | Per-prompt or any-mutation notifications                        |
 
 `update` is a shallow patch, and `arguments` replaces wholesale rather than merging element-wise.
 
@@ -476,7 +492,8 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - **Content doesn't survive the store.** `hydrateFromStore()` returns declarations without `template` / `render`. Compose it under `hydrateFromModule` to put the code back, or re-register the content yourself.
 - **No filesystem source.** `.tsx` prompts need a bundler; a framework binding is the right home for one.
 - **No model-facing tools.** Prompts are user-directed, so a `prompt_list` / `prompt_get` pair needs its audience story told before it ships.
-- **Completion declares but does not resolve.** `complete` threads all the way to the record and the sidecar; nothing invokes a resolver yet. The `prompts/complete` verb, its client handle, and the MCP `completion/complete` projection are the next phase ([`docs/proposals/v2/completions.md`](../../docs/proposals/v2/completions.md) §7 P2–P3), marked `TODO(completions-p2)` at the site it lands. A named ref is not validated against the completions registry at registration time either — a typo surfaces when the resolve door ships.
+- **A named ref is never validated.** An argument may name a completion source nobody bound, and registration does not check — the request answers with no candidates, so a typo looks exactly like an unmounted source.
+- **MCP's `completion/complete` does not route through this door yet.** An MCP server's completion still resolves against its own per-server config with its own ctx ([`docs/proposals/v2/completions.md`](../../docs/proposals/v2/completions.md) §7 P3). Closing it needs an in-fiber twin of the door, so the completion parents under the MCP crossing and sees the connection's identity.
 - **No transactions and no per-prompt ACL.** Each mutation is its own operation, and all session participants share one library.
 
 ## Verified by
@@ -489,6 +506,7 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 - `src/__tests__/store-backing.spec.ts` — the record/sidecar split (the record written without the functions), `update` and `remove` propagation, the source feeding both halves through `reload` and `resolve`, snapshot dropping the functions, store-to-seed restoring records only, plus the store conformance suite against `InMemoryPromptStore`.
 - `src/__tests__/projection.spec.ts` — the declaration document for a function-render prompt (function absent, argument schema stripped), a static string template served as `text/markdown`, register-after-install and remove-unregisters, the `exposeAsResources: false` opt-out, and degradation with no resource registry.
 - `src/__tests__/completion.spec.ts` — the completion split against the real builders: an inline resolver never reaching the store (JSON round-trip included), the derived `completeRef`, `completeRequires` off a dependent resolver, a named ref copied verbatim and side-caring nothing, the re-join through `get` and `list`, `update` / `remove` / `importSnapshot` / genesis keeping both halves in step, and a wire-delivered `complete` stripped at runtime.
+- `src/__tests__/complete.spec.ts` — the completion door against the real builders: an inline resolver running and its bare array folding, prefix-filtering as the user types, `context.arguments` reaching a dependent resolver (gated when a sibling is unfilled, answering when it is not), the minted ctx carrying the session trunk plus the facets and the `AbortSignal`, a `defineCompletion` source resolved inline rather than handed back, a named ref returned verbatim, `unavailable` for a bare argument / an argument the prompt does not have / a restored sidecar-less declaration, `PromptNotFound` for an unknown prompt, a throwing resolver wrapped as `CompletionResolveFailed` with its cause and its derived address, **nothing appended to the journal across four keystrokes**, and the local value-fold agreeing with the canonical one.
 - `src/__tests__/define-prompt.type.spec.ts` — `definePrompt`'s inference: required versus optional values, the no-schema-means-string law, a schema's inferred output, no keys for an argument-less prompt, undeclared keys unreadable, the erased result assignable where declarations go, and both forms of `complete` in one argument list.
 - `src/__tests__/ctx-spine.spec.ts` — the invoking operation's context reaching `render(args, ctx)`.
 - `src/client/__tests__/prompts-handle.spec.ts` + `session-prompts.spec.ts` — the eager poll notifying subscribers when it lands (so no boot-time `refresh()` is needed) and settling empty on a failed poll that `refresh()` then recovers, each write verb followed by a re-poll, and the zero-argument subscribe contract.

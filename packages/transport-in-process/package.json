@@ -55,6 +55,7 @@
     "@agentick/app": "workspace:*",
     "@agentick/client-core": "workspace:*",
     "@agentick/compiler": "workspace:*",
+    "@agentick/completions": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/gates": "workspace:*",
     "@agentick/gateway": "workspace:*",

@@ -55,11 +55,12 @@ export function withCompletions(config: CompletionsConfig = {}): SessionExtensio
       // the cascade here would inherit interceptors that can never fire, which
       // reads as coverage the harness does not have.
       //
-      // TODO(completions-p2): the `complete` wire verb must NOT become a declared
-      // command for the same reason — journal pollution per keystroke. Route it
-      // as a gateway method that calls `resolve()` directly. If that decision is
-      // ever reversed, `inheritedFrom(installer)` belongs on the constructor call
-      // below (ADR 93 landmine 11 — the cascade must be TOTAL).
+      // The `completions/complete` wire verb holds the same line: it is a gateway
+      // ROUTE that calls `resolve()` directly (`./wire.ts`), never a declared
+      // command, and it declares `journal: "bus-only"` so the gateway's own
+      // boundary op does not re-introduce the flood one layer up. If that decision
+      // is ever reversed, `inheritedFrom(installer)` belongs on the constructor
+      // call below (ADR 93 landmine 11 — the cascade must be TOTAL).
       const harness = new CompletionsHarness(
         `${installer.hostId}:completions`,
         installer.substrate.journal,

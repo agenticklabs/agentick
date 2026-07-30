@@ -1806,6 +1806,86 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-30 — completions P2 landed (the agentick wire verb, #244)
+
+The client half of docs/proposals/v2/completions.md, same day as P1. What
+shipped: `PromptsHarness.complete` beside `render` — a PLAIN method, not a
+command, for the same reason `CompletionsHarness.resolve` is one — answering the
+three-arm `PromptsCompleteOutcome` (`resolved` when an inline sidecar resolver
+ran, `ref` when the argument names a registry source prompts will not chase,
+`unavailable` when there is nothing to ask); the `completions/complete`
+`WireExtension` in `@agentick/completions`, registered through
+`builtinWireExtensions`; and `ctx.completions` finally populated at the app's
+`ctxExtensions` site.
+
+**The client method is free.** `completions/complete` is a `WireMethods` row with
+a bound `sessionId`, so `session.completions.complete(params-minus-sessionId)`
+falls out of the derived wire proxy with zero client code. No hand-written
+handle, no `session.complete` base method. `ref.type` is a ONE-member literal
+union (`"prompt"`), so `"resource"` / `"tool"` are additive arms rather than a
+widened string.
+
+**Three arms, and they fall out of the existing re-join.** `complete()` reads the
+declaration through `declarationOf`, and the three shapes
+`restorePromptArguments` can already hand back — a function, a string, nothing —
+ARE the three outcomes. P1's deliberate asymmetry (a derived ref with no sidecar
+restores to no `complete` at all) became `unavailable` for free.
+
+**The gateway boundary op DID journal — verified, then fixed with a seam rather
+than a special case.** Every wire dispatch mints a `wire:<method>` op whose
+`requested` + `terminal` envelopes are `alwaysJournal` phases: measured at 2
+appends per dispatch. Routing completion over the wire would therefore have moved
+the per-keystroke journal flood from the harness (where `resolve` is a plain
+method precisely to avoid it) up one layer to the gateway. The brief proposed a
+hardcoded `override: { "wire:completions/complete": "bus-only" }` on the gateway's
+policy; that contradicts the invariant stated in the gateway's own source at the
+`builtinWireExtensions` site ("the gateway stays harness-agnostic — never imports
+a built-in directly") and would grow a new hardcoded string per high-cadence verb.
+Instead: **`WireExtension.journal`** — a per-method `EventNameOverride` map,
+parallel to the existing per-method `auth` / `clusterRoute` maps, validated at
+`defineWireExtension` like both. The gateway folds it into its `JournalingPolicy`
+`override` keyed by the op name IT derives (`wire:<method>`), so the method
+declares its own durability disposition in its own vocabulary and the gateway
+still names no namespace. Layer order matters and is deliberate: the declaration
+sits BEFORE `options.policy` (an adopter outranks a framework default) and after
+`DEFAULT_JOURNALING_POLICY`; the close-op override stays last because it is a
+substrate-safety invariant. Cost: ~25 LOC across spec + gateway. Known limit:
+a wire extension registered by a gateway EXTENSION's `install()` arrives after
+the policy binds at construction — `TODO(wire-journal-late-registration)`.
+
+**What still journals per keystroke, stated rather than hidden:** the gateway's
+own `authorizer:command:authorize` op, 2 envelopes per dispatch. That is a
+security audit record with a different owner and an explicit hook seam
+(`onAfterAuthorizerAuthorize`), it applies to every wire method, and exempting
+authorization audit is not one verb's call to make. The e2e test ASSERTS those 8
+appends across 4 keystrokes so the fact is pinned rather than discovered later;
+`TODO(completions-p3)` marks revisiting it at the authorization seam for all
+high-cadence verbs if the volume proves real.
+
+**Registration home: `builtinWireExtensions`, not `withCompletions`'s bundle.**
+Completions is extension-installed, so the optional-package pattern
+(`@agentick/mcp` self-installing its wire extension) looks like the right home —
+and is wrong here, because the route's PRIMARY path does not need the completions
+namespace at all: an inline `complete:` resolver rides the prompts sidecar, so an
+app with prompts and no completions still completes over the wire.
+Self-installing would make that case unreachable. Consequence accepted:
+`@agentick/app` gains a runtime dependency on `@agentick/completions`.
+
+**Boundary held in both directions.** The route reads `session.prompts` through a
+structural feature detection (`typeof candidate?.complete === "function"`) typed
+against spec's own `PromptsCompleteInput` / `PromptsCompleteOutcome` — completions
+does not depend on prompts, and prompts still does not depend on completions
+(`foldCompletionValues` is a three-line local twin of
+`normalizeCompletionResult`, pinned against it by a test, for the same reason
+`completeRequiresOf` duplicates `isDependentResolver`).
+
+**Silence over faults, everywhere.** No prompts surface, an argument that
+declares no completion, an argument name the prompt does not have, a ref nobody
+bound, a restored session with no sidecar → `{ values: [] }`. MCP parity, and
+honest: zero candidates is the right composer UI for all of them. The one real
+error is an unknown PROMPT. A resolver that THREW still surfaces
+(`CompletionResolveFailed`) — a broken source is not an empty answer.
+
 ### 2026-07-30 — completions P1 landed (@agentick/completions + prompts threading, #244)
 
 The primitive phase of docs/proposals/v2/completions.md, implemented same-day.

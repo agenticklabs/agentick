@@ -122,8 +122,15 @@ export class CompletionsHarness
   async resolve(name: string, input: CompletionsResolveInput): Promise<CompletionResult> {
     const resolver = this.resolvers.get(name);
     if (resolver === undefined) throw new CompletionNotFound({ completionName: name });
+    // ONE ctx mint per resolve, shared by the resolver call and the counter below.
+    // Metrics is the honest observability answer for a surface that deliberately
+    // writes no journal envelope: the tally survives, the per-keystroke event does
+    // not. Fire-and-forget — nothing here is control flow, and off the telemetry
+    // path `count` is the frozen no-op singleton.
+    const ctx = this.completionCtx(input);
+    ctx.metrics.count("completions.resolve", 1, { name });
     try {
-      return normalizeCompletionResult(await resolver(input.value, this.completionCtx(input)));
+      return normalizeCompletionResult(await resolver(input.value, ctx));
     } catch (cause) {
       // A CompletionNotFound raised by a resolver's own nested resolve passes
       // through; anything else the resolver throws is a resolve failure.

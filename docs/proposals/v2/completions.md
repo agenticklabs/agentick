@@ -1,10 +1,14 @@
 # Completions — argument completion as a first-class seam
 
-**Status:** P1 LANDED 2026-07-30 (`30a4f21f`, #244) — spec seam,
+**Status:** P1 LANDED 2026-07-30 (`d217ee13`, #244) — spec seam,
 `@agentick/completions`, the mcp builder lift, prompts threading, and the
-`definePrompt`/`defineCompletion` singular rule are in-tree; P2–P4 remain.
-Reviewed in-session with Ryan; the verdicts in §6 were argued live and are
-settled unless new evidence arrives.
+`definePrompt`/`defineCompletion` singular rule are in-tree.
+**P2 LANDED 2026-07-30** — `PromptsHarness.complete` (the three-arm outcome),
+the `completions/complete` wire route, the derived client method, and
+`WireExtension.journal` (the per-method durability declaration that keeps a
+per-keystroke verb out of the gateway journal); `ctx.completions` is now
+populated. P3–P4 remain. Reviewed in-session with Ryan; the verdicts in §6 were
+argued live and are settled unless new evidence arrives.
 
 **Reads before this:** blueprint/27-modular-built-ins.md (package pattern),
 ADR 43 (unified handler ctx), ADR 66 (dispatch-resolved ctx),
@@ -32,13 +36,14 @@ then phases-given-job).
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **MCP client harness** (agentick → remote MCP server) | ✅ `mcp:complete` cmd; `completePromptArgument(name, arg, value)`, `completeResourceTemplate(uri, variable, value)` (Wave 2, #146)                                                                                                                                               |
 | **MCP server harness** (agentick serving MCP clients) | ✅ `completions.{prompts,resources}` config; `CompletionContext extends OperationCtx` (identity via `ctx.mcp.user` — gap #3 CLOSED by the ctx-spine work). Builders live here with the v1 cap-100 baked in (`protocol/completions.ts`) — the wrong home per §4/§5; P1 lifts them |
-| **Native prompts harness** (`PromptDeclaration`)      | ❌ no per-arg seam of any kind                                                                                                                                                                                                                                                   |
-| **agentick client wire** (session RPC → client-core)  | ❌ no verb                                                                                                                                                                                                                                                                       |
+| **Native prompts harness** (`PromptDeclaration`)      | ✅ P1/P2 — `complete` on the argument descriptor (inline resolver or named ref) and `PromptsHarness.complete` resolving it                                                                                                                                                       |
+| **agentick client wire** (session RPC → client-core)  | ✅ P2 — `completions/complete`; the client method derives from the wire row                                                                                                                                                                                                      |
 
-Both MCP **edges** have completion; the native **middle** is empty. An
-agentick-wire client (ernesto) has no path to any completion — which is why
-Knowify's `RunnableRegistry.complete()` answers `[]` for prompts today, with a
-`TODO(prompts-complete)` at the branch.
+Both MCP **edges** had completion; the native **middle** was empty. The rows
+above read as of P2 — the columns marked ❌ when this was written are what P1/P2
+closed. Knowify's `RunnableRegistry.complete()` still answers `[]` for prompts
+until P4 wires its prompt branch to the verb (`TODO(prompts-complete)` at the
+branch).
 
 The consumer chain **already exists and is waiting** (nx-knowify, landed
 2026-07-30): composer slot-completion UI (`4ddd8ce8f8f`) → `completeArg` input →
@@ -139,8 +144,8 @@ for: every prompt re-imported `searchJobs` and re-wrapped it.
 // Server-side, anywhere a ctx exists:
 const r = await ctx.completions.resolve("knowify.jobs", { value: "mil", args: {} });
 
-// Client (agentick wire):
-const r = await session.complete({
+// Client (agentick wire) — `session` here is a client `SessionHandle`:
+const r = await session.completions.complete({
   ref: { type: "prompt", name: "tm_change_order_actual_cost" },
   argument: { name: "phase", value: "fra" },
   context: { arguments: { job: "Miller Residence" } },
@@ -151,6 +156,35 @@ const r = await session.complete({
 One generalized wire verb, **MCP-shaped on purpose** (`ref`-discriminated), so
 squaring up with MCP costs a projection, not a translation. `ref.type` opens as
 `"prompt"`; `"resource"` and `"tool"` are additive later (§5).
+
+The client method is **derived, not written**: `completions/complete` is a
+`WireMethods` row whose params carry a bound `sessionId`, so
+`session.completions.complete(params-minus-sessionId)` falls out of the wire
+proxy with zero client code. There is no `session.complete` base-handle method —
+the namespace segment IS the verb's home.
+
+Two things the route owns that no single harness can. First the **two-hop join**:
+it asks `prompts.complete` (which runs an inline sidecar resolver and answers
+`resolved`, or hands back a `completeRef` it will not chase), then resolves a
+returned ref against the session's registry. The sidecar path therefore needs no
+completions namespace at all — prompts with inline resolvers completes over the
+wire on its own. Second, **silence over faults**: no prompts surface, an argument
+that declares no completion, a ref nobody bound, a restored session with no
+sidecar — all `{ values: [] }`, MCP parity. Only an unknown PROMPT errors.
+
+And the durability question the gateway forced. Every wire dispatch mints a
+`wire:<method>` boundary op whose `requested` + `terminal` envelopes journal by
+default — so routing completion over the wire would have moved the per-keystroke
+journal flood from the harness (where `resolve` is a plain method precisely to
+avoid it) up one layer to the gateway. The fix is a declaration, not a
+special case: `WireExtension.journal` lets a method state its own disposition
+(`"bus-only"` here — live observers still see the traffic), and the gateway folds
+it into its journaling policy keyed by the op name it alone derives. The gateway
+never names a namespace, an adopter's explicit `policy.override` still outranks
+the declaration, and the next high-cadence verb declares the same thing instead
+of adding another hardcoded string. What still journals per keystroke is the
+gateway's own `authorizer:command:authorize` op — a security audit record with a
+different owner, deliberately left alone.
 
 ### 2.4 The two MCP projections
 
@@ -281,8 +315,13 @@ later `tool`, `resources`). It is a registry + resolve door, not a subsystem.
   (inline fn → sidecar like `render`, auto-registered under a derived name;
   record carries only the string ref). `definePrompt()` factory in
   `@agentick/prompts`.
-- **P2 — agentick wire.** `complete` session RPC (ref-discriminated),
-  client-core handle, gateway route.
+- **P2 — agentick wire. LANDED.** `PromptsHarness.complete` (the three-arm
+  `resolved` / `ref` / `unavailable` outcome, a plain method for the same journal
+  reason `resolve` is one); the `completions/complete` route in
+  `@agentick/completions`, registered through `builtinWireExtensions`; the derived
+  client method (no hand-written handle); `WireExtension.journal` so the verb's
+  gateway boundary op stays out of the journal; `ctx.completions` populated at the
+  app's `ctxExtensions` site.
 - **P3 — MCP squaring.** Server-harness `completion/complete` resolves through
   the seam (ctx restored; cap-100 at the wire). Client-harness forwarding
   resolvers wait on the MCP-prompts-fold (separate work).

@@ -6,8 +6,8 @@
  *     against `WireNotifications`. Both index-signature-constrained on
  *     the WireExtension shape.
  *   - Runtime: defineWireExtension catches namespace prefix mismatches,
- *     missing namespace, "/" in namespace, auth/clusterRoute referencing
- *     undeclared methods, empty extensions.
+ *     missing namespace, "/" in namespace, auth/clusterRoute/journal
+ *     referencing undeclared methods, empty extensions.
  *
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  */
@@ -144,6 +144,40 @@ describe("defineWireExtension — rejection: clusterRoute references unknown met
         } as Partial<WireExtension["clusterRoute"]>,
       } as WireExtension),
     ).toThrow(/clusterRoute.*references method "subscribe"/);
+  });
+});
+
+describe("defineWireExtension — the per-method journaling declaration", () => {
+  it("carries a declared disposition through to the extension", () => {
+    // The gateway reads this at construction and folds it into its journaling
+    // policy keyed by the op name it derives (`wire:<method>`), so a
+    // per-keystroke verb keeps its boundary op out of the journal without the
+    // gateway naming a namespace. Behavior is pinned in
+    // `gateway/src/__tests__/wire-journaling.spec.ts`.
+    const ext = defineWireExtension({
+      name: "test:journal",
+      namespace: "gateway",
+      methods: { "gateway/list_apps": async () => ({ apps: [] }) },
+      journal: { "gateway/list_apps": "bus-only" },
+    });
+
+    expect(ext.journal).toEqual({ "gateway/list_apps": "bus-only" });
+  });
+
+  it("rejects a journal entry whose method isn't in `methods`", () => {
+    // A disposition declared for someone else's verb would silently exempt it.
+    expect(() =>
+      defineWireExtension({
+        name: "test:stray-journal",
+        namespace: "gateway",
+        methods: {
+          "gateway/list_apps": async () => ({ apps: [] }),
+        },
+        journal: {
+          subscribe: "drop",
+        } as Partial<WireExtension["journal"]>,
+      } as WireExtension),
+    ).toThrow(/journal.*references method "subscribe"/);
   });
 });
 
