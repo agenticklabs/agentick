@@ -30,43 +30,62 @@ import type {
   UrlElicitSpec,
   UrlElicitationSpec,
 } from "@agentick/spec";
-import { ElicitationCancelled, ElicitationDeclined, UrlElicitationRequired } from "@agentick/spec";
+import {
+  ElicitationCancelled,
+  ElicitationDeclined,
+  UrlElicitationRequired,
+  jsonSchema,
+} from "@agentick/spec";
 import { ulid } from "@agentick/runtime";
 
+import {
+  booleanProp,
+  enumProp,
+  multiEnumProp,
+  numberProp,
+  textProp,
+  type FlatProperty,
+} from "./flat-props.js";
+
 // ============================================================================
-// Inline Standard-Schema validators — primitives only
+// Schemas — flat JSON shape on the wire + an inline validator behind it
 // ============================================================================
 //
-// The harness validates the client's reply against the request's
-// schema before resolving. For the sugar surface we need
-// Standard-Schema validators sized for the primitives we send.
-// Kept inline to avoid pulling in a third-party schema library.
+// Each sugar method asks ONE typed question, so its request schema is the
+// VALUE-LEVEL flat property (`{ type: "string", pattern, … }`) built by
+// `./flat-props.js` — the same vocabulary the MCP projection uses, minus
+// MCP's object wrapping. The in-process reply is the bare value
+// (`ClientElicitationHandle.accept(value)` lands on `response.value`,
+// which `ElicitationHarness.validateAccepted` runs through this schema),
+// so the shape on the wire and the shape being validated are the same
+// thing. A subscriber can now render a typed field instead of the
+// degenerate `{ type: "object" }` `toJsonSchema()` falls back to.
+//
+// The validators stay inline — no third-party schema library — and are
+// attached via `jsonSchema(shape, { validator })`, the raw-marker adapter
+// `toJsonSchema()` recovers verbatim.
 
 interface Issue {
   readonly message: string;
   readonly path?: ReadonlyArray<string | number>;
 }
 
-function standardSchema<T>(
-  vendor: string,
-  validate: (value: unknown) => { readonly value: T } | { readonly issues: readonly Issue[] },
-): StandardSchemaV1<unknown, T> {
-  return {
-    "~standard": {
-      version: 1,
-      vendor,
-      validate,
-    },
-  } as StandardSchemaV1<unknown, T>;
-}
-
 type Validator<T> = (raw: unknown) => { readonly value: T } | { readonly issues: readonly Issue[] };
+
+function flatSchema<T>(
+  vendor: string,
+  shape: FlatProperty,
+  validate: Validator<T>,
+): StandardSchemaV1<unknown, T> {
+  return jsonSchema<T>(shape, { vendor, validator: validate });
+}
 
 function stringSchema(opts?: {
   readonly minLength?: number;
   readonly maxLength?: number;
   readonly pattern?: string;
   readonly format?: "email" | "uri" | "date" | "date-time";
+  readonly default?: string;
 }): StandardSchemaV1<unknown, string> {
   const validate: Validator<string> = (raw) => {
     if (typeof raw !== "string") {
@@ -83,13 +102,14 @@ function stringSchema(opts?: {
     }
     return { value: raw };
   };
-  return standardSchema<string>("agentick:elicit:string", validate);
+  return flatSchema<string>("agentick:elicit:string", textProp(opts), validate);
 }
 
 function numberSchema(opts?: {
   readonly min?: number;
   readonly max?: number;
   readonly integer?: boolean;
+  readonly default?: number;
 }): StandardSchemaV1<unknown, number> {
   const validate: Validator<number> = (raw) => {
     if (typeof raw !== "number" || Number.isNaN(raw)) {
@@ -106,32 +126,43 @@ function numberSchema(opts?: {
     }
     return { value: raw };
   };
-  return standardSchema<number>("agentick:elicit:number", validate);
+  return flatSchema<number>("agentick:elicit:number", numberProp(opts), validate);
 }
 
-function booleanSchema(): StandardSchemaV1<unknown, boolean> {
+function booleanSchema(opts?: { readonly default?: boolean }): StandardSchemaV1<unknown, boolean> {
   const validate: Validator<boolean> = (raw) => {
     if (typeof raw !== "boolean") {
       return { issues: [{ message: `expected boolean, got ${typeof raw}` }] };
     }
     return { value: raw };
   };
-  return standardSchema<boolean>("agentick:elicit:boolean", validate);
+  return flatSchema<boolean>("agentick:elicit:boolean", booleanProp(opts), validate);
 }
 
-function enumSchema<T extends readonly string[]>(options: T): StandardSchemaV1<unknown, T[number]> {
+function enumSchema<T extends readonly string[]>(
+  options: T,
+  opts?: {
+    readonly default?: T[number];
+    readonly labels?: Partial<Record<T[number], string>>;
+  },
+): StandardSchemaV1<unknown, T[number]> {
   const validate: Validator<T[number]> = (raw) => {
     if (typeof raw !== "string" || !(options as readonly string[]).includes(raw)) {
       return { issues: [{ message: `expected one of ${options.join("|")}, got ${String(raw)}` }] };
     }
     return { value: raw as T[number] };
   };
-  return standardSchema<T[number]>("agentick:elicit:enum", validate);
+  return flatSchema<T[number]>("agentick:elicit:enum", enumProp(options, opts), validate);
 }
 
 function multiEnumSchema<T extends readonly string[]>(
   options: T,
-  opts?: { readonly min?: number; readonly max?: number },
+  opts?: {
+    readonly min?: number;
+    readonly max?: number;
+    readonly default?: ReadonlyArray<T[number]>;
+    readonly labels?: Partial<Record<T[number], string>>;
+  },
 ): StandardSchemaV1<unknown, Array<T[number]>> {
   const member = options as readonly string[];
   const validate = (
@@ -153,7 +184,11 @@ function multiEnumSchema<T extends readonly string[]>(
     }
     return { value: raw as Array<T[number]> };
   };
-  return standardSchema<Array<T[number]>>("agentick:elicit:multi-enum", validate);
+  return flatSchema<Array<T[number]>>(
+    "agentick:elicit:multi-enum",
+    multiEnumProp(options, opts),
+    validate,
+  );
 }
 
 // ============================================================================
@@ -296,7 +331,7 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
       return unwrapAccept(await form(message, schema, opts?.timeoutMs));
     },
     async select(message, choices, opts) {
-      const schema = enumSchema(choices);
+      const schema = enumSchema(choices, opts);
       return unwrapAccept(await form(message, schema, opts?.timeoutMs));
     },
     async multiSelect(message, choices, opts) {
@@ -304,11 +339,11 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
       return unwrapAccept(await form(message, schema, opts?.timeoutMs));
     },
     async confirm(message, opts) {
-      const schema = booleanSchema();
+      const schema = booleanSchema(opts);
       return unwrapAccept(await form(message, schema, opts?.timeoutMs));
     },
     async boolean(message, opts) {
-      const schema = booleanSchema();
+      const schema = booleanSchema(opts);
       return unwrapAccept(await form(message, schema, opts?.timeoutMs));
     },
     async number(message, opts) {
@@ -350,19 +385,19 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
       return asOutcome(await form(message, stringSchema(opts), opts?.timeoutMs));
     },
     async trySelect(message, choices, opts) {
-      return asOutcome(await form(message, enumSchema(choices), opts?.timeoutMs));
+      return asOutcome(await form(message, enumSchema(choices, opts), opts?.timeoutMs));
     },
     async tryMultiSelect(message, choices, opts) {
       return asOutcome(await form(message, multiEnumSchema(choices, opts), opts?.timeoutMs));
     },
     async tryConfirm(message, opts) {
-      return asOutcome(await form(message, booleanSchema(), opts?.timeoutMs));
+      return asOutcome(await form(message, booleanSchema(opts), opts?.timeoutMs));
     },
     async tryNumber(message, opts) {
       return asOutcome(await form(message, numberSchema(opts), opts?.timeoutMs));
     },
     async tryBoolean(message, opts) {
-      return asOutcome(await form(message, booleanSchema(), opts?.timeoutMs));
+      return asOutcome(await form(message, booleanSchema(opts), opts?.timeoutMs));
     },
     async tryUrl(spec) {
       const elicitationId = `el-${ulid()}`;

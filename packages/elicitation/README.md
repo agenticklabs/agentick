@@ -55,6 +55,8 @@ await elicit.url({ message: "Sign in to GitHub", url: authorizeUrl });
 
 `select` and `multiSelect` are `const`-generic, so `target` is `"staging" | "prod"` — not `string`.
 
+Every option a method takes reaches the client as JSON Schema, so a UI can render the field rather than guess at it: `pattern` / `format` / `minLength` / `maxLength` on `text`, `minimum` / `maximum` and `type: "integer"` on `number`, `enum` on `select`, `minItems` / `maxItems` on `multiSelect`, and `default` throughout. `labels` becomes `enumNames`, positionally aligned with `enum` and falling back to the raw option for anything unlabelled. The schema describes the **value** being asked for (`{ type: "string", … }`), which is exactly what the client accepts with — `handle.accept(value)` takes the bare answer, and the same schema re-validates it server-side. The MCP projection wraps that identical property in the single-key flat object its wire demands; the shape vocabulary (`textProp`, `enumProp`, …) is shared between them.
+
 These throw `ElicitationDeclined` / `ElicitationCancelled` when the user says no. When "no" is an ordinary outcome rather than an exception, use the `try*` twin and branch on the status:
 
 ```ts
@@ -285,17 +287,19 @@ The framework's own MCP sugar produces flat schemas by construction through its 
 
 ### `@agentick/elicitation`
 
-| Export                                                    | Purpose                                                    |
-| --------------------------------------------------------- | ---------------------------------------------------------- |
-| `ElicitationHarness`                                      | The implementation, for direct construction                |
-| `withElicitation()`                                       | Session extension — a documented symmetry slot (see below) |
-| `buildSessionElicit({ harness })`                         | The `Elicit` sugar over a live instance                    |
-| `buildElicitSugar(elicitFn)`                              | The transport-agnostic sugar core over a bare `ElicitFn`   |
-| `assertFlatSchema` / `checkFlatSchema`                    | MCP wire-schema validators (opt-in)                        |
-| `ELICITATION_CHANNEL` / `ELICITATION_CHANNEL_FQN`         | Channel-name constants for subscribers                     |
-| `ELICIT_REQUEST_MESSAGE_TYPE`                             | Inbox message type for cross-component asks                |
-| `PendingElicitation` / `ElicitationSnapshotFrame` (types) | The opening-frame shapes                                   |
-| `ElicitRequestInboxPayload` (type)                        | The inbox payload shape                                    |
+| Export                                                                   | Purpose                                                      |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| `ElicitationHarness`                                                     | The implementation, for direct construction                  |
+| `withElicitation()`                                                      | Session extension — a documented symmetry slot (see below)   |
+| `buildSessionElicit({ harness })`                                        | The `Elicit` sugar over a live instance                      |
+| `buildElicitSugar(elicitFn)`                                             | The transport-agnostic sugar core over a bare `ElicitFn`     |
+| `assertFlatSchema` / `checkFlatSchema`                                   | MCP wire-schema validators (opt-in)                          |
+| `textProp` / `numberProp` / `booleanProp` / `enumProp` / `multiEnumProp` | Flat JSON Schema builders for one form field                 |
+| `flatObjectSchema(properties)`                                           | Wrap fields in the flat object MCP's `requestedSchema` needs |
+| `ELICITATION_CHANNEL` / `ELICITATION_CHANNEL_FQN`                        | Channel-name constants for subscribers                       |
+| `ELICIT_REQUEST_MESSAGE_TYPE`                                            | Inbox message type for cross-component asks                  |
+| `PendingElicitation` / `ElicitationSnapshotFrame` (types)                | The opening-frame shapes                                     |
+| `ElicitRequestInboxPayload` (type)                                       | The inbox payload shape                                      |
 
 > [!NOTE]
 > `withElicitation()` does nothing at install time and takes no options. The app is the single construction site for per-session instances — it builds one before session extensions install and exposes it on `ctx.elicitation`, `bridges.elicitation`, and `session.elicitation`. A second instance would collide on the inbox address and fork which registry `bridges.*` and `ctx.*` resolve to. The factory survives for symmetry with the other `withX()` extensions and as the seam for future per-session configuration.
@@ -359,7 +363,7 @@ The conformance suite takes a factory returning `{ harness, nextCorrelationId(),
 - **Abandoned promises rely on the timeout.** A caller that abandons an `elicit()` promise leaves a registry entry until the timeout evicts it. The five-minute default bounds it; a scope-aware request primitive is the real fix.
 - **No React surface.** There is no `useElicitation()` hook or reference prompt component; the client handle is the current binding point.
 - **URL-mode completion.** Consent is modeled; out-of-band completion notifications for OAuth-style flows are not.
-- **No coverage for the sugar's own edges here.** `buildElicitSugar` is exercised through [@agentick/tasks](../tasks) and [@agentick/session](../session); its per-method validators have no dedicated suite in this package.
+- **The sugar's schemas are hand-built.** The per-method validators and their JSON Schema shapes are written by hand rather than derived from one source, so a new constraint has to be added in both places (`elicit-sugar.ts` and `flat-props.ts`) to be both enforced and visible.
 
 ## Verified by
 
@@ -367,6 +371,7 @@ The conformance suite takes a factory returning `{ harness, nextCorrelationId(),
 - `src/__tests__/harness.spec.ts` — the wire envelope: channel name, `correlationId` / `replyTo` metadata, payload fields, the JSON Schema projection; `id` matching the scope id; `ready` resolving before a reply can land; close-then-respond as a no-op; `respond()` actually routing through the inbox; and URL mode's payload plus its accepted / declined / cancelled terminals.
 - `src/__tests__/pending-snapshot.spec.ts` — the channel-snapshot contract, a mid-ask snapshot mirroring the live delta, multiple concurrent asks enumerated oldest-first, and a resolved ask dropping out of the frame.
 - `src/__tests__/command-hooks.spec.ts` — hook-name derivation, the before hook observing and transforming the outbound request (asserted on the published envelope), the after hook transforming the terminal, and a throw in the before hook vetoing with no request published.
+- `src/__tests__/elicit-sugar-schema.spec.ts` — the client-facing schema every sugar method publishes: `text`'s format / pattern / length bounds, `number`'s bounds and the integer-vs-number type, `confirm` / `boolean` defaults, `select`'s `enum` plus `labels` → positional `enumNames` (and no `enumNames` key without labels), `multiSelect`'s item schema with `minItems` / `maxItems` / `default`, a `try*` twin sending the same schema — each with its accept round-trip, plus violating replies still failing as `schema_violation`.
 - `src/__tests__/flatness.spec.ts` — every accepted shape (primitives, single-select enum, enum and titled-`anyOf` multi-select) and every rejected one (non-object root, nested object, free-form array, missing items, unsupported type, array of objects), plus `assertFlatSchema` carrying issues and schema on the thrown error.
 - `src/__tests__/stub-elicitation.spec.ts` — protocol shape, default declined result, custom and failed canned results, the `onElicit` spy, and respond/close as no-ops.
 - `src/client/__tests__/elicitations-handle.spec.ts` + `elicitations-handle.conformance.spec.ts` — the snapshot frame seeding `list()` with item handles, an item's `accept()` reaching the wire and removing the ask, a live delta adding through the same constructor, `respond(id)` rejecting an unknown id, the zero-argument `subscribe` contract, and the shared client-handle conformance suite.

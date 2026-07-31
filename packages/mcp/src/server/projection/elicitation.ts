@@ -43,6 +43,19 @@ import {
 } from "@agentick/spec";
 import { ulid } from "@agentick/runtime";
 import { omitUndefined } from "@agentick/utils";
+// Shape vocabulary is shared with the in-process sugar so one question asked
+// two ways describes itself identically. The MCP-specific parts stay here: the
+// single-key `flatObjectSchema` wrapping `requestedSchema` demands, and
+// `checkFlatSchema` for adopters bridging their own `elicitation/create`.
+import {
+  booleanProp,
+  enumProp,
+  flatObjectSchema,
+  multiEnumProp,
+  numberProp,
+  textProp,
+  type FlatProperty,
+} from "@agentick/elicitation";
 
 // Re-export the spec classes so adopters who catch these can stay on
 // the `@agentick/mcp/server` import path.
@@ -86,83 +99,6 @@ export function inspectElicitationCapabilities(
     url: explicitUrl,
     any: legacy || explicitForm || explicitUrl,
   };
-}
-
-// ============================================================================
-// Schema builders — flat JSON Schemas matching MCP elicitation/create
-// ============================================================================
-
-type FlatProperty = Readonly<Record<string, unknown>>;
-
-function flatObjectSchema(properties: Readonly<Record<string, FlatProperty>>): FlatProperty {
-  return {
-    type: "object",
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  };
-}
-
-function textProp(opts?: {
-  default?: string;
-  pattern?: string;
-  format?: "email" | "uri" | "date" | "date-time";
-  minLength?: number;
-  maxLength?: number;
-}): FlatProperty {
-  const out: Record<string, unknown> = { type: "string" };
-  if (opts?.default !== undefined) out["default"] = opts.default;
-  if (opts?.pattern !== undefined) out["pattern"] = opts.pattern;
-  if (opts?.format !== undefined) out["format"] = opts.format;
-  if (opts?.minLength !== undefined) out["minLength"] = opts.minLength;
-  if (opts?.maxLength !== undefined) out["maxLength"] = opts.maxLength;
-  return out;
-}
-
-function numberProp(opts?: {
-  min?: number;
-  max?: number;
-  integer?: boolean;
-  default?: number;
-}): FlatProperty {
-  const out: Record<string, unknown> = { type: opts?.integer ? "integer" : "number" };
-  if (opts?.min !== undefined) out["minimum"] = opts.min;
-  if (opts?.max !== undefined) out["maximum"] = opts.max;
-  if (opts?.default !== undefined) out["default"] = opts.default;
-  return out;
-}
-
-function booleanProp(opts?: { default?: boolean }): FlatProperty {
-  const out: Record<string, unknown> = { type: "boolean" };
-  if (opts?.default !== undefined) out["default"] = opts.default;
-  return out;
-}
-
-function enumProp<T extends readonly string[]>(
-  options: T,
-  opts?: { default?: T[number]; labels?: Partial<Record<T[number], string>> },
-): FlatProperty {
-  const out: Record<string, unknown> = { type: "string", enum: options };
-  if (opts?.default !== undefined) out["default"] = opts.default;
-  if (opts?.labels) out["enumNames"] = options.map((o) => opts.labels?.[o as T[number]] ?? o);
-  return out;
-}
-
-function multiEnumProp<T extends readonly string[]>(
-  options: T,
-  opts?: {
-    default?: ReadonlyArray<T[number]>;
-    min?: number;
-    max?: number;
-    labels?: Partial<Record<T[number], string>>;
-  },
-): FlatProperty {
-  const itemSchema = enumProp(options, opts?.labels ? { labels: opts.labels } : undefined);
-  const out: Record<string, unknown> = { type: "array", items: itemSchema, uniqueItems: true };
-  if (opts?.default !== undefined) out["default"] = opts.default;
-  if (opts?.min !== undefined) out["minItems"] = opts.min;
-  if (opts?.max !== undefined) out["maxItems"] = opts.max;
-  return out;
 }
 
 // ============================================================================

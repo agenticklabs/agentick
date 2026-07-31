@@ -30,6 +30,15 @@ export {
 } from "./elicit-sugar.js";
 export { assertFlatSchema, checkFlatSchema } from "./flatness.js";
 export {
+  booleanProp,
+  enumProp,
+  flatObjectSchema,
+  multiEnumProp,
+  numberProp,
+  textProp,
+  type FlatProperty,
+} from "./flat-props.js";
+export {
   ELICITATION_CHANNEL,
   ELICITATION_CHANNEL_FQN,
   type ElicitationChannelName,
