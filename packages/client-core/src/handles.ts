@@ -28,6 +28,7 @@ import type {
   SessionFilter,
   SessionHandle,
   SessionHandleBase,
+  SessionPageRequest,
   StreamEvent,
   SubscriptionScope,
   SubscriptionStream,
@@ -95,6 +96,13 @@ export function makeGatewayHandle(client: InternalClient): GatewayHandle {
         reason: opts?.reason,
       });
     },
+    async listSessions(filter, page) {
+      return client.request("gateway/list_sessions", {
+        filter,
+        cursor: page?.cursor,
+        limit: page?.limit,
+      });
+    },
     events(query, fromCursor) {
       return client.transport.subscribe({ kind: "gateway" }, query, fromCursor);
     },
@@ -118,9 +126,13 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
     async getSession(sessionId): Promise<SessionEntry> {
       return client.request("app/get_session", { appId, sessionId }) as Promise<SessionEntry>;
     },
-    async listSessions(filter?: SessionFilter) {
-      const result = await client.request("app/list_sessions", { appId, filter });
-      return result.sessions as readonly SessionEntry[];
+    async listSessions(filter?: SessionFilter, page?: SessionPageRequest) {
+      return client.request("app/list_sessions", {
+        appId,
+        filter,
+        cursor: page?.cursor,
+        limit: page?.limit,
+      });
     },
     // Hand-written like every other `app/*` verb on this handle. The wire-row
     // DERIVATION (`makeWireNamespace`) synthesizes namespace methods for the

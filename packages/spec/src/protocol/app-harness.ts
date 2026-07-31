@@ -27,6 +27,7 @@ import type { MetricReader } from "@opentelemetry/sdk-metrics";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
+import type { CursorPage, PageRequest } from "./paging.js";
 import type { ExecutorFactory, ExecutorProtocol, LanguageModelExecutor } from "./executor.js";
 import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
@@ -570,6 +571,26 @@ export interface AppHarnessProtocol<P = unknown> {
    * for every "list / resume my sessions" surface.
    */
   listSessions(query?: SessionStoreQuery): Promise<readonly SessionRecord[]>;
+
+  /**
+   * One PAGE of the same durable registry {@link listSessions} snapshots — the
+   * read every remote "list my sessions" surface actually wants.
+   *
+   * Delegates to `SessionStore.page` when the configured store implements that
+   * optional cursored read, so paging reaches the backend and the store mints
+   * the cursor. When it does not, this falls back to snapshotting the query and
+   * cutting the page in process with the framework's default keyset — correct,
+   * and the reason a store with a hundred thousand threads should implement
+   * `page`.
+   *
+   * The two paths are indistinguishable to a caller: same envelope, same opacity
+   * of cursor. Only the cost differs.
+   *
+   * Scope the read with `query.principal` rather than filtering the returned
+   * page — a filter applied after the cut shortens the page and leaves a
+   * `nextCursor` pointing past rows that were discarded.
+   */
+  pageSessions(query?: SessionStoreQuery, page?: PageRequest): Promise<CursorPage<SessionRecord>>;
 
   /**
    * Read one durable {@link SessionRecord} by id from the {@link SessionStore}

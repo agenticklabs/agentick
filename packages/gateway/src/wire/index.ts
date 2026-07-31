@@ -9,3 +9,10 @@ export { gatewayWireExtension } from "./gateway-extension.js";
 export { appWireExtension } from "./app-extension.js";
 export { sessionWireExtension } from "./session-extension.js";
 export { subscriptionsWireExtension } from "./subscriptions-extension.js";
+export {
+  metadataMatches,
+  needsSnapshotPath,
+  toSessionEntry,
+  toSessionStoreQuery,
+  visibleTo,
+} from "./session-list.js";

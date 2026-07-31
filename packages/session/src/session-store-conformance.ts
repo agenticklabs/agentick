@@ -48,6 +48,32 @@ export interface SessionStoreConformanceOptions {
   };
 }
 
+/**
+ * Walk every page of `store.page`, returning the ids in the order they were
+ * served. `mutate` runs between pages — this is how the walk's soundness under
+ * concurrent writes gets exercised rather than asserted about a still store.
+ *
+ * Guards against a non-terminating walk (a store whose `nextCursor` never
+ * clears) with a page budget rather than hanging the suite.
+ */
+async function walk(
+  store: SessionStore,
+  limit: number,
+  mutate?: (pageIndex: number) => Promise<void>,
+): Promise<readonly string[]> {
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < 100; i++) {
+    const page = await store.page!(undefined, { cursor, limit }, stubStoreCtx());
+    expect(page.items.length).toBeLessThanOrEqual(limit);
+    seen.push(...page.items.map((r) => r.id));
+    cursor = page.nextCursor;
+    if (cursor === undefined) return seen;
+    await mutate?.(i);
+  }
+  throw new Error("page() never cleared its nextCursor — the walk does not terminate");
+}
+
 const ZERO_USAGE = {
   inputTokens: 0,
   outputTokens: 0,
@@ -176,6 +202,123 @@ export function runSessionStoreConformance(opts: SessionStoreConformanceOptions)
         expect(await store.list(undefined, stubStoreCtx())).toEqual([]);
         // Second delete: absent → resolves, no throw.
         await expect(store.delete("session:a", stubStoreCtx())).resolves.toBeUndefined();
+      });
+
+      // ── The OPTIONAL cursored read (`page`) ──────────────────────────────
+      //
+      // Skipped entirely when a store does not implement it — `page` is a
+      // capability, and the app degrades to snapshot-and-slice around its
+      // absence. When it IS implemented these are the obligations the framework
+      // relies on, and the reason they are tests rather than framework code is
+      // that the cursor is the store's: nothing but the store can enforce them,
+      // so the framework ships the check instead of the mechanism.
+
+      it("page() returns rows in the canonical order — the merge contract", async () => {
+        const store = await setup();
+        if (store.page === undefined) return;
+        // Deliberately inserted out of order, and with a tie on `updatedAt` that
+        // only the id tiebreak can resolve.
+        await store.put(record("s-mid", { updatedAt: 3000 }), stubStoreCtx());
+        await store.put(record("s-new", { updatedAt: 5000 }), stubStoreCtx());
+        await store.put(record("s-tie-b", { updatedAt: 1000 }), stubStoreCtx());
+        await store.put(record("s-tie-a", { updatedAt: 1000 }), stubStoreCtx());
+
+        const page = await store.page(undefined, {}, stubStoreCtx());
+        // Newest first; the tie broken by ascending id. A store free to order
+        // however it liked would break the gateway's k-way merge, which is why
+        // this one dimension is contract rather than policy.
+        expect(page.items.map((r) => r.id)).toEqual(["s-new", "s-mid", "s-tie-a", "s-tie-b"]);
+      });
+
+      it("page() walks the whole store exactly once across pages", async () => {
+        const store = await setup();
+        if (store.page === undefined) return;
+        const ids = Array.from({ length: 7 }, (_, i) => `s-${i}`);
+        for (const [i, id] of ids.entries()) {
+          await store.put(record(id, { updatedAt: 1000 + i }), stubStoreCtx());
+        }
+
+        const seen = await walk(store, 3);
+        expect([...seen].sort()).toEqual([...ids].sort());
+        expect(new Set(seen).size).toBe(seen.length);
+      });
+
+      it("page() skips no settled row and repeats none while writes land mid-walk", async () => {
+        const store = await setup();
+        if (store.page === undefined) return;
+        // Ten records walked three at a time. Between pages, two kinds of churn
+        // that a real list sees: an EXISTING row is touched (its `updatedAt`
+        // bumped, so it jumps to the front of the order) and a NEW row arrives
+        // at the front. Both push already-served rows further down — which is
+        // exactly what makes a count-addressed cursor re-serve them.
+        const settled = ["s-0", "s-1", "s-2", "s-3", "s-4", "s-5"];
+        const churned = ["c-0", "c-1", "c-2", "c-3"];
+        for (const [i, id] of [...settled, ...churned].entries()) {
+          await store.put(record(id, { updatedAt: 1000 + i }), stubStoreCtx());
+        }
+
+        let n = 0;
+        const seen = await walk(store, 3, async () => {
+          const touch = churned[n % churned.length]!;
+          await store.put(record(touch, { updatedAt: 9000 + n }), stubStoreCtx());
+          await store.put(record(`late-${n}`, { updatedAt: 9500 + n }), stubStoreCtx());
+          n++;
+        });
+
+        // No row served twice — the invariant a moving sort key threatens.
+        expect(new Set(seen).size).toBe(seen.length);
+        // Every row that did NOT move is still served. Rows that jumped ahead of
+        // the cursor are legitimately missed — they sorted into a region the
+        // walk had already passed — so the obligation is stated over the settled
+        // ones, which is precisely the guarantee a keyset cursor makes.
+        for (const id of settled) expect(seen).toContain(id);
+      });
+
+      it("page() honors the query, and scopes by principal inside the page", async () => {
+        const store = await setup();
+        if (store.page === undefined) return;
+        await store.put(record("mine-1", { principal: "userA", updatedAt: 5000 }), stubStoreCtx());
+        await store.put(record("theirs", { principal: "userB", updatedAt: 4000 }), stubStoreCtx());
+        await store.put(record("mine-2", { principal: "userA", updatedAt: 3000 }), stubStoreCtx());
+        // No principal at all — asserts no ownership, so it matches every
+        // principal's query. The ADR 48 rule is `= ? OR IS NULL`, not `= ?`.
+        await store.put(record("unowned", { updatedAt: 2000 }), stubStoreCtx());
+
+        // Limit 2 with another principal's record sitting between the two
+        // matches: a store that filtered AFTER cutting the page would answer
+        // with one row, not two.
+        const page = await store.page({ principal: "userA" }, { limit: 2 }, stubStoreCtx());
+        expect(page.items.map((r) => r.id)).toEqual(["mine-1", "mine-2"]);
+
+        const rest = await store.page(
+          { principal: "userA" },
+          { limit: 2, cursor: page.nextCursor },
+          stubStoreCtx(),
+        );
+        expect(rest.items.map((r) => r.id)).toEqual(["unowned"]);
+      });
+
+      it("page() answers an undecodable cursor with page one rather than raising", async () => {
+        const store = await setup();
+        if (store.page === undefined) return;
+        await store.put(record("only"), stubStoreCtx());
+        // A caller holding a stale or corrupted token has no recovery path from
+        // an error; page one is a walk it can finish.
+        const page = await store.page(undefined, { cursor: "not-a-cursor" }, stubStoreCtx());
+        expect(page.items.map((r) => r.id)).toEqual(["only"]);
+      });
+
+      it("page() ends the walk by CLEARING the cursor, not by shortening the page", async () => {
+        const store = await setup();
+        if (store.page === undefined) return;
+        await store.put(record("a", { updatedAt: 2000 }), stubStoreCtx());
+        await store.put(record("b", { updatedAt: 1000 }), stubStoreCtx());
+
+        // Exactly `limit` rows and nothing behind them: the page is full, so
+        // page length cannot be the end signal. The absent cursor is.
+        const page = await store.page(undefined, { limit: 2 }, stubStoreCtx());
+        expect(page.items).toHaveLength(2);
+        expect(page.nextCursor).toBeUndefined();
       });
 
       const prune = capabilities?.prune;

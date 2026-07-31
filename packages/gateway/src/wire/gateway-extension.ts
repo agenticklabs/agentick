@@ -19,8 +19,18 @@ import {
   type AppInfo,
   type AppHarnessProtocol,
   type WireExtension,
+  sessionKeysetPage,
+  sortSessionRecords,
   WireRpcError,
 } from "@agentick/spec";
+
+import {
+  metadataMatches,
+  needsSnapshotPath,
+  toSessionEntry,
+  toSessionStoreQuery,
+  visibleTo,
+} from "./session-list.js";
 
 /**
  * Project an app onto the wire's {@link AppInfo}.
@@ -67,7 +77,7 @@ export const gatewayWireExtension: WireExtension = defineWireExtension({
       // record with no principal asserts no ownership and is left to the gate.
       const app = await ctx.gateway.appForSession(sessionId);
       const record = await app?.getSessionRecord(sessionId);
-      if (record?.principal !== undefined && record.principal !== ctx.principal) {
+      if (record !== undefined && !visibleTo(record, ctx.principal)) {
         throw WireRpcError.forbidden("gateway:destroy_session");
       }
       // Delegate through the harness verb rather than re-deriving the result
@@ -76,6 +86,43 @@ export const gatewayWireExtension: WireExtension = defineWireExtension({
       // called once per deleted thread — the right trade against two places that
       // could disagree about what a destroy result looks like.
       return ctx.gateway.destroySession(sessionId, omitUndefined({ reason }));
+    },
+    "gateway/list_sessions": async ({ filter, cursor, limit }, ctx) => {
+      // The enumeration half of the pair `gateway/destroy_session` completes: a
+      // client that can delete a session by id without naming its app has to be
+      // able to FIND one the same way. Every row carries the `appId` the gateway
+      // resolved it through, which is what the caller then addresses the
+      // session's app-scoped verbs with.
+      //
+      // Delegated to the harness verb for the same reason destroy is: choosing
+      // between the mounted index and the fallback merge — and the appId
+      // stamping and merged ordering that fallback owes — is one contract with
+      // one implementation, and the in-process caller gets the identical list.
+      //
+      // Scoping rides the query so it reaches whichever source answers — the
+      // mounted index, or the apps' stores under the fallback merge. A cross-app
+      // list names no session, so the dispatch gate's same-principal target rule
+      // has nothing to resolve and this is the only thing scoping the read.
+      const query = toSessionStoreQuery(filter, ctx.principal);
+      const { items, nextCursor } = needsSnapshotPath(filter)
+        ? // `metadata` is not a store dimension, so it cannot be pushed down —
+          // and pushing the PAGE down while filtering up here would return short
+          // pages. Snapshot the union and cut after filtering. Note this bypasses
+          // a mounted index's own ordering; a metadata-filtered cross-app list is
+          // a rare, explicitly slower read.
+          sessionKeysetPage(
+            sortSessionRecords(
+              (
+                await ctx.gateway.listSessions(query, { limit: Number.MAX_SAFE_INTEGER })
+              ).items.filter((r) => metadataMatches(r, filter)),
+            ),
+            { cursor, limit },
+          )
+        : await ctx.gateway.listSessions(query, { cursor, limit });
+      return {
+        sessions: items.map((record) => ({ ...toSessionEntry(record), appId: record.appId })),
+        ...omitUndefined({ nextCursor }),
+      };
     },
   },
   // No notifications on this namespace today. Adopter extensions

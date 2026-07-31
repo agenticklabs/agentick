@@ -212,7 +212,7 @@ describe("session/send — full client → gateway → executor roundtrip", () =
     const { apps } = await client.gateway().listApps();
     expect(apps.map((a) => a.id)).toContain(appId);
 
-    const sessions = await client.app(appId).listSessions();
+    const { sessions } = await client.app(appId).listSessions();
     expect(sessions.map((s) => s.id)).toContain(sessionId);
 
     await cleanup();

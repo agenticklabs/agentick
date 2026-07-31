@@ -32,7 +32,10 @@ import type {
   AppHarnessProtocol,
   DestroySessionInput,
   DestroySessionResult,
+  SessionEntry,
 } from "./app-harness.js";
+import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
+import type { CursorPage, PageRequest } from "./paging.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
 import type { WireExtensionContext } from "../wire/extension.js";
 import type { WireMethod } from "../wire/params.js";
@@ -149,6 +152,34 @@ export interface GatewayDestroySessionResult extends DestroySessionResult {
 }
 
 /**
+ * A {@link SessionRecord} from the gateway's cross-app list, with the app that
+ * answered for it NAMED — `appId` narrowed from optional to required.
+ *
+ * The gateway stamps it from the app whose store produced the record, not from
+ * the record's own field: the app is a fact about where the row was read, and
+ * reading it from the row would let a stale or unstamped record misattribute a
+ * session the gateway just resolved correctly.
+ */
+export interface GatewaySessionRecord extends SessionRecord {
+  readonly appId: string;
+}
+
+/**
+ * The wire projection of a {@link GatewaySessionRecord} — a {@link SessionEntry}
+ * plus its `appId`.
+ *
+ * `SessionEntry` deliberately carries no `appId`, because a client reaching
+ * sessions THROUGH an app handle already knows which app answered. A cross-app
+ * list is precisely the case that reasoning does not cover: the caller asked the
+ * gateway, so nothing but the row itself can say which app the session belongs
+ * to — and without it the caller cannot address the session's app-scoped verbs
+ * or join the app's `title` to render who answered.
+ */
+export interface GatewaySessionEntry extends SessionEntry {
+  readonly appId: string;
+}
+
+/**
  * The runtime-root harness protocol.
  */
 export interface GatewayHarnessProtocol {
@@ -212,6 +243,44 @@ export interface GatewayHarnessProtocol {
     sessionId: string,
     opts?: DestroySessionInput,
   ): Promise<GatewayDestroySessionResult>;
+
+  /**
+   * Every session across every mounted app, as ONE list — the gateway-level
+   * twin of {@link AppHarnessProtocol.listSessions}, and the enumeration half of
+   * the pair {@link destroySession} completes (a caller that can delete a
+   * session by id without naming its app must be able to FIND one the same way).
+   *
+   * The union of the mounted apps' session stores, each record stamped with the
+   * app that produced it and the whole merged and sorted by last activity
+   * (`updatedAt` descending, `id` then `appId` breaking ties) — one total order
+   * over the union, so a page taken from it is a page of the same list every
+   * time. A store that throws contributes nothing rather than failing the
+   * enumeration, matching {@link appForSession}: one sick app must not blind the
+   * gateway to the rest.
+   *
+   * **Two modes, and which one you get is a deployment decision.** When a
+   * {@link SessionIndex} is mounted (`createGateway({ sessionIndex })`) this
+   * delegates to it: ONE query per page, one cursor the index minted, and the
+   * index's own ordering. When none is mounted it falls back to reading every
+   * mounted app's store and merging them — correct, but N reads per page, and
+   * the framework imposes the merged order because a merge over independently
+   * ordered sources has no other option. The fallback is the degraded mode; an
+   * adopter at any scale mounts the index.
+   *
+   * Either way the cursor is opaque and the envelope is identical, so a caller
+   * cannot tell which mode answered — only how fast.
+   *
+   * Paged rather than a bounded snapshot, unlike
+   * {@link AppHarnessProtocol.listSessions}: the whole point of the index seam
+   * is that paging reaches the source, and a snapshot-returning verb would have
+   * to read everything before the index could help.
+   *
+   * @see docs/proposals/v2/blueprint — `SessionIndex` and the gateway-index pattern.
+   */
+  listSessions(
+    query?: SessionStoreQuery,
+    page?: PageRequest,
+  ): Promise<CursorPage<GatewaySessionRecord>>;
 
   /**
    * The gateway's identity-authorization policy (ADR 51 §4). The wire

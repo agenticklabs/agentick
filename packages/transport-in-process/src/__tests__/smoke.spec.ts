@@ -90,14 +90,16 @@ describe("client + in-process transport smoke", () => {
     await client.close();
   });
 
-  it("app(id).listSessions narrows to SessionEntry[]", async () => {
+  it("app(id).listSessions narrows to a page of SessionEntry", async () => {
     const { handler } = makeStubHandler();
     const client = await createClient({ transport: inProcessTransport({ handler }) });
     await client.connect();
-    const sessions = await client.app("app-1").listSessions();
+    const { sessions, nextCursor } = await client.app("app-1").listSessions();
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.id).toBe("sess-a");
     expect(sessions[0]?.status).toBe("active");
+    // The reply carries its own next action; one short page means the walk is done.
+    expect(nextCursor).toBeUndefined();
     await client.close();
   });
 

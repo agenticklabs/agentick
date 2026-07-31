@@ -22,9 +22,12 @@ import type { SendInput, SendResult, SessionExecutionHandle } from "../protocol/
 import type { ContentBlock } from "../data/content-blocks.js";
 import type {
   GatewayListAppsResult,
+  GatewayListSessionsResult,
   AppCreateSessionResult,
   AppDestroySessionResult,
+  AppListSessionsResult,
   AppRunOnceResult,
+  SessionPageRequest,
 } from "../wire/params.js";
 import type { SubscriptionStream } from "./transport.js";
 import type { Unsubscribe } from "../protocol/inbox.js";
@@ -88,6 +91,20 @@ export interface GatewayHandle extends HandleSubscriptions {
     sessionId: string,
     opts?: DestroySessionInput,
   ): Promise<GatewayDestroySessionResult>;
+  /**
+   * One page of every session on the gateway, across every app — the
+   * enumeration twin of {@link destroySession}'s app-less addressing. Each entry
+   * names the `appId` it belongs to, which is what you then call
+   * `gateway.app(entry.appId)` with.
+   *
+   * Scoped to the authenticated caller: another principal's threads are simply
+   * not in the page. Walk with the returned `nextCursor` until it is absent —
+   * a page can be exactly `limit` long and still be the last one.
+   */
+  listSessions(
+    filter?: SessionFilter,
+    page?: SessionPageRequest,
+  ): Promise<GatewayListSessionsResult>;
   events(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream;
   app(id: string): AppHandle;
 }
@@ -99,7 +116,17 @@ export interface GatewayHandle extends HandleSubscriptions {
 export interface AppHandle extends ResourceHandle, HandleSubscriptions {
   createSession<P = unknown>(input?: CreateSessionInput<P>): Promise<AppCreateSessionResult>;
   getSession(sessionId: string): Promise<SessionEntry>;
-  listSessions(filter?: SessionFilter): Promise<readonly SessionEntry[]>;
+  /**
+   * One page of this app's durable session registry — the "my threads" read.
+   *
+   * Returns the PAGE, not a bare array: the reply carries the `nextCursor` that
+   * continues the walk, and a caller handed only rows would have no way to ask
+   * for the rest. Absent `nextCursor` means the walk is done.
+   *
+   * Scoped to the authenticated caller — another principal's sessions are absent
+   * from the page rather than an error.
+   */
+  listSessions(filter?: SessionFilter, page?: SessionPageRequest): Promise<AppListSessionsResult>;
   /**
    * The remote twin of `AppHarnessProtocol.destroySession` — strongest-form,
    * transitive removal. `session(id).close()` is the gentle verb (the thread

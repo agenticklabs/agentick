@@ -26,11 +26,14 @@
 
 import type {
   CollectionMutation,
+  CursorPage,
+  PageRequest,
   SessionRecord,
   SessionStore,
   SessionStoreQuery,
   StoreCtx,
 } from "@agentick/spec";
+import { sessionKeysetPage, sortSessionRecords } from "@agentick/spec";
 import { MemoryCollection } from "@agentick/store";
 import { matchesScope } from "@agentick/utils";
 
@@ -79,6 +82,17 @@ export class InMemorySessionStore implements SessionStore {
       if (!statusMatches(record, query)) return false;
       // Recency: include records last touched at-or-after the cutoff (`>=`).
       if (query.updatedAfter !== undefined && record.updatedAt < query.updatedAfter) return false;
+      // Ownership (ADR 48) — a store dimension because `page` cuts the page
+      // inside the store, and a scope filter applied afterward would shorten it.
+      // Owned-by-me OR owned-by-nobody: an unstamped record asserts no ownership,
+      // which is the same rule the destroy handlers apply to a named record.
+      if (
+        query.principal !== undefined &&
+        record.principal !== undefined &&
+        record.principal !== query.principal
+      ) {
+        return false;
+      }
       return true;
     },
     prunePredicate: isPrunable,
@@ -94,6 +108,30 @@ export class InMemorySessionStore implements SessionStore {
 
   list(query: SessionStoreQuery | undefined, ctx: StoreCtx): Promise<readonly SessionRecord[]> {
     return this.collection.list(query, ctx);
+  }
+
+  /**
+   * The optional cursored read, realized with the framework's default keyset
+   * over the canonical order — which is all an in-memory store can honestly do:
+   * its `Map` has no index to seek into, so it snapshots the query and cuts.
+   *
+   * Implemented anyway rather than left absent, and the distinction matters: the
+   * app's fallback would produce the same rows either way, but shipping `page`
+   * here means the DEFAULT store exercises the same code path a durable adapter
+   * will, and the conformance obligations run against something on every test
+   * run instead of only when someone writes a Postgres adapter.
+   *
+   * A durable adapter should NOT copy this. Translate the query and the cursor
+   * into one indexed statement — `WHERE (updated_at, id) < (?, ?) ORDER BY
+   * updated_at DESC, id ASC LIMIT ?` — and mint whatever token that needs.
+   */
+  async page(
+    query: SessionStoreQuery | undefined,
+    page: PageRequest,
+    ctx: StoreCtx,
+  ): Promise<CursorPage<SessionRecord>> {
+    const matched = await this.collection.list(query, ctx);
+    return sessionKeysetPage(sortSessionRecords(matched), page);
   }
 
   async delete(id: string, ctx: StoreCtx): Promise<void> {

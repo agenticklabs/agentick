@@ -45,6 +45,11 @@ import type {
   CreateAppInput,
   DestroySessionInput,
   GatewayDestroySessionResult,
+  CursorPage,
+  GatewaySessionRecord,
+  PageRequest,
+  SessionRecord,
+  SessionStoreQuery,
   EventBus,
   EventNameOverride,
   EventQuery,
@@ -93,6 +98,8 @@ import {
   GatewayLifecycleError,
   GatewayNotStartedError,
   resolveTruncateToolResults,
+  sessionKeysetPage,
+  sortSessionRecords,
   toRegistration,
 } from "@agentick/spec";
 import { createWireExtensionRegistry } from "./wire-registry.js";
@@ -205,6 +212,30 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
   /** Stable gateway id; defaults to `gateway:${ulid()}`. */
   readonly gatewayId?: string;
   /**
+   * A single door onto every mounted app's sessions — the scale answer for
+   * `gateway/list_sessions`, and where cross-app session ORDERING policy lives.
+   *
+   * **Optional, and the fallback is honest rather than fast.** Without one, the
+   * gateway answers a cross-app session list by reading every mounted app's
+   * store and merging the results: correct, but N reads per page, and the
+   * framework imposes the merged ordering because a merge over independently
+   * ordered sources cannot use their opaque cursors. With one, it is a single
+   * query per page against a source that already holds every app's rows in one
+   * place — which in a real deployment it does, as one table with an `app_id`
+   * column.
+   *
+   * The framework cannot mount one for you: it does not know whether two apps
+   * share a backend, and an app on Postgres beside one on an in-memory store
+   * cannot be served by a single query. Providing it is a deployment fact only
+   * the adopter holds.
+   *
+   * An instance of the general **gateway-index** pattern (see `SessionIndex`'s
+   * module docs) — the same lift ADR 68 made when it moved the task store from
+   * session scope to app scope, applied one scope further up. `gateway/list_tasks`
+   * is the anticipated second tenant and gets a `taskIndex` slot beside this one.
+   */
+  readonly sessionIndex?: import("@agentick/spec").SessionIndex;
+  /**
    * Gateway-level tool declarations (layered config). Every app
    * hosted by this gateway sees these tools in every session, tagged
    * with `binding: { scope: "gateway" }`.
@@ -309,6 +340,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    *  boundary (`dispatchRequest`). `undefined` = OFF (opt-in; the boundary
    *  then skips projection — zero overhead). */
   readonly clientProjection?: import("@agentick/spec").ToolOutputBounder;
+  /**
+   * The cross-app session door (the gateway-index pattern). `undefined` = no
+   * index, and {@link listSessions} falls back to merging the apps' stores.
+   */
+  private readonly sessionIndex?: import("@agentick/spec").SessionIndex;
   private gatewayClosed = false;
   /** Idempotency latch for {@link listen} — a second `listen()` is a no-op. */
   private gatewayStarted = false;
@@ -462,6 +498,9 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // adopter opts in; the wire dispatch boundary reads `this.clientProjection`
     // and skips projection when undefined.
     this.clientProjection = resolveTruncateToolResults(options.truncateToolResults);
+    // The cross-app read door. Nothing to normalize — either an adopter handed
+    // one over or the merge fallback stands in for it.
+    this.sessionIndex = options.sessionIndex;
 
     // Pre-tag gateway-level tools once at construction. Every
     // `createApp` call threads this same array through to the new
@@ -967,6 +1006,44 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       };
     }
     return { ...(await app.destroySession(sessionId, opts)), appId: app.id };
+  }
+
+  /**
+   * The cross-app session page — see {@link GatewayHarnessProtocol.listSessions}.
+   *
+   * **Mode one: an index is mounted.** Delegate and get out of the way. One
+   * query, the index's ordering, the index's cursor handed back untouched. The
+   * gateway adds nothing — not even a re-sort, which would silently override the
+   * ordering policy that is the index's to set.
+   *
+   * **Mode two: no index.** The k-way merge. Every app's store is read in
+   * parallel and a failing one contributes nothing rather than failing the
+   * enumeration — matching {@link appForSession}, because one sick app must not
+   * blind the gateway to the rest. `appId` is stamped from the app the records
+   * were READ from rather than copied off the record, so a row can never
+   * misattribute itself. Then the framework's canonical order and its default
+   * keyset, because merging N independently-ordered sources requires an order
+   * the merger understands: the stores' own cursors are opaque and cannot say
+   * how far into each stream the merged page consumed.
+   *
+   * That second mode reads every matching record to serve one page. It is the
+   * degraded path, and its cost is the argument for mounting an index.
+   */
+  async listSessions(
+    query?: SessionStoreQuery,
+    page: PageRequest = {},
+  ): Promise<CursorPage<GatewaySessionRecord>> {
+    if (this.sessionIndex !== undefined) {
+      return this.sessionIndex.page(query, page, this.storeCtx());
+    }
+    const apps = Array.from(this._apps.values());
+    const perApp = await Promise.all(
+      apps.map((app) => app.listSessions(query).catch(() => [] as readonly SessionRecord[])),
+    );
+    const union = perApp.flatMap((records, i) =>
+      records.map((record) => ({ ...record, appId: apps[i]!.id })),
+    );
+    return sessionKeysetPage(sortSessionRecords(union), page);
   }
 
   async createApp<P>(

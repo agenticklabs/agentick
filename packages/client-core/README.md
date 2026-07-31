@@ -109,13 +109,36 @@ when you're walking down from a listing.
 
 | Handle               | Verbs                                                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `client.gateway()`   | `listApps` · `getApp` · `destroySession` · `app(id)` · `events`                                                     |
+| `client.gateway()`   | `listApps` · `getApp` · `listSessions` · `destroySession` · `app(id)` · `events`                                    |
 | `client.app(id)`     | `createSession` · `getSession` · `listSessions` · `destroySession` · `runOnce` · `close` · `session(id)` · `events` |
 | `client.session(id)` | `send` · `dispatch` · `abort` · `snapshot` · `rebind` · `close` · `events`                                          |
 
 Every handle also carries `onLog`, `onProgress`, and `channelView` pre-bound to
 its own scope. The generic `client.onLog(scope, cb)` stays available for a scope
 you don't hold a handle for.
+
+Both `listSessions` return the **page**, not a bare array — `{ sessions, nextCursor }`.
+A reply that handed back only rows would leave you with no way to ask for the rest.
+Walk until `nextCursor` is absent; a full page is not the signal, since a page can be
+exactly `limit` long and still be the last one. The gateway form unions every app and
+stamps each row with its `appId`, which is what `client.app(row.appId)` then takes.
+
+```ts
+let cursor: string | undefined;
+do {
+  const page = await client.gateway().listSessions({ status: "active" }, { cursor, limit: 50 });
+  render(page.sessions);
+  cursor = page.nextCursor;
+} while (cursor !== undefined);
+```
+
+The cursor is opaque, and it is opaque because it is not the framework's. The client and
+the wire define the envelope — `{ cursor?, limit }` in, `{ sessions, nextCursor? }` out —
+while the token itself is minted by whatever answered: the app's session store, a
+gateway-mounted cross-app index, or the framework's own fallback when neither pages. Pass
+it back verbatim; never parse it, and never mint one. A cursor the server cannot decode
+yields page one rather than an error, since a client holding a stale token has no other
+recovery.
 
 ## Sub-handles install to appear
 

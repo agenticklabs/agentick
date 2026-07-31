@@ -40,6 +40,7 @@
 
 import type { UsageStats } from "../data/execution-result.js";
 import type { SessionStatus } from "./hook-bridges.js";
+import type { CursorPage, PageRequest } from "./paging.js";
 import type { CollectionStore } from "./store.js";
 import type { StoreCtx } from "./store-ctx.js";
 
@@ -168,6 +169,29 @@ export interface SessionStoreQuery {
   readonly root?: boolean;
   /** Recency: `record.updatedAt >= updatedAfter`. */
   readonly updatedAfter?: number;
+  /**
+   * Owning principal (ADR 48) — a STORE dimension rather than a caller-side
+   * filter for one specific reason: once a store pages
+   * ({@link SessionStore.page}), any filter the store does not know about has to
+   * be applied AFTER the page is cut, which hands back pages shortened by rows
+   * the caller was never allowed to see and a `nextCursor` promising rows
+   * already discarded. Scoping has to be inside the query, or paging and scoping
+   * cannot both be correct.
+   *
+   * **Matches a record owned by this principal OR owned by nobody** — the ADR 48
+   * rule verbatim, not a strict equality. A record with no `principal` asserts no
+   * ownership (principal-less deployment, the local pole) and is visible to
+   * everyone; that posture is the framework's, and moving the filter into the
+   * store must not quietly change it. In SQL: `(principal = ? OR principal IS
+   * NULL)`. The `destroy_session` handlers apply the identical rule to a single
+   * named record, so the two verbs cannot disagree about who owns what.
+   *
+   * `undefined` is an unconstrained query, not "everyone" as a security default:
+   * it is what an in-process caller — who has already passed whatever gate
+   * applies — asks for. The wire handlers always supply the authenticated
+   * caller's identity.
+   */
+  readonly principal?: string;
 }
 
 // ============================================================================
@@ -201,6 +225,43 @@ export interface SessionStore extends CollectionStore<SessionRecord, SessionStor
   get(id: string, ctx: StoreCtx): Promise<SessionRecord | undefined>;
   /** By app / status / parent / recency. Omitting the query returns every record. */
   list(query: SessionStoreQuery | undefined, ctx: StoreCtx): Promise<readonly SessionRecord[]>;
+  /**
+   * OPTIONAL cursored read — one page of the same query, with the store minting
+   * the cursor. Mirrors `TimelineStore`'s optional `history`: a capability, not a
+   * mandate, detected by presence and degraded around when absent.
+   *
+   * **Why optional and why it matters.** {@link list} is a bounded SNAPSHOT — it
+   * returns every match, which is the right shape for an in-process caller
+   * holding a modest store and the wrong one for an app with a hundred thousand
+   * threads whose client wants fifty. Without this method the framework can only
+   * page by fetching everything and slicing, which is correct but reads the whole
+   * table per page. Implement it and paging reaches the backend, where a `WHERE
+   * (updated_at, id) < (?, ?) ORDER BY … LIMIT ?` is one indexed query.
+   *
+   * **Two obligations, both pinned by `runSessionStoreConformance`:**
+   *
+   *   1. **Rows come back in {@link compareSessionRecords} order.** This is the
+   *      one place the framework does dictate ordering, and it is not
+   *      presentation policy: when no cross-app {@link SessionIndex} is mounted,
+   *      the gateway MERGES N of these stores, and a merge needs an order every
+   *      source agrees on. (An adopter who wants a different order for product
+   *      reasons — pinned first, unread first — mounts a `SessionIndex`, whose
+   *      output nothing merges and whose ordering is therefore entirely theirs.)
+   *   2. **The walk is sound under concurrent writes.** Page through the whole
+   *      store while records are being written: no row that stayed put may be
+   *      skipped, and no row may appear twice.
+   *
+   * The cursor itself is yours. Encode a keyset, a seek offset, a snapshot id —
+   * the framework passes the token back to you verbatim and never inspects it. A
+   * token you cannot decode SHOULD yield page one rather than raise.
+   *
+   * @see sessionKeysetPage — the framework's default realization, free to reuse.
+   */
+  page?(
+    query: SessionStoreQuery | undefined,
+    page: PageRequest,
+    ctx: StoreCtx,
+  ): Promise<CursorPage<SessionRecord>>;
   delete(id: string, ctx: StoreCtx): Promise<void>;
   /** Optional GC of CLOSED sessions older than `before` (ms-epoch `updatedAt`). */
   prune?(before: number, ctx: StoreCtx): Promise<void>;

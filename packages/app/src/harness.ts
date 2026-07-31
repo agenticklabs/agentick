@@ -57,6 +57,8 @@ import {
   type SessionHarnessOptions,
 } from "@agentick/session";
 import type {
+  CursorPage,
+  PageRequest,
   SessionRecord,
   SessionStore,
   SessionStoreQuery,
@@ -79,6 +81,8 @@ import {
   isRunnerBindable,
   isTerminalTaskStatus,
   isToolExecutorFactory,
+  sessionKeysetPage,
+  sortSessionRecords,
   toRegistration,
 } from "@agentick/spec";
 import { mergeLayered, omitUndefined } from "@agentick/utils";
@@ -1665,6 +1669,28 @@ export class AppHarness<P = unknown>
    */
   listSessions(query?: SessionStoreQuery): Promise<readonly SessionRecord[]> {
     return this.sessionStore.list(query, this.storeCtx());
+  }
+
+  /**
+   * One page of the durable registry — see
+   * {@link AppHarnessProtocol.pageSessions}.
+   *
+   * Two paths, chosen by capability rather than configuration. A store that
+   * implements the optional cursored read owns its own paging AND its own
+   * cursor, so this hands the token straight through; the bundled in-memory
+   * store does, so the common path is the same one a durable adapter takes. A
+   * store without it gets the framework's default keyset over a snapshot of the
+   * query — correct, and the reason `page` exists at all: the fallback reads
+   * every matching record to serve fifty of them.
+   */
+  async pageSessions(
+    query?: SessionStoreQuery,
+    page: PageRequest = {},
+  ): Promise<CursorPage<SessionRecord>> {
+    const store = this.sessionStore;
+    if (store.page !== undefined) return store.page(query, page, this.storeCtx());
+    const snapshot = await store.list(query, this.storeCtx());
+    return sessionKeysetPage(sortSessionRecords(snapshot), page);
   }
 
   /**

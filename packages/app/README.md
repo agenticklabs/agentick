@@ -171,6 +171,45 @@ It is an app singleton, defaulting to a node-local in-memory store. Swap a durab
 
 `title` / `description` / `metadata` are yours to populate — seed them at `createSession({ title })` or set them later with `app.setSessionMeta(id, { title })`. The framework stores them and is blind to their semantics.
 
+### The same list over the wire — paged, and scoped to the caller
+
+`app.listSessions()` in process is a bounded snapshot: every matching record, unpaged, because the caller is already holding the whole store. `app/list_sessions` is the same read with the two things a remote caller needs added.
+
+```ts
+let cursor: string | undefined;
+do {
+  const page = await client.gateway
+    .app("ernesto")
+    .listSessions({ status: "active" }, { cursor, limit: 50 });
+  render(page.sessions);
+  cursor = page.nextCursor;
+} while (cursor !== undefined);
+```
+
+**Walk until `nextCursor` is absent**, not until a page comes back short — a page can be exactly `limit` long and still be the last one.
+
+**The cursor belongs to the store, not the framework.** Agentick defines the _envelope_ — `{ cursor?, limit }` in, `{ sessions, nextCursor? }` out — and nothing about what the token means. A store that implements the optional `SessionStore.page` owns its own paging and mints its own cursor, and the framework hands the token straight back to you. Pass it back verbatim; never parse it.
+
+That rule generalizes: **the cursor belongs to whoever owns the ordering.** Where the framework owns the ordering it owns the cursor too — `timeline/history` pages by a store-assigned `seq` for exactly that reason. Session list ordering is not the framework's to dictate, so the cursor is not either.
+
+**Two paths, one envelope.** A store with `page` gets paging pushed down to the backend, where a keyset over an index is one query. A store without it — the capability is optional — gets the framework's fallback: snapshot the query, sort, and cut in process. Same rows, same opacity; the fallback just reads every match to serve fifty of them, which is the reason to implement `page` once a store holds real volume.
+
+The framework's default (and what the bundled in-memory store uses) is a **keyset** cursor, because sessions are ordered newest-activity-first and last activity moves: a thread that receives a message while you are mid-walk jumps to the front and pushes everything behind it down one. An offset cursor would then re-serve rows you already have. A keyset holds a _position in the list_ rather than a count of rows before it. The trade is honest: a row that jumps ahead of your cursor is not seen again on that walk, because it sorted into a region you already passed. (`paginate()` in `@agentick/utils` is the offset mechanism for catalogs whose order does not move — tools, prompts, resources. A session list is not one of those.)
+
+**Scoped to the authenticated caller, inside the query.** Ownership rides `SessionStoreQuery.principal` rather than filtering the answer, because once a store cuts the page a filter applied afterward shortens it and leaves a `nextCursor` pointing past rows that were dropped. A record owned by another principal is absent from the page; a record owned by _nobody_ is visible to everyone, which is the ADR 48 rule the `destroy_session` handlers apply to a single named record. Absent, not an error: a list answers with what you may see, and a 403 would confirm the id exists.
+
+This is not redundant with the dispatch gate — the gate's same-principal rule resolves a target from `params.sessionId`, and a list names no session, so without this the verb would enumerate every principal's threads.
+
+**Writing a store adapter?** `runSessionStoreConformance` ships the obligations `page` has to meet — rows in the canonical order (N stores get merged at the gateway, so they must agree), a walk that skips no settled row and repeats none while writes land mid-walk, scoping honored inside the page, and an undecodable cursor answering page one rather than raising. They are tests rather than framework code precisely because the cursor is yours: nothing but your store can enforce them.
+
+**Topology rides the events you already have.** There is no `session.added` / `session.removed` notification, because there does not need to be one: `app:command:create-session` and `app:command:destroy-session` are ops, and `session:command:close` is one too — all three land on the app bus, so a client subscribed to the app scope already sees sessions appear and disappear. Enumeration plus the existing events is the whole collection contract.
+
+```ts
+for await (const e of client.gateway.app("ernesto").events({ surface: "app" })) {
+  if (e.name === "app:command:create-session" && e.phase === "terminal") refetch();
+}
+```
+
 ### Close vs destroy
 
 Two removal verbs, deliberately far apart.
@@ -428,7 +467,8 @@ Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, 
 | `createSession(input?)`          | A session bound to this app; opening an existing id resumes |
 | `runOnce(input)`                 | One execution in an ephemeral session                       |
 | `getSession(id)`                 | The live session, or `undefined`                            |
-| `listSessions(query?)`           | Durable records — the queryable superset                    |
+| `listSessions(query?)`           | Durable records — the queryable superset (bounded snapshot) |
+| `pageSessions(query?, page?)`    | One page of the same registry; the store's cursor, or ours  |
 | `getSessionRecord(id)`           | One durable record, closed sessions included                |
 | `setSessionMeta(id, meta)`       | Set app-owned `title` / `description` / `metadata`          |
 | `destroySession(id, opts?)`      | Delete a session — transitive, strongest form               |
@@ -485,6 +525,8 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling failing a too-deep spawn (configured cap and the default chain), `spawnPath` landing on the record, the loop scope, and the handle stream, and a parent close or abort disposing its children with no registry leak.
 - `src/__tests__/destroy-session.spec.tsx` — destroy aborting a grandchild held mid-tool and disposing the whole subtree, cancelling a detached task the same setup under `close()` leaves running, calling `SessionStore.delete` exactly once by id while a bystander's record survives, reaching a closed session's record, and staying silent (not faulting) on a second destroy.
 - `src/__tests__/session-principal-lifecycle.spec.tsx` — owning-principal inheritance across spawn and fork, fork metadata inheritance, and the `onSessionCreate` reshape and veto arms.
+- `@agentick/transport`'s `src/__tests__/list-sessions-wire.spec.ts` — `app/list_sessions` over a real gateway: recency order and the projected descriptive slots, a three-page keyset walk staying disjoint while a touched row and a new row move underneath the open cursor (with the rows an offset cursor would have re-served named), rows sharing a millisecond each walked once, an undecodable cursor answering page one, another principal's sessions absent rather than erroring, and scoping running before the page is cut. Also both store paths: a store whose own cursor format survives the round trip untouched (and receives the paging call), a store implementing no cursored read paging correctly through the framework fallback, and a `metadata` filter — a dimension no store query expresses — forcing the snapshot path rather than returning short pages. (Home is transport because this package does not depend on it.)
+- `@agentick/session`'s `src/__tests__/session-store.spec.ts` — the `SessionStore` conformance obligations, including the six that `page` must meet: canonical order (the gateway merge contract), a whole-store walk serving each row once, no repeat and no skip of a settled row while writes land between pages, principal scoping honored inside the page (with an unowned record matching every principal), an undecodable cursor answering page one, and the walk ending by clearing the cursor rather than shortening the page.
 - `src/__tests__/create-app-cluster.spec.tsx` — cluster wiring, factory-substrate rejection, and close via registry removal.
 - `src/__tests__/session-extensions.spec.ts` + `layered-tools.spec.tsx` — extension target routing with per-session install, and app-scope tool propagation.
 - `src/__tests__/telemetry-e2e.spec.tsx`, `telemetry-wiring.spec.ts`, `telemetry.spec.ts` — the `createTelemetry` → `ctx.trace` / `ctx.metrics` → sink path, sink merging and validation and env autodiscovery, and enrichment on/off.

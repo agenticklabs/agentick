@@ -121,6 +121,9 @@ function fakeGateway(
       },
       record: { existed: false },
     }),
+    // The cross-app enumeration twin: present to satisfy the protocol; no test
+    // here dispatches `gateway/list_sessions`.
+    listSessions: async () => ({ items: [] }),
     listen: async () => {},
     close: async () => {},
     // No authorizer on this fake → the dispatch gate's policy layer never
@@ -284,6 +287,7 @@ describe("dispatchRequest — wire extension registry integration", () => {
         },
         record: { existed: false },
       }),
+      listSessions: async () => ({ items: [] }),
       listen: async () => {},
       close: async () => {},
       authorize: () => Promise.resolve({ allowed: true }),

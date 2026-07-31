@@ -17,7 +17,10 @@ import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
 import type { DestroySessionResult, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
-import type { GatewayDestroySessionResult } from "../protocol/gateway-harness.js";
+import type {
+  GatewayDestroySessionResult,
+  GatewaySessionEntry,
+} from "../protocol/gateway-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type {
   OnBusy,
@@ -90,6 +93,30 @@ export interface GatewayDestroySessionParams extends WireRequestParams {
 // result plus the resolved `appId`) — plain counts, booleans and a string, so it
 // crosses the wire with no translation and needs no wire-local alias.
 
+/**
+ * `gateway/list_sessions` — every session on the gateway, in ONE list, without
+ * the caller walking apps. The union of the mounted apps' session stores, each
+ * entry stamped with the app that answered for it.
+ *
+ * Deliberately no `appId` filter: narrowing to one app is
+ * `app/list_sessions`, which is the same page in the same order.
+ */
+export interface GatewayListSessionsParams extends WireRequestParams, SessionPageRequest {
+  readonly filter?: SessionFilter;
+}
+
+/**
+ * One page of the cross-app session list. Same envelope as
+ * {@link AppListSessionsResult} — the merged ordering and the cursor contract
+ * are identical; only the entry type differs, by the `appId` a cross-app row
+ * cannot do without.
+ */
+export interface GatewayListSessionsResult {
+  readonly sessions: readonly GatewaySessionEntry[];
+  /** Opaque cursor for the next page; absent on the last page. */
+  readonly nextCursor?: string;
+}
+
 // ============================================================================
 // app/* — multi-session host methods
 // ============================================================================
@@ -116,13 +143,56 @@ export interface AppGetSessionParams extends WireRequestParams {
  */
 export type AppGetSessionResult = SessionEntry;
 
-export interface AppListSessionsParams extends WireRequestParams {
+/**
+ * The paging half of a session-list request, shared by the app-scoped and the
+ * gateway-wide verb so ONE place documents the cursor contract.
+ *
+ * The cursor is a **keyset** cursor, not an offset: it carries the sort key of
+ * the last row of the page it came from, and the next page is everything that
+ * sorts strictly after it. Sessions are ordered by last activity (newest
+ * first), and last activity MOVES — a thread that receives a message while a
+ * client is mid-walk jumps to the front of the list. Under an offset cursor
+ * that shift re-serves rows the client already has; under a keyset cursor the
+ * walk keeps its place because the place is a value in the list, not a count of
+ * rows before it. (This is why `paginate()` in `@agentick/utils`, the offset
+ * mechanism every static catalog surface pages with, is the wrong tool here.)
+ *
+ * A row that moves ahead of the cursor mid-walk is not seen again — it sorted
+ * into a region the walk already passed. That is the keyset guarantee and the
+ * point of it: no duplicates, and nothing that stayed put is skipped.
+ */
+export interface SessionPageRequest {
+  /**
+   * Opaque cursor from a prior reply's `nextCursor`; absent starts at page one.
+   * Opaque means opaque — its encoding is the server's and may change. A cursor
+   * the server cannot decode yields page one rather than an error, since a
+   * client holding a stale cursor has no other recovery.
+   */
+  readonly cursor?: string;
+  /** Max entries in the page. Defaults to the framework's page size (100). */
+  readonly limit?: number;
+}
+
+/**
+ * `app/list_sessions` — one app's durable session registry, paged.
+ *
+ * Scoped to the CALLER: a record stamped with another principal is not in the
+ * page (ADR 48). Absent from the list, not an error — a list answers with what
+ * you may see, and someone else's threads are not evidence you are owed.
+ */
+export interface AppListSessionsParams extends WireRequestParams, SessionPageRequest {
   readonly appId: string;
   readonly filter?: SessionFilter;
 }
 
 export interface AppListSessionsResult {
   readonly sessions: readonly SessionEntry[];
+  /**
+   * Opaque cursor for the next page; absent on the last page. Its presence IS
+   * the "there is more" signal — a full page is not, since a page can be
+   * exactly `limit` long and still be the last one.
+   */
+  readonly nextCursor?: string;
 }
 
 /**
@@ -634,6 +704,10 @@ export interface WireMethods {
   "gateway/destroy_session": {
     params: GatewayDestroySessionParams;
     result: GatewayDestroySessionResult;
+  };
+  "gateway/list_sessions": {
+    params: GatewayListSessionsParams;
+    result: GatewayListSessionsResult;
   };
 
   "app/create_session": { params: AppCreateSessionParams; result: AppCreateSessionResult };

@@ -38,6 +38,7 @@ describe("GatewayHarness — framework wire extensions", () => {
     expect(registry.resolve("gateway/list_apps")?.extension).toBe(gatewayWireExtension);
     expect(registry.resolve("gateway/get_app")?.extension).toBe(gatewayWireExtension);
     expect(registry.resolve("gateway/destroy_session")?.extension).toBe(gatewayWireExtension);
+    expect(registry.resolve("gateway/list_sessions")?.extension).toBe(gatewayWireExtension);
     expect(registry.resolve("app/create_session")?.extension).toBe(appWireExtension);
     expect(registry.resolve("app/get_session")?.extension).toBe(appWireExtension);
     expect(registry.resolve("app/list_sessions")?.extension).toBe(appWireExtension);

@@ -94,6 +94,44 @@ It is the same verb as [`app.destroySession`](../app#close-vs-destroy) with the 
 
 `gateway.appForSession(id)` is the resolution on its own, for when you want the app rather than the destruction.
 
+### Every thread on the gateway, in one list
+
+The enumeration half of that pair: a client that can delete a session without naming its app has to be able to **find** one the same way. `gateway/list_sessions` unions every mounted app's session store into one recency-ordered list, and every row names the app it came from — which is what you then address its app-scoped verbs with.
+
+```ts
+const { sessions, nextCursor } = await client.gateway.listSessions({ status: "active" }, { limit: 50 });
+sessions[0].appId; // stamped from the app the row was READ from, never copied off the record
+await client.gateway.app(sessions[0].appId).session(sessions[0].id).send({ ... });
+```
+
+**Scoped to the caller, and the only thing scoping it.** A cross-app list names no session, so the dispatch gate's same-principal target rule has nothing to resolve. Scoping rides the query (`principal`) so it reaches whichever source answers and is honored _inside_ the page — a filter applied after the page is cut returns short pages. Another principal's threads are absent, not an error.
+
+### Gateway indexes — the cross-app query door
+
+`gateway/list_sessions` has **two modes**, and which one you get is a deployment decision.
+
+```ts
+const gateway = await createGateway({ sessionIndex: myPostgresSessionIndex });
+```
+
+**Index mounted.** One query per page against a source that already holds every app's rows — in a real deployment, the one table with an `app_id` column that all your apps write to. The index owns its ordering and mints its own cursor; the gateway delegates and adds nothing, not even a re-sort.
+
+**No index.** The gateway reads every mounted app's store and merges. Correct, and the honest default, but N reads per page — and the framework has to impose the merged ordering (`updatedAt` descending, ties by `id` then `appId`). This is the **degraded** mode. A failing app contributes nothing rather than failing the call, matching `appForSession`: one sick app must not blind the gateway to the rest.
+
+A caller cannot tell which mode answered — same envelope, same opaque cursor. Only the cost differs.
+
+The framework cannot mount an index for you, because it does not know whether two apps share a backend: an app on Postgres beside one on an in-memory store cannot be served by one query, and pretending otherwise would be a fast wrong answer.
+
+**This is a pattern, not a one-off.** Agentick scopes a store where its records are _owned_ — sessions and tasks belong to an app, so those stores are app-scoped (ADR 68 made exactly this lift when it moved the task store from session scope to app scope, so "this app's tasks" became one query instead of a fan-out). A gateway index is that same lift one scope further up, and it always has this shape: an optional adopter-provided door, with a k-way merge fallback. `gateway/list_tasks` is the anticipated second tenant and gets a `taskIndex` slot beside this one, with nothing renamed.
+
+**Ordering policy lives here too**, which is a reason to mount an index independent of scale. `SessionStore.page` must return the framework's canonical order — N of those get merged, so they have to agree. Nothing merges an index's output, so an index is free to order by whatever the product needs: pinned first, unread first, relevance. Unread counts and inbox projections are the natural things to join against this door next, which is why its rows are durable records rather than a wire shape.
+
+**Why the fallback's cursor is the framework's rather than a bag of the stores' own.** A merged page of 50 rows might draw 48 from one app and 2 from another. Resuming means recording that 2 rows of the second stream were consumed — but that store's token is opaque and advances a whole page at a time, with no rewind. Recording a per-app _position_ instead requires a key the framework can compare, at which point the bag is exactly equivalent to one merged key (the session sort key is total across apps) and strictly more machinery. So the merge owns the ordering and therefore mints the cursor.
+
+`gateway.listSessions(query, page)` is the same read in process, both modes included.
+
+There is no `session.added` / `session.removed` notification on this namespace, and there should not be: `app:command:create-session`, `app:command:destroy-session`, and `session:command:close` all land on the app bus already, so a client subscribed to an app scope sees sessions appear and disappear. Enumeration plus the events that already exist is the collection contract.
+
 ### Gating and shaping the mount
 
 `createApp` is itself a hookable operation, so the gateway is where a multi-tenant provisioning gate belongs — before the app is constructed:
@@ -673,6 +711,7 @@ Each is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`, 
 | `app(id)` / `apps()`             | Read-side enumeration.                                           |
 | `appForSession(id)`              | Which mounted app owns a session — live registries, then stores. |
 | `destroySession(id, opts?)`      | Destroy a session without naming its app.                        |
+| `listSessions(query?, page?)`    | One page of every app's sessions; the mounted index, or a merge. |
 | `events(filter?, options?)`      | `AsyncIterable<ProtocolEvent>` fanned in from every app.         |
 | `authorize(input)`               | The hookable policy call.                                        |
 | `accept(info)`                   | The hookable per-connection admission.                           |
@@ -737,6 +776,7 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - `src/__tests__/wire-registry.spec.ts` + `wire-framework-extensions.spec.ts` — register, resolve, enumerate in insertion order, duplicate namespace and name rejection, sealing, and adopter attempts on all four framework namespaces failing.
 - `src/__tests__/dynamic-commands.spec.ts` — the bundled authorizers including glob cover and the same-principal rule, exact-beats-dynamic resolution, single pre-seal registration, a non-`wire` verb being indistinguishable from an absent method, an exposed-and-granted verb dispatching with `origin: "wire"`, and `commands/list` showing a denied caller nothing.
 - `src/__tests__/gateway-extensions.spec.ts` — install during construction, the live installer host, async install awaited before ready, bridge-slot singleton enforcement, install failure rejecting `createGateway` without half-sealing the registry, bundle field distribution, bare app/session extensions cascading to every app and session, and LIFO `onClose` after apps close.
+- `@agentick/transport`'s `src/__tests__/list-sessions-wire.spec.ts` — `gateway/list_sessions` against a real gateway in BOTH modes: a mounted index answering with its own rows, its own ordering (deliberately not the canonical one, so a re-sort would fail the test) and its own cursor handed back verbatim, one query per page, and the caller's principal reaching it; and the fallback merge over two apps' stores in the framework's canonical order with the right `appId` on every row. Plus one cursor paging the union across the app boundary, the caller-scoping filter that is the verb's only defense (it names no session, so the dispatch gate has nothing to resolve), the tree filter reaching the stores rather than post-filtering a fetched page, and an empty gateway's page shape. (Home is transport because this package does not depend on it.)
 - `@agentick/transport`'s `src/__tests__/destroy-session-wire.spec.ts` — both destroy verbs against a real gateway and the real dispatch gate: `gateway/destroy_session` resolving the owner on a multi-app gateway, resolving a paged-out session through the session stores, denying another principal's thread on the record when no live target exists for the gate to read, and answering an unclaimed id with no `appId` instead of a fault. (Home is transport because this package does not depend on it.)
 - `src/__tests__/gateway-app-live-link.spec.ts` — a gateway hook registered **after** a session exists reaching that session's tool executor, and unsubscribe cascading back out.
 - `src/__tests__/layered-tools.spec.ts` — gateway tools reaching every session of every hosted app, and app- and session-level tools overriding on name collision.
