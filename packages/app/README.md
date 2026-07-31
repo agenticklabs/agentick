@@ -171,6 +171,32 @@ It is an app singleton, defaulting to a node-local in-memory store. Swap a durab
 
 `title` / `description` / `metadata` are yours to populate — seed them at `createSession({ title })` or set them later with `app.setSessionMeta(id, { title })`. The framework stores them and is blind to their semantics.
 
+### Close vs destroy
+
+Two removal verbs, deliberately far apart.
+
+`session.close()` is the gentle one — hang up. The session ends, its durable record survives as history on a `closed` status, and its **detached** tasks keep running: they were spawned to outlive the conversation.
+
+`app.destroySession(id)` deletes the thread. It is transitive and it is the strongest form:
+
+```ts
+const { live, record } = await app.destroySession("chat-1", { reason: "user deleted the thread" });
+live.abortedExecutions; //  in-flight work stopped, across the whole spawn subtree
+live.disposedDescendants; //  sub-agent sessions torn down with it
+live.cancelledDetachedTasks; //  the tasks close would have left running
+record.existed; //  there was a durable record to delete
+```
+
+Aborting is transitive because nothing else is: `session.abort()` reaches only that session's own current execution, and a spawned child feels its parent's construction signal without its running execution being cancelled — so destroy walks the live subtree and aborts each descendant itself.
+
+**Idempotent.** Destroying an id that is already gone is a success reporting `live.found: false` / `record.existed: false`. You get facts, not an exception, for the case you were probably racing anyway.
+
+**Descendant records are not deleted** — only the named one. Whether deleting a parent cascades to its children's rows is your store's decision (a SQL `ON DELETE CASCADE` is exactly where that belongs), and so is what deletion MEANS at all: `SessionStore.delete` may soft-flag or hard-remove. That is why the result reports whether a record `existed`, and makes no claim about what happened to it.
+
+Over the wire it is `app/destroy_session`, and it is ownership-gated twice: once by the dispatch gate on the live session's principal, once by the handler on the durable record's — because a session that is no longer live has no live target for the gate to read.
+
+A client holding a session id with no app id beside it — from a cross-app listing — reaches the same verb through [`gateway.destroySession(id)`](../gateway#reaching-a-session-without-naming-its-app), which resolves the owning app itself and reports which one it was.
+
 ### Who answered — `appId` joined to the app's `title`
 
 An app declares the same `id` / `title` / `description` triple a tool or a prompt does:
@@ -405,6 +431,7 @@ Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, 
 | `listSessions(query?)`           | Durable records — the queryable superset                    |
 | `getSessionRecord(id)`           | One durable record, closed sessions included                |
 | `setSessionMeta(id, meta)`       | Set app-owned `title` / `description` / `metadata`          |
+| `destroySession(id, opts?)`      | Delete a session — transitive, strongest form               |
 | `events(query?)`                 | Cross-session bus subscription                              |
 | `use(mw)` / `fx.use(mw)`         | Register middleware; returns an unsubscribe                 |
 | `guard(fn)` / `hook(bag)`        | Register a guard / hooks imperatively                       |
@@ -456,6 +483,7 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - `src/__tests__/session-eviction.spec.tsx` — `maxActive` evicting the least-recently-active session (LRU order proven via a send that refreshes an older one), `idleTimeout` paging out a quiet session on the sweep, an evicted session reopening with its timeline rehydrated, and an in-flight execution never being evicted.
 - `src/__tests__/app-signal.spec.tsx` — an aborted app signal refusing new work at the edge, fanning into every session so a post-abort `send` resolves `aborted` with 0 ticks, and tearing down an in-flight execution.
 - `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling failing a too-deep spawn (configured cap and the default chain), `spawnPath` landing on the record, the loop scope, and the handle stream, and a parent close or abort disposing its children with no registry leak.
+- `src/__tests__/destroy-session.spec.tsx` — destroy aborting a grandchild held mid-tool and disposing the whole subtree, cancelling a detached task the same setup under `close()` leaves running, calling `SessionStore.delete` exactly once by id while a bystander's record survives, reaching a closed session's record, and staying silent (not faulting) on a second destroy.
 - `src/__tests__/session-principal-lifecycle.spec.tsx` — owning-principal inheritance across spawn and fork, fork metadata inheritance, and the `onSessionCreate` reshape and veto arms.
 - `src/__tests__/create-app-cluster.spec.tsx` — cluster wiring, factory-substrate rejection, and close via registry removal.
 - `src/__tests__/session-extensions.spec.ts` + `layered-tools.spec.tsx` — extension target routing with per-session install, and app-scope tool propagation.

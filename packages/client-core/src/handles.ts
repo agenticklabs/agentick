@@ -89,6 +89,12 @@ export function makeGatewayHandle(client: InternalClient): GatewayHandle {
     async getApp(id) {
       return client.request("gateway/get_app", { appId: id });
     },
+    async destroySession(sessionId, opts) {
+      return client.request("gateway/destroy_session", {
+        sessionId,
+        reason: opts?.reason,
+      });
+    },
     events(query, fromCursor) {
       return client.transport.subscribe({ kind: "gateway" }, query, fromCursor);
     },
@@ -115,6 +121,19 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
     async listSessions(filter?: SessionFilter) {
       const result = await client.request("app/list_sessions", { appId, filter });
       return result.sessions as readonly SessionEntry[];
+    },
+    // Hand-written like every other `app/*` verb on this handle. The wire-row
+    // DERIVATION (`makeWireNamespace`) synthesizes namespace methods for the
+    // SESSION handle only — an app-namespace verb takes `appId` from the handle
+    // rather than a `sessionId` from the caller, which is not a shape that
+    // derivation covers. Extending it to the app namespace is a separate change
+    // to the derivation, not a rider on this verb.
+    async destroySession(sessionId, opts) {
+      return client.request("app/destroy_session", {
+        appId,
+        sessionId,
+        reason: opts?.reason,
+      });
     },
     async runOnce<P = unknown>(input: SendInput<P>) {
       return client.request("app/run_once", {

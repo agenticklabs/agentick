@@ -70,7 +70,13 @@ describe("session wire proxy — type-level IntelliSense contract", () => {
     expectTypeOf<Has<"testns">>().toEqualTypeOf<true>();
     // `session/*` rows are the session handle's OWN methods — NOT a `session.session`.
     expectTypeOf<Has<"session">>().toEqualTypeOf<false>();
-    // `gateway/*` / `app/*` carry no sessionId — never session-addressable.
+    // `gateway/*` and `app/*` are RESOURCE-HANDLE namespaces — addressed by their
+    // own handle, never a session sub-namespace. Both stay out even though each
+    // has a row that names a session as an argument: `app/get_session` is caught
+    // by the `appId` guard, and `gateway/destroy_session` — root-addressed, so no
+    // `gatewayId` exists to guard on — by the explicit exclusion. A regression on
+    // the gateway arm would surface `session.gateway.destroy_session`, reversing
+    // what that verb is for (reaching a session WITHOUT naming its app).
     expectTypeOf<Has<"gateway">>().toEqualTypeOf<false>();
     expectTypeOf<Has<"app">>().toEqualTypeOf<false>();
   });

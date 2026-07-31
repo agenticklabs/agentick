@@ -152,7 +152,10 @@ as a test, not a promise.
 
 ## 5. Adjacent wire work this rides on
 
-`app/destroy_session` + `gateway/destroy_session` (in flight);
+`app/destroy_session` + `gateway/destroy_session` (**landed 2026-07-31** —
+transitive: aborts the live spawn subtree, reaps detached tasks,
+deletes the record; the gateway twin resolves the owning app so a
+session id needs no app id beside it);
 `gateway/list_sessions` / `app/list_sessions` — cursor-paginated,
 principal-scoped, records carrying meta — which the Knowify
 conversations panel wants regardless of arena, and which arena's rooms

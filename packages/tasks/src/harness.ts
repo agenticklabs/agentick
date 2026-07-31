@@ -104,6 +104,7 @@ import type {
 } from "@agentick/spec";
 import {
   HandlerError,
+  isTerminalTaskStatus,
   TaskHandlerRefRequiredError,
   UnknownTaskError,
   UnknownTaskExecutorError,
@@ -727,13 +728,23 @@ export class TasksHarness
     }
   }
 
+  /**
+   * Disarm the ttl reaper for one task (ADR 68). The invariant it enforces: a
+   * task this harness has stopped serving — terminal, or abandoned at close —
+   * holds NO timer that could later fire `expireTask` and drive a transition
+   * through the (possibly closed) harness's write-through into the app-scoped
+   * store. Idempotent.
+   */
+  private clearTtl(live: LiveTask): void {
+    if (live.ttlTimer === undefined) return;
+    clearTimeout(live.ttlTimer);
+    live.ttlTimer = undefined;
+  }
+
   /** Resolve / reject the result deferred from the (now terminal) record. */
   private settle(live: LiveTask): void {
     // Terminal — cancel any pending ttl reaper (ADR 68).
-    if (live.ttlTimer !== undefined) {
-      clearTimeout(live.ttlTimer);
-      live.ttlTimer = undefined;
-    }
+    this.clearTtl(live);
     const { record, resultDeferred } = live;
     if (record.status === "completed") {
       resultDeferred.resolve(record.result);
@@ -955,10 +966,18 @@ export class TasksHarness
       pending.push(this.cancelInternal(live, "harness_closed"));
     }
     await Promise.all(pending);
-    // Drain event buses — EXCEPT those of still-running detached tasks,
-    // which keep emitting after this harness closes.
+    // Drain event buses AND disarm ttl reapers — EXCEPT for still-running
+    // DETACHED tasks, which keep emitting and keep their deadline after this
+    // harness closes (ADR 68: they outlive the session, so the ttl that bounds
+    // them has to outlive it too — dropping the timer here would hand a
+    // detached task an unbounded lifetime, which is a worse leak than the timer
+    // it replaces). Every OTHER task was just driven terminal by the cancel
+    // cascade above, so `settle` already cleared its timer; the sweep makes the
+    // invariant explicit and covers a task that reached terminal by a path that
+    // did not go through `settle`.
     for (const live of this.view.listSync()) {
       if (live.record.detached && !this.isTerminal(live.record.status)) continue;
+      this.clearTtl(live);
       await live.eventBus.close();
     }
     await super.close();
@@ -1086,12 +1105,7 @@ export class TasksHarness
   // ─────────── internals ───────────
 
   private isTerminal(status: TaskStatus): boolean {
-    return (
-      status === "completed" ||
-      status === "failed" ||
-      status === "cancelled" ||
-      status === "interrupted"
-    );
+    return isTerminalTaskStatus(status);
   }
 
   private snapshot(record: TaskRecord): TaskInfo {

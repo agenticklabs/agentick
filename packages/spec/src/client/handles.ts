@@ -11,12 +11,19 @@
 
 import type { EventQuery } from "../data/events.js";
 import type { Cursor } from "../protocol/event-log.js";
-import type { CreateSessionInput, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
+import type {
+  CreateSessionInput,
+  DestroySessionInput,
+  SessionEntry,
+  SessionFilter,
+} from "../protocol/app-harness.js";
+import type { GatewayDestroySessionResult } from "../protocol/gateway-harness.js";
 import type { SendInput, SendResult, SessionExecutionHandle } from "../protocol/session-harness.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type {
   GatewayListAppsResult,
   AppCreateSessionResult,
+  AppDestroySessionResult,
   AppRunOnceResult,
 } from "../wire/params.js";
 import type { SubscriptionStream } from "./transport.js";
@@ -71,6 +78,16 @@ export interface ResourceHandle {
 export interface GatewayHandle extends HandleSubscriptions {
   listApps(): Promise<GatewayListAppsResult>;
   getApp(id: string): Promise<GatewayListAppsResult["apps"][number]>;
+  /**
+   * Destroy a session without naming its app — the gateway resolves the owner
+   * and the result says which app it was. Same verb and same semantics as
+   * `app(id).destroySession(...)`; reach for this one when you hold a session id
+   * from a cross-app listing and no app id beside it.
+   */
+  destroySession(
+    sessionId: string,
+    opts?: DestroySessionInput,
+  ): Promise<GatewayDestroySessionResult>;
   events(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream;
   app(id: string): AppHandle;
 }
@@ -83,6 +100,15 @@ export interface AppHandle extends ResourceHandle, HandleSubscriptions {
   createSession<P = unknown>(input?: CreateSessionInput<P>): Promise<AppCreateSessionResult>;
   getSession(sessionId: string): Promise<SessionEntry>;
   listSessions(filter?: SessionFilter): Promise<readonly SessionEntry[]>;
+  /**
+   * The remote twin of `AppHarnessProtocol.destroySession` — strongest-form,
+   * transitive removal. `session(id).close()` is the gentle verb (the thread
+   * ends, its record survives, detached tasks keep running); this one tears down
+   * the live spawn subtree, cancels its detached tasks, and deletes the durable
+   * record. Idempotent: an id that is already gone resolves with
+   * `live.found === false`.
+   */
+  destroySession(sessionId: string, opts?: DestroySessionInput): Promise<AppDestroySessionResult>;
   runOnce<P = unknown>(input: SendInput<P>): Promise<AppRunOnceResult>;
   close(): Promise<void>;
 

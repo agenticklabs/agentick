@@ -153,6 +153,72 @@ export interface CreateSessionInput<P = unknown> {
   readonly parentSessionId?: string;
 }
 
+/**
+ * Options for {@link AppHarnessProtocol.destroySession}. Deliberately thin —
+ * destroy has no policy knobs. What deletion MEANS durably is the
+ * {@link SessionStore} impl's call (soft vs hard is adopter policy), not a flag
+ * here.
+ */
+export interface DestroySessionInput {
+  /**
+   * Reason threaded into the abort of every live execution in the destroyed
+   * subtree, so the cancellation is attributable in the journal / terminal
+   * result. Defaults to `"destroyed"`.
+   */
+  readonly reason?: string;
+}
+
+/**
+ * What {@link AppHarnessProtocol.destroySession} actually did — normalized to
+ * the facts the app holds AT ACT TIME, and nothing more. Every field is
+ * observed, not inferred: no field claims knowledge the store impl owns.
+ *
+ * Idempotent by construction: destroying an unknown id succeeds with
+ * `live.found === false` and `record.existed === false` (silence, not a fault).
+ */
+export interface DestroySessionResult {
+  /** The id destroy was asked to remove. Echoed so a batch caller can correlate. */
+  readonly sessionId: string;
+  /** The LIVE plane — the in-memory registry, executions, and task executors. */
+  readonly live: {
+    /** Was the session in the app's live registry when destroy ran? */
+    readonly found: boolean;
+    /**
+     * How many sessions in the destroyed subtree (the target plus its live
+     * descendants) had an in-flight execution when destroy aborted them. A
+     * session runs at most one execution, so this is a count of sessions, and
+     * it is what destroy OBSERVED — not a promise that each abort landed before
+     * the execution would have finished on its own.
+     */
+    readonly abortedExecutions: number;
+    /**
+     * Live descendants torn down with the target — the transitive spawn subtree
+     * as the registry knew it at act time. Excludes the target itself.
+     */
+    readonly disposedDescendants: number;
+    /**
+     * Detached tasks cancelled across the destroyed subtree. These are exactly
+     * the tasks `close()` deliberately ABANDONS (ADR 68) — destroy is the
+     * stronger verb, so it reaps them. Counts only tasks reachable through a
+     * LIVE session's task harness; a detached task whose owning session was
+     * already closed has no in-process handle for the app to cancel through.
+     */
+    readonly cancelledDetachedTasks: number;
+  };
+  /** The DURABLE plane — the {@link SessionStore} record. */
+  readonly record: {
+    /**
+     * Did a durable {@link SessionRecord} exist for this id when destroy ran?
+     * The honest half of "was anything deleted": destroy always calls
+     * `SessionStore.delete(sessionId)` (unconditionally, so a record written
+     * between the read and the delete is not left behind), and what that
+     * deletion MEANS — soft flag, hard row removal, cascade to children — is
+     * the store impl's contract, not a fact this result can assert.
+     */
+    readonly existed: boolean;
+  };
+}
+
 export interface RunOnceInput<P = unknown> {
   /** What to send to the ephemeral session. */
   readonly send: SendInput<P>;
@@ -450,6 +516,38 @@ export interface AppHarnessProtocol<P = unknown> {
    * envelopes. After `runOnce` resolves, the registry entry is removed.
    */
   runOnce(input: RunOnceInput<P>): Promise<RunOnceResult>;
+
+  /**
+   * Remove a session — the STRONGEST form, and the transitive one.
+   *
+   * `close()` is the gentle verb: the session ends, its durable
+   * {@link SessionRecord} survives as history, and its DETACHED tasks keep
+   * running by contract (ADR 68). `destroySession` is the other end: the
+   * session and its live spawn subtree are torn down, the work they were doing
+   * is cancelled, and the durable record is deleted.
+   *
+   * In order:
+   *   1. **Abort in-flight executions transitively.** `session.abort()` reaches
+   *      only that session's own current execution — a spawned child feels the
+   *      parent's construction signal but is not itself aborted by it — so
+   *      destroy walks the live spawn subtree and aborts each descendant.
+   *   2. **Cancel detached tasks** across the subtree. This is precisely what
+   *      `close()` abandons; destroy is stronger, so it reaps them.
+   *   3. **Dispose the subtree** through the same teardown a genuine session end
+   *      uses (`onSessionClose` fires, live registry entries drop).
+   *   4. **Delete the durable record** — `SessionStore.delete(sessionId)`.
+   *
+   * **Idempotent.** An unknown / already-destroyed id is SUCCESS, not a fault:
+   * the result simply reports `live.found === false` and
+   * `record.existed === false`. Callers get facts, not exceptions, for the
+   * "already gone" case.
+   *
+   * Descendant RECORDS are not deleted — only the named one. Whether a deleted
+   * parent cascades to its children's rows is the store impl's decision (a SQL
+   * `ON DELETE CASCADE` is exactly where that policy belongs), not the
+   * framework's.
+   */
+  destroySession(sessionId: string, opts?: DestroySessionInput): Promise<DestroySessionResult>;
 
   /**
    * Look up a LIVE session by id — the in-memory routing handle. Returns

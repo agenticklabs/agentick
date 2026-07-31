@@ -45,8 +45,12 @@ export type OmitSessionId<P> = Omit<P, "sessionId">;
  * and are NOT app-addressed (no `appId`). The `appId` guard is what separates a
  * session SUB-namespace (`knobs/set`, `billing/approve`) from an app-scoped
  * method that merely references a session (`app/get_session`, whose primary
- * address is the app). `gateway/*`, `initialize`, `ping`, `sub/*`, `auth/*`,
- * `_extensions/*` have no `sessionId` at all, so they never surface either.
+ * address is the app). `initialize`, `ping`, `sub/*`, `auth/*`, `_extensions/*`
+ * have no `sessionId` at all, so they never surface either.
+ *
+ * A `gateway/*` row that names a session is filtered one step later, by
+ * {@link SessionWireNamespace}, not here — the gateway is the runtime ROOT, so
+ * there is no `gatewayId` param for a guard to key on the way `appId` works.
  */
 export type SessionScopedMethod = {
   [M in WireMethod]: WireParams<M> extends { readonly sessionId: string }
@@ -60,11 +64,23 @@ export type SessionScopedMethod = {
 export type WireNamespaceOf<M extends string> = M extends `${infer NS}/${string}` ? NS : never;
 
 /**
- * Every session-scoped namespace EXCEPT `session` itself — the `session/*` rows
- * are the session handle's OWN hand-written methods (`send`, `dispatch`, …), not
- * a `session.session` sub-namespace.
+ * Every session-scoped namespace EXCEPT the RESOURCE-HANDLE namespaces —
+ * `gateway` / `app` / `session` are addressed by their own handles, so none of
+ * them is ever a session SUB-namespace.
+ *
+ * `session/*` rows are the session handle's OWN hand-written methods (`send`,
+ * `dispatch`, …), not a `session.session`. `app/*` rows are already filtered
+ * upstream by the `appId` guard. `gateway/*` needs naming HERE because the
+ * gateway is the runtime root: a row like `gateway/destroy_session` names a
+ * session as its argument while being addressed by the gateway, and there is no
+ * `gatewayId` param for an upstream guard to key on — so without this exclusion
+ * a root-addressed verb would surface as `session.gateway.destroy_session`,
+ * which reverses what it is for (reaching a session WITHOUT naming its app).
  */
-export type SessionWireNamespace = Exclude<WireNamespaceOf<SessionScopedMethod>, "session">;
+export type SessionWireNamespace = Exclude<
+  WireNamespaceOf<SessionScopedMethod>,
+  "session" | "gateway"
+>;
 
 /**
  * The methods of one namespace `NS` as params-object functions with `sessionId`

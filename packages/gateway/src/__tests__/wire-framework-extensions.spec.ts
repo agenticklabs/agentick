@@ -37,9 +37,15 @@ describe("GatewayHarness — framework wire extensions", () => {
     // Every framework method resolves.
     expect(registry.resolve("gateway/list_apps")?.extension).toBe(gatewayWireExtension);
     expect(registry.resolve("gateway/get_app")?.extension).toBe(gatewayWireExtension);
+    expect(registry.resolve("gateway/destroy_session")?.extension).toBe(gatewayWireExtension);
     expect(registry.resolve("app/create_session")?.extension).toBe(appWireExtension);
     expect(registry.resolve("app/get_session")?.extension).toBe(appWireExtension);
     expect(registry.resolve("app/list_sessions")?.extension).toBe(appWireExtension);
+    expect(registry.resolve("app/destroy_session")?.extension).toBe(appWireExtension);
+    // No per-method journal override on either destroy verb: both ride the
+    // DEFAULT disposition and land in the journal as real commands.
+    expect(appWireExtension.journal?.["app/destroy_session"]).toBeUndefined();
+    expect(gatewayWireExtension.journal?.["gateway/destroy_session"]).toBeUndefined();
     // session extension covers non-streaming AND streaming methods post-#303.
     expect(registry.resolve("session/send")?.extension).toBe(sessionWireExtension);
     expect(registry.resolve("session/dispatch")?.extension).toBe(sessionWireExtension);

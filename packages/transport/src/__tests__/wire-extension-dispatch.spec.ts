@@ -107,6 +107,20 @@ function fakeGateway(
     ready: Promise.resolve(),
     app: (appId: string) => augmentedApps.get(appId),
     apps: () => Array.from(augmentedApps.values()),
+    // Session-address resolution + the gateway destroy verb: present to satisfy
+    // the protocol; no test here dispatches `gateway/destroy_session`.
+    appForSession: async (sessionId: string) =>
+      Array.from(augmentedApps.values()).find((a) => a.getSession(sessionId) !== undefined),
+    destroySession: async (sessionId: string) => ({
+      sessionId,
+      live: {
+        found: false,
+        abortedExecutions: 0,
+        disposedDescendants: 0,
+        cancelledDetachedTasks: 0,
+      },
+      record: { existed: false },
+    }),
     listen: async () => {},
     close: async () => {},
     // No authorizer on this fake → the dispatch gate's policy layer never
@@ -259,6 +273,17 @@ describe("dispatchRequest — wire extension registry integration", () => {
       ready: Promise.resolve(),
       app: () => undefined,
       apps: () => [],
+      appForSession: async () => undefined,
+      destroySession: async (sessionId: string) => ({
+        sessionId,
+        live: {
+          found: false,
+          abortedExecutions: 0,
+          disposedDescendants: 0,
+          cancelledDetachedTasks: 0,
+        },
+        record: { existed: false },
+      }),
       listen: async () => {},
       close: async () => {},
       authorize: () => Promise.resolve({ allowed: true }),

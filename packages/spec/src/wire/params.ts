@@ -16,7 +16,8 @@ import type { EventQuery } from "../data/events.js";
 import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
-import type { SessionEntry, SessionFilter } from "../protocol/app-harness.js";
+import type { DestroySessionResult, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
+import type { GatewayDestroySessionResult } from "../protocol/gateway-harness.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type {
   OnBusy,
@@ -68,6 +69,26 @@ export interface GatewayGetAppParams extends WireRequestParams {
 }
 
 export type GatewayGetAppResult = AppInfo;
+
+/**
+ * `gateway/destroy_session` — the same destroy verb as `app/destroy_session`,
+ * addressed WITHOUT an `appId`. The gateway resolves the owning app itself
+ * (live registries first, then the apps' session stores), which is the point: a
+ * client holding a session id from a cross-app listing should not have to carry
+ * an app id alongside it just to delete a thread.
+ *
+ * Same two ownership gates as the app-level verb — the dispatch gate reads
+ * `sessionId` for the live target, the handler re-checks the durable record.
+ */
+export interface GatewayDestroySessionParams extends WireRequestParams {
+  readonly sessionId: string;
+  /** Attribution for the aborts destroy issues. See `DestroySessionInput.reason`. */
+  readonly reason?: string;
+}
+
+// The result is the protocol's own `GatewayDestroySessionResult` (the app-level
+// result plus the resolved `appId`) — plain counts, booleans and a string, so it
+// crosses the wire with no translation and needs no wire-local alias.
 
 // ============================================================================
 // app/* — multi-session host methods
@@ -127,6 +148,28 @@ export interface AppRunOnceResult {
   readonly finalCursor: Cursor;
   readonly result: ExecutionResult;
 }
+
+/**
+ * `app/destroy_session` — the strongest, transitive session removal projected
+ * over the wire. The `sessionId` param is load-bearing beyond addressing: the
+ * dispatch gate resolves the TARGET session from it and applies the
+ * same-principal rule (ADR 48 / ADR 51 §4.2), so a caller cannot destroy
+ * another principal's live session. The handler re-checks the DURABLE record's
+ * principal, because a session that is no longer live has no target for the
+ * gate to resolve and its record would otherwise be unprotected.
+ */
+export interface AppDestroySessionParams extends WireRequestParams {
+  readonly appId: string;
+  readonly sessionId: string;
+  /** Attribution for the aborts destroy issues. See `DestroySessionInput.reason`. */
+  readonly reason?: string;
+}
+
+/**
+ * Wire result reuses the canonical in-process {@link DestroySessionResult} —
+ * plain counts and booleans, JSON-safe with no translation.
+ */
+export type AppDestroySessionResult = DestroySessionResult;
 
 export interface AppCloseParams extends WireRequestParams {
   readonly appId: string;
@@ -588,10 +631,15 @@ export interface WireMethods {
 
   "gateway/list_apps": { params: GatewayListAppsParams; result: GatewayListAppsResult };
   "gateway/get_app": { params: GatewayGetAppParams; result: GatewayGetAppResult };
+  "gateway/destroy_session": {
+    params: GatewayDestroySessionParams;
+    result: GatewayDestroySessionResult;
+  };
 
   "app/create_session": { params: AppCreateSessionParams; result: AppCreateSessionResult };
   "app/get_session": { params: AppGetSessionParams; result: AppGetSessionResult };
   "app/list_sessions": { params: AppListSessionsParams; result: AppListSessionsResult };
+  "app/destroy_session": { params: AppDestroySessionParams; result: AppDestroySessionResult };
   "app/run_once": { params: AppRunOnceParams; result: AppRunOnceResult };
   "app/close": { params: AppCloseParams; result: AppCloseResult };
 

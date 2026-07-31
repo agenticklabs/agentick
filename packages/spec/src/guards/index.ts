@@ -60,6 +60,7 @@ import type {
   StateChangeBlock,
   SystemEventBlock,
   TaskRefBlock,
+  TaskStatus,
   TerminalEvent,
   TextBlock,
   ToolBlock,
@@ -413,6 +414,30 @@ export function isFormatterRef(value: unknown): value is FormatterRef {
     typeof value === "object" &&
     value !== null &&
     typeof (value as { id?: unknown }).id === "string"
+  );
+}
+
+// ============================================================================
+// TaskStatus — the terminal partition (ADR 68)
+// ============================================================================
+
+/**
+ * True for a task status the FSM cannot leave — `completed`, `failed`,
+ * `cancelled`, `interrupted`. The complement (`working`, `input_required`) is
+ * live work.
+ *
+ * Lives here rather than in `@agentick/tasks` because the partition is a
+ * property of the spec union, and its readers are not all inside the tasks
+ * package: the app reads it to find the still-running tasks a session destroy
+ * must reap, and the child-process executor reads it to know when a reported
+ * transition ends the stream.
+ */
+export function isTerminalTaskStatus(status: TaskStatus): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "interrupted"
   );
 }
 

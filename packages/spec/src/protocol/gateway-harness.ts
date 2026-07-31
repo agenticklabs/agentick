@@ -28,7 +28,11 @@ import type { EventQuery, ProtocolEvent } from "../data/events.js";
 import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
 import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
-import type { AppHarnessProtocol } from "./app-harness.js";
+import type {
+  AppHarnessProtocol,
+  DestroySessionInput,
+  DestroySessionResult,
+} from "./app-harness.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
 import type { WireExtensionContext } from "../wire/extension.js";
 import type { WireMethod } from "../wire/params.js";
@@ -132,6 +136,19 @@ export {
 } from "../errors/lifecycle.js";
 
 /**
+ * What the gateway's {@link GatewayHarnessProtocol.destroySession} did — the
+ * app-level {@link DestroySessionResult} plus the app the gateway RESOLVED the
+ * session to.
+ *
+ * `appId` is the whole point of the gateway-level verb: the caller addressed a
+ * session without naming an app, so the answer has to say which app owned it.
+ * Absent when no app claimed the id — the idempotent miss.
+ */
+export interface GatewayDestroySessionResult extends DestroySessionResult {
+  readonly appId?: string;
+}
+
+/**
  * The runtime-root harness protocol.
  */
 export interface GatewayHarnessProtocol {
@@ -160,6 +177,41 @@ export interface GatewayHarnessProtocol {
 
   /** Enumerate all registered Apps. */
   apps(): readonly AppHarnessProtocol[];
+
+  /**
+   * Which mounted app owns this session — gateway-level ADDRESS RESOLUTION, so a
+   * caller holding only a `sessionId` can reach it without knowing (or being
+   * told) the app.
+   *
+   * Two passes, in this order: the apps' LIVE registries first (the cheap
+   * synchronous read), then their durable session stores. The second pass is
+   * what makes the resolution honest for a paged-out or closed session — the
+   * ones a live-only lookup silently reports as unknown. `undefined` when no
+   * mounted app claims the id.
+   */
+  appForSession(sessionId: string): Promise<AppHarnessProtocol | undefined>;
+
+  /**
+   * Destroy a session by id, WITHOUT the caller naming its app — the
+   * gateway-level twin of {@link AppHarnessProtocol.destroySession}, and the
+   * same verb in every respect but addressing. Resolves the owning app via
+   * {@link appForSession}, then delegates; the destruction semantics (transitive
+   * abort, detached-task reap, subtree disposal, record delete) are the app's,
+   * unchanged.
+   *
+   * Idempotent for the same reason the app-level verb is, one level further out:
+   * a session no mounted app claims resolves to nothing, and the result reports
+   * `live.found: false` / `record.existed: false` with no `appId` rather than
+   * raising.
+   *
+   * NOT wrapped in a gateway op: the destruction it delegates to IS an op
+   * (`app:command:destroy-session`), so wrapping here would mint a second
+   * envelope for one destruction. The wire boundary journals the call itself.
+   */
+  destroySession(
+    sessionId: string,
+    opts?: DestroySessionInput,
+  ): Promise<GatewayDestroySessionResult>;
 
   /**
    * The gateway's identity-authorization policy (ADR 51 §4). The wire

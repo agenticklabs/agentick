@@ -81,6 +81,19 @@ await gateway.createApp({
 
 Both are omitted from the projection when unset rather than sent as `null`, so a client falls back to `id` on presence. An app that never faces a person needs neither.
 
+### Reaching a session without naming its app
+
+A client that listed threads across apps holds session ids, not app ids. `gateway/destroy_session` takes only the session id and resolves the owner itself — live registries first, then the apps' session stores, so a paged-out or closed session still resolves:
+
+```ts
+const { appId, live, record } = await client.gateway.destroySession("sess-123");
+appId; // which app owned it — absent when nothing claimed the id
+```
+
+It is the same verb as [`app.destroySession`](../app#close-vs-destroy) with the same semantics and the same idempotency; only the addressing differs. Ownership is checked twice, as it is there: the dispatch gate on the live session's principal, the handler on the durable record's.
+
+`gateway.appForSession(id)` is the resolution on its own, for when you want the app rather than the destruction.
+
 ### Gating and shaping the mount
 
 `createApp` is itself a hookable operation, so the gateway is where a multi-tenant provisioning gate belongs — before the app is constructed:
@@ -651,21 +664,23 @@ Each is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`, 
 
 ### `GatewayHarness`
 
-| Member                           | Returns                                                     |
-| -------------------------------- | ----------------------------------------------------------- |
-| `id`                             | The gateway id.                                             |
-| `listen()`                       | Binds transports, flips ready. Idempotent.                  |
-| `close({ drain? })`              | The sole terminal verb. Drains by default.                  |
-| `createApp(element, input)`      | Mounts an app. Also takes one combined input object.        |
-| `app(id)` / `apps()`             | Read-side enumeration.                                      |
-| `events(filter?, options?)`      | `AsyncIterable<ProtocolEvent>` fanned in from every app.    |
-| `authorize(input)`               | The hookable policy call.                                   |
-| `accept(info)`                   | The hookable per-connection admission.                      |
-| `wireExtensions()`               | The sealed registry.                                        |
-| `emitCapabilitiesChanged()`      | Signal subscribers to refetch capabilities.                 |
-| `emitAdmissionFailure(failure)`  | Record a refused ingress crossing on the bus.               |
-| `hook(config)` / `hooks.onX(fn)` | Register interceptors; both fold live to every app beneath. |
-| `guard(decide)`                  | Register a verdict-returning admission seam.                |
+| Member                           | Returns                                                          |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `id`                             | The gateway id.                                                  |
+| `listen()`                       | Binds transports, flips ready. Idempotent.                       |
+| `close({ drain? })`              | The sole terminal verb. Drains by default.                       |
+| `createApp(element, input)`      | Mounts an app. Also takes one combined input object.             |
+| `app(id)` / `apps()`             | Read-side enumeration.                                           |
+| `appForSession(id)`              | Which mounted app owns a session — live registries, then stores. |
+| `destroySession(id, opts?)`      | Destroy a session without naming its app.                        |
+| `events(filter?, options?)`      | `AsyncIterable<ProtocolEvent>` fanned in from every app.         |
+| `authorize(input)`               | The hookable policy call.                                        |
+| `accept(info)`                   | The hookable per-connection admission.                           |
+| `wireExtensions()`               | The sealed registry.                                             |
+| `emitCapabilitiesChanged()`      | Signal subscribers to refetch capabilities.                      |
+| `emitAdmissionFailure(failure)`  | Record a refused ingress crossing on the bus.                    |
+| `hook(config)` / `hooks.onX(fn)` | Register interceptors; both fold live to every app beneath.      |
+| `guard(decide)`                  | Register a verdict-returning admission seam.                     |
 
 ### `@agentick/gateway/testing`
 
@@ -722,6 +737,7 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - `src/__tests__/wire-registry.spec.ts` + `wire-framework-extensions.spec.ts` — register, resolve, enumerate in insertion order, duplicate namespace and name rejection, sealing, and adopter attempts on all four framework namespaces failing.
 - `src/__tests__/dynamic-commands.spec.ts` — the bundled authorizers including glob cover and the same-principal rule, exact-beats-dynamic resolution, single pre-seal registration, a non-`wire` verb being indistinguishable from an absent method, an exposed-and-granted verb dispatching with `origin: "wire"`, and `commands/list` showing a denied caller nothing.
 - `src/__tests__/gateway-extensions.spec.ts` — install during construction, the live installer host, async install awaited before ready, bridge-slot singleton enforcement, install failure rejecting `createGateway` without half-sealing the registry, bundle field distribution, bare app/session extensions cascading to every app and session, and LIFO `onClose` after apps close.
+- `@agentick/transport`'s `src/__tests__/destroy-session-wire.spec.ts` — both destroy verbs against a real gateway and the real dispatch gate: `gateway/destroy_session` resolving the owner on a multi-app gateway, resolving a paged-out session through the session stores, denying another principal's thread on the record when no live target exists for the gate to read, and answering an unclaimed id with no `appId` instead of a fault. (Home is transport because this package does not depend on it.)
 - `src/__tests__/gateway-app-live-link.spec.ts` — a gateway hook registered **after** a session exists reaching that session's tool executor, and unsubscribe cascading back out.
 - `src/__tests__/layered-tools.spec.ts` — gateway tools reaching every session of every hosted app, and app- and session-level tools overriding on name collision.
 - `src/__tests__/emit-capabilities-changed.spec.ts` — event shape, per-call ordering, zero-subscriber safety, and scope-query plus child-bus isolation.

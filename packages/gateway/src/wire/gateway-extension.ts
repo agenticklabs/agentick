@@ -19,6 +19,7 @@ import {
   type AppInfo,
   type AppHarnessProtocol,
   type WireExtension,
+  WireRpcError,
 } from "@agentick/spec";
 
 /**
@@ -51,6 +52,30 @@ export const gatewayWireExtension: WireExtension = defineWireExtension({
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
       return toAppInfo(app);
+    },
+    "gateway/destroy_session": async ({ sessionId, reason }, ctx) => {
+      // Same verb as `app/destroy_session`, addressed without an app — the
+      // gateway resolves the owner. A client holding a session id from a
+      // cross-app listing should not have to carry an app id beside it just to
+      // delete a thread.
+      //
+      // Ownership, second door (the first is the dispatch gate, which reads
+      // `params.sessionId` and applies the same-principal rule to the LIVE
+      // session). A destroy that reaches a paged-out or closed session has no
+      // live target for the gate to read, and only the durable record names the
+      // owner — so check it here, exactly as the app-level handler does. A
+      // record with no principal asserts no ownership and is left to the gate.
+      const app = await ctx.gateway.appForSession(sessionId);
+      const record = await app?.getSessionRecord(sessionId);
+      if (record?.principal !== undefined && record.principal !== ctx.principal) {
+        throw WireRpcError.forbidden("gateway:destroy_session");
+      }
+      // Delegate through the harness verb rather than re-deriving the result
+      // here: it owns the ONE construction site for the shape, including the
+      // no-app-claims-it miss. The cost is resolving the app twice on a verb
+      // called once per deleted thread — the right trade against two places that
+      // could disagree about what a destroy result looks like.
+      return ctx.gateway.destroySession(sessionId, omitUndefined({ reason }));
     },
   },
   // No notifications on this namespace today. Adopter extensions

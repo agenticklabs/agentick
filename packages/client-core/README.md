@@ -107,11 +107,11 @@ const session = app.session("sess-123"); // AppHandle → SessionHandle
 `client.app(id)` and `client.session(id)` are the direct forms — nesting is for
 when you're walking down from a listing.
 
-| Handle               | Verbs                                                                                            |
-| -------------------- | ------------------------------------------------------------------------------------------------ |
-| `client.gateway()`   | `listApps` · `getApp` · `app(id)` · `events`                                                     |
-| `client.app(id)`     | `createSession` · `getSession` · `listSessions` · `runOnce` · `close` · `session(id)` · `events` |
-| `client.session(id)` | `send` · `dispatch` · `abort` · `snapshot` · `rebind` · `close` · `events`                       |
+| Handle               | Verbs                                                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `client.gateway()`   | `listApps` · `getApp` · `destroySession` · `app(id)` · `events`                                                     |
+| `client.app(id)`     | `createSession` · `getSession` · `listSessions` · `destroySession` · `runOnce` · `close` · `session(id)` · `events` |
+| `client.session(id)` | `send` · `dispatch` · `abort` · `snapshot` · `rebind` · `close` · `events`                                          |
 
 Every handle also carries `onLog`, `onProgress`, and `channelView` pre-bound to
 its own scope. The generic `client.onLog(scope, cb)` stays available for a scope

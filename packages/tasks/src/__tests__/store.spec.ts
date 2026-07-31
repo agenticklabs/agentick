@@ -107,6 +107,62 @@ describe("TasksHarness — detached lifetime (ADR 68)", () => {
   });
 });
 
+// ── 2b. ttl reaper lifetime across close ────────────────────────────────
+describe("TasksHarness — ttl reaper lifetime across close (ADR 68)", () => {
+  it("a surviving detached task KEEPS its deadline after close", async () => {
+    // The deliberate exception to "a task this harness stopped serving holds no
+    // timer". A detached task outlives the session by contract, so the ttl that
+    // BOUNDS it has to outlive the session too — disarming the reaper at close
+    // would hand a detached task an unbounded lifetime, which is the worse leak.
+    const store = new InMemoryTaskStore();
+    const harness = mkHarness(store, "s-ttl-detached");
+    await harness.hydrated;
+
+    const handle = harness.submit(() => new Promise<string>(() => {}), {
+      detached: true,
+      ttl: 20,
+    });
+    const outcome = drainRejection(handle.result);
+
+    await harness.close();
+    // Survived close, still running.
+    expect(harness.get(handle.taskId)?.status).toBe("working");
+
+    // …and its deadline still lands.
+    await expect(outcome).resolves.toMatchObject({ status: "failed" });
+    expect(harness.get(handle.taskId)?.failure?.kind).toBe("timeout");
+    const persisted = await store.get(handle.taskId, stubStoreCtx());
+    expect(persisted?.status).toBe("failed");
+    expect(persisted?.failure?.kind).toBe("timeout");
+  });
+
+  it("cancelling a detached task disarms its reaper — the deadline never rewrites the outcome", async () => {
+    // The path `app.destroySession` takes: destroy cancels the detached tasks
+    // close abandons, and that cancellation must take the timer with it, or a
+    // reaper fires later against a task nobody is serving.
+    const store = new InMemoryTaskStore();
+    const harness = mkHarness(store, "s-ttl-cancelled");
+    await harness.hydrated;
+
+    const handle = harness.submit(() => new Promise<string>(() => {}), {
+      detached: true,
+      ttl: 20,
+    });
+    const outcome = drainRejection(handle.result);
+
+    await harness.cancel(handle.taskId, "destroyed");
+    await expect(outcome).resolves.toMatchObject({ status: "cancelled" });
+    await harness.close();
+
+    // Well past the ttl: the outcome is still the cancellation, with its reason
+    // intact — the reaper did not run and did not relabel it a timeout.
+    await new Promise((r) => setTimeout(r, 60));
+    expect(harness.get(handle.taskId)?.status).toBe("cancelled");
+    expect(harness.get(handle.taskId)?.failure?.reason).toBe("destroyed");
+    expect((await store.get(handle.taskId, stubStoreCtx()))?.status).toBe("cancelled");
+  });
+});
+
 // ── 3. Shared store isolates sessions; no cross-session list bleed ───────
 describe("TasksHarness — shared app-scoped store isolation (ADR 68)", () => {
   it("two harnesses on one store each list only their own scope", async () => {

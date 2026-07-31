@@ -43,6 +43,8 @@ import type {
   AuthorizeResult,
   ConnectionInfo,
   CreateAppInput,
+  DestroySessionInput,
+  GatewayDestroySessionResult,
   EventBus,
   EventNameOverride,
   EventQuery,
@@ -915,6 +917,56 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
 
   apps(): readonly AppHarnessProtocol[] {
     return Array.from(this._apps.values());
+  }
+
+  /**
+   * Gateway-level address resolution — see
+   * {@link GatewayHarnessProtocol.appForSession}. Live registries first (the
+   * cheap sync read), then the durable session stores, because a paged-out or
+   * closed session is exactly the case a live-only lookup gets wrong.
+   *
+   * Stores are read in parallel: a mounted app whose store is slow or failing
+   * must not serialize the resolution, and a store that throws answers "not
+   * mine" rather than failing the whole lookup.
+   */
+  async appForSession(sessionId: string): Promise<AppHarnessProtocol | undefined> {
+    for (const app of this._apps.values()) {
+      if (app.getSession(sessionId) !== undefined) return app;
+    }
+    const apps = Array.from(this._apps.values());
+    const records = await Promise.all(
+      apps.map((app) => app.getSessionRecord(sessionId).catch(() => undefined)),
+    );
+    return apps[records.findIndex((record) => record !== undefined)];
+  }
+
+  /**
+   * Destroy a session addressed WITHOUT its app — see
+   * {@link GatewayHarnessProtocol.destroySession}. Pure resolution + delegation:
+   * the destruction semantics are the app's, and deliberately not re-wrapped in
+   * a gateway op (that would mint a second envelope for one destruction).
+   */
+  async destroySession(
+    sessionId: string,
+    opts?: DestroySessionInput,
+  ): Promise<GatewayDestroySessionResult> {
+    const app = await this.appForSession(sessionId);
+    if (app === undefined) {
+      // No mounted app claims this id. Idempotent for the same reason the
+      // app-level verb is, one level further out — and with no `appId`, because
+      // there is no app to name.
+      return {
+        sessionId,
+        live: {
+          found: false,
+          abortedExecutions: 0,
+          disposedDescendants: 0,
+          cancelledDetachedTasks: 0,
+        },
+        record: { existed: false },
+      };
+    }
+    return { ...(await app.destroySession(sessionId, opts)), appId: app.id };
   }
 
   async createApp<P>(

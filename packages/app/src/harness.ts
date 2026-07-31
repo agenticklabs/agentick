@@ -40,7 +40,7 @@ import {
 import { ElicitationHarness } from "@agentick/elicitation";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks";
 import type { TaskExecutor, TaskStore } from "@agentick/tasks";
-import type { TaskWakePolicy } from "@agentick/spec";
+import type { TaskRecord, TaskWakePolicy } from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model";
@@ -77,6 +77,7 @@ import {
   isLoopExecutorFactory,
   isCompilerFactory,
   isRunnerBindable,
+  isTerminalTaskStatus,
   isToolExecutorFactory,
   toRegistration,
 } from "@agentick/spec";
@@ -89,6 +90,8 @@ import type {
   AppInstallerHost,
   Extension,
   CreateSessionInput,
+  DestroySessionInput,
+  DestroySessionResult,
   EventBus,
   EventQuery,
   SubscribeOptions,
@@ -185,6 +188,15 @@ declare module "@agentick/runtime" {
     // `runOperation` (see `closeApp`). Input/output are both `void` (the
     // Operation's generics). Mints `onBefore/AfterAppCloseApp`.
     "app:close-app": { input: void; output: void };
+    // The strongest-form session removal. Its own verb (not a flag on
+    // `close`) precisely so a guard can veto DESTRUCTION without also vetoing
+    // hangup — "this principal may end a thread but may not delete it" is the
+    // distinction a shared verb makes inexpressible. Mints
+    // `onBefore/AfterAppDestroySession`.
+    "app:destroy-session": {
+      input: { readonly sessionId: string; readonly reason?: string };
+      output: DestroySessionResult;
+    };
   }
 }
 
@@ -1605,8 +1617,42 @@ export class AppHarness<P = unknown>
     );
   }
 
+  // TODO(session-direct-close-registry): a session closed DIRECTLY
+  // (`session.close()`, the wire's `session/close`) keeps its live registry
+  // entry — only `disposeSession` removes it — so `getSession` can hand back a
+  // closed harness and the LRU cap counts a session that is already gone. The
+  // fix is a session→app close notification, which is a change to close's
+  // plumbing and so out of destroy's scope (destroy disposes through
+  // `disposeSession`, which is correct today).
   getSession(sessionId: string): SessionHarnessProtocol<P> | undefined {
     return this.registry.get(sessionId)?.session;
+  }
+
+  /**
+   * Strongest-form, transitive session removal. See
+   * {@link AppHarnessProtocol.destroySession} for the contract; the ordering
+   * rationale lives on {@link destroySessionBody}.
+   *
+   * Its own op (`app:command:destroy-session`) rather than a flag on close —
+   * so a guard can veto deletion without also vetoing hangup.
+   */
+  destroySession(sessionId: string, opts?: DestroySessionInput): Promise<DestroySessionResult> {
+    const input = { sessionId, ...omitUndefined({ reason: opts?.reason }) };
+    const op: Operation<typeof input, DestroySessionResult> = {
+      opId: `app:destroy-session:${ulid()}`,
+      surface: "app",
+      name: "app:command:destroy-session",
+      scope: { sessionId },
+      input,
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.destroySessionBody(i.sessionId, i.reason ?? "destroyed"),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
+    );
   }
 
   /**
@@ -2568,6 +2614,163 @@ export class AppHarness<P = unknown>
     // the journal for this op, so a handler closing the journal
     // doesn't break the framework's terminal append.
     await super.close();
+  }
+
+  /**
+   * The `app:command:destroy-session` BODY — strongest-form, transitive removal.
+   *
+   * The ORDER is the whole design, and each step exists because the step before
+   * it cannot do its job:
+   *
+   *   1. **Abort in-flight executions across the subtree.** `session.abort()`
+   *      reaches only that session's own current handle; a spawned child feels
+   *      the parent's construction signal (which makes its NEXT send resolve
+   *      `aborted`) but its RUNNING execution is not itself cancelled by it. So
+   *      every live descendant is aborted explicitly, deepest-first — a child
+   *      must stop before the parent that is waiting on it unwinds.
+   *   2. **Cancel detached tasks** — this must happen while the sessions are
+   *      still LIVE, because a detached task's only in-process handle is its
+   *      owning session's task harness, and step 3 closes that harness.
+   *   3. **Dispose the subtree** through the same `disposeSession("close")` a
+   *      genuine session end uses (registry removal, `onSessionClose`, bridge
+   *      teardown) — promoted, not duplicated.
+   *   4. **Delete the durable record.**
+   *
+   * Idempotent: an unknown id walks an empty subtree, disposes nothing, and
+   * deletes a record that isn't there — reporting all three as facts rather than
+   * raising. Destroy deliberately does NOT `assertOpen()`: refusing to clean up
+   * because the app is already shutting down would be exactly backwards.
+   */
+  private async destroySessionBody(
+    sessionId: string,
+    reason: string,
+  ): Promise<DestroySessionResult> {
+    // Snapshot the subtree BEFORE any teardown — disposal mutates the registry,
+    // so its shape can only be read honestly up front.
+    const subtree = this.liveSubtree(sessionId);
+    const found = this.registry.has(sessionId);
+
+    // (1) Transitive abort, deepest-first. `hasInFlightExecution` is the
+    // session's own synchronous truth, read immediately before the abort — the
+    // only honest input to the count.
+    let abortedExecutions = 0;
+    for (const entry of [...subtree].reverse()) {
+      if (!entry.session.hasInFlightExecution) continue;
+      abortedExecutions++;
+      try {
+        await entry.session.abort(reason);
+      } catch {
+        // best effort — an execution that settled mid-abort is a success
+      }
+    }
+
+    // (2) Reap detached tasks — precisely the ones `close()` abandons.
+    const cancelledDetachedTasks = await this.cancelDetachedTasks(subtree, reason);
+
+    // (3) Dispose. The target's own close cascades to the children it spawned
+    // (SP6 `disposeChildren`), so the second pass is a no-op for those; it
+    // exists for a descendant the registry links to this subtree but the live
+    // `_children` chain does not (an intermediate session evicted / already
+    // closed leaves its children parented to a gone session).
+    await this.disposeSession(sessionId, "close");
+    for (const entry of subtree) {
+      if (entry.id === sessionId) continue;
+      await this.disposeSession(entry.id, "close");
+    }
+
+    // (4) Delete the durable record. `existed` is read first because
+    // `SessionStore.delete` returns void — what deletion MEANS (soft flag, hard
+    // removal, cascade) is the store impl's contract, so the only durable fact
+    // this result can assert is whether there was a record to act on. The delete
+    // itself is unconditional: a record written between the read and the delete
+    // must not survive destroy.
+    const storeCtx = this.storeCtx();
+    const existed = (await this.sessionStore.get(sessionId, storeCtx)) !== undefined;
+    await this.sessionStore.delete(sessionId, storeCtx);
+
+    return {
+      sessionId,
+      live: {
+        found,
+        abortedExecutions,
+        disposedDescendants: subtree.length - (found ? 1 : 0),
+        cancelledDetachedTasks,
+      },
+      record: { existed },
+    };
+  }
+
+  /**
+   * The live spawn subtree rooted at `sessionId` — the target's own registry
+   * entry (when live) followed by every live descendant, breadth-first, so
+   * reversing the list walks deepest-first.
+   *
+   * Read off the registry's `parentSessionId` edge rather than
+   * `SessionHarness._children` (private) — the same edge from the other end, and
+   * the one that still finds a descendant whose intermediate ancestor has since
+   * been evicted. A target that is not itself live still yields its live
+   * descendants.
+   */
+  private liveSubtree(sessionId: string): InternalSessionEntry<P>[] {
+    const out: InternalSessionEntry<P>[] = [];
+    const self = this.registry.get(sessionId);
+    if (self) out.push(self);
+    const seen = new Set<string>([sessionId]);
+    const frontier: string[] = [sessionId];
+    while (frontier.length > 0) {
+      const parentId = frontier.shift() as string;
+      for (const entry of this.registry.values()) {
+        if (entry.parentSessionId !== parentId || seen.has(entry.id)) continue;
+        seen.add(entry.id);
+        out.push(entry);
+        frontier.push(entry.id);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Cancel every still-running DETACHED task owned by a session in `subtree`.
+   *
+   * Detached is the only interesting case: `close()` already cancels the rest as
+   * its harness shuts down, and it deliberately ABANDONS the detached ones (ADR
+   * 68 — they outlive the session that spawned them). Destroy is the stronger
+   * verb, so it reaps them.
+   *
+   * Reached through the owning session's LIVE task harness, not by writing the
+   * store directly: cancellation has to abort the executor, and the executor is
+   * an in-process handle only that harness holds. Consequently a detached task
+   * whose owning session was already closed is NOT reachable — its record stays
+   * `working` until store hydration marks it `interrupted`.
+   *
+   * TODO(tasks-detached-orphans): give the app a door to the executors of
+   * detached tasks whose owning session is gone, so destroy (and app close) can
+   * reap them too. Today the only handle dies with the session's harness.
+   */
+  private async cancelDetachedTasks(
+    subtree: readonly InternalSessionEntry<P>[],
+    reason: string,
+  ): Promise<number> {
+    let cancelled = 0;
+    const storeCtx = this.storeCtx();
+    for (const entry of subtree) {
+      let records: readonly TaskRecord[];
+      try {
+        records = await this.taskStore.list({ scope: { sessionId: entry.id } }, storeCtx);
+      } catch {
+        continue; // a store read failure must not block the teardown
+      }
+      for (const record of records) {
+        if (!record.detached || isTerminalTaskStatus(record.status)) continue;
+        try {
+          await entry.session.tasks.cancel(record.taskId, reason);
+          cancelled++;
+        } catch {
+          // unknown to this harness, or terminal since the read — best effort
+        }
+      }
+    }
+    return cancelled;
   }
 
   /**

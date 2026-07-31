@@ -26,6 +26,7 @@ import {
   type SessionRecord,
   type SessionStoreQuery,
   type WireExtension,
+  WireRpcError,
 } from "@agentick/spec";
 
 /**
@@ -112,6 +113,28 @@ export const appWireExtension: WireExtension = defineWireExtension({
       const record = await app.getSessionRecord(sessionId);
       if (!record) throw new SessionNotFoundError({ sessionId });
       return toSessionEntry(record);
+    },
+    "app/destroy_session": async ({ appId, sessionId, reason }, ctx) => {
+      const app = ctx.gateway.app(appId);
+      if (!app) throw new AppNotFoundError({ appId });
+      // ADR 48 ownership, second door. The dispatch gate already resolved the
+      // TARGET session from `params.sessionId` and applied the same-principal
+      // rule — but it resolves through the LIVE registry, and destroy's whole
+      // point is that it also reaches a session that is no longer live. A closed
+      // session has no live target, so the gate sees no target principal and the
+      // rule goes quiet; the durable record still carries the owner. Check it
+      // here, where the record is in hand, or the strongest verb in the API is
+      // the one place a caller can act on someone else's thread.
+      //
+      // A record with NO principal asserts no ownership (principal-less
+      // deployment / local pole) and is left to the gate. A record WITH one is
+      // matched exactly — an unauthenticated caller does not match an owned
+      // session, which is the same answer `sameOwner` gives on the live path.
+      const record = await app.getSessionRecord(sessionId);
+      if (record?.principal !== undefined && record.principal !== ctx.principal) {
+        throw WireRpcError.forbidden("app:destroy_session");
+      }
+      return app.destroySession(sessionId, omitUndefined({ reason }));
     },
     "app/list_sessions": async ({ appId, filter }, ctx) => {
       const app = ctx.gateway.app(appId);

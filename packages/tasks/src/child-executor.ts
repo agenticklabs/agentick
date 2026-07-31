@@ -46,12 +46,11 @@ import type {
   TaskExecutorHooks,
   TaskRecord,
   TaskReport,
-  TaskStatus,
   TaskWork,
   TaskWorkContext,
   TaskWorkVerbs,
 } from "@agentick/spec";
-import { isAgentickError, serializeAgentickError } from "@agentick/spec";
+import { isAgentickError, isTerminalTaskStatus, serializeAgentickError } from "@agentick/spec";
 
 import type { ParentToWorkerMessage, WorkerToParentMessage } from "./child-protocol.js";
 
@@ -102,15 +101,6 @@ interface ChildHandle {
 interface ChildProcessExecution extends TaskExecution {
   readonly kind: "child-process";
   readonly taskId: string;
-}
-
-function isTerminalStatus(status: TaskStatus): boolean {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "interrupted"
-  );
 }
 
 export class ChildProcessTaskExecutor implements TaskExecutor {
@@ -176,7 +166,7 @@ export class ChildProcessTaskExecutor implements TaskExecutor {
       if (message.t !== "transition") return;
       if (handle.settled) return;
       const transition = message.transition;
-      if (transition.status !== undefined && isTerminalStatus(transition.status)) {
+      if (transition.status !== undefined && isTerminalTaskStatus(transition.status)) {
         handle.settled = true;
       }
       handle.report(transition);
