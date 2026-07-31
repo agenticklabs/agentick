@@ -150,6 +150,60 @@ UNMODIFIED 1:1 assistant composition and asserts byte-identical
 behavior with arena installed-but-unused — the conservation principle
 as a test, not a promise.
 
+## 4b. v3 refinement — rooms are loop-less; agents participate through bridges
+
+**(Ryan's connector insight, 2026-07-31 — supersedes §3.4/§4's
+participation-orchestrator-in-the-room and the arena use of
+`session.run()`.)**
+
+The room is a **loop-less** conversation object — shared ground truth
+(timeline + membership + channels), no model ever runs _in_ it. An
+agent participant is an **ordinary, unchanged 1:1 session** whose
+counterparty is the room, bound by a **bridge that is a connector**:
+room events flow in as that session's input; replies flow back as
+attributed room appends. `@agentick/connector` already means "external
+event source feeding a session," and a room is such a source — which
+makes SMS/email bridge members and agent members the SAME shape.
+Everything is a connector into and out of the room.
+
+What this fixes structurally rather than by rule:
+
+1. **Compaction dissolves.** Room transcript and agent working memory
+   are DIFFERENT timelines. The agent compacts/system-prompts/
+   tool-calls in its own session; the room stays the humans' untouched
+   record. Whose-context-wins stops being a question.
+2. **Join-horizon privacy becomes auditable fact.** What the agent
+   read is exactly what its bridge forwarded; the horizon is when
+   forwarding started. Per-agent, inspectable.
+3. **The send fusion becomes CORRECT.** The bridge _sends_ to the
+   agent session — room activity genuinely is that session's input.
+   Participation collapses into the bridge's **delivery policy** (when
+   to forward a batch is when the agent speaks; debounce is natively
+   batching). `session.run()` exits the arena path (it remains E1-
+   worthy standalone: regenerate/continue).
+4. **Multi-agent gets cheap.** Each agent is a full session — own
+   model/tools/knobs/eviction; agents don't know each other;
+   arbitration lives in bridges.
+
+The unification: a room is IMPLEMENTED as a membership-session with no
+loop configured — the "separate-but-equal derivative" and the "session
+profile" are one object seen from two ends. E1 therefore reduces to
+seams 3.1–3.3 (principal, guard, wire append) — still required for the
+HUMAN half. The client needs no wrapper: the wire-extension model
+already makes every client a superset per installed extension (arena
+adds an `arena/*` namespace to the same derived client, as knobs and
+completions did); agent sessions are headless — their "client" IS the
+bridge.
+
+Costs to price honestly: **transcript duplication** (room speech is
+copied into each agent session as forwarded input — token/storage
+cost; mitigated by the agent's own compaction, and arguably the point:
+that copy is its working memory) and **echo suppression** (a bridge
+never forwards an agent its own words — must be a pinned invariant or
+two agents resonate). ⁇ how a bridge attributes multi-human batches in
+the agent session's input (draft: one forwarded message per batch,
+speaker-labeled inline, source.arena carrying the room ref).
+
 ## 5. Adjacent wire work this rides on
 
 `app/destroy_session` + `gateway/destroy_session` (**landed 2026-07-31** —
