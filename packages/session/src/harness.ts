@@ -1504,8 +1504,18 @@ export class SessionHarness<P = unknown>
     );
   }
 
-  /** The `session:command:close` BODY — the pre-promotion `close` verbatim. */
+  /**
+   * The `session:command:close` BODY. The session's own teardown lives in
+   * {@link teardown}, which `BaseHarness.close` runs with the inbox detach and
+   * the `onClose` unwind guaranteed to follow it — so a bridge or a mount that
+   * fails to shut down cannot leave this session's substrate addresses claimed
+   * and collide with the next create-or-resume of the same id.
+   */
   private async closeBody(): Promise<void> {
+    await super.close();
+  }
+
+  protected override async teardown(): Promise<void> {
     if (this._closed) return;
     this._closed = true;
     this.runtime.setStatus("closed" as never);
@@ -1536,7 +1546,6 @@ export class SessionHarness<P = unknown>
       }
     }
     await Promise.all(closes);
-    await super.close();
   }
 
   // ── StateApplicator ──────────────────────────────────────────────

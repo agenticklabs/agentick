@@ -124,6 +124,18 @@ Hook names are a total function of the verb: `on` + `Before|After` + PascalCase 
 > [!IMPORTANT]
 > Commands carry verbs plus serializable data only. An operation with a required function parameter must not be declared — give it a construction-bound default and declare the data-only signal form, keeping the function-arg variant as a plain method.
 
+### Shutting down — override `teardown`, not `close`
+
+A harness's own shutdown work goes in `teardown()`. `close()` runs it, then detaches from the interceptor parent and the inbox, then fires the `onClose` handlers LIFO — and each of those steps is isolated, so a `teardown()` that throws still gets the full unwind. The failure is re-thrown once the unwind finishes, so nothing is swallowed.
+
+```ts
+protected override async teardown(): Promise<void> {
+  await this.client.close(); // may reject — the inbox detach happens anyway
+}
+```
+
+That split is not stylistic. Detaching from the inbox is what releases `address` for the next harness to claim, and a subclass that ran its work ahead of `await super.close()` skipped the detach the moment its work rejected — leaving the address claimed for the life of the process, and turning the next harness at the same address into `address already registered`. `close()` owns that invariant now; `teardown()` is the only part a subclass writes. A harness that wraps close in an operation (`session:command:close`) still overrides `close()` for the envelope, but its body calls `super.close()` and its work lives in `teardown()`.
+
 ### `commandStream` — the streaming twin
 
 `commandStream({ name, body })` is the second declaration site. It fuses the same registry registration and the same interceptor cascade with the async-iterator machinery, so there is no second interceptor path: `guard → onBefore(input) → body → onAfter(R)` fires at the stream's **start** and **terminal**, exactly as for a non-streaming command.
@@ -624,6 +636,7 @@ Key types: `Middleware` · `AsyncMiddleware` · `InterceptorKind` · `CommandReg
 | `commands()`                                        | public     | Wire-safe summaries of the declared verbs                            |
 | `address` · `principal` · `metadata` · `input`      | public     | Construction identity                                                |
 | `ready` · `onClose(h)` · `close()`                  | public     | Lifecycle — `ready` settles once inbox registration lands            |
+| `teardown()`                                        | protected  | The subclass's own shutdown work — override this, never `close()`    |
 | `command(def)` / `commandStream(def)`               | protected  | The two declaration sites                                            |
 | `commandEffect(name, input)`                        | protected  | Invoke a declared verb in-fiber so causality threads                 |
 | `runOperation(op, body)`                            | protected  | The heavy path directly, for a verb that is not a declared command   |
@@ -685,6 +698,7 @@ The **fakes** are the production in-memory implementations themselves — import
 - `src/__tests__/namespace-slots.spec.ts` — registration idempotence under a double import, projection of only the registered and present slots, explicit-`undefined` treated as absent, and nothing forwarded for an unregistered key.
 - `src/__tests__/memory-journal.spec.ts` + `local-event-bus.spec.ts` + `local-event-bus-batching.spec.ts` + `local-inbox.spec.ts` — the spec conformance suites, plus capacity overflow with idempotency-key eviction, the cursor protocol (replay, tail, `CursorEvictedError` past retention, independent cursors), lazy fan-out, metrics, per-surface batch triggers with exact-over-wildcard precedence, drain on close, and fan-in writes with isolated reads.
 - `src/__tests__/base-harness-slots.spec.ts` + `create-factory.spec.ts` + `base-harness-principal.spec.ts` — positional defaults, instance and factory overrides, the shell exposing the parent's substrate, `onClose` replay, the sync-only factory contract, the bundled `createFactory` fan-in defaults and hand-rolled factory patterns, and the principal as authoritative construction identity.
+- `src/__tests__/close-teardown.spec.ts` — the teardown contract: a `teardown()` that rejects still detaches from the inbox, still fires the `onClose` handlers, and still surfaces its own error; a close that races construction releases the address it claimed; a second close is a no-op. [@agentick/tasks](../tasks) and [@agentick/app](../app) pin the same invariant through a real harness and a real create-or-resume cycle.
 - `src/__tests__/harness-plumbing.spec.ts` — a mixed sync/async harness end to end: envelope flow identical for direct and inbox-routed calls, an unknown message type failing without crashing the harness, middleware on both paths, and `parentOpId` threading through nested operations.
 - `src/__tests__/compile-query.spec.ts` + `request-response-registry.spec.ts` + `fork-bus-subscription.spec.ts` + `spy-telemetry-sink.spec.ts` — matcher agreement across every query shape plus specialization fast paths; register/resolve, timeout, signal abort, cancel-all; per-event isolation of a throwing _and_ a rejecting listener with idempotent unsubscribe; and the recording processor/reader resolving parents by name and collecting all three instrument kinds.
 - The switch itself — enrichment defaults on, zero overhead off — is covered in [@agentick/app](../app) (`telemetry.spec.ts`) and [@agentick/session](../session) (`telemetry.spec.ts`). `ctx.run`'s cross-surface contract is covered in [@agentick/tool-executor](../tool-executor) (`ctx-run.spec.ts`) and by the ctx conformance suites in `@agentick/spec-conformance`.

@@ -2111,9 +2111,37 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     this.closeHandlers.push(handler);
   }
 
+  /** Latched at the top of {@link close} — teardown runs at most once. */
+  private closeStarted = false;
+
   /**
-   * Detach this harness from the inbox and fire all registered
-   * `onClose` handlers in LIFO order with error isolation.
+   * Subclass teardown — the harness's OWN shutdown work (cancel in-flight
+   * tasks, stop streams, close a client, drain a bus). **Override this, never
+   * {@link close}.**
+   *
+   * The split exists because teardown is the failable part and detaching from
+   * the inbox is the part that must happen anyway. A subclass that overrode
+   * `close()` and ran its work before `await super.close()` — the shape all
+   * five concrete harnesses had — silently skipped the detach the moment its
+   * work rejected, and the address stayed claimed for the lifetime of the
+   * process. `close()` now owns that invariant: this hook is isolated, and the
+   * detach + `onClose` unwind run whether it succeeds or not. A failure is
+   * re-thrown once the unwind is complete, so the caller still learns about it.
+   *
+   * Runs BEFORE the inbox detach: teardown may still need to `ask`/`send` (an
+   * MCP client's goodbye, a task escalation reply), and a harness that has not
+   * yet detached can still receive the answer.
+   */
+  protected teardown(): void | Promise<void> {}
+
+  /**
+   * Tear this harness down: run the subclass's {@link teardown}, detach from
+   * the interceptor parent and the inbox, then fire every registered
+   * {@link onClose} handler in LIFO order. Idempotent.
+   *
+   * **Do not override.** Subclasses supply {@link teardown}; this method owns
+   * the ordering and the isolation between steps — one failing step never
+   * skips the ones after it.
    *
    * **Subclasses that wrap close in a runOperation** (e.g.
    * `AppHarness.closeApp`) MUST mark their close-Op name as
@@ -2123,17 +2151,50 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * See `AppHarness` constructor for the canonical pattern.
    */
   async close(): Promise<void> {
+    if (this.closeStarted) return;
+    this.closeStarted = true;
+
+    // The subclass's own shutdown, isolated. Held rather than thrown so the
+    // detach below is not skippable; re-thrown at the end.
+    let teardownError: unknown;
+    let teardownFailed = false;
+    try {
+      await this.teardown();
+    } catch (err) {
+      teardownError = err;
+      teardownFailed = true;
+    }
+
     // ADR 83 §4 — detach from the interceptor parent so a torn-down child stops
     // receiving pushed registrations and is not retained by the parent's
-    // children set. Fired before the substrate unwind (order-independent).
-    if (this.detachFromInterceptorParent) {
-      this.detachFromInterceptorParent();
-      this.detachFromInterceptorParent = undefined;
+    // children set. Order-independent relative to the inbox detach.
+    try {
+      if (this.detachFromInterceptorParent) {
+        this.detachFromInterceptorParent();
+        this.detachFromInterceptorParent = undefined;
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("BaseHarness interceptor-parent detach failed:", err);
     }
-    if (this.inboxUnsubscribe) {
-      this.inboxUnsubscribe();
-      this.inboxUnsubscribe = undefined;
+
+    // Release the inbox address. `ready` is awaited first because
+    // `inboxUnsubscribe` is assigned in a `.then()` off the registration
+    // Effect: a close that races construction would otherwise find the slot
+    // empty and leak the address with nothing left alive to release it. A
+    // registration that FAILED leaves nothing to detach, so a rejected `ready`
+    // is exactly the no-op case.
+    try {
+      await this.ready.catch(() => {});
+      if (this.inboxUnsubscribe) {
+        this.inboxUnsubscribe();
+        this.inboxUnsubscribe = undefined;
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("BaseHarness inbox detach failed:", err);
     }
+
     // LIFO unwind. Each handler is awaited so async cleanup completes
     // before the next runs. Errors logged but never propagated — one
     // bad handler must not block the rest.
@@ -2146,6 +2207,8 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
         console.error("BaseHarness onClose handler failed:", err);
       }
     }
+
+    if (teardownFailed) throw teardownError;
   }
 }
 

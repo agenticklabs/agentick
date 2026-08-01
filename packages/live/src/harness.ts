@@ -288,11 +288,30 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
     );
   }
 
-  /** The `live:command:close` BODY — the pre-promotion `close` verbatim. */
+  /**
+   * The `live:command:close` BODY. The harness's OWN teardown lives in
+   * {@link teardown} — `BaseHarness.close` isolates it from the inbox detach,
+   * so a stream that fails to stop cannot leave this harness's address
+   * claimed. This body is just the op wrapper's call into that sequence.
+   */
   private async closeBody(): Promise<void> {
-    const ids = [...this.streams.keys()];
-    for (const id of ids) await this.stop(id, { hard: true, reason: "harness_closed" });
     await super.close();
+  }
+
+  protected override async teardown(): Promise<void> {
+    const ids = [...this.streams.keys()];
+    const failures: unknown[] = [];
+    for (const id of ids) {
+      // Per-stream isolation: one stream that will not stop must not strand
+      // the others still running.
+      try {
+        await this.stop(id, { hard: true, reason: "harness_closed" });
+      } catch (err) {
+        failures.push(err);
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "live harness teardown failed");
   }
 
   /**

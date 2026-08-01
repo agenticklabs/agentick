@@ -1421,7 +1421,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * Terminal shutdown. Cancels any pending reconnect, closes the SDK
    * client + transport, transitions lifecycle to `closed`. Idempotent.
    */
-  override async close(): Promise<void> {
+  protected override async teardown(): Promise<void> {
     this.lifecycle.close();
     if (this.client) {
       try {
@@ -1433,7 +1433,6 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       this.client = undefined;
     }
     await this.taskNotificationBus.close();
-    await super.close();
   }
 
   // ─────────── lifecycle helpers ───────────

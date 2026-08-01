@@ -409,9 +409,8 @@ export class ElicitationHarness
    * subscribed registry sees the cancellation route through the
    * normal failure path.
    */
-  override async close(): Promise<void> {
+  protected override teardown(): void {
     this.requests.cancelAll("harness_closed");
-    await super.close();
   }
 
   // ─────────── channel snapshot (§6.1 — pending-ask enumeration) ───────────

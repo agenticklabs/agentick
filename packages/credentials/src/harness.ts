@@ -270,13 +270,12 @@ export class CredentialsHarness
     return this.changes.subscribe(listener);
   }
 
-  override async close(): Promise<void> {
+  protected override teardown(): void {
     if (this.closed) return;
     this.closed = true;
     this.storeUnsubscribe?.();
     this.storeUnsubscribe = undefined;
     this.changes.clear();
-    await super.close();
   }
 
   // ── Substrate plumbing ──────────────────────────────────────────

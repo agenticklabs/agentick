@@ -301,9 +301,13 @@ class CallbackSessionHarness<P = unknown>
     );
   }
 
-  async close(): Promise<void> {
+  /**
+   * The adopter's `close` runs as {@link teardown}, so a spec whose close
+   * rejects still gets the substrate unwind (inbox detach, `onClose` LIFO)
+   * that `BaseHarness.close` guarantees — and still surfaces its error.
+   */
+  protected override async teardown(): Promise<void> {
     if (this.spec.close) await this.spec.close();
-    await super.close();
   }
 
   // ──────── StateApplicator ────────

@@ -1904,6 +1904,21 @@ export class AppHarness<P = unknown>
 
   // ──────── internals ────────
 
+  /**
+   * `createSession` with construction failure made NON-permanent.
+   *
+   * The per-session sub-harnesses each claim an inbox address in their
+   * constructor, and construction runs a long way — extension installs,
+   * genesis hydration, the mount — before {@link buildSession} reaches
+   * `registry.set`. A failure in between left those harnesses live, addressed,
+   * and unreachable: nothing held a reference, so nothing could ever close
+   * them. Every later create-or-resume of that session id then failed to
+   * register with `address already registered: <surface>:<sessionId>:<…>`,
+   * reporting the collision instead of the real fault — forever.
+   *
+   * So construction records what it claims, and an abort releases it. The
+   * adopter gets the error that actually happened, and a retry is a retry.
+   */
   private async createSessionBody(
     input: CreateSessionInput<P>,
     ephemeral: boolean,
@@ -1915,6 +1930,39 @@ export class AppHarness<P = unknown>
       /** SP6 — the parent's construction signal, fanned into the child. */
       readonly signal?: AbortSignal;
     } = {},
+  ): Promise<SessionHarnessProtocol<P>> {
+    const claimed: unknown[] = [];
+    try {
+      return await this.buildSession(input, ephemeral, overrides, claimed);
+    } catch (err) {
+      // LIFO, best-effort, and never masking the real error: a cleanup that
+      // itself fails must not become the exception the adopter sees.
+      for (const built of claimed.reverse()) {
+        try {
+          await closeOf(built);
+        } catch {
+          // best effort
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The create-session body proper. Pushes every substrate-claiming harness it
+   * constructs onto `claimed` so {@link createSessionBody} can release them if
+   * construction does not reach the registry.
+   */
+  private async buildSession(
+    input: CreateSessionInput<P>,
+    ephemeral: boolean,
+    overrides: {
+      readonly agent?: unknown;
+      readonly parentSessionId?: string;
+      readonly spawnPath?: readonly string[];
+      readonly signal?: AbortSignal;
+    },
+    claimed: unknown[],
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
 
@@ -2019,6 +2067,7 @@ export class AppHarness<P = unknown>
       this.inbox,
       { parentScope: { sessionId }, inheritedInterceptors, interceptorParent: this },
     );
+    claimed.push(elicitation);
 
     // Per-session tasks harness — substrate-level long-running tool
     // registry. Surfaced on `ctx.tasks` for handlers, on
@@ -2040,6 +2089,7 @@ export class AppHarness<P = unknown>
       inheritedInterceptors,
       interceptorParent: this,
     });
+    claimed.push(tasks);
 
     // Per-session resources harness (ADR 62) — the application-controlled
     // read-projection seam. Constructed at the single site symmetrically
@@ -2057,6 +2107,7 @@ export class AppHarness<P = unknown>
       // command hooks as op-scoped middleware. Live via `interceptorParent`.
       { inheritedInterceptors, interceptorParent: this },
     );
+    claimed.push(resources);
 
     // ── Session extension lifecycle (#150) ────────────────────────
     //
@@ -2215,6 +2266,7 @@ export class AppHarness<P = unknown>
           inheritedInterceptors,
           interceptorParent: this,
         });
+    claimed.push(tools);
 
     // Cascade: per-call `createSession.*` > per-app `session.*` >
     // shorthand (`defaultMaxTicks`/`initialProps`/`initialKnobs`).
@@ -2377,6 +2429,7 @@ export class AppHarness<P = unknown>
         description: input.description,
       }),
     });
+    claimed.push(session);
 
     // ── The namespace map's ORDERING CONTRACT (#257) ─────────────────────
     //

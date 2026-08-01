@@ -943,7 +943,7 @@ export class TasksHarness
 
   // ─────────── close ───────────
 
-  override async close(): Promise<void> {
+  protected override async teardown(): Promise<void> {
     // TASK-WAKE: latch `closing` BEFORE the cancel cascade so a terminal
     // transition driven by close never schedules a wake, and cancel any
     // deferred wake already in flight — no zombie sends after close.
@@ -965,7 +965,15 @@ export class TasksHarness
       if (live.record.detached) continue;
       pending.push(this.cancelInternal(live, "harness_closed"));
     }
-    await Promise.all(pending);
+    // `allSettled`, not `all`: the cancel cascade reaches an ADOPTER-supplied
+    // `TaskExecutor.cancel` (a dead child process, an EPIPE on the IPC channel)
+    // and one rejection there must not skip the reaper sweep below, nor the
+    // inbox detach `BaseHarness.close` runs after this. Failures are collected
+    // and re-thrown at the end — isolated, not swallowed.
+    const failures: unknown[] = [];
+    for (const outcome of await Promise.allSettled(pending)) {
+      if (outcome.status === "rejected") failures.push(outcome.reason);
+    }
     // Drain event buses AND disarm ttl reapers — EXCEPT for still-running
     // DETACHED tasks, which keep emitting and keep their deadline after this
     // harness closes (ADR 68: they outlive the session, so the ttl that bounds
@@ -978,9 +986,14 @@ export class TasksHarness
     for (const live of this.view.listSync()) {
       if (live.record.detached && !this.isTerminal(live.record.status)) continue;
       this.clearTtl(live);
-      await live.eventBus.close();
+      try {
+        await live.eventBus.close();
+      } catch (err) {
+        failures.push(err);
+      }
     }
-    await super.close();
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "tasks harness teardown failed");
   }
 
   // ─────────── inbox ───────────
