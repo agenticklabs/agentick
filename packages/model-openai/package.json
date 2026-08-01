@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model-openai",
-  "version": "1.0.0-next.54",
+  "version": "1.0.0-next.55",
   "description": "OpenAI LanguageModelAdapter for Agentick v2 (ADR 52). openai(model?, options?) — the provider-normalization part consumed by @agentick/model-executor's LanguageModelExecutor. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
