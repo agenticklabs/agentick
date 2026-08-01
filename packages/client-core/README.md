@@ -469,6 +469,36 @@ A spent budget is reported, not silent: `readiness` settles on
 `{ kind: "handshake-failed", retrying: false }`. Verified by
 [`src/__tests__/handshake-retry.spec.ts`](src/__tests__/handshake-retry.spec.ts).
 
+### The gateway you come back to may not be the one you left
+
+A reconnect restores the **wire**. It does not restore anything the peer was
+holding in memory, and a restarted gateway comes back with an empty session
+registry — every session id you hold names something that does not exist there
+yet. The client cannot rebuild those for you: only you know which of them still
+matter, and only your store knows what they contained.
+
+So treat every `ready` after the first as "re-establish what I need", and make
+that path idempotent — which create-or-resume already is:
+
+```ts
+let established = false;
+client.onReadinessChange(async (r) => {
+  if (r !== "ready") return;
+  if (established) return ((established = false), void resume()); // came back — rebuild
+  established = true;
+  await resume();
+});
+```
+
+Live subscriptions do not need this. The transport re-issues each one on the way
+back, and keeps re-asking while the peer answers `SessionNotFound` — a session
+being rebuilt and a session that is gone say the same thing at the instant of the
+answer, so it re-asks for `reconnect.resubscribeGraceMs` (30s) before ending the
+stream with the error. Rebuild the session inside that window and the stream
+heals with no work from you; miss it and the stream ends, which is your signal
+that it will not heal on its own. See
+[@agentick/transport](../transport#a-subscription-that-does-not-come-back-says-so).
+
 The three predicates read one source: the extensions the server registered. They
 answer whether a capability is **deployed**, not what a given session mounts —
 `hasMethod` is silent about verbs a harness declares for the dynamic command

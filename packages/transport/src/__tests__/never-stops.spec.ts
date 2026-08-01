@@ -34,7 +34,7 @@ const CAPABILITIES: TransportCapabilities = {
   media: false,
 };
 
-type DialBehavior = "succeed" | "reject-silently" | "throw-sync";
+type DialBehavior = "succeed" | "reject-silently" | "throw-sync" | "hang";
 
 /**
  * A transport whose wire is entirely under the test's control. `openConnection`
@@ -73,6 +73,12 @@ class ProbeTransport extends BaseClientTransport {
       // The shape that used to wedge the loop: the dial fails and NOTHING
       // reports it — no close event, no drop, just a rejected promise.
       return Promise.reject(new Error("dial failed"));
+    }
+    if (this.behavior === "hang") {
+      // The shape a loop armed by FAILURE cannot see: a dial that neither
+      // succeeds nor fails. A proxy in front of a dead upstream, an ingress
+      // that accepts and never upgrades.
+      return new Promise<void>(() => {});
     }
     this.markWireUp();
     this.setState("open");
@@ -125,6 +131,10 @@ class ProbeTransport extends BaseClientTransport {
   }
   subscribeCount(): number {
     return this.sent.filter((f) => "method" in f && f.method === "sub/subscribe").length;
+  }
+  /** True once the base has dropped its registration — the subscription is over. */
+  streamEnded(): boolean {
+    return this.activeSubscriptions.size === 0;
   }
 }
 
@@ -210,6 +220,82 @@ describe("the dial loop cannot be stopped by a failing dial", () => {
     await t.close();
   });
 
+  it("abandons a dial that never answers, and keeps dialing", async () => {
+    // Nothing else can report this one. The dial holds forever, so no close
+    // event fires, no rejection arrives, and a loop armed only by failure is
+    // armed by nothing at all — the transport parks in `connecting` for the
+    // life of the process.
+    const t = new ProbeTransport({ dialTimeoutMs: 20 });
+    t.behavior = "hang";
+    await expect(t.connect()).rejects.toThrow(/unanswered/);
+
+    await waitFor(() => t.dials >= 3, { description: "loop kept dialing past the deadline" });
+    // Each abandoned dial releases its half-open wire; otherwise the redial
+    // competes with a socket that will never answer.
+    expect(t.discards).toBeGreaterThanOrEqual(2);
+    await t.close();
+  });
+
+  it("a second connect() joins the dial in flight instead of opening another", async () => {
+    // Two racing dials leave a loser whose listeners the subclass's staleness
+    // guard mutes: its caller's promise never settles (an adopter awaits a
+    // connection that may already be open) and its wire is never released.
+    const t = new ProbeTransport({ dialTimeoutMs: 60 });
+    t.behavior = "hang";
+
+    const first = t.connect().then(
+      () => "resolved",
+      () => "rejected",
+    );
+    const second = t.connect().then(
+      () => "resolved",
+      () => "rejected",
+    );
+    expect(t.dials).toBe(1);
+
+    const settled = await Promise.race([
+      Promise.all([first, second]),
+      new Promise((r) => setTimeout(() => r("hung"), 500)),
+    ]);
+    expect(settled).toEqual(["rejected", "rejected"]);
+    await t.close();
+  });
+
+  it("ends an in-flight PROGRESS stream on the drop — it can never be re-opened", async () => {
+    // The send's own RPC rejects with everything else in `pending`, but a
+    // caller rendering a live turn is not awaiting that promise — it is
+    // awaiting this iterator. A progress token names one operation on a
+    // connection that is gone and no verb re-attaches to it, so silence here
+    // is silence for the life of the process: a UI stuck rendering a turn that
+    // will never end.
+    const t = new ProbeTransport();
+    t.behavior = "succeed";
+    await t.connect();
+    const progress = t.progress("tok-1");
+
+    const drained = Promise.race([
+      (async () => {
+        try {
+          for await (const _ of progress) void _;
+          return "ended-clean" as const;
+        } catch (e) {
+          return e;
+        }
+      })(),
+      new Promise((r) => setTimeout(() => r("hung"), 500)),
+    ]);
+
+    t.drop();
+
+    const outcome = await drained;
+    expect(outcome).not.toBe("hung");
+    // The failure, not a clean end: the operation may still be RUNNING on the
+    // server, and "the stream died" is a different fact from "it finished".
+    expect(outcome).not.toBe("ended-clean");
+    expect((outcome as { kind?: string }).kind).toBe("closed");
+    await t.close();
+  });
+
   it("a deliberate close() during backoff ends it", async () => {
     const t = new ProbeTransport();
     await t.connect().catch(() => {});
@@ -225,11 +311,11 @@ describe("the dial loop cannot be stopped by a failing dial", () => {
 
 describe("a subscription that does not survive a reconnect", () => {
   /** Open the wire and establish one server-acknowledged subscription. */
-  async function withSubscription(): Promise<{
+  async function withSubscription(policy?: ReconnectPolicy): Promise<{
     t: ProbeTransport;
     sub: ReturnType<ProbeTransport["subscribe"]>;
   }> {
-    const t = new ProbeTransport();
+    const t = new ProbeTransport(policy);
     t.behavior = "succeed";
     await t.connect();
     const sub = t.subscribe({ kind: "session", id: "s1" });
@@ -274,6 +360,52 @@ describe("a subscription that does not survive a reconnect", () => {
       id: t.lastSubscribeId(),
       error: { code: -32003, message: 'not authorized for "sub:subscribe"' },
     });
+
+    const outcome = await drain(sub);
+    expect(outcome).not.toBe("hung");
+    expect((outcome as { kind?: string }).kind).toBe("rpc");
+    await t.close();
+  });
+
+  it("re-asks while the peer says the SCOPE is not there — that answer expires", async () => {
+    // A gateway that restarted answers `SessionNotFound` for every session the
+    // adopter has not rebuilt yet, and the wire is back long before it has.
+    // Final at the instant it is given, wrong a moment later.
+    const { t, sub } = await withSubscription();
+    t.drop();
+    await waitFor(() => t.subscribeCount() === 2, { description: "resubscribe issued" });
+
+    t.deliver({
+      jsonrpc: "2.0",
+      id: t.lastSubscribeId(),
+      error: { code: -32010, message: "session s1 not found" },
+    });
+
+    // Asked again rather than killed.
+    await waitFor(() => t.subscribeCount() === 3, { description: "re-asked after not-found" });
+    const outcome = await Promise.race([
+      drain(sub),
+      new Promise((r) => setTimeout(() => r("still-open"), 100)),
+    ]);
+    expect(outcome).toBe("still-open");
+    await t.close();
+  });
+
+  it("gives up on a scope that stays missing past the grace window", async () => {
+    // The window is what separates a session being rebuilt from one that is
+    // gone: both say the same thing, so only time tells them apart.
+    const { t, sub } = await withSubscription({ resubscribeGraceMs: 30 });
+    t.drop();
+    await waitFor(() => t.subscribeCount() === 2, { description: "resubscribe issued" });
+
+    for (let i = 0; i < 20 && !t.streamEnded(); i++) {
+      t.deliver({
+        jsonrpc: "2.0",
+        id: t.lastSubscribeId(),
+        error: { code: -32010, message: "session s1 not found" },
+      });
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
     const outcome = await drain(sub);
     expect(outcome).not.toBe("hung");

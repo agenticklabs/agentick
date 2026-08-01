@@ -82,6 +82,8 @@ const transport = websocket({
     initialDelayMs: 100,
     maxDelayMs: 30_000,
     maxAttempts: Infinity,
+    dialTimeoutMs: 10_000,
+    resubscribeGraceMs: 30_000,
   },
   keepalive: {
     intervalMs: 30_000,
@@ -93,6 +95,10 @@ const transport = websocket({
 That is both default policies written out. On a drop the transport moves to `reconnecting`, waits a full-jitter exponential delay, opens a fresh socket, and replays each still-open subscription from its last-seen cursor. If the cursor is still inside the server's retention window the subscription resumes with no gap. If it fell out, the stream surfaces `notifications/subscription/evicted` as a protocol error, so the decision to resume from oldest, jump to latest, or give up is yours to make explicitly rather than silently.
 
 The policy covers the **first** dial as well as later drops, so a client pointed at a server that is still booting comes up on its own. `connect()` still rejects on its own failed dial rather than blocking on a loop whose default `maxAttempts` is `Infinity` — a rejected `connect()` therefore does not mean the transport gave up, and its message says as much. Watch `onStateChange` for `reconnecting` → `open`, or `await client.whenReady()` for the handshake that follows. Pass `reconnect: { enabled: false }` when you want one dial and nothing more.
+
+`dialTimeoutMs` covers the dial that never answers at all. A dev-server proxy, an ingress, or a load balancer in front of a dead upstream accepts the TCP connection and never completes the upgrade: the socket stays in `CONNECTING`, neither `error` nor `close` ever fires, and a loop armed only by failure is armed by nothing. After the deadline the half-open socket is terminated and the dial is retried like any other failure.
+
+`resubscribeGraceMs` covers the peer that came back **empty**. A restarted gateway answers `SessionNotFound` for every session the adopter has not rebuilt yet, and the wire returns in milliseconds — long before it has. Each resubscribe is therefore re-asked on the backoff curve for that window, so a subscription heals as soon as the session is re-created; after it, the stream ends with the error rather than waiting forever on a scope that is genuinely gone.
 
 ### The drop nobody reports
 
@@ -241,14 +247,14 @@ server.listen(8080);
 | `ReconnectPolicy` (type)           | Re-exported from the base plumbing |
 | `KeepalivePolicy` (type)           | Re-exported from the base plumbing |
 
-| Option              | Meaning                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------- |
-| `url`               | `ws://` or `wss://` endpoint. Required                                                   |
-| `WebSocket`         | Constructor override. Defaults to `globalThis.WebSocket`                                 |
-| `extraSubprotocols` | Additional offers appended after `agentick-rpc-v1`                                       |
-| `reconnect`         | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts }`. Full-jitter backoff, 100ms → 30s |
-| `keepalive`         | `{ enabled, intervalMs, timeoutMs }`. `ping` liveness probe, 30s interval / 10s deadline |
-| `id`                | Stable transport id for logs. Defaults to `ws-<n>`                                       |
+| Option              | Meaning                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`               | `ws://` or `wss://` endpoint. Required                                                                                                                                |
+| `WebSocket`         | Constructor override. Defaults to `globalThis.WebSocket`                                                                                                              |
+| `extraSubprotocols` | Additional offers appended after `agentick-rpc-v1`                                                                                                                    |
+| `reconnect`         | `{ enabled, initialDelayMs, maxDelayMs, maxAttempts, dialTimeoutMs, resubscribeGraceMs }`. Full-jitter backoff, 100ms → 30s; 10s dial deadline; 30s resubscribe grace |
+| `keepalive`         | `{ enabled, intervalMs, timeoutMs }`. `ping` liveness probe, 30s interval / 10s deadline                                                                              |
+| `id`                | Stable transport id for logs. Defaults to `ws-<n>`                                                                                                                    |
 
 ### `@agentick/transport-websocket/server`
 
@@ -282,7 +288,7 @@ Security fields (shared, from [@agentick/transport](../transport)): `allowedOrig
 - **No session affinity across reconnects.** `initialize` returns a `connectionId`, but the client does not carry it on reconnect, so a load balancer cannot sticky-route. Fine for single-node deployments; broken for clustered ones.
 - **No server-initiated broadcast.** The server tracks live sockets for teardown but does not fan a gateway-level `notify` out to connected clients. Notifications flow only within a dispatch — subscription events and progress.
 - **Heartbeat termination is unverified.** The server pings on an interval and terminates a socket that misses its pong; the miss branch has no test (it needs a client that deliberately ignores `ping`).
-- **Cursor-aware resubscribe is unverified end-to-end.** Reconnect itself is covered thoroughly (see `reconnect-e2e.spec.ts`), and the replay path is wired, but no test carries a live subscription across a drop to assert events resume flowing on the same stream from the last-seen cursor. Two things follow: a resubscribe that silently failed would look identical to a healthy reconnect from the outside, because `resubscribeAfterReconnect` discards the `sub/subscribe` rejection by design (nobody awaits it); and nothing drives a subscription past a tight retention window to assert `evicted` arrives.
+- **Resubscribe is verified for liveness, not for continuity.** `reconnect-to-new-gateway.spec.ts` carries a live subscription across a real restart and asserts frames resume on the same stream, so a silently-failed resubscribe no longer looks like a healthy reconnect. What is still unverified is the `fromCursor` half: the server ignores it (`cursorResume: false`), so nothing drives a subscription past a tight retention window to assert `evicted` arrives, and a subscription that survives a drop can still MISS events emitted while the wire was down.
 - **`extraSubprotocols` has no integration test.** The client offers them; nothing exercises a server that actually speaks a second dialect.
 
 ## Verified by

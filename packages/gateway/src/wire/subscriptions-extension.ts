@@ -22,6 +22,7 @@
 
 import {
   AppNotFoundError,
+  SessionNotFoundError,
   defineWireExtension,
   type AppHarnessProtocol,
   type EventEnvelope,
@@ -141,11 +142,18 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // reducer.
       let iterable = openScopeEvents(ctx.gateway, params);
       if (!iterable) {
-        // No conforming AgentickError class covers "scope target not
-        // found" today. AppNotFoundError is the closest fit (session
-        // scope resolution ultimately traverses apps).
+        // Name the thing that is missing. Not cosmetic: a client deciding
+        // whether to re-ask needs to tell "this scope is not here (yet)" from
+        // "refused", and it reads that off the JSON-RPC code — SessionNotFound
+        // / AppNotFound, both of which a restarted gateway answers about
+        // everything the adopter has not rebuilt yet. Naming a session scope
+        // as an app whose id stringified to `[object Object]` told a caller
+        // neither.
+        if (params.scope.kind === "session") {
+          throw new SessionNotFoundError({ sessionId: params.scope.id });
+        }
         throw new AppNotFoundError({
-          appId: params.scope.kind === "app" ? params.scope.id : String(params.scope),
+          appId: params.scope.kind === "app" ? params.scope.id : params.scope.kind,
         });
       }
 

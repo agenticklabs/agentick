@@ -50,7 +50,7 @@ import type {
   WireParams,
   WireResult,
 } from "@agentick/spec";
-import { isClientStateFailed } from "@agentick/spec";
+import { ErrorCode, isClientStateFailed } from "@agentick/spec";
 import { createNotifier } from "@agentick/pubsub";
 import { computeFullJitterBackoff } from "@agentick/utils";
 
@@ -74,6 +74,13 @@ export interface ActiveSubscription {
   readonly scope: SubscriptionScope;
   readonly query?: EventQuery;
   lastCursor?: Cursor;
+  /**
+   * When the CURRENT resubscribe campaign began, and how many attempts it has
+   * spent. Both reset on every reconnect — see {@link resubscribeAfterReconnect}
+   * and `ReconnectPolicy.resubscribeGraceMs`.
+   */
+  resubscribeStartedAt?: number;
+  resubscribeAttempts?: number;
 }
 
 /**
@@ -104,6 +111,46 @@ export interface ReconnectPolicy {
   readonly initialDelayMs?: number;
   readonly maxDelayMs?: number;
   readonly maxAttempts?: number;
+  /**
+   * How long a dial may go UNANSWERED before it is abandoned and retried.
+   *
+   * The loop above is armed by a dial that fails. A dial that neither succeeds
+   * nor fails arms nothing — and that is not exotic, it is what a backend
+   * behind a live proxy looks like: a dev-server proxy, an ingress, or a load
+   * balancer accepts the TCP connection and then never completes the upgrade
+   * because the upstream is not there. The socket sits in `CONNECTING`, no
+   * event ever fires, and a transport with no deadline waits in `connecting`
+   * for the life of the tab — including long after the backend came up.
+   *
+   * So the dial is bounded. On expiry the half-open wire is discarded
+   * ({@link BaseClientTransport.discardWire}) and the failure re-arms the
+   * backoff loop like any other. `Infinity` disables the deadline.
+   *
+   * @verifiedBy ../../../transport-websocket/src/__tests__/reconnect-to-new-gateway.spec.ts
+   */
+  readonly dialTimeoutMs?: number;
+  /**
+   * How long a reconnected transport keeps re-asking for a subscription whose
+   * SCOPE the peer does not (yet) have.
+   *
+   * A gateway that restarted comes back with an empty session registry. The
+   * wire is back in milliseconds — well before the adopter's create-or-resume
+   * has rebuilt anything — so the automatic resubscribe below asks for a
+   * session that will exist shortly and does not exist now. Treating that
+   * answer as final is how a client reconnects to a live wire and never
+   * receives another event; treating it as a race, and re-asking on the same
+   * backoff curve, is what makes the subscription heal on its own.
+   *
+   * The window is finite because the two cases are indistinguishable at the
+   * instant of the answer: a session being rebuilt and a session that is
+   * genuinely gone both say "not found". When it expires the stream ends with
+   * that error, so a consumer is told rather than left waiting forever. Only
+   * "not found" is retried — a refusal (forbidden, invalid, no such method) is
+   * a verdict, and ends the stream immediately.
+   *
+   * @verifiedBy ../../../transport-websocket/src/__tests__/reconnect-to-new-gateway.spec.ts
+   */
+  readonly resubscribeGraceMs?: number;
 }
 
 export const DEFAULT_RECONNECT_POLICY: Required<ReconnectPolicy> = {
@@ -111,6 +158,8 @@ export const DEFAULT_RECONNECT_POLICY: Required<ReconnectPolicy> = {
   initialDelayMs: 100,
   maxDelayMs: 30_000,
   maxAttempts: Infinity,
+  dialTimeoutMs: 10_000,
+  resubscribeGraceMs: 30_000,
 };
 
 /**
@@ -147,6 +196,9 @@ export interface KeepalivePolicy {
   readonly timeoutMs?: number;
 }
 
+/** Ceiling on the resubscribe retry delay — see `computeResubscribeBackoff`. */
+const RESUBSCRIBE_MAX_DELAY_MS = 2_000;
+
 export const DEFAULT_KEEPALIVE_POLICY: Required<KeepalivePolicy> = {
   enabled: true,
   intervalMs: 30_000,
@@ -181,6 +233,10 @@ export abstract class BaseClientTransport implements ClientTransport {
   protected explicitClose = false;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The dial currently in flight, if any — see {@link dial}. */
+  private dialInFlight: Promise<void> | null = null;
+  /** Pending resubscribe retries, keyed by subscription id. */
+  private readonly resubscribeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
    * Stamp identifying the CURRENT dial attempt. Bumped by every arm, so a
    * late failure from a superseded dial can recognise itself and stay out of
@@ -237,11 +293,84 @@ export abstract class BaseClientTransport implements ClientTransport {
   async connect(): Promise<void> {
     if (this.currentState === "open") return;
     try {
-      await this.openConnection();
+      await this.dial();
     } catch (err) {
       this.armLoopAfterFailedDial();
       throw err;
     }
+  }
+
+  /**
+   * The ONE way a dial happens — single-flight, and bounded by
+   * `ReconnectPolicy.dialTimeoutMs`.
+   *
+   * Single-flight because a second concurrent dial is never what anyone
+   * wanted. `connect()` is public and adopters call it again — a retry button,
+   * a bootstrap effect that re-runs, a reconnect loop whose timer fires while
+   * the caller's own dial is still in flight — and each call used to open its
+   * own socket. The subclass's staleness guard then MUTES every listener on
+   * whichever socket lost: the loser's promise never settles (so the caller
+   * that awaited `connect()` waits forever, on a transport that may already be
+   * open) and its socket is never closed (so a connection the client cannot
+   * read stays open on the server). Joining the dial already in flight removes
+   * both, and costs the second caller nothing — it wanted a connection, not a
+   * particular socket.
+   */
+  protected dial(): Promise<void> {
+    const existing = this.dialInFlight;
+    if (existing) return existing;
+    let attempt: Promise<void>;
+    try {
+      attempt = Promise.resolve(this.openConnection());
+    } catch (err) {
+      // A subclass whose `openConnection` throws synchronously still gets a
+      // rejected promise out of here — every caller awaits, none catches.
+      return Promise.reject(err);
+    }
+    const tracked = this.underDialDeadline(attempt).finally(() => {
+      if (this.dialInFlight === tracked) this.dialInFlight = null;
+    });
+    this.dialInFlight = tracked;
+    return tracked;
+  }
+
+  /**
+   * Reject a dial that has gone unanswered past the deadline, discarding the
+   * half-open wire on the way out so the redial does not compete with a socket
+   * that will never answer. Unbounded (`Infinity`) passes the dial through.
+   */
+  private underDialDeadline(attempt: Promise<void>): Promise<void> {
+    const ms = this.reconnectPolicy.dialTimeoutMs;
+    if (!Number.isFinite(ms) || ms <= 0) return attempt;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        try {
+          this.discardWire();
+        } catch {
+          // Releasing a wire that never came up is best-effort; what matters
+          // is that the rejection below still arms the loop.
+        }
+        reject(
+          transportError({
+            kind: "timeout",
+            message: `dial on transport ${this.id} went unanswered for ${ms}ms; abandoning it and retrying`,
+            afterMs: ms,
+          }),
+        );
+      }, ms);
+      // A dial deadline must never be the reason a process refuses to exit.
+      (timer as { unref?: () => void }).unref?.();
+      attempt.then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        (err: unknown) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      );
+    });
   }
 
   async close(): Promise<void> {
@@ -251,6 +380,11 @@ export abstract class BaseClientTransport implements ClientTransport {
     // close event from re-arming it.
     this.stopKeepalive();
     this.cancelReconnect();
+    this.cancelResubscribeRetries();
+    // A dial abandoned mid-flight never settles (its listeners are muted by
+    // the subclass's staleness guard), so leaving it here would have the next
+    // `connect()` join a promise that can never resolve.
+    this.dialInFlight = null;
     for (const s of this.subscriptionStreams.values()) await s.end(null);
     for (const s of this.progressStreams.values()) await s.end(null);
     this.subscriptionStreams.clear();
@@ -371,6 +505,7 @@ export abstract class BaseClientTransport implements ClientTransport {
     const stream = new MultiplexedStream<EventFrame>(subscriptionId, async () => {
       this.subscriptionStreams.delete(subscriptionId);
       this.activeSubscriptions.delete(subscriptionId);
+      this.clearResubscribeTimer(subscriptionId);
       if (this.currentState === "open") {
         try {
           await this.request("sub/unsubscribe", { subscriptionId });
@@ -621,10 +756,33 @@ export abstract class BaseClientTransport implements ClientTransport {
    */
   protected handleConnectionDrop(cause?: TransportError): void {
     this.stopKeepalive();
+    // Nothing can be resubscribed on a wire that is gone; the reconnect owns
+    // recovery, and `resubscribeAfterReconnect` starts a fresh campaign on the
+    // way back.
+    this.cancelResubscribeRetries();
 
     const failure = transportError(cause ?? { kind: "closed", message: "wire closed mid-request" });
     for (const p of this.pending.values()) p.reject(failure);
     this.pending.clear();
+
+    // A PROGRESS stream cannot survive this, and — unlike a subscription — it
+    // cannot be re-opened either: its `progressToken` names one in-flight
+    // operation on a connection that is gone, and no verb re-attaches to it.
+    // So the wire drop is the last thing that will ever happen to it, and
+    // saying nothing leaves the consumer's `for await` blocked on a stream
+    // that will not produce another frame or a `done` for the life of the
+    // process. That is a UI stuck rendering a turn forever: the send's own RPC
+    // rejects here with everything else in `pending`, but a caller consuming
+    // `events()` is not awaiting that promise — it is awaiting this iterator.
+    //
+    // Ended with the failure rather than cleanly, because the two are not the
+    // same fact and the consumer acts differently on them: a clean end means
+    // the operation finished, and this one means the stream died while the
+    // operation may well still be RUNNING on the server. The honest recovery
+    // is to reconnect and re-read what it committed — which a consumer can
+    // only choose if it was told which of the two happened.
+    for (const stream of this.progressStreams.values()) void stream.end(failure);
+    this.progressStreams.clear();
 
     // A dial is ALREADY scheduled, so this wire's death is old news: while the
     // backoff timer counts down there is no wire, and the only thing that can
@@ -773,17 +931,13 @@ export abstract class BaseClientTransport implements ClientTransport {
     const generation = ++this.dialGeneration;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      // A subclass whose `openConnection` throws SYNCHRONOUSLY would otherwise
-      // escape this timer callback as an uncaught exception, taking the loop
-      // (and, under Node's default policy, the process) with it.
-      let dial: Promise<void>;
-      try {
-        dial = Promise.resolve(this.openConnection());
-      } catch (err) {
-        this.onDialFailed(generation, err);
-        return;
-      }
-      void dial.catch((err: unknown) => this.onDialFailed(generation, err));
+      // `dial()` is single-flight and never throws synchronously — a subclass
+      // whose `openConnection` throws would otherwise escape this timer
+      // callback as an uncaught exception, taking the loop (and, under Node's
+      // default policy, the process) with it. It also joins a dial an adopter's
+      // own `connect()` already has in flight rather than opening a second
+      // socket beside it.
+      void this.dial().catch((err: unknown) => this.onDialFailed(generation, err));
     }, delay);
   }
 
@@ -838,18 +992,29 @@ export abstract class BaseClientTransport implements ClientTransport {
     // are. Snapshot anyway — a failure callback can fire synchronously and
     // delete the entry being iterated.
     for (const [subscriptionId, sub] of [...this.activeSubscriptions]) {
-      // Runs inside the subclass's `open` handler. A throw here would abort
-      // that handler — leaving `connect()`'s promise unsettled and, on a
-      // socket-event path, surfacing as an uncaught exception. One bad
-      // subscription must not cost the connection.
-      try {
-        this.dispatchSubscribeFrame(
-          { subscriptionId, scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
-          (error) => this.onResubscribeFailed(subscriptionId, sub, error),
-        );
-      } catch (err) {
-        this.onResubscribeFailed(subscriptionId, sub, toTransportError(err));
-      }
+      // A fresh wire starts a fresh campaign: the grace window is measured
+      // from the reconnect, not from whatever a previous one spent.
+      this.clearResubscribeTimer(subscriptionId);
+      sub.resubscribeStartedAt = Date.now();
+      sub.resubscribeAttempts = 0;
+      this.sendResubscribe(subscriptionId, sub);
+    }
+  }
+
+  /**
+   * One resubscribe attempt. Runs inside the subclass's `open` handler (or a
+   * retry timer) — a throw there would abort that handler, leaving
+   * `connect()`'s promise unsettled and, on a socket-event path, surfacing as
+   * an uncaught exception. One bad subscription must not cost the connection.
+   */
+  private sendResubscribe(subscriptionId: string, sub: ActiveSubscription): void {
+    try {
+      this.dispatchSubscribeFrame(
+        { subscriptionId, scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
+        (error) => this.onResubscribeFailed(subscriptionId, sub, error),
+      );
+    } catch (err) {
+      this.onResubscribeFailed(subscriptionId, sub, toTransportError(err));
     }
   }
 
@@ -868,6 +1033,13 @@ export abstract class BaseClientTransport implements ClientTransport {
    *     blocked on `for await` would wait forever, so the stream ends with the
    *     reason.
    *
+   *   - The peer does not HAVE the scope (`AppNotFound` / `SessionNotFound`).
+   *     Between the two above: the answer is final for this instant and very
+   *     likely wrong a moment later, because a gateway that just restarted
+   *     answers exactly this way until the adopter's create-or-resume has run.
+   *     Retried on the backoff curve for `resubscribeGraceMs`, then ended with
+   *     the error like any other refusal.
+   *
    * TODO(wire-resume): the honest fix for the first case is server-side resume
    * (`ServerCapabilities.cursorResume` is still false — see the
    * `TODO(wire-resume)` trailhead in `@agentick/gateway`). Until a server can
@@ -883,8 +1055,86 @@ export abstract class BaseClientTransport implements ClientTransport {
     // Transient — left registered for the next reconnect, `lastCursor`
     // untouched, so the retry still asks from where the consumer left off.
     if (error.kind !== "rpc" && error.kind !== "protocol") return;
+    if (isScopeMissing(error) && this.withinResubscribeGrace(sub)) {
+      this.scheduleResubscribeRetry(subscriptionId, sub);
+      return;
+    }
+    this.clearResubscribeTimer(subscriptionId);
     this.activeSubscriptions.delete(subscriptionId);
     this.subscriptionStreams.delete(subscriptionId);
     void sub.stream.end(error);
   }
+
+  /** Is this campaign still inside `ReconnectPolicy.resubscribeGraceMs`? */
+  private withinResubscribeGrace(sub: ActiveSubscription): boolean {
+    const grace = this.reconnectPolicy.resubscribeGraceMs;
+    if (!Number.isFinite(grace)) return grace > 0;
+    if (grace <= 0) return false;
+    return Date.now() - (sub.resubscribeStartedAt ?? Date.now()) < grace;
+  }
+
+  /**
+   * Ask again, later, on the same backoff curve the dial loop uses. Guarded at
+   * fire time rather than at schedule time: the wire can go again, and the
+   * consumer can walk away, between arming this and its firing.
+   */
+  // TODO(subscription-observability): a subscription that is mid-campaign is
+  // indistinguishable from a healthy one from outside — the stream is simply
+  // quiet, and the only report is the stream ENDING if the grace window
+  // expires. `ClientEvent`'s `subscription` surface is the declared home for
+  // this (`ClientEventSurfaces` in `@agentick/spec`) and still has no live
+  // source; the emit sites are here and in `subscribe`/`onResubscribeFailed`.
+  private scheduleResubscribeRetry(subscriptionId: string, sub: ActiveSubscription): void {
+    const attempt = sub.resubscribeAttempts ?? 0;
+    sub.resubscribeAttempts = attempt + 1;
+    this.clearResubscribeTimer(subscriptionId);
+    const timer = setTimeout(() => {
+      this.resubscribeTimers.delete(subscriptionId);
+      // The wire owns recovery once it is gone; the reconnect starts a fresh
+      // campaign on the way back.
+      if (this.currentState !== "open") return;
+      // The consumer stopped iterating — its `onClose` reaped the registration
+      // and there is nothing left to re-open.
+      if (!this.activeSubscriptions.has(subscriptionId)) return;
+      this.sendResubscribe(subscriptionId, sub);
+    }, this.computeResubscribeBackoff(attempt));
+    (timer as { unref?: () => void }).unref?.();
+    this.resubscribeTimers.set(subscriptionId, timer);
+  }
+
+  /**
+   * The dial curve, capped short. A resubscribe is one small frame on a wire
+   * that is already UP, so it has none of the reasons a dial backs off toward
+   * 30s — and at the dial's cap a 30s grace window would be spent in two or
+   * three attempts, which is not a window at all.
+   */
+  private computeResubscribeBackoff(attempt: number): number {
+    return computeFullJitterBackoff(attempt, {
+      initialDelayMs: this.reconnectPolicy.initialDelayMs,
+      maxDelayMs: Math.min(this.reconnectPolicy.maxDelayMs, RESUBSCRIBE_MAX_DELAY_MS),
+    });
+  }
+
+  private clearResubscribeTimer(subscriptionId: string): void {
+    const timer = this.resubscribeTimers.get(subscriptionId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.resubscribeTimers.delete(subscriptionId);
+  }
+
+  private cancelResubscribeRetries(): void {
+    for (const timer of this.resubscribeTimers.values()) clearTimeout(timer);
+    this.resubscribeTimers.clear();
+  }
+}
+
+/**
+ * Did the peer answer "I do not have that scope"? The one refusal that is
+ * routinely a RACE rather than a verdict — a gateway that restarted says it
+ * about every session it is about to rebuild.
+ */
+function isScopeMissing(error: TransportError): boolean {
+  if (error.kind !== "rpc") return false;
+  const code = error.error.code;
+  return code === ErrorCode.AppNotFound || code === ErrorCode.SessionNotFound;
 }
