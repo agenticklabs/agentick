@@ -34,7 +34,7 @@
  *   - `setStatus` / `setMeta` PERSIST (`view.write` → cache + store.put +
  *     notify). `setStatus` is the metadata-change notify trigger, exactly as
  *     the old `notify()` was; `setMeta` persists directly (as it did).
- *   - `setCurrentExecutionId` / `bumpExecutionCount` / `addUsage` are
+ *   - `setCurrentExecutionId` / `bumpExecutionCount` / `addTickAccounting` are
  *     CACHE-ONLY (`view.seedSync` — no store write, no notify). They ride the
  *     next `setStatus` into the store, preserving the old behavior where only a
  *     status transition re-wrote the durable record. (Usage therefore persists
@@ -65,6 +65,11 @@
 
 import type {
   CollectionMutation,
+  Cost,
+  CostRollup,
+  ExecutionTarget,
+  ModelKey,
+  ModelUsage,
   SessionRecord,
   SessionStatus,
   SessionStore,
@@ -73,12 +78,15 @@ import type {
   StoreCtx,
   UsageStats,
 } from "@agentick/spec";
+import { foldUsageRollup } from "@agentick/spec";
 import { View } from "@agentick/store";
 import { omitUndefined } from "@agentick/utils";
 
 /**
  * The zero-value usage accumulator seeded into a fresh session's record —
- * every field explicit so `addUsage`'s running sums start defined.
+ * every field explicit so the running sums start defined. `byModel` and
+ * `cost` have no zero value and are simply ABSENT until the first tick folds
+ * in — a zero-valued cost would claim "this session cost nothing".
  */
 const ZERO_USAGE: UsageStats = {
   inputTokens: 0,
@@ -245,6 +253,8 @@ export class SessionRuntime {
       status?: SessionStatus;
       executionCount?: number;
       usage?: UsageStats;
+      byModel?: Readonly<Record<ModelKey, ModelUsage>>;
+      cost?: CostRollup;
       currentExecutionId?: string | null;
     },
     opts: { persist: boolean },
@@ -254,6 +264,12 @@ export class SessionRuntime {
       patch.currentExecutionId !== undefined
         ? patch.currentExecutionId
         : (cur.currentExecutionId ?? null);
+    // The two accounting slots are PRESENCE-keyed, not value-keyed: a restore
+    // of an unpriced snapshot must CLEAR a stale cost, and `?? cur.cost` would
+    // silently keep it. Absence from the patch preserves; presence replaces
+    // (including with `undefined`).
+    const byModel = "byModel" in patch ? patch.byModel : cur.byModel;
+    const cost = "cost" in patch ? patch.cost : cur.cost;
     const record: SessionRecord = {
       id: this.id,
       createdAt: this.createdAt,
@@ -261,6 +277,10 @@ export class SessionRuntime {
       status: patch.status ?? cur.status,
       executionCount: patch.executionCount ?? cur.executionCount,
       usage: patch.usage ?? cur.usage,
+      ...omitUndefined({
+        byModel,
+        cost,
+      }),
       ...omitUndefined({
         parentSessionId: this.parentSessionId,
         principal: this.principal,
@@ -335,32 +355,62 @@ export class SessionRuntime {
   usage(): UsageStats {
     return this.record().usage;
   }
-  /**
-   * CACHE-ONLY accumulate — rides the next `setStatus` into the store (parity;
-   * usage was never persisted eagerly per tick). Arithmetic is byte-identical
-   * to the pre-View in-place accumulator.
-   */
-  addUsage(delta?: UsageStats): void {
-    if (!delta) return;
-    const u = this.record().usage;
-    const usage: UsageStats = {
-      inputTokens: u.inputTokens + (delta.inputTokens ?? 0),
-      outputTokens: u.outputTokens + (delta.outputTokens ?? 0),
-      totalTokens: u.totalTokens + (delta.totalTokens ?? 0),
-      cachedInputTokens: (u.cachedInputTokens ?? 0) + (delta.cachedInputTokens ?? 0),
-      cacheCreationTokens: (u.cacheCreationTokens ?? 0) + (delta.cacheCreationTokens ?? 0),
-      reasoningTokens: (u.reasoningTokens ?? 0) + (delta.reasoningTokens ?? 0),
-    };
-    this.commit({ usage }, { persist: false });
+  /** Per-model breakdown; absent until the first tick folds in. */
+  byModel(): Readonly<Record<ModelKey, ModelUsage>> | undefined {
+    return this.record().byModel;
+  }
+  /** The session's cost rollup; absent until the first tick folds in. */
+  cost(): CostRollup | undefined {
+    return this.record().cost;
   }
 
   /**
-   * SET the aggregate usage from a snapshot (restore). CACHE-ONLY — rides
-   * the next `setStatus` into the store, like {@link addUsage}. Distinct
-   * from `addUsage` (accumulate): restore replaces wholesale.
+   * Fold ONE tick into the session's accounting: the flat `usage` total, the
+   * per-model breakdown, and the cost rollup — all three from
+   * {@link foldUsageRollup}, so they can never disagree.
+   *
+   * `cost === undefined` means the tick was UNPRICED, and the fold records it
+   * as such: the rollup degrades to `partial` with the tick counted in
+   * `unpricedTicks`. It never contributes a zero to a `complete` total —
+   * zero is the claim "this cost nothing", which is a different (and
+   * silently low) statement from "we cannot say what this cost".
+   *
+   * CACHE-ONLY — rides the next `setStatus` into the store (parity; usage was
+   * never persisted eagerly per tick). The flat arithmetic is unchanged: the
+   * seeded {@link ZERO_USAGE} has every field defined, so the fold's
+   * absent-stays-absent rule collapses to the old in-place accumulator.
    */
-  setUsage(usage: UsageStats): void {
-    this.commit({ usage }, { persist: false });
+  addTickAccounting(
+    usage: UsageStats,
+    model: Pick<ExecutionTarget, "provider" | "modelId"> | undefined,
+    cost: Cost | undefined,
+  ): void {
+    const cur = this.record();
+    const folded = foldUsageRollup(
+      { usage: cur.usage, byModel: cur.byModel ?? {}, ...(cur.cost ? { cost: cur.cost } : {}) },
+      model,
+      usage,
+      cost,
+    );
+    this.commit(
+      { usage: folded.usage, byModel: folded.byModel, cost: folded.cost },
+      { persist: false },
+    );
+  }
+
+  /**
+   * SET the whole aggregate from a snapshot (restore). CACHE-ONLY — rides
+   * the next `setStatus` into the store, like {@link addTickAccounting}.
+   * Distinct from the fold (accumulate): restore replaces wholesale, and it
+   * restores the breakdown and the stamped cost alongside the flat total —
+   * a cost that does not survive a reload defeats the point of stamping it.
+   */
+  setAccounting(
+    usage: UsageStats,
+    byModel?: Readonly<Record<ModelKey, ModelUsage>>,
+    cost?: CostRollup,
+  ): void {
+    this.commit({ usage, byModel, cost }, { persist: false });
   }
 
   // ────────── app-owned descriptive slots (E11) ──────────

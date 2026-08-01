@@ -86,6 +86,7 @@ import type {
   Unsubscribe,
 } from "@agentick/spec";
 import { supportsLifecycleProjection, TOOL_NARRATION_FIELD } from "@agentick/spec";
+import { omitUndefined } from "@agentick/utils";
 
 export interface LifecycleProjection {
   /**
@@ -158,12 +159,17 @@ export function wireLifecycleProjection(
         // the loop's DECIDE. Carries this tick's usage (becomes "prior
         // usedTokens" for the next render) + the settled `TickResult`.
         const usage = terminal.result.usage;
+        // The tick's stamped cost + model ride the same metadata bag as
+        // usage, straight off the `TickResult` the loop settled. Rendered
+        // through `omitUndefined` so an unpriced tick's record carries NO
+        // `cost` key: absent means unpriced, never zero.
+        const metadata = omitUndefined({ usage, cost: result.cost, model: result.model });
         await settle({
           kind: "tick-end",
           tickId: result.tickId,
           executionId: result.executionId,
           result,
-          ...(usage !== undefined ? { metadata: { usage } } : {}),
+          ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         });
         return;
       }

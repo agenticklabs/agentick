@@ -239,23 +239,26 @@ type Hook = `onBefore${Pascal<"wire:acme/reindex">}`;
 
 Small, total, and shared — each exists because a second hand-rolled copy would drift.
 
-| Helper                                                        | Does                                                                         |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `mergeProviderOptions(base, patch)`                           | The one provider-namespace fold                                              |
-| `toRegistration(declaration, binding)`                        | Tag a `ToolDeclaration` with a binding; `handlerRef` falls back to `id`      |
-| `toClientToolRegistration(declaration, binding)`              | Fold a wire-declared client tool into a client-handled registration          |
-| `jsonSchema(schema, options?)`                                | Wrap a raw JSON Schema object as a `StandardSchemaV1`                        |
-| `toJsonSchema(schema)` · `registerJsonSchemaConverter`        | Recover JSON Schema from any Standard Schema; register a vendor converter    |
-| `parseJsonWithSchema(text, schema)`                           | Text → typed value, never throwing; discriminates parse vs. schema failure   |
-| `foldContentBlock` · `foldContentBlockWith`                   | Exhaustive dispatch over the `ContentBlock` union                            |
-| `normalizeToolResult` · `toContentBlocks`                     | Tool-return normalization into content blocks                                |
-| `resolveToolOutputBounder(options?)`                          | Build the tool-output size bounder from options; overridable, off-switchable |
-| `logEventName` · `progressEventName` · `channelEventName`     | The canonical `<surface>:<domain>:<action>` name builders                    |
-| `logEventQuery` · `progressEventQuery` · `timelineEventQuery` | Cross-surface subscriber queries over those names                            |
-| `defineWireExtension(input)`                                  | Validate and normalize a wire extension declaration                          |
-| `validateJsonRpcInput` · `validateJsonRpcFrame`               | Frame validation for transports                                              |
-| `scopeCovers` · `intersectScopes`                             | Authorization scope-pattern algebra                                          |
-| `deriveHookNames` · `pascalOfCommand` · `Pascal`              | Command hook-name derivation, value and type level                           |
+| Helper                                                                  | Does                                                                         |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `mergeProviderOptions(base, patch)`                                     | The one provider-namespace fold                                              |
+| `toRegistration(declaration, binding)`                                  | Tag a `ToolDeclaration` with a binding; `handlerRef` falls back to `id`      |
+| `toClientToolRegistration(declaration, binding)`                        | Fold a wire-declared client tool into a client-handled registration          |
+| `jsonSchema(schema, options?)`                                          | Wrap a raw JSON Schema object as a `StandardSchemaV1`                        |
+| `toJsonSchema(schema)` · `registerJsonSchemaConverter`                  | Recover JSON Schema from any Standard Schema; register a vendor converter    |
+| `parseJsonWithSchema(text, schema)`                                     | Text → typed value, never throwing; discriminates parse vs. schema failure   |
+| `foldContentBlock` · `foldContentBlockWith`                             | Exhaustive dispatch over the `ContentBlock` union                            |
+| `normalizeToolResult` · `toContentBlocks`                               | Tool-return normalization into content blocks                                |
+| `resolveToolOutputBounder(options?)`                                    | Build the tool-output size bounder from options; overridable, off-switchable |
+| `logEventName` · `progressEventName` · `channelEventName`               | The canonical `<surface>:<domain>:<action>` name builders                    |
+| `logEventQuery` · `progressEventQuery` · `timelineEventQuery`           | Cross-surface subscriber queries over those names                            |
+| `defineWireExtension(input)`                                            | Validate and normalize a wire extension declaration                          |
+| `validateJsonRpcInput` · `validateJsonRpcFrame`                         | Frame validation for transports                                              |
+| `scopeCovers` · `intersectScopes`                                       | Authorization scope-pattern algebra                                          |
+| `deriveHookNames` · `pascalOfCommand` · `Pascal`                        | Command hook-name derivation, value and type level                           |
+| `priceUsage(usage, card)` · `resolveTickCost(input, resolver?)`         | Usage → `Cost`, in integer micro-units                                       |
+| `foldCost` · `mergeCostRollups` · `foldUsageRollup` · `mergeUsageStats` | The usage/cost folds, per-model and honest about gaps                        |
+| `rollupTree(records, rootId)` · `inSpawnTree`                           | Agent-tree cost attribution — a query over `spawnPath`, never a write        |
 
 Plus the guards. `@agentick/spec/guards` narrows every content block (`isTextBlock`, `isToolResultBlock`, `isMediaBlock`, …), every context entry, every event phase and outcome (`isTerminalEvent`, `isVetoed`, `isDeferred`, …), every lifecycle event kind, and every declaration kind — and feature-detects optional capabilities (`supportsLifecycleProjection`, `supportsTreeInterception`, `isSnapshotCapable`, `hasFeature`).
 
@@ -278,6 +281,48 @@ if (parsed.ok) {
   console.error(parsed.reason, parsed.issues, parsed.text);
 }
 ```
+
+### Usage → cost
+
+Spec owns the money arithmetic because it is a pure function of two spec types, and every layer that needs it — loop-executor, session, app, the model adapters — already depends on spec. Nothing else in the framework may reimplement it.
+
+Three rules are baked into these helpers, and each exists because the obvious implementation gets it wrong:
+
+**Money is an integer count of micro-units** (`1_000_000` = one unit of `currency`), never a float. A cost total is a fold over hundreds of ticks, so float error accumulates in the direction nobody audits.
+
+**Cache and reasoning tokens are subsets, so rates apply to remainders.** `cachedInputTokens` and `cacheCreationTokens` are part of `inputTokens`; `reasoningTokens` is part of `outputTokens`. Charging the input rate against the whole of `inputTokens` _and_ a cache rate against the cached part bills those tokens twice — `priceUsage` splits the disjoint remainders for you.
+
+**An unpriced tick is unpriced, never zero.** The framework ships no prices. A tick whose model declares no `RateCard` and whose app resolver returns nothing produces no `Cost` at all, and `foldCost` degrades the total to `partial` rather than adding a zero. `CostRollup` is a discriminated union for the same reason `StopCause` is: `"complete"` and `"partial"` demand different words on screen — `"$1.23"` versus `"at least $1.23"` — and a flat shape lets every consumer render the wrong one by omission.
+
+```ts
+import { priceUsage, foldCost, type RateCard } from "@agentick/spec";
+
+// $3/MTok input, $15/MTok output, in micro-units.
+const card: RateCard = {
+  id: "anthropic:claude-sonnet-5@2026-07-01", // date it — a price change is a NEW card
+  currency: "USD",
+  perMTok: { input: 3_000_000, output: 15_000_000, cacheRead: 300_000 },
+};
+
+priceUsage({ inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000 }, card);
+// { amountMicros: 3_000_000, currency: "USD", rateRef: "anthropic:claude-sonnet-5@2026-07-01" }
+
+foldCost(undefined, undefined);
+// { kind: "partial", amountMicros: 0, unpricedTicks: 1, ... } — NOT a complete zero
+```
+
+Rates are declared at model construction and ride `ExecutionTarget.rates`; an app-level `CostResolver` wins over them when it returns a value.
+
+**Rollup is write-time within a session, query-time across the graph.** tick → execution → record is written as it happens. A sub-agent's cost is never propagated root-ward, for three reasons: it would re-write every ancestor on every descendant tick; it would make _summing records_ — what any billing export does — count each descendant once per ancestor above it; and who pays for a detached task or a shared sub-agent is the adopter's policy, which a write freezes and a query leaves open. Spec ships the fold instead, over records you already have:
+
+```ts
+import { rollupTree } from "@agentick/spec";
+
+const tree = rollupTree(await store.list({ appId }, ctx), rootSessionId);
+tree?.cost; // complete | partial, across the whole subtree
+```
+
+The honesty rule extends: a tree is `partial` if any descendant is partial _or_ has usage with no cost at all. See [`docs/proposals/v2/usage-cost.md`](../../docs/proposals/v2/usage-cost.md) for the full contract.
 
 ### Errors
 
@@ -428,6 +473,8 @@ Both shapes derive from one underlying run: iterating does not change the summar
 - `src/__tests__/tool-result.spec.ts` and `tool-output-bound.spec.ts` — `toContentBlocks` / `normalizeToolResult` / envelope detection; and the output bounder's text, JSON, inline-binary, and recursive paths plus the override, the disable switch, and that truncation is off by default.
 - `src/__tests__/client-tool-declaration.spec.ts` — `toClientToolRegistration`: the `jsonSchema` wrap and the omitted `handlerRef` that marks a call client-handled.
 - `src/__tests__/promise-view.spec.ts` — the homomorphic-shape regression: JSDoc authored on the `Fx` twin survives onto the derived Promise method.
+- `src/__tests__/usage-cost.spec.ts` — also the query-time tree rollup: attribution at any depth with a sibling tree excluded, the same records answering a different root, a descendant with usage and no cost degrading the whole tree to `partial`, and a zero-usage descendant correctly _not_ degrading it.
+- `src/__tests__/usage-cost.spec.ts` — the money arithmetic and the honesty rule: cache reads and writes are not double-charged, reasoning splits from output only when a reasoning rate exists, the flat per-call fee applies once (including on a zero-token call), rounding is deferred to one final division and is order-independent, a resolver beats declared rates and a resolver-returned `Cost` is used verbatim, an unpriced tick folds to `partial` rather than a complete zero, a foreign-currency tick is counted unpriced instead of summed, and a two-model fold partitions `byModel` while the flat total still equals their sum.
 - `src/__tests__/wire.spec.ts`, `wire-extension.spec.ts`, `wire-proxy.type.spec.ts` — JSON-RPC envelopes and guards, batches, error codes, subscription scope, the initialize handshake, validator accept/reject and JSON round-trip, the `WireMethods` / `WireNotifications` registries, `defineWireExtension` happy path and each rejection, and the type-level wire-proxy surface.
 - `src/__tests__/signals.spec.ts`, `channels.spec.ts`, `timeline.spec.ts` — the signal, channel, and timeline event-name builders and their query shapes. Cross-surface query _matching_ is verified against the real matcher in [@agentick/runtime](../runtime).
 - `src/__tests__/event-log.spec.ts`, `version.spec.ts` — the `EventLog<E>` contract with its cursor, compiled matcher, eviction error, and metrics; and that `SPEC_VERSION` is a date string.

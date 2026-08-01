@@ -53,8 +53,30 @@ The SDK client is constructed lazily on first use, so declaring an adapter needs
 | `parseThinkTags` | Route inline `<think>…</think>` to the reasoning channel — niche; native thinking blocks are better                               |
 | `customBlocks`   | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                            |
 | `target`         | Override the self-described `ExecutionTarget` (a proxy, an extra capability)                                                      |
+| `rates`          | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                       |
 
 Defaults with no `model` argument: `claude-3-5-sonnet-latest`, a 200k context window, 8192 max output tokens, tools and vision on.
+
+### Rates
+
+The framework ships **no prices**. Declare them where the model is declared and they ride the per-tick `<Model>` cascade for free:
+
+```ts
+const model = anthropic("claude-sonnet-5", {
+  rates: {
+    id: "anthropic:claude-sonnet-5@2026-07-01", // date it — a price change is a NEW card
+    currency: "USD",
+    perMTok: {
+      input: 3_000_000, // micro-units per MILLION tokens: $3/MTok
+      output: 15_000_000,
+      cacheRead: 300_000,
+      cacheWrite: 3_750_000,
+    },
+  },
+});
+```
+
+Without a card the tick is _unpriced_, which is recorded as unpriced — never as zero. See [`docs/proposals/v2/usage-cost.md`](../../docs/proposals/v2/usage-cost.md).
 
 ## The Anthropic dialect
 
@@ -62,7 +84,9 @@ Defaults with no `model` argument: `claude-3-5-sonnet-latest`, a 200k context wi
 
 **Native thinking.** `thinking` and `redacted_thinking` blocks map to the reasoning channel, and both round-trip. This is not a nicety — extended thinking with tool use _requires_ that a signed block replay unchanged on the next turn, so `signature` + `thinking` (or the opaque `data` of a redacted block) ride back out verbatim.
 
-**Prompt caching, two granularities.** A per-block breakpoint comes from `providerMetadata.anthropic.cacheControl` on the specific content block; a per-tool one from `ProviderToolOptions["anthropic"].cache_control`. An explicit per-block `cacheControl` beats the canonical `CacheHint` that the executor otherwise translates onto the last block. `cache_read_input_tokens` surfaces as `usage.cachedInputTokens`, treated as a subset of `inputTokens`.
+**Prompt caching, two granularities.** A per-block breakpoint comes from `providerMetadata.anthropic.cacheControl` on the specific content block; a per-tool one from `ProviderToolOptions["anthropic"].cache_control`. An explicit per-block `cacheControl` beats the canonical `CacheHint` that the executor otherwise translates onto the last block.
+
+**Cache tokens are folded, on both paths.** Anthropic reports `cache_read_input_tokens` and `cache_creation_input_tokens` _disjoint_ from `input_tokens`; the canonical rule is subset semantics, so both are folded into `usage.inputTokens` and each is also reported on its own (`cachedInputTokens`, `cacheCreationTokens`). Streaming and non-streaming produce identical `UsageStats` for identical wire numbers — worth stating because they did not before, and cache **writes** are the expensive kind (1.25× input). A kind the response does not carry stays `undefined`; absent is not zero.
 
 **Stop reasons, unmasked.**
 
@@ -205,4 +229,5 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 - `src/__tests__/anthropic-executor.spec.ts` — the dialect: system extraction and strict alternation, tool-use round-trip including streaming input JSON, abort, the streaming delta vocabulary, cache-token accounting, native thinking blocks, sampling params lifted from tree config, `providerOptions` spread, think-tag routing, custom blocks, base64 images, canonical `CacheHint` translation, canonical `toolChoice`, the provider-tools request projection, and document citations.
 - `src/__tests__/provider-web-search.spec.ts` — a provider-executed search: the `tool_result` stamped `executedBy: "provider:anthropic"`, the request half excluded from dispatchable tool calls, URL-interned sources, and web-search-location citations.
 - `src/__tests__/multimodal-projection.spec.ts` — base64 documents as native blocks, request-level `providerOptions` reaching the body, the signed-thinking round trip through normalize and back onto the wire, the redacted-thinking opaque round trip, `refusal` → `content_filter`, `pause_turn` → `other`, and config-declared `topP` / `stopSequences` reaching the request.
+- `src/__tests__/usage-normalization.spec.ts` — both cache counters folded into `inputTokens` and reported separately, unreported kinds left `undefined`, cache **writes** present on the streaming path, streaming and non-streaming producing identical `UsageStats`, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor, this adapter, and a stubbed SDK client.

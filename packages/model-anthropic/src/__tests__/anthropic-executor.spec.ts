@@ -8,30 +8,27 @@
  * cache token plumbing, providerOptions spread, streaming deltas.
  */
 
-import { omitUndefined } from "@agentick/utils";
-
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
-import type { LanguageModelTarget, LanguageModelToolChoice, RenderedTree } from "@agentick/spec";
+import type { LanguageModelToolChoice, RenderedTree } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type {
   Message as AnthropicMessage,
   MessageCreateParams,
 } from "@anthropic-ai/sdk/resources/messages";
 
-import { LanguageModelExecutor } from "@agentick/model-executor";
-
 import { anthropic } from "../anthropic-adapter.js";
 import {
   StubAnthropicClient,
-  asClient,
+  emptyTree,
+  makeExecutor,
   mkMessage,
   mkMessageStartEvent,
   mkContentBlockStartText,
   mkContentBlockStartThinking,
   mkContentBlockStartToolUse,
+  mkTarget,
   mkTextDelta,
   mkThinkingDelta,
   mkInputJsonDelta,
@@ -39,51 +36,6 @@ import {
   mkMessageDelta,
   mkMessageStop,
 } from "./stub-anthropic-client.js";
-
-function emptyTree(): RenderedTree {
-  return {
-    specVersion: "2026-05-08",
-    context: {
-      entries: [
-        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
-      ],
-    },
-  };
-}
-
-function mkTarget(overrides?: Partial<LanguageModelTarget>): LanguageModelTarget {
-  return {
-    kind: "language-model",
-    provider: "anthropic",
-    modelId: "claude-3-5-sonnet-latest",
-    ...(overrides ?? {}),
-  };
-}
-
-async function makeExecutor(
-  stub: StubAnthropicClient,
-  opts: {
-    stream?: boolean;
-    model?: string;
-    maxTokens?: number;
-    parseThinkTags?: boolean;
-    customBlocks?: Record<string, { tag?: string; onContent?: (c: string) => void }>;
-  } = {},
-) {
-  const journal = new MemoryJournal();
-  const bus = new LocalEventBus();
-  const inbox = new LocalInbox();
-  const exec = new LanguageModelExecutor("exec-anthropic-test", journal, bus, inbox, {
-    adapter: anthropic(opts.model ?? "claude-3-5-sonnet-latest", {
-      client: asClient(stub),
-      ...omitUndefined({ stream: opts.stream, maxTokens: opts.maxTokens }),
-      ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
-      ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
-    }),
-  });
-  await exec.ready;
-  return { exec, journal, bus, inbox };
-}
 
 describe("anthropic() adapter — non-streaming", () => {
   it("returns a succeeded terminal with normalized output", async () => {

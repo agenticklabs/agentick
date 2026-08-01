@@ -58,6 +58,27 @@ const result = await generate({
 | ----------------- | -------------------------------------------------------------------------------------------------------------- |
 | `model`           | Any AI SDK `LanguageModel` — a provider handle or a plain model-id string                                      |
 | `options.target`  | Override the self-described `ExecutionTarget`. Defaults are derived from the handle's `provider` and `modelId` |
+| `options.rates`   | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                    |
+
+### Rates
+
+The framework ships **no prices**. Declare them where the model is declared and they ride the per-tick `<Model>` cascade for free:
+
+```ts
+const model = aisdk(openai("gpt-4o"), {
+  rates: {
+    id: "openai:gpt-4o@2026-07-01", // date it — a price change is a NEW card
+    currency: "USD",
+    perMTok: {
+      input: 2_500_000, // micro-units per MILLION tokens: $2.50/MTok
+      output: 10_000_000,
+      cacheRead: 1_250_000,
+    },
+  },
+});
+```
+
+Without a card the tick is _unpriced_, which is recorded as unpriced — never as zero. See [`docs/proposals/v2/usage-cost.md`](../../docs/proposals/v2/usage-cost.md).
 
 There is no `clientOptions` and no `client`: the AI SDK handle _is_ the client, so API keys, base URLs, and fetch overrides stay where you already configure them.
 
@@ -77,7 +98,9 @@ Target derivation is why a handle beats a bare string here — a string id carri
 > | `reasoning` | `reasoning` | the signed payload rides on the part's `providerOptions` |
 > | `tool_use` / `tool_result` | `tool-call` / `tool-result` | — |
 
-Reasoning comes back through both paths: streamed `reasoning`, `reasoning-delta`, `reasoning-start`, and `reasoning-end` parts map to reasoning deltas, while a non-streaming `reasoning` / `reasoningText` surfaces as a `reasoning` content block ordered before the text. `usage.reasoningTokens` surfaces on the canonical usage.
+Reasoning comes back through both paths: streamed `reasoning`, `reasoning-delta`, `reasoning-start`, and `reasoning-end` parts map to reasoning deltas, while a non-streaming `reasoning` / `reasoningText` surfaces as a `reasoning` content block ordered before the text.
+
+**Usage maps 1:1, on both paths.** The SDK already normalizes to the canonical names with the canonical containment — `cachedInputTokens` inside `inputTokens`, `reasoningTokens` inside `outputTokens` — so nothing is folded and nothing is added. Every kind the SDK reports survives the streaming reconstruction, including the cache counters the SDK's own usage type does not yet name (they are read by duck-typing, so a provider that reports them is carried rather than silently dropped). A kind the SDK does not report stays `undefined`; absent is not zero.
 
 Generation knobs — temperature, `maxOutputTokens`, `topP`, the penalties, stop sequences — are lifted from the tree config and spread onto the call.
 
@@ -177,4 +200,5 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 - `src/__tests__/ai-sdk-executor.spec.ts` — the bridge against `MockLanguageModelV2`: target derivation from a handle, tool-call extraction, the finish-reason vocabulary, abort, reasoning output and `reasoningTokens`, the invariant that `providerTools` leak nowhere, and provider sources becoming citations.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across the source kinds, plus request-level and message-level `providerOptions` carry.
+- `src/__tests__/usage-normalization.spec.ts` — every kind mapped 1:1 with nothing added, unreported kinds left `undefined`, cache reads and writes surviving the streaming reconstruction, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor and this adapter.

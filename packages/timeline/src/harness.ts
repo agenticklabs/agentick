@@ -61,11 +61,13 @@ import type {
   CompactResult,
   CompactStrategy,
   ContentBlock,
+  CostRollup,
   EventBus,
   JournalingPolicy,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  ModelUsage,
   Operation,
   OperationJournal,
   OperationOrigin,
@@ -813,6 +815,20 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     readonly executionId: string;
     readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
     readonly usage?: UsageStats;
+    /**
+     * The turn's PER-MODEL breakdown. The flat `usage` above is safe to sum
+     * and meaningless to price — a turn changes model (a per-tick `<Model>`,
+     * a steer, a `setModel`), so it routinely mixes rate tiers. This is the
+     * shape cost is actually a function of.
+     */
+    readonly byModel?: Readonly<Record<string, ModelUsage>>;
+    /**
+     * What the turn cost, folded from per-tick costs stamped at act time.
+     * `partial` when any tick was unpriced — an unpriced tick never folds in
+     * as a zero, so the total is either complete or says how much of itself
+     * is missing.
+     */
+    readonly cost?: CostRollup;
     readonly stopCause?: StopCause;
     readonly target?: { readonly provider?: string; readonly modelId?: string };
   }): Promise<void> {
@@ -831,8 +847,12 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
         // application narrowing its suspects to "entries since the last success" needs to
         // know whether that success is comparable — a failover or a model swap makes it
         // not. This is the one part of that fold the application cannot derive itself.
+        // This spread is an ALLOWLIST — a field absent from it is silently
+        // dropped, which is how `byModel` / `cost` went missing at first.
         ...omitUndefined({
           usage: input.usage,
+          byModel: input.byModel,
+          cost: input.cost,
           stopCause: input.stopCause,
           target: input.target,
         }),

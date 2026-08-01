@@ -60,8 +60,29 @@ The SDK client is constructed lazily on first use, so declaring an adapter needs
 | `parseThinkTags` | Route inline `<think>…</think>` to the reasoning channel — niche; native thought parts are better                                                            |
 | `customBlocks`   | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                                                       |
 | `target`         | Override the self-described `ExecutionTarget`                                                                                                                |
+| `rates`          | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                                                  |
 
 Defaults with no `model` argument: `gemini-2.5-flash`.
+
+### Rates
+
+The framework ships **no prices**. Declare them where the model is declared and they ride the per-tick `<Model>` cascade for free:
+
+```ts
+const model = google("gemini-2.5-flash", {
+  rates: {
+    id: "google:gemini-2.5-flash@2026-07-01", // date it — a price change is a NEW card
+    currency: "USD",
+    perMTok: {
+      input: 300_000, // micro-units per MILLION tokens: $0.30/MTok
+      output: 2_500_000,
+      cacheRead: 75_000,
+    },
+  },
+});
+```
+
+Without a card the tick is _unpriced_, which is recorded as unpriced — never as zero. See [`docs/proposals/v2/usage-cost.md`](../../docs/proposals/v2/usage-cost.md).
 
 ## The Gemini dialect
 
@@ -73,7 +94,7 @@ Defaults with no `model` argument: `gemini-2.5-flash`.
 
 **Block boundaries are synthesized.** Gemini's chunks carry no start or stop markers, so the adapter opens and closes canonical blocks on content-kind transitions and composes the shared `defaultFinalizeStream` for the late stop-reason mapping — the finalization that closes open blocks, emits `message-end`, and rolls sources up onto the message summary.
 
-**Usage.** `thoughtsTokenCount` surfaces as `usage.reasoningTokens`, `cachedContentTokenCount` as `usage.cachedInputTokens`.
+**Usage, with thoughts folded into output.** `cachedContentTokenCount` surfaces as `usage.cachedInputTokens` and is already inside `promptTokenCount`, so input needs no folding. `thoughtsTokenCount` surfaces as `usage.reasoningTokens` **and** is added to `usage.outputTokens`, because Gemini reports `candidatesTokenCount` excluding thoughts while billing thinking at the output rate — and Anthropic and OpenAI both report reasoning inside their output counter. The canonical rule is `reasoningTokens ⊆ outputTokens`, so one adapter reporting them as peers would make "how many tokens did this generate" a question you can only answer by knowing which provider answered it. After the fold, `inputTokens + outputTokens` agrees with Gemini's own `totalTokenCount`, which counts thoughts too. A kind the response does not carry stays `undefined`; absent is not zero.
 
 **Structured output.** The canonical `responseFormat` maps natively, so `generateObject` is a single call here rather than a prompt-and-hope.
 
@@ -246,4 +267,5 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 - `src/__tests__/google-executor.spec.ts` — the dialect: schema sanitization, thought-part routing to reasoning, `thoughtSignature` capture and carry, synthesized block boundaries, stop-reason mapping, the grounding-tools request projection, and grounding citations with no `executedBy` stamp.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across all four source kinds, the `thoughtSignature` round trip, and the `CacheHint` no-op alongside the `cachedContent` escape hatch.
+- `src/__tests__/usage-normalization.spec.ts` — thoughts folded into `outputTokens` with `reasoningTokens` still reported separately, `inputTokens + outputTokens` agreeing with `totalTokenCount`, cached content treated as a subset of input, unreported kinds left `undefined`, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor, this adapter, and a stubbed SDK client.

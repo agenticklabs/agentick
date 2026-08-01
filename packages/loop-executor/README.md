@@ -223,6 +223,69 @@ When the run carries an `outputSpec` — or the rendered tree declares one — t
 
 The overlay precedence for the generation directive is explicit-beats-ambient: a send-level `responseFormat` wins over a per-tick `<Model>` parameter patch, which wins over the tree's own config.
 
+## What a run cost
+
+Every tick is priced **once**, when it settles, and never again. The loop is the earliest place where a tick's usage and the model that produced it are both known — the model executor returns a result without knowing which model made it, and the `<Model>` cascade resolves per tick — so the stamp lives here rather than one layer down.
+
+Declare rates on the target and the loop does the arithmetic:
+
+```ts
+import type { ExecutionTarget } from "@agentick/spec";
+
+const target: ExecutionTarget = {
+  kind: "language-model",
+  provider: "anthropic",
+  modelId: "claude-sonnet-5",
+  rates: {
+    // DATE it. A price change is a NEW card, not an edit to this one —
+    // an id that survives a repricing defeats the point of stamping.
+    id: "anthropic:claude-sonnet-5@2026-07-01",
+    currency: "USD",
+    // Micro-units per MILLION tokens: $3/MTok is 3_000_000.
+    perMTok: { input: 3_000_000, output: 15_000_000, cacheRead: 300_000, cacheWrite: 3_750_000 },
+  },
+};
+```
+
+Rates ride the target through the per-tick cascade, so a tree-declared `<Model>` brings its own card with it. For pricing that is not a table — per-tenant contracts, marketplace markup, a credit system — supply a `costResolver` on the run input:
+
+```ts
+import type { CostResolver, RateCard } from "@agentick/spec";
+
+const costResolver: CostResolver = ({ usage, sessionId }) => {
+  const contract = contracts.get(sessionId);
+  if (contract === undefined) return undefined; // fall through to target.rates
+  // Return a Cost to say "I did the arithmetic" — the number billed is
+  // not a function of tokens at all (a credit system, a flat per-seat fee).
+  if (contract.credits !== undefined) {
+    return {
+      amountMicros: usage.totalTokens * contract.credits,
+      currency: "USD",
+      rateRef: contract.id,
+    };
+  }
+  // Return a RateCard to say "here are the rates, you do the arithmetic".
+  return contract.card;
+};
+
+declare const contracts: Map<string, { id: string; credits?: number; card: RateCard }>;
+```
+
+The resolver **wins whenever it returns a value**; `undefined` falls through to the target's declared rates. Discrimination is structural — a `Cost` has `amountMicros`.
+
+The stamp then lands in three places: `cost` and `model` on the tick's `tick` / `tick-end` events, the same pair on the `applyExecutorResult` call so the session can write them onto the generation's timeline entry, and the run-level fold on the terminal:
+
+```ts
+terminal.result?.usage; // flat totals — safe to sum, meaningless to price
+terminal.result?.byModel; // { "anthropic/claude-sonnet-5": { usage, ticks, cost } }
+terminal.result?.cost; // { kind: "complete", amountMicros, currency, ticks, rateRefs }
+```
+
+`byModel` exists because a run can change model mid-flight, so the flat `usage` routinely mixes rate tiers and is not a thing you can price. A run that recorded no usage at all has neither `cost` nor `byModel` — absent, not zero.
+
+> [!IMPORTANT]
+> **An unpriced tick never rolls up as zero.** A tick with usage and no rate card is _unpriced_, and the run reports `{ kind: "partial", amountMicros, pricedTicks, unpricedTicks }` where `amountMicros` is a **lower bound**, not a total. Zero is a claim — "this cost nothing" — and folding an unpriced tick in as zero produces a number that is confidently, silently low in the direction nobody double-checks. The union forces the two cases to render different words. The framework ships **no prices**: a model with no rates produces no cost, which is true, rather than a seeded guess, which is confidently wrong.
+
 ## `defineLoop` — replace the orchestration
 
 Subclass `LoopExecutorHarness` to change one tick step. To change the _topology_ — a single-call loop with no tool round trip, a parallel multi-model fan-out, a replay driver — bring a callback instead:
@@ -333,6 +396,8 @@ Every apply call is a no-op, on both the Promise facade and the `fx` twins. Noth
 - **`defineLoop` cannot stream events.** The callback returns a terminal, so the `runExecution` sink it is handed has nothing to drain. Subclass `LoopExecutorHarness` if you need the event stream from custom orchestration.
 - **The tree-declared model is resolved post-render.** A `<Model>` in the IR selects the executor for _that_ tick, but the render that declared it did not see it in its own render context. Closing that needs render → resolve → re-render convergence.
 - **`ExecutionRunResult.outputs`** is threaded through the type and never populated.
+- **A cost rollup carries one currency.** A tick priced in a second currency counts toward `unpricedTicks` rather than being summed in — it stays fully priced in its own `byModel` bucket. Per-currency buckets are unbuilt; summing across currencies is the same class of lie as summing unpriced ticks as zero.
+- **No `maxCost` bound.** `maxTicks` caps a run by count, not by spend. The stamped per-tick `Cost` is the input such a bound needs, so it is a small addition rather than a subsystem — but it is not here.
 - **No `ctx.log` in the tick body.** The log facet is threaded into the tool executor and the session but not the loop, so decisions like the structured-output strategy fallback are silent rather than warned.
 
 ## Verified by
@@ -347,6 +412,7 @@ Every apply call is a no-op, on both the Promise facade and the `fx` twins. Noth
 - `src/__tests__/fx-run-execution.spec.ts` — `fx.runExecution` is an un-run `Effect`; the Promise method is its facade; both produce the same terminal.
 - `src/__tests__/fx-state-applicator.spec.ts` — `NoopStateApplicator`'s twins are composable Effects that nest in one `Effect.gen`.
 - `src/__tests__/response-format-overlay.spec.ts` — send-level `responseFormat` beating both the tree config and a per-tick `<Model>` parameter patch.
+- `src/__tests__/cost-stamping.spec.ts` — the resolver beating declared rates, `undefined` falling through to them, and a returned `Cost` used verbatim; `rateRef` on every priced tick and de-duplicated in the run's `rateRefs`; the stamp reaching `applyExecutorResult` and both tick events; an unpriced run rolling up `partial` rather than a zero `complete`; a mixed run whose `amountMicros` is only the priced subset; a run with no usage having no cost at all; a two-model run partitioning into two `byModel` keys whose usage sums to the flat total.
 - `src/__tests__/define-loop.spec.ts` — the factory marker, callback delegation, default and custom abort routing, and envelopes reaching the supplied bus.
 - `src/__tests__/telemetry-parity.spec.ts` — an interceptor on `loop:run-execution` emitting metrics that reach a late-bound meter with the ambient labels.
 - Integration against the real compiler and executors (lifecycle projection, per-tick model resolution) and the end-to-end structured-output behaviour live in [@agentick/session](../session), where their dependencies live.

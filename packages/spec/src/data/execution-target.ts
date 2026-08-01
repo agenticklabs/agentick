@@ -139,6 +139,21 @@ export interface ExecutionTarget {
     readonly cachedInputPerMTok?: number;
     readonly cacheWritePerMTok?: number;
   };
+  /**
+   * Adopter-supplied rates, declared at model construction
+   * (`anthropic("claude-sonnet-5", { rates })`). The framework ships NO
+   * prices — an absent card means an UNPRICED tick, which rolls up as
+   * explicitly unpriced rather than as zero.
+   *
+   * Rates live on the target rather than in an app-level table keyed by
+   * model name so a per-tick `<Model>` override carries its own card
+   * through the model cascade with no extra plumbing.
+   *
+   * An app-level `CostResolver` wins over this when it returns a value.
+   *
+   * @see docs/proposals/v2/usage-cost.md
+   */
+  readonly rates?: import("./usage-cost.js").RateCard;
 }
 
 export interface LanguageModelTarget extends ExecutionTarget {

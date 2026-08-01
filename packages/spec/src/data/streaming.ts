@@ -395,6 +395,10 @@ export type TickEndEvent = {
   readonly stopReason?: string;
   readonly shouldContinue: boolean;
   readonly usage?: UsageStats;
+  /** Stamped at act time. Absent = UNPRICED, never zero. */
+  readonly cost?: import("./usage-cost.js").Cost;
+  /** WHICH model produced this tick's usage — usage alone cannot be priced. */
+  readonly model?: Pick<import("./execution-target.js").ExecutionTarget, "provider" | "modelId">;
 } & StreamEventBase;
 
 export type TickEvent = {
@@ -403,6 +407,10 @@ export type TickEvent = {
   readonly stopReason: string;
   readonly usage: UsageStats;
   readonly durationMs: number;
+  /** Stamped at act time. Absent = UNPRICED, never zero. */
+  readonly cost?: import("./usage-cost.js").Cost;
+  /** WHICH model produced this tick's usage — usage alone cannot be priced. */
+  readonly model?: Pick<import("./execution-target.js").ExecutionTarget, "provider" | "modelId">;
 } & StreamEventBase;
 
 /** Execution lifecycle. Symmetric. */
@@ -421,7 +429,12 @@ export type ExecutionEndEvent = {
 export type ExecutionEvent = {
   readonly type: "execution";
   readonly output: readonly ContentBlock[];
+  /** Flat totals across every model. Safe to sum; meaningless to price. */
   readonly usage: UsageStats;
+  /** Per-model breakdown, keyed `` `${provider}/${modelId}` ``. */
+  readonly byModel?: Readonly<Record<string, import("./usage-cost.js").ModelUsage>>;
+  /** `partial` when any tick was unpriced — an unpriced tick never folds in as zero. */
+  readonly cost?: import("./usage-cost.js").CostRollup;
   readonly stopReason: string;
   readonly ticks: number;
   readonly durationMs: number;

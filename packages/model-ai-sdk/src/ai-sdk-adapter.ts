@@ -53,6 +53,7 @@ import type {
   MediaSource,
   NormalizeInput,
   ProviderOptions,
+  RateCard,
   Source,
   TextBlock,
   ToolCall,
@@ -72,6 +73,18 @@ export interface AISDKAdapterOptions {
    * advertise additional capabilities.
    */
   readonly target?: ExecutionTarget;
+  /**
+   * Adopter-supplied rates for this model. Lands on
+   * {@link ExecutionTarget.rates}, so it rides the per-tick `<Model>`
+   * cascade with no extra plumbing. Applied over an explicit `target`
+   * too — declaring one must not silently drop the rates.
+   *
+   * The framework ships NO prices: without a card the tick is UNPRICED,
+   * which rolls up as explicitly unpriced rather than as zero.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.2
+   */
+  readonly rates?: RateCard;
 }
 
 // ============================================================================
@@ -157,7 +170,13 @@ export function aisdk(
   model: LanguageModel,
   options: AISDKAdapterOptions = {},
 ): LanguageModelAdapter<unknown, AISDKStreamPart> {
-  const target: ExecutionTarget = options.target ?? deriveTarget(model);
+  const baseTarget: ExecutionTarget = options.target ?? deriveTarget(model);
+  // `rates` layers OVER the resolved target, explicit or default. An
+  // adopter who overrides the target is describing capabilities and ids,
+  // not waiving the price card — swallowing the rates there would make
+  // every tick silently unpriced.
+  const target: ExecutionTarget =
+    options.rates !== undefined ? { ...baseTarget, rates: options.rates } : baseTarget;
 
   return defineLanguageModelAdapter<unknown, AISDKStreamPart, AISDKProjectedInput>({
     provider: "ai-sdk",
@@ -395,13 +414,19 @@ export function aisdk(
         ...(reasoningText.length > 0
           ? { reasoning: [{ type: "reasoning", text: reasoningText }], reasoningText }
           : {}),
+        // The SDK's normalized names are 1:1 with ours, so every kind
+        // round-trips verbatim — including the cache counters, which the
+        // streaming path used to drop on the floor (same class of defect
+        // as Anthropic's D5; usage-cost.md §2).
         usage: {
           inputTokens: accum.usage.inputTokens,
           outputTokens: accum.usage.outputTokens,
           totalTokens: accum.usage.totalTokens,
-          ...(accum.usage.reasoningTokens !== undefined
-            ? { reasoningTokens: accum.usage.reasoningTokens }
-            : {}),
+          ...omitUndefined({
+            reasoningTokens: accum.usage.reasoningTokens,
+            cachedInputTokens: accum.usage.cachedInputTokens,
+            cacheCreationTokens: accum.usage.cacheCreationTokens,
+          }),
         },
         toolCalls,
       };

@@ -68,6 +68,7 @@ import type {
   NormalizeInput,
   ProjectInput,
   ProviderOptions,
+  RateCard,
   RenderedTree,
   SectionEntry,
   Source,
@@ -158,6 +159,18 @@ export interface AnthropicAdapterOptions {
   readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
   /** Override the self-described target. */
   readonly target?: ExecutionTarget;
+  /**
+   * Adopter-supplied rates for this model. Lands on
+   * {@link ExecutionTarget.rates}, so it rides the per-tick `<Model>`
+   * cascade with no extra plumbing. Applied over an explicit `target`
+   * too — declaring one must not silently drop the rates.
+   *
+   * The framework ships NO prices: without a card the tick is UNPRICED,
+   * which rolls up as explicitly unpriced rather than as zero.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.2
+   */
+  readonly rates?: RateCard;
 }
 
 // Re-export from @agentick/model-executor so adopters that import from
@@ -225,7 +238,7 @@ export function anthropic(
   const defaultMaxTokens = options.maxTokens;
   const parseThinkTags = options.parseThinkTags ?? false;
   const customBlocks = options.customBlocks;
-  const target: ExecutionTarget = options.target ?? {
+  const baseTarget: ExecutionTarget = options.target ?? {
     kind: "language-model",
     provider: "anthropic",
     modelId: model ?? DEFAULT_MODEL,
@@ -246,6 +259,12 @@ export function anthropic(
       maxOutputTokens: 8_192,
     },
   };
+  // `rates` layers OVER the resolved target, explicit or default. An
+  // adopter who overrides the target is describing capabilities and ids,
+  // not waiving the price card — swallowing the rates there would make
+  // every tick silently unpriced.
+  const target: ExecutionTarget =
+    options.rates !== undefined ? { ...baseTarget, rates: options.rates } : baseTarget;
 
   let clientMemo: Anthropic | undefined = options.client;
   const client = (): Anthropic => (clientMemo ??= new Anthropic(buildClientOptions(options)));
@@ -303,21 +322,13 @@ export function anthropic(
           out.push({ type: "message-start", role: "assistant", model: msg.model });
           const u = msg.usage;
           if (u) {
-            out.push({
-              type: "usage",
-              // Subset semantics (#186): fold cache reads into inputTokens.
-              usage: (() => {
-                const cached = u.cache_read_input_tokens ?? 0;
-                const inputTokens = (u.input_tokens ?? 0) + cached;
-                const outputTokens = u.output_tokens ?? 0;
-                return {
-                  inputTokens,
-                  outputTokens,
-                  totalTokens: inputTokens + outputTokens,
-                  ...(u.cache_read_input_tokens != null ? { cachedInputTokens: cached } : {}),
-                };
-              })(),
-            });
+            // Anthropic reports cache reads AND cache writes disjoint from
+            // `input_tokens`; subset semantics (#186) folds BOTH in. This is
+            // the same arithmetic as the non-streaming `toUsageStats` — the
+            // two paths must produce identical UsageStats for identical wire
+            // numbers, or a streamed call reports zero cache writes and
+            // under-bills the expensive kind (usage-cost.md D5).
+            out.push({ type: "usage", usage: toUsageStats(u) });
           }
           break;
         }
@@ -406,15 +417,22 @@ export function anthropic(
           // Carries final stop_reason + last usage update.
           if (event.delta.stop_sequence != null) state.stopSequence = event.delta.stop_sequence;
           const u = event.usage;
-          const inputTokens = accum.usage.inputTokens; // already captured at message_start
+          // Input and both cache counters were captured (and folded) at
+          // message_start; carry them forward verbatim so the terminal
+          // usage matches the non-streaming shape kind for kind.
+          const inputTokens = accum.usage.inputTokens;
+          const outputTokens = u?.output_tokens ?? accum.usage.outputTokens;
           out.push({
             type: "message-end",
             stopReason: mapFinishReason(event.delta.stop_reason),
             usage: {
               inputTokens,
-              outputTokens: u?.output_tokens ?? accum.usage.outputTokens,
-              totalTokens: inputTokens + (u?.output_tokens ?? accum.usage.outputTokens),
-              ...omitUndefined({ cachedInputTokens: accum.usage.cachedInputTokens }),
+              outputTokens,
+              totalTokens: inputTokens + outputTokens,
+              ...omitUndefined({
+                cachedInputTokens: accum.usage.cachedInputTokens,
+                cacheCreationTokens: accum.usage.cacheCreationTokens,
+              }),
             },
           });
           break;
@@ -497,11 +515,16 @@ export function anthropic(
         stop_reason: mapBackStopReason(accum.stopReason),
         stop_sequence: state.stopSequence,
         usage: {
-          // Back-map subset semantics to Anthropic's disjoint wire shape.
-          input_tokens: accum.usage.inputTokens - (accum.usage.cachedInputTokens ?? 0),
+          // Back-map subset semantics to Anthropic's disjoint wire shape:
+          // BOTH cache counters come back out of inputTokens, or the
+          // round-trip through normalize() double-counts cache writes.
+          input_tokens:
+            accum.usage.inputTokens -
+            (accum.usage.cachedInputTokens ?? 0) -
+            (accum.usage.cacheCreationTokens ?? 0),
           output_tokens: accum.usage.outputTokens,
           cache_read_input_tokens: accum.usage.cachedInputTokens ?? null,
-          cache_creation_input_tokens: null,
+          cache_creation_input_tokens: accum.usage.cacheCreationTokens ?? null,
         },
       } as AnthropicMessage;
     },

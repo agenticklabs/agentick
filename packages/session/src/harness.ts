@@ -41,6 +41,8 @@ import type {
   ChannelHandle,
   ChannelSnapshotProvider,
   ContentBlock,
+  Cost,
+  CostResolver,
   EventEnvelope,
   ElicitationRequest,
   FormElicitationRequest,
@@ -55,8 +57,11 @@ import type {
   MessageHandlerError,
   MessageInbox,
   MessageInboxFactory,
+  MetricLabels,
+  Metrics,
   NotifyTickEndInput,
   Operation,
+  OperationCtx,
   OperationJournal,
   OperationJournalFactory,
   ProtocolEvent,
@@ -85,15 +90,19 @@ import type {
   TickEndForwardDecision,
   TickResult,
   TimelineEntry,
+  TokenKind,
   ToolExecutorProtocol,
   ToolsHandle,
   TreeInterceptionSource,
   Unsubscribe,
+  UsageRollup,
+  UsageStats,
 } from "@agentick/spec";
 import {
   channelEventName,
   DEFAULT_JOURNALING_POLICY,
   ExecutionFailed,
+  foldUsageRollup,
   HandlerError,
   isChannelSnapshotProvider,
   isSnapshotCapable,
@@ -108,12 +117,7 @@ import {
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
 import { buildSessionElicit } from "@agentick/elicitation";
 import { withScope } from "@agentick/tool-executor";
-import {
-  effectiveModelInfo,
-  mergeUsageStats,
-  type LanguageModelAdapter,
-  type ModelRegistry,
-} from "@agentick/model";
+import { effectiveModelInfo, type LanguageModelAdapter, type ModelRegistry } from "@agentick/model";
 import type { KnobsHandle } from "@agentick/knobs";
 import type { GateHandle, GatesHandle } from "@agentick/gates";
 import type { StateHandle } from "@agentick/state";
@@ -260,6 +264,15 @@ export interface SessionHarnessOptions<P = unknown> {
    * merges and injects.
    */
   readonly models?: ModelRegistry;
+  /**
+   * Pricing seam (`AppHarnessOptions.costResolver`), threaded straight
+   * through to `ExecutionRunInput.costResolver` on every send. The loop
+   * consults it per tick at settlement, where it WINS over the resolved
+   * target's declared `rates`.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.3
+   */
+  readonly costResolver?: CostResolver;
   /**
    * Adopter-defined metadata bag carried on the session and exposed
    * to substrate factories via `parent.metadata`. Framework defines
@@ -509,6 +522,51 @@ export interface SessionHarnessOptions<P = unknown> {
 }
 
 // ============================================================================
+// Tick accounting — the metrics plane (usage-cost §5)
+// ============================================================================
+
+/**
+ * **Two planes, one stamp.** A tick's `Cost` is computed exactly once, at
+ * settlement in the loop. The session projects that single fact twice:
+ *
+ *  - the **truth plane** — the assistant entry's `SessionMessageMetadata`, the
+ *    execution rollup, and the `SessionRecord` aggregate. Durable, complete,
+ *    per-model. This is what billing reads.
+ *  - the **metrics plane** — the names below, emitted through `ctx.metrics`.
+ *    Strictly a MIRROR of the truth plane, for dashboards.
+ *
+ * The direction is non-negotiable: **money must never live ONLY in metrics.**
+ * A metrics pipeline is lossy by design — it samples, aggregates, expires
+ * series, and drops labels under cardinality pressure. It is a fine place to
+ * WATCH cost and a catastrophic place to SOURCE it. So nothing here is the
+ * only writer of a number, and nothing reads any of it back for accounting.
+ *
+ * `ctx.metrics` prefixes each name with the harness's telemetry namespace, so
+ * these land as `agentick.session.tick.*` unless the app whitelabels it.
+ */
+const TICK_COST_METRIC = "session.tick.cost_micros";
+const TICK_TOKENS_METRIC = "session.tick.tokens";
+const TICK_UNPRICED_METRIC = "session.tick.unpriced";
+
+/**
+ * The token kinds a tick can report, read in the {@link TokenKind} vocabulary
+ * the rate cards price in — so the `kind` label on the tokens histogram joins
+ * directly to a `RateCard.perMTok` key.
+ *
+ * **Absent ≠ zero** (usage-cost §2) holds here too: an unreported kind emits
+ * NOTHING. A `0` observation claims "this model did no cache writes", which is
+ * a different statement from "this provider does not tell us" — and in a
+ * histogram the difference is a bucket that drags every percentile down.
+ */
+const TICK_TOKEN_KINDS: readonly (readonly [TokenKind, (u: UsageStats) => number | undefined])[] = [
+  ["input", (u) => u.inputTokens],
+  ["output", (u) => u.outputTokens],
+  ["cacheRead", (u) => u.cachedInputTokens],
+  ["cacheWrite", (u) => u.cacheCreationTokens],
+  ["reasoning", (u) => u.reasoningTokens],
+];
+
+// ============================================================================
 // SessionHarness
 // ============================================================================
 
@@ -674,6 +732,8 @@ export class SessionHarness<P = unknown>
   readonly requiredScopes?: readonly string[] | undefined;
   /** Injected model registry (#206) — window resolution for useContextInfo. */
   private readonly models: ModelRegistry | undefined;
+  /** App-injected pricing seam — forwarded verbatim onto every run input. */
+  private readonly costResolver: CostResolver | undefined;
   private _currentExecution: Promise<unknown> | null = null;
   /** In-flight handle — join target for steering sends (ADR 53 §5). */
   private _currentHandle: import("@agentick/spec").SessionExecutionHandle | null = null;
@@ -702,8 +762,16 @@ export class SessionHarness<P = unknown>
    * execution after cleanup.
    */
   private _loopDone = false;
-  /** The running turn's aggregate usage — the boundary record's payload. */
-  private _executionUsage: import("@agentick/spec").UsageStats | undefined;
+  /**
+   * The running turn's aggregate accounting — flat `usage`, the per-model
+   * breakdown, and the cost rollup — folded per tick as
+   * `applyExecutorResult` lands. The boundary record's payload.
+   *
+   * Per-model rather than a flat bag because cost is NOT a function of a bag
+   * flattened across models: a turn changes model (a per-tick `<Model>`, a
+   * steer, a `setModel`), and the flat total routinely mixes rate tiers.
+   */
+  private _executionRollup: UsageRollup | undefined;
   /** Input entries the running execution has observed (ADR 53 live check). */
   private _inputEntriesSeen = 0;
   /**
@@ -937,6 +1005,7 @@ export class SessionHarness<P = unknown>
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
     this.requiredScopes = options.requiredScopes;
     this.models = options.models;
+    this.costResolver = options.costResolver;
     this.defaultStreaming = options.defaultStreaming;
     // Narration defaults ON — the token-cost off-switch is opt-out.
     this.narrate = options.narrate ?? true;
@@ -1338,7 +1407,14 @@ export class SessionHarness<P = unknown>
       currentTick: this.runtime.currentTick(),
       bridges,
       usage: this.runtime.usage(),
-      ...omitUndefined({ parentSessionId: this.parentSessionId }),
+      // The accounting record travels with the snapshot. A stamped cost that
+      // does not survive a reload defeats the point of stamping it, and the
+      // per-model breakdown is the only thing that makes it recomputable-free.
+      ...omitUndefined({
+        byModel: this.runtime.byModel(),
+        cost: this.runtime.cost(),
+        parentSessionId: this.parentSessionId,
+      }),
     };
   }
 
@@ -1365,7 +1441,8 @@ export class SessionHarness<P = unknown>
    *   2. bridge fan-out — for every entry in `snapshot.bridges`, if the
    *      live bridge by that name is {@link SnapshotCapable}, `importSnapshot`
    *      it. Async-aware (timeline's import is a Promise); awaited together.
-   *   3. accounting — restore the execution-local tick + aggregate usage.
+   *   3. accounting — restore the execution-local tick + the aggregate
+   *      usage / per-model breakdown / cost rollup.
    */
   private async restoreBody(input: RestoreSnapshotInput): Promise<void> {
     if (this._closed) {
@@ -1398,7 +1475,7 @@ export class SessionHarness<P = unknown>
     // fold doesn't carry). Status is NOT forced: a restored session resumes
     // under its own lifecycle, not the snapshot's captured phase.
     this.runtime.setTick(snap.currentTick);
-    this.runtime.setUsage(snap.usage);
+    this.runtime.setAccounting(snap.usage, snap.byModel, snap.cost);
   }
 
   /**
@@ -1482,9 +1559,19 @@ export class SessionHarness<P = unknown>
   private applyExecutorResultFx(
     input: ApplyExecutorResultInput,
   ): Effect.Effect<ApplyResult, StateApplyError, never> {
-    return Effect.tryPromise({
-      try: () => this.applyExecutorResultBody(input),
-      catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
+    return Effect.gen(this, function* () {
+      // IN-FIBER mint (ADR 91) — the only legal way for the async body to
+      // reach `ctx.metrics`, since a synchronous ambient read from a Promise
+      // body is the `readContext()` trap. Minted here rather than threaded as
+      // a new parameter through the loop's stateApplicator seam: the body has
+      // exactly one caller, so the ADR-77 in-fiber composition is untouched.
+      // The facets are LAZY getters, so a session with telemetry off pays for
+      // a trunk copy and nothing else.
+      const ctx = yield* this.currentOperationCtx();
+      return yield* Effect.tryPromise({
+        try: () => this.applyExecutorResultBody(input, ctx),
+        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
+      });
     });
   }
 
@@ -2379,7 +2466,7 @@ export class SessionHarness<P = unknown>
 
     // ADR 53: the first render will include everything appended so far.
     this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
-    this._executionUsage = undefined;
+    this._executionRollup = undefined;
 
     const executionId = `exec:${ulid()}`;
     // E11 accounting: bump the execution count + set the in-flight id BEFORE
@@ -2537,6 +2624,10 @@ export class SessionHarness<P = unknown>
                 mountId: this.mountId,
                 modelExecutor: modelExecutorForCall,
                 target: targetForCall,
+                // The app-level pricing seam, forwarded verbatim. The loop
+                // consults it per tick at settlement, where it beats the
+                // resolved target's declared `rates`.
+                ...omitUndefined({ costResolver: this.costResolver }),
                 toolExecutor: this.toolExecutor,
                 stateApplicator: {
                   // The `.fx` twins compose in the loop's fiber (Stage 3); the
@@ -2699,7 +2790,13 @@ export class SessionHarness<P = unknown>
             // can read, since a turn that died before its first tick appended no
             // assistant entry at all.
             ...omitUndefined({
-              usage: this._executionUsage,
+              usage: this._executionRollup?.usage,
+              // The turn's per-model breakdown + cost, folded from the same
+              // per-tick stream the flat `usage` above comes from — so the
+              // three never disagree. `cost` is `partial` when any tick of
+              // this turn was unpriced.
+              byModel: this._executionRollup?.byModel,
+              cost: this._executionRollup?.cost,
               stopCause: terminal.result?.stopCause,
               // The target that ran the turn. A SUCCEEDED boundary is a proof that every
               // entry it carried was projectable — but only for this target, so a reader
@@ -2757,6 +2854,12 @@ export class SessionHarness<P = unknown>
             output: result.output,
             toolResults: result.toolResults,
             usage: result.usage,
+            // Lifted from the loop's run result, exactly as the flat `usage`
+            // beside them is: the loop is the accounting authority for the
+            // run (it sees every tick, including ones that appended no
+            // entry). Absent when the run recorded no usage; `cost` is
+            // `partial` when any tick was unpriced — never a zero `complete`.
+            ...omitUndefined({ byModel: result.byModel, cost: result.cost }),
             stopReason: result.stopReason,
             ticks: result.ticks,
             executionId,
@@ -2788,7 +2891,9 @@ export class SessionHarness<P = unknown>
             executionId,
             outcome: "failed",
             ...omitUndefined({
-              usage: this._executionUsage,
+              usage: this._executionRollup?.usage,
+              byModel: this._executionRollup?.byModel,
+              cost: this._executionRollup?.cost,
               target: boundaryTarget(targetForCall),
             }),
           })
@@ -2841,7 +2946,17 @@ export class SessionHarness<P = unknown>
             tick: loopEvent.tick,
             tickIndex: loopEvent.tickIndex,
             shouldContinue: loopEvent.shouldContinue,
-            ...omitUndefined({ stopReason: loopEvent.stopReason, usage: loopEvent.usage }),
+            // The wire `StreamEvent` types are explicitly-fielded — nothing
+            // rides automatically. `omitUndefined` keeps an unpriced tick's
+            // payload free of a `cost` key entirely: absent means unpriced,
+            // and a serialized `cost: null` would be a different (wrong)
+            // claim.
+            ...omitUndefined({
+              stopReason: loopEvent.stopReason,
+              usage: loopEvent.usage,
+              cost: loopEvent.cost,
+              model: loopEvent.model,
+            }),
           });
           return;
         case "tick":
@@ -2852,6 +2967,7 @@ export class SessionHarness<P = unknown>
             stopReason: loopEvent.stopReason,
             usage: loopEvent.usage,
             durationMs: loopEvent.durationMs,
+            ...omitUndefined({ cost: loopEvent.cost, model: loopEvent.model }),
           });
           return;
         case "execution-start":
@@ -2877,6 +2993,15 @@ export class SessionHarness<P = unknown>
             tick: loopEvent.tick,
             output: loopEvent.output,
             usage: loopEvent.usage,
+            // The run's per-model breakdown + cost. Sourced from the session's
+            // own per-tick fold rather than the loop event (which carries only
+            // the flat bag), so the wire summary matches the turn-boundary
+            // record byte for byte. The summary fires at the terminal, after
+            // every tick has been applied.
+            ...omitUndefined({
+              byModel: this._executionRollup?.byModel,
+              cost: this._executionRollup?.cost,
+            }),
             stopReason: loopEvent.stopReason,
             ticks: loopEvent.tick,
             durationMs: loopEvent.durationMs,
@@ -2923,29 +3048,99 @@ export class SessionHarness<P = unknown>
     };
   }
 
-  private async applyExecutorResultBody(input: ApplyExecutorResultInput): Promise<ApplyResult> {
+  private async applyExecutorResultBody(
+    input: ApplyExecutorResultInput,
+    ctx: OperationCtx,
+  ): Promise<ApplyResult> {
     const ids: string[] = [];
+    const { usage, cost, model } = input.result;
     if (input.result.output.length > 0) {
       const id = await this.appendMessageEntry({
         role: "assistant",
         content: input.result.output,
         // ADR 53 §2.2: one tick = one generation = one assistant entry;
-        // stamp provenance + the GENERATION's usage on the record.
+        // stamp provenance + the GENERATION's usage on the record — plus the
+        // model that produced it and what it cost, computed ONCE at act time.
+        // Usage without model identity cannot be priced, and a cost that is
+        // recomputed on read reprices history every time a rate changes.
+        // Absent `cost` = the tick was UNPRICED, which is a fact, not a zero.
         metadata: {
           executionId: input.executionId,
           tickId: input.tickId,
-          ...omitUndefined({ usage: input.result.usage }),
+          ...omitUndefined({ usage, cost, model }),
         },
       });
       ids.push(id);
     }
-    this._executionUsage =
-      this._executionUsage && input.result.usage
-        ? mergeUsageStats(this._executionUsage, input.result.usage)
-        : (input.result.usage ?? this._executionUsage);
-    this.runtime.addUsage(input.result.usage);
+    // Fold the tick into BOTH the turn-level rollup and the session record.
+    //
+    // NOTE the session record is deliberately NOT a place a SPAWNED child's
+    // cost lands: a child folds into its OWN record, and "what did this agent
+    // tree cost" is a query over `spawnPath`, never a write-time rollup —
+    // write-time double-counts and freezes one scope answer (usage-cost §7.1).
+    // Gated on `usage` because "no usage at all" is not an unpriced tick — it
+    // is nothing to account for, and folding it would push a `partial` cost
+    // onto a turn that never generated. With usage present but no cost, the
+    // fold degrades the rollup to `partial` and counts the tick unpriced;
+    // it never contributes a zero to a `complete` total.
+    if (usage !== undefined) {
+      this._executionRollup = foldUsageRollup(this._executionRollup, model, usage, cost);
+      this.runtime.addTickAccounting(usage, model, cost);
+      // The metrics plane, mirroring what the two folds above just recorded
+      // durably. Same stamp, second projection — never a second source.
+      this.mirrorTickAccounting(ctx.metrics, usage, model, cost);
+    }
     this.runtime.bumpTick();
     return { appendedEntryIds: ids };
+  }
+
+  /**
+   * Project one settled tick's accounting onto the metrics plane — see the
+   * {@link TICK_COST_METRIC} note for why this is a mirror and never a source.
+   * Called only when the tick reported usage: a tick that generated nothing is
+   * not an unpriced tick, it is nothing to account for.
+   *
+   * Every `ctx.metrics` call is a no-op against a frozen singleton when no
+   * meter is wired, so a telemetry-off session pays for two small label
+   * objects per tick and nothing else.
+   *
+   * **Labels are deliberately bounded**: `provider` / `modelId` (a deployment
+   * has a handful), `currency` (ISO-4217, effectively one), `kind` (the five
+   * {@link TokenKind}s). NOT `rateRef` — it is adopter-chosen and DATED, so a
+   * new time series is minted on every price change, forever. NOT sessionId /
+   * executionId / tickId — per-tick identity is the definition of a
+   * cardinality explosion; it rides spans and logs, never a metric label.
+   */
+  private mirrorTickAccounting(
+    metrics: Metrics,
+    usage: UsageStats,
+    model: Pick<ExecutionTarget, "provider" | "modelId"> | undefined,
+    cost: Cost | undefined,
+  ): void {
+    const modelLabels: MetricLabels = {
+      ...(model?.provider !== undefined ? { provider: model.provider } : {}),
+      ...(model?.modelId !== undefined ? { modelId: model.modelId } : {}),
+    };
+    // A priced tick contributes its amount. An UNPRICED one contributes to a
+    // COUNTER rather than a zero to the histogram — the metrics-plane
+    // expression of the honesty rule (usage-cost §6). A dashboard showing
+    // spend must also be able to show how much of the spend it could not see;
+    // without this counter a consumer reads a total that is confidently,
+    // silently low, which is the exact defect this vertical exists to prevent.
+    if (cost !== undefined) {
+      metrics.record(TICK_COST_METRIC, cost.amountMicros, {
+        ...modelLabels,
+        currency: cost.currency,
+      });
+    } else {
+      metrics.count(TICK_UNPRICED_METRIC, 1, modelLabels);
+    }
+    for (const [kind, read] of TICK_TOKEN_KINDS) {
+      const tokens = read(usage);
+      if (tokens !== undefined) {
+        metrics.record(TICK_TOKENS_METRIC, tokens, { ...modelLabels, kind });
+      }
+    }
   }
 
   private async applyToolResultsBody(input: ApplyToolResultsInput): Promise<ApplyResult> {

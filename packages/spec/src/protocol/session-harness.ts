@@ -118,6 +118,24 @@ export interface SessionMessageMetadata {
   readonly tickId?: string;
   /** The generation's usage — execution-produced assistant entries. */
   readonly usage?: import("../data/execution-result.js").UsageStats;
+  /**
+   * WHICH model produced this generation. Stamped alongside `usage`
+   * because usage without model identity cannot be priced, and a session
+   * changes model more often than the flat aggregate admits.
+   */
+  readonly model?: Pick<
+    import("../data/execution-target.js").ExecutionTarget,
+    "provider" | "modelId"
+  >;
+  /**
+   * The generation's cost, computed ONCE at act time against the rate
+   * card in force then. Never recomputed — a price published tomorrow
+   * must not reprice this record. Absent = the tick was UNPRICED, which
+   * is a fact, not a zero.
+   *
+   * @see docs/proposals/v2/usage-cost.md §5
+   */
+  readonly cost?: import("../data/usage-cost.js").Cost;
   readonly [key: string]: unknown;
 }
 
@@ -181,6 +199,10 @@ export interface TurnBoundaryEntry {
     /** The TURN's aggregate usage — may exceed the entry-sum when a
      *  tick billed tokens but appended no assistant entry. */
     readonly usage?: import("../data/execution-result.js").UsageStats;
+    /** The turn's per-model breakdown, keyed `` `${provider}/${modelId}` ``. */
+    readonly byModel?: Readonly<Record<string, import("../data/usage-cost.js").ModelUsage>>;
+    /** The turn's cost — `partial` when any tick was unpriced. */
+    readonly cost?: import("../data/usage-cost.js").CostRollup;
     /**
      * WHY the turn ended badly — see {@link StopCause}. Present on `failed` and
      * `vetoed`, when a cause was carried.
@@ -442,7 +464,19 @@ export interface SendResult<T = unknown> {
   readonly output: readonly ContentBlock[];
   /** Tool dispatch results accumulated across ticks. */
   readonly toolResults: readonly LoopToolResult[];
+  /** Flat totals across every model this send touched. Safe to sum; meaningless to price. */
   readonly usage: UsageStats;
+  /** Per-model breakdown, keyed `` `${provider}/${modelId}` `` — what makes cost computable. */
+  readonly byModel?: Readonly<Record<string, import("../data/usage-cost.js").ModelUsage>>;
+  /**
+   * What this send cost. Absent when it recorded no usage; `partial`
+   * when any tick was unpriced — an unpriced tick never folds in as
+   * zero, so a total is complete or explicitly says how much of itself
+   * is missing.
+   *
+   * @see docs/proposals/v2/usage-cost.md §6
+   */
+  readonly cost?: import("../data/usage-cost.js").CostRollup;
   readonly stopReason:
     | LanguageModelStopReason
     | "max_ticks"
@@ -582,14 +616,36 @@ export function isRunnerBindable(x: unknown): x is RunnerBindable {
 // State application — implemented by session, consumed by loop
 // ============================================================================
 
+/**
+ * The ONE input type for `applyExecutorResult`, shared by the Promise
+ * facade and the Effect twin (`StateApplicatorFx`).
+ *
+ * It was two structural copies until they drifted twice over: the facade
+ * declared a narrow projection (`output` / `stopReason` / `usage?`) while
+ * the twin took a whole {@link LanguageModelExecutionResult}, and only the
+ * facade learned about `cost` / `model`. Every real caller passes a full
+ * executor result, so the narrow shape was the wrong one — and because the
+ * loop forwards via a spread, neither disagreement ever went red.
+ */
 export interface ApplyExecutorResultInput {
   readonly sessionId: string;
   readonly executionId: string;
   readonly tickId: string;
-  readonly result: {
-    readonly output: readonly ContentBlock[];
-    readonly stopReason: string;
-    readonly usage?: UsageStats;
+  readonly result: import("../data/execution-result.js").LanguageModelExecutionResult & {
+    /**
+     * The tick's cost, stamped ONCE at settlement against the resolved
+     * target. Absent = UNPRICED — never zero.
+     */
+    readonly cost?: import("../data/usage-cost.js").Cost;
+    /**
+     * The model this tick actually resolved to, after the `<Model>`
+     * cascade. Carried with the cost because usage without model identity
+     * cannot be priced.
+     */
+    readonly model?: Pick<
+      import("../data/execution-target.js").ExecutionTarget,
+      "provider" | "modelId"
+    >;
   };
 }
 
@@ -660,7 +716,22 @@ export interface SessionSnapshot {
    * TimelineHarnessSnapshot`).
    */
   readonly bridges: Readonly<Record<string, unknown>>;
+  /** Flat token totals across every model. Safe to sum; meaningless to price. */
   readonly usage: UsageStats;
+  /**
+   * Per-model breakdown, keyed `` `${provider}/${modelId}` ``.
+   *
+   * Snapshotted alongside {@link usage} because a restored session that
+   * kept its token counts and lost its per-model partition can no longer
+   * be priced — the flat bag mixes rate tiers.
+   */
+  readonly byModel?: Readonly<Record<string, import("../data/usage-cost.js").ModelUsage>>;
+  /**
+   * The session's cost, folded from per-tick stamps. Round-tripped
+   * through snapshot/restore: a cost computed at act time that does not
+   * survive a reload defeats the point of computing it at act time.
+   */
+  readonly cost?: import("../data/usage-cost.js").CostRollup;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 

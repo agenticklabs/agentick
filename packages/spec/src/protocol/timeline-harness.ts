@@ -73,6 +73,27 @@ export interface TimelineEndTurnInput {
   readonly outcome: "succeeded" | "failed" | "aborted" | "vetoed";
   readonly usage?: import("../data/execution-result.js").UsageStats;
   /**
+   * The turn's PER-MODEL breakdown. The flat `usage` above is safe to sum
+   * and meaningless to price — a turn changes model (a per-tick `<Model>`,
+   * a steer, a `setModel`), so it routinely mixes rate tiers.
+   */
+  readonly byModel?: Readonly<Record<string, import("../data/usage-cost.js").ModelUsage>>;
+  /**
+   * What the turn cost, folded from per-tick stamps. `partial` when any
+   * tick was unpriced — never a zero standing in for "we don't know".
+   */
+  readonly cost?: import("../data/usage-cost.js").CostRollup;
+  /**
+   * The target that ran the turn. Present on the concrete harness and on
+   * `TurnBoundaryEntry.boundary` since ADR 53, and missing here the whole
+   * time — this type had already drifted from its one implementation
+   * before cost arrived. Declared now so the drift stops.
+   */
+  readonly target?: {
+    readonly provider?: string;
+    readonly modelId?: string;
+  };
+  /**
    * Why the turn ended badly — recorded on the boundary. Supply it whenever the
    * outcome is `failed` or `vetoed` and a cause is known; see
    * `TurnBoundaryEntry.boundary.stopCause` on why the outcome alone leaves

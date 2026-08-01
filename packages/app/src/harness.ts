@@ -92,6 +92,7 @@ import type {
   AppHarnessProtocol,
   AppInstaller,
   AppInstallerHost,
+  CostResolver,
   Extension,
   CreateSessionInput,
   DestroySessionInput,
@@ -332,6 +333,36 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    * merge adapter fragments (`openaiModels`, …) + your overrides.
    */
   readonly models?: import("@agentick/model").ModelRegistry;
+  /**
+   * Pricing seam — consulted per tick at settlement, and it **WINS over
+   * the resolved target's declared `rates`** whenever it returns a
+   * value. Returning `undefined` falls through to `target.rates`; when
+   * neither supplies rates the tick is UNPRICED, which is a recorded
+   * fact and never a zero.
+   *
+   * Two return arms, both real. A `RateCard` says "here are the rates,
+   * you do the arithmetic" — per-tenant contracts, volume tiers. A
+   * `Cost` says "I did the arithmetic" — a marketplace markup or a
+   * credit system, where the number billed is not a function of tokens
+   * at all.
+   *
+   * A callback rather than a config table because pricing policy is
+   * unbounded; any enum shipped here would be a guess at which three
+   * policies matter. Threaded into EVERY session this app creates —
+   * including spawned and forked children, which inherit it through the
+   * one session-construction body.
+   *
+   * ```ts
+   * createApp(<Agent />, {
+   *   model: anthropic("claude-sonnet-5"),
+   *   costResolver: ({ target, sessionId }) =>
+   *     tenantRates(sessionId, target.modelId),
+   * });
+   * ```
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.3
+   */
+  readonly costResolver?: CostResolver;
 
   // ────────── Sub-harness slots (shared across sessions) ──────────
 
@@ -783,6 +814,11 @@ export class AppHarness<P = unknown>
   /** App-level model registry (#206), merged over SEED_MODELS, passed to every session. */
   private readonly models: import("@agentick/model").ModelRegistry | undefined;
   /**
+   * App-level pricing seam, passed to every session (and thence to the loop's
+   * per-tick settlement, where it beats the target's declared `rates`).
+   */
+  private readonly costResolver: CostResolver | undefined;
+  /**
    * Options forwarded to the default `ToolExecutorHarness` constructed
    * per-session. Undefined when the caller supplied a
    * `ToolExecutorFactory` at the `toolExecutor` slot — `toolFactory`
@@ -1172,6 +1208,7 @@ export class AppHarness<P = unknown>
     // and applies at session construction.
     this.sessionDefaults = mergeSessionDefaults(options);
     this.models = options.models;
+    this.costResolver = options.costResolver;
     // Tool executor slot: factory → defer construction to per-session
     // via `toolFactory`; options/undefined → forward to the bundled
     // `ToolExecutorHarness` via `toolDefaults`.
@@ -2254,6 +2291,10 @@ export class AppHarness<P = unknown>
       ...omitUndefined({ principal: input.principal }),
       ...(input.requiredScopes !== undefined ? { requiredScopes: input.requiredScopes } : {}),
       ...(this.models !== undefined ? { models: this.models } : {}),
+      // The pricing seam rides the SAME one construction body every session
+      // takes — host-created, spawned (`createChildSession`), and forked (a
+      // fork is a spawn) — so a child inherits it without a second cascade.
+      ...(this.costResolver !== undefined ? { costResolver: this.costResolver } : {}),
       // Streaming cascade: per-session input.streaming > app-level
       // streamingDefault (sessionDefaults.defaultStreaming) > undefined
       // (executor-capability default resolved per-send in SessionHarness).

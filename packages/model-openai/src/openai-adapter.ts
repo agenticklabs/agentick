@@ -64,6 +64,7 @@ import type {
   LanguageModelTool,
   MediaSource,
   NormalizeInput,
+  RateCard,
   Source,
   TextBlock,
   ToolCall,
@@ -183,6 +184,18 @@ export interface OpenAIAdapterOptions {
    * (vLLM, LM Studio, ollama) or to advertise additional capabilities.
    */
   readonly target?: ExecutionTarget;
+  /**
+   * Adopter-supplied rates for this model. Lands on
+   * {@link ExecutionTarget.rates}, so it rides the per-tick `<Model>`
+   * cascade with no extra plumbing. Applied over an explicit `target`
+   * too — declaring one must not silently drop the rates.
+   *
+   * The framework ships NO prices: without a card the tick is UNPRICED,
+   * which rolls up as explicitly unpriced rather than as zero.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.2
+   */
+  readonly rates?: RateCard;
 }
 
 // Re-export from @agentick/model-executor so adopters that import from
@@ -244,7 +257,7 @@ export function openai(
   const defaultModel = model;
   const parseThinkTags = options.parseThinkTags ?? false;
   const customBlocks = options.customBlocks;
-  const target: ExecutionTarget = options.target ?? {
+  const baseTarget: ExecutionTarget = options.target ?? {
     kind: "language-model",
     provider: "openai",
     modelId: model ?? "gpt-4o-mini",
@@ -265,6 +278,12 @@ export function openai(
       },
     },
   };
+  // `rates` layers OVER the resolved target, explicit or default. An
+  // adopter who overrides the target is describing capabilities and ids,
+  // not waiving the price card — swallowing the rates there would make
+  // every tick silently unpriced.
+  const target: ExecutionTarget =
+    options.rates !== undefined ? { ...baseTarget, rates: options.rates } : baseTarget;
 
   let clientMemo: OpenAI | undefined = options.client;
   const client = (): OpenAI => (clientMemo ??= new OpenAI(buildClientOptions(options)));

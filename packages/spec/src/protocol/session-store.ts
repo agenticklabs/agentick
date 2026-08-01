@@ -107,8 +107,35 @@ export interface SessionRecord {
   readonly currentExecutionId?: string;
   /** Number of executions started against this session. */
   readonly executionCount: number;
-  /** Usage aggregated across every execution. */
+  /**
+   * Usage aggregated across every execution — FLAT across models. Safe
+   * to sum, meaningless to price: a session changes model (`setModel`, a
+   * per-send override, a per-tick `<Model>`), so this bag routinely
+   * mixes rate tiers. Read {@link byModel} to compute money.
+   */
   readonly usage: UsageStats;
+  /**
+   * Per-model breakdown, keyed `` `${provider}/${modelId}` ``, aggregated
+   * across every execution.
+   *
+   * NOTE (downstream store adapters): persist + round-trip this and
+   * {@link cost} alongside `usage` — they are the durable accounting
+   * record, and a stamped cost that does not survive a reload defeats
+   * the point of stamping it.
+   */
+  readonly byModel?: Readonly<Record<string, import("../data/usage-cost.js").ModelUsage>>;
+  /**
+   * What this session cost, folded from per-tick costs stamped at act
+   * time. `partial` when any tick was unpriced.
+   *
+   * A SPAWNED session's cost is deliberately NOT folded in here.
+   * Attribution across an agent tree is a QUERY over {@link spawnPath},
+   * never a write-time rollup — write-time double-counts, and freezes
+   * one scope answer while destroying the others.
+   *
+   * @see docs/proposals/v2/usage-cost.md §7.1
+   */
+  readonly cost?: import("../data/usage-cost.js").CostRollup;
 
   // ─── descriptive (app-owned slots — framework STORES, never POPULATES) ───
   /** App-generated title (auto-summary / user-edit). Framework is blind to it. */
@@ -151,7 +178,22 @@ export interface SessionStoreQuery {
   readonly appId?: string;
   /** Match a single status or any of a set. */
   readonly status?: SessionStatus | readonly SessionStatus[];
-  /** Match sessions whose parent is exactly this id (the session tree). */
+  /**
+   * Match sessions whose parent is exactly this id — DIRECT children, one
+   * level. Not the transitive tree.
+   *
+   * // TODO(trail-spawn-tree-query): a `spawnPathContains?: string` ancestor
+   * // predicate is what cost attribution across an agent tree needs (see
+   * // `SessionRecord.cost` and docs/proposals/v2/usage-cost.md §7.1); today
+   * // that means walking this field level by level, which is N+1 and does
+   * // not page. It has to go in the QUERY for the same reason `principal`
+   * // does — a filter the store doesn't know about is applied after the
+   * // page is cut. Deliberately NOT added piecemeal: an adapter that does
+   * // not recognize a new field ignores it silently and returns too many
+   * // records, which for a cost query is an over-count with nothing in the
+   * // result shape to signal it. Land it in the conformance suite and every
+   * // adapter as one change, or not at all.
+   */
   readonly parentSessionId?: string;
   /**
    * `true` matches only ROOT sessions — those with no parent at all.

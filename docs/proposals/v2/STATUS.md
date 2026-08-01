@@ -1827,6 +1827,182 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-07-31 — usage → cost vertical (`docs/proposals/v2/usage-cost.md`)
+
+Cost became a first-class, durable record. Contract in
+`docs/proposals/v2/usage-cost.md`; arithmetic and folds in
+`@agentick/spec` (`src/data/usage-cost.ts`), stamping in loop-executor,
+rollups in loop-executor + session, the seam on `AppHarnessOptions`.
+
+**The audit found four defects, all real.** (1) Every rollup was FLAT
+across models — `ExecutionRunResult.usage`, `SessionRecord.usage`, the
+turn record — while `setModel` / per-send / per-tick `<Model>` / spawn
+overrides all change model mid-flight. Cost is not a function of a
+flattened bag, and the information was destroyed at fold time. (2) Cost
+was never recorded anywhere: `estimateCost` had exactly ONE caller in
+the workspace (`app/src/telemetry-defaults.ts`, an OTel span
+annotation), so a restored session knew its tokens and not its money.
+(3) Nothing being stamped meant every read repriced history. (4) Two
+adapter normalization bugs: Anthropic's STREAMING path dropped
+`cache_creation_input_tokens` entirely (the non-streaming path folded it
+correctly) — cache writes cost 1.25x input, so streamed calls
+under-billed; and Google's `candidatesTokenCount` excludes
+`thoughtsTokenCount` while Gemini bills thinking at the output rate.
+Both fixed, with streaming/non-streaming equivalence pinned.
+
+**Decisions.** Money is INTEGER micro-units (`1_000_000` = one currency
+unit) — a total is a fold over hundreds of ticks, so float error
+accumulates where nobody audits. Rates are a `RateCard` declared at
+MODEL CONSTRUCTION (`anthropic("...", { rates })`) landing on
+`ExecutionTarget.rates`, so a per-tick `<Model>` override carries its
+own card through the cascade with no extra plumbing; an app-level
+`costResolver` callback WINS over declared rates, returning either a
+`RateCard` ("you do the math") or a `Cost` ("I did") — both arms are
+real (per-tenant contracts vs. marketplace markup). Rates apply to
+DISJOINT REMAINDERS because cache/reasoning tokens are subsets; rounding
+is deferred to one final division so the total is order-independent.
+Cost is stamped ONCE per tick at act time with a `rateRef`, inside the
+tick body where the settled usage and the `<Model>`-resolved target
+coexist — **not** in model-executor as originally planned, because the
+model-executor does not know which model the cascade chose.
+
+**The honesty rule is the load-bearing invariant.** An unpriced tick
+rolls up as explicitly unpriced, NEVER as zero — zero is a claim ("this
+cost nothing") and an unpriced tick cost something we cannot name.
+`CostRollup` is a DISCRIMINATED union (`complete` | `partial`), not a
+flat shape with an ignorable `unpricedTicks`, for the same reason
+`StopCause` is discriminated: the two arms demand different words on
+screen ("$1.23" vs "at least $1.23"), and a flat shape lets every
+consumer render the wrong one by omission. A foreign-currency tick
+counts as unpriced _in that total_ and stays fully priced in its own
+`byModel` bucket — summing across currencies is the same class of lie.
+
+**Two planes, one stamp (design ruling).** The stamp happens once and is
+projected twice: the TRUTH plane (execution events/journal + the
+session-record aggregate) is what billing reads; `ctx.metrics` gets a
+MIRROR of the same facts for telemetry. **Money never lives only in
+metrics** — a metrics pipeline samples, pre-aggregates, expires series
+and sheds labels under cardinality pressure, all correct for telemetry
+and catastrophic for an invoice. The mirror is emitted at the session's
+`applyExecutorResultBody`, where cost + model are already in hand and
+already being durably written; the loop has no `ctx.metrics` threading
+yet, so the session is the correct emitter today. The honesty rule
+crosses over intact: an unpriced-tick COUNTER is mandatory beside the
+cost histogram, or a dashboard shows a confident silently-low number.
+Labels stay low-cardinality (provider/modelId/currency/kind, never
+rateRef — it is adopter-chosen and DATED, so it mints a new series on
+every price change forever — and never session/execution/tick id).
+Landed as `session.tick.cost_micros` (histogram),
+`session.tick.tokens` (histogram, labelled by kind), and
+`session.tick.unpriced` (counter). A tick that reported no usage at all
+emits nothing — not even an unpriced count, since unmeasured is not
+unpriced. Live in-turn cost display is a THIRD thing — the client folds
+`tick` events — and is display, not accounting: it may lag or drop
+because nothing reads it back.
+
+**Rollup boundary (design ruling): write-time WITHIN a session,
+query-time ACROSS the graph.** tick → execution → record is written as
+it happens, per-model preserved. Sub-agent sessions (`spawnPath`) and
+task executions (`scope.sessionId`) are NEVER propagated root-ward.
+Three refusal reasons, each sufficient alone: (1) **write
+amplification** — every ancestor re-written on every descendant tick,
+scaling with depth × ticks; (2) **structural double-count** — if a
+parent contained its children's spend, then _summing records_, which is
+exactly what a billing export or per-principal total does, counts each
+descendant once per ancestor above it; silent, grows with depth, always
+overstates, and unfixable by a careful consumer because it is a property
+of the shape; (3) **attribution is policy** — who pays for a detached
+task or a shared sub-agent is the adopter's call, and a write freezes
+one answer while a query leaves the scope open.
+
+Framework obligation discharged: spec ships `rollupTree(records,
+rootId)` + `inSpawnTree` over the existing join keys (`SessionRecord`
+already satisfies `CostAttributionRecord` structurally — no new
+storage, no new writer). Root is a PARAMETER, so the same records answer
+"whole tree" / "subtree" / "this session alone". Tree honesty extends:
+`partial` if any descendant is itself partial OR has usage with no cost
+rollup at all — the second case is the trap, since
+`mergeCostRollups(acc, undefined)` returns `acc` and a naive fold would
+claim `complete` over an unaccounted branch. Cannot detect a descendant
+whose record was never handed in, so the caller owns input completeness
+(documented). Pinned by test, including that a spawned child's cost
+lands on the child's record only.
+
+**Corrections made mid-flight, both caught by verification rather than
+by review:**
+
+- The doc originally argued `SEED_MODELS`' prices were "wrong, off by
+  3x". Checked against current list pricing: the rows are RIGHT today
+  (Opus $5/$25, Sonnet $3/$15, Haiku $1/$5, cache read 0.1x / write
+  1.25x). The argument was rewritten to the real one — an undated table
+  applied as a silent default cannot express a repriced family under one
+  prefix (`anthropic/claude-opus` matches Opus 3 at $15/$75 and today's
+  Opus at $5/$25), introductory pricing, or the 1h-TTL 2x cache-write
+  tier.
+- §8 claimed cost "rides the wire automatically" because it sits on
+  payloads that already project. FALSE — the wire `StreamEvent` types in
+  `spec/data/streaming.ts` are separate, explicitly-fielded types that
+  session projects onto field by field. Added `cost`/`model` to
+  `TickEvent`/`TickEndEvent` and `byModel`/`cost` to `ExecutionEvent`,
+  plus a test that an unpriced tick emits NO `cost` key (not `null`).
+- §7.1 claimed `SessionStore.list` already scopes on `spawnPath`. FALSE
+  — `SessionStoreQuery` has `parentSessionId` (direct children) and
+  `root`, no ancestor predicate. **Deliberately not added**: an adapter
+  that does not recognize a new query field ignores it silently and
+  returns too many records, which for a cost query is an over-count with
+  nothing in the result shape to signal it — exactly what the honesty
+  rule exists to prevent. `TODO(trail-spawn-tree-query)` at the
+  `parentSessionId` site: land it across the conformance suite and every
+  adapter as one change, or not at all.
+
+**Two spec faces of one call had silently drifted.**
+`StateApplicatorFx.applyExecutorResult` (what the loop actually
+composes) and `ApplyExecutorResultInput` (the Promise facade) were
+structural copies, and they disagreed twice over: the facade declared a
+narrow projection (`output`/`stopReason`/`usage?`) while the twin took a
+whole `LanguageModelExecutionResult`, and only the facade learned about
+`cost`/`model`. Neither disagreement ever went red, because the loop
+forwards via a SPREAD and TS's excess-property check only fires on
+literal keys — so the declared contract said the money fields did not
+exist while every call site passed them. Collapsed to ONE type
+(`ApplyExecutorResultInput`, widened to the full result), which
+immediately caught an under-specified conformance fixture that had been
+omitting `specVersion`. Also ended a pre-existing drift on
+`TimelineEndTurnInput`, which was missing `target?` (accepted by its one
+implementation since ADR 53) alongside the new `byModel?`/`cost?`.
+
+**The recurring defect worth naming.** Three separate hops in this
+pipeline copy a payload forward by NAMING each field, and each silently
+drops what it does not name: `TimelineHarness.appendTurnBoundary`'s
+`omitUndefined({usage, stopCause, target})` allowlist, the session's
+`LoopStreamEvent` → wire `StreamEvent` projection, and
+`SessionRuntime.commit`'s record rebuild. All three dropped
+`byModel`/`cost` on the first pass and **none failed to compile** — the
+fields are optional, so an omission is legal everywhere. Only a test
+reading the far end catches it. Hence one assertion per landing site
+rather than one end-to-end test standing in for all of them. (The
+timeline allowlist is why `packages/timeline/src/harness.ts` is in this
+change at all; the fix is additive.)
+
+**Known gap this vertical inherits.** `UsageStats.cacheCreationTokens`
+collapses the 5-minute-TTL (1.25x) and 1-hour-TTL (2x) cache writes that
+Anthropic reports separately, so no rate card can price them apart and
+long-TTL workloads under-bill. `TokenKind` is a closed union, so closing
+it is a spec change touching every adapter.
+`TODO(trail-cache-ttl-tiers)`.
+
+**Two cost systems now coexist, and that is a defect.**
+`@agentick/model` still holds the #186/#204 estimator (float USD,
+seeded-by-default, ephemeral span annotation) and
+`ExecutionTarget.pricing`. Untouched — a concurrent session owns that
+package. Nothing in the new vertical reads `target.pricing` or
+`SEED_PRICING`, so there is no silent cross-talk, just duplication. The
+exact convergence diff (delete `estimateCost` / `SEED_PRICING` /
+`ModelPricing` / `CostEstimate` / `ExecutionTarget.pricing`; keep
+`mergeUsageStats` as a re-export from spec; repoint
+`telemetry-defaults.ts` at the stamped `Cost`) is written up in
+usage-cost.md §9. They should not both exist at v2.0.
+
 ### 2026-07-30 (evening) — the consolidation wave
 
 Three parallel workstreams, gated as one tree (3,827 tests green):

@@ -8,8 +8,6 @@
  * SDK's signal option, streaming delta emission.
  */
 
-import { omitUndefined } from "@agentick/utils";
-
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -23,42 +21,13 @@ import { openai } from "../openai-adapter.js";
 import {
   StubOpenAIClient,
   asClient,
+  emptyTree,
+  makeExecutor,
   mkCompletion,
   mkContentChunk,
   mkFinishChunk,
+  mkTarget,
 } from "./stub-openai-client.js";
-
-function emptyTree(): RenderedTree {
-  return {
-    specVersion: "2026-05-08",
-    context: {
-      entries: [
-        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
-      ],
-    },
-  };
-}
-
-function mkTarget(): LanguageModelTarget {
-  return { kind: "language-model", provider: "openai", modelId: "gpt-4o-mini" };
-}
-
-async function makeExecutor(
-  stub: StubOpenAIClient,
-  opts: { stream?: boolean; model?: string } = {},
-) {
-  const journal = new MemoryJournal();
-  const bus = new LocalEventBus();
-  const inbox = new LocalInbox();
-  const exec = new LanguageModelExecutor("exec-openai-test", journal, bus, inbox, {
-    adapter: openai(opts.model ?? "gpt-4o-mini", {
-      client: asClient(stub),
-      ...omitUndefined({ stream: opts.stream }),
-    }),
-  });
-  await exec.ready;
-  return { exec, journal, bus, inbox };
-}
 
 describe("openai() adapter — non-streaming", () => {
   it("returns a succeeded terminal with normalized output", async () => {

@@ -52,8 +52,29 @@ The SDK client is constructed lazily on first use, so declaring an adapter needs
 | `parseThinkTags` | Route inline `<think>…</think>` from the content channel to reasoning deltas                                                               |
 | `customBlocks`   | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                                     |
 | `target`         | Override the self-described `ExecutionTarget` — the switch for a non-stock endpoint                                                        |
+| `rates`          | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                                |
 
 Defaults with no `model` argument: `gpt-4o-mini`, with tools, streaming, and JSON-schema output advertised.
+
+### Rates
+
+The framework ships **no prices**. Declare them where the model is declared and they ride the per-tick `<Model>` cascade for free:
+
+```ts
+const model = openai("gpt-4o-mini", {
+  rates: {
+    id: "openai:gpt-4o-mini@2026-07-01", // date it — a price change is a NEW card
+    currency: "USD",
+    perMTok: {
+      input: 150_000, // micro-units per MILLION tokens: $0.15/MTok
+      output: 600_000,
+      cacheRead: 75_000,
+    },
+  },
+});
+```
+
+Without a card the tick is _unpriced_, which is recorded as unpriced — never as zero. See [`docs/proposals/v2/usage-cost.md`](../../docs/proposals/v2/usage-cost.md).
 
 ## Pointing it somewhere else
 
@@ -81,6 +102,8 @@ Two things earn their keep there. `provider` is the **serving** provider, so pri
 **Model precedence.** A per-tick model override on the target wins over the construction-time `openai(model)` default; the default applies only when the target names no model. So one adapter instance serves a tree that switches models per render.
 
 **Reasoning.** `reasoning_content` and `reasoning` fields map to reasoning deltas with no option needed, and `usage.completion_tokens_details.reasoning_tokens` surfaces as `usage.reasoningTokens`.
+
+**Usage passes through, unfolded.** `prompt_tokens` already contains `prompt_tokens_details.cached_tokens` and `completion_tokens` already contains `completion_tokens_details.reasoning_tokens`, which is exactly the canonical subset rule — so nothing is added and nothing is subtracted. OpenAI has no cache-**write** charge, so `cacheCreationTokens` is always absent rather than zero: absent says "this provider has no such concept", zero would claim the model did no cache writes.
 
 **Stop reasons.**
 
@@ -215,5 +238,6 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 - `src/__tests__/openai-executor.spec.ts` — the dialect: message conversion, `finish_reason` mapping, abort, the streaming delta vocabulary, think-tag routing, custom blocks, target-over-construction model precedence, the provider-tools request projection, and web-search citations.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection, the model-override precedence, and `reasoningTokens` surfacing on usage.
+- `src/__tests__/usage-normalization.spec.ts` — cached and reasoning counters passing through as subsets rather than being added, `cacheCreationTokens` never fabricated, unreported kinds left `undefined`, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/provider-request-hooks.spec.ts` — the last-mile request hook seeing and transforming the provider-native request `prepareRequest` produced.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor, this adapter, and a stubbed SDK client, with the same protocol checks passing against the fake executor.

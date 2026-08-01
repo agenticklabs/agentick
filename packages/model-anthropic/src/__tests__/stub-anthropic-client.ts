@@ -8,6 +8,8 @@
  * the next matching canned response from its sequence.
  */
 
+import { omitUndefined } from "@agentick/utils";
+
 import type Anthropic from "@anthropic-ai/sdk";
 import type {
   Message as AnthropicMessage,
@@ -15,6 +17,11 @@ import type {
   RawMessageStreamEvent,
   Usage,
 } from "@anthropic-ai/sdk/resources/messages";
+import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { LanguageModelExecutor } from "@agentick/model-executor";
+
+import { anthropic } from "../anthropic-adapter.js";
 
 export type CannedResponse =
   | { readonly kind: "non-streaming"; readonly message: AnthropicMessage }
@@ -238,4 +245,58 @@ export function mkMessageDelta(
 
 export function mkMessageStop(): RawMessageStreamEvent {
   return { type: "message_stop" } as RawMessageStreamEvent;
+}
+
+// ============================================================================
+// Executor harness
+// ============================================================================
+// An `anthropic()` adapter wired into a real `LanguageModelExecutor` over the
+// stub above. Lives here rather than in one spec file because every Anthropic
+// spec needs the same three pieces to say anything at all, and a second copy is
+// a second place for the wiring to drift from the adapter it is testing.
+
+/** A one-user-message tree — the minimum a target will accept. */
+export function emptyTree(): RenderedTree {
+  return {
+    specVersion: "2026-05-08",
+    context: {
+      entries: [
+        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+    },
+  };
+}
+
+export function mkTarget(overrides?: Partial<LanguageModelTarget>): LanguageModelTarget {
+  return {
+    kind: "language-model",
+    provider: "anthropic",
+    modelId: "claude-3-5-sonnet-latest",
+    ...(overrides ?? {}),
+  };
+}
+
+export async function makeExecutor(
+  stub: StubAnthropicClient,
+  opts: {
+    stream?: boolean;
+    model?: string;
+    maxTokens?: number;
+    parseThinkTags?: boolean;
+    customBlocks?: Record<string, { tag?: string; onContent?: (c: string) => void }>;
+  } = {},
+) {
+  const journal = new MemoryJournal();
+  const bus = new LocalEventBus();
+  const inbox = new LocalInbox();
+  const exec = new LanguageModelExecutor("exec-anthropic-test", journal, bus, inbox, {
+    adapter: anthropic(opts.model ?? "claude-3-5-sonnet-latest", {
+      client: asClient(stub),
+      ...omitUndefined({ stream: opts.stream, maxTokens: opts.maxTokens }),
+      ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
+      ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
+    }),
+  });
+  await exec.ready;
+  return { exec, journal, bus, inbox };
 }

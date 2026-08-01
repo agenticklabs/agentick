@@ -16,6 +16,8 @@
  * the request shape and the abort plumbing.
  */
 
+import { omitUndefined } from "@agentick/utils";
+
 import type {
   ChatCompletion,
   ChatCompletionChunk,
@@ -23,6 +25,11 @@ import type {
 } from "openai/resources/chat/completions";
 
 import type { OpenAI } from "openai";
+import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { LanguageModelExecutor } from "@agentick/model-executor";
+
+import { openai } from "../openai-adapter.js";
 
 export type CannedResponse =
   | { readonly kind: "non-streaming"; readonly completion: ChatCompletion }
@@ -139,7 +146,8 @@ export function mkCompletion(opts: {
   }>;
   finishReason?: ChatCompletion["choices"][0]["finish_reason"];
   model?: string;
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  /** Full `CompletionUsage`, so tests can carry `*_tokens_details`. */
+  usage?: ChatCompletion["usage"];
 }): ChatCompletion {
   const toolCalls = opts.toolCalls?.map((tc) => ({
     id: tc.id,
@@ -197,7 +205,8 @@ export function mkContentChunk(opts: {
 export function mkFinishChunk(opts: {
   finishReason?: ChatCompletionChunk["choices"][0]["finish_reason"];
   model?: string;
-  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  /** Full `CompletionUsage`, so tests can carry `*_tokens_details`. */
+  usage?: ChatCompletionChunk["usage"];
 }): ChatCompletionChunk {
   return {
     id: "chatcmpl-stream-1",
@@ -214,4 +223,50 @@ export function mkFinishChunk(opts: {
     ],
     ...(opts.usage ? { usage: opts.usage } : {}),
   } as ChatCompletionChunk;
+}
+
+// ============================================================================
+// Executor harness
+// ============================================================================
+// An `openai()` adapter wired into a real `LanguageModelExecutor` over the stub
+// above. Lives here rather than in one spec file because every OpenAI spec needs
+// the same three pieces to say anything at all, and a second copy is a second
+// place for the wiring to drift from the adapter it is testing.
+
+/** A one-user-message tree — the minimum a target will accept. */
+export function emptyTree(): RenderedTree {
+  return {
+    specVersion: "2026-05-08",
+    context: {
+      entries: [
+        { kind: "message", id: "m_1", role: "user", content: [{ type: "text", text: "hi" }] },
+      ],
+    },
+  };
+}
+
+export function mkTarget(overrides?: Partial<LanguageModelTarget>): LanguageModelTarget {
+  return {
+    kind: "language-model",
+    provider: "openai",
+    modelId: "gpt-4o-mini",
+    ...(overrides ?? {}),
+  };
+}
+
+export async function makeExecutor(
+  stub: StubOpenAIClient,
+  opts: { stream?: boolean; model?: string } = {},
+) {
+  const journal = new MemoryJournal();
+  const bus = new LocalEventBus();
+  const inbox = new LocalInbox();
+  const exec = new LanguageModelExecutor("exec-openai-test", journal, bus, inbox, {
+    adapter: openai(opts.model ?? "gpt-4o-mini", {
+      client: asClient(stub),
+      ...omitUndefined({ stream: opts.stream }),
+    }),
+  });
+  await exec.ready;
+  return { exec, journal, bus, inbox };
 }

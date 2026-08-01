@@ -48,6 +48,7 @@ import type {
   LanguageModelTool,
   MediaSource,
   NormalizeInput,
+  RateCard,
   Source,
   TextBlock,
   ToolCall,
@@ -144,6 +145,18 @@ export interface GoogleAdapterOptions {
   readonly customBlocks?: Readonly<Record<string, CustomBlockDefinition>>;
   /** Override the self-described target. */
   readonly target?: ExecutionTarget;
+  /**
+   * Adopter-supplied rates for this model. Lands on
+   * {@link ExecutionTarget.rates}, so it rides the per-tick `<Model>`
+   * cascade with no extra plumbing. Applied over an explicit `target`
+   * too — declaring one must not silently drop the rates.
+   *
+   * The framework ships NO prices: without a card the tick is UNPRICED,
+   * which rolls up as explicitly unpriced rather than as zero.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.2
+   */
+  readonly rates?: RateCard;
 }
 
 export type { CustomBlockDefinition } from "@agentick/model";
@@ -204,7 +217,7 @@ export function google(
   const defaultModel = model;
   const parseThinkTags = options.parseThinkTags ?? false;
   const customBlocks = options.customBlocks;
-  const target: ExecutionTarget = options.target ?? {
+  const baseTarget: ExecutionTarget = options.target ?? {
     kind: "language-model",
     provider: "google",
     modelId: model ?? DEFAULT_MODEL,
@@ -233,6 +246,12 @@ export function google(
       maxOutputTokens: 8_192,
     },
   };
+  // `rates` layers OVER the resolved target, explicit or default. An
+  // adopter who overrides the target is describing capabilities and ids,
+  // not waiving the price card — swallowing the rates there would make
+  // every tick silently unpriced.
+  const target: ExecutionTarget =
+    options.rates !== undefined ? { ...baseTarget, rates: options.rates } : baseTarget;
 
   let clientMemo: GoogleGenAI | undefined = options.client;
   const client = (): GoogleGenAI => (clientMemo ??= new GoogleGenAI(buildClientOptions(options)));
@@ -469,7 +488,10 @@ export function google(
         modelVersion: modelSeen ?? defaultModel ?? target.modelId,
         usageMetadata: {
           promptTokenCount: accum.usage.inputTokens,
-          candidatesTokenCount: accum.usage.outputTokens,
+          // Back-map to Gemini's wire shape, where `candidatesTokenCount`
+          // EXCLUDES thoughts — take them back out or the round-trip
+          // through normalize() double-counts thinking.
+          candidatesTokenCount: accum.usage.outputTokens - (accum.usage.reasoningTokens ?? 0),
           totalTokenCount: accum.usage.totalTokens,
           ...omitUndefined({
             thoughtsTokenCount: accum.usage.reasoningTokens,
@@ -1243,14 +1265,23 @@ function toUsageStats(usage: GenerateContentResponse["usageMetadata"]): UsageSta
   if (!usage) {
     return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
   }
+  // `promptTokenCount` already includes `cachedContentTokenCount`, so
+  // input needs no folding.
   const inputTokens = usage.promptTokenCount ?? 0;
-  const outputTokens = usage.candidatesTokenCount ?? 0;
+  // `candidatesTokenCount` EXCLUDES thoughts, but Gemini bills thinking at
+  // the output rate and both other providers report reasoning INSIDE their
+  // output counter. `reasoningTokens ⊆ outputTokens` is normative, so fold
+  // thoughts in — otherwise Google under-reports billable output
+  // (usage-cost.md §2, D6). `totalTokenCount` already counts them, which is
+  // why the two disagreed before this fold.
+  const thoughts = usage.thoughtsTokenCount ?? 0;
+  const outputTokens = (usage.candidatesTokenCount ?? 0) + thoughts;
   const totalTokens = usage.totalTokenCount ?? inputTokens + outputTokens;
   return {
     inputTokens,
     outputTokens,
     totalTokens,
-    ...(usage.thoughtsTokenCount != null ? { reasoningTokens: usage.thoughtsTokenCount } : {}),
+    ...(usage.thoughtsTokenCount != null ? { reasoningTokens: thoughts } : {}),
     ...(usage.cachedContentTokenCount != null
       ? { cachedInputTokens: usage.cachedContentTokenCount }
       : {}),

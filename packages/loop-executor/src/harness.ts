@@ -78,6 +78,7 @@ import {
 import type {
   ContentBlock,
   ExecutionRunResult,
+  ExecutionTarget,
   ExecutionTerminal,
   ExecutorTerminal,
   LanguageModelExecutionResult,
@@ -100,6 +101,7 @@ import type {
   TickResult,
   ToolCall,
   ToolDeclaration,
+  UsageRollup,
   UsageStats,
 } from "@agentick/spec";
 import {
@@ -111,7 +113,9 @@ import {
   ResponseValidationError,
   StructuredOutputIncomplete,
   TerminalToolNameCollision,
+  foldUsageRollup,
   parseJsonWithSchema,
+  resolveTickCost,
   toJsonSchema,
   toRegistration,
 } from "@agentick/spec";
@@ -167,25 +171,25 @@ interface InFlightEntry {
   abortReason?: string;
 }
 
-interface MutableUsage {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  reasoningTokens?: number;
-  cachedInputTokens?: number;
-  cacheCreationTokens?: number;
-  ticks?: number;
-}
-
 interface TickAccumulator {
   ticks: number;
   output: ContentBlock[];
   toolResults: LoopToolResult[];
-  usage: MutableUsage;
+  /**
+   * Flat totals + per-model breakdown + cost, folded ONCE per tick by
+   * spec's canonical {@link foldUsageRollup}.
+   *
+   * One fold, not two: the flat `usage` the run result must always carry
+   * IS `rollup.usage`, so the flat total and the per-model partition can
+   * never disagree. Absent until a tick reports usage — a run that
+   * recorded none has no rollup, and therefore no cost, rather than a
+   * fabricated zero (usage-cost.md §6).
+   */
+  rollup?: UsageRollup;
   lastStopReason?: LanguageModelStopReason;
 }
 
-function zeroUsage(): MutableUsage {
+function zeroUsage(): UsageStats {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 }
 
@@ -420,7 +424,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         ticks: 0,
         output: [],
         toolResults: [],
-        usage: zeroUsage(),
       };
 
       let stopReason:
@@ -498,6 +501,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
           ...(input.outputSpec !== undefined ? { outputSpec: input.outputSpec } : {}),
           ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
+          // usage-cost.md §4.3 — the pricing seam rides INTO the tick,
+          // because the stamp happens at tick settlement (the only point
+          // where the settled usage and the resolved target coexist).
+          ...(input.costResolver !== undefined ? { costResolver: input.costResolver } : {}),
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
           emit: sink,
@@ -550,7 +557,23 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // Accumulate this tick's contribution from the settled `TickResult`
         // (the tick command body no longer mutates the run's accumulator).
         const result = executorTerminal.result;
-        accumulateUsage(acc.usage, result.usage);
+        // usage-cost.md §7 — fold this tick into the run rollup: flat
+        // totals, the per-model partition, and cost. The tick's `cost` was
+        // stamped ONCE inside the tick body against the RESOLVED target
+        // (§5); it is folded here and NEVER recomputed, which is the whole
+        // reason a price published tomorrow cannot reprice this run.
+        //
+        // The fold runs for EVERY tick that reported usage, priced or not.
+        // Skipping the unpriced ones is exactly how an unpriced tick
+        // becomes invisible: `foldCost` degrades the total to `partial`
+        // and counts the tick in `unpricedTicks`, so the run reports a
+        // lower bound instead of a confident, silently-low `complete`
+        // (§6 — the honesty rule). A tick that reported NO usage is not
+        // unpriced, it is unmeasured — there is nothing to price and
+        // nothing to attribute, so it does not enter the fold at all.
+        if (result.usage !== undefined) {
+          acc.rollup = foldUsageRollup(acc.rollup, tickResult.model, result.usage, tickResult.cost);
+        }
         acc.output.push(...result.output);
         acc.toolResults.push(...tickResult.toolResults);
         acc.lastStopReason = result.stopReason;
@@ -611,6 +634,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             : "continue";
         const tickDuration = Date.now() - tickStartedAt;
         const shouldContinue = wantsContinue && acc.ticks < input.maxTicks;
+        // Live observation of the stamp (usage-cost.md §7, tick level).
+        // `cost` absent on a tick that reported usage means UNPRICED — a
+        // renderer must say "unpriced", never "$0.00".
+        const stamp = omitUndefined({ cost: tickResult.cost, model: tickResult.model });
         yield* sink({
           kind: "tick-end",
           tick: tickIndex,
@@ -618,6 +645,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           shouldContinue,
           stopReason: tickStopReason,
           usage: result.usage,
+          ...stamp,
         });
         yield* sink({
           kind: "tick",
@@ -626,6 +654,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           stopReason: tickStopReason,
           usage: result.usage ?? zeroUsage(),
           durationMs: tickDuration,
+          ...stamp,
         });
 
         if (!wantsContinue) {
@@ -702,6 +731,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.responseFormat !== undefined ? { responseFormat: input.responseFormat } : {}),
           ...(input.outputSpec !== undefined ? { outputSpec: input.outputSpec } : {}),
           ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
+          ...(input.costResolver !== undefined ? { costResolver: input.costResolver } : {}),
           toolChoice: { tool: terminalToolName },
           narrate: input.narrate,
           toolConcurrency: input.toolConcurrency,
@@ -713,7 +743,11 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         );
         if (wrapResult.executorTerminal.outcome === "succeeded") {
           const wr = wrapResult.executorTerminal.result;
-          accumulateUsage(acc.usage, wr.usage);
+          // The forced wrap-up is a real tick against a real model — it
+          // burns tokens and it costs money, so it folds like any other.
+          if (wr.usage !== undefined) {
+            acc.rollup = foldUsageRollup(acc.rollup, wrapResult.model, wr.usage, wrapResult.cost);
+          }
           acc.output.push(...wr.output);
           acc.toolResults.push(...wrapResult.toolResults);
           if (wrapResult.resolvedOutputSchema !== undefined) {
@@ -788,7 +822,14 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       const runResult: ExecutionRunResult = {
         executionId,
         ticks: acc.ticks,
-        usage: acc.usage,
+        // The flat total — safe to sum, meaningless to price. A run can
+        // change model mid-flight, so this bag routinely mixes rate tiers;
+        // `byModel` below is what makes cost computable (usage-cost.md §7).
+        usage: acc.rollup?.usage ?? zeroUsage(),
+        ...(acc.rollup !== undefined ? { byModel: acc.rollup.byModel } : {}),
+        // Absent when the run recorded no usage at all — an absent cost and
+        // a zero cost are different claims (§6).
+        ...(acc.rollup?.cost !== undefined ? { cost: acc.rollup.cost } : {}),
         stopReason,
         output: acc.output,
         toolResults: acc.toolResults,
@@ -1165,6 +1206,49 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 
       const result = executorTerminal.result;
 
+      // ── usage-cost.md §5 — STAMP, once, here ────────────────────────
+      //
+      // This is the earliest point at which the tick's settled `usage` and
+      // the RESOLVED target (`tickTarget`, after the `<Model>` cascade
+      // tick-IR > send > session) are both in hand — which is why the
+      // stamp lives in the loop and not in the model executor, which
+      // produces a result without knowing which model produced it.
+      //
+      // Cost is computed HERE and never again. The tick carries a number
+      // and a `rateRef`, not a recipe, so a price published tomorrow
+      // cannot reach it. Resolution order is the resolver (wins whenever
+      // it returns anything), then the target's declared `rates`, then
+      // NOTHING — an unpriced tick, which is a recorded fact and not a
+      // zero (§6). `resolveTickCost` is pure and total; the loop does no
+      // arithmetic of its own.
+      const tickCost =
+        result.usage !== undefined
+          ? resolveTickCost(
+              {
+                target: tickTarget,
+                usage: result.usage,
+                sessionId: input.sessionId,
+                executionId,
+                tickId,
+              },
+              input.costResolver,
+            )
+          : undefined;
+      // WHICH model produced it. Threaded out on the `TickResult` rather
+      // than re-derived by the run loop — re-deriving would mean re-running
+      // the `<Model>` cascade against a render that has since moved on, and
+      // a `byModel` key that disagrees with what actually ran is worse than
+      // none. Narrowed to the two identity fields on purpose: the full
+      // target carries `rates`, and this rides wire-projected events.
+      //
+      // A target naming NEITHER stamps nothing rather than `{}` — spec's
+      // `modelKey` reads both as `"unknown"`, so the only difference is a
+      // meaningless empty object on every event.
+      const tickModel: Pick<ExecutionTarget, "provider" | "modelId"> | undefined =
+        tickTarget.provider === undefined && tickTarget.modelId === undefined
+          ? undefined
+          : omitUndefined({ provider: tickTarget.provider, modelId: tickTarget.modelId });
+
       // Non-streaming path: synthesize summary model events from the
       // result so consumers subscribed to `message` / `content` /
       // `tool-call` events see the model's output. The streaming
@@ -1380,11 +1464,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // composed in-fiber via `.fx`. NoopStateApplicator records nothing;
       // the real session harness writes timeline entries here so the next
       // render sees them.
+      // usage-cost.md §5 — the stamp rides the apply so the session can
+      // write `cost` + `model` onto the generation's timeline entry. That
+      // durable record is the point: a restored session that knows its
+      // token counts but not what they cost is the defect this closes.
       yield* input.stateApplicator.fx.applyExecutorResult({
         sessionId: input.sessionId,
         executionId,
         tickId,
-        result,
+        result: {
+          ...result,
+          ...omitUndefined({ cost: tickCost, model: tickModel }),
+        },
       });
       if (tickToolResults.length > 0) {
         yield* input.stateApplicator.fx.applyToolResults({
@@ -1433,6 +1524,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         toolResults: tickToolResults,
         shouldContinue: provisionalContinue,
         stopReason: result.stopReason,
+        // usage-cost.md §5 — the stamp, surfaced for the run-execution
+        // continuation to fold (§7) and emit on the tick events. Absent
+        // `cost` = UNPRICED; the fold counts it, never zeroes it.
+        ...omitUndefined({ cost: tickCost, model: tickModel }),
         // §B2 — surface the resolved strategy (so the run-execution
         // continuation can decide the forced wrap-up tick), the resolved
         // terminal tool name (for the wrap-up `toolChoice`), and the raw
@@ -1604,28 +1699,4 @@ function failedTickResult(
  */
 function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, never> {
   return Effect.tryPromise({ try: async () => thunk(), catch: (e: unknown) => e });
-}
-
-/**
- * Fold one tick's `UsageStats` into the run-level accumulator. The three
- * always-present counters add unconditionally; the optional ones
- * (`reasoningTokens`, `cachedInputTokens`, `cacheCreationTokens`) stay
- * `undefined` on the accumulator until some tick reports them, so a run
- * against a provider that never reports them does not fabricate zeros.
- * `add` of `undefined` (a tick with no usage) is a no-op.
- */
-function accumulateUsage(acc: MutableUsage, add?: UsageStats): void {
-  if (!add) return;
-  acc.inputTokens += add.inputTokens ?? 0;
-  acc.outputTokens += add.outputTokens ?? 0;
-  acc.totalTokens += add.totalTokens ?? 0;
-  if (add.reasoningTokens !== undefined) {
-    acc.reasoningTokens = (acc.reasoningTokens ?? 0) + add.reasoningTokens;
-  }
-  if (add.cachedInputTokens !== undefined) {
-    acc.cachedInputTokens = (acc.cachedInputTokens ?? 0) + add.cachedInputTokens;
-  }
-  if (add.cacheCreationTokens !== undefined) {
-    acc.cacheCreationTokens = (acc.cacheCreationTokens ?? 0) + add.cacheCreationTokens;
-  }
 }

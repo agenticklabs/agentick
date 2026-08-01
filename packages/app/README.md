@@ -456,9 +456,25 @@ await app.closeApp(); // closes the cluster too
 | `appId`                     | `string`                                               | Defaults to `app:${ulid()}`                                                              |
 | `title`                     | `string`                                               | Display label — what a person reads. Distinct from `name`; see below                     |
 | `description`               | `string`                                               | One line for a picker or catalog                                                         |
+| `costResolver`              | `(input) => RateCard \| Cost \| undefined`             | Pricing seam; wins over a model's declared `rates`. See below                            |
 | _namespace slots_           | e.g. `timeline`                                        | Contributed by namespace packages; not declared here                                     |
 
 Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, `streaming`, `narrate`, `migrateSnapshot`, `initialProps`, `initialKnobs`, `target`, `interceptorParent`.
+
+#### `costResolver` — the pricing seam
+
+The framework ships no prices. Static rates are declared on the model (`ExecutionTarget.rates`), so a per-tick `<Model>` override carries its own card. `costResolver` covers what a table cannot: per-tenant contracts, volume tiers, marketplace markup, a rate that depends on the request.
+
+```ts
+const app = await createApp(<Agent />, {
+  model: anthropic("claude-sonnet-5"),
+  costResolver: ({ target, usage, sessionId }) => contractFor(sessionId, target.modelId),
+});
+```
+
+It is consulted per tick at settlement and **wins over the model's declared `rates`** whenever it returns a value; returning `undefined` falls through to them. Both return arms are real: a `RateCard` says "here are the rates, you do the arithmetic"; a `Cost` says "I did the arithmetic" — the marketplace case, where the number billed is not a function of tokens at all. A callback rather than a config table because pricing policy is unbounded, and any enum shipped here would be a guess at which three policies matter.
+
+Every session the app creates gets it, spawned and forked children included. When neither the resolver nor the target supplies rates, the tick is **unpriced** — recorded as such, never as zero. See [@agentick/session](../session) for how that folds upward.
 
 ### `AppHarness`
 
@@ -528,6 +544,7 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - `@agentick/transport`'s `src/__tests__/list-sessions-wire.spec.ts` — `app/list_sessions` over a real gateway: recency order and the projected descriptive slots, a three-page keyset walk staying disjoint while a touched row and a new row move underneath the open cursor (with the rows an offset cursor would have re-served named), rows sharing a millisecond each walked once, an undecodable cursor answering page one, another principal's sessions absent rather than erroring, and scoping running before the page is cut. Also both store paths: a store whose own cursor format survives the round trip untouched (and receives the paging call), a store implementing no cursored read paging correctly through the framework fallback, and a `metadata` filter — a dimension no store query expresses — forcing the snapshot path rather than returning short pages. (Home is transport because this package does not depend on it.)
 - `@agentick/session`'s `src/__tests__/session-store.spec.ts` — the `SessionStore` conformance obligations, including the six that `page` must meet: canonical order (the gateway merge contract), a whole-store walk serving each row once, no repeat and no skip of a settled row while writes land between pages, principal scoping honored inside the page (with an unowned record matching every principal), an undecodable cursor answering page one, and the walk ending by clearing the cursor rather than shortening the page.
 - `src/__tests__/create-app-cluster.spec.tsx` — cluster wiring, factory-substrate rejection, and close via registry removal.
+- `src/__tests__/usage-cost.spec.tsx` — `costResolver` reaching the loop's run input verbatim, staying off it entirely when unset, and a spawned child inheriting it through the one session-construction body; plus a spawned child's cost landing on the child's own record while the parent's `cost` and `byModel` stay absent — not zero.
 - `src/__tests__/session-extensions.spec.ts` + `layered-tools.spec.tsx` — extension target routing with per-session install, and app-scope tool propagation.
 - `src/__tests__/telemetry-e2e.spec.tsx`, `telemetry-wiring.spec.ts`, `telemetry.spec.ts` — the `createTelemetry` → `ctx.trace` / `ctx.metrics` → sink path, sink merging and validation and env autodiscovery, and enrichment on/off.
 - `src/__tests__/run.spec.tsx` — `run()` as awaitable and iterable, with teardown on settle.

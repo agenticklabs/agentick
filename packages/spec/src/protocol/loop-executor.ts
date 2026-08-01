@@ -29,6 +29,7 @@ import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { ToolChoice } from "../data/rendered-tree.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
+import type { Cost, CostResolver, ModelUsage } from "../data/usage-cost.js";
 import type { PromiseView } from "./promise-view.js";
 import type {
   ExecutorTerminal,
@@ -75,12 +76,24 @@ import type { ToolExecutorProtocol } from "./tool-executor.js";
  * middleware surface only).
  */
 export interface StateApplicatorFx {
-  applyExecutorResult(input: {
-    readonly sessionId: string;
-    readonly executionId: string;
-    readonly tickId: string;
-    readonly result: LanguageModelExecutionResult;
-  }): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
+  /**
+   * Input is the SAME type the Promise facade takes
+   * ({@link import("./session-harness.js").ApplyExecutorResultInput}), not a
+   * structural copy of it.
+   *
+   * It used to be a copy, and the copy silently drifted: the facade gained
+   * `cost` / `model` and this twin did not. Nothing went red, because the
+   * loop forwards them through a SPREAD (`{ ...result, ...omitUndefined({
+   * cost, model }) }`) and TypeScript's excess-property check only fires on
+   * literal keys. So the declared contract said those fields did not exist
+   * while the call site passed them anyway — a session implementer reading
+   * this type would have been within their rights to drop money on the
+   * floor, and no build would have caught it. Two faces of one call cannot
+   * be two declarations.
+   */
+  applyExecutorResult(
+    input: import("./session-harness.js").ApplyExecutorResultInput,
+  ): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
 
   applyToolResults(input: {
     readonly sessionId: string;
@@ -187,6 +200,14 @@ export interface RunExecutionInput {
   readonly modelExecutor?: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   /** Fallback execution target paired with {@link modelExecutor}. Optional (model-less). */
   readonly target?: ExecutionTarget;
+  /**
+   * App-level pricing seam, threaded from `AppHarnessOptions`. Consulted
+   * per tick at settlement and WINS over the resolved target's declared
+   * `rates` whenever it returns a value.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.3
+   */
+  readonly costResolver?: CostResolver;
 
   /** Tool executor harness for dispatch of `result.toolCalls`. */
   readonly toolExecutor: ToolExecutorProtocol;
@@ -342,6 +363,10 @@ export type LoopExecutionEvent =
       readonly stopReason?: string;
       readonly shouldContinue: boolean;
       readonly usage?: UsageStats;
+      /** Stamped at act time. Absent = UNPRICED, never zero. */
+      readonly cost?: Cost;
+      /** WHICH model produced this tick's usage — cost is not computable without it. */
+      readonly model?: Pick<ExecutionTarget, "provider" | "modelId">;
     }
   | {
       readonly kind: "tick";
@@ -350,6 +375,10 @@ export type LoopExecutionEvent =
       readonly stopReason: string;
       readonly usage: UsageStats;
       readonly durationMs: number;
+      /** Stamped at act time. Absent = UNPRICED, never zero. */
+      readonly cost?: Cost;
+      /** WHICH model produced this tick's usage — cost is not computable without it. */
+      readonly model?: Pick<ExecutionTarget, "provider" | "modelId">;
     }
   | {
       readonly kind: "execution-start";
@@ -409,7 +438,20 @@ export type LoopExecutionEvent =
 export interface ExecutionRunResult {
   readonly executionId: string;
   readonly ticks: number;
+  /** Flat totals across every model this run touched. Safe to sum; meaningless to price. */
   readonly usage: UsageStats;
+  /**
+   * Per-model breakdown, keyed `` `${provider}/${modelId}` ``. A run can
+   * change model mid-flight (per-tick `<Model>`, a steer, a spawn
+   * override), so the flat `usage` above routinely mixes rate tiers and
+   * cost is NOT a function of it.
+   */
+  readonly byModel?: Readonly<Record<string, ModelUsage>>;
+  /**
+   * Run cost. Absent when the run recorded no usage; `partial` when any
+   * tick was unpriced — an unpriced tick never folds in as zero.
+   */
+  readonly cost?: import("../data/usage-cost.js").CostRollup;
   readonly stopReason:
     | LanguageModelStopReason
     | "max_ticks"
@@ -532,6 +574,15 @@ export interface TickInput {
   readonly modelExecutor?: ExecutorProtocol<unknown, unknown, LanguageModelExecutionResult>;
   /** Fallback execution target paired with {@link modelExecutor}. Optional (model-less). */
   readonly target?: ExecutionTarget;
+  /**
+   * App-level pricing seam, forwarded from {@link ExecutionRunInput}. It
+   * has to reach INTO the tick because the stamp happens where the
+   * settled usage and the `<Model>`-resolved target coexist, and that is
+   * here — not at the run-level fold.
+   *
+   * @see docs/proposals/v2/usage-cost.md §4.3
+   */
+  readonly costResolver?: CostResolver;
   /** Tool executor harness for dispatch of `result.toolCalls`. */
   readonly toolExecutor: ToolExecutorProtocol;
   /** Where the tick writes results back (session `apply*` commands). */
@@ -600,6 +651,25 @@ export interface TickResult extends TickInfo {
   readonly executorTerminal: ExecutorTerminal<LanguageModelExecutionResult>;
   /** Tool dispatch results from this tick. */
   readonly toolResults: readonly LoopToolResult[];
+  /**
+   * The model this tick ACTUALLY ran against, after the `<Model>` cascade
+   * (per-tick IR > per-send > session default). Threaded out of the tick
+   * body rather than re-derived by the caller: re-running the cascade at
+   * settlement could disagree with what was called, and a cost attributed
+   * to the wrong model is worse than no attribution.
+   */
+  readonly model?: Pick<ExecutionTarget, "provider" | "modelId">;
+  /**
+   * This tick's cost, priced ONCE here — where the settled usage and the
+   * resolved target coexist — and never recomputed. That is the whole
+   * mechanism protecting past records from a future price change.
+   *
+   * Absent means the tick was UNPRICED (no resolver verdict, no declared
+   * rates). It never means free.
+   *
+   * @see docs/proposals/v2/usage-cost.md §5
+   */
+  readonly cost?: Cost;
   /**
    * Whether the loop will continue past this tick (subject to lifecycle
    * handler verdicts that may override).

@@ -56,7 +56,7 @@ import type {
   TimelineHarnessSnapshot,
   ToolExecutorProtocol,
 } from "@agentick/spec";
-import { SessionClosedError } from "@agentick/spec";
+import { SPEC_VERSION, SessionClosedError } from "@agentick/spec";
 
 /**
  * The durable persisted timeline log from a snapshot. Post-Step-6 (ADR 27)
@@ -490,6 +490,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         executionId: "exec-x",
         tickId: "tick-x",
         result: {
+          specVersion: SPEC_VERSION,
           output: [{ type: "text", text: "from-applicator" }],
           stopReason: "end",
         },

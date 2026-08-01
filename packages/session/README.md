@@ -394,6 +394,39 @@ A session is the per-render fact producer for the loop. Each send hands the loop
 
 The backward half closes the loop: after each tick the session appends the assistant message with that generation's usage, then the tool results, so the _next_ render sees them.
 
+### What a turn cost
+
+The assistant entry carries more than tokens. Each tick lands `usage`, the `model` that produced it, and the `cost` the loop stamped **at act time** on the entry's metadata — computed once, against the rate card in force then, and never recomputed. A price published tomorrow cannot reprice yesterday's records, because the record holds a number and a `rateRef`, not a recipe.
+
+Those per-tick facts fold upward, per model, at every level: `SendResult.byModel` / `.cost` for the send, the turn-boundary record for the turn, and `SessionRecord.byModel` / `.cost` for the whole session — all of which survive snapshot and restore. The flat `usage` stays beside them because "how many tokens did this burn" is a real question with a real flat answer; it is just not a priceable one, since a session that changes model mixes rate tiers in one bag.
+
+Cost is honest about what it does not know. A tick with no rate card is **unpriced**, and an unpriced tick never folds in as zero:
+
+```ts
+const { usage, byModel, cost } = await handle.result;
+
+if (cost?.kind === "complete") render(`$${cost.amountMicros / 1e6}`);
+else if (cost?.kind === "partial")
+  render(`at least $${cost.amountMicros / 1e6}`); // + cost.unpricedTicks
+else render("—"); // no usage recorded at all
+```
+
+Zero is a claim — "this cost nothing" — and a run mixing one priced model with one unpriced one would otherwise produce a total that looks authoritative and silently under-reports. The union forces the reader to notice. Rates ride the model (`ExecutionTarget.rates`); dynamic pricing rides `createApp({ costResolver })`, which wins over declared rates whenever it returns a value. A spawned child accounts for itself: its cost lands on its own record and never rolls into its parent's, because "what did this agent tree cost" is a query over `spawnPath`, not a write-time total.
+
+#### Watching cost, without sourcing it from metrics
+
+The stamp happens once and is projected twice. Everything above is the **truth plane** — durable, complete, per-model, and what billing reads. Alongside it the session emits a **metrics mirror** of the same facts, so a dashboard can watch spend without querying records:
+
+| Instrument                          | Kind      | Labels                            |
+| ----------------------------------- | --------- | --------------------------------- |
+| `agentick.session.tick.cost_micros` | histogram | `provider`, `modelId`, `currency` |
+| `agentick.session.tick.tokens`      | histogram | `provider`, `modelId`, `kind`     |
+| `agentick.session.tick.unpriced`    | counter   | `provider`, `modelId`             |
+
+One observation per tick, never a pre-aggregate. `kind` is the `TokenKind` vocabulary the rate cards price in (`input`, `output`, `cacheRead`, `cacheWrite`, `reasoning`), so a panel joins straight to a `RateCard.perMTok` key — and a kind the provider did not report emits **nothing**, because a `0` in a histogram claims the model did no cache writes and drags every percentile down with it. The prefix follows `telemetryNamespace`; every emission is a no-op against a frozen singleton when no meter is wired.
+
+The honesty rule holds on this plane too, which is what `unpriced` is for: a dashboard showing spend must be able to show how much of the spend it could not see. And the direction is one-way by design — **money must never live only in metrics.** A metrics pipeline samples, aggregates, expires series and drops labels under cardinality pressure; it is a fine place to watch cost and a catastrophic place to source it. Nothing here is the only writer of a number, and nothing reads it back for accounting. That is also why `rateRef` is not a label: it is dated, so it would mint a new time series on every price change, forever. Per-tick identity (session / execution / tick ids) is likewise absent — it rides spans and logs.
+
 ```tsx
 import { useContextInfo } from "@agentick/compiler-react";
 import { Timeline } from "@agentick/timeline/react";
@@ -675,4 +708,5 @@ const session = factory({
 - `src/__tests__/layered-tools.spec.ts` — execution-scoped registration and removal, execution-over-session precedence, and session-scoped tools persisting across sends.
 - `src/__tests__/channel-snapshot.spec.ts` — a channel opening on its current frame, an unowned channel reporting none, and a pending ask seeding the elicitation channel.
 - `src/__tests__/define-session.spec.ts` — the factory marker, delegation to the supplied callbacks, helpful errors from unconfigured verbs, and no-op handles resolving cleanly.
+- `src/__tests__/usage-cost.spec.tsx` — the accounting record end to end: a two-model session partitioned into two `byModel` buckets whose usage sums to the flat total, an unidentified model keyed `unknown` rather than dropped, and the honesty rule in four forms (an unpriced session rolling up `partial` and never a zero `complete`, a mixed run's amount being the priced subset only, a foreign-currency tick counted unpriced in the total yet fully priced in its own bucket, and a session with no usage carrying no `cost` key at all). Plus `cost` + `model` stamped on the assistant entry (and absent, not zero, when unpriced), `SendResult` lifting the loop's own rollup, the turn-boundary record carrying the session-folded one, `byModel` + `cost` round-tripping a snapshot — including a restore that CLEARS a stale cost — and the wire projection: a priced tick's `tick` event carrying `cost` + `model` computed from the target's declared rates, an unpriced one carrying no `cost` key. The metrics mirror gets its own suite against a spy meter: a priced tick recording the cost histogram in micro-units labelled by model + currency, one observation per tick and per model rather than a pre-aggregate, an unpriced tick counting `unpriced` and recording NO cost observation, a mixed run emitting both, token histograms carrying only the kinds actually reported (an unreported kind emitting nothing, not a zero), a tick with no usage emitting nothing at all, labels holding to the bounded set — never `rateRef`, never a session / execution / tick id — the same mirror landing on the REAL loop path (the `.fx` twin, not just the public facade), and a session with no meter wired emitting nothing while its durable accounting lands unchanged.
 - Spawn, fork and lifecycle operations are verified where both layers live, in [@agentick/app](../app): `spawn-hardening.spec.tsx` (the depth ceiling and `SpawnDepthExceededError`, `spawnPath` on the record / event scope / handle stream, parent close and abort disposing children), `fork.spec.tsx` (state copy, lineage, divergence), `lifecycle-operations.spec.tsx` (the linked spawn and child-create records, a guard vetoing at either layer, the bus-only close op and its `"evicted"` provenance from both the idle sweep and the memory cap), `set-model.spec.tsx` (the swap end-to-end through `createApp`), and `session-principal-lifecycle.spec.tsx` (spawn and fork inheriting the principal). The wire gate engaging on the stamped principal is pinned in [@agentick/transport](../transport) (`session-principal.spec.ts`).
