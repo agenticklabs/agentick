@@ -8,7 +8,7 @@
  *                                     Payload: `TaskInfo`.
  *   `session:channel:task-progress` — work-in-progress updates from
  *                                     the task's `onProgress` callback.
- *                                     Payload: `{ taskId, current,
+ *                                     Payload: `{ taskId, progress,
  *                                     total?, message? }`.
  *
  * Two channels (not one with discriminator) so subscribers can filter
