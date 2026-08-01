@@ -54,11 +54,12 @@ const result = await generate({
 
 `aisdk(model, options?)` → `LanguageModelAdapter`
 
-| Argument / option | Purpose                                                                                                        |
-| ----------------- | -------------------------------------------------------------------------------------------------------------- |
-| `model`           | Any AI SDK `LanguageModel` — a provider handle or a plain model-id string                                      |
-| `options.target`  | Override the self-described `ExecutionTarget`. Defaults are derived from the handle's `provider` and `modelId` |
-| `options.rates`   | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                    |
+| Argument / option         | Purpose                                                                                                        |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `model`                   | Any AI SDK `LanguageModel` — a provider handle or a plain model-id string                                      |
+| `options.target`          | Override the self-described `ExecutionTarget`. Defaults are derived from the handle's `provider` and `modelId` |
+| `options.rates`           | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                    |
+| `options.providerOptions` | Provider knobs for every call. Lands on `target.providerOptions`; folded over an explicit `target`'s bag too   |
 
 ### Rates
 
@@ -115,6 +116,26 @@ The AI SDK has its own `providerOptions` bag, and this adapter forwards the cano
 | Per part    | a part's own `providerOptions`                               | that AI SDK part's `providerOptions`   |
 
 So Anthropic cache control or OpenAI reasoning effort reaches the provider exactly as it would if you had called the AI SDK yourself. The canonical spec types the bag as a loose record while the AI SDK types it strictly; the runtime shape is the same.
+
+### Where to set them
+
+The request-level bag has a factory option, so a knob does not cost you a restated `ExecutionTarget`:
+
+```ts
+const model = aisdk(anthropic("claude-sonnet-5"), {
+  providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 8192 } } },
+});
+```
+
+It lands on the adapter's own `target.providerOptions`, which is what the app and the per-tick `<Model>` cascade hand the executor, so it applies to every call — streaming and not. Three layers can set the same namespace, most specific winning:
+
+| Layer                                                        | Wins over        |
+| ------------------------------------------------------------ | ---------------- |
+| `<model providerOptions={…}>` in the tree — this render only | everything below |
+| `aisdk(model, { providerOptions })` — this adapter           | the target's bag |
+| `aisdk(model, { target })` — the target you declared         | —                |
+
+The fold is per provider namespace, one level deep, the more specific bag winning key by key — so a tree-level object-valued knob **replaces** the factory's whole object rather than merging into it. The bag is opaque: nothing in it is read or validated. A per-call `SendInput.target` is the exception, replacing the target outright, bag included.
 
 ## The honest gaps
 
@@ -198,7 +219,7 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 ## Verified by
 
-- `src/__tests__/ai-sdk-executor.spec.ts` — the bridge against `MockLanguageModelV2`: target derivation from a handle, tool-call extraction, the finish-reason vocabulary, abort, reasoning output and `reasoningTokens`, the invariant that `providerTools` leak nowhere, and provider sources becoming citations.
+- `src/__tests__/ai-sdk-executor.spec.ts` — the bridge against `MockLanguageModelV2`: target derivation from a handle, tool-call extraction, the finish-reason vocabulary, abort, reasoning output and `reasoningTokens`, the invariant that `providerTools` leak nowhere, provider sources becoming citations, and the factory `providerOptions` bag reaching the model's call options on both paths, folding over an explicit target's bag, and losing to a tree-declared one.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across the source kinds, plus request-level and message-level `providerOptions` carry.
 - `src/__tests__/usage-normalization.spec.ts` — every kind mapped 1:1 with nothing added, unreported kinds left `undefined`, cache reads and writes surviving the streaming reconstruction, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor and this adapter.

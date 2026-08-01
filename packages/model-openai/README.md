@@ -44,15 +44,16 @@ The SDK client is constructed lazily on first use, so declaring an adapter needs
 
 `openai(model?, options?)` → `LanguageModelAdapter<ChatCompletion, ChatCompletionChunk>`
 
-| Option           | Purpose                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clientOptions`  | Every field the SDK's `OpenAI` constructor takes (apiKey, baseURL, organization, project, timeout, fetch, …). Ignored when `client` is set |
-| `client`         | Inject a pre-built `OpenAI` client — tests, custom dispatcher, mTLS                                                                        |
-| `stream`         | Stream every execution. Per-call intent on the target still wins                                                                           |
-| `parseThinkTags` | Route inline `<think>…</think>` from the content channel to reasoning deltas                                                               |
-| `customBlocks`   | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                                     |
-| `target`         | Override the self-described `ExecutionTarget` — the switch for a non-stock endpoint                                                        |
-| `rates`          | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                                |
+| Option            | Purpose                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `clientOptions`   | Every field the SDK's `OpenAI` constructor takes (apiKey, baseURL, organization, project, timeout, fetch, …). Ignored when `client` is set |
+| `client`          | Inject a pre-built `OpenAI` client — tests, custom dispatcher, mTLS                                                                        |
+| `stream`          | Stream every execution. Per-call intent on the target still wins                                                                           |
+| `parseThinkTags`  | Route inline `<think>…</think>` from the content channel to reasoning deltas                                                               |
+| `customBlocks`    | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                                     |
+| `target`          | Override the self-described `ExecutionTarget` — the switch for a non-stock endpoint                                                        |
+| `rates`           | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                                |
+| `providerOptions` | Provider knobs for every call. Lands on `target.providerOptions`; folded over an explicit `target`'s bag too                               |
 
 Defaults with no `model` argument: `gpt-4o-mini`, with tools, streaming, and JSON-schema output advertised.
 
@@ -150,6 +151,26 @@ The direction split is the rule: `providerOptions` is what you send, `providerMe
 > [!WARNING]
 > Don't set `model`, `messages`, or `stream` through `providerOptions`. Those are the adapter's to own, and overriding them desynchronizes the request from the target the executor thinks it called.
 
+### Where to set them
+
+Raising the reasoning effort is one option on the factory — it does not cost you a restated `ExecutionTarget`:
+
+```ts
+const model = openai("gpt-5", {
+  providerOptions: { openai: { reasoning_effort: "high" } },
+});
+```
+
+That bag lands on the adapter's own `target.providerOptions`, which is what the app and the per-tick `<Model>` cascade hand the executor, so it applies to every call — streaming and not. Three layers can set the same namespace, most specific winning:
+
+| Layer                                                        | Wins over        |
+| ------------------------------------------------------------ | ---------------- |
+| `<model providerOptions={…}>` in the tree — this render only | everything below |
+| `openai(model, { providerOptions })` — this adapter          | the target's bag |
+| `openai(model, { target })` — the target you declared        | —                |
+
+The fold is per provider namespace, one level deep, the more specific bag winning key by key — so a tree-level object-valued knob **replaces** the factory's whole object rather than merging into it. The bag is opaque: nothing in it is read or validated. A per-call `SendInput.target` is the exception, replacing the target outright, bag included.
+
 ## Provider-executed tools
 
 Tools OpenAI runs itself are projected onto the native `tools` array from the `provider === "openai"` slice of `providerTools`, as `{ type, ...config }` — you write OpenAI's own type string and it passes through verbatim:
@@ -236,7 +257,7 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 ## Verified by
 
-- `src/__tests__/openai-executor.spec.ts` — the dialect: message conversion, `finish_reason` mapping, abort, the streaming delta vocabulary, think-tag routing, custom blocks, target-over-construction model precedence, the provider-tools request projection, and web-search citations.
+- `src/__tests__/openai-executor.spec.ts` — the dialect: message conversion, `finish_reason` mapping, abort, the streaming delta vocabulary, think-tag routing, custom blocks, target-over-construction model precedence, the provider-tools request projection, web-search citations, and the factory `providerOptions` bag reaching the request body on both paths, folding over an explicit target's bag, and losing to a tree-declared one.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection, the model-override precedence, and `reasoningTokens` surfacing on usage.
 - `src/__tests__/usage-normalization.spec.ts` — cached and reasoning counters passing through as subsets rather than being added, `cacheCreationTokens` never fabricated, unreported kinds left `undefined`, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/provider-request-hooks.spec.ts` — the last-mile request hook seeing and transforming the provider-native request `prepareRequest` produced.

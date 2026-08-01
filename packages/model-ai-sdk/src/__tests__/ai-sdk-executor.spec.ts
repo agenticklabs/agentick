@@ -309,3 +309,116 @@ describe("aisdk() adapter — provenance-half (Pass D provider sources)", () => 
     expect(textBlock?.citations).toEqual([{ sourceId: "s0" }, { sourceId: "s0" }]);
   });
 });
+
+// ============================================================================
+// Factory-level providerOptions
+// ============================================================================
+// Enabling a provider knob must not cost the adopter a restated ExecutionTarget.
+// The factory bag lands on the adapter's own target, which is what the app and
+// the per-tick `<Model>` cascade hand the executor. The AI SDK forwards its own
+// `providerOptions` to the model's call options, so the mock model IS the wire.
+
+describe("aisdk() adapter — factory providerOptions", () => {
+  /** A mock model that records the `providerOptions` the AI SDK hands it. */
+  function capturingModel(): { model: MockLanguageModelV2; seen: () => unknown } {
+    let seen: unknown;
+    const model = new MockLanguageModelV2({
+      provider: "mock-aisdk",
+      modelId: "mock-1",
+      doGenerate: async (options) => {
+        seen = options.providerOptions;
+        return {
+          content: [{ type: "text", text: "ok" }],
+          finishReason: "stop",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+          warnings: [],
+        };
+      },
+      doStream: async (options) => {
+        seen = options.providerOptions;
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: "stream-start", warnings: [] });
+              controller.enqueue({ type: "text-start", id: "0" });
+              controller.enqueue({ type: "text-delta", id: "0", delta: "ok" });
+              controller.enqueue({ type: "text-end", id: "0" });
+              controller.enqueue({
+                type: "finish",
+                finishReason: "stop",
+                usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+              });
+              controller.close();
+            },
+          }) as never,
+        };
+      },
+    });
+    return { model, seen: () => seen };
+  }
+
+  async function mkExec(
+    model: MockLanguageModelV2,
+    options: Parameters<typeof aisdk>[1],
+  ): Promise<LanguageModelExecutor> {
+    const exec = new LanguageModelExecutor(
+      "exec-aisdk-provider-options",
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { adapter: aisdk(model, options) },
+    );
+    await exec.ready;
+    return exec;
+  }
+
+  it("reaches the provider request with no target restated (non-streaming)", async () => {
+    const { model, seen } = capturingModel();
+    const exec = await mkExec(model, {
+      providerOptions: { openai: { reasoningEffort: "high" } },
+    });
+    await exec.run({ compiled: mkTree(), target: exec.target, tools: [] });
+    expect(seen()).toEqual({ openai: { reasoningEffort: "high" } });
+  });
+
+  it("reaches the provider request on the streaming path too", async () => {
+    const { model, seen } = capturingModel();
+    const exec = await mkExec(model, {
+      providerOptions: { openai: { reasoningEffort: "high" } },
+    });
+    const target = exec.target;
+    const projected = await exec.project({ compiled: mkTree(), target, tools: [] });
+    const stream = exec.executeStream({ targetInput: projected, target });
+    for await (const _ of stream) {
+      /* drain */
+    }
+    await stream.result;
+    expect(seen()).toEqual({ openai: { reasoningEffort: "high" } });
+  });
+
+  it("folds over an explicit target's bag — factory wins per key, the rest survives", async () => {
+    const { model, seen } = capturingModel();
+    const exec = await mkExec(model, {
+      target: {
+        ...mkTarget(),
+        providerOptions: { openai: { reasoningEffort: "low", user: "u1" } },
+      },
+      providerOptions: { openai: { reasoningEffort: "high" } },
+    });
+    await exec.run({ compiled: mkTree(), target: exec.target, tools: [] });
+    expect(seen()).toEqual({ openai: { reasoningEffort: "high", user: "u1" } });
+  });
+
+  it("a tree-declared <model providerOptions> wins over the factory bag", async () => {
+    const { model, seen } = capturingModel();
+    const exec = await mkExec(model, {
+      providerOptions: { openai: { reasoningEffort: "low", user: "u1" } },
+    });
+    const tree: RenderedTree = {
+      ...mkTree(),
+      providerOptions: { openai: { reasoningEffort: "high" } },
+    };
+    await exec.run({ compiled: tree, target: exec.target, tools: [] });
+    expect(seen()).toEqual({ openai: { reasoningEffort: "high", user: "u1" } });
+  });
+});

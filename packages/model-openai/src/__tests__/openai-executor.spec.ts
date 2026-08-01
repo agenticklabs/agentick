@@ -645,3 +645,67 @@ describe("openai() adapter — canonical toolChoice", () => {
     expect(params.tool_choice).toBe("none");
   });
 });
+
+// ============================================================================
+// Factory-level providerOptions
+// ============================================================================
+// Enabling a provider knob must not cost the adopter a restated ExecutionTarget.
+// The factory bag lands on the adapter's own target, which is what the app and
+// the per-tick `<Model>` cascade hand the executor.
+
+describe("openai() adapter — factory providerOptions", () => {
+  it("reaches the request body with no target restated (non-streaming)", async () => {
+    const stub = new StubOpenAIClient([
+      { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      providerOptions: { openai: { seed: 42 } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    expect((stub.calls[0]!.params as { seed?: number }).seed).toBe(42);
+  });
+
+  it("reaches the request body on the streaming path too", async () => {
+    const stub = new StubOpenAIClient([
+      {
+        kind: "streaming",
+        chunks: [mkContentChunk({ delta: "ok" }), mkFinishChunk({ finishReason: "stop" })],
+      },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      stream: true,
+      providerOptions: { openai: { seed: 42 } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    expect(stub.calls[0]!.params.stream).toBe(true);
+    expect((stub.calls[0]!.params as { seed?: number }).seed).toBe(42);
+  });
+
+  it("folds over an explicit target's bag — factory wins per key, the rest survives", async () => {
+    const stub = new StubOpenAIClient([
+      { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      target: { ...mkTarget(), providerOptions: { openai: { seed: 1, user: "u1" } } },
+      providerOptions: { openai: { seed: 99 } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    const params = stub.calls[0]!.params as { seed?: number; user?: string };
+    expect(params.seed).toBe(99);
+    expect(params.user).toBe("u1");
+  });
+
+  it("a tree-declared <model providerOptions> wins over the factory bag", async () => {
+    const stub = new StubOpenAIClient([
+      { kind: "non-streaming", completion: mkCompletion({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      providerOptions: { openai: { seed: 1, user: "u1" } },
+    });
+    const tree: RenderedTree = { ...emptyTree(), providerOptions: { openai: { seed: 99 } } };
+    await exec.run({ compiled: tree, target: exec.target, tools: [] });
+    const params = stub.calls[0]!.params as { seed?: number; user?: string };
+    expect(params.seed).toBe(99);
+    expect(params.user).toBe("u1");
+  });
+});

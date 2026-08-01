@@ -171,6 +171,28 @@ export interface AnthropicAdapterOptions {
    * @see docs/proposals/v2/usage-cost.md §4.2
    */
   readonly rates?: RateCard;
+  /**
+   * Provider knobs applied to EVERY call this adapter makes. Lands on
+   * {@link ExecutionTarget.providerOptions}, so it rides the per-tick
+   * `<Model>` cascade with no extra plumbing, and folds OVER an explicit
+   * `target`'s own bag — declaring one must not silently drop the knobs.
+   *
+   * The bag is OPAQUE: never validated or interpreted, spread last onto
+   * the request. Folded by the canonical `mergeProviderOptions`
+   * (per-namespace, one level deep, patch wins), so precedence reads
+   * `<model providerOptions>` (tree) > this > `target.providerOptions`.
+   * A per-call `SendInput.target` REPLACES the target, bag included.
+   *
+   * @example
+   * ```ts
+   * anthropic("claude-sonnet-5", {
+   *   providerOptions: {
+   *     anthropic: { thinking: { type: "enabled", budget_tokens: 8192 } },
+   *   },
+   * });
+   * ```
+   */
+  readonly providerOptions?: ProviderOptions;
 }
 
 // Re-export from @agentick/model-executor so adopters that import from
@@ -259,12 +281,19 @@ export function anthropic(
       maxOutputTokens: 8_192,
     },
   };
-  // `rates` layers OVER the resolved target, explicit or default. An
-  // adopter who overrides the target is describing capabilities and ids,
-  // not waiving the price card — swallowing the rates there would make
-  // every tick silently unpriced.
-  const target: ExecutionTarget =
-    options.rates !== undefined ? { ...baseTarget, rates: options.rates } : baseTarget;
+  // `rates` and `providerOptions` layer OVER the resolved target, explicit
+  // or default. An adopter who overrides the target is describing
+  // capabilities and ids, not waiving the price card or the provider knobs —
+  // swallowing either there would make every tick silently unpriced /
+  // un-configured. The bag folds through the canonical merge so an explicit
+  // target's own namespaces survive under the factory's.
+  const target: ExecutionTarget = {
+    ...baseTarget,
+    ...omitUndefined({
+      rates: options.rates,
+      providerOptions: mergeProviderOptions(baseTarget.providerOptions, options.providerOptions),
+    }),
+  };
 
   let clientMemo: Anthropic | undefined = options.client;
   const client = (): Anthropic => (clientMemo ??= new Anthropic(buildClientOptions(options)));

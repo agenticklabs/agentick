@@ -44,16 +44,17 @@ The SDK client is constructed lazily on first use, so declaring an adapter needs
 
 `anthropic(model?, options?)` → `LanguageModelAdapter<Message, RawMessageStreamEvent>`
 
-| Option           | Purpose                                                                                                                           |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `clientOptions`  | Every field the SDK's `Anthropic` constructor takes (apiKey, authToken, baseURL, timeout, fetch, …). Ignored when `client` is set |
-| `client`         | Inject a pre-built `Anthropic` client — tests, custom dispatcher, mTLS                                                            |
-| `maxTokens`      | Default `max_tokens`. Anthropic **requires** it; defaults to 4096                                                                 |
-| `stream`         | Stream every execution. Per-call intent on the target still wins                                                                  |
-| `parseThinkTags` | Route inline `<think>…</think>` to the reasoning channel — niche; native thinking blocks are better                               |
-| `customBlocks`   | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                            |
-| `target`         | Override the self-described `ExecutionTarget` (a proxy, an extra capability)                                                      |
-| `rates`          | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                       |
+| Option            | Purpose                                                                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `clientOptions`   | Every field the SDK's `Anthropic` constructor takes (apiKey, authToken, baseURL, timeout, fetch, …). Ignored when `client` is set |
+| `client`          | Inject a pre-built `Anthropic` client — tests, custom dispatcher, mTLS                                                            |
+| `maxTokens`       | Default `max_tokens`. Anthropic **requires** it; defaults to 4096                                                                 |
+| `stream`          | Stream every execution. Per-call intent on the target still wins                                                                  |
+| `parseThinkTags`  | Route inline `<think>…</think>` to the reasoning channel — niche; native thinking blocks are better                               |
+| `customBlocks`    | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                            |
+| `target`          | Override the self-described `ExecutionTarget` (a proxy, an extra capability)                                                      |
+| `rates`           | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                       |
+| `providerOptions` | Provider knobs for every call. Lands on `target.providerOptions`; folded over an explicit `target`'s bag too                      |
 
 Defaults with no `model` argument: `claude-3-5-sonnet-latest`, a 200k context window, 8192 max output tokens, tools and vision on.
 
@@ -133,6 +134,26 @@ Four channels, each typed by this package augmenting the shared provider namespa
 | `providerMetadata.anthropic`         | What came **back**, per content block                            |
 
 The direction split is the rule: `providerOptions` is what you send, `providerMetadata` is what returned. Bags fold through `mergeProviderOptions` with the rendered tree winning over the target, and provider overrides spread last — an explicit escape-hatch value always beats the canonical mapping.
+
+### Where to set them
+
+Turning on extended thinking is one option on the factory — it does not cost you a restated `ExecutionTarget`:
+
+```ts
+const model = anthropic("claude-sonnet-5", {
+  providerOptions: { anthropic: { thinking: { type: "enabled", budget_tokens: 8192 } } },
+});
+```
+
+That bag lands on the adapter's own `target.providerOptions`, which is what the app and the per-tick `<Model>` cascade hand the executor, so it applies to every call — streaming and not. Three layers can set the same namespace, most specific winning:
+
+| Layer                                                        | Wins over        |
+| ------------------------------------------------------------ | ---------------- |
+| `<model providerOptions={…}>` in the tree — this render only | everything below |
+| `anthropic(model, { providerOptions })` — this adapter       | the target's bag |
+| `anthropic(model, { target })` — the target you declared     | —                |
+
+The fold is per provider namespace, one level deep, the more specific bag winning key by key — so a tree-level `thinking` **replaces** the factory's whole object rather than merging into it. The bag is opaque: nothing in it is read or validated. A per-call `SendInput.target` is the exception, replacing the target outright, bag included.
 
 ## Provider-executed tools
 
@@ -226,7 +247,7 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 ## Verified by
 
-- `src/__tests__/anthropic-executor.spec.ts` — the dialect: system extraction and strict alternation, tool-use round-trip including streaming input JSON, abort, the streaming delta vocabulary, cache-token accounting, native thinking blocks, sampling params lifted from tree config, `providerOptions` spread, think-tag routing, custom blocks, base64 images, canonical `CacheHint` translation, canonical `toolChoice`, the provider-tools request projection, and document citations.
+- `src/__tests__/anthropic-executor.spec.ts` — the dialect: system extraction and strict alternation, tool-use round-trip including streaming input JSON, abort, the streaming delta vocabulary, cache-token accounting, native thinking blocks, sampling params lifted from tree config, `providerOptions` spread, think-tag routing, custom blocks, base64 images, canonical `CacheHint` translation, canonical `toolChoice`, the provider-tools request projection, document citations, and the factory `providerOptions` bag reaching the request body on both paths, folding over an explicit target's bag, and losing to a tree-declared one.
 - `src/__tests__/provider-web-search.spec.ts` — a provider-executed search: the `tool_result` stamped `executedBy: "provider:anthropic"`, the request half excluded from dispatchable tool calls, URL-interned sources, and web-search-location citations.
 - `src/__tests__/multimodal-projection.spec.ts` — base64 documents as native blocks, request-level `providerOptions` reaching the body, the signed-thinking round trip through normalize and back onto the wire, the redacted-thinking opaque round trip, `refusal` → `content_filter`, `pause_turn` → `other`, and config-declared `topP` / `stopSequences` reaching the request.
 - `src/__tests__/usage-normalization.spec.ts` — both cache counters folded into `inputTokens` and reported separately, unreported kinds left `undefined`, cache **writes** present on the streaming path, streaming and non-streaming producing identical `UsageStats`, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.

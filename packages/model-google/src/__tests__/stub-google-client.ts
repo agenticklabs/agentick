@@ -15,7 +15,12 @@ import type {
   GenerateContentParameters,
   GenerateContentResponse,
 } from "@google/genai";
-import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
+import type {
+  ExecutionTarget,
+  LanguageModelTarget,
+  ProviderOptions,
+  RenderedTree,
+} from "@agentick/spec";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
@@ -276,6 +281,8 @@ export async function makeExecutor(
     model?: string;
     parseThinkTags?: boolean;
     customBlocks?: Record<string, { tag?: string; onContent?: (c: string) => void }>;
+    providerOptions?: ProviderOptions;
+    target?: ExecutionTarget;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -284,7 +291,11 @@ export async function makeExecutor(
   const exec = new LanguageModelExecutor("exec-google-test", journal, bus, inbox, {
     adapter: google(opts.model ?? "gemini-2.5-flash", {
       client: asClient(stub),
-      ...omitUndefined({ stream: opts.stream }),
+      ...omitUndefined({
+        stream: opts.stream,
+        providerOptions: opts.providerOptions,
+        target: opts.target,
+      }),
       ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
       ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
     }),

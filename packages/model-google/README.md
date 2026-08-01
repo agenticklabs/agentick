@@ -52,15 +52,16 @@ The SDK client is constructed lazily on first use, so declaring an adapter needs
 
 `google(model?, options?)` → `LanguageModelAdapter<GenerateContentResponse, GenerateContentResponse>`
 
-| Option           | Purpose                                                                                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `clientOptions`  | Every field the SDK's `GoogleGenAI` constructor takes (apiKey, vertexai, project, location, googleAuthOptions, httpOptions, …). Ignored when `client` is set |
-| `client`         | Inject a pre-built `GoogleGenAI` client — tests, custom auth                                                                                                 |
-| `stream`         | Stream every execution. Per-call intent on the target still wins                                                                                             |
-| `parseThinkTags` | Route inline `<think>…</think>` to the reasoning channel — niche; native thought parts are better                                                            |
-| `customBlocks`   | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                                                       |
-| `target`         | Override the self-described `ExecutionTarget`                                                                                                                |
-| `rates`          | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                                                  |
+| Option            | Purpose                                                                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `clientOptions`   | Every field the SDK's `GoogleGenAI` constructor takes (apiKey, vertexai, project, location, googleAuthOptions, httpOptions, …). Ignored when `client` is set |
+| `client`          | Inject a pre-built `GoogleGenAI` client — tests, custom auth                                                                                                 |
+| `stream`          | Stream every execution. Per-call intent on the target still wins                                                                                             |
+| `parseThinkTags`  | Route inline `<think>…</think>` to the reasoning channel — niche; native thought parts are better                                                            |
+| `customBlocks`    | Adopter-declared XML-ish tags carved out of the text stream as `custom-block-*` deltas                                                                       |
+| `target`          | Override the self-described `ExecutionTarget`                                                                                                                |
+| `rates`           | A `RateCard` for this model. Lands on `target.rates`; applied over an explicit `target` too                                                                  |
+| `providerOptions` | Provider knobs for every call. Lands on `target.providerOptions`; folded over an explicit `target`'s bag too                                                 |
 
 Defaults with no `model` argument: `gemini-2.5-flash`.
 
@@ -149,6 +150,30 @@ The direction split is the rule: `providerOptions` is what you send, `providerMe
 
 > [!WARNING]
 > Don't set `systemInstruction`, `tools`, or `abortSignal` through `providerOptions`. Those are the adapter's to own.
+
+### Where to set them
+
+Turning on thinking is one option on the factory — it does not cost you a restated `ExecutionTarget`:
+
+```ts
+const model = google("gemini-2.5-pro", {
+  providerOptions: { google: { thinkingConfig: { thinkingBudget: 8192 } } },
+});
+```
+
+That bag lands on the adapter's own `target.providerOptions`, which is what the app and the per-tick `<Model>` cascade hand the executor, so it applies to every call — streaming and not — and rides a per-tick model swap with no extra plumbing.
+
+Three layers can set the same namespace, most specific winning:
+
+| Layer                                                        | Wins over        |
+| ------------------------------------------------------------ | ---------------- |
+| `<model providerOptions={…}>` in the tree — this render only | everything below |
+| `google(model, { providerOptions })` — this adapter          | the target's bag |
+| `google(model, { target })` — the target you declared        | —                |
+
+The fold is `mergeProviderOptions`: per provider namespace, one level deep, the more specific bag winning key by key. A tree-level `{ google: { seed } }` therefore overrides the factory's `seed` and leaves its `thinkingConfig` alone — but a tree-level `thinkingConfig` **replaces** the factory's whole object rather than merging into it. The bag is opaque: nothing in it is read or validated, it is spread onto the request last.
+
+A per-call `SendInput.target` is the exception — it replaces the target outright, bag included, because it replaces the whole target.
 
 ### Prompt caching is a deliberate no-op here
 
@@ -265,7 +290,7 @@ runExecutorConformance(async ({ harnessId, scripted }) => {
 
 ## Verified by
 
-- `src/__tests__/google-executor.spec.ts` — the dialect: schema sanitization, thought-part routing to reasoning, `thoughtSignature` capture and carry, synthesized block boundaries, stop-reason mapping, the grounding-tools request projection, and grounding citations with no `executedBy` stamp.
+- `src/__tests__/google-executor.spec.ts` — the dialect: schema sanitization, thought-part routing to reasoning, `thoughtSignature` capture and carry, synthesized block boundaries, stop-reason mapping, the grounding-tools request projection, grounding citations with no `executedBy` stamp, and the factory `providerOptions` bag reaching the request config on both paths, folding over an explicit target's bag, and losing to a tree-declared one.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across all four source kinds, the `thoughtSignature` round trip, and the `CacheHint` no-op alongside the `cachedContent` escape hatch.
 - `src/__tests__/usage-normalization.spec.ts` — thoughts folded into `outputTokens` with `reasoningTokens` still reported separately, `inputTokens + outputTokens` agreeing with `totalTokenCount`, cached content treated as a subset of input, unreported kinds left `undefined`, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor, this adapter, and a stubbed SDK client.

@@ -25,7 +25,12 @@ import type {
 } from "openai/resources/chat/completions";
 
 import type { OpenAI } from "openai";
-import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
+import type {
+  ExecutionTarget,
+  LanguageModelTarget,
+  ProviderOptions,
+  RenderedTree,
+} from "@agentick/spec";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
@@ -256,7 +261,12 @@ export function mkTarget(overrides?: Partial<LanguageModelTarget>): LanguageMode
 
 export async function makeExecutor(
   stub: StubOpenAIClient,
-  opts: { stream?: boolean; model?: string } = {},
+  opts: {
+    stream?: boolean;
+    model?: string;
+    providerOptions?: ProviderOptions;
+    target?: ExecutionTarget;
+  } = {},
 ) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
@@ -264,7 +274,11 @@ export async function makeExecutor(
   const exec = new LanguageModelExecutor("exec-openai-test", journal, bus, inbox, {
     adapter: openai(opts.model ?? "gpt-4o-mini", {
       client: asClient(stub),
-      ...omitUndefined({ stream: opts.stream }),
+      ...omitUndefined({
+        stream: opts.stream,
+        providerOptions: opts.providerOptions,
+        target: opts.target,
+      }),
     }),
   });
   await exec.ready;

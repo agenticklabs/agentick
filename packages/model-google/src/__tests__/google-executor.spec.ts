@@ -604,6 +604,72 @@ describe("google() adapter — providerOptions.google (G5)", () => {
 });
 
 // ============================================================================
+// Factory-level providerOptions
+// ============================================================================
+// Enabling a provider knob must not cost the adopter a restated ExecutionTarget.
+// The factory bag lands on the adapter's own target, which is what the app and
+// the per-tick `<Model>` cascade hand the executor.
+
+describe("google() adapter — factory providerOptions", () => {
+  it("reaches the request config with no target restated (non-streaming)", async () => {
+    const stub = new StubGoogleClient([
+      { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      providerOptions: { google: { thinkingConfig: { thinkingBudget: 8192 } } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    const config = stub.calls[0]!.params.config as { thinkingConfig?: unknown };
+    expect(config.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+  });
+
+  it("reaches the request config on the streaming path too", async () => {
+    const stub = new StubGoogleClient([
+      { kind: "streaming", chunks: [mkTextChunk("ok"), mkFinishChunk({ finishReason: "STOP" })] },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      stream: true,
+      providerOptions: { google: { thinkingConfig: { thinkingBudget: 8192 } } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    expect(stub.calls[0]!.streaming).toBe(true);
+    const config = stub.calls[0]!.params.config as { thinkingConfig?: unknown };
+    expect(config.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+  });
+
+  it("folds over an explicit target's bag — factory wins per key, the rest survives", async () => {
+    const stub = new StubGoogleClient([
+      { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      target: { ...mkTarget(), providerOptions: { google: { seed: 1, topK: 40 } } },
+      providerOptions: { google: { seed: 99 } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    const config = stub.calls[0]!.params.config as { seed?: number; topK?: number };
+    expect(config.seed).toBe(99);
+    expect(config.topK).toBe(40);
+  });
+
+  it("a tree-declared <model providerOptions> wins over the factory bag", async () => {
+    const stub = new StubGoogleClient([
+      { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      providerOptions: { google: { seed: 1, topK: 40 } },
+    });
+    const tree: RenderedTree = {
+      ...emptyTree(),
+      providerOptions: { google: { seed: 99 } },
+    };
+    await exec.run({ compiled: tree, target: exec.target, tools: [] });
+    const config = stub.calls[0]!.params.config as { seed?: number; topK?: number };
+    expect(config.seed).toBe(99);
+    expect(config.topK).toBe(40);
+  });
+});
+
+// ============================================================================
 // Per-tool providerOptions (G11)
 // ============================================================================
 

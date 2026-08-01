@@ -17,7 +17,12 @@ import type {
   RawMessageStreamEvent,
   Usage,
 } from "@anthropic-ai/sdk/resources/messages";
-import type { LanguageModelTarget, RenderedTree } from "@agentick/spec";
+import type {
+  ExecutionTarget,
+  LanguageModelTarget,
+  ProviderOptions,
+  RenderedTree,
+} from "@agentick/spec";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
@@ -284,6 +289,8 @@ export async function makeExecutor(
     maxTokens?: number;
     parseThinkTags?: boolean;
     customBlocks?: Record<string, { tag?: string; onContent?: (c: string) => void }>;
+    providerOptions?: ProviderOptions;
+    target?: ExecutionTarget;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -292,7 +299,12 @@ export async function makeExecutor(
   const exec = new LanguageModelExecutor("exec-anthropic-test", journal, bus, inbox, {
     adapter: anthropic(opts.model ?? "claude-3-5-sonnet-latest", {
       client: asClient(stub),
-      ...omitUndefined({ stream: opts.stream, maxTokens: opts.maxTokens }),
+      ...omitUndefined({
+        stream: opts.stream,
+        maxTokens: opts.maxTokens,
+        providerOptions: opts.providerOptions,
+        target: opts.target,
+      }),
       ...(opts.parseThinkTags ? { parseThinkTags: true } : {}),
       ...(opts.customBlocks ? { customBlocks: opts.customBlocks } : {}),
     }),

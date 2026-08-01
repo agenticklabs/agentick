@@ -1130,3 +1130,73 @@ describe("anthropic() adapter — canonical toolChoice", () => {
     expect(params.tool_choice).toEqual({ type: "none" });
   });
 });
+
+// ============================================================================
+// Factory-level providerOptions
+// ============================================================================
+// Enabling a provider knob must not cost the adopter a restated ExecutionTarget.
+// The factory bag lands on the adapter's own target, which is what the app and
+// the per-tick `<Model>` cascade hand the executor.
+
+describe("anthropic() adapter — factory providerOptions", () => {
+  const thinking = { type: "enabled", budget_tokens: 8192 } as const;
+
+  it("reaches the request body with no target restated (non-streaming)", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      providerOptions: { anthropic: { thinking } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    expect(stub.calls[0]!.params.thinking).toEqual(thinking);
+  });
+
+  it("reaches the request body on the streaming path too", async () => {
+    const stub = new StubAnthropicClient([
+      {
+        kind: "streaming",
+        events: [
+          mkMessageStartEvent({ inputTokens: 4 }),
+          mkContentBlockStartText(0),
+          mkTextDelta(0, "ok"),
+          mkContentBlockStop(0),
+          mkMessageDelta("end_turn", 1),
+          mkMessageStop(),
+        ],
+      },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      stream: true,
+      providerOptions: { anthropic: { thinking } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    expect(stub.calls[0]!.params.thinking).toEqual(thinking);
+  });
+
+  it("folds over an explicit target's bag — factory wins per key, the rest survives", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      target: { ...mkTarget(), providerOptions: { anthropic: { top_k: 5, top_p: 0.4 } } },
+      providerOptions: { anthropic: { top_k: 40 } },
+    });
+    await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
+    expect(stub.calls[0]!.params.top_k).toBe(40);
+    expect(stub.calls[0]!.params.top_p).toBe(0.4);
+  });
+
+  it("a tree-declared <model providerOptions> wins over the factory bag", async () => {
+    const stub = new StubAnthropicClient([
+      { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
+    ]);
+    const { exec } = await makeExecutor(stub, {
+      providerOptions: { anthropic: { top_k: 5, top_p: 0.4 } },
+    });
+    const tree: RenderedTree = { ...emptyTree(), providerOptions: { anthropic: { top_k: 40 } } };
+    await exec.run({ compiled: tree, target: exec.target, tools: [] });
+    expect(stub.calls[0]!.params.top_k).toBe(40);
+    expect(stub.calls[0]!.params.top_p).toBe(0.4);
+  });
+});
