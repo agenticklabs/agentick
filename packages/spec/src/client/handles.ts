@@ -244,6 +244,28 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
    */
   rebind(auth: unknown): Promise<void>;
   close(): Promise<void>;
+  /**
+   * Events from this session AND its live spawn subtree — the
+   * `{ kind: "session-tree" }` twin of {@link ResourceHandle.events}, which sees
+   * this session alone.
+   *
+   * Reach for it to watch work that outlives a turn: a detached task or a
+   * cross-turn sub-agent emits on ITS OWN session's channels, so a plain
+   * `events()` subscription shows a client attached to the root nothing at all.
+   *
+   * ```ts
+   * const stream = session.treeEvents({ name: { exact: "session:channel:tasks" } });
+   * for await (const frame of stream) {
+   *   // Which member emitted rides the envelope, as it always has.
+   *   render(frame.envelope.scope.sessionId, frame.envelope.payload);
+   * }
+   * ```
+   *
+   * Members live when the subscription opens contribute their current channel
+   * snapshot first (root's, then descendants'); a member spawned later simply
+   * emits onto the live stream as it populates.
+   */
+  treeEvents(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream;
 
   // Elicitation (the `elicitations` property — an `ElicitationsHandle`, read via
   // `list()`/`subscribe()`, reply via `.respond(...)` / item verbs) is contributed

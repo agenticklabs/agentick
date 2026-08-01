@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   SIGNAL_NAME_DOMAIN,
+  isProgressEventName,
   logEventName,
   logEventQuery,
   progressEventName,
@@ -36,5 +37,26 @@ describe("signal query builders (ADR 64)", () => {
 
   it("progressEventQuery matches progress across all surfaces", () => {
     expect(progressEventQuery()).toEqual({ name: { wildcard: "*:signal:progress" } });
+  });
+});
+
+describe("isProgressEventName — the predicate form of the query", () => {
+  it("accepts a progress signal from ANY surface", () => {
+    for (const surface of ["tool", "mcp", "session", "tasks"]) {
+      expect(isProgressEventName(progressEventName(surface))).toBe(true);
+    }
+  });
+
+  it("refuses everything else, including the family's other signal", () => {
+    expect(isProgressEventName(logEventName("tool"))).toBe(false);
+    expect(isProgressEventName("session:execution:event")).toBe(false);
+    expect(isProgressEventName("session:channel:task-status")).toBe(false);
+  });
+
+  it("matches the wildcard EXACTLY — `*` is one segment, not a suffix", () => {
+    // A consumer discriminating a mixed stream must not admit a name that
+    // merely ends the right way; `endsWith` would take this one.
+    expect(isProgressEventName("a:b:signal:progress")).toBe(false);
+    expect(isProgressEventName("signal:progress")).toBe(false);
   });
 });

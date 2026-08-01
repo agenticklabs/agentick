@@ -654,6 +654,53 @@ export interface AppHarnessProtocol<P = unknown> {
   executionTreeContains(executionId: string, sessionId: string): boolean;
 
   /**
+   * Is `sessionId` inside the live spawn tree rooted at `rootSessionId`? The
+   * same O(depth) `parentSessionId` climb {@link executionTreeContains} makes,
+   * asking the OTHER membership question — and the difference between them is
+   * not a detail, it is the whole point of having both.
+   *
+   * **An execution id names a turn a session moves past; a session id names the
+   * session itself.** So `executionTreeContains(e, s)` answers `false` for the
+   * session that STARTED execution `e` (its own later turns are not that turn's
+   * business), while `sessionTreeContains(r, r)` answers `true`: the root IS a
+   * member of its own tree. Watching a session's tree that excluded the session
+   * would be a subscription nobody wants.
+   *
+   * Membership is LINEAGE, not turn: a descendant belongs whether it was
+   * spawned by turn 1 or turn 40, and it keeps belonging after the turn that
+   * spawned it settles. That is what makes this the right predicate for a
+   * SUBSCRIPTION, which outlives any one execution, where
+   * {@link executionTreeContains} is the right one for a turn's progress fan.
+   *
+   * The canonical caller is the gateway's `session-tree` subscription scope:
+   * one emitting session id per event, arriving continuously, so it climbs from
+   * the emitter rather than snapshotting the tree.
+   *
+   * Reads the LIVE registry only, with the same limitation stated the same way:
+   * a paged-out intermediate ancestor breaks the chain and its descendants
+   * report `false`. Cycle-guarded — a corrupt parent edge must not hang a
+   * per-event predicate.
+   */
+  sessionTreeContains(rootSessionId: string, sessionId: string): boolean;
+
+  /**
+   * The live spawn tree rooted at `rootSessionId`, ROOT FIRST then
+   * breadth-first — the enumeration half of {@link sessionTreeContains}.
+   *
+   * A subscriber needs the membership predicate per event and this list ONCE,
+   * at subscribe time, to splice each member's current channel snapshots in
+   * before the live tail (root's board first, then its children's — the order a
+   * late joiner wants to render). Returns ids only: the caller reaches the
+   * session through {@link getSession}, and a list of ids cannot go stale in a
+   * way that a list of harness references would hide.
+   *
+   * Live registry only, so it is a point-in-time answer by construction — a
+   * session spawned a millisecond later is not in it and needs no retro-splice,
+   * because its channels emit as they populate.
+   */
+  sessionTree(rootSessionId: string): readonly string[];
+
+  /**
    * Look up a LIVE session by id — the in-memory routing handle. Returns
    * `undefined` if no session with that id is currently live (a closed session
    * is dropped from the live registry, but its durable {@link SessionRecord}

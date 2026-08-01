@@ -398,3 +398,21 @@ export function logEventQuery(): EventQuery {
 export function progressEventQuery(): EventQuery {
   return { name: { wildcard: `*:${SIGNAL_NAME_DOMAIN}:progress` } };
 }
+
+/**
+ * Is this event name a `progress` signal from ANY surface? The PREDICATE form
+ * of {@link progressEventQuery}, for a consumer holding a delivered envelope
+ * rather than opening a subscription — the client stitching a mixed progress
+ * stream is the canonical one (`@agentick/client-core`'s `events()`, which
+ * must tell a signal frame from an execution-event frame).
+ *
+ * Matches the wildcard exactly, not loosely: `*` is ONE segment, so a name is
+ * a progress signal iff it has three segments and the last two are
+ * `signal:progress`. `endsWith` would wrongly admit `a:b:signal:progress`.
+ *
+ * @verifiedBy packages/spec/src/__tests__/signals.spec.ts
+ */
+export function isProgressEventName(name: string): boolean {
+  const segments = name.split(":");
+  return segments.length === 3 && segments[1] === SIGNAL_NAME_DOMAIN && segments[2] === "progress";
+}

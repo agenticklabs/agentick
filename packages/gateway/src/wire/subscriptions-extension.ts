@@ -17,6 +17,29 @@
  * validator (every method must start with `${namespace}/`) and
  * closes #300.
  *
+ * ## Scope, and what each one is for
+ *
+ * `gateway` / `app` / `session` / `session-tree` ({@link SubscriptionScope}).
+ * The last is the living-subtree rung: a session AND its live spawn
+ * descendants, which is how a client attached to a root sees a detached task's
+ * or a cross-turn sub-agent's channels — work that outlives any turn and so has
+ * no turn stream to ride. Its turn-scoped twin is `session/send`'s `fanIn`
+ * (one turn's progress, widened to that turn's descendants).
+ *
+ * ## Authorization
+ *
+ * Every scope kind passes through the SAME gate, and there is exactly one: the
+ * verb-derived `sub:subscribe` label the dispatcher requires of any caller.
+ * Scope-target resolution — the same-principal rule and the session's scope
+ * ceiling — keys on `params.sessionId`, which these params do not carry (the
+ * target rides `params.scope.id`), so it does not run for ANY subscription
+ * scope. `session-tree` therefore adds no reachability a `session` subscription
+ * did not already have, and it is the right shape when it does run: principal
+ * descends the spawn tree (ADR 48), so admitting a root admits its tree. The
+ * gap is not this scope's, and it is already named —
+ * `TODO(trail-session-resolution-seam)` in `@agentick/transport`'s
+ * `authorizeDispatch`, which is where subscribe scopes must route to be seen.
+ *
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  */
 
@@ -31,10 +54,55 @@ import {
   type WireExtension,
 } from "@agentick/spec";
 
+/** The app whose LIVE registry holds `sessionId`, or `undefined`. */
+function ownerApp(
+  gateway: GatewayHarnessProtocol,
+  sessionId: string,
+): AppHarnessProtocol | undefined {
+  for (const app of gateway.apps() as readonly AppHarnessProtocol[]) {
+    if (app.getSession(sessionId)) return app;
+  }
+  return undefined;
+}
+
+/**
+ * Admit only what the live tree rooted at `rootSessionId` emits.
+ *
+ * The subtree cannot be expressed as a bus-side `scope` filter — a query names
+ * ONE sessionId, and the membership set changes on every spawn — so the
+ * subscription is widened to the owning app and narrowed on arrival, the same
+ * shape `session/send`'s `fanIn` uses one rung down. An envelope with no
+ * `sessionId` (app-level lifecycle) belongs to no session and is refused: this
+ * scope is about the tree's sessions.
+ */
+async function* onlyInTree(
+  live: AsyncIterable<EventEnvelope>,
+  app: AppHarnessProtocol,
+  rootSessionId: string,
+): AsyncGenerator<EventEnvelope> {
+  for await (const envelope of live) {
+    const sessionId = envelope.scope.sessionId;
+    if (sessionId !== undefined && app.sessionTreeContains(rootSessionId, sessionId)) {
+      yield envelope;
+    }
+  }
+}
+
 /**
  * Resolve the scope's event iterable — mirrors the pre-#303
  * `openScopeEvents` helper. `null` return means the scope's target
  * (app or session) wasn't found.
+ *
+ * TODO(gateway-scope-subscription): the third rung of the scope ladder — a
+ * subscription over everything ONE PRINCIPAL owns, carved by principal rather
+ * than by spawn lineage. `{ kind: "gateway" }` exists but is the whole gateway,
+ * which is an operator's view, not a tenant's. The design is principal-prefix
+ * admission: widen to `gateway.events(...)` and admit an envelope iff the
+ * emitting session's principal equals the caller's, the same arrival-filter
+ * shape as `session-tree` with the identity axis instead of the lineage one.
+ * Unbuilt because no consumer has asked and the envelope scope carries no
+ * principal today (`TODO(signal-scope-app-id)`'s neighbor — both want more
+ * identity on the envelope, and closing them belongs at the emitter).
  */
 function openScopeEvents(
   gateway: GatewayHarnessProtocol,
@@ -50,17 +118,18 @@ function openScopeEvents(
     return app.events(params.query) as AsyncIterable<EventEnvelope>;
   }
   if (scope.kind === "session") {
-    for (const app of gateway.apps() as readonly AppHarnessProtocol[]) {
-      const sess = app.getSession(scope.id);
-      if (sess) {
-        const query = {
-          ...(params.query ?? {}),
-          scope: { ...(params.query?.scope ?? {}), sessionId: scope.id },
-        };
-        return app.events(query) as AsyncIterable<EventEnvelope>;
-      }
-    }
-    return null;
+    const app = ownerApp(gateway, scope.id);
+    if (!app) return null;
+    const query = {
+      ...(params.query ?? {}),
+      scope: { ...(params.query?.scope ?? {}), sessionId: scope.id },
+    };
+    return app.events(query) as AsyncIterable<EventEnvelope>;
+  }
+  if (scope.kind === "session-tree") {
+    const app = ownerApp(gateway, scope.id);
+    if (!app) return null;
+    return onlyInTree(app.events(params.query) as AsyncIterable<EventEnvelope>, app, scope.id);
   }
   return null;
 }
@@ -69,39 +138,54 @@ function openScopeEvents(
 const CHANNEL_NAME_PREFIX = "session:channel:";
 
 /**
- * When a subscription targets exactly ONE session channel, resolve the
- * owning session and render the channel's current snapshot as the opening
- * frame. Returns `undefined` unless: the scope is a session, the query is a
- * single-channel `{ exact }` name under `session:channel:`, a session
- * resolves, AND a provider owns that channel. Session resolution mirrors
- * the `session` branch of {@link openScopeEvents}.
+ * When a subscription targets exactly ONE session channel, render that
+ * channel's current snapshot(s) as the opening frame(s). Empty unless: the
+ * scope is a session or a session tree, the query is a single-channel
+ * `{ exact }` name under `session:channel:`, the target session resolves, AND
+ * a provider owns that channel.
+ *
+ * A `session` scope yields at most ONE frame. A `session-tree` scope yields one
+ * per LIVE MEMBER that has the channel, in {@link AppHarnessProtocol.sessionTree}
+ * order — root first, then breadth-first — so a late joiner paints the root's
+ * board before its descendants'. A member with nothing on that channel
+ * contributes nothing rather than an empty frame.
+ *
+ * Members that spawn AFTER this runs need no retro-splice: a new session's
+ * channel emits as it populates, and those deltas arrive on the live tail the
+ * arrival filter is already admitting. The splice is for what happened BEFORE
+ * the subscriber arrived, which is precisely what the live stream cannot
+ * replay.
  */
-async function resolveChannelSnapshot(
+async function resolveChannelSnapshots(
   gateway: GatewayHarnessProtocol,
   params: SubscribeParams,
-): Promise<EventEnvelope | undefined> {
+): Promise<readonly EventEnvelope[]> {
   const scope = params.scope;
-  if (scope.kind !== "session") return undefined;
+  if (scope.kind !== "session" && scope.kind !== "session-tree") return [];
   const name = params.query?.name;
-  if (name === undefined || !("exact" in name)) return undefined;
-  if (!name.exact.startsWith(CHANNEL_NAME_PREFIX)) return undefined;
+  if (name === undefined || !("exact" in name)) return [];
+  if (!name.exact.startsWith(CHANNEL_NAME_PREFIX)) return [];
   const channel = name.exact.slice(CHANNEL_NAME_PREFIX.length);
-  for (const app of gateway.apps() as readonly AppHarnessProtocol[]) {
-    const sess = app.getSession(scope.id);
-    if (sess) return sess.channelSnapshot(channel);
+  const app = ownerApp(gateway, scope.id);
+  if (!app) return [];
+  const members = scope.kind === "session" ? [scope.id] : app.sessionTree(scope.id);
+  const snapshots: EventEnvelope[] = [];
+  for (const id of members) {
+    const snap = await app.getSession(id)?.channelSnapshot(channel);
+    if (snap) snapshots.push(snap);
   }
-  return undefined;
+  return snapshots;
 }
 
 /**
- * Prepend the channel snapshot as the FIRST frame, then relay live deltas
+ * Prepend the channel snapshots as the FIRST frames, then relay live deltas
  * on the same stream (K8s `sendInitialEvents` / watch-list).
  */
-async function* withSnapshot(
-  snap: EventEnvelope,
+async function* withSnapshots(
+  snaps: readonly EventEnvelope[],
   live: AsyncIterable<EventEnvelope>,
 ): AsyncGenerator<EventEnvelope> {
-  yield snap;
+  yield* snaps;
   yield* live;
 }
 
@@ -149,7 +233,10 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
         // everything the adopter has not rebuilt yet. Naming a session scope
         // as an app whose id stringified to `[object Object]` told a caller
         // neither.
-        if (params.scope.kind === "session") {
+        if (params.scope.kind === "session" || params.scope.kind === "session-tree") {
+          // A tree is named by its ROOT, so an unknown root is an unknown
+          // session — the same answer, and the id in it is the one the caller
+          // asked about.
           throw new SessionNotFoundError({ sessionId: params.scope.id });
         }
         throw new AppNotFoundError({
@@ -157,13 +244,14 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
         });
       }
 
-      // Open-with-snapshot: when this is a single-session-channel
-      // subscription and a provider owns the channel, the FIRST frame the
-      // subscriber receives is the channel's current snapshot; live deltas
-      // follow on the same stream.
-      const snapEnvelope = await resolveChannelSnapshot(ctx.gateway, params);
-      if (snapEnvelope) {
-        iterable = withSnapshot(snapEnvelope, iterable);
+      // Open-with-snapshot: when this is a single-channel subscription and a
+      // provider owns the channel, the FIRST frames the subscriber receives are
+      // the channel's current snapshots — one for a session scope, one per live
+      // tree member (root first) for a session-tree scope; live deltas follow on
+      // the same stream.
+      const snapEnvelopes = await resolveChannelSnapshots(ctx.gateway, params);
+      if (snapEnvelopes.length > 0) {
+        iterable = withSnapshots(snapEnvelopes, iterable);
       }
 
       // The id is the CLIENT's, adopted verbatim (`SubscribeParams.

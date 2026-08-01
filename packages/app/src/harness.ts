@@ -3019,6 +3019,42 @@ export class AppHarness<P = unknown>
   }
 
   /**
+   * `AppHarnessProtocol.sessionTreeContains` — the same climb
+   * {@link executionTreeContains} makes, terminating on the ROOT SESSION rather
+   * than on an origin execution. See the protocol doc-block for why the root is
+   * a member of its own tree while an origin session is not a member of its
+   * turn's: a session id names the session, an execution id names a turn it
+   * moves past.
+   *
+   * `seen` guards a corrupt parent cycle, exactly as the execution walk does —
+   * a subscriber calls this per event.
+   */
+  sessionTreeContains(rootSessionId: string, sessionId: string): boolean {
+    const seen = new Set<string>();
+    let cursor = this.registry.get(sessionId);
+    while (cursor !== undefined && !seen.has(cursor.id)) {
+      if (cursor.id === rootSessionId) return true;
+      seen.add(cursor.id);
+      cursor =
+        cursor.parentSessionId !== undefined
+          ? this.registry.get(cursor.parentSessionId)
+          : undefined;
+    }
+    return false;
+  }
+
+  /**
+   * `AppHarnessProtocol.sessionTree` — the id projection of {@link liveSubtree},
+   * which already returns root-first-then-breadth-first. The public door exists
+   * because a subscriber outside this package needs the membership list once,
+   * at subscribe time, and has no other way to read the live registry's spawn
+   * edge.
+   */
+  sessionTree(rootSessionId: string): readonly string[] {
+    return this.liveSubtree(rootSessionId).map((entry) => entry.id);
+  }
+
+  /**
    * The live spawn subtree rooted at `sessionId` — the target's own registry
    * entry (when live) followed by every live descendant, breadth-first, so
    * reversing the list walks deepest-first.

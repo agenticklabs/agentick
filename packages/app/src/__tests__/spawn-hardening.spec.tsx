@@ -273,7 +273,10 @@ describe("SP5 — spawnPath lineage", () => {
 
     const withPath: Array<readonly string[]> = [];
     for await (const ev of handle.events()) {
-      if (Array.isArray(ev.spawnPath)) withPath.push(ev.spawnPath);
+      // `spawnPath` lives on `StreamEventBase`, which the union's `progress`
+      // variant deliberately does not extend (a bus signal has no lineage stamp
+      // of its own); an in-process handle never yields one.
+      if (ev.type !== "progress" && Array.isArray(ev.spawnPath)) withPath.push(ev.spawnPath);
     }
     await handle.result;
 

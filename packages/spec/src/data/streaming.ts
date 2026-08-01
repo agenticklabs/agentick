@@ -38,6 +38,7 @@ import type { ContentBlock } from "./content-blocks.js";
 import type { BlockType } from "./content-blocks.js";
 import type { ToolPresentation } from "./declarations.js";
 import type { LanguageModelStopReason, UsageStats } from "./execution-result.js";
+import type { ProgressToken, ProgressUpdate } from "./signals.js";
 
 // ============================================================================
 // Content metadata (citations, language hints, provider extensions)
@@ -492,14 +493,83 @@ export type ResultStreamEvent = {
 } & StreamEventBase;
 
 // ============================================================================
+// ProgressStreamEvent — a runtime `progress` signal, on the same stream
+// ============================================================================
+
+/**
+ * ONE {@link ProgressUpdate} frame from the runtime signal family (ADR 64),
+ * carried on the same stream as the turn's events.
+ *
+ * **Why it is here at all.** A turn's `events()` stream has TWO producers: the
+ * execution-event fan-out, and the `<surface>:signal:progress` bus signals a
+ * tool emits through `ctx.progress` (its descendants' too, under `fanIn`).
+ * Both already ride one wire; before this variant the second arrived as a bare
+ * `ProgressEventPayload` wearing a `StreamEvent` type, so every consumer
+ * duck-typed to tell them apart.
+ *
+ * **Why `type` and not `name`.** The frame's kind is on the bus envelope's
+ * `name`, and stamping that onto the payload COLLIDES: six variants of this
+ * union already carry a `name` and it is the TOOL name (`tool-call-start`,
+ * `tool-call`, `tool-dispatch-start`, `tool-dispatch-end`, `tool-dispatch`,
+ * `tool-confirmation-required`). Discriminating on the union's EXISTING `type`
+ * costs nothing and leaves those six alone.
+ *
+ * **Why it does NOT extend {@link StreamEventBase}.** The base demands `id`,
+ * `sequence`, `tick` and `timestamp`; a signal can honestly supply none of
+ * them. It is emitted on the bus by a tool handler, not minted by the session's
+ * event pipeline: there is no per-session monotonic `sequence` behind it (so it
+ * participates in no gap detection or replay), and it belongs to a tool call
+ * rather than to a tick. Faking those fields would put four lies on every frame
+ * to satisfy a structural relation nothing reads. A union member need not share
+ * the base — `type` is the discriminant, and it is the only field consumers
+ * narrow on.
+ *
+ * **Correlation instead.** `token` is the ProgressToken the emitting surface
+ * minted (the tool call id, in the tool executor) — what ties successive frames
+ * of one operation together. `sessionId` / `executionId` are the EMITTER's
+ * identity, read off the bus envelope's scope, and are what attributes a
+ * descendant's frame under `fanIn` — a sub-agent's progress carries the child's
+ * ids, never the turn's. Optional because the envelope's scope is gap-filled
+ * and may carry neither.
+ *
+ * **`progress` only.** The other signal in the family — `log` — is NOT on this
+ * stream today (the gateway fans out progress signals only), so it gets no
+ * variant. The door is the same one if a consumer ever needs it: another
+ * `type`, not another `name`.
+ *
+ * The four laws every frame obeys are on {@link ProgressUpdate} — in
+ * particular, each frame classifies ALONE (`total` present = determinate), so a
+ * consumer that joins mid-turn renders correctly from the first frame it sees.
+ */
+export type ProgressStreamEvent = ProgressUpdate & {
+  readonly type: "progress";
+  /** Correlation token minted by the emitting surface — the tool call id, in the tool executor. */
+  readonly token: ProgressToken;
+  /** The EMITTING session (a descendant's own id under `fanIn`), from the envelope scope. */
+  readonly sessionId?: string;
+  /** The EMITTING execution (a descendant runs its own), from the envelope scope. */
+  readonly executionId?: string;
+};
+
+// ============================================================================
 // Combined StreamEvent
 // ============================================================================
 
 /**
  * The complete event union yielded by `SessionExecutionHandle.events()`.
- * Three layers: model, orchestration, result. Consumers narrow on
- * `.type` to dispatch.
+ * Four layers: model, orchestration, result, and runtime progress signals.
+ * Consumers narrow on `.type` to dispatch.
+ *
+ * Not every producer emits every layer: {@link ProgressStreamEvent} is
+ * produced by the client-side stitch of the per-token progress stream
+ * (`@agentick/client-core`), where the two producers actually meet. An
+ * in-process handle's stream carries no signals today — the same way a stream
+ * that runs no tools carries no `tool-dispatch`.
  */
-export type StreamEvent = ModelStreamEvent | OrchestrationStreamEvent | ResultStreamEvent;
+export type StreamEvent =
+  | ModelStreamEvent
+  | OrchestrationStreamEvent
+  | ResultStreamEvent
+  | ProgressStreamEvent;
 
 export type StreamEventType = StreamEvent["type"];

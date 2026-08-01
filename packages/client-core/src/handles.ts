@@ -20,6 +20,7 @@ import type {
   ContentBlock,
   CreateSessionInput,
   EventQuery,
+  ProgressEventPayload,
   GatewayHandle,
   GatewayListAppsResult,
   HandleSubscriptions,
@@ -36,6 +37,8 @@ import type {
   WireMethod,
 } from "@agentick/spec";
 import type { Cursor } from "@agentick/spec";
+import { isProgressEventName } from "@agentick/spec";
+import { omitUndefined } from "@agentick/utils";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import {
@@ -235,6 +238,9 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
     events(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream {
       return client.transport.subscribe({ kind: "session", id: sessionId }, query, fromCursor);
     },
+    treeEvents(query?: EventQuery, fromCursor?: Cursor): SubscriptionStream {
+      return client.transport.subscribe({ kind: "session-tree", id: sessionId }, query, fromCursor);
+    },
   };
   // ADR 87 — spread registered per-harness sub-handles (session.tasks, .knobs, …)
   // as lazy getters. Client-core stays agnostic; harness /client packages register.
@@ -411,34 +417,45 @@ function createSessionExecutionHandle<P>(
     // `notifications/progress/complete` once both progress fan-outs drain,
     // and the transport ends this stream on it (which also reaps the token).
     //
-    // TODO(mixed-stream): this yields EVERY frame on the token as a
-    // `StreamEvent`, but the gateway multiplexes two producers onto it — the
-    // execution-event fan-out (`envelope.name === "session:execution:event"`)
-    // AND ADR 64 progress SIGNALS (`<surface>:signal:progress`, payload
-    // `ProgressEventPayload`). A tool calling `ctx.progress(...)` therefore
-    // hands a consumer a non-StreamEvent wearing a StreamEvent type. Until it
-    // is fixed a consumer MUST ignore unknown `type` values rather than
-    // `switch` with a throwing default. `fanIn` makes this WORSE, not
-    // differently: descendant signal frames now ride here too, and their
-    // emitter identity lives on the envelope `scope` this discards.
+    // TWO PRODUCERS, ONE UNION. The gateway multiplexes the execution-event
+    // fan-out (`envelope.name === "session:execution:event"`, payload already a
+    // `StreamEvent`) and ADR 64 progress SIGNALS (`<surface>:signal:progress`,
+    // payload a `ProgressEventPayload`) onto this one token. A signal is
+    // yielded as the `type: "progress"` variant of the union built from the
+    // payload plus the envelope's SCOPE — the emitter identity a consumer needs
+    // to attribute a descendant's frame under `fanIn`, which used to be
+    // discarded here. Execution events yield exactly what they always did.
     //
-    // The obvious fix does NOT work, and the reason is worth recording so it
-    // is not re-attempted: stamping the envelope's `name` onto the yielded
-    // payload COLLIDES. Six `StreamEvent` variants already carry a `name`, and
-    // it is the TOOL name — `tool-call-start`, `tool-call`,
-    // `tool-dispatch-start`, `tool-dispatch-end`, `tool-dispatch`,
-    // `tool-confirmation-required` (see `spec/src/data/streaming.ts`). Those
-    // are the most-consumed frames on the stream, and overwriting `name` on
-    // them would silently replace "which tool" with "which frame kind" in
-    // every UI that renders a tool call. The resolution is a real design
-    // choice — fold signals into the `StreamEvent` union under their own
-    // `type`, or yield the envelope and change what `events()` advertises —
-    // and it belongs to whoever owns that union, not to a field stamp here.
+    // Discriminating on `type` rather than stamping the envelope's `name` is
+    // the design decision recorded on `ProgressStreamEvent`: six variants of
+    // this union already carry a `name` and it is the TOOL name, so a stamp
+    // would replace "which tool" with "which frame kind" on the most-consumed
+    // frames of the stream.
     async *events(): AsyncGenerator<StreamEvent> {
       for await (const frame of progressStream) {
+        const envelope = frame.envelope;
+        if (isProgressEventName(envelope.name)) {
+          const payload = envelope.payload as ProgressEventPayload;
+          // Deliberately NOT fed to the `executionId` learn-step below: a
+          // signal's scope names its EMITTER, and under `fanIn` that is a
+          // sub-agent's execution. Learning from it would advertise a
+          // descendant's execution as this handle's.
+          yield {
+            type: "progress",
+            token: payload.token,
+            progress: payload.progress,
+            ...omitUndefined({
+              total: payload.total,
+              message: payload.message,
+              sessionId: envelope.scope.sessionId,
+              executionId: envelope.scope.executionId,
+            }),
+          };
+          continue;
+        }
         // The envelope's payload IS the StreamEvent — server already
         // normalized it.
-        const event = frame.envelope.payload as StreamEvent;
+        const event = envelope.payload as StreamEvent;
         // Learn the execution's id from the FIRST event that names it. Every
         // `StreamEventBase` carries `executionId`, and the send's own response does
         // not arrive until the turn is OVER — so without this the handle advertised

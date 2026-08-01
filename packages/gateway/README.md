@@ -591,6 +591,38 @@ Three things it deliberately is not:
 - **Not durable.** Membership reads the live session registry, so a descendant whose ancestor has been paged out is unreachable and its signals do not arrive — the same limitation `abortExecutionTree`'s walk has, for the same reason: a per-event predicate must not do store reads.
 - **Not the default.** Omitting `fanIn` produces a byte-identical request and byte-identical behavior. A UI built against one turn's frames should not start seeing another's because a tool learned to spawn.
 
+## Watching a session's living subtree
+
+`fanIn` widens one **turn**. A subscription is the other question: what a client attached to a session should see for as long as it stays attached. Sub-agents are the gap — a channel event is scoped to the session that emitted it, so a client watching a root's `task-status` sees nothing from the sub-agents that root spawns, and that is exactly the work worth watching, because a detached task or a cross-turn sub-agent outlives the turn that started it and has no turn stream to ride.
+
+`{ kind: "session-tree", id }` is that scope:
+
+```ts
+const stream = client.session("sess-123").treeEvents({
+  name: { exact: "session:channel:task-status" },
+});
+
+for await (const frame of stream) {
+  // Which member emitted rides the envelope, exactly as it always has.
+  board(frame.envelope.scope.sessionId, frame.envelope.payload);
+}
+```
+
+Membership is **lineage**: `app.sessionTreeContains(rootId, emitterId)` climbs the `parentSessionId` chain from the emitting session and answers `true` on reaching the root. A descendant belongs whichever turn spawned it and keeps belonging after that turn settles — the opposite of `fanIn`'s rule, and deliberately, because a subscription outlives any one turn. The root **is** a member of its own tree, where an execution's origin session is not a member of that turn's: a session id names the session, an execution id names a turn the session moves past.
+
+**A late joiner opens with the boards that already exist.** When the query targets exactly one channel, every live member's current snapshot is spliced ahead of the live tail, root first then breadth-first. A member spawned _after_ you subscribe needs no retro-splice: its channel emits as it populates, and the arrival filter is a live registry read, so the frame is admitted the moment it exists.
+
+**The scope ladder, end to end:**
+
+| Scope                           | What it observes                       | Lifetime         |
+| ------------------------------- | -------------------------------------- | ---------------- |
+| `session/send` with `fanIn`     | one turn's interior, incl. descendants | that turn        |
+| `{ kind: "session" }`           | one session's own events               | the subscription |
+| `{ kind: "session-tree" }`      | that session **and its live subtree**  | the subscription |
+| `{ kind: "app" }` / `"gateway"` | one app / the whole deployment         | the subscription |
+
+Authorization does not change: every scope kind passes the same `sub:subscribe` gate, and admitting a root admits its tree because principal descends the spawn tree. A tree subscription reaches nothing a session subscription on the same root could not.
+
 ## Observing the whole deployment
 
 `gateway.events(filter?)` is an async iterable fanned in from every hosted app — the one place to watch a multi-app process:
@@ -799,7 +831,7 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - **`telemetryNamespace` does not cascade.** Each app whitelabels its own attribute prefix; set it per app if you need a non-default one.
 - **No cluster substrate of its own.** `GatewayHarness` accepts any `EventBus`, so a Redis- or Kafka-backed deployment is a substrate swap rather than a gateway rewrite — but this package ships no such bus.
 - **`fanIn` cannot tell two apps' identically-named sessions apart.** The lineage walk keys on a session id, which is unique within an app but not across apps on one gateway. The arrival filter checks `scope.appId` for exactly this, but no `appId` reaches a `tool:signal:progress` envelope today — the app stamps `{ sessionId }` on the per-session scope and nothing gap-fills the rest. Reaching the hole needs two apps, deliberate reuse of one explicit session id (spawn generates ULIDs), and concurrent `fanIn` turns; closing it belongs at the emitter, since every scope-filtered bus subscriber has the same blind spot.
-- **Session-scoped subscriptions do not fan in.** `sub/subscribe` over `session:channel:*` shows a client nothing from the sub-agents that session spawns. The shape would be the same pair — widen, then filter — but a subscription outlives any one turn, so its membership question is about a session subtree over time rather than a settled execution.
+- **There is no per-principal subscription scope.** The ladder tops out at `{ kind: "gateway" }`, which is the whole deployment — an operator's view, not a tenant's. The missing rung is a scope carved by principal rather than by spawn lineage; it would have `session-tree`'s shape (widen, then filter on arrival) with the identity axis, but the envelope scope carries no principal today, so the filter has nothing to read. `TODO(gateway-scope-subscription)` marks the spot.
 
 ## Verified by
 
@@ -811,7 +843,8 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - `@agentick/transport`'s `src/__tests__/list-sessions-wire.spec.ts` — `gateway/list_sessions` against a real gateway in BOTH modes: a mounted index answering with its own rows, its own ordering (deliberately not the canonical one, so a re-sort would fail the test) and its own cursor handed back verbatim, one query per page, and the caller's principal reaching it; and the fallback merge over two apps' stores in the framework's canonical order with the right `appId` on every row. Plus one cursor paging the union across the app boundary, the caller-scoping filter that is the verb's only defense (it names no session, so the dispatch gate has nothing to resolve), the tree filter reaching the stores rather than post-filtering a fetched page, and an empty gateway's page shape. (Home is transport because this package does not depend on it.)
 - `@agentick/transport`'s `src/__tests__/destroy-session-wire.spec.ts` — both destroy verbs against a real gateway and the real dispatch gate: `gateway/destroy_session` resolving the owner on a multi-app gateway, resolving a paged-out session through the session stores, denying another principal's thread on the record when no live target exists for the gate to read, and answering an unclaimed id with no `appId` instead of a fault. (Home is transport because this package does not depend on it.)
 - `@agentick/transport-in-process`'s `src/__tests__/progress-fan-in-e2e.spec.ts` — `fanIn` over the full stack (real client, gateway, app, session, loop, tool executor, and real `spawn`): the default leaving a child's frames off the parent's stream while the fixture proves the child emitted; `fanIn` delivering them with the emitter's session, a distinct execution id, and the tool call id as correlation token; a grandchild arriving through the lineage walk; two concurrent turns in two apps sharing one gateway-wide subscription and each seeing only its own; a sibling turn's still-live child emitting DURING the next turn and staying off it; and no frame arriving after the send settles. (Home is transport-in-process because this package does not depend on it.)
-- `@agentick/app`'s `src/__tests__/cascading-abort.spec.tsx` — `executionTreeContains` on the same tree the fan-out test builds: child and grandchild in, a sibling turn's child out, the origin session itself out, and both unknowns quiet.
+- `@agentick/transport-in-process`'s `src/__tests__/session-tree-subscription-e2e.spec.ts` — the `session-tree` scope over a real gateway, app, sessions and `spawn`: a child's and a grandchild's channel frames arriving attributed to the emitter, a plain session subscription still seeing only itself, each live member's snapshot spliced at subscribe with the root's first, a session spawned AFTER subscribe joining live with no retro-splice, a foreign session excluded on both axes (another root in the same app, and another app on the same gateway) while publishing FIRST so its absence is the filter and not a race, and `close()` ending delivery. (Home is transport-in-process because this package does not depend on it.)
+- `@agentick/app`'s `src/__tests__/cascading-abort.spec.tsx` — `executionTreeContains` on the same tree the fan-out test builds: child and grandchild in, a sibling turn's child out, the origin session itself out, and both unknowns quiet. Plus `sessionTreeContains` / `sessionTree` on that tree: both turns' children in (lineage, not turn), the root a member of its own tree where the origin session is not a member of its turn's, and the enumeration root-first then breadth-first.
 - `src/__tests__/gateway-app-live-link.spec.ts` — a gateway hook registered **after** a session exists reaching that session's tool executor, and unsubscribe cascading back out.
 - `src/__tests__/layered-tools.spec.ts` — gateway tools reaching every session of every hosted app, and app- and session-level tools overriding on name collision.
 - `src/__tests__/emit-capabilities-changed.spec.ts` — event shape, per-call ordering, zero-subscriber safety, and scope-query plus child-bus isolation.

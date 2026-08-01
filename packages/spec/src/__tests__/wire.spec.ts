@@ -9,6 +9,7 @@ import {
   isJsonRpcResponse,
   isJsonRpcSuccess,
   isSessionScope,
+  isSessionTreeScope,
   findSession,
   SessionNotFoundError,
   validateJsonRpcFrame,
@@ -201,6 +202,19 @@ describe("@agentick/spec — wire structural tests", () => {
     it("isSessionScope narrows to the session variant", () => {
       const s: SubscriptionScope = { kind: "session", id: "s1" };
       expect(isSessionScope(s)).toBe(true);
+    });
+
+    it("session-tree is its OWN kind, not a flag on session", () => {
+      // The kind names the shape of what you observe, which is what makes it
+      // enumerable on the wire: a client reading back a subscription can tell
+      // "this session" from "this session and its living subtree".
+      const tree: SubscriptionScope = { kind: "session-tree", id: "s1" };
+      expect(isSessionTreeScope(tree)).toBe(true);
+      expect(isSessionScope(tree)).toBe(false);
+      expect(isSessionTreeScope({ kind: "session", id: "s1" })).toBe(false);
+      if (isSessionTreeScope(tree)) {
+        expectTypeOf(tree.id).toEqualTypeOf<string>();
+      }
     });
   });
 

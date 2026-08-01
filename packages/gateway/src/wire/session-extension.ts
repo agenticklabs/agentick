@@ -182,17 +182,14 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // decided at the harness level (`TickEndForwardDecision`), and a second
         // answer to that question at the wire would be a competing one.
         //
-        // TODO(fan-in-session-scope): the OTHER client observation channel —
-        // `sub/subscribe` over `session:channel:*` — has the same blind spot
-        // and no equivalent. A client watching a session's channels sees
-        // nothing from the sub-agents that session spawns, because a channel
-        // event is scoped to the emitting session. The shape would be the same
-        // pair (widen the subscription, filter on arrival), but the membership
-        // question differs — a subscription outlives any one turn, so the
-        // predicate would key on the SESSION subtree, not on an execution, and
-        // "which of my descendants existed when" becomes a live question
-        // instead of a settled one. Not built: no consumer has asked, and the
-        // wrong answer here is a subscription that silently grows.
+        // The OTHER client observation channel — `sub/subscribe` over
+        // `session:channel:*` — had the same blind spot and now has its own
+        // answer: the `session-tree` subscription scope, same pair (widen the
+        // subscription, filter on arrival) with the membership question a
+        // subscription actually asks. A subscription outlives any one turn, so
+        // it keys on the SESSION subtree (`app.sessionTreeContains`, lineage)
+        // where this keys on the EXECUTION tree (`executionTreeContains`, one
+        // turn). Turn interiors here; living subtree there.
         const fanIn = params.fanIn === true;
         const signalEvents = ctx.gateway.events(
           fanIn

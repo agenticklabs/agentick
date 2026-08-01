@@ -554,6 +554,63 @@ describe("session/send fanIn — descendant progress signals", () => {
   // 5 — teardown
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // 7 — the same frames, through the typed handle
+  // -------------------------------------------------------------------------
+
+  it("through the client handle, a signal arrives as the `progress` StreamEvent variant", async () => {
+    // The raw-wire tests above read envelopes. `session.send(...).events()` is
+    // what an adopter actually holds, and it yields the UNION: an execution
+    // event exactly as before, and a signal as `type: "progress"` carrying the
+    // token plus the EMITTER's identity (which is what the envelope's `scope`
+    // used to hold and the payload used to lose).
+    const { client, cleanup } = await makeStack([
+      { appId: "app-a", sessionId: "root", script: rootReportThenSpawn },
+    ]);
+
+    const handle = client.session("root").send({
+      messages: [{ role: "user", content: "go" }],
+      fanIn: true,
+    });
+
+    // A consumer's dispatch: narrow on `type`, no shape guards, no duck-typing.
+    const progress: Array<{ token: unknown; sessionId?: string; message?: string }> = [];
+    const toolNames: string[] = [];
+    for await (const event of handle.events()) {
+      switch (event.type) {
+        case "progress":
+          progress.push({
+            token: event.token,
+            sessionId: event.sessionId,
+            message: event.message,
+          });
+          break;
+        case "tool-dispatch":
+          // The six `name`-carrying variants still mean the TOOL — the whole
+          // reason the frame kind rides `type` and not `name`.
+          toolNames.push(event.name);
+          break;
+        default:
+          break;
+      }
+    }
+    await handle.result;
+
+    // Both producers, on one stream, discriminated by the union's own field.
+    expect(toolNames).toEqual(["report", "spawn"]);
+    expect(progress).toEqual([
+      { token: "tc-root-1", sessionId: "root", message: "from root" },
+      { token: "kid1-c1", sessionId: "kid1", message: "from kid1" },
+    ]);
+
+    // The child's frame is attributed to the CHILD — its own session, and its
+    // own execution, neither of which is the turn the caller sent.
+    const child = progress[1]!;
+    expect(child.sessionId).toBe("kid1");
+
+    await cleanup();
+  });
+
   it("stops forwarding once the send settles", async () => {
     // The gateway bus outlives the RPC, so a gateway-WIDE subscription that
     // survived its send would keep pushing a stranger's frames onto a token

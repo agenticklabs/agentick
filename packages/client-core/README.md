@@ -69,20 +69,48 @@ await client.close();
 
 ### One token, two producers
 
-> [!IMPORTANT]
-> **Ignore unknown `ev.type` values — never `switch` with a throwing default.** `run.events()` is typed `StreamEvent`, but the gateway multiplexes two producers onto the turn's progress token: the execution's events, and the `ctx.progress(...)` **signals** its tools emit. `events()` yields each frame's payload, so a signal arrives here wearing a `StreamEvent` type it does not have.
-
-When you need the frame kind, the emitter, or a sub-agent's progress, read the transport stream instead — the envelope is intact there:
+The gateway multiplexes two producers onto a turn's progress token: the execution's own events, and the `ctx.progress(...)` **signals** its tools emit. Both arrive on `run.events()`, and both are members of the `StreamEvent` union — a signal under `type: "progress"`. One `switch`, no shape guards:
 
 ```ts
-for await (const frame of client.transport.progress(token)) {
-  const { name, scope, payload } = frame.envelope;
-  if (name === "session:execution:event") fold(payload as StreamEvent);
-  if (name === "tool:signal:progress") bar(scope.sessionId, payload.progress, payload.total);
+for await (const ev of run.events()) {
+  switch (ev.type) {
+    case "content-delta":
+      process.stdout.write(ev.delta);
+      break;
+    case "tool-dispatch":
+      console.log(`[${ev.name}] ${ev.durationMs}ms`); // `name` is the TOOL, as always
+      break;
+    case "progress":
+      // `token` is the tool call id; `sessionId` is who emitted — a sub-agent's
+      // own id when the frame came from one.
+      bar(ev.sessionId, ev.progress, ev.total);
+      break;
+  }
 }
 ```
 
-`send({ ..., fanIn: true })` widens the signal half of that stream to the turn's whole spawn tree, so a sub-agent's progress reaches the caller that started the turn. It is off by default and changes nothing else — see [@agentick/gateway](../gateway#progress-on-a-running-turn) for the membership rule and what it deliberately excludes.
+The frame kind rides `type` rather than the envelope's `name` because six variants of the union already carry a `name` and it is the **tool** name; stamping the envelope over it would replace "which tool" with "which frame kind" on the most-consumed frames of the stream.
+
+A `progress` frame carries no `sequence`, `tick` or `timestamp` — it is a bus signal, not a sequenced session event, and the variant does not pretend otherwise. It classifies alone: `total` present means determinate, absent means a spinner, so a consumer joining mid-turn renders correctly from the first frame it sees.
+
+`send({ ..., fanIn: true })` widens the signal half of that stream to the turn's whole spawn tree, so a sub-agent's progress reaches the caller that started the turn. It is off by default and changes nothing else — see [@agentick/gateway](../gateway#progress-on-a-running-turn) for the membership rule and what it deliberately excludes. The raw envelopes are still there when you want them (`client.transport.progress(token)`), unchanged.
+
+### Watching a session's living subtree
+
+A turn's stream ends with the turn. For work that outlives one — a detached task, a sub-agent that keeps going after the turn that spawned it settles — subscribe to the session **tree**:
+
+```ts
+const stream = client.session("sess-123").treeEvents({
+  name: { exact: "session:channel:task-status" },
+});
+
+for await (const frame of stream) {
+  board(frame.envelope.scope.sessionId, frame.envelope.payload);
+}
+await stream.close();
+```
+
+`events()` is the same subscription scoped to that session alone, which sees nothing a sub-agent emits (a channel event is scoped to its emitter). `treeEvents()` opens with every live member's current channel snapshot — root first — then relays the live tail; a member spawned later simply appears on it.
 
 ## One client, one surface
 
@@ -881,18 +909,10 @@ transport changes the `createClient` call and nothing else.
   reconnect. A `notifications/capabilities/changed` subscription that refetches
   mid-connection is declared in the protocol but not implemented here, so today a
   server-side extension-set change is observed only after a reconnect.
-- **`run.events()` is typed narrower than what it yields.** Progress signals ride
-  the same token as execution events, so the iterator hands you frames that are not
-  `StreamEvent`s — [ignore unknown types](#one-token-two-producers). The obvious fix
-  does not work: stamping the envelope's `name` onto the payload collides with the
-  `name` six `StreamEvent` variants already carry, which is the **tool** name on
-  every `tool-call*` and `tool-dispatch*` frame. Resolving it means folding signals
-  into the `StreamEvent` union under their own `type`, or changing what `events()`
-  advertises — a design choice, not a field stamp.
-- **`onProgress` does not follow a turn into its sub-agents.** The subscription is
-  scoped to a session, and a sub-agent is a different one. `send({ fanIn: true })`
-  covers the case for the progress-token stream; the subscription channel has no
-  equivalent.
+- **`onProgress` does not follow a turn into its sub-agents.** The pre-scoped signal
+  subscription is keyed to one session, and a sub-agent is a different one. The two
+  doors that do cover it are `send({ fanIn: true })` for a turn's progress stream and
+  `treeEvents()` for a subscription; `onProgress` itself takes no tree scope.
 - **`client.events()` has one live source.** Only the `connection` surface emits.
   `request` / `subscription` / `auth` / `wire` / `extension` have no emit sites
   yet, so a filter on them yields nothing.

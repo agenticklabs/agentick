@@ -499,3 +499,61 @@ describe("app.executionTreeContains", () => {
     await cleanup("root");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 7 — sessionTreeContains / sessionTree: the OTHER membership question
+// ---------------------------------------------------------------------------
+
+describe("app.sessionTreeContains + app.sessionTree", () => {
+  it("keys on lineage, not on a turn — and the ROOT is a member of its own tree", async () => {
+    // The same tree as above, asked the question a SUBSCRIPTION asks. A
+    // subscription outlives any one turn, so which turn spawned a descendant is
+    // not a distinction it can make use of: both kids are in.
+    const { app, fixture, cleanup } = await mkApp();
+    const root = asSession(await app.createSession({ sessionId: "root" }));
+
+    const turnA = await root.send({
+      messages: [{ role: "user", content: "A" }],
+      modelExecutor: await mkExec("turn-a", spawnThenEndScript("tc-a")),
+    });
+    await turnA.result;
+    const turnB = await root.send({
+      messages: [{ role: "user", content: "B" }],
+      modelExecutor: await mkExec("turn-b", spawnThenEndScript("tc-b")),
+    });
+    await turnB.result;
+    await waitFor(() => fixture.entered.includes("kid1") && fixture.entered.includes("kid2"), {
+      description: "both kids parked",
+    });
+    await app.getSession("kid1")!.spawn({ agent: React.createElement(Agent), sessionId: "grand" });
+
+    // The asymmetry with `executionTreeContains`, stated as a pair: an
+    // execution id names a turn a session moves PAST (so the origin session is
+    // out of its own turn's tree), a session id names the session itself (so
+    // the root is in).
+    expect(app.sessionTreeContains("root", "root")).toBe(true);
+    expect(app.executionTreeContains(turnA.executionId, "root")).toBe(false);
+
+    // Lineage, at any depth, from any turn.
+    expect(app.sessionTreeContains("root", "kid1")).toBe(true);
+    expect(app.sessionTreeContains("root", "kid2")).toBe(true);
+    expect(app.sessionTreeContains("root", "grand")).toBe(true);
+    // …and read from an intermediate node, which is a smaller tree.
+    expect(app.sessionTreeContains("kid1", "grand")).toBe(true);
+    expect(app.sessionTreeContains("kid2", "grand")).toBe(false);
+    // Never upward: a parent is not in its child's tree.
+    expect(app.sessionTreeContains("kid1", "root")).toBe(false);
+
+    // Quiet on unknowns, both ends, like every other registry walk.
+    expect(app.sessionTreeContains("root", "no-such-session")).toBe(false);
+    expect(app.sessionTreeContains("no-such-root", "kid1")).toBe(false);
+
+    // The enumeration half — root FIRST, then breadth-first, which is the order
+    // a snapshot splice needs (a late joiner paints the root's board first).
+    expect(app.sessionTree("root")).toEqual(["root", "kid1", "kid2", "grand"]);
+    expect(app.sessionTree("kid1")).toEqual(["kid1", "grand"]);
+    expect(app.sessionTree("no-such-root")).toEqual([]);
+
+    await cleanup("root");
+  });
+});

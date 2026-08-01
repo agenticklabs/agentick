@@ -128,7 +128,12 @@ describe("SessionExecutionHandle — typed streaming events", () => {
     const session = await mkSession();
     const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
     const seqs: number[] = [];
-    for await (const ev of handle.events()) seqs.push(ev.sequence);
+    // The union's `progress` variant carries no `sequence` — it is a bus signal,
+    // not a sequenced session event — and an in-process handle never yields one.
+    // The narrowing is that invariant written down, not a skip.
+    for await (const ev of handle.events()) {
+      if (ev.type !== "progress") seqs.push(ev.sequence);
+    }
     expect(seqs[0]).toBe(1);
     for (let i = 1; i < seqs.length; i++) {
       expect(seqs[i]).toBe(seqs[i - 1]! + 1);
