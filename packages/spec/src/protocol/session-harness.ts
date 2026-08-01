@@ -855,6 +855,44 @@ export type TickEndForwardDecision =
 // ============================================================================
 
 /**
+ * Options for {@link SessionHarnessProtocol.abort}.
+ *
+ * **The cancellation ladder** — four verbs, strictly increasing in what they
+ * take away. Each rung does everything the rung above it does, and more:
+ *
+ * | verb | cancels | disposes | detached tasks | durable record |
+ * | --- | --- | --- | --- | --- |
+ * | `abort()` | this session's current execution | no | keep running | untouched |
+ * | `abort({ cascade: true })` | ⤷ plus every live descendant's | no | keep running | untouched |
+ * | `close()` | this session's current execution | this session + its spawned children | ABANDONED (ADR 68) | survives as history |
+ * | `destroySession()` | the whole live subtree's | the whole live subtree | CANCELLED | DELETED |
+ *
+ * The two abort rungs are the only reversible ones: the session stays open,
+ * addressable, and immediately sendable again.
+ */
+export interface SessionAbortOptions {
+  /**
+   * Abort the live spawn subtree, not just this session — every live
+   * DESCENDANT session's current execution, deepest-first (a child stops
+   * before the parent waiting on it unwinds), then this session's own.
+   *
+   * Scope only. Cascade does not dispose anything, does not touch the durable
+   * record, and does not cancel detached tasks — for those, climb the ladder
+   * above. Each aborted execution mints its own ordinary `loop:abort`
+   * operation, so a guard sees the same op it always did: cascade changes the
+   * SCOPE of an abort, never its KIND.
+   *
+   * Defaults to `false` — the conservative reading of a bare `abort()`, which
+   * has always meant "stop what I'm doing", never "stop my whole agent tree".
+   *
+   * Reaching descendants requires the app-level registry (the session's
+   * `SpawnContext`). A session constructed without one has no children to
+   * reach, so cascade degrades to the plain self-abort.
+   */
+  readonly cascade?: boolean;
+}
+
+/**
  * Methods every session harness MUST provide. Promise-typed at the
  * public surface (consistent with compiler / executor / tool-executor
  * / loop-executor protocols). Implementations wrap internal bodies with
@@ -910,9 +948,12 @@ export interface SessionHarnessProtocol<P = unknown> {
    * success. It cancels ONE execution — it does not refuse future sends (that
    * is `close()`, or the construction-bound signal).
    *
+   * `{ cascade: true }` widens the SCOPE to the live spawn subtree — see
+   * {@link SessionAbortOptions.cascade} and the cancellation ladder there.
+   *
    * @throws {SessionError}
    */
-  abort(reason?: string): Promise<void>;
+  abort(reason?: string, opts?: SessionAbortOptions): Promise<void>;
 
   /**
    * Capture the current state as a serializable snapshot. Routed through
@@ -1322,6 +1363,21 @@ export interface SpawnContext<P = unknown> {
    * to leak. Idempotent; unknown / already-disposed ids are a no-op.
    */
   disposeChildSession(sessionId: string): Promise<void>;
+  /**
+   * Abort every live execution in the spawn subtree rooted at `sessionId` —
+   * the subtree INCLUDING that session — deepest-first, and answer how many
+   * sessions were aborted.
+   *
+   * The app owns this walk because the app owns the registry: a session knows
+   * its children's IDS, but only the registry holds their harnesses, and only
+   * the registry still finds a descendant whose intermediate ancestor was
+   * evicted. This is the SAME walk `destroySession` runs as its first step,
+   * exposed on its own so the weaker verb (`session.abort({ cascade: true })`)
+   * can reuse it without any of destroy's teardown.
+   *
+   * Aborts only — no disposal, no store writes, no detached-task cancellation.
+   */
+  abortSubtree(sessionId: string, reason?: string): Promise<number>;
 }
 
 export interface SpawnContextChildInput<P = unknown> {
@@ -1348,11 +1404,31 @@ export interface SpawnContextChildInput<P = unknown> {
    */
   readonly spawnPath?: readonly string[];
   /**
-   * The parent's construction signal (SP6). Fanned into the child as its
-   * construction signal so a parent abort tears down the child's in-flight
-   * work through the same merge-into-execution-signal plumbing (PA1).
+   * The parent's construction signal (SP6), MERGED with the abort signal of
+   * the parent execution that asked for the spawn (EX1). Fanned into the child
+   * as its construction signal so both a parent abort and a
+   * parent-EXECUTION abort tear down the child's in-flight work through the
+   * same merge-into-execution-signal plumbing (PA1).
    */
   readonly signal?: AbortSignal;
+  /**
+   * The parent EXECUTION that spawned this child (EX1) — the id of the
+   * execution running on the parent at the spawn site. Stamped on the child's
+   * registry entry and its {@link SessionRecord}, which is what makes
+   * `abortExecutionTree(executionId)` possible AFTER that execution settled:
+   * the live-signal fan (see {@link signal}) covers the running case, and this
+   * edge covers children that outlived the execution that made them.
+   *
+   * Absent when the spawn did not run inside an execution (a host calling
+   * `session.spawn()` directly).
+   */
+  readonly originExecutionId?: string;
+  /**
+   * The parent TOOL CALL whose handler asked for the spawn, when there was one
+   * (`SpawnInput.originCallId`). Travels alongside {@link originExecutionId} so
+   * the durable record names the call that fanned out, not just the execution.
+   */
+  readonly originCallId?: string;
   /**
    * The invoking `session:command:spawn` operation's id (ADR 92 Family 2 §4) —
    * the causal link stamped as `parentOpId` on the `app:command:create-child-

@@ -354,6 +354,12 @@ export interface SessionListToolsResult {
 export interface SessionAbortParams extends WireRequestParams {
   readonly sessionId: string;
   readonly reason?: string;
+  /**
+   * Widen the abort to the session's live spawn subtree — see
+   * `SessionAbortOptions.cascade`. Omitted (the default) is byte-identical to
+   * the pre-cascade verb: only the addressed session's current execution stops.
+   */
+  readonly cascade?: boolean;
 }
 
 export type SessionAbortResult = null;

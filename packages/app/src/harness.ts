@@ -87,6 +87,8 @@ import {
 } from "@agentick/spec";
 import { mergeLayered, omitUndefined } from "@agentick/utils";
 import type {
+  AbortExecutionTreeInput,
+  AbortExecutionTreeResult,
   AppError,
   AppExtension,
   AppHarnessProtocol,
@@ -763,6 +765,15 @@ interface InternalSessionEntry<P> {
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly createdAt: number;
   readonly parentSessionId?: string;
+  /**
+   * EX1 — the parent EXECUTION that spawned this session (`parentSessionId`
+   * names which session did; this names which of its turns). The live half of
+   * the same edge the durable `SessionRecord` carries, and the key
+   * {@link AppHarness.abortExecutionTree} walks.
+   */
+  readonly originExecutionId?: string;
+  /** EX1 — the parent TOOL CALL that asked for the spawn, when there was one. */
+  readonly originCallId?: string;
   lastActiveAt?: number;
   ephemeral: boolean;
 }
@@ -1697,6 +1708,45 @@ export class AppHarness<P = unknown>
   }
 
   /**
+   * Cancel one execution's fan-out — see
+   * {@link AppHarnessProtocol.abortExecutionTree} for the contract.
+   *
+   * Its own op (`app:command:abort-execution-tree`) for the same reason destroy
+   * has one: a guard should be able to refuse "cancel this turn's sub-agents"
+   * without refusing every abort in the app. The aborts it issues are still
+   * ordinary `loop:abort` ops underneath — this op is the ENVELOPE around the
+   * walk, not a new kind of cancellation.
+   *
+   * TODO(abort-execution-tree-wire): no wire verb yet. The client-facing
+   * cancellation is session-addressed (`session/abort` + `cascade`); an
+   * execution-addressed verb needs the ownership question answered first — the
+   * dispatch gate resolves a target from a `sessionId`, and an execution id
+   * names no session the gate can read.
+   */
+  abortExecutionTree(
+    executionId: string,
+    opts?: AbortExecutionTreeInput,
+  ): Promise<AbortExecutionTreeResult> {
+    const input = { executionId, ...omitUndefined({ reason: opts?.reason }) };
+    const op: Operation<typeof input, AbortExecutionTreeResult> = {
+      opId: `app:abort-execution-tree:${ulid()}`,
+      surface: "app",
+      name: "app:command:abort-execution-tree",
+      scope: { executionId },
+      input,
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () =>
+            this.abortExecutionTreeBody(i.executionId, i.reason ?? "origin execution aborted"),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
+    );
+  }
+
+  /**
    * Enumerate the durable session registry — the {@link SessionStore} (E11).
    * Returns {@link SessionRecord}s (the superset: every non-ephemeral session
    * ever, including closed ones the live `registry` dropped), filtered by app /
@@ -1929,6 +1979,9 @@ export class AppHarness<P = unknown>
       readonly spawnPath?: readonly string[];
       /** SP6 — the parent's construction signal, fanned into the child. */
       readonly signal?: AbortSignal;
+      /** EX1 — the origin edge: which execution (and call) spawned the child. */
+      readonly originExecutionId?: string;
+      readonly originCallId?: string;
     } = {},
   ): Promise<SessionHarnessProtocol<P>> {
     const claimed: unknown[] = [];
@@ -1961,6 +2014,8 @@ export class AppHarness<P = unknown>
       readonly parentSessionId?: string;
       readonly spawnPath?: readonly string[];
       readonly signal?: AbortSignal;
+      readonly originExecutionId?: string;
+      readonly originCallId?: string;
     },
     claimed: unknown[],
   ): Promise<SessionHarnessProtocol<P>> {
@@ -2342,6 +2397,12 @@ export class AppHarness<P = unknown>
       // spawned child (via `createChildSession`); `maxSpawnDepth` is stamped
       // app-uniformly on every session so the SP4 guard reads a consistent cap.
       ...omitUndefined({ spawnPath: overrides.spawnPath }),
+      // EX1 — the origin edge, onto the harness so it reaches the durable
+      // record. Set only for a child spawned from inside an execution.
+      ...omitUndefined({
+        originExecutionId: overrides.originExecutionId,
+        originCallId: overrides.originCallId,
+      }),
       maxSpawnDepth: this.maxSpawnDepth,
       // ADR 48 — the construction-bound owning principal. Set host-door via
       // `createSession({ principal })`, from the wire caller's identity by the
@@ -2565,7 +2626,13 @@ export class AppHarness<P = unknown>
       metadata: input.metadata ?? {},
       createdAt: Date.now(),
       ephemeral,
-      ...omitUndefined({ parentSessionId: overrides.parentSessionId }),
+      ...omitUndefined({
+        parentSessionId: overrides.parentSessionId,
+        // EX1 — the live half of the origin edge. Held on the entry so the
+        // execution-tree walk is a registry scan, not a store round-trip.
+        originExecutionId: overrides.originExecutionId,
+        originCallId: overrides.originCallId,
+      }),
     };
     this.registry.set(sessionId, entry);
     // PA2 — enforce the LRU cap AFTER registering the newcomer. Ephemeral
@@ -2628,8 +2695,14 @@ export class AppHarness<P = unknown>
               parentSessionId: input.parentSessionId,
               // SP5/SP6 — forward the child's lineage + the parent's
               // construction signal so the session stamps envelopes and
-              // cascades teardown.
-              ...omitUndefined({ spawnPath: input.spawnPath, signal: input.signal }),
+              // cascades teardown. EX1 — plus the origin edge (which of the
+              // parent's turns, and which tool call, asked for this child).
+              ...omitUndefined({
+                spawnPath: input.spawnPath,
+                signal: input.signal,
+                originExecutionId: input.originExecutionId,
+                originCallId: input.originCallId,
+              }),
             }),
           catch: (cause): AppError => mapAppError(cause),
         }),
@@ -2778,19 +2851,9 @@ export class AppHarness<P = unknown>
     const subtree = this.liveSubtree(sessionId);
     const found = this.registry.has(sessionId);
 
-    // (1) Transitive abort, deepest-first. `hasInFlightExecution` is the
-    // session's own synchronous truth, read immediately before the abort — the
-    // only honest input to the count.
-    let abortedExecutions = 0;
-    for (const entry of [...subtree].reverse()) {
-      if (!entry.session.hasInFlightExecution) continue;
-      abortedExecutions++;
-      try {
-        await entry.session.abort(reason);
-      } catch {
-        // best effort — an execution that settled mid-abort is a success
-      }
-    }
+    // (1) Transitive abort, deepest-first — the shared walk, which
+    // `session.abort({ cascade: true })` reaches through the SpawnContext door.
+    const abortedExecutions = (await this.abortEach(subtree, reason)).length;
 
     // (2) Reap detached tasks — precisely the ones `close()` abandons.
     const cancelledDetachedTasks = await this.cancelDetachedTasks(subtree, reason);
@@ -2826,6 +2889,102 @@ export class AppHarness<P = unknown>
       },
       record: { existed },
     };
+  }
+
+  /**
+   * The `app:command:abort-execution-tree` BODY.
+   *
+   * Two passes, in the deepest-first order every cascade in this file uses:
+   *
+   *   1. **The fan-out.** Live sessions stamped with this `originExecutionId`
+   *      are the execution's direct children; each one's WHOLE live subtree
+   *      goes with it, because once a branch belongs to the cancelled turn so
+   *      does everything under it — including work a lineage session started
+   *      from a later execution of its own. Seeds are siblings under one parent
+   *      session, so their subtrees are disjoint; the map dedupes anyway.
+   *   2. **The origin itself**, and only if it is STILL that execution: a
+   *      session that has moved on to a later turn must not have that turn
+   *      cancelled by an id referring to a settled one. `currentExecutionId` is
+   *      the session's own synchronous truth, so the comparison is exact.
+   *
+   * Idempotent and quiet: an unknown or fully-settled execution matches
+   * nothing, aborts nothing, and reports empty. Nothing here disposes or
+   * deletes — this is `abort({ cascade: true })` keyed by execution.
+   *
+   * TODO(abort-execution-tree-paged-out): the walk reads the LIVE registry, so
+   * a descendant of the cancelled turn that has been paged out is out of reach
+   * — it has no in-process handle to abort, the same limitation destroy's walk
+   * has. The durable `originExecutionId` would support a store-side query
+   * (`SessionStoreQuery`) if resuming-to-cancel ever becomes a real need.
+   */
+  private async abortExecutionTreeBody(
+    executionId: string,
+    reason: string,
+  ): Promise<AbortExecutionTreeResult> {
+    const targets = new Map<string, InternalSessionEntry<P>>();
+    for (const entry of this.registry.values()) {
+      if (entry.originExecutionId !== executionId) continue;
+      for (const inBranch of this.liveSubtree(entry.id)) targets.set(inBranch.id, inBranch);
+    }
+    const sessionIds = await this.abortEach([...targets.values()], reason);
+
+    const origin = [...this.registry.values()].find(
+      (entry) => entry.session.currentExecutionId === executionId,
+    );
+    if (origin !== undefined) {
+      try {
+        await origin.session.abort(reason);
+      } catch {
+        // best effort — an execution that settled mid-abort is a success
+      }
+    }
+    return { executionId, sessionIds, originAborted: origin !== undefined };
+  }
+
+  /**
+   * `SpawnContext.abortSubtree` — abort every live execution in the spawn
+   * subtree rooted at `sessionId` (that session INCLUDED), deepest-first.
+   *
+   * The `session.abort({ cascade: true })` door: a session knows its children's
+   * ids, but only this registry holds their harnesses, so the walk lives here.
+   * Destroy's step 1 is this same pass over a subtree it already snapshotted
+   * (see {@link abortEach}) — one implementation, two callers, and destroy
+   * keeps its single snapshot.
+   *
+   * Abort-strength only: nothing is disposed, no record is touched, detached
+   * tasks keep running. Returns how many sessions were actually aborted.
+   */
+  async abortSubtree(sessionId: string, reason?: string): Promise<number> {
+    const aborted = await this.abortEach(this.liveSubtree(sessionId), reason ?? "aborted");
+    return aborted.length;
+  }
+
+  /**
+   * Abort the current execution of each entry, DEEPEST-FIRST — the caller
+   * passes a subtree in the breadth-first order {@link liveSubtree} returns and
+   * this reverses it, because a child must stop before the parent that is
+   * waiting on it unwinds.
+   *
+   * `hasInFlightExecution` is the session's own synchronous truth, read
+   * immediately before the abort — the only honest input to the count. Failures
+   * are swallowed per session: an execution that settled mid-abort got what the
+   * caller wanted.
+   */
+  private async abortEach(
+    subtree: readonly InternalSessionEntry<P>[],
+    reason: string,
+  ): Promise<readonly string[]> {
+    const aborted: string[] = [];
+    for (const entry of [...subtree].reverse()) {
+      if (!entry.session.hasInFlightExecution) continue;
+      aborted.push(entry.id);
+      try {
+        await entry.session.abort(reason);
+      } catch {
+        // best effort — an execution that settled mid-abort is a success
+      }
+    }
+    return aborted;
   }
 
   /**

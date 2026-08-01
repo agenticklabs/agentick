@@ -65,7 +65,7 @@ console.log(stopReason, usage.totalTokens);
 await client.close();
 ```
 
-`run.abort(reason?)` issues `session/abort` and closes the progress stream.
+`run.abort(reason?)` issues `session/abort` and closes the progress stream. `client.session(id).abort(reason?, { cascade: true })` sends the same verb with the wider scope — the session's live spawn subtree stops too, and nothing is disposed or deleted. See the [cancellation ladder](../app#the-cancellation-ladder).
 
 ## One client, one surface
 

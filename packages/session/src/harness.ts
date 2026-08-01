@@ -74,6 +74,7 @@ import type {
   SendMessageInput,
   SendResult,
   SendTelemetry,
+  SessionAbortOptions,
   SessionCloseInput,
   SessionError,
   SessionExecutionHandle,
@@ -374,6 +375,14 @@ export interface SessionHarnessOptions<P = unknown> {
    * per-execution handle stream so sub-agent work is attributable.
    */
   readonly spawnPath?: readonly string[];
+  /**
+   * The parent EXECUTION that spawned this session (EX1) — set by the App's
+   * `createChildSession` from the spawn site. Stamped onto the
+   * `SessionRecord`, where it is the edge `app.abortExecutionTree` walks.
+   */
+  readonly originExecutionId?: string;
+  /** The parent TOOL CALL that asked for the spawn (EX1), when there was one. */
+  readonly originCallId?: string;
   /**
    * Spawn depth ceiling (SP4) — the maximum `spawnPath.length` a session
    * may have and still spawn a child. A session already AT this depth
@@ -745,6 +754,19 @@ export class SessionHarness<P = unknown>
    */
   private _currentEmit: ((event: SessionEmitInput) => void) | null = null;
   /**
+   * EX1 — the in-flight execution's DOWNSTREAM teardown signal. Fires when the
+   * execution is cancelled (`handle.abort` / `session.abort`, a timeout, an
+   * error), never when it succeeds; sessions spawned during the execution take
+   * it as their construction signal, so cancelling a turn tears down the
+   * sub-agents that turn created.
+   *
+   * Deliberately NOT merged into the signal handed to the loop: the loop's own
+   * abort semantics (which outcome a cancellation reports, and with what
+   * reason) are ratified and stay untouched — this controller only fans
+   * outward, to work the execution started elsewhere. Null between executions.
+   */
+  private _currentExecutionAbort: AbortController | null = null;
+  /**
    * SYNCHRONOUS send reservation (review finding: two un-awaited fresh
    * sends both passed the null-guard across its awaits). Set before the
    * first await in sendBody; a concurrent send awaits it and JOINS.
@@ -908,6 +930,9 @@ export class SessionHarness<P = unknown>
         // SP5 — persist the full lineage on the record (omit for a root).
         spawnPath:
           options.spawnPath && options.spawnPath.length > 0 ? options.spawnPath : undefined,
+        // EX1 — persist the origin edge (which TURN spawned us, and which call).
+        originExecutionId: options.originExecutionId,
+        originCallId: options.originCallId,
         title: options.title,
         description: options.description,
         // The adopter's session metadata bag doubles as the record's open
@@ -1227,6 +1252,17 @@ export class SessionHarness<P = unknown>
   }
 
   /**
+   * The in-flight execution's id, or `undefined` when idle — the sync twin of
+   * `SessionRecord.currentExecutionId`, without a store read. Lets a caller
+   * holding an EXECUTION id (rather than a session id) decide whether this
+   * session is still running THAT execution: `app.abortExecutionTree` uses it
+   * to tell "the origin turn is still going" from "a later turn is".
+   */
+  get currentExecutionId(): string | undefined {
+    return this.runtime.currentExecutionId() ?? undefined;
+  }
+
+  /**
    * Resolve once this session has FULLY quiesced — the in-flight execution
    * (if any) has settled AND its post-terminal durability barrier (endTurn +
    * flush) has run AND the reservation has cleared / status returned to idle.
@@ -1279,9 +1315,23 @@ export class SessionHarness<P = unknown>
    *
    * Not a session op of its own: the abort it delegates to IS an op
    * (`loop:abort`), so wrapping it here would mint a second envelope for one
-   * cancellation.
+   * cancellation. That holds for the cascade too — one `loop:abort` per
+   * aborted session, no third op kind. Cascade is SCOPE, not KIND: a guard
+   * watching `loop:abort` sees exactly the ops it always saw, more of them.
+   *
+   * `{ cascade: true }` aborts the live spawn subtree deepest-first (this
+   * session last), through the app's registry walk — the same one
+   * `destroySession` runs as its first step, and none of the teardown that
+   * follows it there. Nothing is disposed, no record is touched, detached
+   * tasks keep running; see {@link SessionAbortOptions} for the full ladder.
+   * A session with no `spawnContext` cannot have spawned anything, so cascade
+   * collapses to the plain self-abort.
    */
-  async abort(reason?: string): Promise<void> {
+  async abort(reason?: string, opts?: SessionAbortOptions): Promise<void> {
+    if (opts?.cascade === true && this.spawnContext !== undefined) {
+      await this.spawnContext.abortSubtree(this.runtime.id, reason);
+      return;
+    }
     await this._currentHandle?.abort(reason);
   }
 
@@ -1754,9 +1804,29 @@ export class SessionHarness<P = unknown>
         initialProps: input.initialProps,
         initialKnobs: input.initialKnobs,
         maxTicks: input.maxTicks,
-        // SP6 — fan our construction signal into the child so a parent abort
-        // tears down the child's in-flight work (PA1 merge-into-execution).
-        signal: this.constructionSignal,
+        // SP6 + EX1 — fan our construction signal AND the spawning execution's
+        // teardown signal into the child, as one merged construction signal.
+        // The first makes a parent abort tear down the child's in-flight work
+        // (PA1 merge-into-execution); the second does the same for a cancelled
+        // TURN, so a sub-agent never outlives the execution that asked for it.
+        // A spawn outside any execution merges to just the construction signal
+        // (`mergeAbortSignals` drops the undefined and hands the single signal
+        // back untouched), which is the old behavior, listener included.
+        //
+        // TODO(spawn-signal-listener-lifetime): an IN-EXECUTION spawn does
+        // build a composite, which leaves one `abort` listener on the (possibly
+        // app-wide, possibly very long-lived) construction signal for each such
+        // spawn — `mergeAbortSignals` returns no disposer to unregister with.
+        // Bounded by spawn count, and each spawn already allocates a session,
+        // so it is a smell rather than a leak; the fix is a disposing merge in
+        // `@agentick/utils`, which is a shared-signature change.
+        signal: mergeAbortSignals(this.constructionSignal, this._currentExecutionAbort?.signal),
+        // EX1 — the origin edge, stamped on the child's registry entry and its
+        // durable record. The live signal above covers cancelling a RUNNING
+        // execution; this is what still identifies the branch after that
+        // execution settled (`app.abortExecutionTree`).
+        originExecutionId: this.runtime.currentExecutionId() ?? undefined,
+        originCallId: input.originCallId,
         // ADR 92 — the causal link to THIS spawn op (see `spawn`'s docblock).
         parentOpId,
       }),
@@ -2516,6 +2586,11 @@ export class SessionHarness<P = unknown>
     // its durable log and must land on "failed", not "idle" (the
     // `.finally` runs after our reject and would otherwise clobber it).
     let durabilityFailed = false;
+    // EX1 — the execution's downstream teardown signal (see
+    // {@link _currentExecutionAbort}). Published on the session BEFORE the loop
+    // runs, so a `spawn()` from inside a tool handler fans it into the child.
+    const executionAbort = new AbortController();
+    this._currentExecutionAbort = executionAbort;
     const resultDeferred = {} as { resolve: (r: SendResult) => void; reject: (e: unknown) => void };
     const resultPromise = new Promise<SendResult>((resolve, reject) => {
       resultDeferred.resolve = resolve;
@@ -2524,6 +2599,7 @@ export class SessionHarness<P = unknown>
       this._currentExecution = null;
       this._currentHandle = null;
       this._currentEmit = null;
+      this._currentExecutionAbort = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
       this.runtime.setStatus(durabilityFailed ? "failed" : "idle");
@@ -2554,6 +2630,11 @@ export class SessionHarness<P = unknown>
       ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
       resultPromise,
       abort: async (reason) => {
+        // EX1 — tear down what this execution spawned FIRST: a child must stop
+        // before the parent waiting on it unwinds (the same deepest-first rule
+        // destroy's walk follows). Synchronous — firing the signal only
+        // schedules the children's teardown; it does not wait on it.
+        executionAbort.abort(new Error(reason ?? "origin execution aborted"));
         await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
       },
     });
@@ -2766,6 +2847,18 @@ export class SessionHarness<P = unknown>
           this._steerQueue = [];
           if (terminal.outcome === "succeeded") redispatchSteers = undrained;
         }
+        // EX1 — the same rule the steer queue just applied, applied to the
+        // execution's SPAWNED work: an execution that did not complete
+        // (`canceled`, `timeout` — `executor_failed` / `max_ticks` / a veto all
+        // report `succeeded`, having completed a real turn) cancels the
+        // sub-agents it started. This is the path a TIMEOUT takes, which
+        // `handle.abort` never sees. On success the children survive
+        // deliberately: that is the case `app.abortExecutionTree` exists for.
+        if (terminal.outcome !== "succeeded") {
+          executionAbort.abort(
+            new Error(`origin execution ${terminal.outcome}: ${terminal.reason ?? ""}`),
+          );
+        }
         // ADR 49 flush barrier — execution end. Invariant: any process
         // that subsequently loads the store sees every completed
         // execution. A buffered store-write failure is a durability
@@ -2891,6 +2984,9 @@ export class SessionHarness<P = unknown>
         // successful turn they could have steered, and the caller's `.result`
         // rejects). No re-dispatch.
         this._steerQueue = [];
+        // EX1 — and cancel what it spawned, for the same reason: there was no
+        // turn for those sub-agents to be doing work for.
+        executionAbort.abort(err instanceof Error ? err : new Error("origin execution failed"));
         // The execution error wins as the rejection reason; the barrier
         // still runs so a completed-but-unflushed prefix lands in the
         // store (best-effort — a flush failure here latches "failed"

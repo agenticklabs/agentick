@@ -18,7 +18,12 @@ import type {
   SessionFilter,
 } from "../protocol/app-harness.js";
 import type { GatewayDestroySessionResult } from "../protocol/gateway-harness.js";
-import type { SendInput, SendResult, SessionExecutionHandle } from "../protocol/session-harness.js";
+import type {
+  SendInput,
+  SendResult,
+  SessionAbortOptions,
+  SessionExecutionHandle,
+} from "../protocol/session-harness.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type {
   GatewayListAppsResult,
@@ -178,7 +183,12 @@ export interface SessionHandleExtensions {}
 export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
   send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
-  abort(reason?: string): Promise<void>;
+  /**
+   * Cancel the session's current execution. `{ cascade: true }` widens the
+   * scope to its live spawn subtree — the same `SessionAbortOptions` the
+   * in-process harness takes, over the wire.
+   */
+  abort(reason?: string, opts?: SessionAbortOptions): Promise<void>;
   snapshot(): Promise<unknown>;
   /**
    * Rebind the session to a refreshed auth context. Used when a token

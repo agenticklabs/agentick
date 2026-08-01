@@ -188,7 +188,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const { page, nextCursor } = paginate(all, cursor);
       return { tools: page, ...omitUndefined({ nextCursor }) };
     },
-    "session/abort": async ({ sessionId, reason }, ctx) => {
+    "session/abort": async ({ sessionId, reason, cascade }, ctx) => {
       // The STANDALONE cancellation verb — reaches a session by id, with no
       // in-flight RPC to correlate against. (`notifications/cancelled` is the
       // other cancellation path: it aborts the execution behind a specific
@@ -199,8 +199,15 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       // `session.abort` targets the session's CURRENT execution and no-ops on
       // an idle session, so a race with a naturally-finishing execution is a
       // success, not an error.
+      //
+      // `cascade` widens the SCOPE to the session's live spawn subtree — the
+      // remote twin of `abort({ cascade: true })`, threaded through untouched.
+      // Absent ⇒ the verb behaves exactly as it did before cascade existed. It
+      // needs no gate of its own: the subtree is this session's own descendants
+      // (principal descends the spawn tree), so the same-principal check the
+      // dispatch gate already made on `sessionId` covers every session reached.
       const sess = ctx.session ?? findSession(ctx, sessionId);
-      await sess.abort(reason);
+      await sess.abort(reason, cascade === true ? { cascade: true } : undefined);
       return null;
     },
     "session/close": async ({ sessionId }, ctx) => {

@@ -346,6 +346,8 @@ describe("SessionHarness — spawn", () => {
     let receivedInput: SpawnContextChildInput | undefined;
     const ctx: SpawnContext = {
       disposeChildSession: async () => undefined,
+      // No registry behind a stub context — nothing to cascade to.
+      abortSubtree: async () => 0,
       createChildSession: async (input) => {
         receivedInput = input;
         // Return a minimal stub satisfying SessionHarnessProtocol
@@ -397,6 +399,8 @@ describe("SessionHarness — spawn", () => {
     let receivedInput: SpawnContextChildInput | undefined;
     const ctx: SpawnContext = {
       disposeChildSession: async () => undefined,
+      // No registry behind a stub context — nothing to cascade to.
+      abortSubtree: async () => 0,
       createChildSession: async (input) => {
         receivedInput = input;
         return { id: input.sessionId ?? "child-stub" } as unknown as SessionHarnessProtocol;
@@ -510,6 +514,8 @@ function stubSpawnContext(childExecutionId: string, settle: Promise<unknown>) {
   const seen: { input?: SpawnContextChildInput } = {};
   const ctx: SpawnContext = {
     disposeChildSession: async () => undefined,
+    // No registry behind a stub context — nothing to cascade to.
+    abortSubtree: async () => 0,
     createChildSession: async (input) => {
       seen.input = input;
       return {

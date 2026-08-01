@@ -35,8 +35,10 @@ import type {
   JsonRpcResponse,
   LanguageModelExecutionResult,
   LanguageModelInput,
+  SessionExecutionHandle,
 } from "@agentick/spec";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
+import { waitFor } from "@agentick/utils/testing";
 
 import { inProcessTransport } from "../index.js";
 
@@ -56,6 +58,9 @@ async function makeStack() {
     announceEntered = resolve;
   });
   let observedReason: unknown;
+  // How many model calls have PARKED. The cascade test needs both its
+  // executions genuinely in flight before it aborts them.
+  let parked = 0;
 
   const baseFx = executor.fx;
   const parkedFx: ExecutorFx<LanguageModelInput, unknown, LanguageModelExecutionResult> = {
@@ -63,6 +68,7 @@ async function makeStack() {
     run: (input) =>
       Effect.promise(async () => {
         const signal = input.signal;
+        parked++;
         announceEntered?.();
         if (signal !== undefined && !signal.aborted) {
           await new Promise<void>((resolve) => {
@@ -99,8 +105,10 @@ async function makeStack() {
 
   return {
     client,
+    session,
     sessionId: session.id,
     entered,
+    parkedCount: () => parked,
     observedReason: () => observedReason,
     cleanup: async () => {
       await client.close();
@@ -127,6 +135,34 @@ describe("session/abort — full client → gateway → loop roundtrip", () => {
     // The reason crossed the wire, the gateway, the session, and the loop's
     // per-execution controller to reach the call that was actually running.
     expect(observedReason()).toBe("user pressed stop");
+
+    await cleanup();
+  });
+
+  it("cascade reaches a spawned child over the wire", async () => {
+    const { client, session, sessionId, parkedCount, cleanup } = await makeStack();
+
+    // Spawned while the parent is IDLE: the child is reachable ONLY through the
+    // cascade, not through the parent execution's own teardown signal — so what
+    // this pins is the wire flag, not the execution-scoped fan.
+    const child = (await session.spawn({
+      agent: null,
+      sessionId: "abort-child",
+      send: { messages: [{ role: "user", content: "child work" }], stream: false },
+    })) as SessionExecutionHandle;
+    const parent = client
+      .session(sessionId)
+      .send({ messages: [{ role: "user", content: "go" }], stream: false });
+    // Both executions must be genuinely in flight: an abort that lands before
+    // the parent's send has started would prove nothing.
+    await waitFor(() => parkedCount() === 2, { description: "parent + child parked" });
+
+    await client.session(sessionId).abort("stop the tree", { cascade: true });
+
+    // One RPC, two cancelled executions: the option crossed the wire and the
+    // gateway handed it to `session.abort` as scope, not as a different verb.
+    expect((await parent.result).stopReason).toBe("aborted");
+    expect((await child.result).stopReason).toBe("aborted");
 
     await cleanup();
   });

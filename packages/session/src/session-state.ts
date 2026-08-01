@@ -131,6 +131,10 @@ export interface SessionRuntimeInit {
   readonly principal?: string;
   /** Spawn lineage (SP5) — ancestor session ids, root-first. Folded into the record. */
   readonly spawnPath?: readonly string[];
+  /** Origin edge (EX1) — the parent EXECUTION that spawned this session. Folded in. */
+  readonly originExecutionId?: string;
+  /** Origin edge (EX1) — the parent TOOL CALL that asked for the spawn. Folded in. */
+  readonly originCallId?: string;
   readonly title?: string;
   readonly description?: string;
   readonly metadata?: Record<string, unknown>;
@@ -147,6 +151,9 @@ export class SessionRuntime {
   private readonly principal: string | undefined;
   /** Spawn lineage (SP5) — folded into every record write; absent for a root. */
   private readonly spawnPath: readonly string[] | undefined;
+  /** Origin edge (EX1) — folded into every record write; absent for a root. */
+  private readonly originExecutionId: string | undefined;
+  private readonly originCallId: string | undefined;
   private readonly storeCtx: () => StoreCtx;
 
   /**
@@ -186,6 +193,8 @@ export class SessionRuntime {
     this.parentSessionId = init.parentSessionId;
     this.principal = init.principal;
     this.spawnPath = init.spawnPath;
+    this.originExecutionId = init.originExecutionId;
+    this.originCallId = init.originCallId;
     this.storeCtx = init.storeCtx;
     this._meta = omitUndefined({
       title: init.title,
@@ -216,6 +225,8 @@ export class SessionRuntime {
         parentSessionId: this.parentSessionId,
         principal: this.principal,
         spawnPath: this.spawnPath,
+        originExecutionId: this.originExecutionId,
+        originCallId: this.originCallId,
         appId: this.appId,
         title: this._meta.title,
         description: this._meta.description,
@@ -285,6 +296,8 @@ export class SessionRuntime {
         parentSessionId: this.parentSessionId,
         principal: this.principal,
         spawnPath: this.spawnPath,
+        originExecutionId: this.originExecutionId,
+        originCallId: this.originCallId,
         appId: this.appId,
         currentExecutionId: nextExecutionId ?? undefined,
         title: this._meta.title,

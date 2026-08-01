@@ -84,6 +84,27 @@ export interface SessionRecord {
    * whole ancestor chain, not just its immediate `parentSessionId`.
    */
   readonly spawnPath?: readonly string[];
+  /**
+   * The parent EXECUTION that spawned this session (EX1) — which of the
+   * parent's executions fanned out, where {@link parentSessionId} names only
+   * which session did. Construction-bound; absent for a root session and for a
+   * child spawned outside any execution (a host calling `session.spawn()`).
+   *
+   * This is the edge `AppHarnessProtocol.abortExecutionTree` walks: it is the
+   * only durable record of which agent-tree branch belongs to which turn, and
+   * it stays readable long after the execution settled.
+   *
+   * NOTE (downstream store adapters): persist + round-trip this and
+   * {@link originCallId} with the other identity slots — an ancestry edge that
+   * does not survive a reload cannot answer the question it exists for.
+   */
+  readonly originExecutionId?: string;
+  /**
+   * The parent TOOL CALL whose handler asked for the spawn, when the spawn came
+   * from one. The finer-grained twin of {@link originExecutionId} — an audit
+   * surface, not a walk key (nothing cascades over it).
+   */
+  readonly originCallId?: string;
   /** Owning app id — the primary `list` scope dimension. */
   readonly appId?: string;
   /**

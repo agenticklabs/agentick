@@ -194,8 +194,14 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
       });
       return result.content;
     },
-    async abort(reason) {
-      await client.request("session/abort", { sessionId, reason });
+    async abort(reason, opts) {
+      // `cascade` rides the same verb — see `SessionAbortOptions`. Omitted when
+      // not asked for, so the request body is byte-identical to the old one.
+      await client.request("session/abort", {
+        sessionId,
+        reason,
+        ...(opts?.cascade !== undefined ? { cascade: opts.cascade } : {}),
+      });
     },
     async snapshot(): Promise<unknown> {
       const result = await client.request("session/snapshot", { sessionId });

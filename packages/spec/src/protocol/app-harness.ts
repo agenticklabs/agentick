@@ -220,6 +220,43 @@ export interface DestroySessionResult {
   };
 }
 
+/**
+ * Options for {@link AppHarnessProtocol.abortExecutionTree}. As thin as
+ * destroy's, and for the same reason: the verb has one job.
+ */
+export interface AbortExecutionTreeInput {
+  /**
+   * Reason threaded into each abort, so the cancellation is attributable in the
+   * journal and in the terminal result. Defaults to
+   * `"origin execution aborted"`.
+   */
+  readonly reason?: string;
+}
+
+/**
+ * What {@link AppHarnessProtocol.abortExecutionTree} actually did — facts
+ * observed at act time, in the shape a supervisor needs next: it names the
+ * sessions it cancelled, because the caller's next move (inspect them, destroy
+ * them, report them) needs their ids and the app will not hand them back twice.
+ */
+export interface AbortExecutionTreeResult {
+  /** The execution whose fan-out was cancelled. Echoed for correlation. */
+  readonly executionId: string;
+  /**
+   * The live sessions whose executions were aborted — the origin execution's
+   * spawned children and their whole live subtrees, deepest-first (the order
+   * the aborts were issued in). Excludes the origin session itself; see
+   * {@link originAborted}.
+   */
+  readonly sessionIds: readonly string[];
+  /**
+   * Was the origin execution itself still running, and therefore aborted too?
+   * `false` is the normal case for the verb's reason to exist: the turn already
+   * settled and only its fan-out is still alive.
+   */
+  readonly originAborted: boolean;
+}
+
 export interface RunOnceInput<P = unknown> {
   /** What to send to the ephemeral session. */
   readonly send: SendInput<P>;
@@ -549,6 +586,38 @@ export interface AppHarnessProtocol<P = unknown> {
    * framework's.
    */
   destroySession(sessionId: string, opts?: DestroySessionInput): Promise<DestroySessionResult>;
+
+  /**
+   * Cancel what ONE execution spawned — the sessions it created, their
+   * descendants, and (if it is somehow still running) the execution itself.
+   *
+   * The scope is an EXECUTION, not a session: a long-lived session runs many
+   * turns, and turn N's sub-agents are not turn N+1's business. The walk keys
+   * off {@link SessionRecord.originExecutionId}, the edge every spawn stamps —
+   * the target execution's direct children, then each of their whole live
+   * subtrees, because once a branch belongs to the cancelled turn, everything
+   * under it does too (including work a lineage session spawned from a later
+   * execution of its own).
+   *
+   * **Why this exists when the live case is already covered.** A spawn inherits
+   * its origin execution's abort signal, so aborting a RUNNING execution
+   * already tears down the children it spawned — no walk needed. This verb is
+   * for the other case: the execution SETTLED (successfully — a failed or
+   * cancelled one fired that same signal), the caller kept the sub-agents it
+   * spawned, and now wants them gone. There is no live signal left to fire; the
+   * durable origin edge is the only thing that still knows what belonged to
+   * that turn.
+   *
+   * Abort-strength only, and deliberately: sessions are cancelled, never
+   * disposed and never deleted. It is `abort({ cascade: true })` addressed by
+   * execution instead of by session — see {@link SessionAbortOptions} for the
+   * ladder. Idempotent and quiet: an unknown / already-settled execution with
+   * no live fan-out reports an empty `sessionIds`.
+   */
+  abortExecutionTree(
+    executionId: string,
+    opts?: AbortExecutionTreeInput,
+  ): Promise<AbortExecutionTreeResult>;
 
   /**
    * Look up a LIVE session by id — the in-memory routing handle. Returns
