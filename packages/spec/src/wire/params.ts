@@ -487,6 +487,26 @@ export type SessionRespondToToolCallResult = null;
 // ============================================================================
 
 export interface SubscribeParams extends WireRequestParams {
+  /**
+   * CLIENT-allocated subscription id, and the id every
+   * `notifications/subscription/*` frame for this subscription correlates by.
+   * The server adopts it verbatim rather than minting one of its own.
+   *
+   * Required, because the alternative loses frame one. A server-allocated id
+   * is not knowable until the `sub/subscribe` RESPONSE lands, so a snapshot
+   * frame that overtakes that response — trivially, over
+   * `@agentick/transport-http`, where the response rides the POST body and
+   * notifications ride a separate SSE GET with no ordering relation to it —
+   * names a subscription the client cannot yet route and is dropped. Allocated
+   * client-side, the stream is registered under its final id before the
+   * request frame is even written, so no frame is ever unroutable on any
+   * transport.
+   *
+   * MUST be unique per connection: the server refuses a collision with
+   * `InvalidParams` rather than hijack the live subscription already answering
+   * to that id.
+   */
+  readonly subscriptionId: string;
   readonly scope: SubscriptionScope;
   readonly query?: EventQuery;
   /** Resume from a previously-observed cursor. Omit to start from the
@@ -495,7 +515,12 @@ export interface SubscribeParams extends WireRequestParams {
 }
 
 export interface SubscribeResult {
-  /** Server-allocated. Notifications correlate via this id. */
+  /**
+   * The client's {@link SubscribeParams.subscriptionId}, echoed back as
+   * confirmation that the server adopted it. A response carrying anything
+   * else means the server broke the adoption contract, and the client fails
+   * the subscription rather than iterate a stream nothing will ever route to.
+   */
   readonly subscriptionId: string;
 }
 

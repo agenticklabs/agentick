@@ -49,7 +49,12 @@ function makeHandler(seen: string[]) {
       case "knobs/set":
         return { jsonrpc: "2.0", id: req.id, result: null };
       case "sub/subscribe":
-        return { jsonrpc: "2.0", id: req.id, result: { subscriptionId: "sub-1" } };
+        // Echo the client's id — the adoption contract.
+        return {
+          jsonrpc: "2.0",
+          id: req.id,
+          result: { subscriptionId: (req.params as { subscriptionId: string }).subscriptionId },
+        };
       case "sub/unsubscribe":
         return { jsonrpc: "2.0", id: req.id, result: null };
       default:

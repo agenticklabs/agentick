@@ -330,6 +330,8 @@ Construction: `new ElicitationHarness(scopeId, journal, bus, inbox, options)`, w
 
 The handle: `list()` / `get(correlationId)` (Enumerable), `subscribe(cb)` with a zero-argument callback (the store contract), `respond(correlationId, body)` (Respondable), and `close()`.
 
+`ELICITATION_CHANNEL` / `ELICITATION_CHANNEL_FQN` and the frame types (`ElicitationChannelName`, `ElicitationSnapshotFrame`, `PendingElicitation`) are re-exported here too, so a browser bundle that subscribes itself never has to reach for the root barrel — which would drag the server harness in with them.
+
 ### `@agentick/elicitation/testing`
 
 | Export                                  | Purpose                                                        |

@@ -67,19 +67,17 @@ function stubGateway(session: SessionHarnessProtocol): GatewayHarnessProtocol {
 /** Wire ctx with a transport that records every published envelope. */
 function stubCtx(gateway: GatewayHarnessProtocol) {
   const published: EventEnvelope[] = [];
-  const handle: SubscriptionHandle = {
-    id: "wire-sub-1",
+  // Adopts the client's id verbatim, like the real transport slot.
+  const registerSubscription = (id: string): SubscriptionHandle => ({
+    id,
     publish: (env) => {
       published.push(env as EventEnvelope);
     },
     close: () => {},
-  };
+  });
   const ctx = {
     gateway,
-    wire: {
-      registerSubscription: () => handle,
-      closeSubscription: () => {},
-    },
+    wire: { registerSubscription, closeSubscription: () => {} },
   } as unknown as WireExtensionContext;
   return { ctx, published };
 }
@@ -90,12 +88,14 @@ describe("sub/subscribe — channel opens with a snapshot (slice 2)", () => {
   it("prepends the channel snapshot as the FIRST delivered frame", async () => {
     const { ctx, published } = stubCtx(stubGateway(stubSession()));
     const params: SubscribeParams = {
+      subscriptionId: "cli-sub-1",
       scope: { kind: "session", id: SESSION_ID },
       query: { surface: "session", name: { exact: "session:channel:knobs-state" } },
     };
 
+    // The response ECHOES the client's id — it never mints one.
     const res = await subscribe(params, ctx);
-    expect(res.subscriptionId).toBe("wire-sub-1");
+    expect(res.subscriptionId).toBe("cli-sub-1");
 
     await waitFor(() => published.length >= 1);
     expect(published[0]).toBe(KNOBS_SNAPSHOT);
@@ -105,6 +105,7 @@ describe("sub/subscribe — channel opens with a snapshot (slice 2)", () => {
   it("does NOT prepend a snapshot for a non-channel subscription (behavior-preserving)", async () => {
     const { ctx, published } = stubCtx(stubGateway(stubSession()));
     const params: SubscribeParams = {
+      subscriptionId: "cli-sub-2",
       scope: { kind: "session", id: SESSION_ID },
       // A non-channel query — must not trigger a snapshot prepend.
       query: { surface: "session", name: { prefix: "session:tick" } },
@@ -120,6 +121,7 @@ describe("sub/subscribe — channel opens with a snapshot (slice 2)", () => {
   it("does NOT prepend for an exact channel the session does not own", async () => {
     const { ctx, published } = stubCtx(stubGateway(stubSession()));
     const params: SubscribeParams = {
+      subscriptionId: "cli-sub-3",
       scope: { kind: "session", id: SESSION_ID },
       query: { surface: "session", name: { exact: "session:channel:no-such" } },
     };

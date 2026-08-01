@@ -534,16 +534,17 @@ Types: `ToolExecutorHarnessOptions`, `HandlerResolver`, `HandlerEntry`, `Handler
 
 ### `@agentick/tool-executor/client`
 
-| Export                    | Purpose                                                                     |
-| ------------------------- | --------------------------------------------------------------------------- |
-| `session.clientToolCalls` | Registered on import: pending-call feed + `set`/`route`/`confirm`/`respond` |
-| `session.tools`           | Registered on import: registry projection + `dispatch`/`refresh`            |
-| `clientToolCallsHandle`   | The headless factory behind the feed                                        |
-| `toolsHandle`             | The headless factory behind the registry projection                         |
-| `toolConfirmation`        | Reads an elicitation as a `ConfirmRequest`; `undefined` if it isn't one     |
-| `respondToToolCall`       | By-id reply escape hatch                                                    |
+| Export                     | Purpose                                                                     |
+| -------------------------- | --------------------------------------------------------------------------- |
+| `session.clientToolCalls`  | Registered on import: pending-call feed + `set`/`route`/`confirm`/`respond` |
+| `session.tools`            | Registered on import: registry projection + `dispatch`/`refresh`            |
+| `clientToolCallsHandle`    | The headless factory behind the feed                                        |
+| `toolsHandle`              | The headless factory behind the registry projection                         |
+| `toolConfirmation`         | Reads an elicitation as a `ConfirmRequest`; `undefined` if it isn't one     |
+| `respondToToolCall`        | By-id reply escape hatch                                                    |
+| `TOOL_CALL_CHANNEL`/`_FQN` | The channel names, for a consumer subscribing itself                        |
 
-Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `ClientToolHandler`, `RouteClientToolsOptions`, `ToolsClientHandle`, `ConfirmPolicy`, `ConfirmRequest`.
+Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `ClientToolHandler`, `RouteClientToolsOptions`, `ToolsClientHandle`, `ConfirmPolicy`, `ConfirmRequest`, `PendingToolCall`, `ToolCallRequestPayload`, `ToolCallResponse`, `ToolCallSnapshotFrame`. The channel names and wire shapes are re-exported here so a browser bundle never has to reach for the root barrel — which would drag the executor runtime in with them.
 
 ### `@agentick/tool-executor/testing`
 

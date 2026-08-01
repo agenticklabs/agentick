@@ -23,7 +23,12 @@ import {
   type JsonRpcResponse,
   type WireServerDescriptor,
 } from "@agentick/spec";
-import { authenticateIngress, dispatchRequest, type DispatchHost } from "@agentick/transport";
+import {
+  admitSubscriptionId,
+  authenticateIngress,
+  dispatchRequest,
+  type DispatchHost,
+} from "@agentick/transport";
 import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
 
 /**
@@ -294,6 +299,9 @@ class ConnectionContext {
           sendNotification: (n) =>
             this.send({ jsonrpc: "2.0", method: n.method, params: n.params }),
           registerSubscription: (subId, unsubscribe) => {
+            // Client-allocated id: refuse a collision rather than re-point a
+            // live subscription's routing (see `admitSubscriptionId`).
+            admitSubscriptionId(this.subscriptions, subId);
             this.subscriptions.set(subId, { unsubscribe });
           },
           unregisterSubscription: (subId) => {

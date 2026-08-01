@@ -67,7 +67,7 @@ export class MultiplexedStream<T> implements AsyncIterable<T> {
   private droppedCount = 0;
 
   constructor(
-    public id: string,
+    public readonly id: string,
     private readonly onClose: () => Promise<void>,
     backpressure: BackpressureOptions<T> = {},
   ) {
@@ -93,10 +93,6 @@ export class MultiplexedStream<T> implements AsyncIterable<T> {
   /** Number of values dropped under `drop-oldest` / `drop-newest`. */
   get dropped(): number {
     return this.droppedCount;
-  }
-
-  rekey(newId: string): void {
-    this.id = newId;
   }
 
   push(value: T): void {

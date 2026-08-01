@@ -285,6 +285,9 @@ Three rendering modes:
 | `session.knobs`                     | Registered on import: `list` / `get` / `subscribe` / `set` / `use` / `close` |
 | `knobsHandle(client, sessionId)`    | The same handle as a free factory                                            |
 | `knobsStateView(client, sessionId)` | Values-only fold (`Record<id, value>`)                                       |
+| `KNOBS_STATE_CHANNEL` / `_FQN`      | The channel name, for a consumer subscribing itself                          |
+
+Types: `KnobsState`, `KnobsClient`, `KnobsCommandClient`, `KnobsHandle`, `WireKnobDescriptor`, `KnobsStateChannelName`, `KnobsStateFrame`, `KnobsStateSnapshotFrame`, `KnobsStateDeltaFrame`. The channel name and frame shapes live here so a browser bundle never has to reach for the root barrel — which would drag the server harness in with them. `toWireDescriptor` and `knobPointer` stay off this barrel: they operate on the server's live descriptor and generate patches, and the client only reads.
 
 ### `@agentick/knobs/testing`
 

@@ -216,7 +216,9 @@ Reserved namespaces guarantee non-collision: agentick will not define methods in
 
 **Execution-bound streams** use the LSP/MCP `$/progress` pattern — client allocates a token in `params._meta.progressToken`; server begins streaming `notifications/progress` immediately; final result returns on the original RPC's `id`. One round trip.
 
-**Persistent subscriptions** use the Ethereum-style `subscribe` RPC returning a server-allocated `subscriptionId`; events arrive as `notifications/subscription/event` notifications correlated by that id. Survives across multiple RPCs.
+**Persistent subscriptions** use the Ethereum-style `subscribe` RPC, but with the progress pattern's id ownership: the CLIENT allocates the `subscriptionId` in `params` and the server adopts it verbatim, echoing it in the result as confirmation. Events arrive as `notifications/subscription/event` notifications correlated by that id. Survives across multiple RPCs.
+
+A server-allocated id was the original shape and it lost frame one. The id is unknowable until the response lands, so a frame the server sends before it — notably the channel snapshot `sub/subscribe` splices in front of a session-channel stream — names a subscription the client cannot route, and the client drops it. No ordering fixes that in general: over `@agentick/transport-http` the response rides the POST body while notifications ride a separate persistent SSE GET, two connections with no ordering relation. Client allocation dissolves the race — the stream is registered under its final id before the request frame is written. The id must be unique per connection; a collision is refused with `InvalidParams`.
 
 ### Frame examples
 
@@ -309,15 +311,16 @@ The `cursor` field on `notifications/progress.params` is the **agentick-specific
 #### 6. Persistent subscription (Ethereum-style, agentick namespace)
 
 ```jsonc
-// → subscribe
-{ "jsonrpc": "2.0", "id": 6, "method": "subscribe",
+// → subscribe, with the CLIENT-allocated subscription id
+{ "jsonrpc": "2.0", "id": 6, "method": "sub/subscribe",
   "params": {
+    "subscriptionId": "s-44",
     "scope": { "kind": "session", "id": "sess-123" },
     "query": { "surface": "executor" },
     "fromCursor": "evt-00091"
   } }
 
-// ← server-allocated subscription id
+// ← the same id, echoed back as confirmation that the server adopted it
 { "jsonrpc": "2.0", "id": 6, "result": { "subscriptionId": "s-44" } }
 
 // ← events, correlated by subscriptionId

@@ -72,6 +72,8 @@ export {
   TASK_STATUS_CHANNEL_FQN,
   type TaskProgressChannelName,
   type TaskStatusChannelName,
+  type TaskStatusFrame,
+  type TaskStatusSnapshotFrame,
 } from "./channel.js";
 export {
   TASKS_CANCEL_MESSAGE_TYPE,

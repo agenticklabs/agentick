@@ -11,7 +11,7 @@
 
 export { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
 export { projectClientResult, projectClientNotification } from "./client-projection.js";
-export { BaseConnectionContext } from "./connection-context.js";
+export { admitSubscriptionId, BaseConnectionContext } from "./connection-context.js";
 export {
   authenticateIngress,
   DEFAULT_INGRESS_AUTHN_TIMEOUT_MS,

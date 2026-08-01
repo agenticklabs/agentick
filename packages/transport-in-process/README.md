@@ -255,7 +255,7 @@ The control transport knows nothing about audio or video. Pass a `MediaTransport
 ## Verified by
 
 - `src/__tests__/smoke.spec.ts` — `gateway` XOR `handler` construction guard, connect / `ping` / close state transitions, typed `gateway().listApps()` + `app().listSessions()` + `session().abort()` params, RPC error surfacing as `TransportError { kind: "rpc" }`, pre-connect rejection, `wireParity: true` round-trip, and the client extension pipeline (request middleware order, namespace install, LIFO `onClose`).
-- `src/__tests__/transport-conformance.spec.ts` — the shared `ClientTransport` suite: state machine, RPC correlation, concurrent multiplexed RPCs, `notifications/cancelled` client emit, subscription id re-keying / routing / close / eviction, progress streams.
+- `src/__tests__/transport-conformance.spec.ts` — the shared `ClientTransport` suite: state machine, RPC correlation, concurrent multiplexed RPCs, `notifications/cancelled` client emit, subscription id adoption / routing / close / eviction, progress streams.
 - `src/__tests__/wire-conformance.spec.ts` — envelope round-trips through the validator, heterogeneous batches, empty-batch rejection.
 - `src/__tests__/cancellation-e2e.spec.ts` — an aborted request reaching the server: a parked wire method's registered cancel callback firing, the cancellation routed to the one request id it names while a sibling stays parked, and an unmatched cancellation leaving the pair usable.
 - `src/__tests__/connection-teardown.spec.ts` — client close releasing the server-side subscription's bus stream (the iterator closed, its producer fiber interrupted), and `sub/unsubscribe` releasing it rather than merely forgetting the registry entry.
@@ -268,6 +268,7 @@ The control transport knows nothing about audio or video. Pass a `MediaTransport
 - `src/__tests__/tasks-cancel-e2e.spec.ts` — `tasks/cancel` reaching a hanging server task, and the cancelled transition re-folding the client's task view.
 - `src/__tests__/resources-e2e.spec.ts` + `wire-reads-e2e.spec.ts` + `client-handles-e2e.spec.ts` — resources read / list / templates, the skills / prompts / state reads and writes, and the typed `session.*` handles over the same lane.
 - `src/__tests__/tools-e2e.spec.ts` + `client-tools-e2e.spec.ts` + `client-tools.spec.ts` — `session/list_tools` with exposure filtering, the whole-slice `set_client_tools` replace that leaves app-declared tools standing, and `respond_to_tool_call` routing.
+- `src/__tests__/subscription-first-frame.spec.ts` — the late subscriber, against a real gateway: attaching AFTER the state exists still receives the session channel's snapshot as its literal FIRST frame — knobs values, a pending elicitation ask, a working task — because the client allocates the `subscriptionId` and the server adopts it; plus a duplicate id on one connection refused with `InvalidParams` while a distinct one is admitted.
 - `src/__tests__/capabilities-changed-e2e.spec.ts` — `gateway:capabilities:changed` reaching every gateway-scope subscriber over `sub/subscribe`.
 - `src/__tests__/server-transport.spec.ts` — `ServerTransport` conformance, no-op `listen` / `close` under a real gateway, stable `"in-process"` id.
 - The `media` slot is exercised in [@agentick/live](../live) (`src/__tests__/in-process-media-e2e.spec.ts`).

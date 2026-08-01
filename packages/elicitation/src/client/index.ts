@@ -24,5 +24,17 @@ export {
   type ElicitationsHandle,
 } from "./elicitations.js";
 
+// The channel name + frame shapes, nameable from `/client` so a browser bundle
+// that subscribes or folds frames itself does NOT have to import the ROOT barrel
+// (which drags the elicitation harness runtime in). `channel.ts` is constants +
+// types only.
+export {
+  ELICITATION_CHANNEL,
+  ELICITATION_CHANNEL_FQN,
+  type ElicitationChannelName,
+  type ElicitationSnapshotFrame,
+  type PendingElicitation,
+} from "../channel.js";
+
 // Side-effect: contribute the elicitation slots to the client SessionHandle.
 import "./register.js";

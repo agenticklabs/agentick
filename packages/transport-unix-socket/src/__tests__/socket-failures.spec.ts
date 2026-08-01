@@ -62,13 +62,16 @@ declare module "@agentick/spec" {
  * swallowed failure is most invisible.
  */
 function explodingTeardownExtension(): WireExtension {
+  // Stands in for the client-allocated `SubscribeParams.subscriptionId` this
+  // probe method has no params to carry — the connection refuses a repeat.
+  let subscriptionSeq = 0;
   return defineWireExtension({
     name: "test#exploding-teardown",
     namespace: "failProbe",
     version: "1.0.0",
     methods: {
       "failProbe/subscribe": async (_params, ctx) => {
-        ctx.wire.registerSubscription(async () => {
+        ctx.wire.registerSubscription(`cli-sub-${++subscriptionSeq}`, async () => {
           throw new Error("cleanup exploded");
         });
         return null;

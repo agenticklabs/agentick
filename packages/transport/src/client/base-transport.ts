@@ -5,8 +5,8 @@
  * Owns:
  *   - Connection state machine + listener registry
  *   - RPC correlation via JSON-RPC `id` (pending map, in-flight ids)
- *   - Subscription stream registry (keyed by `subscriptionId`, re-keyed
- *     when the server allocates the real id)
+ *   - Subscription stream registry (keyed by the CLIENT-allocated
+ *     `subscriptionId` this class mints and the server adopts)
  *   - Progress stream registry (keyed by `progressToken`)
  *   - Notification routing — `notifications/progress`,
  *     `notifications/subscription/event`, `notifications/subscription/closed`,
@@ -15,7 +15,7 @@
  *     resume after reconnect — the subclass that needs reconnect just
  *     uses `activeSubscriptions`)
  *   - AbortSignal → `notifications/cancelled` emit on the wire
- *   - subscribe() → temp-id stream → server-allocated id re-key dance
+ *   - subscribe() → id allocation → stream registered before the frame is sent
  *   - progress(token) stream factory
  *
  * Subclasses fill in:
@@ -360,65 +360,67 @@ export abstract class BaseClientTransport implements ClientTransport {
   // ── subscribe / progress ─────────────────────────────────────────────
 
   subscribe(scope: SubscriptionScope, query?: EventQuery, fromCursor?: Cursor): SubscriptionStream {
-    const tentativeId = `tentative-sub-${this.id}-${this.nextRequestId++}`;
-    const stream = new MultiplexedStream<EventFrame>(tentativeId, async () => {
-      const real = stream.id;
-      this.subscriptionStreams.delete(real);
-      this.activeSubscriptions.delete(real);
+    // THE CLIENT allocates the id, and the server adopts it. Both registrations
+    // below therefore happen under the FINAL id, before `dispatchSubscribeFrame`
+    // writes the request — which is the whole mechanism: a frame that overtakes
+    // the response finds its stream in `subscriptionStreams` (routable, not
+    // dropped) AND its `activeSubscriptions` entry, which is where
+    // `routeNotification` records `lastCursor`, so even a pre-response frame
+    // leaves cursor tracking correct for the next reconnect.
+    const subscriptionId = `sub-${this.id}-${this.nextRequestId++}`;
+    const stream = new MultiplexedStream<EventFrame>(subscriptionId, async () => {
+      this.subscriptionStreams.delete(subscriptionId);
+      this.activeSubscriptions.delete(subscriptionId);
       if (this.currentState === "open") {
         try {
-          await this.request("sub/unsubscribe", { subscriptionId: real });
+          await this.request("sub/unsubscribe", { subscriptionId });
         } catch {
           /* swallow */
         }
       }
     });
-    this.subscriptionStreams.set(tentativeId, stream);
+    this.subscriptionStreams.set(subscriptionId, stream);
+    this.activeSubscriptions.set(subscriptionId, { stream, scope, query, lastCursor: fromCursor });
 
-    // CRITICAL: re-key the stream SYNCHRONOUSLY when the subscribe response
-    // arrives — not via `.then()`. EventEmitter delivers WS messages
-    // synchronously in sequence; microtasks don't drain between them, so a
-    // `.then()` re-key runs AFTER any same-tick notification frames have
-    // already missed the stream lookup and been silently dropped.
-    this.dispatchSubscribeFrame(
-      { scope, query, fromCursor },
-      (serverId) => {
-        if (serverId !== tentativeId) {
-          this.subscriptionStreams.delete(tentativeId);
-          stream.rekey(serverId);
-          this.subscriptionStreams.set(serverId, stream);
-        }
-        this.activeSubscriptions.set(serverId, { stream, scope, query, lastCursor: fromCursor });
-      },
-      (error) => {
-        // A subscription the server never acknowledged receives nothing, ever
-        // — it is not in `activeSubscriptions`, so no reconnect will revive
-        // it. Ending the stream is what turns a permanent silent hang into an
-        // error the caller's `for await` can act on.
-        this.subscriptionStreams.delete(tentativeId);
-        void stream.end(error);
-      },
-    );
+    this.dispatchSubscribeFrame({ subscriptionId, scope, query, fromCursor }, (error) => {
+      // A subscription the server never acknowledged receives nothing, ever.
+      // Ending the stream is what turns a permanent silent hang into an error
+      // the caller's `for await` can act on; dropping both registrations is
+      // what keeps a reconnect from reviving it.
+      this.subscriptionStreams.delete(subscriptionId);
+      this.activeSubscriptions.delete(subscriptionId);
+      void stream.end(error);
+    });
 
-    return Object.assign(stream, { subscriptionId: tentativeId });
+    return Object.assign(stream, { subscriptionId });
   }
 
   /**
-   * Issue a `subscribe` RPC with a SYNCHRONOUS post-response callback.
-   * The callback fires inside `routeResponse` before the next inbound
-   * frame is dispatched — preventing the back-to-back notification race
-   * that hits when a server emits `[subscribe-response, event, event]`
-   * in one TCP segment.
+   * Issue a `sub/subscribe` RPC whose only outcome is FAILURE. Success needs no
+   * callback: `params.subscriptionId` is the id the caller already registered
+   * its stream under, so there is nothing left to learn from the response but
+   * that the server honored it.
    *
-   * The race: WS library emits 'message' events synchronously via
-   * `EventEmitter.emit()`; microtasks don't drain between them. Using
-   * `await req.then(...)` to re-key the stream therefore runs the
-   * re-key AFTER subsequent same-tick events have missed the lookup
-   * by server-allocated id.
+   * That is what replaced this method's original job. It used to re-key the
+   * stream from a tentative client id to a server-allocated one, and to do it
+   * SYNCHRONOUSLY inside `routeResponse` — because a WS library emits 'message'
+   * events synchronously via `EventEmitter.emit()` with no microtask drain
+   * between them, so a `.then()` re-key ran after any same-tick
+   * `[subscribe-response, event, event]` burst had already missed the lookup.
+   * The re-key is gone with the tentative id, and so is the defence: ordering
+   * is now irrelevant by construction rather than raced against. It had to be —
+   * the defence only ever worked where the response and the notifications share
+   * one ordered channel, which over `@agentick/transport-http` (POST body vs. a
+   * separate SSE GET) they do not.
+   *
+   * The failure path stays, and stays load-bearing: nobody awaits this RPC, so
+   * a subscribe that fails and says nothing is a stream that hangs for the life
+   * of the process. An echo that does not match what was sent counts as a
+   * failure — the server broke the adoption contract, and no frame it sends
+   * afterwards will route.
    */
   private dispatchSubscribeFrame(
     params: SubscribeParams,
-    onResolved: (serverId: string) => void,
     onFailed: (error: TransportError & Error) => void,
   ): void {
     if (this.currentState !== "open") {
@@ -440,21 +442,16 @@ export abstract class BaseClientTransport implements ClientTransport {
     };
 
     this.pending.set(id, {
-      // The synchronous re-key happens HERE — inside routeResponse's
-      // call to pending.resolve, before any subsequent message handler
-      // fires.
       resolve: (res: unknown) => {
-        const serverId = (res as { subscriptionId?: string } | null | undefined)?.subscriptionId;
-        if (typeof serverId === "string") onResolved(serverId);
-        else {
-          onFailed(
-            transportError({
-              kind: "protocol",
-              message: "subscribe response carried no subscriptionId",
-              cause: res,
-            }),
-          );
-        }
+        const echoed = (res as { subscriptionId?: string } | null | undefined)?.subscriptionId;
+        if (echoed === params.subscriptionId) return; // adopted — nothing to do
+        onFailed(
+          transportError({
+            kind: "protocol",
+            message: `subscribe response echoed subscriptionId ${JSON.stringify(echoed)} — expected ${JSON.stringify(params.subscriptionId)}`,
+            cause: res,
+          }),
+        );
       },
       // Nobody awaits this Promise, which is exactly why the rejection has to
       // go somewhere: a subscribe that fails and says nothing is a stream that
@@ -836,32 +833,22 @@ export abstract class BaseClientTransport implements ClientTransport {
    */
   protected resubscribeAfterReconnect(): void {
     if (this.activeSubscriptions.size === 0) return;
-    // Snapshot: the resolve callback re-keys `activeSubscriptions` SYNCHRONOUSLY
-    // (see `dispatchSubscribeFrame`), which would otherwise mutate the map
-    // being iterated.
-    for (const [oldId, sub] of [...this.activeSubscriptions]) {
-      this.subscriptionStreams.set(oldId, sub.stream);
+    // The id survives the reconnect: it was the client's to begin with, so the
+    // new wire re-opens the SAME subscription and both registries stay as they
+    // are. Snapshot anyway — a failure callback can fire synchronously and
+    // delete the entry being iterated.
+    for (const [subscriptionId, sub] of [...this.activeSubscriptions]) {
       // Runs inside the subclass's `open` handler. A throw here would abort
       // that handler — leaving `connect()`'s promise unsettled and, on a
       // socket-event path, surfacing as an uncaught exception. One bad
       // subscription must not cost the connection.
       try {
-        // Same synchronous-rekey discipline as subscribe() — see the
-        // comment on dispatchSubscribeFrame.
         this.dispatchSubscribeFrame(
-          { scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
-          (newId) => {
-            if (newId === oldId) return;
-            this.activeSubscriptions.delete(oldId);
-            this.subscriptionStreams.delete(oldId);
-            sub.stream.rekey(newId);
-            this.subscriptionStreams.set(newId, sub.stream);
-            this.activeSubscriptions.set(newId, sub);
-          },
-          (error) => this.onResubscribeFailed(oldId, sub, error),
+          { subscriptionId, scope: sub.scope, query: sub.query, fromCursor: sub.lastCursor },
+          (error) => this.onResubscribeFailed(subscriptionId, sub, error),
         );
       } catch (err) {
-        this.onResubscribeFailed(oldId, sub, toTransportError(err));
+        this.onResubscribeFailed(subscriptionId, sub, toTransportError(err));
       }
     }
   }
@@ -871,8 +858,8 @@ export abstract class BaseClientTransport implements ClientTransport {
    * means is decided by the failure:
    *
    *   - The WIRE went again (`connection` / `closed` / `timeout`). Nothing is
-   *     wrong with the subscription, so it stays registered under its old id
-   *     and the NEXT successful reconnect resubscribes it. Deleting it here —
+   *     wrong with the subscription, so it stays registered under its id and
+   *     the NEXT successful reconnect resubscribes it. Deleting it here —
    *     which is what the pre-#263 code did by removing it before the response
    *     arrived — is how a subscription disappears permanently after a drop
    *     that happens to land mid-resubscribe.
@@ -889,18 +876,15 @@ export abstract class BaseClientTransport implements ClientTransport {
    * not its continuity.
    */
   private onResubscribeFailed(
-    oldId: string,
+    subscriptionId: string,
     sub: ActiveSubscription,
     error: TransportError & Error,
   ): void {
-    if (error.kind === "rpc" || error.kind === "protocol") {
-      this.activeSubscriptions.delete(oldId);
-      this.subscriptionStreams.delete(oldId);
-      void sub.stream.end(error);
-      return;
-    }
-    // Transient — keep it for the next reconnect. `lastCursor` is untouched,
-    // so the retry still asks from where the consumer left off.
-    this.activeSubscriptions.set(oldId, sub);
+    // Transient — left registered for the next reconnect, `lastCursor`
+    // untouched, so the retry still asks from where the consumer left off.
+    if (error.kind !== "rpc" && error.kind !== "protocol") return;
+    this.activeSubscriptions.delete(subscriptionId);
+    this.subscriptionStreams.delete(subscriptionId);
+    void sub.stream.end(error);
   }
 }

@@ -21,10 +21,21 @@ export {
 } from "./knobs-state-view.js";
 export { knobsHandle, type KnobsHandle } from "./knobs-handle.js";
 
-// The item type `KnobsHandle.list()` yields. Nameable from the `/client` subpath so
-// a UI can annotate a component prop without importing the harness package (which
-// would drag the knobs runtime into a browser bundle).
-export type { WireKnobDescriptor } from "../channel.js";
+// The item type `KnobsHandle.list()` yields, the channel name, and the frame
+// shapes. Nameable from the `/client` subpath so a UI can subscribe, fold frames,
+// and annotate a component prop without importing the harness package (which
+// would drag the knobs runtime into a browser bundle). `toWireDescriptor` /
+// `knobPointer` stay OFF this barrel — they operate on the SERVER's live
+// `KnobDescriptor` (validate/schema) and generate patches; the client only reads.
+export {
+  KNOBS_STATE_CHANNEL,
+  KNOBS_STATE_CHANNEL_FQN,
+  type KnobsStateChannelName,
+  type KnobsStateDeltaFrame,
+  type KnobsStateFrame,
+  type KnobsStateSnapshotFrame,
+  type WireKnobDescriptor,
+} from "../channel.js";
 
 // Side-effect: contribute `session.knobs` to the client SessionHandle (ADR 87).
 import "./register.js";

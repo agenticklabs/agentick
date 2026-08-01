@@ -94,10 +94,14 @@ validator).
 - `registerCancel(abort)` — bridges to
   `sink.registerInFlight(reqId, abort)`; unregistered
   automatically when the RPC returns.
-- `registerSubscription(cleanup)` — returns a
+- `registerSubscription(subscriptionId, cleanup)` — returns a
   `SubscriptionHandle` (`id`, `publish(envelope)`,
-  `close(reason?)`); server-side allocates the id, cursor tracking
-  is automatic, cleanup fires on client unsubscribe.
+  `close(reason?)`); the id is the CLIENT's, taken from
+  `SubscribeParams.subscriptionId` and adopted verbatim (so a frame
+  sent before the RPC response is still routable — see ADR 33),
+  cursor tracking is automatic, cleanup fires on client
+  unsubscribe. A duplicate id on one connection is refused with
+  `InvalidParams`.
 - `closeSubscription(id)` — client-initiated teardown seam.
 
 `session/send`, `sub/subscribe`, `sub/unsubscribe` all use this

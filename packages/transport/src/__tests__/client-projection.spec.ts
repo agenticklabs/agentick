@@ -337,7 +337,7 @@ const sendExt = {
     "session/send": async (_params: unknown, ctx: WireExtensionContext) => {
       // Fan out oversized notifications through the transport slot — exactly
       // the real send handler's egress (subscription + progress).
-      const sub = ctx.wire.registerSubscription(async () => {});
+      const sub = ctx.wire.registerSubscription("cli-sub-1", async () => {});
       sub.publish({
         name: TIMELINE_APPEND_EVENT_NAME,
         payload: { entries: [{ kind: "message", message: { content: [bigToolResult()] } }] },

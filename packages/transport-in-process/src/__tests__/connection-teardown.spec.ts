@@ -85,10 +85,12 @@ describe("in-process transport — connection teardown", () => {
     const client = await createClient({ transport: inProcessTransport({ gateway: host }) });
     await client.connect();
 
-    const { subscriptionId } = (await client.request("sub/subscribe", {
+    // The id is the CALLER's now; the server echoes it back.
+    const { subscriptionId } = await client.request("sub/subscribe", {
+      subscriptionId: "teardown-sub-1",
       scope: { kind: "gateway" },
-    })) as { subscriptionId: string };
-    expect(subscriptionId).toBeTruthy();
+    });
+    expect(subscriptionId).toBe("teardown-sub-1");
     await waitFor(() => opened.length === 1, { description: "the server-side bus stream" });
     expect(opened[0]!.closed).toBe(false);
 
@@ -111,9 +113,10 @@ describe("in-process transport — connection teardown", () => {
     const client = await createClient({ transport: inProcessTransport({ gateway: host }) });
     await client.connect();
 
-    const { subscriptionId } = (await client.request("sub/subscribe", {
+    const { subscriptionId } = await client.request("sub/subscribe", {
+      subscriptionId: "teardown-sub-2",
       scope: { kind: "gateway" },
-    })) as { subscriptionId: string };
+    });
     await waitFor(() => opened.length === 1, { description: "the server-side bus stream" });
 
     await client.request("sub/unsubscribe", { subscriptionId });

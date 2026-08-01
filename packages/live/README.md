@@ -157,7 +157,7 @@ The control transport stays generic — it merely exposes the `MediaTransport` i
 | `LiveSessionHandle`                 | `sendFrame` · `onFrame` · `onTranscript` · `onState` · `interrupt` · `stop` · `abort` · `status` · `ref`. |
 | `handle.uplink` / `handle.downlink` | The stream projections over that callback surface — runtime only, not on the portable contract.           |
 
-Importing the subpath registers `session.live` on the client. It depends on the generic client core rather than the harness runtime, so pulling it into a browser bundle drags no server code in.
+Importing the subpath registers `session.live` on the client. It depends on the generic client core rather than the harness runtime, so pulling it into a browser bundle drags no server code in. The control-plane channel names (`LIVE_TRANSCRIPT_CHANNEL` / `LIVE_STATE_CHANNEL` and their `_FQN` twins) and frame types (`LiveTranscriptFrame`, `LiveStateFrame`, and the two name types) are re-exported here for the same reason — a consumer that subscribes itself would otherwise have to import the root barrel.
 
 ### `@agentick/live/testing`
 

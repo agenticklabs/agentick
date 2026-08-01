@@ -5,9 +5,10 @@
  *
  * Wire methods:
  *   - `sub/subscribe` — open a durable subscription on a scope's
- *     event bus. Uses `ctx.wire.registerSubscription(...)` to
- *     allocate a server-side id + fan out
- *     `notifications/subscription/event` frames.
+ *     event bus under the CLIENT-allocated `params.subscriptionId`. Uses
+ *     `ctx.wire.registerSubscription(id, cleanup)` to adopt that id + fan out
+ *     `notifications/subscription/event` frames under it, and echoes it in
+ *     the response as confirmation.
  *   - `sub/unsubscribe` — client-initiated teardown. Uses
  *     `ctx.wire.closeSubscription(id)`.
  *
@@ -157,8 +158,18 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
         iterable = withSnapshot(snapEnvelope, iterable);
       }
 
+      // The id is the CLIENT's, adopted verbatim (`SubscribeParams.
+      // subscriptionId`). That is what makes the drain below race-free: the
+      // client registered its stream under this id BEFORE it wrote the request
+      // frame, so whichever of the two frames lands first — this drain's
+      // opening snapshot or the RPC response echoing the id — the snapshot is
+      // routable on arrival. There is no server-side ordering to arrange, and
+      // none would help: over `@agentick/transport-http` the response rides
+      // the POST body while notifications ride a separate SSE GET, two
+      // connections with no ordering relation. A collision on this connection
+      // throws InvalidParams out of `registerSubscription`.
       let cancelled = false;
-      const sub = ctx.wire.registerSubscription(async () => {
+      const sub = ctx.wire.registerSubscription(params.subscriptionId, async () => {
         cancelled = true;
       });
 

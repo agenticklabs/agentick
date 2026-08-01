@@ -215,9 +215,9 @@ export interface ProgressReporter {
 
 /**
  * A live subscription owned by an extension handler. Returned by
- * {@link WireExtensionTransport.registerSubscription}. The `id` is
- * server-allocated and returned in the handler's RPC response so the
- * client can later `unsubscribe`.
+ * {@link WireExtensionTransport.registerSubscription}. The `id` is the one the
+ * CLIENT allocated and sent on `SubscribeParams.subscriptionId`, adopted
+ * verbatim; the handler echoes it in its RPC response as confirmation.
  *
  * `publish` sends `notifications/subscription/event` frames
  * correlated by `id`, with automatic cursor tracking. `close` sends
@@ -276,16 +276,20 @@ export interface WireExtensionTransport {
   registerCancel(abort: () => void): void;
 
   /**
-   * Open a subscription. Returns a handle whose `id` the handler
-   * MUST return in its RPC response — clients unsubscribe by that
-   * id.
+   * Open a subscription under the id the CLIENT allocated
+   * (`SubscribeParams.subscriptionId`). Returns a handle whose `id` is that
+   * same value, which the handler MUST echo in its RPC response.
+   *
+   * Throws `WireRpcError(InvalidParams)` when the id is absent or already
+   * registered on this connection — adopting a duplicate would re-point the
+   * live subscription's routing at a different producer.
    *
    * `cleanup` runs when the client unsubscribes (via the
    * unsubscribe RPC) or when the connection drops. Server-initiated
    * teardown uses `handle.close({ code, message })` instead — the
    * cleanup ALSO fires in that case.
    */
-  registerSubscription(cleanup: () => Promise<void>): SubscriptionHandle;
+  registerSubscription(subscriptionId: string, cleanup: () => Promise<void>): SubscriptionHandle;
 
   /**
    * Client-initiated unsubscribe. Runs the cleanup fn associated

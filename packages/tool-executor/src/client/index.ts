@@ -45,6 +45,18 @@ export { toolConfirmation, type ConfirmPolicy, type ConfirmRequest } from "./con
 // `ToolConfirmationReply` types the value `accept(...)` must carry.
 export { TOOL_CONFIRMATION_KIND, type ToolConfirmationReply } from "../confirmation-schema.js";
 
+// The client-tool-call channel names + frame shapes — same reason, for a client
+// that subscribes or folds frames itself instead of using the handle. The client
+// half already imports this module at runtime, so no new graph edge.
+export {
+  TOOL_CALL_CHANNEL,
+  TOOL_CALL_CHANNEL_FQN,
+  type PendingToolCall,
+  type ToolCallRequestPayload,
+  type ToolCallResponse,
+  type ToolCallSnapshotFrame,
+} from "../tool-call-schema.js";
+
 // `session.tools` — the tool registry projection (three-audiences-plan §F).
 export { toolsHandle, type ToolsClientHandle, type ToolsCommandClient } from "./tools-handle.js";
 

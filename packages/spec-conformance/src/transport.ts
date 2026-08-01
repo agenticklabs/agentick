@@ -14,7 +14,8 @@
  *   - RPC error → `kind: "rpc"` TransportError with the JsonRpcError data
  *   - Concurrent multiplexed RPCs on one connection
  *   - AbortSignal triggers `notifications/cancelled` wire emit
- *   - Subscribe → server-allocated id → re-key + notification routing
+ *   - Subscribe → the CLIENT allocates the id, the server echoes it, and
+ *     notifications route by it
  *   - close() puts transport in `closed` state cleanly
  *
  * Per-transport packages run this in their own __tests__ alongside
@@ -47,6 +48,19 @@ export interface TransportConformanceFactory {
     transport: ClientTransport;
     teardown: () => Promise<void>;
   }>;
+}
+
+/**
+ * The id the client allocated on this `sub/subscribe` frame. Every conforming
+ * server adopts it verbatim — a fake that mints its own instead would fail the
+ * client's echo check, which is exactly the contract being pinned here.
+ */
+function clientSubscriptionId(req: JsonRpcRequest): string {
+  const id = (req.params as { subscriptionId?: unknown } | undefined)?.subscriptionId;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new Error("sub/subscribe arrived without a client-allocated subscriptionId");
+  }
+  return id;
 }
 
 const echoPing: TestHandler = async (req) => ({
@@ -205,11 +219,12 @@ export function runTransportConformance(name: string, factory: TransportConforma
     });
 
     describe("subscriptions", () => {
-      it("subscribe → server-allocated id → events route to the stream", async () => {
+      it("subscribe → the server ECHOES the client's id → events route to the stream", async () => {
         const handler: TestHandler = async (req, sendNotification) => {
           if (req.method === "sub/subscribe") {
-            // Reply with a server-allocated id, then push two events.
-            const subscriptionId = "srv-sub-test-1";
+            // Adopt the id the CLIENT sent — a conforming server never mints
+            // one — then push two events under it.
+            const subscriptionId = clientSubscriptionId(req);
             setTimeout(() => {
               sendNotification({
                 method: "notifications/subscription/event",
@@ -255,7 +270,7 @@ export function runTransportConformance(name: string, factory: TransportConforma
       it("notifications/subscription/closed terminates the stream", async () => {
         const handler: TestHandler = async (req, sendNotification) => {
           if (req.method === "sub/subscribe") {
-            const subscriptionId = "srv-sub-close-1";
+            const subscriptionId = clientSubscriptionId(req);
             setTimeout(() => {
               sendNotification({
                 method: "notifications/subscription/closed",
@@ -279,7 +294,7 @@ export function runTransportConformance(name: string, factory: TransportConforma
       it("notifications/subscription/evicted surfaces a protocol error", async () => {
         const handler: TestHandler = async (req, sendNotification) => {
           if (req.method === "sub/subscribe") {
-            const subscriptionId = "srv-sub-evict-1";
+            const subscriptionId = clientSubscriptionId(req);
             setTimeout(() => {
               sendNotification({
                 method: "notifications/subscription/evicted",

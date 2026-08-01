@@ -944,10 +944,12 @@ carries typed streaming primitives:
 - `registerCancel(abort)` bridges to
   `sink.registerInFlight(reqId, abort)`; auto-cleared on RPC
   return.
-- `registerSubscription(cleanup)` returns a
+- `registerSubscription(subscriptionId, cleanup)` returns a
   `SubscriptionHandle` (`id`, `publish(envelope)`,
-  `close(reason?)`) with server-allocated id + auto-cursor
-  tracking + cleanup routing.
+  `close(reason?)`) adopting the CLIENT-allocated id from
+  `SubscribeParams.subscriptionId` (see ADR 33 §"Two streaming
+  patterns") + auto-cursor tracking + cleanup routing. A duplicate
+  id on one connection throws `InvalidParams`.
 - `closeSubscription(id)` is the client-initiated teardown seam.
 
 `session/send`, `sub/subscribe`, `sub/unsubscribe` all use this

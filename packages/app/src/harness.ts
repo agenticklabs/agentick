@@ -37,7 +37,7 @@ import {
   type TelemetryProvider,
   ulid,
 } from "@agentick/runtime";
-import { ElicitationHarness } from "@agentick/elicitation";
+import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks";
 import type { TaskExecutor, TaskStore } from "@agentick/tasks";
 import type { TaskRecord, TaskWakePolicy } from "@agentick/spec";
@@ -2084,6 +2084,14 @@ export class AppHarness<P = unknown>
       executors: this.taskExecutors,
       // TASK-WAKE — app-wide default wake policy (per-submit `wake` overrides).
       ...(this.taskDefaultWake !== undefined ? { defaultWake: this.taskDefaultWake } : {}),
+      // ADR 69 — task `ctx.elicit` escalation. Inject the elicit-sugar factory
+      // so a task's `ctx.elicit.*` escalates to its owning session
+      // (`record.scope.sessionId`, stamped from `parentScope` above) via
+      // `inbox.ask` and resolves with the client's response. Without it every
+      // `ctx.elicit.*` throws "not configured" (tasks/task-elicit.ts) — this is
+      // THE construction site for app-composed sessions, so it must be here.
+      // `@agentick/tasks` stays elicitation-free; the sugar is injected.
+      buildElicit: buildElicitSugar,
       // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
       // command hooks as op-scoped middleware. Live via `interceptorParent`.
       inheritedInterceptors,

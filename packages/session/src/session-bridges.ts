@@ -293,13 +293,12 @@ export function buildSessionBridges(
         // (`session:{sessionId}`) via `inbox.ask` and resolves with the
         // client's response. Keeps `@agentick/tasks` free of an
         // elicitation dependency (the escalation relay is payload-agnostic).
-        // NOTE: per-originating-session escalation now works at the harness —
-        // `submit({ scope })` stamps each task's owning session on the record
-        // and `ctx.elicit` escalates from `record.scope`, not the harness scope
-        // (tasks/harness.ts `makeEscalate`). The only remaining piece for a
-        // shared/app-scoped `options.tasks` path is app-owned wiring: the
-        // AppHarness must inject `buildElicit` on that shared harness too and
-        // pass the originating `scope` per submit.
+        // This arm only runs for a bare (non-app-composed) session; the
+        // injected `options.tasks` path — every `createApp` composition — gets
+        // the SAME injection at its own construction site (app/harness.ts),
+        // and `submit({ scope })` stamps each task's owning session on the
+        // record so `ctx.elicit` escalates from `record.scope`, not the
+        // harness scope (tasks/harness.ts `makeEscalate`).
         buildElicit: buildElicitSugar,
       }),
     );

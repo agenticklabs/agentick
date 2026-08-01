@@ -104,13 +104,6 @@ export interface DispatchSink {
   unregisterInFlight(id: JsonRpcId): void;
 }
 
-/**
- * Module-scoped subscription-id counter. IDs need to be unique within
- * a connection; using a module counter is stronger than needed but
- * costs nothing and matches the prior implementation.
- */
-let subscriptionCounter = 0;
-
 export async function dispatchRequest(
   host: DispatchHost,
   req: JsonRpcRequest,
@@ -664,8 +657,10 @@ function buildTransportSlot(reqId: JsonRpcId, sink: DispatchSink): WireExtension
     registerCancel(abort: () => void) {
       sink.registerInFlight(reqId, abort);
     },
-    registerSubscription(cleanup: () => Promise<void>): SubscriptionHandle {
-      const id = `srv-sub-${++subscriptionCounter}`;
+    // The id is the CLIENT's (`SubscribeParams.subscriptionId`), adopted
+    // verbatim — the handler passes it straight through. Uniqueness is the
+    // connection's to enforce (`registerSubscription` throws on a collision).
+    registerSubscription(id: string, cleanup: () => Promise<void>): SubscriptionHandle {
       let cursor = 0;
       sink.registerSubscription(id, cleanup);
       return {

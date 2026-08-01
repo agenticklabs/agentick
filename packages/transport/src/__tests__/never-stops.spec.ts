@@ -105,12 +105,23 @@ class ProbeTransport extends BaseClientTransport {
   deliver(frame: JsonRpcFrame): void {
     this.routeFrame(frame);
   }
-  /** The id of the most recent `sub/subscribe` frame written to the wire. */
-  lastSubscribeId(): number {
+  /** The most recent `sub/subscribe` frame written to the wire. */
+  private lastSubscribeFrame(): JsonRpcFrame & { id: unknown; params: unknown } {
     const frames = this.sent.filter((f) => "method" in f && f.method === "sub/subscribe");
     const last = frames[frames.length - 1];
     if (!last || !("id" in last)) throw new Error("no sub/subscribe frame written");
-    return last.id as number;
+    return last as JsonRpcFrame & { id: unknown; params: unknown };
+  }
+  /** Its JSON-RPC id — what a response has to correlate by. */
+  lastSubscribeId(): number {
+    return this.lastSubscribeFrame().id as number;
+  }
+  /**
+   * The subscription id the CLIENT allocated on it. A conforming server echoes
+   * exactly this; anything else fails the subscription as a protocol breach.
+   */
+  lastSubscriptionId(): string {
+    return (this.lastSubscribeFrame().params as { subscriptionId: string }).subscriptionId;
   }
   subscribeCount(): number {
     return this.sent.filter((f) => "method" in f && f.method === "sub/subscribe").length;
@@ -222,7 +233,11 @@ describe("a subscription that does not survive a reconnect", () => {
     t.behavior = "succeed";
     await t.connect();
     const sub = t.subscribe({ kind: "session", id: "s1" });
-    t.deliver({ jsonrpc: "2.0", id: t.lastSubscribeId(), result: { subscriptionId: "srv-1" } });
+    t.deliver({
+      jsonrpc: "2.0",
+      id: t.lastSubscribeId(),
+      result: { subscriptionId: t.lastSubscriptionId() },
+    });
     return { t, sub };
   }
 

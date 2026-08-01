@@ -25,9 +25,42 @@ import type {
   JsonRpcResponse,
   WireServerDescriptor,
 } from "@agentick/spec";
-import { intersectScopes, type IngressIdentity } from "@agentick/spec";
+import { ErrorCode, intersectScopes, WireRpcError, type IngressIdentity } from "@agentick/spec";
 
 import { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
+
+/**
+ * Admit a client-allocated subscription id into a connection's registry, or
+ * refuse it.
+ *
+ * The id on `sub/subscribe` is the CLIENT's, and it is what every
+ * `notifications/subscription/*` frame for that subscription is keyed by. Two
+ * subscriptions answering to one id on one connection is therefore not a
+ * duplicate registration — it is a hijack: the second `set` re-points the
+ * cleanup the connection will run, and the first subscription's frames arrive
+ * at a client stream fed by a different producer. So a collision is refused
+ * with the caller's own fault code rather than absorbed.
+ *
+ * Called synchronously inside the `sub/subscribe` handler, so `dispatchRequest`
+ * maps the throw verbatim to a JSON-RPC error.
+ *
+ * @throws WireRpcError InvalidParams — id absent, empty, or already live here.
+ */
+export function admitSubscriptionId(registry: ReadonlyMap<string, unknown>, subId: string): void {
+  if (typeof subId !== "string" || subId.length === 0) {
+    throw new WireRpcError(
+      ErrorCode.InvalidParams,
+      "sub/subscribe requires a client-allocated `subscriptionId`",
+    );
+  }
+  if (registry.has(subId)) {
+    throw new WireRpcError(
+      ErrorCode.InvalidParams,
+      `subscriptionId "${subId}" is already open on this connection`,
+      { subscriptionId: subId },
+    );
+  }
+}
 
 export abstract class BaseConnectionContext {
   protected readonly subscriptions = new Map<string, { unsubscribe: () => Promise<void> }>();
@@ -151,6 +184,7 @@ export abstract class BaseConnectionContext {
   // shared `dispatchInbound` already uses them internally.
 
   registerSubscription(subId: string, unsubscribe: () => Promise<void>): void {
+    admitSubscriptionId(this.subscriptions, subId);
     this.subscriptions.set(subId, { unsubscribe });
   }
   /**

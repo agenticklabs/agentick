@@ -1,6 +1,6 @@
 # @agentick/transport
 
-**A transport is only its bytes.** Everything above the bytes — RPC correlation, subscription streams and their re-key dance, reconnect backoff, JSON-RPC dispatch, ingress authentication, the web-security posture, the client-facing output bound — lives in this package once and is shared by every wire.
+**A transport is only its bytes.** Everything above the bytes — RPC correlation, subscription streams and their id allocation, reconnect backoff, JSON-RPC dispatch, ingress authentication, the web-security posture, the client-facing output bound — lives in this package once and is shared by every wire.
 
 That is why writing a new transport is small: you implement "open the wire", "close the wire", "write a frame", and "here is a frame that arrived". And it is why the wires behave identically — not by convention, but because there is one implementation and a conformance suite that every transport runs. A security default cannot drift between the HTTP edge and the WebSocket edge when both call the same resolver.
 
@@ -99,7 +99,7 @@ class MyConnection extends BaseConnectionContext {
 }
 ```
 
-That is the whole surface. `close()` on the context iterates both registries and cleans up, so a dropped connection cannot leak a server-side subscription.
+That is the whole surface. `close()` on the context iterates both registries and cleans up, so a dropped connection cannot leak a server-side subscription. The subscription registry is keyed by the id the CLIENT sent on `sub/subscribe`, and registering one that is absent or already live on this connection throws `WireRpcError(InvalidParams)` — an adapter that keeps its own registry instead of inheriting this one applies the same rule with the exported `admitSubscriptionId(registry, subId)`.
 
 ## What the client base class already did for you
 
@@ -107,7 +107,7 @@ That is the whole surface. `close()` on the context iterates both registries and
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **State machine**        | `connecting` → `open` → `closed`, observable via `onStateChange`.                                                                                     |
 | **RPC correlation**      | Request ids allocated, responses matched, errors rejected as typed failures.                                                                          |
-| **Subscription streams** | One `MultiplexedStream` per subscription, routed by server-allocated id.                                                                              |
+| **Subscription streams** | One `MultiplexedStream` per subscription, routed by the client-allocated id the server adopts.                                                        |
 | **Progress streams**     | `progress(token)` mints a stream fed by `notifications/progress`, ended by `notifications/progress/complete`.                                         |
 | **Cancellation**         | An `AbortSignal` on a request emits `notifications/cancelled` for that id.                                                                            |
 | **Reconnect backoff**    | Full-jitter, capped, and it covers the first dial too. `DEFAULT_RECONNECT_POLICY` is the shared shape.                                                |
@@ -183,11 +183,15 @@ TransportFailure: prompt 'summarize' requires argument 'topic' (rpc error -32602
 
 A bare `console.error(err)` is therefore actionable on its own. The structured payload is untouched underneath — `err.kind === "rpc"`, `err.error.code`, `err.error.message`, `err.error.data` — which is what [@agentick/client](../client) reads to rehydrate a typed `AgentickError` when the server stamped one into `error.data`. Every other kind (`connection`, `timeout`, `cancelled`, `protocol`, `closed`) carries its own `message` and uses it verbatim.
 
-### The subscription id re-key
+### The client allocates the subscription id
 
-Subscribing is asynchronous but the caller wants a stream immediately, so the base class hands out a stream keyed by a tentative client-side id, issues the `subscribe` RPC, and re-keys the stream to the server-allocated `subscriptionId` when the response lands. Frames route by the server id from then on, and a stream closed early sends its unsubscribe under the real id.
+Subscribing is asynchronous but the caller wants a stream immediately, so the base class mints the `subscriptionId` itself, registers the stream under it, and only then issues the `sub/subscribe` RPC. The server adopts that id verbatim and echoes it back; a response echoing anything else fails the subscription as a `protocol` error, because no frame the server sends afterwards would route.
 
-You get this for free. It matters only if you are debugging why a frame arrived before the id you expected existed.
+That ordering is the whole point, and it is not a micro-optimization. A server-allocated id is unknowable until the RESPONSE lands, so any frame the server sends before it — notably the channel snapshot `sub/subscribe` splices in front of a session-channel stream — names a subscription the client cannot yet route, and `routeNotification` drops it. Scheduling around that is not possible in general: over [@agentick/transport-http](../transport-http) the response comes back on the POST body while notifications ride a separate persistent SSE GET, two connections with no ordering relation between them. Allocating client-side dissolves the race instead — the stream is registered under its final id before the request frame is written, so nothing is ever unroutable, on any wire. Progress streams already worked this way, keyed by a client-minted `progressToken`.
+
+Two consequences you can rely on: the `subscriptionId` on the stream you are handed is final from the moment you have it, and a reconnect resubscribes under the SAME id rather than churning the registries.
+
+The id must be unique per connection, which the base class guarantees. A collision is refused by the server with `InvalidParams` rather than absorbed — adopting it would re-point a live subscription's routing at a second producer.
 
 ### Progress tokens are bounded, and say so
 
@@ -394,17 +398,18 @@ runIngressAuthnConformance({
 
 ### `@agentick/transport/server`
 
-| Export                                                     | Purpose                                       |
-| ---------------------------------------------------------- | --------------------------------------------- |
-| `dispatchRequest(host, req, sink, identity?)`              | The one JSON-RPC dispatcher.                  |
-| `BaseConnectionContext`                                    | The abstract per-connection server adapter.   |
-| `DispatchHost` / `DispatchSink` (types)                    | The dispatcher's two contracts.               |
-| `authenticateIngress(context, authSource?, options?)`      | The ingress crossing. Enrichment only.        |
-| `IngressAuthnOptions` (type)                               | `{ onRejected?, timeoutMs? }`.                |
-| `DEFAULT_INGRESS_AUTHN_TIMEOUT_MS` / `IngressAuthnTimeout` | The authn wall-clock ceiling and its refusal. |
-| `resolveWebSecurity(options?)`                             | The shared HTTP-facing security policy.       |
-| `CSRF_HEADER` / `DEFAULT_BIND_HOST` / `isLoopbackAddress`  | Companion constants and predicate.            |
-| `projectClientResult` / `projectClientNotification`        | The client-facing output bounders.            |
+| Export                                                     | Purpose                                                        |
+| ---------------------------------------------------------- | -------------------------------------------------------------- |
+| `dispatchRequest(host, req, sink, identity?)`              | The one JSON-RPC dispatcher.                                   |
+| `BaseConnectionContext`                                    | The abstract per-connection server adapter.                    |
+| `admitSubscriptionId(registry, subId)`                     | Refuse an absent / duplicate client-allocated subscription id. |
+| `DispatchHost` / `DispatchSink` (types)                    | The dispatcher's two contracts.                                |
+| `authenticateIngress(context, authSource?, options?)`      | The ingress crossing. Enrichment only.                         |
+| `IngressAuthnOptions` (type)                               | `{ onRejected?, timeoutMs? }`.                                 |
+| `DEFAULT_INGRESS_AUTHN_TIMEOUT_MS` / `IngressAuthnTimeout` | The authn wall-clock ceiling and its refusal.                  |
+| `resolveWebSecurity(options?)`                             | The shared HTTP-facing security policy.                        |
+| `CSRF_HEADER` / `DEFAULT_BIND_HOST` / `isLoopbackAddress`  | Companion constants and predicate.                             |
+| `projectClientResult` / `projectClientNotification`        | The client-facing output bounders.                             |
 
 ### `@agentick/transport/testing`
 
@@ -451,4 +456,5 @@ runIngressAuthnConformance({
 - `packages/transport-in-process/src/__tests__/typed-error-e2e.spec.ts` — the server half, against a real gateway and session: a `prompts/invoke` missing a required argument answering `InvalidParams` with the domain error's own message (no wrapper text), the tag and its fields in `error.data`, the failure rehydrating to its typed class through `client.request`, and an unknown prompt still mapping to `MethodNotFound`.
 - `src/__tests__/rpc-error-fidelity.spec.ts` — a JSON-RPC error response reaching the caller with the server's message and code in `Error.message`, the structured `kind`/`error.code`/`error.data` still reachable for typed rehydration, a message-less server error naming its code, and message-carrying kinds used verbatim.
 - `src/__tests__/backoff-jitter.spec.ts` — full-jitter shape: per-attempt bounds, cap doubling to the maximum, never exceeding it, uniform distribution across the range, and reproducibility under an injected RNG.
+- `packages/transport-in-process/src/__tests__/subscription-first-frame.spec.ts` and `packages/transport-websocket/src/__tests__/subscription-first-frame.spec.ts` — the client-allocated id, where it matters: against a real gateway over both wires, a subscriber attaching AFTER the state exists receives the session channel's snapshot as its literal first frame (knobs, a pending elicitation ask, a working task), and a duplicate `subscriptionId` on one connection is refused with `InvalidParams`.
 - `src/testing/index.ts` (`runIngressAuthnConformance`) and `@agentick/spec-conformance`'s `runTransportConformance` — run by every concrete transport against a real server; see [@agentick/transport-websocket](../transport-websocket) and [@agentick/transport-in-process](../transport-in-process) for the invocations.

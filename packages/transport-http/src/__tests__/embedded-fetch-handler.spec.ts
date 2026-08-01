@@ -221,9 +221,16 @@ describe("embedded fetch handler — subscription over the handler surface (proo
 
     // Subscribe on the SAME session id (gateway scope), then emit gateway events.
     const subRes = await body(
-      await handler(rpc("sub/subscribe", { scope: { kind: "gateway" } }, sessionId)),
+      await handler(
+        rpc(
+          "sub/subscribe",
+          { subscriptionId: "http-sub-1", scope: { kind: "gateway" } },
+          sessionId,
+        ),
+      ),
     );
-    expect(subRes.result.subscriptionId).toBeTruthy();
+    // Echoed, not minted.
+    expect(subRes.result.subscriptionId).toBe("http-sub-1");
 
     // Re-emit each poll until the frame is observed (absorbs the subscribe→bus race).
     await waitFor(

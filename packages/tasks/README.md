@@ -122,7 +122,7 @@ ctx.tasks!.submit(async (task) => {
 > [!WARNING]
 > `elicit` and `awaitingInput` throw on a `detached: true` task. Detached work has no guaranteed live ancestor to reach a client, so it fails loudly rather than hanging against a dead address. Interactive and detached are mutually exclusive by construction.
 
-Reaching a client requires an injected elicit factory (`buildElicit`). A bare harness has no client, and `task.elicit` throws a "not configured" error there rather than pretending.
+Reaching a client requires an injected elicit factory (`buildElicit`). Every session built by `createApp` — and every bare session built by `buildSessionBridges` — is wired with it. A harness you construct yourself has no client unless you pass one, and `task.elicit` throws a "not configured" error there rather than pretending.
 
 ## Lifetime and durability
 
@@ -250,7 +250,7 @@ The subscription **opens with a snapshot frame** carrying the full current task 
 | `runTaskWorker(registry?)`                                                                       | The child-side IPC driver.                                                                                                                    |
 | `TASK_LIST` / `TASK_GET` / `TASK_CANCEL` / `TASK_AWAIT`                                          | The four model tool names.                                                                                                                    |
 | `buildSessionTasksTools(sessionId, getNamespace?)`                                               | The declarations plus handlers, if you register them yourself.                                                                                |
-| `TASK_STATUS_CHANNEL` / `TASK_PROGRESS_CHANNEL` (and `_FQN` variants)                            | Channel names, bare and fully qualified.                                                                                                      |
+| `TASK_STATUS_CHANNEL` / `TASK_PROGRESS_CHANNEL` (and `_FQN` variants)                            | Channel names, bare and fully qualified. `TaskStatusFrame` / `TaskStatusSnapshotFrame` are the shapes carried on the status channel.          |
 | `TASKS_CANCEL_MESSAGE_TYPE` / `TASKS_GET_MESSAGE_TYPE` / `TASKS_RESULT_MESSAGE_TYPE`             | Inbox message types, with their payload and reply types.                                                                                      |
 | `tasksWireExtension`                                                                             | Serves `tasks/cancel` over the gateway wire.                                                                                                  |
 | `TASKS_EXTENSION_NAME`                                                                           | The extension's registered name.                                                                                                              |
@@ -282,6 +282,10 @@ Inside a work function, `ctx` carries the framework spine (`sessionId`, `log`, `
 | `session.tasks`                     | Registered on import: `list`, `get`, `subscribe`, `cancel`, `close`. |
 | `tasksHandle(client, sessionId)`    | The same handle, constructed explicitly.                             |
 | `taskStatusView(client, sessionId)` | The headless fold: `get`, `subscribe`, `close`.                      |
+| `TASK_STATUS_CHANNEL` / `_FQN`      | The channel names, for a consumer subscribing itself.                |
+| `TASK_PROGRESS_CHANNEL` / `_FQN`    | Same, for progress.                                                  |
+
+Types: `TaskStatusClient`, `TaskStatusMap`, `TasksHandle`, `TasksCommandClient`, `TaskStatusChannelName`, `TaskProgressChannelName`, `TaskStatusFrame`, `TaskStatusSnapshotFrame`. The channel names and frame shapes are re-exported here so a browser bundle never has to reach for the root barrel — which would drag the server harness in with them.
 
 ### `@agentick/tasks/testing`
 
@@ -323,7 +327,7 @@ Inside a work function, `ctx` carries the framework spine (`sessionId`, `log`, `
 - `src/__tests__/executor-conformance.spec.ts` + `executor-conformance.ts` — the four canonical cases against the in-process executor, including ordered progress delivery and cancellation of work that honors its signal.
 - `src/__tests__/child-executor.spec.ts` — fork-per-task lifecycle, by-ref handler resolution, progress and status over IPC, cooperative cancel with the `SIGKILL` backstop, and terminal-send flush discipline.
 - `src/__tests__/input-required.spec.ts` — `awaitingInput` flipping `working → input_required → working`, restoration on throw, and the Effect overload interrupting on cancel.
-- `src/__tests__/escalation.spec.ts` + `child-elicit.spec.ts` — `task.elicit` escalating to the owning session and resolving with the answer, in process and across IPC, plus the detached-task rejection.
+- `src/__tests__/escalation.spec.ts` + `child-elicit.spec.ts` — `task.elicit` escalating to the owning session and resolving with the answer, in process and across IPC, plus the detached-task rejection. `@agentick/app`'s `src/__tests__/tasks-elicit.spec.tsx` pins the same round trip through real `createApp` wiring, where the harness is constructed by the app rather than by the session bridges.
 - `src/__tests__/task-wake.spec.ts` — exactly-once wake, consume-on-observe from `task_get`, `task_await`, and cancel, the callable policy shaping and suppressing, `defaultWake` with a per-task override, and no wake during close.
 - `src/__tests__/task-tools.spec.ts` — the four tools' declarations and handlers, including unknown-id responses and the `remote` slot's per-server error capture.
 - `src/__tests__/cluster-inbox.spec.ts` — the three inbox verbs routing cancel, get, and result by address, with replies over `request-response`.
