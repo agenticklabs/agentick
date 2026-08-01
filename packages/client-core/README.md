@@ -67,6 +67,23 @@ await client.close();
 
 `run.abort(reason?)` issues `session/abort` and closes the progress stream. `client.session(id).abort(reason?, { cascade: true })` sends the same verb with the wider scope — the session's live spawn subtree stops too, and nothing is disposed or deleted. See the [cancellation ladder](../app#the-cancellation-ladder).
 
+### One token, two producers
+
+> [!IMPORTANT]
+> **Ignore unknown `ev.type` values — never `switch` with a throwing default.** `run.events()` is typed `StreamEvent`, but the gateway multiplexes two producers onto the turn's progress token: the execution's events, and the `ctx.progress(...)` **signals** its tools emit. `events()` yields each frame's payload, so a signal arrives here wearing a `StreamEvent` type it does not have.
+
+When you need the frame kind, the emitter, or a sub-agent's progress, read the transport stream instead — the envelope is intact there:
+
+```ts
+for await (const frame of client.transport.progress(token)) {
+  const { name, scope, payload } = frame.envelope;
+  if (name === "session:execution:event") fold(payload as StreamEvent);
+  if (name === "tool:signal:progress") bar(scope.sessionId, payload.progress, payload.total);
+}
+```
+
+`send({ ..., fanIn: true })` widens the signal half of that stream to the turn's whole spawn tree, so a sub-agent's progress reaches the caller that started the turn. It is off by default and changes nothing else — see [@agentick/gateway](../gateway#progress-on-a-running-turn) for the membership rule and what it deliberately excludes.
+
 ## One client, one surface
 
 There are no context objects, no emitter strings, and no hand-rolled queries.
@@ -864,6 +881,18 @@ transport changes the `createClient` call and nothing else.
   reconnect. A `notifications/capabilities/changed` subscription that refetches
   mid-connection is declared in the protocol but not implemented here, so today a
   server-side extension-set change is observed only after a reconnect.
+- **`run.events()` is typed narrower than what it yields.** Progress signals ride
+  the same token as execution events, so the iterator hands you frames that are not
+  `StreamEvent`s — [ignore unknown types](#one-token-two-producers). The obvious fix
+  does not work: stamping the envelope's `name` onto the payload collides with the
+  `name` six `StreamEvent` variants already carry, which is the **tool** name on
+  every `tool-call*` and `tool-dispatch*` frame. Resolving it means folding signals
+  into the `StreamEvent` union under their own `type`, or changing what `events()`
+  advertises — a design choice, not a field stamp.
+- **`onProgress` does not follow a turn into its sub-agents.** The subscription is
+  scoped to a session, and a sub-agent is a different one. `send({ fanIn: true })`
+  covers the case for the progress-token stream; the subscription channel has no
+  equivalent.
 - **`client.events()` has one live source.** Only the `connection` surface emits.
   `request` / `subscription` / `auth` / `wire` / `extension` have no emit sites
   yet, so a filter on them yields nothing.
@@ -889,6 +918,11 @@ transport changes the `createClient` call and nothing else.
 
 ## Verified by
 
+- `src/__tests__/send-fan-in.spec.ts` — `fanIn` reaching the `session/send` params
+  when asked for, and the key being absent (not `undefined`) when not, so an
+  existing caller's request body is unchanged. What it MEANS is pinned end-to-end
+  in [@agentick/transport-in-process](../transport-in-process)'s
+  `progress-fan-in-e2e.spec.ts`.
 - `src/__tests__/capabilities.spec.ts` — handshake populates capabilities and
   `serverInfo`, `MethodNotFound` degradation on `_extensions/list`, rejection when
   `initialize` fails, clearing on drop, re-handshake on reconnect (and _not_ on the

@@ -294,6 +294,23 @@ export interface SessionSendParams extends WireRequestParams {
    * design; nothing schema-shaped crosses the wire regardless.)
    */
   readonly responseFormat?: ResponseFormat;
+  /**
+   * Widen the `_meta.progressToken` progress fan from THIS execution to its
+   * whole spawn tree: a `progress` signal emitted by any live descendant
+   * session whose lineage reaches this execution rides the caller's token too.
+   * Without it a sub-agent's `ctx.progress` is invisible to the caller that
+   * started the turn — the descendant's signals carry the descendant's own
+   * execution id, which the execution-scoped subscription cannot match.
+   *
+   * Observation only. It changes nothing about how the execution runs, and
+   * signals only: execution EVENTS are unaffected (a child's interior events
+   * stay on the child's handle — see `TickEndForwardDecision` for the seam that
+   * decides what a child surfaces to its parent).
+   *
+   * Absent or `false` ⇒ byte-identical behavior to the pre-`fanIn` verb. See
+   * {@link ClientSendInput.fanIn} for the client-facing door.
+   */
+  readonly fanIn?: boolean;
 }
 
 /**

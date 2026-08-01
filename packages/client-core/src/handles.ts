@@ -15,6 +15,7 @@ import type {
   ChannelViewConfig,
   ClientProtocol,
   ClientSessionExecutionHandle,
+  ClientSendInput,
   ClientTransport,
   ContentBlock,
   CreateSessionInput,
@@ -183,7 +184,7 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   const handle: SessionHandleBase = {
     ...scopedSubscriptions(client, { kind: "session", id: sessionId }),
     id: sessionId,
-    send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle {
+    send<P = unknown>(input: ClientSendInput<P>): ClientSessionExecutionHandle {
       return createSessionExecutionHandle(client, sessionId, input);
     },
     async dispatch(tool, input): Promise<readonly ContentBlock[]> {
@@ -347,7 +348,7 @@ function wrapSessionWireProxy(
 function createSessionExecutionHandle<P>(
   client: InternalClient,
   sessionId: string,
-  input: SendInput<P>,
+  input: ClientSendInput<P>,
 ): ClientSessionExecutionHandle {
   const progressToken = `p-${client.id}-${nextProgressToken()}`;
 
@@ -373,6 +374,10 @@ function createSessionExecutionHandle<P>(
       // directive (wire-safe JSON). The client parses the returned
       // `response` text against its own schema.
       responseFormat: input.responseFormat,
+      // Widens the progress fan on THIS token to the turn's spawn tree.
+      // Omitted when not asked for, so the request body is byte-identical to
+      // the pre-fanIn one. See `ClientSendInput.fanIn`.
+      ...(input.fanIn !== undefined ? { fanIn: input.fanIn } : {}),
       _meta: { progressToken },
     })
     .then((res) => {
@@ -411,10 +416,24 @@ function createSessionExecutionHandle<P>(
     // execution-event fan-out (`envelope.name === "session:execution:event"`)
     // AND ADR 64 progress SIGNALS (`<surface>:signal:progress`, payload
     // `ProgressEventPayload`). A tool calling `ctx.progress(...)` therefore
-    // hands a consumer a non-StreamEvent wearing a StreamEvent type. The fix
-    // is to discriminate on `envelope.name` here (or expose the envelope);
-    // until then a consumer MUST ignore unknown `type` values rather than
-    // `switch` with a throwing default.
+    // hands a consumer a non-StreamEvent wearing a StreamEvent type. Until it
+    // is fixed a consumer MUST ignore unknown `type` values rather than
+    // `switch` with a throwing default. `fanIn` makes this WORSE, not
+    // differently: descendant signal frames now ride here too, and their
+    // emitter identity lives on the envelope `scope` this discards.
+    //
+    // The obvious fix does NOT work, and the reason is worth recording so it
+    // is not re-attempted: stamping the envelope's `name` onto the yielded
+    // payload COLLIDES. Six `StreamEvent` variants already carry a `name`, and
+    // it is the TOOL name — `tool-call-start`, `tool-call`,
+    // `tool-dispatch-start`, `tool-dispatch-end`, `tool-dispatch`,
+    // `tool-confirmation-required` (see `spec/src/data/streaming.ts`). Those
+    // are the most-consumed frames on the stream, and overwriting `name` on
+    // them would silently replace "which tool" with "which frame kind" in
+    // every UI that renders a tool call. The resolution is a real design
+    // choice — fold signals into the `StreamEvent` union under their own
+    // `type`, or yield the envelope and change what `events()` advertises —
+    // and it belongs to whoever owns that union, not to a field stamp here.
     async *events(): AsyncGenerator<StreamEvent> {
       for await (const frame of progressStream) {
         // The envelope's payload IS the StreamEvent — server already

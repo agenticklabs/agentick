@@ -563,6 +563,34 @@ gateway.bridges.myThing; // whatever the gateway part installed
 
 A gateway extension's `install` may be async and is awaited before the gateway is ready. A throwing `install` rejects `createGateway` outright rather than leaving a half-built gateway, and the wire registry is never left half-sealed. Bridge slots are hard singletons — an occupied slot throws. Teardown fires `onClose` handlers in reverse install order, after the apps close.
 
+## Progress on a running turn
+
+A `session/send` that carries `_meta.progressToken` opens a progress stream for that turn, and the gateway fans **two** producers onto it: the execution's own event stream, and the `ctx.progress(...)` signals its tools emit. Every frame is a self-describing envelope — `name` says which producer, `scope` says which session and execution emitted it — so one stream carries both without a second channel.
+
+By default the signal half is scoped to the turn's own execution. That is right for the turn's own tools and blind to everything below it: a sub-agent runs its **own** execution, so its progress matched nothing and a caller watching a fan-out saw silence for exactly the work slow enough to need a bar. `fanIn` fixes that:
+
+```ts
+const turn = client.session("sess-123").send({ messages, fanIn: true });
+
+for await (const frame of client.transport.progress(token)) {
+  const { name, scope, payload } = frame.envelope;
+  if (name === "tool:signal:progress") {
+    // `scope.sessionId` attributes the frame; `payload.token` is the tool call id
+    bar(scope.sessionId, payload.progress, payload.total);
+  }
+}
+```
+
+A signal joins the stream when its execution **is** this turn, or when the emitting session's lineage reaches this turn — the child, the grandchild, and work a descendant started from a later turn of its own. Membership is the same origin edge [`abortExecutionTree`](../app#the-cancellation-ladder) fans out over, read from the other end: `app.executionTreeContains(executionId, sessionId)` climbs the `parentSessionId` chain and stops at the first ancestor stamped with that origin execution.
+
+**Two turns never see each other.** A sibling execution satisfies neither arm — not on this session, not on another, and neither do its descendants, because their lineage reaches the sibling's execution instead. Turning `fanIn` on widens a turn's stream along exactly one axis, lineage, and no other.
+
+Three things it deliberately is not:
+
+- **Not execution events.** Only signals fan in. What a child surfaces to its parent's event stream is decided at the harness level (`TickEndForwardDecision`), and a second answer at the wire would be a competing one.
+- **Not durable.** Membership reads the live session registry, so a descendant whose ancestor has been paged out is unreachable and its signals do not arrive — the same limitation `abortExecutionTree`'s walk has, for the same reason: a per-event predicate must not do store reads.
+- **Not the default.** Omitting `fanIn` produces a byte-identical request and byte-identical behavior. A UI built against one turn's frames should not start seeing another's because a tool learned to spawn.
+
 ## Observing the whole deployment
 
 `gateway.events(filter?)` is an async iterable fanned in from every hosted app — the one place to watch a multi-app process:
@@ -770,6 +798,8 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - **The dynamic lane costs two inbox asks per invocation** — one to enumerate the surface's commands, one to dispatch. Declarations are construction-stable, so a per-address cache with close-invalidation is the obvious follow-up.
 - **`telemetryNamespace` does not cascade.** Each app whitelabels its own attribute prefix; set it per app if you need a non-default one.
 - **No cluster substrate of its own.** `GatewayHarness` accepts any `EventBus`, so a Redis- or Kafka-backed deployment is a substrate swap rather than a gateway rewrite — but this package ships no such bus.
+- **`fanIn` cannot tell two apps' identically-named sessions apart.** The lineage walk keys on a session id, which is unique within an app but not across apps on one gateway. The arrival filter checks `scope.appId` for exactly this, but no `appId` reaches a `tool:signal:progress` envelope today — the app stamps `{ sessionId }` on the per-session scope and nothing gap-fills the rest. Reaching the hole needs two apps, deliberate reuse of one explicit session id (spawn generates ULIDs), and concurrent `fanIn` turns; closing it belongs at the emitter, since every scope-filtered bus subscriber has the same blind spot.
+- **Session-scoped subscriptions do not fan in.** `sub/subscribe` over `session:channel:*` shows a client nothing from the sub-agents that session spawns. The shape would be the same pair — widen, then filter — but a subscription outlives any one turn, so its membership question is about a session subtree over time rather than a settled execution.
 
 ## Verified by
 
@@ -780,6 +810,8 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - `src/__tests__/gateway-extensions.spec.ts` — install during construction, the live installer host, async install awaited before ready, bridge-slot singleton enforcement, install failure rejecting `createGateway` without half-sealing the registry, bundle field distribution, bare app/session extensions cascading to every app and session, and LIFO `onClose` after apps close.
 - `@agentick/transport`'s `src/__tests__/list-sessions-wire.spec.ts` — `gateway/list_sessions` against a real gateway in BOTH modes: a mounted index answering with its own rows, its own ordering (deliberately not the canonical one, so a re-sort would fail the test) and its own cursor handed back verbatim, one query per page, and the caller's principal reaching it; and the fallback merge over two apps' stores in the framework's canonical order with the right `appId` on every row. Plus one cursor paging the union across the app boundary, the caller-scoping filter that is the verb's only defense (it names no session, so the dispatch gate has nothing to resolve), the tree filter reaching the stores rather than post-filtering a fetched page, and an empty gateway's page shape. (Home is transport because this package does not depend on it.)
 - `@agentick/transport`'s `src/__tests__/destroy-session-wire.spec.ts` — both destroy verbs against a real gateway and the real dispatch gate: `gateway/destroy_session` resolving the owner on a multi-app gateway, resolving a paged-out session through the session stores, denying another principal's thread on the record when no live target exists for the gate to read, and answering an unclaimed id with no `appId` instead of a fault. (Home is transport because this package does not depend on it.)
+- `@agentick/transport-in-process`'s `src/__tests__/progress-fan-in-e2e.spec.ts` — `fanIn` over the full stack (real client, gateway, app, session, loop, tool executor, and real `spawn`): the default leaving a child's frames off the parent's stream while the fixture proves the child emitted; `fanIn` delivering them with the emitter's session, a distinct execution id, and the tool call id as correlation token; a grandchild arriving through the lineage walk; two concurrent turns in two apps sharing one gateway-wide subscription and each seeing only its own; a sibling turn's still-live child emitting DURING the next turn and staying off it; and no frame arriving after the send settles. (Home is transport-in-process because this package does not depend on it.)
+- `@agentick/app`'s `src/__tests__/cascading-abort.spec.tsx` — `executionTreeContains` on the same tree the fan-out test builds: child and grandchild in, a sibling turn's child out, the origin session itself out, and both unknowns quiet.
 - `src/__tests__/gateway-app-live-link.spec.ts` — a gateway hook registered **after** a session exists reaching that session's tool executor, and unsubscribe cascading back out.
 - `src/__tests__/layered-tools.spec.ts` — gateway tools reaching every session of every hosted app, and app- and session-level tools overriding on name collision.
 - `src/__tests__/emit-capabilities-changed.spec.ts` — event shape, per-call ordering, zero-subscriber safety, and scope-query plus child-bus isolation.

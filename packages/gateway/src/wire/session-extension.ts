@@ -17,6 +17,7 @@ import {
   findSession,
   progressEventQuery,
   toClientToolRegistration,
+  type AppHarnessProtocol,
   type ProtocolEvent,
   type SessionHarnessProtocol,
   type ToolExecutorProtocol,
@@ -34,6 +35,56 @@ import { omitUndefined, paginate } from "@agentick/utils";
 type SessionWithTools = SessionHarnessProtocol & {
   readonly toolExecutor: ToolExecutorProtocol;
 };
+
+/**
+ * Does this signal envelope belong to the turn rooted at `executionId`?
+ *
+ * The whole of `fanIn` — no router, no subscription manager, just the
+ * predicate a gateway-wide subscription is filtered through. Two admissions,
+ * and they are the two halves of "this turn":
+ *
+ *   1. The turn's OWN work — the envelope's execution IS the target. This is
+ *      the default subscription's bus-side filter, restated on the arrival
+ *      side because the subscription is no longer filtered.
+ *   2. The turn's DESCENDANTS — the emitting session's lineage reaches the
+ *      target execution ({@link AppHarnessProtocol.executionTreeContains}, an
+ *      O(depth) registry walk). Their signals carry their own execution ids,
+ *      so (1) can never see them.
+ *
+ * Everything else is refused, which is the isolation guarantee stated
+ * positively: a sibling execution — on this session or any other — satisfies
+ * neither arm, and neither do its descendants, because their lineage reaches
+ * the sibling's execution, not this one.
+ *
+ * The `appId` check addresses the one seam a gateway-wide subscription opens.
+ * Session ids are unique within an app, not across apps on one gateway, so a
+ * foreign app's session sharing an id with a descendant of this turn would
+ * otherwise be admitted by (2) — the lineage walk reads THIS app's registry and
+ * would find OUR session under that id. Execution ids are ULIDs and do not
+ * collide, so (1) needs no such guard.
+ *
+ * TODO(signal-scope-app-id): the check is currently inert in the default
+ * deployment. A signal envelope's scope is gap-filled from the emitting
+ * harness's `parentScope`, which the app stamps as `{ sessionId }` only — no
+ * `appId` reaches a `tool:signal:progress` envelope, so the guard has nothing
+ * to compare and lineage decides alone. The narrow hole that leaves: two apps
+ * on ONE gateway, both given the SAME explicit session id by the adopter (spawn
+ * generates ULIDs, so this needs deliberate id reuse), with concurrent fanIn
+ * turns. Closing it belongs at the emitter — `appId` on the per-session
+ * `parentScope` — not here, because every scope-filtered subscriber on the bus
+ * has the same blind spot, not just this one.
+ */
+function inThisTurn(
+  envelope: ProtocolEvent,
+  executionId: string,
+  app: AppHarnessProtocol | undefined,
+): boolean {
+  if (envelope.scope.executionId === executionId) return true;
+  if (app === undefined) return false;
+  if (envelope.scope.appId !== undefined && envelope.scope.appId !== app.id) return false;
+  const sessionId = envelope.scope.sessionId;
+  return sessionId !== undefined && app.executionTreeContains(executionId, sessionId);
+}
 
 export const sessionWireExtension: WireExtension = defineWireExtension({
   name: "@agentick/gateway#session",
@@ -112,17 +163,42 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // (2) Progress-SIGNAL fan-out (ADR 64 / #19-progress-wire). The
         // gateway bus is the fan-in root — every child harness's signal
         // reaches it, so `ctx.gateway.events(...)` observes a tool's
-        // `ctx.progress(...)`. Scope to the execution id so concurrent
-        // executions on the same session never cross-contaminate. Push
-        // the raw signal envelope (self-describing: `name` is
-        // `<surface>:signal:progress`, `payload` is the ProgressEventPayload)
-        // so the client can discriminate it from execution events. Torn
-        // down when the send settles — the gateway bus outlives this RPC,
-        // so the subscription must be explicitly stopped.
-        const signalEvents = ctx.gateway.events({
-          ...progressEventQuery(),
-          scope: { executionId: handle.executionId },
-        });
+        // `ctx.progress(...)`. Push the raw signal envelope (self-describing:
+        // `name` is `<surface>:signal:progress`, `payload` is the
+        // ProgressEventPayload, `scope` names the emitting session +
+        // execution) so the client can discriminate it from execution events
+        // and attribute it. Torn down when the send settles — the gateway bus
+        // outlives this RPC, so the subscription must be explicitly stopped.
+        //
+        // SCOPE, and the one knob on it. By default the subscription is
+        // filtered at the bus to this execution: concurrent executions on the
+        // same session never cross-contaminate, and a sub-agent — running its
+        // OWN execution — is out of view. `fanIn` trades that narrow filter for
+        // a gateway-wide subscription plus `inThisTurn` below, which is the
+        // same isolation rule widened by exactly one axis: lineage.
+        //
+        // Signals only. Execution EVENTS keep producer (1)'s scope untouched —
+        // what a child surfaces to its parent's event stream is already
+        // decided at the harness level (`TickEndForwardDecision`), and a second
+        // answer to that question at the wire would be a competing one.
+        //
+        // TODO(fan-in-session-scope): the OTHER client observation channel —
+        // `sub/subscribe` over `session:channel:*` — has the same blind spot
+        // and no equivalent. A client watching a session's channels sees
+        // nothing from the sub-agents that session spawns, because a channel
+        // event is scoped to the emitting session. The shape would be the same
+        // pair (widen the subscription, filter on arrival), but the membership
+        // question differs — a subscription outlives any one turn, so the
+        // predicate would key on the SESSION subtree, not on an execution, and
+        // "which of my descendants existed when" becomes a live question
+        // instead of a settled one. Not built: no consumer has asked, and the
+        // wrong answer here is a subscription that silently grows.
+        const fanIn = params.fanIn === true;
+        const signalEvents = ctx.gateway.events(
+          fanIn
+            ? progressEventQuery()
+            : { ...progressEventQuery(), scope: { executionId: handle.executionId } },
+        );
         const signalIter = signalEvents[Symbol.asyncIterator]();
         stopSignalDrain = () => {
           void signalIter.return?.(undefined);
@@ -134,7 +210,9 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
               step.done !== true;
               step = await signalIter.next()
             ) {
-              reporter.push(step.value as ProtocolEvent);
+              const envelope = step.value as ProtocolEvent;
+              if (fanIn && !inThisTurn(envelope, handle.executionId, ctx.app)) continue;
+              reporter.push(envelope);
             }
           } catch {
             /* best-effort — progress is never a control path (ADR 64) */

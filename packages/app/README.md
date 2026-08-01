@@ -270,6 +270,16 @@ Every spawn stamps the execution that asked for it — `SessionRecord.originExec
 
 **Cancelling a RUNNING turn needs none of this.** A spawn inherits its origin execution's teardown signal, so aborting (or timing out, or failing) an execution already tears down the sub-agents it started — no walk, no registry, no verb. `abortExecutionTree` is for the other case: the turn ENDED WELL, its sub-agents outlived it deliberately, and you now want them gone. There is no live signal left to fire, and the durable origin edge is the only thing that still knows what belonged to that turn.
 
+**The same question, one session at a time.** `executionTreeContains(executionId, sessionId)` answers "is this session's work part of that turn?" — the membership `abortExecutionTree` fans out over, read from the other end:
+
+```ts
+if (app.executionTreeContains(turn.executionId, event.scope.sessionId)) render(event);
+```
+
+The fan-out walks DOWN over a registry snapshot, which suits a one-shot cancellation. A subscriber filtering a live stream has the opposite problem — one session id per event, arriving continuously — so this walks UP instead, following `parentSessionId` until it hits an ancestor stamped with that origin execution. O(depth), no snapshot, and the gateway's [`fanIn` progress fan](../gateway#progress-on-a-running-turn) is its first caller.
+
+The origin session itself is deliberately **not** a member of its own turn's tree: a session that has moved on to a later turn must not be dragged in by an id naming an earlier one. And like the fan-out walk, it reads only the live registry — a paged-out ancestor breaks the chain.
+
 ### Who answered — `appId` joined to the app's `title`
 
 An app declares the same `id` / `title` / `description` triple a tool or a prompt does:
@@ -512,22 +522,23 @@ Every session the app creates gets it, spawned and forked children included. Whe
 
 ### `AppHarness`
 
-| Member                           | Returns                                                     |
-| -------------------------------- | ----------------------------------------------------------- |
-| `createSession(input?)`          | A session bound to this app; opening an existing id resumes |
-| `runOnce(input)`                 | One execution in an ephemeral session                       |
-| `getSession(id)`                 | The live session, or `undefined`                            |
-| `listSessions(query?)`           | Durable records — the queryable superset (bounded snapshot) |
-| `pageSessions(query?, page?)`    | One page of the same registry; the store's cursor, or ours  |
-| `getSessionRecord(id)`           | One durable record, closed sessions included                |
-| `setSessionMeta(id, meta)`       | Set app-owned `title` / `description` / `metadata`          |
-| `destroySession(id, opts?)`      | Delete a session — transitive, strongest form               |
-| `abortExecutionTree(id, opts?)`  | Cancel one execution's fan-out — abort strength, no removal |
-| `events(query?)`                 | Cross-session bus subscription                              |
-| `use(mw)` / `fx.use(mw)`         | Register middleware; returns an unsubscribe                 |
-| `guard(fn)` / `hook(bag)`        | Register a guard / hooks imperatively                       |
-| `hooks.onBeforeToolDispatch(fn)` | Per-verb imperative registrar                               |
-| `closeApp()`                     | Close every session, fire close handlers, tear down         |
+| Member                            | Returns                                                     |
+| --------------------------------- | ----------------------------------------------------------- |
+| `createSession(input?)`           | A session bound to this app; opening an existing id resumes |
+| `runOnce(input)`                  | One execution in an ephemeral session                       |
+| `getSession(id)`                  | The live session, or `undefined`                            |
+| `listSessions(query?)`            | Durable records — the queryable superset (bounded snapshot) |
+| `pageSessions(query?, page?)`     | One page of the same registry; the store's cursor, or ours  |
+| `getSessionRecord(id)`            | One durable record, closed sessions included                |
+| `setSessionMeta(id, meta)`        | Set app-owned `title` / `description` / `metadata`          |
+| `destroySession(id, opts?)`       | Delete a session — transitive, strongest form               |
+| `abortExecutionTree(id, opts?)`   | Cancel one execution's fan-out — abort strength, no removal |
+| `executionTreeContains(eid, sid)` | Is that session's work part of that turn? (O(depth), live)  |
+| `events(query?)`                  | Cross-session bus subscription                              |
+| `use(mw)` / `fx.use(mw)`          | Register middleware; returns an unsubscribe                 |
+| `guard(fn)` / `hook(bag)`         | Register a guard / hooks imperatively                       |
+| `hooks.onBeforeToolDispatch(fn)`  | Per-verb imperative registrar                               |
+| `closeApp()`                      | Close every session, fire close handlers, tear down         |
 
 `closeApp()` closes registered sessions, fires extension close handlers in reverse registration order, closes the cluster if there is one, then tears down the substrate. Idempotent. `close()` is the same operation under the name every harness shares.
 
@@ -575,7 +586,7 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - `src/__tests__/app-signal.spec.tsx` — an aborted app signal refusing new work at the edge, fanning into every session so a post-abort `send` resolves `aborted` with 0 ticks, and tearing down an in-flight execution.
 - `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling failing a too-deep spawn (configured cap and the default chain), `spawnPath` landing on the record, the loop scope, and the handle stream, and a parent close or abort disposing its children with no registry leak.
 - `src/__tests__/destroy-session.spec.tsx` — destroy aborting a grandchild held mid-tool and disposing the whole subtree, cancelling a detached task the same setup under `close()` leaves running, calling `SessionStore.delete` exactly once by id while a bystander's record survives, reaching a closed session's record, and staying silent (not faulting) on a second destroy.
-- `src/__tests__/cascading-abort.spec.tsx` — the ladder, rung by rung: a plain `abort()` leaving a spawned child's in-flight work alone, `abort({ cascade: true })` stopping a grandchild deepest-first while disposing nothing and leaving the session immediately sendable again, a detached task surviving that cascade and being cancelled by `destroySession` on the same setup, a child spawned DURING an execution torn down by a plain abort of that execution, `originExecutionId` / `originCallId` stamped on the child's record while a SUCCEEDED turn leaves its child running, and `abortExecutionTree` taking one settled turn's branch transitively (a grandchild it never spawned included) while a sibling turn's child keeps working.
+- `src/__tests__/cascading-abort.spec.tsx` — the ladder, rung by rung: a plain `abort()` leaving a spawned child's in-flight work alone, `abort({ cascade: true })` stopping a grandchild deepest-first while disposing nothing and leaving the session immediately sendable again, a detached task surviving that cascade and being cancelled by `destroySession` on the same setup, a child spawned DURING an execution torn down by a plain abort of that execution, `originExecutionId` / `originCallId` stamped on the child's record while a SUCCEEDED turn leaves its child running, and `abortExecutionTree` taking one settled turn's branch transitively (a grandchild it never spawned included) while a sibling turn's child keeps working. Plus `executionTreeContains` over that same tree: child and grandchild in, a sibling turn's child out, the origin session itself out, and both unknowns quiet.
 - `src/__tests__/session-address-reuse.spec.tsx` — create-or-resume never colliding with the id it reuses: every disposal path (destroy, `disposeChildSession`, `closeApp`, LRU eviction, a direct `session.close()`) releasing all three per-session inbox addresses even when a task executor's `cancel` rejects during teardown, a resume after eviction or destroy building a fresh harness set cleanly, and a create that fails partway releasing what its aborted construction claimed so the retry reports the real error instead of an address collision.
 - `src/__tests__/tasks-elicit.spec.tsx` — a background task's `ctx.elicit` reaching the session's real elicitation harness through app-built wiring: the question arriving at the client verbatim, the answer resolving the work function, `canDoForm()` reporting the live capability rather than the stub's `false`, and a detached task still failing with the typed error before any ask leaves it. The app constructs the tasks harness itself, so the session-level escalation spec cannot see this path.
 - `src/__tests__/session-principal-lifecycle.spec.tsx` — owning-principal inheritance across spawn and fork, fork metadata inheritance, and the `onSessionCreate` reshape and veto arms.

@@ -170,6 +170,51 @@ export interface AppHandle extends ResourceHandle, HandleSubscriptions {
 export interface SessionHandleExtensions {}
 
 /**
+ * What a CLIENT sends: everything the in-process session takes, plus the
+ * options that only mean something when a wire is in the middle.
+ *
+ * The separation is deliberate. {@link SendInput} is the execution's input —
+ * every field there changes how the turn RUNS, and an in-process caller can set
+ * all of them. The fields below configure the OBSERVATION channel the wire
+ * opens alongside the turn, which in-process has no analogue for: a local
+ * caller holds the handle itself. Folding them into `SendInput` would put a
+ * field on the primary session API that silently does nothing off the wire.
+ */
+export interface ClientSendInput<P = unknown> extends SendInput<P> {
+  /**
+   * Stream the progress signals of this turn's SUB-AGENTS, not just its own.
+   *
+   * A tool calling `ctx.progress(...)` emits a signal scoped to the session and
+   * execution it runs in. The turn you started is one execution; a sub-agent it
+   * spawns runs its own, so by default a sub-agent's progress is invisible to
+   * you — which is exactly backwards for the case that needs it most, a long
+   * fan-out whose only liveness is happening one level down.
+   *
+   * With `fanIn`, a signal joins your stream when its session's lineage reaches
+   * this execution: the turn's own signals, its children's, its grandchildren's
+   * — including work a descendant started from a later turn of its own. A
+   * SIBLING execution's signals never do, on this session or any other, so two
+   * concurrent turns on one session stay separate streams.
+   *
+   * ```ts
+   * const turn = session.send({ messages, fanIn: true });
+   * for await (const frame of client.transport.progress(token)) {
+   *   // frames from the root turn AND from every sub-agent under it
+   * }
+   * ```
+   *
+   * Signals only — a child's execution EVENTS are still its own. Membership is
+   * read from the live session registry, so a descendant whose ancestor has
+   * been paged out is not reachable and its signals do not arrive.
+   *
+   * Defaults to `false`: fan-in is more than a caller asked for, and a UI built
+   * against one turn's frames should not start seeing another's because a tool
+   * learned to spawn.
+   */
+  readonly fanIn?: boolean;
+}
+
+/**
  * The hand-written CORE of the client session handle — the members that are NOT
  * derived from wire rows and NOT per-harness sub-handles. `send()` returns a
  * `ClientSessionExecutionHandle` (same shape as the server-side
@@ -181,7 +226,7 @@ export interface SessionHandleExtensions {}
  * surface ({@link SessionWireNamespaces}).
  */
 export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
-  send<P = unknown>(input: SendInput<P>): ClientSessionExecutionHandle;
+  send<P = unknown>(input: ClientSendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
   /**
    * Cancel the session's current execution. `{ cascade: true }` widens the

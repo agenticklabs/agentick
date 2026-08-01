@@ -620,6 +620,40 @@ export interface AppHarnessProtocol<P = unknown> {
   ): Promise<AbortExecutionTreeResult>;
 
   /**
+   * Is `sessionId` inside the spawn tree of `executionId`? The same membership
+   * {@link abortExecutionTree} computes, answered from the other end.
+   *
+   * `abortExecutionTree` walks DOWN: seed on the entries stamped with this
+   * origin execution, then take each seed's whole live subtree. That shape
+   * suits a one-shot fan-out over a registry snapshot. A subscriber filtering a
+   * live event stream has the opposite problem — one session id per event,
+   * arriving continuously — so it walks UP instead: from the session, follow
+   * the `parentSessionId` chain and answer `true` at the first ancestor (the
+   * session itself included) whose `originExecutionId` is the target. Same
+   * predicate, same edges, O(depth) per call and no snapshot.
+   *
+   * The canonical caller is the gateway's execution-scoped progress fan
+   * (`session/send` with `fanIn`): descendant signals carry their OWN
+   * execution id, so the execution-id equality that matches the root turn's
+   * own signals cannot see them, and this answers "does this session's work
+   * belong to the turn I am streaming?".
+   *
+   * Deliberately NOT membership in a session's spawn subtree — the question is
+   * scoped to ONE TURN. A session whose lineage reaches the target execution is
+   * in, including work it started from a later execution of its own; a sibling
+   * turn's descendants (and the origin session's own later turns) are out,
+   * which is what keeps two concurrent executions on one session from seeing
+   * each other's signals.
+   *
+   * Reads the LIVE registry only, so a paged-out ancestor breaks the chain and
+   * its descendants report `false` — the same limitation
+   * {@link abortExecutionTree}'s walk has, and for the same reason (the durable
+   * `SessionRecord` carries the edge, but resolving it would make a per-event
+   * predicate do store reads).
+   */
+  executionTreeContains(executionId: string, sessionId: string): boolean;
+
+  /**
    * Look up a LIVE session by id — the in-memory routing handle. Returns
    * `undefined` if no session with that id is currently live (a closed session
    * is dropped from the live registry, but its durable {@link SessionRecord}

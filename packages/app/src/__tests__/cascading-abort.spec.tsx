@@ -446,3 +446,56 @@ describe("app.abortExecutionTree", () => {
     await cleanup("root");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6 — executionTreeContains: the same membership, read bottom-up
+// ---------------------------------------------------------------------------
+
+describe("app.executionTreeContains", () => {
+  it("answers the same membership abortExecutionTree fans out over", async () => {
+    // The identical tree the fan-out test builds: turn A → kid1 → grand, turn
+    // B → kid2, both turns on `root`. A subscriber filtering a live event
+    // stream asks this per event, so every answer below is one a progress fan
+    // depends on frame by frame.
+    const { app, fixture, cleanup } = await mkApp();
+    const root = asSession(await app.createSession({ sessionId: "root" }));
+
+    const turnA = await root.send({
+      messages: [{ role: "user", content: "A" }],
+      modelExecutor: await mkExec("turn-a", spawnThenEndScript("tc-a")),
+    });
+    await turnA.result;
+    const turnB = await root.send({
+      messages: [{ role: "user", content: "B" }],
+      modelExecutor: await mkExec("turn-b", spawnThenEndScript("tc-b")),
+    });
+    await turnB.result;
+    await waitFor(() => fixture.entered.includes("kid1") && fixture.entered.includes("kid2"), {
+      description: "both kids parked",
+    });
+    await app.getSession("kid1")!.spawn({ agent: React.createElement(Agent), sessionId: "grand" });
+
+    // In: the turn's own child, and everything under it — `grand`'s own origin
+    // is kid1's spawn, not turn A, so only the LINEAGE walk finds it.
+    expect(app.executionTreeContains(turnA.executionId, "kid1")).toBe(true);
+    expect(app.executionTreeContains(turnA.executionId, "grand")).toBe(true);
+
+    // Out, and this is the isolation guarantee: a sibling turn's fan-out, on
+    // the SAME session, is a different tree.
+    expect(app.executionTreeContains(turnA.executionId, "kid2")).toBe(false);
+    expect(app.executionTreeContains(turnB.executionId, "kid1")).toBe(false);
+    expect(app.executionTreeContains(turnB.executionId, "kid2")).toBe(true);
+
+    // Out: the ORIGIN session itself. It is not in its own turn's spawn tree —
+    // deliberately, because the caller already matches its own work by
+    // execution id and a session that has moved on to turn B must not be
+    // dragged in by an id naming turn A.
+    expect(app.executionTreeContains(turnA.executionId, "root")).toBe(false);
+
+    // Quiet on both unknowns, the same way the fan-out walk is.
+    expect(app.executionTreeContains(turnA.executionId, "no-such-session")).toBe(false);
+    expect(app.executionTreeContains("exec:never-ran", "kid1")).toBe(false);
+
+    await cleanup("root");
+  });
+});

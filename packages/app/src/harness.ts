@@ -2988,6 +2988,37 @@ export class AppHarness<P = unknown>
   }
 
   /**
+   * `AppHarnessProtocol.executionTreeContains` — the membership
+   * {@link abortExecutionTreeBody} fans out over, answered bottom-up for ONE
+   * session. See the protocol doc-block for why the direction differs (a live
+   * event stream hands you one session id at a time; a snapshot walk does not).
+   *
+   * Climb the `parentSessionId` chain from `sessionId` — that session included
+   * — and stop at the first entry stamped with this `originExecutionId`.
+   * Equivalent to "is `sessionId` in the live subtree of some entry seeded by
+   * `executionId`", which is exactly what the top-down walk collects. Pure
+   * registry reads, no store, no cache: the live registry IS the truth, and a
+   * cache would answer a question about a tree that changes on every spawn.
+   *
+   * `seen` guards a corrupt parent cycle rather than trusting the tree to be
+   * one; the loop must terminate even then, because a subscriber calls this per
+   * event.
+   */
+  executionTreeContains(executionId: string, sessionId: string): boolean {
+    const seen = new Set<string>();
+    let cursor = this.registry.get(sessionId);
+    while (cursor !== undefined && !seen.has(cursor.id)) {
+      if (cursor.originExecutionId === executionId) return true;
+      seen.add(cursor.id);
+      cursor =
+        cursor.parentSessionId !== undefined
+          ? this.registry.get(cursor.parentSessionId)
+          : undefined;
+    }
+    return false;
+  }
+
+  /**
    * The live spawn subtree rooted at `sessionId` — the target's own registry
    * entry (when live) followed by every live descendant, breadth-first, so
    * reversing the list walks deepest-first.

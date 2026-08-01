@@ -35,6 +35,7 @@ import {
   type JsonRpcRequest,
   type JsonRpcResponse,
   type ProgressStreamWriter,
+  type AppHarnessProtocol,
   type SessionHarnessProtocol,
   type SubscriptionHandle,
   type WireExtension,
@@ -477,7 +478,7 @@ async function authorizeDispatch(
   // TODO(trail-session-resolution-seam): methods that reach a session
   // via other params (a future app/run_once) must route through the
   // same resolution or the ceiling won't see them.
-  const targetSession = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
+  const targetSession = sessionId ? findSessionOrUndef(host, sessionId)?.session : undefined;
   // #199 — the target session's scope CEILING is structural (resource-
   // declared, like its principal) and checked BEFORE policy AND before
   // the no-authorizer short-circuit: no authorizer — including an
@@ -563,8 +564,15 @@ function buildWireExtensionContext(
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
   const appId = typeof params.appId === "string" ? params.appId : undefined;
 
-  const app = appId ? host.app(appId) : undefined;
-  let session = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
+  const found = sessionId ? findSessionOrUndef(host, sessionId) : undefined;
+  // A session-scoped method resolves its app FROM the session — the doc on
+  // `WireExtensionContext.app` says "app-scoped OR session-scoped", and only
+  // the first half was ever true. `session/*` params carry no `appId`, so a
+  // handler needing app-level state (the `fanIn` lineage walk in
+  // `session/send`) had nothing to ask. An explicit `appId` still wins: it is
+  // what the consistency check below is checking against.
+  const app = appId ? host.app(appId) : found?.app;
+  let session = found?.session;
 
   // Consistency check — if both appId and sessionId are provided, the
   // session must live under that app. Mismatch drops `session` to
@@ -692,13 +700,19 @@ function buildTransportSlot(reqId: JsonRpcId, sink: DispatchSink): WireExtension
   };
 }
 
+/**
+ * Resolve a session by id across the mounted apps, and answer WHICH app owns
+ * it. The owner is not a bonus fact: it is how a session-scoped handler reaches
+ * app-level state (`ctx.app`) at all, since `session/*` params name a session
+ * and never an app.
+ */
 function findSessionOrUndef(
   host: GatewayHarnessProtocol,
   sessionId: string,
-): SessionHarnessProtocol | undefined {
+): { session: SessionHarnessProtocol; app: AppHarnessProtocol } | undefined {
   for (const app of host.apps()) {
     const sess = app.getSession(sessionId);
-    if (sess) return sess;
+    if (sess) return { session: sess, app };
   }
   return undefined;
 }
