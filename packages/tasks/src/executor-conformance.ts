@@ -94,8 +94,8 @@ export function runTaskExecutorConformance(opts: TaskExecutorConformanceOptions)
         );
         expect(progress.length).toBeGreaterThanOrEqual(3);
         // Monotonic non-decreasing `current` — ordered delivery, not raced.
-        const currents = progress.map((p) => p.current);
-        expect(currents).toEqual([...currents].sort((a, b) => a - b));
+        const counts = progress.map((p) => p.progress);
+        expect(counts).toEqual([...counts].sort((a, b) => a - b));
         await handle.result;
         expect(shell.harness.status(handle.taskId)).toBe("completed");
       } finally {

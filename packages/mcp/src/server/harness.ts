@@ -44,10 +44,12 @@ import type {
   Operation,
   OperationJournal,
   ProgressToken,
+  ProgressUpdate,
   Prompts,
   Resources,
 } from "@agentick/spec";
 import {
+  createProgress,
   DEFAULT_JOURNALING_POLICY,
   deriveHookNames,
   HandlerError,
@@ -843,6 +845,9 @@ export class McpServerHarness
       // connection (`installLogProjection` forwards it to
       // `notifications/message`); `trace`/`metrics` go to the telemetry
       // provider, off-path until the in-fiber re-attach.
+      // One id for this request, reused as the ctx's `toolCallId` and as the
+      // `progress.begin()` token when the client did not supply one.
+      const requestToolCallId = `mcp:req:${ulid()}`;
       const built = deriveContext(
         requestScope,
         {
@@ -862,7 +867,7 @@ export class McpServerHarness
           // until the tool-call handler runs (the tools projection overwrites
           // this default per-call); `task` defaults to `"auto"` until per-call
           // wire metadata flips it.
-          toolCallId: `mcp:req:${ulid()}`,
+          toolCallId: requestToolCallId,
           // #254 — the CALLER's cancellation, straight from the SDK request
           // handler (`RequestHandlerExtra.signal`): it fires on
           // `notifications/cancelled` for this request id AND on connection
@@ -877,10 +882,14 @@ export class McpServerHarness
           emit: () => {
             /* no-op for MCP-server ctx — sessions own channel emit */
           },
-          progress: (
-            token: ProgressToken,
-            p: { progress: number; total?: number; message?: string },
-          ): void => {
+          // ADR 64 — the callable progress surface. The raw call door takes an
+          // explicit token (the spelling that echoes the client's
+          // `_meta.progressToken` back under the id it correlates on);
+          // `.begin()` mints a reporter on the token this request already has
+          // — the client's when it opted into progress, the synthetic request
+          // id otherwise. Either way one bus event per frame, which the
+          // progress projection forwards to `notifications/progress`.
+          progress: createProgress((token: ProgressToken, p: ProgressUpdate): void => {
             void Effect.runFork(
               this.emitProgress(connectionScope, {
                 token,
@@ -889,7 +898,7 @@ export class McpServerHarness
                 ...(p.message !== undefined ? { message: p.message } : {}),
               }),
             );
-          },
+          }, overrides?.progressToken ?? requestToolCallId),
           task: "auto" as const,
           transport: "mcp" as const,
           // #171d.3 — the server's TasksHarness. Handlers calling
@@ -1261,9 +1270,10 @@ export class McpServerHarness
         emit: () => {
           /* no-op — no channel behind an off-connection crossing */
         },
-        progress: () => {
-          /* no-op — no progress token before the SDK sees the request */
-        },
+        // No progress token before the SDK sees the request — frames go
+        // nowhere, but the surface keeps its shape so handler code that reaches
+        // for `.begin()` does not have to branch on which ctx it got.
+        progress: createProgress(() => {}, `mcp:preconnect:${ulid()}`),
         task: "auto" as const,
         transport: "mcp" as const,
         tasks: this.serverTasks,

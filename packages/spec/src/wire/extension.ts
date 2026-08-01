@@ -182,16 +182,22 @@ export interface WireOpConfig<K extends WireMethod = WireMethod> {
 export type WireClusterRoute = "session-local" | "any" | "leader";
 
 /**
- * Progress reporter for a single in-flight RPC. Returned by
- * {@link WireExtensionTransport.progress}. Cursor tracking is
+ * The write half of one RPC's progress stream — the server-side counterpart of
+ * the client's {@link import("../client/transport.js").ProgressStream}.
+ * Returned by {@link WireExtensionTransport.progress}. Cursor tracking is
  * internal — each `push` auto-increments and stamps the outbound
- * `notifications/progress` frame with a monotonically increasing
- * cursor.
+ * `notifications/progress` frame with a monotonically increasing cursor.
+ *
+ * Carries ARBITRARY extension-defined envelopes, which is why it is a stream
+ * writer and not a {@link import("../data/signals.js").ProgressReporter}: that
+ * one counts determinate/indeterminate work in the
+ * {@link import("../data/signals.js").ProgressUpdate} grammar, this one is a
+ * transport for whatever an extension wants to stream under a progress token.
  *
  * Progress delivery is fire-and-forget — cluster-distributed
  * routing failures don't surface to the extension.
  */
-export interface ProgressReporter {
+export interface ProgressStreamWriter {
   /**
    * Push one progress envelope. Extensions define envelope shape;
    * the framework wraps it in the `notifications/progress`
@@ -261,7 +267,7 @@ export interface WireExtensionTransport {
    * Extensions that don't want progress simply never call this
    * method.
    */
-  progress(progressToken: string | number): ProgressReporter;
+  progress(progressToken: string | number): ProgressStreamWriter;
 
   /**
    * Register an abort callback fired when the client sends

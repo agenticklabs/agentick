@@ -458,7 +458,7 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     teardown.push(() => session.close());
 
     // Track local progress events on the TasksHarness's bus.
-    const localProgress: Array<{ current: number; total?: number; message?: string }> = [];
+    const localProgress: Array<{ progress: number; total?: number; message?: string }> = [];
     const dispatchP = session.tools.dispatch("tasksvr__slow_task", { label: "z" });
     void drainRejection(dispatchP);
 
@@ -468,10 +468,10 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
 
     const eventStreamP = (async () => {
       for await (const event of session.tasks.events(localTaskId)) {
-        const e = event as { kind: string; current?: number; total?: number; message?: string };
+        const e = event as { kind: string; progress?: number; total?: number; message?: string };
         if (e.kind === "progress") {
           localProgress.push({
-            current: e.current!,
+            progress: e.progress!,
             ...omitUndefined({ total: e.total, message: e.message }),
           });
         }
@@ -488,8 +488,8 @@ describe("withMCP — taskSupport:'required' end-to-end", () => {
     await drainRejection(eventStreamP);
 
     expect(localProgress.length).toBeGreaterThanOrEqual(2);
-    expect(localProgress[0]).toMatchObject({ current: 1, total: 3, message: "step 1" });
-    expect(localProgress[1]).toMatchObject({ current: 2, total: 3, message: "step 2" });
+    expect(localProgress[0]).toMatchObject({ progress: 1, total: 3, message: "step 1" });
+    expect(localProgress[1]).toMatchObject({ progress: 2, total: 3, message: "step 2" });
   });
 });
 

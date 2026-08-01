@@ -39,9 +39,9 @@ runTaskExecutorConformance({
               // before emission (in-process work would otherwise emit
               // synchronously during submit, before anyone subscribed).
               await new Promise((r) => setTimeout(r, 25));
-              onProgress({ current: 1, total: 3 });
-              onProgress({ current: 2, total: 3 });
-              onProgress({ current: 3, total: 3 });
+              onProgress({ progress: 1, total: 3 });
+              onProgress({ progress: 2, total: 3 });
+              onProgress({ progress: 3, total: 3 });
               return [{ type: "text", text: "progress-done" } as ContentBlock];
             });
           case "thrower":

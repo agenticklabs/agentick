@@ -20,7 +20,7 @@ import type { Observability } from "./observability.js";
 import type { Ops } from "./ops.js";
 import type { RuntimeContext } from "./runtime-context.js";
 import type { ToolResultInput } from "./tool-result.js";
-import type { ProgressToken } from "./signals.js";
+import type { Progress, ProgressToken } from "./signals.js";
 
 // ============================================================================
 // Channel emit seed
@@ -118,18 +118,36 @@ export interface ToolHandlerCtx
   // telemetry surface (no-ops off); `run` mints a journaled operation.
 
   /**
-   * Emit a structured `progress` signal — out-of-band liveness for
+   * The structured `progress` signal surface — out-of-band liveness for
    * long-running work (ADR 64). ALWAYS present on every transport (see
    * {@link log} for the emit-once / project-everywhere rationale). The
-   * MCP-server projection forwards to `notifications/progress`
-   * correlated by `token`; the agentick client receives via the
-   * existing per-token progress stream.
+   * MCP-server projection forwards to `notifications/progress` correlated by
+   * `token`; the agentick client receives via the existing per-token progress
+   * stream.
+   *
+   * A CALLABLE OBJECT, exactly like `ctx.log`:
+   *
+   * ```ts
+   * const p = ctx.progress.begin({ total: files.length }); // the everyday door
+   * for (const f of files) p.advance(1, f.name);
+   * p.done();
+   *
+   * ctx.progress(ctx.mcp!.progressToken!, { progress: 3, total: 10 }); // the raw door
+   * ```
+   *
+   * `begin()` mints the token from the dispatch (the tool call id), so a
+   * handler never invents one, and the returned reporter
+   * upholds the four laws on {@link import("./signals.js").ProgressUpdate} by
+   * construction.
+   * The call form stays the raw door — reach for it to echo a token that came
+   * from somewhere else (an MCP client's `_meta.progressToken`) or when the
+   * handler owns its own counting.
    *
    * Fire-and-forget — NEVER a control path; never awaited, never throws.
    *
    * @see docs/proposals/v2/blueprint/64-runtime-signal-family.md
    */
-  progress(token: ProgressToken, p: { progress: number; total?: number; message?: string }): void;
+  readonly progress: Progress;
 
   /**
    * Caller-resolved task mode for THIS dispatch. Mirrors

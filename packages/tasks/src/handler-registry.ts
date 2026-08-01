@@ -94,7 +94,7 @@ const DEFAULT_REGISTRY = new TaskHandlerRegistry();
  * registerTaskHandler<{ target: string }, readonly ContentBlock[]>(
  *   "deploy",
  *   async (ctx, input) => {
- *     ctx.onProgress({ current: 0, total: 1, message: `deploying ${input.target}` });
+ *     ctx.progress.begin({ total: 1, message: `deploying ${input.target}` });
  *     await deploy(input.target, ctx.signal);
  *     return [{ type: "text", text: "deployed" }];
  *   },

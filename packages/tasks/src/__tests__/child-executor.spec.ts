@@ -82,7 +82,7 @@ describe("ChildProcessTaskExecutor — fork + IPC round-trip", () => {
 
     const progress: number[] = [];
     for await (const event of handle.events()) {
-      if (event.kind === "progress") progress.push(event.current);
+      if (event.kind === "progress") progress.push(event.progress);
     }
     await handle.result;
     expect(progress).toEqual([1, 2, 3]);

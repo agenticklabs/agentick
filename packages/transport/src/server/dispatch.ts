@@ -34,7 +34,7 @@ import {
   type JsonRpcId,
   type JsonRpcRequest,
   type JsonRpcResponse,
-  type ProgressReporter,
+  type ProgressStreamWriter,
   type SessionHarnessProtocol,
   type SubscriptionHandle,
   type WireExtension,
@@ -629,7 +629,7 @@ function buildTransportSlot(reqId: JsonRpcId, sink: DispatchSink): WireExtension
     // scope the signal subscription, so the stitch lives there, not in
     // this transport-generic slot builder. This slot just wraps each
     // pushed envelope in the wire `notifications/progress` frame.
-    progress(progressToken): ProgressReporter {
+    progress(progressToken): ProgressStreamWriter {
       let cursor = 0;
       return {
         push(envelope) {

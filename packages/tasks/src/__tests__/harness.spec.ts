@@ -8,8 +8,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ProtocolEvent, TaskEvent, TaskInfo, TaskRejection } from "@agentick/spec";
 import type { LocalEventBus } from "@agentick/runtime";
 import { drainRejection } from "@agentick/utils/testing";
+import { stubStoreCtx } from "@agentick/store";
 
 import { TASK_PROGRESS_CHANNEL_FQN, TASK_STATUS_CHANNEL_FQN } from "../channel.js";
+import { InMemoryTaskStore } from "../store.js";
 import { fakeTasks, type FakeTasksBundle } from "../testing/fake-tasks.js";
 
 // ---------------------------------------------------------------------------
@@ -152,9 +154,9 @@ describe("TasksHarness — bus envelopes", () => {
     const progressP = takeProgressEnvelopes(bundle.bus, 3);
 
     const handle = bundle.harness.submit(async ({ onProgress }) => {
-      onProgress({ current: 1, total: 3 });
-      onProgress({ current: 2, total: 3, message: "halfway" });
-      onProgress({ current: 3, total: 3, message: "done" });
+      onProgress({ progress: 1, total: 3 });
+      onProgress({ progress: 2, total: 3, message: "halfway" });
+      onProgress({ progress: 3, total: 3, message: "done" });
       return "complete";
     });
 
@@ -165,23 +167,77 @@ describe("TasksHarness — bus envelopes", () => {
       (e) =>
         e.payload as {
           taskId: string;
-          current: number;
+          progress: number;
           total?: number;
           message?: string;
         },
     );
-    expect(payloads[0]).toEqual({ taskId: handle.taskId, current: 1, total: 3 });
+    expect(payloads[0]).toEqual({ taskId: handle.taskId, progress: 1, total: 3 });
     expect(payloads[1]).toEqual({
       taskId: handle.taskId,
-      current: 2,
+      progress: 2,
       total: 3,
       message: "halfway",
     });
     expect(payloads[2]).toEqual({
       taskId: handle.taskId,
-      current: 3,
+      progress: 3,
       total: 3,
       message: "done",
+    });
+  });
+
+  it("ctx.progress.begin() publishes the SAME grammar on task-progress, keyed by task id", async () => {
+    bundle = await fakeTasks();
+    const progressP = takeProgressEnvelopes(bundle.bus, 3);
+
+    const handle = bundle.harness.submit(async ({ progress }) => {
+      // The task's own id is the token — the work body invents nothing, and the
+      // frames are the same `{ progress, total?, message? }` a tool's
+      // `ctx.progress.begin()` emits.
+      const bar = progress.begin({ total: 2, message: "starting" });
+      bar.advance(1, "first");
+      bar.done();
+      return "complete";
+    });
+
+    await handle.result;
+    expect((await progressP).map((e) => e.payload)).toEqual([
+      { taskId: handle.taskId, progress: 0, total: 2, message: "starting" },
+      { taskId: handle.taskId, progress: 1, total: 2, message: "first" },
+      { taskId: handle.taskId, progress: 2, total: 2 },
+    ]);
+  });
+
+  it("an indeterminate task reporter never publishes total", async () => {
+    bundle = await fakeTasks();
+    const progressP = takeProgressEnvelopes(bundle.bus, 2);
+
+    const handle = bundle.harness.submit(async ({ progress }) => {
+      const spinner = progress.begin({ message: "scanning" });
+      spinner.advance(3);
+      return "complete";
+    });
+
+    await handle.result;
+    expect((await progressP).map((e) => e.payload)).toEqual([
+      { taskId: handle.taskId, progress: 0, message: "scanning" },
+      { taskId: handle.taskId, progress: 3 },
+    ]);
+  });
+
+  it("the reporter's last frame is the durable record's progress fold, same three fields", async () => {
+    const store = new InMemoryTaskStore();
+    bundle = await fakeTasks({ store });
+    const handle = bundle.harness.submit(async ({ progress }) => {
+      progress.begin({ total: 4 }).advance(2, "halfway");
+      return "complete";
+    });
+    await handle.result;
+    expect((await store.get(handle.taskId, stubStoreCtx()))?.progress).toEqual({
+      progress: 2,
+      total: 4,
+      message: "halfway",
     });
   });
 
@@ -319,8 +375,8 @@ describe("TasksHarness — events()", () => {
     const handle = bundle.harness.submit(async ({ onProgress }) => {
       // Wait for the consumer to subscribe before emitting progress
       while (!started) await new Promise((r) => setTimeout(r, 5));
-      onProgress({ current: 1 });
-      onProgress({ current: 2 });
+      onProgress({ progress: 1 });
+      onProgress({ progress: 2 });
       return "done";
     });
 
@@ -510,9 +566,9 @@ describe("TasksHarness — Effect-typed work", () => {
     bundle = await fakeTasks();
     const handle = bundle.harness.submit((ctx) =>
       Effect.gen(function* () {
-        yield* Effect.sync(() => ctx.onProgress({ current: 1, total: 3 }));
-        yield* Effect.sync(() => ctx.onProgress({ current: 2, total: 3 }));
-        yield* Effect.sync(() => ctx.onProgress({ current: 3, total: 3 }));
+        yield* Effect.sync(() => ctx.onProgress({ progress: 1, total: 3 }));
+        yield* Effect.sync(() => ctx.onProgress({ progress: 2, total: 3 }));
+        yield* Effect.sync(() => ctx.onProgress({ progress: 3, total: 3 }));
         return "done";
       }),
     );

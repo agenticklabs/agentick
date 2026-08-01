@@ -262,9 +262,9 @@ export function runTasksHarnessConformance(factory: TasksConformanceFactory): vo
         let started = false;
         const handle = shell.harness.submit(async ({ onProgress }) => {
           while (!started) await new Promise((r) => setTimeout(r, 5));
-          onProgress({ current: 1, total: 3 });
-          onProgress({ current: 2, total: 3 });
-          onProgress({ current: 3, total: 3 });
+          onProgress({ progress: 1, total: 3 });
+          onProgress({ progress: 2, total: 3 });
+          onProgress({ progress: 3, total: 3 });
           return "complete";
         });
 

@@ -37,13 +37,8 @@ import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
 import type { CollectionStore } from "./store.js";
 import type { StoreCtx } from "./store-ctx.js";
-import type {
-  ProgressUpdate,
-  TaskFailure,
-  TaskStatus,
-  TaskWorkContext,
-  TaskWorkVerbs,
-} from "./tasks-harness.js";
+import type { ProgressUpdate } from "../data/signals.js";
+import type { TaskFailure, TaskStatus, TaskWorkContext, TaskWorkVerbs } from "./tasks-harness.js";
 import type { Elicit, ElicitFn } from "./elicit-api.js";
 
 // ============================================================================
@@ -88,12 +83,8 @@ export interface TaskRecord {
   readonly result?: unknown;
   /** Structured failure on `failed` / `cancelled` / `interrupted`. */
   readonly failure?: TaskFailure;
-  /** Latest progress fold (ADR 68 field name; the wire keeps `current`). */
-  readonly progress?: {
-    readonly progress: number;
-    readonly total?: number;
-    readonly message?: string;
-  };
+  /** Latest progress fold — one {@link ProgressUpdate}, the same grammar the wire carries. */
+  readonly progress?: ProgressUpdate;
   /** Reattach handle for out-of-process executors (child pid, microvmId, …). */
   readonly executorState?: unknown;
   // ─── TaskInfo-reconstructing fields (so a hydrated record rebuilds the snapshot) ───

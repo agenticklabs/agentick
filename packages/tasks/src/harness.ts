@@ -695,7 +695,7 @@ export class TasksHarness
         ...record,
         updatedAt: now,
         progress: {
-          progress: p.current,
+          progress: p.progress,
           ...omitUndefined({ total: p.total, message: p.message }),
         },
       };
@@ -1185,7 +1185,7 @@ export class TasksHarness
     live.eventBus.publish({
       kind: "progress",
       taskId: live.record.taskId,
-      current: update.current,
+      progress: update.progress,
       ...omitUndefined({ total: update.total, message: update.message }),
     });
   }
@@ -1206,7 +1206,7 @@ export class TasksHarness
     void Effect.runPromise(
       this.publishOnChannel(TASK_PROGRESS_CHANNEL, {
         taskId: event.taskId,
-        current: event.current,
+        progress: event.progress,
         ...omitUndefined({ total: event.total, message: event.message }),
       }),
     ).catch(() => undefined);

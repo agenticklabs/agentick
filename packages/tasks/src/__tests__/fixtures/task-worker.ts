@@ -25,9 +25,9 @@ registerTaskHandler<unknown, unknown>("roundtrip", (_ctx, input) => input);
 
 // `progress` — emits three ordered progress updates then completes.
 registerTaskHandler<unknown, readonly ContentBlock[]>("progress", async (ctx) => {
-  ctx.onProgress({ current: 1, total: 3 });
-  ctx.onProgress({ current: 2, total: 3 });
-  ctx.onProgress({ current: 3, total: 3 });
+  ctx.onProgress({ progress: 1, total: 3 });
+  ctx.onProgress({ progress: 2, total: 3 });
+  ctx.onProgress({ progress: 3, total: 3 });
   return [{ type: "text", text: "progress-done" }];
 });
 

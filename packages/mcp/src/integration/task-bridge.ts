@@ -152,8 +152,10 @@ function foldUntilTerminal(
       (_, note) => {
         if (note.kind === "progress") {
           const p = note.notification.params;
+          // A straight pass-through since the task grammar and the MCP wire
+          // frame are the same three fields — no field renaming at the boundary.
           workCtx.onProgress({
-            current: p.progress,
+            progress: p.progress,
             ...omitUndefined({ total: p.total, message: p.message }),
           });
           return undefined;

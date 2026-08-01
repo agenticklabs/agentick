@@ -49,6 +49,7 @@ import type {
   Operation,
   OperationJournal,
   ProgressToken,
+  ProgressUpdate,
   RegisterToolInput,
   RemoveBoundToolsInput,
   RespondToToolCallInput,
@@ -68,7 +69,7 @@ import type {
   ToolsHandle,
   UnregisterToolInput,
 } from "@agentick/spec";
-import { normalizeToolResult, TOOL_NARRATION_FIELD } from "@agentick/spec";
+import { createProgress, normalizeToolResult, TOOL_NARRATION_FIELD } from "@agentick/spec";
 import { viaToOrigin } from "./provenance.js";
 import { createToolsHandle } from "./tools-handle.js";
 import {
@@ -933,14 +934,15 @@ export class ToolExecutorHarness
           // ONE discrete bus event (`tool:signal:log`, phase `terminal`,
           // bus-only) scoped to this dispatch; projections subscribe (MCP →
           // notifications/message; agentick client → subscribe/onLog).
-          // ADR 64 — `progress` signal. Emits ONE discrete bus event
-          // (`tool:signal:progress`, phase `terminal`, bus-only) scoped to
-          // this dispatch. Fire-and-forget: launched with `Effect.runFork`,
-          // never awaited, never throws into the handler.
-          progress: (
-            token: ProgressToken,
-            p: { progress: number; total?: number; message?: string },
-          ): void => {
+          // ADR 64 — `progress` signal. Every form (the raw call door and the
+          // frames a `begin()` reporter emits) collapses to ONE discrete bus
+          // event (`tool:signal:progress`, phase `terminal`, bus-only) scoped
+          // to this dispatch, through the SAME emission below. Fire-and-forget:
+          // launched with `Effect.runFork`, never awaited, never throws into
+          // the handler. `begin()` bakes in the tool call id as the token — the
+          // dispatch already has a correlation id, so a handler never invents
+          // one.
+          progress: createProgress((token: ProgressToken, p: ProgressUpdate): void => {
             void Effect.runFork(
               this.emitProgress(dispatchScope, {
                 token,
@@ -949,7 +951,7 @@ export class ToolExecutorHarness
                 ...(p.message !== undefined ? { message: p.message } : {}),
               }),
             );
-          },
+          }, input.toolCallId),
         },
       );
       // The dispatch seam demands the brand: only a `deriveContext` output

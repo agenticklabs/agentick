@@ -75,14 +75,16 @@ const SlowCompute = createTool({
   }),
   handler: async ({ steps }, { ctx }) => {
     return ctx.tasks!.submit(
-      async ({ signal, onProgress }) => {
+      async ({ signal, progress }) => {
+        const bar = progress.begin({ total: steps, message: "computing" });
         let acc = 1;
         for (let i = 1; i <= steps; i++) {
           if (signal.aborted) throw new DOMException("aborted", "AbortError");
           await new Promise<void>((r) => setTimeout(r, 50));
           acc = acc * i;
-          onProgress({ current: i, total: steps, message: `step ${i}/${steps} (acc=${acc})` });
+          bar.advance(1, `step ${i}/${steps} (acc=${acc})`);
         }
+        bar.done();
         return [{ type: "text", text: `slow_compute(${steps}) = ${acc}` } as ContentBlock];
       },
       { statusMessage: "computing" },
@@ -115,7 +117,7 @@ const DeployBranch = createTool({
   annotations: { taskSupport: "required" },
   handler: async ({ branch, environment }, { ctx }) => {
     return ctx.tasks!.submit(
-      async ({ signal, onProgress, setStatusMessage }) => {
+      async ({ signal, progress, setStatusMessage }) => {
         const stages = [
           ["building", 400],
           ["uploading-artifacts", 600],
@@ -123,15 +125,15 @@ const DeployBranch = createTool({
           ["routing-traffic", 400],
           ["smoke-tests", 200],
         ] as const;
-        let elapsed = 0;
         const total = stages.reduce((sum, [, ms]) => sum + ms, 0);
+        const bar = progress.begin({ total });
         for (const [stage, ms] of stages) {
           if (signal.aborted) throw new DOMException("aborted", "AbortError");
           setStatusMessage(stage);
           await new Promise<void>((r) => setTimeout(r, ms));
-          elapsed += ms;
-          onProgress({ current: elapsed, total, message: stage });
+          bar.advance(ms, stage);
         }
+        bar.done();
         return [
           {
             type: "text",

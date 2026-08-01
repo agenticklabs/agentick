@@ -32,7 +32,9 @@
 
 import { Cause, Effect, Fiber } from "effect";
 import { causeValue, reasonOf } from "@agentick/utils";
+import { createProgressBegin } from "@agentick/spec";
 import type {
+  ProgressUpdate,
   TaskExecution,
   TaskExecutor,
   TaskExecutorHooks,
@@ -106,9 +108,15 @@ export class InProcessTaskExecutor implements TaskExecutor {
     // funnel into the ONE report path. The signal is harness-owned (aborts on
     // cancel / close); the work fn observes it. `elicit` composes escalation
     // (ADR 69) over `awaitingInput` + the harness `hooks`.
+    const onProgress = (update: ProgressUpdate): void => report({ progress: update });
     const verbs: TaskWorkVerbs = {
       signal,
-      onProgress: (update) => report({ progress: update }),
+      // Both doors funnel into the ONE report path — `progress.begin()` mints a
+      // reporter whose frames are the same `ProgressUpdate`s `onProgress` takes
+      // verbatim. The task's own id is the correlation token, so a work body
+      // never invents one.
+      progress: createProgressBegin(onProgress),
+      onProgress,
       setStatusMessage: (message) => report({ statusMessage: message }),
       awaitingInput,
       elicit: buildTaskElicit({ record, awaitingInput, hooks }),

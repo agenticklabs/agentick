@@ -251,6 +251,8 @@ Small, total, and shared — each exists because a second hand-rolled copy would
 | `normalizeToolResult` · `toContentBlocks`                               | Tool-return normalization into content blocks                                |
 | `resolveToolOutputBounder(options?)`                                    | Build the tool-output size bounder from options; overridable, off-switchable |
 | `logEventName` · `progressEventName` · `channelEventName`               | The canonical `<surface>:<domain>:<action>` name builders                    |
+| `createProgressReporter(emit, opts?)`                                   | A progress counter that cannot break the four laws below                     |
+| `createLog(emit)` · `createProgress(emit, token)`                       | The callable-object `ctx.log` / `ctx.progress` surfaces                      |
 | `logEventQuery` · `progressEventQuery` · `timelineEventQuery`           | Cross-surface subscriber queries over those names                            |
 | `defineWireExtension(input)`                                            | Validate and normalize a wire extension declaration                          |
 | `validateJsonRpcInput` · `validateJsonRpcFrame`                         | Frame validation for transports                                              |
@@ -281,6 +283,29 @@ if (parsed.ok) {
   console.error(parsed.reason, parsed.issues, parsed.text);
 }
 ```
+
+### Progress, and the four laws
+
+`ProgressUpdate` — `{ progress, total?, message? }` — is the one progress grammar in the framework. A tool's `ctx.progress`, a task's progress stream, and MCP's `notifications/progress` all speak it, byte for byte, so nothing translates at a boundary. Four rules hold, and `createProgressReporter` enforces all four so a caller cannot break them by hand:
+
+1. **Every frame classifies alone.** `total` present means determinate — draw a bar; absent means indeterminate — draw a spinner. Nothing about the stream's history is needed to decide, which is what makes a client that connects mid-flight render correctly from the first frame it sees.
+2. **The ratchet is one-way.** A stream may learn its denominator once, mid-flight, and turn a spinner into a bar. It never goes back, and a total once set never changes.
+3. **Progress never decreases** for a token.
+4. **Terminal is the operation's business, not the frame's.** There is no `done` field. The tool call resolving, or the task reaching a terminal status, is what closes the bar — which is exactly why the frame stays byte-identical to the MCP wire shape.
+
+```ts
+const bar = createProgressReporter((update) => emitSomewhere(update), { total: files.length });
+for (const f of files) bar.advance(1, f.name);
+bar.done();
+
+const spinner = createProgressReporter(emit); // no total: never fake a denominator
+spinner.note("scanning");
+spinner.total(entries.length); // learned it — the one legal upgrade; throws on a second call
+```
+
+Construction emits one opening frame at zero, so a UI shows the affordance the moment work starts rather than at the first `advance()`. `advance` / `set` / `note` / `done` never throw — a bad number is clamped or ignored, because a glitch in a progress call must not take down the work it describes. `total()` is the exception: it throws on a ratchet violation, which is a bug, not a data glitch.
+
+Client-side, [@agentick/client-core](../client-core)'s `progressView` folds these frames into render-ready state and re-validates every law, because not every emitter on the bus is one of ours.
 
 ### Usage → cost
 
@@ -476,6 +501,7 @@ Both shapes derive from one underlying run: iterating does not change the summar
 - `src/__tests__/usage-cost.spec.ts` — also the query-time tree rollup: attribution at any depth with a sibling tree excluded, the same records answering a different root, a descendant with usage and no cost degrading the whole tree to `partial`, and a zero-usage descendant correctly _not_ degrading it.
 - `src/__tests__/usage-cost.spec.ts` — the money arithmetic and the honesty rule: cache reads and writes are not double-charged, reasoning splits from output only when a reasoning rate exists, the flat per-call fee applies once (including on a zero-token call), rounding is deferred to one final division and is order-independent, a resolver beats declared rates and a resolver-returned `Cost` is used verbatim, an unpriced tick folds to `partial` rather than a complete zero, a foreign-currency tick is counted unpriced instead of summed, and a two-model fold partitions `byModel` while the flat total still equals their sum.
 - `src/__tests__/wire.spec.ts`, `wire-extension.spec.ts`, `wire-proxy.type.spec.ts` — JSON-RPC envelopes and guards, batches, error codes, subscription scope, the initialize handshake, validator accept/reject and JSON round-trip, the `WireMethods` / `WireNotifications` registries, `defineWireExtension` happy path and each rejection, and the type-level wire-proxy surface.
+- `src/__tests__/progress-reporter.spec.ts` — each of the four laws in turn: the opening frame, monotonic `advance`/`set`, clamping, the ratchet (once, unchangeable, throwing on violation), that every determinate frame carries `total` and no indeterminate frame does, `done` idempotence with every later emission dropped, and the message-only frame.
 - `src/__tests__/signals.spec.ts`, `channels.spec.ts`, `timeline.spec.ts` — the signal, channel, and timeline event-name builders and their query shapes. Cross-surface query _matching_ is verified against the real matcher in [@agentick/runtime](../runtime).
 - `src/__tests__/event-log.spec.ts`, `version.spec.ts` — the `EventLog<E>` contract with its cursor, compiled matcher, eviction error, and metrics; and that `SPEC_VERSION` is a date string.
 - `src/errors/__tests__/base.spec.ts`, `codec.spec.ts`, `registry.spec.ts`, `effect-interop.spec.ts` — the abstract root and its JSON projection, codec round-trip for known and unknown tags with input validation, registry duplicate-rejection, and `Effect.catchTag` narrowing.

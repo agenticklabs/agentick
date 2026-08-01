@@ -44,6 +44,12 @@ export { liveStore, type LiveStore } from "./live-store.js";
 export { channelView, type ChannelView, type ChannelViewConfig } from "./channel-view.js";
 export { channelStream, type ChannelStream, type ChannelClient } from "./channel-stream.js";
 export {
+  foldProgress,
+  progressView,
+  type ProgressState,
+  type ProgressStates,
+} from "./progress-view.js";
+export {
   knownSessionHandleExtensionImports,
   registerSessionHandleExtension,
   registeredSessionHandleExtensions,

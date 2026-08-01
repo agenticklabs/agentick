@@ -28,10 +28,11 @@ export const deployHandler: ToolHandler = async (input, { ctx }) => {
 
   const handle = ctx.tasks!.submit(async (task) => {
     task.setStatusMessage(`deploying ${target}`);
+    const bar = task.progress.begin({ total: 3 });
     for (let step = 0; step < 3; step++) {
       task.signal.throwIfAborted();
-      task.onProgress({ current: step, total: 3 });
       await runStep(step, target);
+      bar.advance();
     }
     return [{ type: "text" as const, text: `deployed ${target}` }];
   });
@@ -182,7 +183,7 @@ The worker module registers handlers and hands control to the IPC driver:
 import { registerTaskHandler, runTaskWorker } from "@agentick/tasks";
 
 registerTaskHandler<{ target: string }>("deploy", async (task, input) => {
-  task.onProgress({ current: 0, total: 1, message: `deploying ${input.target}` });
+  task.progress.begin({ total: 1, message: `deploying ${input.target}` });
   await runDeploy(input.target, task.signal);
   return [{ type: "text" as const, text: "deployed" }];
 });
@@ -204,16 +205,34 @@ runTaskExecutorConformance({ label: "my-executor", setup: () => makeShell() });
 
 ## Watching a task
 
-Every transition publishes on two channels — `task-status` carrying a `TaskInfo`, and `task-progress` carrying `{ taskId, current, total?, message? }`. Two channels rather than one discriminated stream, so a task list and a progress bar can subscribe to different things.
+Every transition publishes on two channels — `task-status` carrying a `TaskInfo`, and `task-progress` carrying `{ taskId, progress, total?, message? }`. Two channels rather than one discriminated stream, so a task list and a progress bar can subscribe to different things.
 
 In process, the handle is the stream. It opens with a synthesized snapshot and closes on the terminal frame:
 
 ```ts
 for await (const event of handle.events()) {
-  if (event.kind === "progress") render(event.current, event.total);
+  if (event.kind === "progress") render(event.progress, event.total);
   else if (event.kind === "status") setStatus(event.info.status);
 }
 ```
+
+### One progress grammar
+
+A task's progress frame is a `ProgressUpdate` — `{ progress, total?, message? }` — the same three fields a tool's `ctx.progress` emits and the same three MCP's `notifications/progress` carries. Nothing is renamed at any boundary, so a progress bar written against one folds the other, and [@agentick/client-core](../client-core)'s `progressView` works on both.
+
+Two doors into it, mirroring the tool side:
+
+```ts
+const bar = task.progress.begin({ total: rows.length }); // the everyday door
+for (const row of rows) bar.advance(1, row.name);
+bar.done();
+
+task.onProgress({ progress: 12, total: 40 }); // the raw door — hand over a whole frame
+```
+
+The task's own id is the correlation token, so a work body never invents one. `begin()` emits an opening frame at zero, counts and clamps for you, and refuses to move backwards. Omit `total` when you genuinely don't know it — a spinner that tells the truth beats a fabricated denominator — and call `bar.total(n)` once if you learn it mid-flight.
+
+Both doors funnel through the same report seam, so the durable record's progress fold, the `task-progress` channel, and the handle's event stream see identical frames whichever you use.
 
 ## The client side
 
@@ -320,7 +339,7 @@ Types: `TaskStatusClient`, `TaskStatusMap`, `TasksHandle`, `TasksCommandClient`,
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — the state machine end to end: submit through terminal, progress and status-message transitions, cancel winning the race against late work, ttl expiry, post-terminal reports as no-ops, close cancelling non-detached tasks while detached ones survive, and the exact channel payload shapes.
+- `src/__tests__/harness.spec.ts` — the state machine end to end: submit through terminal, progress and status-message transitions, cancel winning the race against late work, ttl expiry, post-terminal reports as no-ops, close cancelling non-detached tasks while detached ones survive, the exact channel payload shapes, and `task.progress.begin()` publishing the unified grammar — determinate and indeterminate — down to the durable record's progress fold.
 - `src/__tests__/conformance.spec.ts` + `conformance.ts` — the protocol invariants: round-trip, typed failure rejection, cancel and double-cancel idempotence, `UnknownTaskError` on unknown ids, snapshot and status reads, the event stream closing on terminal, and close semantics.
 - `src/__tests__/store.spec.ts` + `store-conformance.ts` — put/get round-trip, upsert in place, scope- and status-filtered `list`, delete, and prune restricted to terminal records; plus the ttl reaper's lifetime across `close()` — a surviving detached task keeps its deadline, and cancelling one disarms the reaper so the deadline never rewrites the outcome.
 - `src/__tests__/close-teardown.spec.ts` — teardown isolation: the harness releases its inbox address whether or not the close cancel cascade succeeds (an executor whose `cancel` rejects, a store whose write-through rejects), the ttl sweep after a failed cancel still disarms the reaper, the failure is still reported rather than swallowed, a second close is a no-op, and a close that races construction releases what it claimed. Without it the address stayed claimed and the next session on that id could not register.

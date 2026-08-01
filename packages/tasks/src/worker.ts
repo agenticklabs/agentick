@@ -8,7 +8,7 @@
  * import { registerTaskHandler, runTaskWorker } from "@agentick/tasks";
  *
  * registerTaskHandler("deploy", async (ctx, input) => {
- *   ctx.onProgress({ current: 0, total: 1 });
+ *   const p = ctx.progress.begin({ total: 1 });
  *   await deploy(input, ctx.signal);
  *   return [{ type: "text", text: "deployed" }];
  * });
@@ -41,12 +41,13 @@ import { Effect } from "effect";
 import { reasonOf, ulid } from "@agentick/utils";
 import type {
   Elicit,
+  ProgressUpdate,
   TaskRecord,
   TaskTransition,
   TaskWorkContext,
   TaskWorkVerbs,
 } from "@agentick/spec";
-import { deserializeAgentickError } from "@agentick/spec";
+import { createProgressBegin, deserializeAgentickError } from "@agentick/spec";
 import { deriveContext, type ContextFacets, type RunOperationFn } from "@agentick/runtime";
 
 import { defaultTaskHandlerRegistry, type TaskHandlerRegistry } from "./handler-registry.js";
@@ -306,13 +307,16 @@ async function runOnce(
     return Promise.resolve(input).finally(restore);
   }) as TaskWorkContext["awaitingInput"];
 
+  const onProgress = (update: ProgressUpdate): void => {
+    void send({ t: "transition", transition: { progress: update } });
+  };
   const verbs: TaskWorkVerbs = {
     signal: controller.signal,
     // Progress / status-message updates funnel into the SAME transition
-    // seam as the in-process executor — one field per report.
-    onProgress: (update) => {
-      void send({ t: "transition", transition: { progress: update } });
-    },
+    // seam as the in-process executor — one field per report. Both progress
+    // doors (`progress.begin()` and the raw `onProgress`) share that seam.
+    progress: createProgressBegin(onProgress),
+    onProgress,
     setStatusMessage: (message) => {
       void send({ t: "transition", transition: { statusMessage: message } });
     },

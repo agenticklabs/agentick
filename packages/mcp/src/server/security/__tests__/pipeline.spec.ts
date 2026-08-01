@@ -31,6 +31,7 @@ import { describe, expect, it } from "vitest";
 import type { McpRequestContext } from "@agentick/spec";
 import {
   createLog,
+  createProgress,
   McpServerAuthRejected,
   McpServerAuthzDenied,
   McpServerClosed,
@@ -77,7 +78,7 @@ function ctx(overrides: CtxOverrides = {}): McpRequestContext {
     setState: () => {},
     emit: () => {},
     log: createLog(() => {}),
-    progress: () => {},
+    progress: createProgress(() => {}, "tc:test"),
     trace: (_n, fn) =>
       Promise.resolve(
         fn({ setAttribute() {}, setAttributes() {}, addEvent() {}, recordException() {} }),

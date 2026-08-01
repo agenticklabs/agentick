@@ -28,6 +28,7 @@ import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { EventScope } from "../data/events.js";
 import type { OperationCtx } from "../data/runtime-context.js";
+import type { ProgressBegin, ProgressUpdate } from "../data/signals.js";
 import type { Elicit } from "./elicit-api.js";
 import type { SendInput } from "./session-harness.js";
 
@@ -139,33 +140,19 @@ export interface TaskFailure {
 }
 
 /**
- * Progress update emitted by the task's work function via the
- * `onProgress` callback. The harness materializes this into a
- * `TaskEvent` of kind `"progress"` on the task's event stream.
- */
-export interface ProgressUpdate {
-  /** Absolute progress (units defined by the task). */
-  readonly current: number;
-  /** Total work, if known. Omitted = indeterminate progress. */
-  readonly total?: number;
-  /** Optional UI-friendly status string. */
-  readonly message?: string;
-}
-
-/**
  * Discriminated event yielded by {@link TasksHarnessProtocol.events}.
  *   status   — state transition (working → completed, etc.).
  *   progress — work-in-progress update.
+ *
+ * The progress variant is one {@link ProgressUpdate} keyed by the task's id:
+ * a task's progress stream and the `progress` signal family speak the SAME
+ * grammar (`{ progress, total?, message? }`) and obey the same four laws, so a
+ * progress bar folds either without translation. The task id IS the
+ * correlation token — a task never invents one.
  */
 export type TaskEvent =
   | { readonly kind: "status"; readonly info: TaskInfo }
-  | {
-      readonly kind: "progress";
-      readonly taskId: string;
-      readonly current: number;
-      readonly total?: number;
-      readonly message?: string;
-    };
+  | ({ readonly kind: "progress"; readonly taskId: string } & ProgressUpdate);
 
 // ============================================================================
 // Submission input
@@ -174,7 +161,7 @@ export type TaskEvent =
 /**
  * The task-specific verbs an executor supplies to a running task —
  * `signal` aborts when the task is cancelled or the harness is closed;
- * `onProgress` fans {@link ProgressUpdate} events to subscribers;
+ * `progress` / `onProgress` fan {@link ProgressUpdate} events to subscribers;
  * `setStatusMessage` / `awaitingInput` / `elicit` are the pause + escalation
  * seams. These are the boundary EXTRAS the executor builds locally; the
  * framework composes them over the trunk+facets to form the full
@@ -183,6 +170,27 @@ export type TaskEvent =
  */
 export interface TaskWorkVerbs {
   readonly signal: AbortSignal;
+  /**
+   * Start reporting progress for this task. The everyday door, and the same
+   * spelling a tool handler uses (`ctx.progress.begin(...)`) — the task's own
+   * id is the correlation token, so nothing is invented:
+   *
+   * ```ts
+   * const p = ctx.progress.begin({ total: rows.length });
+   * for (const row of rows) p.advance(1, row.name);
+   * p.done();
+   * ```
+   *
+   * The returned {@link import("../data/signals.js").ProgressReporter} upholds
+   * the four laws on {@link ProgressUpdate} by construction. Reach for
+   * {@link onProgress} instead when the work body already owns its own
+   * counting and wants to hand over whole frames.
+   */
+  readonly progress: ProgressBegin;
+  /**
+   * The raw door — emit one {@link ProgressUpdate} verbatim. Every frame
+   * {@link progress} produces funnels through this same seam.
+   */
   onProgress(update: ProgressUpdate): void;
   /**
    * Update the task's `statusMessage` without emitting a progress
@@ -244,8 +252,8 @@ export interface TaskWorkVerbs {
  * ({@link OperationCtx} — the submitting op's trunk, so a task reads its
  * `sessionId`, plus the `log` / `trace` / `metrics` / `run` facets, so a task
  * can `ctx.log(...)` and open child spans) intersected with the executor's
- * {@link TaskWorkVerbs} (`signal` / `onProgress` / `awaitingInput` / `elicit`
- * / `setStatusMessage`). The harness derives the trunk+facets from the
+ * {@link TaskWorkVerbs} (`signal` / `progress` / `onProgress` / `awaitingInput` /
+ * `elicit` / `setStatusMessage`). The harness derives the trunk+facets from the
  * submitting crossing via `deriveContext` and composes the executor's verbs in
  * as branded boundary extras — see {@link TaskExecutor.start}'s `deriveCtx`.
  */
@@ -482,7 +490,8 @@ export interface TasksHarnessProtocol {
    *
    * Work is invoked with a {@link TaskWorkContext} carrying:
    *   - `signal` — aborts on `cancel()` or harness close.
-   *   - `onProgress(update)` — emits a progress event.
+   *   - `progress.begin(opts)` — a progress reporter for this task.
+   *   - `onProgress(update)` — emits one progress frame verbatim.
    *   - `setStatusMessage(msg)` — updates the task's status string.
    *
    * Work return → task transitions to `completed`; `result` resolves

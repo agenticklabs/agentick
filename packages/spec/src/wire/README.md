@@ -88,7 +88,7 @@ validator).
 
 `WireExtensionContext.transport` exposes typed streaming primitives:
 
-- `progress(progressToken)` — returns a `ProgressReporter` that
+- `progress(progressToken)` — returns a `ProgressStreamWriter` that
   auto-tracks cursor ordering and emits
   `notifications/progress` frames.
 - `registerCancel(abort)` — bridges to

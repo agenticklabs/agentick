@@ -12,7 +12,7 @@
  * @see docs/proposals/v2/blueprint/43-unified-tool-handler-ctx.md
  */
 
-import { createLog } from "@agentick/spec";
+import { createLog, createProgress } from "@agentick/spec";
 import type {
   Elicit,
   ElicitationHarnessProtocol,
@@ -101,7 +101,9 @@ export function fakeToolHandlerCtx(overrides: FakeToolHandlerCtxOverrides = {}):
     // `log` is the callable {@link Log} (level methods + `.with`); the default
     // wraps a no-op emit.
     log: overrides.log ?? createLog(() => {}),
-    progress: overrides.progress ?? (() => {}),
+    // `progress` is the callable {@link Progress} (raw door + `.begin()`); the
+    // default wraps a no-op emit on a fixed token.
+    progress: overrides.progress ?? createProgress(() => {}, overrides.toolCallId ?? "tc:test"),
     // ADR 78 — Observability facet's telemetry half; off-path no-ops.
     trace: overrides.trace ?? ((_name, fn) => Promise.resolve(fn(NOOP_FAKE_SPAN))),
     metrics: overrides.metrics ?? NOOP_FAKE_METRICS,

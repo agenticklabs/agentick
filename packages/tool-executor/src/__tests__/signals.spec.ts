@@ -143,4 +143,68 @@ describe("ctx.log / ctx.progress — in-process dispatch (ADR 64)", () => {
     const ev = events.find((e) => e.name === progressEventName("tool"))!;
     expect(ev.payload).toEqual({ token: 42, progress: 1 });
   });
+
+  it("ctx.progress.begin() reports on the CALL's token — the handler never invents one", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [reg()],
+      handlers: [
+        {
+          handlerRef: "h.signaller",
+          handler: async (_input, { ctx }) => {
+            const p = ctx.progress.begin({ total: 3, message: "starting" });
+            p.advance(1, "one");
+            p.done();
+            return [{ type: "text", text: "ok" }];
+          },
+        },
+      ],
+    });
+
+    const events = await withBusCapture(bus, async () => {
+      await harness.dispatch(dispatchOf());
+    });
+
+    const prog = events.filter((e) => e.name === progressEventName("tool"));
+    // Opening frame, the advance, and the fill — every one on the dispatch's
+    // own tool call id, every one carrying `total` (law 1), all correctly scoped.
+    expect(prog.map((e) => e.payload)).toEqual([
+      { token: "c_signaller", progress: 0, total: 3, message: "starting" },
+      { token: "c_signaller", progress: 1, total: 3, message: "one" },
+      { token: "c_signaller", progress: 3, total: 3 },
+    ]);
+    for (const e of prog) {
+      expect(e.surface).toBe("tool");
+      expect(e.phase).toBe("terminal");
+      expect(e.scope).toMatchObject({ sessionId: "s1", executionId: "e1", tickId: "t1" });
+    }
+  });
+
+  it("an indeterminate begin() never puts total on the wire", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [reg()],
+      handlers: [
+        {
+          handlerRef: "h.signaller",
+          handler: async (_input, { ctx }) => {
+            const p = ctx.progress.begin();
+            p.note("scanning");
+            p.advance();
+            return [{ type: "text", text: "ok" }];
+          },
+        },
+      ],
+    });
+
+    const events = await withBusCapture(bus, async () => {
+      await harness.dispatch(dispatchOf());
+    });
+
+    expect(
+      events.filter((e) => e.name === progressEventName("tool")).map((e) => e.payload),
+    ).toEqual([
+      { token: "c_signaller", progress: 0 },
+      { token: "c_signaller", progress: 0, message: "scanning" },
+      { token: "c_signaller", progress: 1 },
+    ]);
+  });
 });

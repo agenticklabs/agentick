@@ -173,23 +173,25 @@ export const deploy = createTool({
       return { content: "Cancelled by the user.", isError: true };
     }
     ctx.log.info({ event: "deploy.start", env });
-    ctx.progress("deploy", { progress: 0, total: 3, message: "building" });
-    const out = await runDeploy(env, ctx.signal);
+    const bar = ctx.progress.begin({ total: 3, message: "building" });
+    const out = await runDeploy(env, ctx.signal, () => bar.advance());
     return out;
   },
 });
 ```
 
-| Slot                                        | Notes                                                                   |
-| ------------------------------------------- | ----------------------------------------------------------------------- |
-| `ctx.signal`                                | `AbortSignal` for the dispatch — composes host abort and caller abort   |
-| `ctx.log` / `ctx.trace` / `ctx.metrics`     | Observability; `log` is callable and chainable via `.with(fields)`      |
-| `ctx.progress(token, { progress, total? })` | Out-of-band liveness; forwarded to MCP `notifications/progress`         |
-| `ctx.elicit`                                | Ask the user a question mid-handler — `text`, `select`, `confirm`       |
-| `ctx.tasks` / `ctx.resource`                | Raw substrate primitives for long-running work and readable content     |
-| `ctx.setState(key, value)` / `ctx.emit()`   | Per-call state and session channel events                               |
-| `ctx.transport`                             | `"in-process"` or `"mcp"` — branch only when behavior genuinely differs |
-| `ctx.mcp`                                   | Wire-level extras (client capabilities, authenticated user); MCP only   |
+| Slot                                      | Notes                                                                   |
+| ----------------------------------------- | ----------------------------------------------------------------------- |
+| `ctx.signal`                              | `AbortSignal` for the dispatch — composes host abort and caller abort   |
+| `ctx.log` / `ctx.trace` / `ctx.metrics`   | Observability; `log` is callable and chainable via `.with(fields)`      |
+| `ctx.progress.begin({ total? })`          | Out-of-band liveness; forwarded to MCP `notifications/progress`         |
+| `ctx.elicit`                              | Ask the user a question mid-handler — `text`, `select`, `confirm`       |
+| `ctx.tasks` / `ctx.resource`              | Raw substrate primitives for long-running work and readable content     |
+| `ctx.setState(key, value)` / `ctx.emit()` | Per-call state and session channel events                               |
+| `ctx.transport`                           | `"in-process"` or `"mcp"` — branch only when behavior genuinely differs |
+| `ctx.mcp`                                 | Wire-level extras (client capabilities, authenticated user); MCP only   |
+
+`ctx.progress` has two doors. `begin(opts?)` is the everyday one: it takes the token from the call, counts and clamps for you, and emits an opening frame so a bar appears the moment work starts. Pass `total` when you know the denominator; omit it when you don't, and never invent one — a spinner that tells the truth beats a bar that lies. The callable form, `ctx.progress(token, frame)`, is the raw door, for echoing a token that came from elsewhere.
 
 Optional capabilities that not every deployment mounts — a sandbox, for instance — contribute their own `ctx` slot by module augmentation, so they show up as `ctx.sandbox?.…` when the package is installed. Guard the optional slots with `?`; the universal ones are always there.
 

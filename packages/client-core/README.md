@@ -591,6 +591,39 @@ which is why one `channelView` covers both full-object channels and snapshot+del
 channels. A malformed frame is skipped rather than tearing the stream down, and a
 throwing listener can't starve its siblings.
 
+**`progressView` — progress, already classified.** The same fold engine pinned to
+the cross-surface progress query, holding the latest state per correlation token.
+Where `onProgress` hands you every frame, this hands you render-ready state:
+
+```ts
+import { progressView } from "@agentick/client-core";
+
+const bars = progressView(client, scope);
+bars.subscribe((states) => {
+  const s = states.get(toolCallId);
+  if (s === undefined) return;
+  s.kind === "determinate" ? setWidth(s.fraction) : showSpinner(s.message);
+});
+```
+
+`state.kind` is the whole decision — `"determinate"` draws a bar at `fraction`
+(clamped to `[0, 1]`), `"indeterminate"` draws a spinner. **A client that connects
+mid-flight renders correctly from the first frame it sees**, because every frame
+carries its own `total` or deliberately doesn't; no history is needed to classify
+one.
+
+It also distrusts its input. First-party emitters are correct by construction
+(`createProgressReporter` in [@agentick/spec](../spec)), but frames also arrive
+from emitters nobody here controls — a third-party MCP server bridged onto the
+bus. So a frame that goes backwards, or that shrinks, drops, or changes a `total`
+already established, is **dropped rather than rendered**: a bar that freezes is
+honest, a bar that jumps backwards or silently rescales is not. A total appearing
+for the first time is the one legal upgrade, and it is honored.
+
+Holding at 99% until the work actually settles is the component's policy, not the
+fold's — the frame carries no terminal flag, and `progressView` invents none. Close
+the bar on the operation's lifecycle, which you are already watching.
+
 **`filteredView` — many projections, one subscription.** A handle _is_ its default
 view; `filteredView` mints additional ones over the same source. Each re-derives
 from the source on every change and closes independently; the shared subscription
@@ -748,6 +781,7 @@ auto-connect; call `connect()` when you want the wire open.
 | `send(sessionId, input)`                | Shortcut for `session(id).send(input)`             |
 | `onLog` / `onProgress`                  | Generic scoped signal subscriptions                |
 | `channelView(scope, channel, config?)`  | Generic channel fold                               |
+| `progressView(scope)`                   | Progress frames folded to bar/spinner state        |
 | `events(filter?)`                       | Live stream of client-lifecycle events             |
 | `transport` / `id`                      | The wrapped transport; this client's identity      |
 
@@ -763,6 +797,7 @@ auto-connect; call `connect()` when you want the wire open.
 | `makeGatewayHandle` / `makeAppHandle` / `makeSessionHandle`            | Handle factories, for building a client of your own            |
 | `onLog` / `onProgress`                                                 | Tree-shakeable signal subscriptions                            |
 | `channelStream` / `channelView`                                        | Channel-pinned stream and fold                                 |
+| `progressView` / `foldProgress`                                        | Per-token progress state, and the fold it is built on          |
 | `eventStream` / `eventView`                                            | The generic stream and fold beneath them                       |
 | `liveStore` / `filteredView`                                           | Fan-out core; shared-subscription projections                  |
 | `polledView`                                                           | Poll-backed read core (eager seed + by-id index + `refresh`)   |
@@ -871,6 +906,7 @@ transport changes the `createClient` call and nothing else.
   [@agentick/skills](../skills), and [@agentick/resources](../resources): the eager
   poll notifies subscribers when it lands (so no boot-time `refresh()` is needed)
   and a failed poll settles the snapshot empty until `refresh()` recovers it.
+- `src/__tests__/progress-view.spec.ts` — classification from a single frame (the late-join guarantee), per-token independence, the honored ratchet upgrade, `fraction` clamping, and each defense: a regressing frame, a shrinking / growing / vanishing `total`, and malformed frames all dropped with prior state untouched.
 - `src/__tests__/signals.spec.ts` — cross-surface log/progress queries,
   envelope→payload+scope mapping, `fromCursor` forwarding, unsubscribe closing the
   stream, and the instance methods delegating to the free functions.

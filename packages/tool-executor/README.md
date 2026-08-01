@@ -151,7 +151,8 @@ const handler: ToolHandler = async (input, { ctx, use }) => {
   // Out-of-band diagnostics + liveness. Each emits ONE bus event, fire-and-forget.
   ctx.log("info", { step: "started" }, "my-tool");
   ctx.log.warning({ retrying: true }); // RFC-5424 severities as methods
-  ctx.progress("job-1", { progress: 3, total: 10, message: "reading" });
+  const bar = ctx.progress.begin({ total: 10 }); // token = this call; nothing to invent
+  bar.advance(1, "reading");
 
   // A real, journaled, guard-reachable operation — without registering a command.
   const rows = await ctx.run("retrieval", () => search(input));
@@ -168,6 +169,26 @@ const handler: ToolHandler = async (input, { ctx, use }) => {
 ```
 
 `ctx.log` / `ctx.progress` are **always present**, never optional, and structurally bus-only — they are never journaled, so diagnostic volume cannot bloat the recovery spine. They are not sent to any wire directly either: projections subscribe and forward (an MCP server to `notifications/message` and `notifications/progress`, the agentick client to its log stream). Emit once, receive everywhere. A dying bus never blocks or fails the dispatch.
+
+### Reporting progress
+
+`ctx.progress` is a callable object, like `ctx.log`. Two doors:
+
+```ts
+// The everyday door. The token is the tool call id, the frames obey the four laws.
+const bar = ctx.progress.begin({ total: files.length, message: "indexing" });
+for (const f of files) bar.advance(1, f.name);
+bar.done();
+
+// The raw door. An explicit token and a hand-built frame.
+ctx.progress(ctx.mcp!.progressToken!, { progress: 3, total: 10, message: "reading" });
+```
+
+Reach for `begin()` unless you have a specific reason not to: it mints the token from the dispatch, counts for you, clamps to the total, refuses to go backwards, and emits an opening frame so a UI shows the bar the instant the work starts. Reach for the raw door when the token came from somewhere else — echoing an MCP client's `_meta.progressToken` back under the id it correlates on — or when the handler already owns its own counting. Both doors emit the same single bus event per frame.
+
+**If you know the denominator, say it. If you don't, never fake one.** `begin({ total })` renders a bar; `begin()` renders a spinner, and a spinner that tells the truth beats a bar that invents `total: 100` and jumps. When the denominator arrives mid-flight — a `content-length` that only comes with the response headers — `bar.total(n)` upgrades the spinner to a bar exactly once. It throws if called twice, because a total that moves makes every frame drawn before it a lie.
+
+There is no `done` flag on the wire. `bar.done()` fills the bar; what actually closes it is the tool call resolving — the operation's lifecycle, which the client is already watching.
 
 `ctx.run(name, fn)` sits deliberately between `ctx.trace` (a span, no journal) and a registered command (typed hooks, addressability): a journaled operation, parented under the dispatch, reachable by guards and string-keyed hooks, minted inline. It is **not** a memoized checkpoint — re-invoking re-runs `fn`. When `RunOptions` is too small, `ctx.runner.runOperation(op, body)` is the primitive undiluted, exposed as a run-only view.
 
@@ -581,6 +602,6 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
 - `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.
-- `src/__tests__/ctx-extensions.spec.ts` + `ctx-run.spec.ts` + `ctx-trunk-derivation.spec.ts` + `signals.spec.ts` + `signal-fire-and-forget.spec.ts` — opaque extension slots (freshness, absence, universal-field collision safety); `ctx.run` minting a journaled op parented under the dispatch, hook-observable and guard-vetoable, plus `ctx.runner` as a run-only view; the dispatch ctx carrying the crossing's real work-path ids; and `ctx.log` / `ctx.progress` emit shape, scope, and survival of a dying bus.
+- `src/__tests__/ctx-extensions.spec.ts` + `ctx-run.spec.ts` + `ctx-trunk-derivation.spec.ts` + `signals.spec.ts` + `signal-fire-and-forget.spec.ts` — opaque extension slots (freshness, absence, universal-field collision safety); `ctx.run` minting a journaled op parented under the dispatch, hook-observable and guard-vetoable, plus `ctx.runner` as a run-only view; the dispatch ctx carrying the crossing's real work-path ids; and `ctx.log` / `ctx.progress` emit shape, scope, and survival of a dying bus — including `ctx.progress.begin()` reporting on the dispatch's own tool call id, every determinate frame carrying `total`, and an indeterminate one never carrying it.
 - `src/__tests__/middleware-and-hooks.spec.ts` + `command-hooks-augmentation.spec.ts` + `fx-dispatch.spec.ts` — middleware wrapping and compose order, `guardDispatch` verdicts, unsubscribe, the typed hook names agreeing with the runtime derivation, and the `.fx` twins (composable Effects, Promise facades, door → origin preservation, single-fiber nesting, catchable binding mismatch).
 - `src/__tests__/define-tool-executor.spec.ts` + `with-scope.spec.ts` + `validator.spec.ts` + `handler-resolver.spec.ts` — the callback factory (marker, default and custom registry callbacks, inbox `tool:abort`, dispatch-as-command parity, bus envelopes), scoped binding cleanup on return and throw, the validators, and the resolver.
