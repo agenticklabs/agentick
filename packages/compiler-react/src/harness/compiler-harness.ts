@@ -102,29 +102,8 @@ import {
   type FormatterResolution,
 } from "@agentick/formatters";
 
-// ADR 80/83 — light up the compile verb. `compiler:render-tree` (op
-// `compiler:command:render-tree`) already routes through `runOperation`
-// (see `renderTreeFx`), so typing it here mints `onBeforeCompilerRenderTree`
-// / `onAfterCompilerRenderTree` on the derived `CommandHooks` surface. Input
-// is the render request; output the settled `RenderTreeResult` — the exact
-// generics of the `renderTreeFx` Operation below.
-declare module "@agentick/runtime" {
-  interface CommandRegistry {
-    "compiler:render-tree": { input: RenderTreeInput; output: RenderTreeResult };
-    // The remaining compile verbs (ADR 80/83). `mount` / `rerender` /
-    // `render-to-string` each build a hand-rolled Operation and route through
-    // `runOperation`, so typing them mints `onBefore/After<Verb>` on
-    // `CommandHooks`. Generics are the declaration sites'.
-    //
-    // `compiler:unmount` is DELIBERATELY absent: its method is a plain
-    // synchronous teardown that does NOT route through `runOperation`, so a
-    // typed hook would never fire (misleading). It stays `mechanism`/deferred
-    // until the teardown is wrapped.
-    "compiler:mount": { input: MountInput; output: MountResult };
-    "compiler:rerender": { input: RerenderInput; output: void };
-    "compiler:render-to-string": { input: RenderToStringInput; output: RenderToStringResult };
-  }
-}
+// The compile verbs' `CommandRegistry` rows live in `@agentick/compiler` — they
+// belong to the PROTOCOL, not to this implementation. See its `augment.ts`.
 
 interface MountState {
   readonly mountId: string;

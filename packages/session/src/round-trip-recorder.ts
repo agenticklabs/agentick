@@ -111,7 +111,7 @@ import type { CommandHooks, InterceptorCtx } from "@agentick/runtime";
 // is honest: the bag genuinely depends on them.
 /* eslint-disable-next-line import/no-empty-named-blocks -- the empty block IS
    the point: these load module augmentations, they import no bindings. */
-import type {} from "@agentick/compiler-react";
+import type {} from "@agentick/compiler";
 /* eslint-disable-next-line import/no-empty-named-blocks */
 import type {} from "@agentick/timeline";
 /* eslint-disable-next-line import/no-empty-named-blocks */

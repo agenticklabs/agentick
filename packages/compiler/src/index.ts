@@ -1,3 +1,7 @@
+// Load the compile verbs' `CommandRegistry` rows (ADR 80/83) for every consumer
+// of this package. See `./augment.ts` on why they are not in an implementation.
+import "./augment.js";
+
 /**
  * `@agentick/compiler` — compiler-agnostic base.
  *
