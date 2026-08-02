@@ -22,6 +22,7 @@
  */
 
 import type { HarnessFx } from "./middleware.js";
+import type { InstallerInterceptors } from "./app-extension.js";
 import type { Effect } from "effect";
 import type { ProviderOptions, ProviderToolOptions, RenderedTree } from "../data/rendered-tree.js";
 import type { MediaSource } from "../data/content-blocks.js";
@@ -703,8 +704,19 @@ export interface LanguageModelExecutor extends ExecutorProtocol<
 /**
  * Substrate dependencies a `LanguageModelExecutor` is constructed with.
  * Mirrors the args every `BaseHarness` subclass takes.
+ *
  */
 export interface ExecutorFactoryDeps {
+  /**
+   * The host's interceptor cascade, in the SAME nested shape a
+   * {@link InstallerInterceptors} handle takes — so `inheritedFrom(deps)` from
+   * `@agentick/runtime` spreads it straight into your harness options.
+   *
+   * Absent before this existed, which meant a factory-built executor received
+   * no app hooks, no guards, and no telemetry enrichment — silently, since the
+   * executor still worked.
+   */
+  readonly interceptors?: InstallerInterceptors;
   readonly scopeId: string;
   readonly journal: import("./journal.js").OperationJournal;
   readonly bus: import("./bus.js").EventBus;

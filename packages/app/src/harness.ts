@@ -1149,6 +1149,14 @@ export class AppHarness<P = unknown>
                 journal,
                 bus,
                 inbox,
+                // Same cascade the adapter path gets. A factory-built executor
+                // used to receive NO app hooks, guards, or telemetry — silently,
+                // because it still ran. The factory spreads this into its
+                // harness options via `inheritedFrom(deps)`.
+                interceptors: {
+                  inheritedInterceptors: this.resolvedInterceptors(),
+                  interceptorParent: this,
+                },
               })
             : options.modelExecutor;
     // Resolve target: caller override > modelExecutor.target (undefined when
@@ -1243,7 +1251,18 @@ export class AppHarness<P = unknown>
     // Loop slot: factory → call with shared substrate; instance → use
     // as-is; undefined → bundled default with shared substrate.
     this.loop = isLoopExecutorFactory(options.loop)
-      ? options.loop({ scopeId: appId, journal, bus, inbox })
+      ? options.loop({
+          scopeId: appId,
+          journal,
+          bus,
+          inbox,
+          // The same cascade the bundled default gets below — a factory-built
+          // loop is not a second-class citizen.
+          interceptors: {
+            inheritedInterceptors: this.resolvedInterceptors(),
+            interceptorParent: this,
+          },
+        })
       : (options.loop ??
         // ADR 76/83 — app-shared spine folds the APP's resolved interceptor
         // snapshot (incl. the app's declarative hooks registered above). ADR 83
@@ -2299,6 +2318,8 @@ export class AppHarness<P = unknown>
           journal: this.journal,
           bus: this.bus,
           inbox: this.inbox,
+          // The same cascade the bundled `ToolExecutorHarness` gets below.
+          interceptors: { inheritedInterceptors, interceptorParent: this },
         })
       : new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
           ...this.toolDefaults,

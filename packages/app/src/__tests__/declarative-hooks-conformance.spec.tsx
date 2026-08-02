@@ -41,6 +41,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../react.js";
+import { defineToolExecutor } from "@agentick/tool-executor";
 import type {
   AdapterDelta,
   ExecuteInput,
@@ -103,8 +104,23 @@ async function driveWithDeclarativeHooks(): Promise<Fired> {
   };
 
   const app = await createApp(React.createElement(Agent), {
-    // The ADAPTER path — the only one that attaches app interceptors.
     model: stubAdapter(),
+    // A FACTORY-built tool executor. `ExecutorFactoryDeps` used to carry no
+    // interceptor fields, so anything on the factory path received no app hooks
+    // at all — and nothing asserted otherwise, which is how the model half of
+    // this suite came to be written against the adapter path only.
+    // A FACTORY-built tool executor. `ExecutorFactoryDeps` used to carry no
+    // interceptor handle, so anything on the factory path received no app hooks
+    // at all — and nothing asserted otherwise, which is how the model half of
+    // this suite came to be written against the adapter path only.
+    toolExecutor: defineToolExecutor({
+      dispatch: async (input) => ({
+        toolCallId: input.toolCallId,
+        name: input.name,
+        content: [{ type: "text", text: "ok" }],
+        durationMs: 0,
+      }),
+    }),
     hooks: {
       // Boundary hooks — the half that already worked.
       onBeforeModelGenerateStream: (input) => {
@@ -130,14 +146,22 @@ async function driveWithDeclarativeHooks(): Promise<Fired> {
           mark("onModelProviderRequestChunk");
         },
       },
+      // A command on the FACTORY-built tool executor, invoked by the loop every
+      // tick. This is the assertion that `ExecutorFactoryDeps` carries the
+      // cascade at all — the model hooks above only exercise the adapter path.
+      onBeforeToolReplaceCompilerTools: (input) => {
+        mark("onBeforeToolReplaceCompilerTools");
+        return input;
+      },
     },
   });
 
   try {
     const session = await app.createSession();
-    // `stream: true` is load-bearing — see the module docblock.
+    // No `stream:` — streaming is the DEFAULT, and asserting that here means a
+    // regression to opt-in streaming shows up as a chunk hook that stops firing.
     await (
-      await session.send({ messages: [{ role: "user", content: "ping" }], stream: true })
+      await session.send({ messages: [{ role: "user", content: "ping" }] })
     ).result;
   } finally {
     await app.closeApp();
@@ -156,6 +180,11 @@ describe("declarative CommandHooks — every declared kind fires through createA
   it("fires onBefore on the NESTED provider-request command", async () => {
     const { names } = await driveWithDeclarativeHooks();
     expect(names).toContain("onBeforeModelProviderRequest");
+  });
+
+  it("reaches a FACTORY-built harness, not just the adapter path", async () => {
+    const { names } = await driveWithDeclarativeHooks();
+    expect(names).toContain("onBeforeToolReplaceCompilerTools");
   });
 
   // These three were the defect. Chunk interceptors live in a per-`CommandRunner`
@@ -184,6 +213,7 @@ describe("declarative CommandHooks — every declared kind fires through createA
         "onAfterModelGenerateStream",
         "onBeforeModelGenerateStream",
         "onBeforeModelProviderRequest",
+        "onBeforeToolReplaceCompilerTools",
         "onModelGenerateStreamChunk",
         "onModelProviderRequestChunk",
       ].sort(),

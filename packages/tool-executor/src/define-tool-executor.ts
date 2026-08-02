@@ -45,6 +45,8 @@
 
 import { Effect } from "effect";
 import {
+  inheritedFrom,
+  type BaseHarnessOptions,
   BaseHarness,
   LocalEventBus,
   LocalInbox,
@@ -169,7 +171,7 @@ export function defineToolExecutor(spec: DefineToolExecutorInput): ToolExecutorF
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
-    return new CallbackToolExecutor(scopeId, journal, bus, inbox, spec);
+    return new CallbackToolExecutor(scopeId, journal, bus, inbox, spec, inheritedFrom(deps));
   };
   return Object.assign(factory, { toolExecutorFactory: true as const });
 }
@@ -209,9 +211,15 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     bus: EventBus,
     inbox: MessageInbox,
     spec: DefineToolExecutorInput,
+    // The host's interceptor cascade (ADR 93 landmine 11). Without it a
+    // `defineToolExecutor` executor received no app hooks, guards, or telemetry.
+    interceptors: Pick<BaseHarnessOptions, "inheritedInterceptors" | "interceptorParent">,
   ) {
     // Same rule as `ToolExecutorHarness` — see the note there.
-    super("tool", scopeId, journal, bus, inbox, { parentScope: { sessionId: scopeId } });
+    super("tool", scopeId, journal, bus, inbox, {
+      parentScope: { sessionId: scopeId },
+      ...interceptors,
+    });
     this.spec = spec;
     this.registry = new InMemoryToolRegistry();
     this.tools = createToolsHandle({

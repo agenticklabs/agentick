@@ -47,6 +47,8 @@
 
 import { Effect } from "effect";
 import {
+  inheritedFrom,
+  type BaseHarnessOptions,
   BaseHarness,
   LocalEventBus,
   LocalInbox,
@@ -111,7 +113,7 @@ export function defineLoop(spec: DefineLoopInput): LoopExecutorFactory {
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
-    return new CallbackLoopExecutor(scopeId, journal, bus, inbox, spec);
+    return new CallbackLoopExecutor(scopeId, journal, bus, inbox, spec, inheritedFrom(deps));
   };
   return Object.assign(factory, { loopExecutorFactory: true as const });
 }
@@ -135,8 +137,11 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
     bus: EventBus,
     inbox: MessageInbox,
     spec: DefineLoopInput,
+    // The host's interceptor cascade (ADR 93 landmine 11). Without it a
+    // `defineLoop` executor received no app hooks, guards, or telemetry.
+    interceptors: Pick<BaseHarnessOptions, "inheritedInterceptors" | "interceptorParent">,
   ) {
-    super("loop", scopeId, journal, bus, inbox);
+    super("loop", scopeId, journal, bus, inbox, interceptors);
     this.spec = spec;
   }
 

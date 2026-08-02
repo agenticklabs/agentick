@@ -39,6 +39,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
+import type { InstallerInterceptors } from "./app-extension.js";
 import type { HarnessFx } from "./middleware.js";
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
@@ -908,9 +909,20 @@ export function isToolsInstance(v: unknown): v is Tools {
 
 /**
  * Substrate dependencies a `ToolExecutorProtocol` is constructed with.
- * Mirrors `ExecutorFactoryDeps` — same shape, different slot.
+ * Mirrors the args every `BaseHarness` subclass takes.
+ *
  */
 export interface ToolExecutorFactoryDeps {
+  /**
+   * The host's interceptor cascade, in the SAME nested shape a
+   * {@link InstallerInterceptors} handle takes — so `inheritedFrom(deps)` from
+   * `@agentick/runtime` spreads it straight into your harness options.
+   *
+   * Absent before this existed, which meant a factory-built harness received no
+   * app hooks, no guards, and no telemetry enrichment — silently, since the
+   * harness still worked.
+   */
+  readonly interceptors?: InstallerInterceptors;
   readonly scopeId: string;
   readonly journal: import("./journal.js").OperationJournal;
   readonly bus: import("./bus.js").EventBus;
