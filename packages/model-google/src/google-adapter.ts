@@ -43,6 +43,7 @@ import type {
   LanguageModelExecutionResult,
   LanguageModelInput,
   LanguageModelMessage,
+  LanguageModelMessageRole,
   LanguageModelMessagePart,
   LanguageModelStopReason,
   LanguageModelTool,
@@ -63,6 +64,7 @@ import {
   defaultFinalizeStream,
   defineLanguageModelAdapter,
   type DeltaTransform,
+  lowerSemanticRole,
   type LanguageModelAdapter,
   type SourceInterner,
   type StreamAccumulatorView,
@@ -835,6 +837,20 @@ function toGoogleParams(
   return params;
 }
 
+/**
+ * Google role vocabulary. `system` is handled before this table is consulted
+ * (it becomes `systemInstruction`, not a content role) and `tool` results
+ * ride a `user` turn, which is Gemini's shape for function responses.
+ */
+const GOOGLE_ROLES = {
+  system: "user",
+  user: "user",
+  assistant: "model",
+  tool: "user",
+  grounding: "user",
+  event: "user",
+} as const satisfies Record<LanguageModelMessageRole, "user" | "model">;
+
 function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
   systemInstruction: { parts: Array<{ text: string }> } | undefined;
   contents: Content[];
@@ -862,7 +878,11 @@ function toGoogleContents(messages: ReadonlyArray<LanguageModelMessage>): {
       continue;
     }
 
-    const role: "user" | "model" = message.role === "assistant" ? "model" : "user";
+    // Gemini has two content roles and no instruction channel. `grounding`
+    // and `event` both land as `user` — an explicit table rather than a
+    // fallthrough, so a role added upstream fails here at COMPILE time
+    // instead of silently arriving as a human turn.
+    const role: "user" | "model" = lowerSemanticRole(message.role, GOOGLE_ROLES);
     const parts: Part[] = [];
 
     for (const part of message.content) {

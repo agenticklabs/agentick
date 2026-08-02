@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
+import type { MessageEntry } from "@agentick/spec";
 import { createContainer } from "@agentick/compiler";
 import { createHostScope } from "@agentick/compiler";
 import { createCompiler } from "../react/compiler.js";
@@ -22,6 +23,18 @@ function renderAndCollect(element: React.ReactNode) {
   const registry = createBuiltInRegistry();
   return collect({ roots: container.children, registry, rootScope: container.rootScope });
 }
+
+/**
+ * ADR 94 — a free-floating `<section>` is a `grounding` message, not a
+ * `SectionEntry`. `renderedWith` is still stamped from the in-scope `section`
+ * format purpose onto the entry the section became, so every scope-resolution
+ * claim below survives verbatim; only the `kind === "section"` narrowing had
+ * to move to a role check.
+ */
+const grounding = (entry: MessageEntry | undefined): MessageEntry => {
+  if (entry?.role !== "grounding") throw new Error("expected a grounding entry");
+  return entry;
+};
 
 describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
   it("emits no IR fragment of its own — purely a scope provider", () => {
@@ -59,10 +72,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
       registry,
       rootScope: container.rootScope,
     });
-    const [outer, inner] = tree.context.entries;
-    if (outer?.kind !== "section" || inner?.kind !== "section") {
-      throw new Error("expected two sections");
-    }
+    const [outer, inner] = [grounding(tree.context.entries[0]), grounding(tree.context.entries[1])];
     expect(outer.renderedWith?.id).toBe("xml");
     expect(inner.renderedWith?.id).toBe("markdown");
   });
@@ -71,8 +81,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
     const { tree } = renderAndCollect(
       React.createElement(XML, null, React.createElement("section", { id: "s" }, "body")),
     );
-    const s = tree.context.entries[0]!;
-    if (s.kind !== "section") throw new Error("expected section");
+    const s = grounding(tree.context.entries[0]);
     expect(s.renderedWith?.id).toBe("xml");
     expect(s.renderedWith?.format).toBe("xml");
   });
@@ -81,8 +90,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
     const { tree } = renderAndCollect(
       React.createElement(PlainText, null, React.createElement("section", { id: "s" }, "body")),
     );
-    const s = tree.context.entries[0]!;
-    if (s.kind !== "section") throw new Error("expected section");
+    const s = grounding(tree.context.entries[0]);
     expect(s.renderedWith?.id).toBe("text");
     expect(s.renderedWith?.format).toBe("text");
   });
@@ -95,8 +103,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         React.createElement(XML, null, React.createElement("section", { id: "s.inner" }, "deep")),
       ),
     );
-    const s = tree.context.entries[0]!;
-    if (s.kind !== "section") throw new Error("expected section");
+    const s = grounding(tree.context.entries[0]);
     expect(s.renderedWith?.id).toBe("xml");
   });
 
@@ -113,10 +120,8 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         React.createElement(XML, null, React.createElement("section", { id: "s.xml" }, "xml body")),
       ),
     );
-    const [a, b] = tree.context.entries;
-    if (a?.kind !== "section" || b?.kind !== "section") {
-      throw new Error("expected two sections");
-    }
+    const a = grounding(tree.context.entries[0]);
+    const b = grounding(tree.context.entries[1]);
     expect(a.renderedWith?.id).toBe("markdown");
     expect(b.renderedWith?.id).toBe("xml");
   });
@@ -136,10 +141,12 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         ),
       ),
     );
-    const [s, m] = tree.context.entries;
-    if (s?.kind !== "section" || m?.kind !== "message") {
-      throw new Error("expected section + message");
-    }
+    const s = grounding(tree.context.entries[0]);
+    const m = tree.context.entries[1];
+    if (m?.role !== "user") throw new Error("expected a user message");
+    // ADR 94 — `renderedWith` on the grounding entry still comes from the
+    // `section` format purpose, so purpose scoping is unaffected by the
+    // section-entry deletion.
     expect(s.renderedWith?.id).toBe("xml");
     expect(m.renderedWith?.id).toBe("markdown"); // unchanged
   });
@@ -152,8 +159,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         React.createElement("section", { id: "s.untouched" }, "body"),
       ),
     );
-    const s = tree.context.entries[0]!;
-    if (s.kind !== "section") throw new Error("expected section");
+    const s = grounding(tree.context.entries[0]);
     expect(s.renderedWith?.id).toBe("markdown");
   });
 
@@ -165,8 +171,7 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         React.createElement("section", { id: "s.yaml" }, "body"),
       ),
     );
-    const s = tree.context.entries[0]!;
-    if (s.kind !== "section") throw new Error("expected section");
+    const s = grounding(tree.context.entries[0]);
     expect(s.renderedWith?.id).toBe("custom-yaml");
     expect(s.renderedWith?.format).toBe("yaml");
   });
@@ -185,8 +190,12 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
         React.createElement(Markdown, null, "wrapped text"),
       ),
     );
-    const s = tree.context.entries[0]!;
-    if (s.kind !== "section") throw new Error("expected section");
-    expect(s.content).toEqual([{ type: "text", text: "wrapped text" }]);
+    const s = grounding(tree.context.entries[0]);
+    // ADR 94 — the folded blocks now arrive via `lowerSection`, which stamps
+    // the section id + `metadata.section` onto them. The claim under test is
+    // unchanged: the wrapper is transparent, the text still lands.
+    expect(s.content).toEqual([
+      { type: "text", text: "wrapped text", id: "s.wrap", metadata: { section: "s.wrap" } },
+    ]);
   });
 });

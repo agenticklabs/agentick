@@ -19,11 +19,21 @@ function renderAndCollect(element: React.ReactNode) {
   return collect({ roots: container.children, registry, rootScope: container.rootScope });
 }
 
+/**
+ * ADR 94 — every entry is a `MessageEntry` now. A free-floating `<section>`
+ * is an anonymous `grounding` message and a `<message>` is itself, so the
+ * first entry's content reads the same way regardless of role.
+ *
+ * Note what the section wrapper adds: `lowerSection` stamps `id` +
+ * `metadata.section` on every block it passes through and COALESCES adjacent
+ * plain-text blocks into one. Every assertion below is either `toMatchObject`
+ * (tolerant of the stamp) or lives under a `<message>` wrapper where block
+ * boundaries and block-level ids survive untouched.
+ */
 function contentOf(tree: ReturnType<typeof renderAndCollect>["tree"]): readonly ContentBlock[] {
-  const first = tree.context.entries[0]!;
-  if (first.kind === "section") return first.content;
-  if (first.kind === "message") return first.content;
-  throw new Error("expected section or message");
+  const first = tree.context.entries[0];
+  if (first === undefined) throw new Error("expected an entry");
+  return first.content;
 }
 
 describe("content blocks — inside <section>", () => {
@@ -120,11 +130,17 @@ describe("content blocks — inside <section>", () => {
     expect((blocks[1] as { headers?: readonly string[] }).headers).toEqual(["a", "b"]);
   });
 
-  it("<text> explicit content-block", () => {
+  it("<text> explicit content-block keeps its own id", () => {
+    // Wrapper is `<message>`, not `<section>`: this test's subject is the
+    // `<text>` contributor's BLOCK-LEVEL id, and ADR 94's `lowerSection`
+    // deliberately coalesces a section's plain-text run into one block
+    // re-stamped with the SECTION's id. Under a section wrapper the
+    // assertion would be testing the lowering, not the contributor — that
+    // rule is pinned in formatters/__tests__/section-lowering.spec.ts.
     const { tree } = renderAndCollect(
       React.createElement(
-        "section",
-        { id: "s" },
+        "message",
+        { role: "user" },
         React.createElement("text", { id: "t1" }, "explicit"),
       ),
     );

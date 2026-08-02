@@ -44,8 +44,40 @@ export type BlockType =
 /**
  * Agentick semantic role on a {@link MessageEntry}. Open string; canonical
  * roles are mapped to provider role vocabulary by the executor harness.
+ *
+ * `grounding` is the role an anonymous message gets when a free-floating
+ * `<Section>` is wrapped at its own tree position (ADR 94) — non-conversational
+ * context that is not an instruction and not a human turn. `event` is a
+ * record of something that happened. Both lower to a provider role at the
+ * ADAPTER boundary, never by a cast.
  */
-export type MessageRole = "user" | "assistant" | "system" | "tool" | "event" | (string & {});
+export type MessageRole =
+  | "user"
+  | "assistant"
+  | "system"
+  | "tool"
+  | "grounding"
+  | "event"
+  | (string & {});
+
+/**
+ * Cross-provider caching intent. The compiler MUST NOT reorder context
+ * for caching; the executor maps this hint to provider mechanics
+ * (Anthropic `cache_control`, OpenAI prefix caching, Gemini
+ * `cachedContents`).
+ *
+ * Carried at three levels, each narrower than the last: a
+ * {@link MessageEntry}'s `metadata.cache`, a single block's
+ * {@link BaseContentBlock.cache}, and the projected message part's own
+ * `cache`. Block level is what makes a per-section cache breakpoint
+ * survive the section → content lowering (ADR 94 / #185).
+ */
+export interface CacheHint {
+  readonly ttl?: "5m" | "1h" | (string & {});
+  /** `[PLACEHOLDER]` — exact semantics pending sign-off. */
+  readonly scope?: "prefix" | "block";
+  readonly [key: string]: unknown;
+}
 
 /**
  * Discriminator for {@link MediaSource}.
@@ -95,6 +127,13 @@ export interface BaseContentBlock {
   readonly index?: number;
   readonly metadata?: Record<string, unknown>;
   readonly summary?: string;
+  /**
+   * Cache breakpoint on THIS block. A section carrying a cache hint keeps
+   * its own boundary after lowering into a message's content, because the
+   * hint rides the block the section produced; `messagePartFromBlock`
+   * forwards it to the projected part (ADR 94 / #185).
+   */
+  readonly cache?: CacheHint;
   /**
    * Provider-specific metadata that must round-trip through the
    * pipeline on this specific block. Keyed by provider namespace

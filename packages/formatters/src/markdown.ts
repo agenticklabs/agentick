@@ -21,7 +21,6 @@ import type {
   ContentBlock,
   JsonBlock,
   MessageEntry,
-  SectionEntry,
   SemanticContentBlock,
   SemanticNode,
   TextBlock,
@@ -188,10 +187,6 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
 // Tree-level framing + flatten (owned by this formatter)
 // ============================================================================
 
-function frameSection(entry: SectionEntry, body: string): string {
-  return entry.title ? `## ${entry.title}\n\n${body}` : body;
-}
-
 function frameMessage(entry: MessageEntry, body: string): string {
   return `**${entry.role}:** ${body}`;
 }
@@ -244,7 +239,6 @@ export const markdownFormatter = createFormatter({
   id: "formatter.markdown",
   format: "markdown",
   render: (blocks) => blocks.map(formatBlock),
-  frameSection,
   frameMessage,
   blocksToText,
 });

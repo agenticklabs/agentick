@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { fakeBridges } from "@agentick/compiler";
-import type { HookBridges } from "@agentick/spec";
+import type { HookBridges, MessageEntry } from "@agentick/spec";
 
 import { CompilerHarness } from "../harness/compiler-harness.js";
 import { Project } from "../react/components/index.js";
@@ -50,6 +50,18 @@ async function mountRender(mountId: string, element: React.ReactElement, bridges
 
 const empty = (): React.ReactElement => React.createElement(React.Fragment, null);
 
+/**
+ * ADR 94 — the projection no longer emits a `SectionEntry`. It emits a
+ * `grounding` message whose content is `lowerSection({ title: "Connected MCP
+ * servers", … })`, so the entry is found by role + id and its text begins
+ * with the lowered `# ` heading.
+ */
+const mcpInfoEntry = (tree: { context: { entries: readonly MessageEntry[] } }) =>
+  tree.context.entries.find((e) => e.role === "grounding" && e.id === "mcp-server-info");
+
+const textOf = (entry: MessageEntry | undefined): string =>
+  (entry?.content ?? []).map((b) => (b.type === "text" ? b.text : "")).join("");
+
 describe("mcpServerInfo default projection", () => {
   it("surfaces connected servers keyed by alias, provenance default:mcpServerInfo", async () => {
     const bridges = bridgesWithMcp([
@@ -62,16 +74,17 @@ describe("mcpServerInfo default projection", () => {
     ]);
     const { tree } = await mountRender("mcp1", empty(), bridges);
 
-    const section = tree.context.entries.find(
-      (e) => e.kind === "section" && e.id === "mcp-server-info",
-    );
-    expect(section).toBeDefined();
-    const text = (section as unknown as { content: { text?: string }[] }).content[0]?.text ?? "";
+    const entry = mcpInfoEntry(tree);
+    expect(entry).toBeDefined();
+    const text = textOf(entry);
+    // ADR 94 — the projected content is section-LOWERED, so the title is now
+    // a leading `# ` heading in the text rather than an `entry.title` field.
+    expect(text.startsWith("# Connected MCP servers\n")).toBe(true);
     expect(text).toContain("docs [connected]");
     expect(text).toContain("docs-server v1.2.0");
     expect(text).toContain("capabilities: tools, resources");
 
-    const idx = tree.context.entries.indexOf(section!);
+    const idx = tree.context.entries.indexOf(entry!);
     expect(tree.provenance?.entries?.[idx]).toBe("default:mcpServerInfo");
   });
 
@@ -93,12 +106,11 @@ describe("mcpServerInfo default projection", () => {
       },
     ]);
     const { tree } = await mountRender("mcp2", empty(), bridges);
-    const section = tree.context.entries.find(
-      (e) => e.kind === "section" && e.id === "mcp-server-info",
-    )!;
-    const text = (section as unknown as { content: { text?: string }[] }).content[0]!.text!;
+    const text = textOf(mcpInfoEntry(tree));
 
     // Both aliases surface as DISTINCT entries — the alias governs.
+    // (The `# Connected MCP servers` heading ADR 94's lowering prepends is not
+    // a `- ` line, so the server-line count is unaffected.)
     const serverLines = text.split("\n").filter((l) => l.startsWith("- "));
     expect(serverLines).toHaveLength(2);
     expect(serverLines.some((l) => l.startsWith("- srv-a [connected]"))).toBe(true);
@@ -123,15 +135,11 @@ describe("mcpServerInfo default projection", () => {
       React.createElement(Project, { projectionKey: "mcpServerInfo" }),
       bridges,
     );
-    expect(
-      tree.context.entries.some((e) => e.kind === "section" && e.id === "mcp-server-info"),
-    ).toBe(false);
+    expect(mcpInfoEntry(tree)).toBeUndefined();
   });
 
   it("contributes nothing when no mcp bridge is present", async () => {
     const { tree } = await mountRender("mcp4", empty(), fakeBridges());
-    expect(
-      tree.context.entries.some((e) => e.kind === "section" && e.id === "mcp-server-info"),
-    ).toBe(false);
+    expect(mcpInfoEntry(tree)).toBeUndefined();
   });
 });

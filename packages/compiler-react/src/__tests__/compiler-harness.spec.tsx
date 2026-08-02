@@ -60,12 +60,25 @@ describe("CompilerHarness — end-to-end", () => {
     expect(tree.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(tree.context.entries).toHaveLength(2);
     const [system, section] = tree.context.entries;
-    if (system?.kind !== "message" || section?.kind !== "section") {
-      throw new Error("expected message + section");
+    if (system === undefined || section === undefined) {
+      throw new Error("expected two entries");
     }
     expect(system.role).toBe("system");
+    // ADR 94 — the free-floating `<section>` is a `grounding` message at its
+    // own position (after the system message, where it was written). There is
+    // no `entry.title` any more: `lowerSection` folds the title into the
+    // content as a leading `# ` heading, one text block carrying the section
+    // id and the `metadata.section` stamp.
+    expect(section.role).toBe("grounding");
     expect(section.id).toBe("s.tools");
-    expect(section.title).toBe("Tools");
+    expect(section.content).toEqual([
+      {
+        type: "text",
+        text: "# Tools\navailable tools…",
+        id: "s.tools",
+        metadata: { section: "s.tools" },
+      },
+    ]);
 
     expect(tree.declarations?.tools).toHaveLength(1);
     expect(tree.declarations!.tools![0]!.name).toBe("echo");

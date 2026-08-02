@@ -41,7 +41,7 @@ export interface CollectContext {
    *
    * Used by contributors whose parent IS a content container (e.g.,
    * a `<section>` wants to collect its children's text and tool_use
-   * blocks into `SectionEntry.content`).
+   * blocks before lowering them to the blocks it contributes).
    *
    * Non-content fragments emitted by content-block contributors
    * (diagnostics from missing-prop validation, etc.) are pushed into

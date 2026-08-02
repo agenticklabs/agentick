@@ -27,7 +27,7 @@
  * @see docs/proposals/v2/blueprint/63-compiler-surfacing.md
  */
 
-import type { ContextEntry, ToolDeclaration } from "@agentick/spec";
+import type { MessageEntry, ToolDeclaration } from "@agentick/spec";
 
 // ============================================================================
 // Projection result + sources
@@ -39,7 +39,7 @@ import type { ContextEntry, ToolDeclaration } from "@agentick/spec";
  * declarations (tools), or both. Empty fields contribute nothing.
  */
 export interface ProjectionResult {
-  readonly entries?: readonly ContextEntry[];
+  readonly entries?: readonly MessageEntry[];
   readonly tools?: readonly ToolDeclaration[];
 }
 

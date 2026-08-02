@@ -21,8 +21,11 @@
  * MCP `PromptMessage.role` is restricted to `"user" | "assistant"` —
  * v2's `MessageRole` is broader. We map:
  *   - `user` / `assistant` → carried through
- *   - `system` → `user` (treats the system instruction as user context;
- *     consistent with v1 and how clients typically consume `prompts/get`)
+ *   - `system` / `grounding` → `user` (instruction context, which MCP has no
+ *     role for; consistent with how clients consume `prompts/get`, and with
+ *     what Anthropic and Google adapters do with the same roles). A
+ *     free-floating `<Section>` in a JSX prompt body arrives as `grounding`
+ *     (ADR 94), so dropping it would silently empty such a prompt.
  *   - `tool` / `event` / other → skipped (don't make sense in prompts/get)
  *
  * Message CONTENT narrows through the shared outbound mapper
@@ -248,6 +251,6 @@ export function toWirePromptMessages(entry: MessageEntry): readonly McpWirePromp
 
 function mapRole(role: string): "user" | "assistant" | null {
   if (role === "user" || role === "assistant") return role;
-  if (role === "system") return "user";
+  if (role === "system" || role === "grounding") return "user";
   return null;
 }

@@ -246,9 +246,26 @@ Failover is per-adapter all the way down: each adapter runs its own `prepareRequ
 
 ## Projection — what the model actually sees
 
-`defaultProject` folds a compiled tree into a `LanguageModelInput`: sections become one system message, message entries become chat messages, model-exposed tool declarations become `tools[]`. Adapters override `project` only when their system-message or tool shape demands it.
+`defaultProject` folds a compiled tree into a `LanguageModelInput`. The fold law is short, and most of it is about what the fold does NOT do:
 
-The parts are exported individually so a custom projection stays aligned with the canonical one: `buildMessages`, `buildTools`, `buildProviderTools`, `buildParameters`, `collectSectionText`, `sectionText`, `messagePartFromBlock`.
+- `system` entries merge, **in order**, into one leading system message. That is the only collapsing step, and it exists because two of the three providers take system as a separate request parameter rather than a positioned message.
+- **Every other entry keeps its index.** An entry's position in `tree.context.entries` is its position in `messages`. Nothing is hoisted, filtered, or reordered — a `<Section>` written below `<Timeline />` is the last message the model receives.
+- Model-exposed tool declarations become `tools[]`; provider-executed tools become the sibling `providerTools[]`.
+
+The parts are exported individually so a custom projection stays aligned with the canonical one: `buildMessages`, `buildTools`, `buildProviderTools`, `buildParameters`, `messagePartFromBlock`.
+
+### Semantic roles and where they are lowered
+
+`MessageEntry.role` is an open string — an application can tag its own turns. A provider request has a fixed set of slots. The two meet in exactly one place, and it is a check, not a cast: `canonicalRole` narrows to the closed vocabulary and throws `UnknownMessageRoleError` on anything else.
+
+The fold keeps `grounding` and `event` intact rather than collapsing them, because an adapter may have a slot for them. Each adapter lowers at its own boundary with `lowerSemanticRole` and a table that is total over the role union — so a role added upstream breaks every adapter at compile time instead of silently arriving as a human turn:
+
+| semantic role | OpenAI      | Anthropic | Google |
+| ------------- | ----------- | --------- | ------ |
+| `grounding`   | `developer` | `user`    | `user` |
+| `event`       | `user`      | `user`    | `user` |
+
+`developer` is OpenAI's sanctioned non-user instruction channel and is legal mid-stream, which is what `grounding` needs. Where a provider has no such role, what keeps a grounding message from reading as something the human typed is the structure already in its content — the section lowering the compiler applied. An `event` is a record rather than an instruction, so it stays on `user` everywhere.
 
 ### Media fidelity — what reaches the provider, and what you are told
 
@@ -443,28 +460,29 @@ A source with neither a URL nor a document index has no shared identity and is i
 
 ### `@agentick/model`
 
-| Export                                                                                       | Purpose                                        |
-| -------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `generate` / `generateStream`                                                                | Standalone single-shot call over an adapter    |
-| `generateObject` / `GenerateObjectError`                                                     | Schema-validated structured output             |
-| `defineLanguageModelAdapter`                                                                 | The blessed adapter constructor                |
-| `isLanguageModelAdapter`                                                                     | Structural guard for adapter-or-executor slots |
-| `defaultFinalizeStream`                                                                      | End-of-stream finalization, composable         |
-| `withRetry` / `withFallback` / `tapModel`                                                    | Resilience, failover, observability            |
-| `isTransientProviderError`                                                                   | The default retry predicate (429/5xx/network)  |
-| `StreamAccumulator`                                                                          | The canonical delta fold                       |
-| `composeTransforms` / `identityTransform`                                                    | `DeltaTransform` pipeline                      |
-| `thinkTagTransform` / `customBlockTransform`                                                 | Tag routing as transforms                      |
-| `StreamTagParser`                                                                            | The streaming XML-ish tag parser beneath them  |
-| `defaultProject` + `buildTools` / `buildProviderTools` / `buildMessages` / `buildParameters` | Canonical projection and its parts             |
-| `messagePartFromBlock` / `sectionText` / `collectSectionText`                                | Projection leaves                              |
-| `buildMessageProvenance`                                                                     | Where-provenance over a projected request      |
-| `applyMediaSupport`                                                                          | Screen media against the target's declaration  |
-| `detectDroppedInputs`                                                                        | What the adapter silently discarded            |
-| `createSourceInterner`                                                                       | Per-turn one-source-one-id registry            |
-| `SEED_MODELS` / `resolveModelInfo` / `mergeRegistry` / `effectiveModelInfo`                  | The model registry                             |
-| `contextUtilization` / `estimateTokens`                                                      | Window ratio and token estimation              |
-| `SEED_PRICING` / `resolvePricing` / `mergePricing` / `estimateCost` / `mergeUsageStats`      | Cost accounting                                |
+| Export                                                                                       | Purpose                                                  |
+| -------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `generate` / `generateStream`                                                                | Standalone single-shot call over an adapter              |
+| `generateObject` / `GenerateObjectError`                                                     | Schema-validated structured output                       |
+| `defineLanguageModelAdapter`                                                                 | The blessed adapter constructor                          |
+| `isLanguageModelAdapter`                                                                     | Structural guard for adapter-or-executor slots           |
+| `defaultFinalizeStream`                                                                      | End-of-stream finalization, composable                   |
+| `withRetry` / `withFallback` / `tapModel`                                                    | Resilience, failover, observability                      |
+| `isTransientProviderError`                                                                   | The default retry predicate (429/5xx/network)            |
+| `StreamAccumulator`                                                                          | The canonical delta fold                                 |
+| `composeTransforms` / `identityTransform`                                                    | `DeltaTransform` pipeline                                |
+| `thinkTagTransform` / `customBlockTransform`                                                 | Tag routing as transforms                                |
+| `StreamTagParser`                                                                            | The streaming XML-ish tag parser beneath them            |
+| `defaultProject` + `buildTools` / `buildProviderTools` / `buildMessages` / `buildParameters` | Canonical projection and its parts                       |
+| `messagePartFromBlock`                                                                       | Projection leaf: one content block → one part            |
+| `canonicalRole` / `lowerSemanticRole` / `UnknownMessageRoleError`                            | The role seam — narrow at the fold, lower at the adapter |
+| `buildMessageProvenance`                                                                     | Where-provenance over a projected request                |
+| `applyMediaSupport`                                                                          | Screen media against the target's declaration            |
+| `detectDroppedInputs`                                                                        | What the adapter silently discarded                      |
+| `createSourceInterner`                                                                       | Per-turn one-source-one-id registry                      |
+| `SEED_MODELS` / `resolveModelInfo` / `mergeRegistry` / `effectiveModelInfo`                  | The model registry                                       |
+| `contextUtilization` / `estimateTokens`                                                      | Window ratio and token estimation                        |
+| `SEED_PRICING` / `resolvePricing` / `mergePricing` / `estimateCost` / `mergeUsageStats`      | Cost accounting                                          |
 
 Types: `LanguageModelAdapter`, `LanguageModelAdapterDefinition`, `StreamAccumulatorView`, `AccumToolCall`, `DeltaTransform`, `CustomBlockDefinition`, `StreamTagHandler` / `StreamTagParserConfig` / `StreamTagEvent`, `GenerateOptions`, `GenerateObjectOptions` / `GenerateObjectResult`, `RetryOptions`, `ModelTap`, `SourceInterner`, `ModelInfo` / `ModelPricing` / `ModelRegistry`, `PricingTable` / `CostEstimate`, `MessageProvenance` / `PartOrigin`, `MediaSupportResult` / `PartDeclined`, `DroppedInputs` / `DroppedPart` / `ProjectingAdapter`.
 
@@ -522,9 +540,10 @@ Spread-override any hook for a behavior-specific variant: `{ ...scriptedAdapter(
 - `src/__tests__/canonical-projection.spec.ts` — wire-native modality parts, the `generated_image` data-URI regression, resource projection, `providerMetadata → providerOptions` on parts and on messages, the tree-over-target `providerOptions` fold, `buildParameters` lifting the generation knobs and `toolChoice`, and `buildProviderTools` name resolution, dedupe, empty-slot omission, and exclusion from the function tools list.
 - `src/__tests__/dropped-inputs.spec.ts` — a dropped part found among carried ones and reported nothing for a faithful adapter; a SOLO dropped part whose removal also empties its message (and again when the adapter drops the emptied message wholesale — the apparent confound that is not one); drops across several messages; two identical parts not mistaken for one drop; a dropped `responseFormat` and a dropped tool; **the case it cannot see** — an input carried in a form the provider would reject — pinned so silence is never read as safety; and a drop joined through provenance to the durable entry id.
 - `src/__tests__/media-support.spec.ts` — undeclared targets unscreened (by reference); a declared kind carried and an undeclared one declined; an entire omitted modality declined, and `[]` read the same as omission; a declined image not taking neighbouring text with it; a message emptied by the removal dropped while an already-empty one is left alone; and declines joining provenance to name a durable entry id, over a tree where the filtered list diverges from the indexed one.
-- `src/__tests__/provenance.spec.ts` — the alignment invariant (`provenance[i][j]` describes `messages[i].content[j]`) over the trees a divergent walk would go off by one on: cache-hinted sections emitting one part each, an empty section contributing none, no sections at all, mixed blocks, empty content; plus the timeline message id rather than a position, `undefined` for a system part, `entryId` omitted rather than invented for an id-less entry, out-of-range lookups returning `undefined`, and out-of-range lookups returning `undefined`.
+- `src/__tests__/provenance.spec.ts` — the alignment invariant (`provenance[i][j]` describes `messages[i].content[j]`) over the trees a divergent walk would go off by one on: cache-hinted section blocks keeping one part each, several system entries merging into one message, a system entry contributing no parts, no system entry at all, a free-floating grounding message, mixed blocks, empty content; plus the timeline message id rather than a position, the section's stable id for a system part, `entryId` omitted rather than invented when there is none, and out-of-range lookups returning `undefined`.
 - `src/__tests__/narration-injection.spec.ts` — `_summary` injected when enabled, never in `required`, skipped on the app-level off-switch, on `annotations.narrate: false`, and on an author-owned `_summary`; source schema never mutated; dispatch-only tools dropped.
-- `src/__tests__/cache-hints.spec.ts` — message-level cache hints carried, unhinted sections keeping the joined system blob, and a hinted section switching the system message to per-section parts.
+- `src/__tests__/cache-hints.spec.ts` — message-level cache hints carried, a block-level hint reaching the part it rides, and a message-level hint marking the last part it covers.
+- `src/__tests__/semantic-roles.spec.ts` — the fold keeping `grounding` / `event` intact, an unknown role throwing rather than being cast, the three adapter tables including `grounding` → `developer` on OpenAI, a partial table throwing rather than emitting `undefined`, leading system entries merging in order, every other entry keeping its index, and no system message at all when the tree has no system entry.
 - `src/__tests__/model-info.spec.ts` — longest-prefix resolution, `mergeRegistry` layering, the adopter > self > seed precedence in every direction, `undefined` when no layer knows the model, utilization ratio and clamping, token estimation, single-source pricing parity, and distinct rows per serving provider for the same underlying model.
 - `src/__tests__/pricing.spec.ts` — longest-prefix pricing, fresh/cached/write rate splitting, rate fallbacks, table layering, `mergeUsageStats` optional-field handling, and the explicit-table > `target.pricing` > seed order.
 - `src/__tests__/message-sources-rollup.spec.ts` — `defaultFinalizeStream` deduping a source cited in two blocks and unioning distinct sources across blocks.

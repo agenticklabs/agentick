@@ -1,6 +1,6 @@
 # ADR 94 — Sections are content: container decides role, position decides order
 
-**Status:** accepted (design), implementation pending
+**Status:** accepted, IMPLEMENTED (2026-08-02)
 **Decided:** 2026-08-01/02, workshop with Ryan (v2 of this ADR — the first
 draft's "leading run folds to system" rule is superseded by the uniform
 container rule below; that draft's adapter table, formatter ownership, and
@@ -49,6 +49,18 @@ exists at the wire, so nothing else exists in the IR.**
    case 1. `{entries.map(...)}` with sections dropped between mapped
    messages yields grounding turns exactly where they were placed.
 
+   **The role prop is the escape hatch on the default.** A free-standing
+   section's anonymous message is `grounding` because that is what
+   non-conversational context is — but a section that IS a turn says so:
+   `<Section role="user">` compiles to a plain user message whose content
+   is still the section structure, and the role rides the same adapter
+   lowering table as any other. On a section NESTED in a message the prop
+   is a compile DIAGNOSTIC rather than a silent no-op: the container has
+   already decided the role, and honouring it would mean breaking the
+   section out of its parent — the hoisting this ADR removes. A
+   silently-dropped prop reads as a bug in the framework instead of one in
+   the tree.
+
 3. **There is no third case.** `SectionEntry` leaves the IR:
    `ContextEntry = MessageEntry` only. The IR is what the wire is — an
    ordered list of role-bearing messages.
@@ -85,6 +97,15 @@ lowering is written ONCE and used by both cases:
   spaces/punctuation → underscore; `"Current User"` → `<current_user>`;
   untitled → `<section id="…">`). The XML formatter already preserves
   custom block tags and attrs; this is the same rule reaching sections.
+
+**No tag-override prop.** The tag derives from `slug(title)` and nothing
+else. The reason is that markdown renders the title's words as a heading
+and XML renders the SAME words as a tag — one section, one name, two
+dialects telling the same story. An independent `tag` prop would let the
+two diverge, so a tree could read `# Current User` in markdown and
+`<ctx7>` in XML and both would be "correct." Authors who need an exact tag
+already have one: the custom-block mechanism, whose tag and attrs the XML
+formatter preserves verbatim.
 
 ## Semantic roles: one mapping seam, two tenants
 
@@ -135,16 +156,51 @@ promised, and the `entry.role as …` cast dies:
   `RagContext`'s hand-rolled `<User>` turn can become a plain mid-stream
   `<Section>` at leisure.
 
-## Verified by (to be written with the implementation)
+## Status: implemented
 
-- Section inside `<System>` → system param content, markdown lowering
-  byte-compatible with today's `sectionText` for the title+text case;
-  cache-hinted sections keep per-part boundaries.
-- Section inside `<User>` → that message's content, same structure.
-- Free-floating section between two messages → grounding message at its
-  position; below `<Timeline />` → the LAST message the executor
-  receives (e2e).
-- Adapter lowerings per table; `role: "event"` never cast.
-- XML formatter title→tag slug rule; markdown unchanged.
-- Bare-leading-section diagnostic names the `<System>` fix.
-- Unfiltered grep: no `SectionEntry`, no `priority` references.
+Landed on `feat/v2`. One deviation from the design above, deliberate and
+marked in code as `TODO(section-formatter-thread)`: the compile path
+applies the MARKDOWN lowering unconditionally, even under an `<XML>`
+scope. The xml title→tag rule is written and tested in
+`lowerSection`, but wiring it into the collect walk would double-process
+— the compiler harness's formatter pass runs AFTER collect and would
+escape a frame emitted during it (`<current_user>` → `&lt;current_user&gt;`)
+while the body, already lowered to text, would skip the escaping it
+needs. Choosing the dialect correctly means resolving the live formatter
+during the collect walk. That is the thread-through the TODO names, and
+it is the only part of this ADR not yet load-bearing.
+
+## Verified by
+
+- `packages/compiler-react/src/__tests__/positional-sections.spec.tsx` —
+  the law: conservation pins (semantic-HTML system byte-identical; a
+  title+text section's markdown bytes identical to the old `sectionText`;
+  two sections in one message joined the way the old system blob joined
+  them), section inside `<System>` / `<User>` / `<Assistant>`,
+  cache-hinted section keeps its own block, free-floating section →
+  grounding at its position, the `role` prop (default `grounding`,
+  `role="user"` as a plain turn with the wrapper intact, a non-provider
+  role carried for the adapter, `role="system"` answering the
+  never-mid-stream rule), `<Grounding>` ≡ bare section, and all three
+  diagnostics including `SECTION_ROLE_IN_MESSAGE` on a nested section.
+- `packages/app/src/__tests__/positional-sections-e2e.spec.tsx` — the
+  headline consequence at the altitude an adopter sees it: a `<Section>`
+  below `<Timeline />` is the LAST `LanguageModelMessage` the executor is
+  handed, and the system prompt contains only what `<System>` contained.
+- `packages/formatters/src/__tests__/section-lowering.spec.ts` — the one
+  lowering: markdown bytes, the xml title→tag slug rule (including the
+  leading-digit and no-surviving-characters cases), what rides the
+  produced blocks, and no-silent-drop around non-text and
+  semantic-sidecar blocks.
+- `packages/model/src/__tests__/semantic-roles.spec.ts` — the role seam:
+  the fold narrows and keeps `grounding` / `event`, an unknown role
+  throws instead of being cast, the three adapter tables, and system
+  having no position while everything else keeps its own.
+- `packages/model/src/__tests__/cache-hints.spec.ts` — a block-level
+  cache hint reaches the projected part (#185, one level down).
+- `packages/model/src/__tests__/provenance.spec.ts` — the provenance walk
+  still mirrors the fold part-for-part, and a system part now names the
+  SECTION's stable id.
+- `packages/app/src/__tests__/prefix-stability.spec.tsx` — sections
+  inside `<System>` keep the prompt-cache prefix byte-stable across
+  renders and across mounts.

@@ -7,8 +7,7 @@
  *   - block-level formatting via `formatter(blocks)` (existing
  *     contract — `SemanticContentBlock[] → ContentBlock[]`)
  *   - block-to-text flattening via `formatter.blocksToText`
- *   - section / message framing via `formatter.frameSection` /
- *     `formatter.frameMessage`
+ *   - message framing via `formatter.frameMessage`
  *
  * The built-in markdown / xml / text formatters supply all three
  * tree-level methods. 3rd-party formatters that omit them fall back
@@ -31,7 +30,6 @@ import type {
   FormatterRef,
   MessageEntry,
   RenderedTree,
-  SectionEntry,
   SemanticContentBlock,
 } from "@agentick/spec";
 
@@ -59,11 +57,7 @@ export function formatTree(
     const formatter = resolveFormatter(entry.renderedWith, defaultFormatter, opts);
     const formattedBlocks = formatter(entry.content as readonly SemanticContentBlock[]);
     const bodyText = (formatter.blocksToText ?? defaultBlocksToText)(formattedBlocks);
-    const framed =
-      entry.kind === "section"
-        ? (formatter.frameSection ?? defaultFrameSection)(entry, bodyText)
-        : (formatter.frameMessage ?? defaultFrameMessage)(entry, bodyText);
-    parts.push(framed);
+    parts.push((formatter.frameMessage ?? defaultFrameMessage)(entry, bodyText));
   }
 
   if (tree.content && tree.content.length > 0) {
@@ -98,10 +92,6 @@ function resolveFormatter(
 // flatten methods. The built-in markdown / xml / text formatters all
 // supply theirs — these defaults exist to protect 3rd-party
 // formatters that only implement the block-level contract.
-
-function defaultFrameSection(entry: SectionEntry, body: string): string {
-  return entry.title ? `## ${entry.title}\n\n${body}` : body;
-}
 
 function defaultFrameMessage(entry: MessageEntry, body: string): string {
   return `**${entry.role}:** ${body}`;

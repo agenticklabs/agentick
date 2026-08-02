@@ -241,8 +241,24 @@ export interface LanguageModelInput {
   readonly providerOptions?: ProviderOptions;
 }
 
+/**
+ * Provider-facing role vocabulary, plus the two AGENTICK-SEMANTIC roles the
+ * canonical fold keeps intact for the adapter to lower: `grounding`
+ * (non-conversational context) and `event` (a record of something that
+ * happened). Every adapter maps those two to its own vocabulary at its own
+ * boundary — OpenAI has `developer`, Anthropic and Google do not — and an
+ * unrecognized role is an error there, never a coercion (ADR 94).
+ */
+export type LanguageModelMessageRole =
+  | "system"
+  | "user"
+  | "assistant"
+  | "tool"
+  | "grounding"
+  | "event";
+
 export interface LanguageModelMessage {
-  readonly role: "system" | "user" | "assistant" | "tool";
+  readonly role: LanguageModelMessageRole;
   readonly content: ReadonlyArray<LanguageModelMessagePart>;
   readonly toolCallId?: string;
   readonly name?: string;
@@ -262,7 +278,7 @@ export interface LanguageModelMessage {
    * block; providers with automatic prefix caching no-op); explicit
    * per-block `providerMetadata.<ns>` always wins over this hint.
    */
-  readonly cache?: import("../data/entries.js").CacheHint;
+  readonly cache?: import("../data/content-blocks.js").CacheHint;
 }
 
 /**
@@ -304,7 +320,7 @@ export type LanguageModelMessagePart =
       readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
       /** Canonical cache hint for THIS part (per-section system boundaries, #185). */
-      readonly cache?: import("../data/entries.js").CacheHint;
+      readonly cache?: import("../data/content-blocks.js").CacheHint;
     }
   | {
       /**

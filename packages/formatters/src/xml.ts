@@ -11,7 +11,6 @@ import type {
   ContentBlock,
   JsonBlock,
   MessageEntry,
-  SectionEntry,
   SemanticContentBlock,
   SemanticNode,
   TextBlock,
@@ -173,11 +172,6 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
 // Tree-level framing + flatten (owned by this formatter)
 // ============================================================================
 
-function frameSection(entry: SectionEntry, body: string): string {
-  const title = entry.title ? ` title="${escapeXml(entry.title)}"` : "";
-  return `<section id="${escapeXml(entry.id)}"${title}>\n${body}\n</section>`;
-}
-
 function frameMessage(entry: MessageEntry, body: string): string {
   return `<message role="${escapeXml(entry.role)}">\n${body}\n</message>`;
 }
@@ -248,7 +242,6 @@ export const xmlFormatter = createFormatter({
   id: "formatter.xml",
   format: "xml",
   render: (blocks) => blocks.map(formatBlock),
-  frameSection,
   frameMessage,
   blocksToText,
 });

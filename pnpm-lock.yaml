@@ -557,6 +557,9 @@ importers:
 
   packages/compiler:
     dependencies:
+      '@agentick/formatters':
+        specifier: workspace:*
+        version: link:../formatters
       '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub

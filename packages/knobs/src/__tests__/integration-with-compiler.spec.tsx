@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { extractText } from "@agentick/spec";
-import type { HookBridges, LifecycleExecutionEnd, SectionEntry } from "@agentick/spec";
+import type { HookBridges, LifecycleExecutionEnd, MessageEntry } from "@agentick/spec";
 
 import { CompilerHarness } from "@agentick/compiler-react";
 import { fakeBridges, fakeKnobsHarness } from "@agentick/compiler";
@@ -33,13 +33,16 @@ async function makeHarness() {
   return harness;
 }
 
+/**
+ * ADR 94: a free-floating `<Section>` is not an entry kind — it lands as an
+ * anonymous `grounding` message keeping the section id, its title lowered
+ * into the leading line of the first text block.
+ */
 function sectionOf(
-  tree: { context: { entries: readonly { kind: string }[] } },
+  tree: { context: { entries: readonly MessageEntry[] } },
   id: string,
-): SectionEntry | undefined {
-  return tree.context.entries.find(
-    (e): e is SectionEntry => e.kind === "section" && (e as SectionEntry).id === id,
-  );
+): MessageEntry | undefined {
+  return tree.context.entries.find((e) => e.role === "grounding" && e.id === id);
 }
 
 // Local alias for the canonical `extractText` so call sites still read
@@ -312,7 +315,7 @@ describe("<Knobs /> — render prop", () => {
 
     const custom = sectionOf(tree, "custom-knobs");
     expect(custom).toBeTruthy();
-    expect(textOf(custom!.content)).toBe("Got 1 knob(s)");
+    expect(textOf(custom!.content)).toBe("# Custom\nGot 1 knob(s)");
     expect(sectionOf(tree, "knobs")).toBeUndefined();
     expect(tree.declarations?.tools?.some((t) => t.name === "knob_set")).toBe(true);
   });

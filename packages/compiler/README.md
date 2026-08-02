@@ -36,7 +36,9 @@ const { tree, diagnostics } = collect({
   rootScope,
 });
 
-tree.context.entries; // [{ kind: "section", id, title: "Guidance", content: [{ type: "text", ... }] }]
+// A `<section>` on its own is content with no message to belong to, so it
+// becomes one at its own position (ADR 94).
+tree.context.entries; // [{ kind: "message", role: "grounding", id, content: [{ type: "text", text: "# Guidance\nAnswer concisely." }] }]
 ```
 
 That is the whole contract a concrete compiler has to meet: build host instances however your framework does it, then hand the roots to `collect`. `createBuiltInRegistry()` supplies the entire vocabulary.
@@ -68,18 +70,19 @@ One contributor per host type. Return `IRFragment`s; use `ctx` to recurse, fold 
 ```ts
 import { NO_FRAGMENTS, createBuiltInRegistry } from "@agentick/compiler";
 import type { CollectContext, Contributor, ElementInstance, IRFragment } from "@agentick/compiler";
-import type { SectionEntry } from "@agentick/spec";
+import type { MessageEntry } from "@agentick/spec";
 
 const bannerContributor: Contributor = {
   type: "banner",
   contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[] {
     const text = ctx.collectText(instance);
     if (text.length === 0) return NO_FRAGMENTS;
-    const entry: SectionEntry = {
-      kind: "section",
+    const entry: MessageEntry = {
+      kind: "message",
+      role: "grounding",
       id: ctx.stableId("banner", instance),
       content: [{ type: "text", text }],
-      renderedWith: ctx.formatter("section"),
+      renderedWith: ctx.formatter("message"),
     };
     return [{ kind: "context-entry", entry }];
   },
@@ -106,8 +109,8 @@ The guard is type-level. Each contributor partitions its spec type's keys into w
 ```ts
 import type { Exhausted, UnhandledSpecKeys } from "@agentick/compiler";
 
-type BannerSpec = { readonly kind: "section"; readonly id: string; readonly title?: string };
-type Forwarded = "title";
+type BannerSpec = { readonly kind: "message"; readonly id: string; readonly role: string };
+type Forwarded = "role";
 type Supplied = "kind" | "id";
 type _conformance = Exhausted<UnhandledSpecKeys<BannerSpec, Forwarded, Supplied>>;
 ```
@@ -121,6 +124,8 @@ Three contributors carry a documented exception with no partition: `content-pass
 `collect` folds two different kinds of contribution, and the distinction is the reason context doesn't get double-counted.
 
 **Content** is `<Message>` / `<Section>` / text written directly in the tree. It appends to the entry stream in tree order.
+
+A `<Section>` is content in the strict sense: it emits a `section-content` fragment, not an entry, and where those blocks land is the CONTAINER's call. Inside a `<message>` they splice into that message's content; at entry level the collector wraps them in an anonymous `role: "grounding"` message at that position. This is also the fix for a real defect — a `<section>` nested in a `<message>` used to fall off the content walker's fragment switch and vanish with no diagnostic.
 
 **Projections** are one-per-surfacing-key. A harness with something to surface — the timeline, the tool set — gets exactly one projection into the IR: either its framework **default**, or a component that **overrides** it. Accumulation lives in the harness; a projection only surfaces what the harness already holds.
 
@@ -138,7 +143,8 @@ const namesProjection: DefaultProjection = {
       : {
           entries: [
             {
-              kind: "section",
+              kind: "message",
+              role: "grounding",
               id: "tool-names",
               content: [{ type: "text", text: sources.tools.map((t) => t.name).join(", ") }],
               renderedWith: { id: "default" },
@@ -345,7 +351,7 @@ The doubles are typed against the protocol interfaces, so a protocol change brea
 
 **The React binding.** [@agentick/compiler-react](../compiler-react) owns the reconciler host config, the JSX runtime, the hooks, the components, and the bridge context (`BridgeProvider` / `useBridges`). It builds host instances and hands them to `collect`.
 
-**Protocol types.** [@agentick/spec](../spec) owns `RenderedTree`, `ContextEntry`, `ToolDeclaration`, every content block, the lifecycle event union, and `CompilerFactory`. Both a contributor and the package producing its props derive from the same spec type, which is what makes spec the single sync point.
+**Protocol types.** [@agentick/spec](../spec) owns `RenderedTree`, `MessageEntry`, `ToolDeclaration`, every content block, the lifecycle event union, and `CompilerFactory`. Both a contributor and the package producing its props derive from the same spec type, which is what makes spec the single sync point.
 
 **Substrate.** [@agentick/runtime](../runtime) supplies the journal, bus, and inbox a compiler runs its operations on, plus the harness base class behind `defineCompiler`.
 

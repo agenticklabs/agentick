@@ -26,6 +26,17 @@ export { markdownFormatter } from "./markdown.js";
 export { xmlFormatter } from "./xml.js";
 export { textFormatter } from "./text.js";
 
+// The ONE section → content-blocks lowering (ADR 94). A `<Section>` is
+// content, not an entry: the compiler calls this for a section inside a
+// message AND for a free-floating one (which becomes an anonymous
+// `grounding` message wrapping exactly these blocks).
+export {
+  lowerSection,
+  sectionTagName,
+  SECTION_STAMP,
+  type SectionSource,
+} from "./section-lowering.js";
+
 // Content-reduction policies (v2 home of v1's connector content-pipeline).
 export {
   textOnlyFormatter,

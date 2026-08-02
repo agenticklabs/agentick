@@ -19,6 +19,7 @@
 
 import React, { type ReactNode } from "react";
 import { Message, type MessageProps } from "./message.js";
+import { Section, type SectionProps } from "./section.js";
 
 const passThrough = (role: MessageProps["role"]) =>
   function RoleMessage(props: Omit<MessageProps, "role">): React.ReactElement {
@@ -41,6 +42,43 @@ export const User = passThrough("user");
  * `<Message role="assistant">`.
  */
 export const Assistant = passThrough("assistant");
+
+/**
+ * `<Grounding>...</Grounding>` — non-conversational context at this position
+ * in the conversation: what the user is looking at, who they are, what the
+ * retrieval returned. Not an instruction and not a human turn.
+ *
+ * It is a `grounding` message wrapping a `<Section>`, which is exactly what
+ * a free-floating `<Section>` compiles to — this is the explicit spelling of
+ * the same thing (ADR 94). The section wrapper is load-bearing: providers
+ * without a non-user role (Anthropic, Google) receive this as `user`, and
+ * the structure in the content is what keeps it distinguishable from
+ * something the human typed. OpenAI receives it as `developer`.
+ *
+ * @see docs/proposals/v2/blueprint/94-positional-sections.md
+ */
+export function Grounding({ title, id, cache, children }: GroundingProps): React.ReactElement {
+  return React.createElement(
+    Message,
+    { role: "grounding" },
+    React.createElement(
+      Section,
+      {
+        ...(title !== undefined ? { title } : {}),
+        ...(id !== undefined ? { id } : {}),
+        ...(cache !== undefined ? { cache } : {}),
+      },
+      children,
+    ),
+  );
+}
+
+export interface GroundingProps {
+  readonly title?: string;
+  readonly id?: string;
+  readonly cache?: SectionProps["cache"];
+  readonly children?: ReactNode;
+}
 
 // ─── Block-level semantic wrappers ───────────────────────────────────
 

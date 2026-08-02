@@ -109,7 +109,7 @@ export interface FormatDiagnostics {
 /**
  * Direct output of the formatter harness. Inside a {@link RenderedTree},
  * the contribution is unpacked onto individual entries — `content` flows
- * into `MessageEntry.content` / `SectionEntry.content`; `text` / `mimeType`
+ * into `MessageEntry.content`; `text` / `mimeType`
  * / `renderedWith` are surfaced at the IR root for free-root rendering.
  */
 export interface FormattedContent {

@@ -18,7 +18,7 @@
  * conforming implementation for the default projection.
  */
 
-import type { MessageEntry, RenderedTree, SectionEntry } from "@agentick/spec";
+import type { RenderedTree } from "@agentick/spec";
 
 /**
  * Where one projected part came from.
@@ -34,9 +34,9 @@ export interface PartOrigin {
 }
 
 /**
- * Origins parallel to the projected messages. `undefined` for a part with no message-entry
- * origin — every part of the leading SYSTEM message, built from sections rather than
- * conversation, so there is nothing to quarantine and no id to name.
+ * Origins parallel to the projected messages. `undefined` for a part with no id to
+ * name — a system part built from a `<Section>` the adopter never gave an id, rather
+ * than fabricated.
  *
  * Reading it is `provenance[messageIndex]?.[partIndex]`; collecting candidates is a filter.
  * Two traps if you write either, because both misattribute silently rather than erroring:
@@ -53,40 +53,24 @@ export type MessageProvenance = ReadonlyArray<ReadonlyArray<PartOrigin | undefin
 
 /** Walk a tree the way `buildMessages` does, recording origins instead of building parts. */
 export function buildMessageProvenance(tree: RenderedTree): MessageProvenance {
-  const out: Array<ReadonlyArray<PartOrigin | undefined>> = [];
-
-  // The system message, mirroring `buildMessages`' two shapes: cache-hinted sections emit
-  // one part each, otherwise all sections collapse into one joined blob. Origins are
-  // `undefined` either way, but the COUNT has to match or every later index is off by one.
-  const sections = tree.context.entries.filter((e): e is SectionEntry => e.kind === "section");
-  if (sections.some((sec) => sec.metadata?.cache !== undefined)) {
-    const partCount = sections.filter((sec) => sectionTextLength(sec) > 0).length;
-    if (partCount > 0) out.push(new Array<undefined>(partCount).fill(undefined));
-  } else if (sections.some((sec) => sectionTextLength(sec) > 0)) {
-    out.push([undefined]);
-  }
+  // Mirrors the fold exactly: system entries merge into one leading message,
+  // everything else keeps its position. The COUNT has to match part for part or
+  // every later index is off by one.
+  const system: Array<PartOrigin | undefined> = [];
+  const rest: Array<ReadonlyArray<PartOrigin | undefined>> = [];
 
   for (const entry of tree.context.entries) {
-    if (entry.kind !== "message") continue;
-    const message = entry as MessageEntry;
-    out.push(
-      message.content.map((_, blockIndex) => ({
-        ...(message.id !== undefined ? { entryId: message.id } : {}),
-        blockIndex,
-      })),
-    );
+    // A block keeps the id of whatever produced it — for a section that
+    // lowered into this message's content, that is the SECTION's stable id,
+    // which is what makes a system part attributable at all now that it is
+    // no longer a top-level entry (ADR 94).
+    const origins = entry.content.map((block, blockIndex) => {
+      const entryId = block.id ?? entry.id;
+      return { ...(entryId !== undefined ? { entryId } : {}), blockIndex };
+    });
+    if (entry.role === "system") system.push(...origins);
+    else rest.push(origins);
   }
-  return out;
-}
 
-/**
- * The emptiness test `buildMessages` applies to a section. Duplicated rather than imported
- * so this module never concatenates a payload — it needs the length, not the string.
- */
-function sectionTextLength(section: SectionEntry): number {
-  let n = section.title !== undefined ? section.title.length + 2 : 0;
-  for (const block of section.content) {
-    if (block.type === "text") n += block.text.length;
-  }
-  return n;
+  return system.length > 0 ? [system, ...rest] : rest;
 }

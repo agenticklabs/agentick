@@ -10,14 +10,22 @@
  *  - maxIterations cap → surfaces `max-iterations` diagnostic
  *  - Multiple sections / messages in render order
  *  - No session/journal/bridges leakage — each call is fresh
- *  - defaultFormatter stamps `renderedWith` on section entries
+ *  - defaultFormatter stamps `renderedWith` on the entry a section became
  *  - <tool> declarations land on tree.declarations.tools
  *
  * Pins for renderTemplate:
  *  - Default markdown formatter produces sensible output
- *  - Section title framing (markdown `## title`)
+ *  - Section title lowering (a leading `# title` inside the content)
  *  - Message role framing (`**user:** ...`)
  *  - useData-resolved content reaches the final string
+ *
+ * ADR 94 — a free-floating `<section>` is a `grounding` MESSAGE at its own
+ * tree position, `SectionEntry` is gone, and `frameSection` was deleted from
+ * every formatter. A section's title is lowered into its content as a `# `
+ * heading at COLLECT time (markdown-only for now —
+ * TODO(section-formatter-thread)), so the render formatter only ever sees a
+ * message with text content.
+ * @see docs/proposals/v2/blueprint/94-positional-sections.md
  */
 
 import { createElement } from "react";
@@ -32,12 +40,15 @@ describe("compileTemplate — JSX → IR", () => {
   it("renders a single <section> with inline text", async () => {
     const Template = () => createElement("section" as never, { id: "intro" }, "Hello, world.");
     const { tree, diagnostics, iterations } = await compileTemplate(createElement(Template));
-    expect(diagnostics).toHaveLength(0);
+    // ADR 94 — a bare leading `<section>` is no longer silent: it compiles to
+    // a `grounding` message at its own position and earns the migration hint
+    // naming the `<System>` wrapper. That is the ONLY diagnostic here.
+    expect(diagnostics.map((d) => d.code)).toEqual(["SECTION_WITHOUT_SYSTEM"]);
     expect(iterations).toBe(1);
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
-    expect(entry.kind).toBe("section");
-    if (entry.kind !== "section") throw new Error("expected section");
+    expect(entry.kind).toBe("message");
+    expect(entry.role).toBe("grounding");
     expect(entry.id).toBe("intro");
   });
 
@@ -51,7 +62,9 @@ describe("compileTemplate — JSX → IR", () => {
     );
     const { tree } = await compileTemplate(createElement(Tpl));
     expect(tree.context.entries).toHaveLength(3);
-    const ids = tree.context.entries.map((e) => (e.kind === "section" ? e.id : `msg:${e.role}`));
+    // ADR 94's headline: position decides order. The trailing section is the
+    // LAST entry — it is not hoisted ahead of the user message any more.
+    const ids = tree.context.entries.map((e) => (e.role === "grounding" ? e.id : `msg:${e.role}`));
     expect(ids).toEqual(["a", "msg:user", "c"]);
   });
 
@@ -64,7 +77,7 @@ describe("compileTemplate — JSX → IR", () => {
     expect(iterations).toBeGreaterThan(1);
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
-    if (entry.kind !== "section") throw new Error("expected section");
+    expect(entry.role).toBe("grounding");
     expect(entry.content.some((b) => b.type === "text" && b.text.includes("Hello, async"))).toBe(
       true,
     );
@@ -138,13 +151,15 @@ describe("compileTemplate — JSX → IR", () => {
     );
   });
 
-  it("respects defaultFormatter — stamps `renderedWith` on section entries", async () => {
+  it("respects defaultFormatter — stamps `renderedWith` on the section's entry", async () => {
     const Template = () => createElement("section" as never, { id: "x" }, "body");
     const { tree } = await compileTemplate(createElement(Template), {
       defaultFormatter: { id: "xml", format: "xml" },
     });
     const entry = tree.context.entries[0]!;
-    if (entry.kind !== "section") throw new Error("expected section");
+    // ADR 94 — the ref resolved from the `section` format purpose rides the
+    // grounding message the section became.
+    expect(entry.role).toBe("grounding");
     expect(entry.renderedWith?.id).toBe("xml");
   });
 
@@ -168,13 +183,16 @@ describe("compileTemplate — JSX → IR", () => {
 });
 
 describe("renderTemplate — JSX → formatted string", () => {
-  it("produces markdown by default with section framing", async () => {
+  it("produces markdown by default, with the section title lowered to a heading", async () => {
     const Template = () =>
       createElement("section" as never, { id: "intro", title: "Greeting" }, "Hello.");
     const { output, diagnostics } = await renderTemplate(createElement(Template));
-    expect(diagnostics).toHaveLength(0);
-    expect(output).toContain("## Greeting");
-    expect(output).toContain("Hello.");
+    // ADR 94 deleted `frameSection`, so the formatter no longer produces
+    // `## Greeting`. `lowerSection` produces the heading at COLLECT time and
+    // coalesces it with the body into one text block, which markdown then
+    // frames as a `grounding` message.
+    expect(diagnostics.map((d) => d.code)).toEqual(["SECTION_WITHOUT_SYSTEM"]);
+    expect(output).toBe("**grounding:** # Greeting\nHello.");
   });
 
   it("frames messages with role prefix in markdown mode", async () => {
@@ -189,14 +207,22 @@ describe("renderTemplate — JSX → formatted string", () => {
     expect(output).toContain("**assistant:** pong");
   });
 
-  it("honors xmlFormatter — wraps sections in <section> tags", async () => {
+  it("honors xmlFormatter — frames the section's entry as an XML message", async () => {
     const Template = () => createElement("section" as never, { id: "intro" }, "body");
     const { output } = await renderTemplate(createElement(Template), {
       formatter: xmlFormatter,
     });
-    expect(output).toContain('<section id="intro">');
-    expect(output).toContain("body");
-    expect(output).toContain("</section>");
+    // ADR 94 deleted `frameSection`, so `<section id="intro">…</section>` is
+    // no longer what the XML formatter emits. The section is a `grounding`
+    // message and xml frames it as one.
+    //
+    // TODO(section-formatter-thread): the xml title→tag rule (`"Current
+    // User"` → `<current_user>`) EXISTS in `lowerSection` and is pinned by
+    // formatters/__tests__/section-lowering.spec.ts — it is simply not wired
+    // into the collect path yet, because choosing the dialect there means
+    // resolving the live formatter during the walk. See the note in
+    // compiler/src/collect/contributors/section.ts.
+    expect(output).toBe('<message role="grounding">\nbody\n</message>');
   });
 
   it("honors textFormatter — minimal framing", async () => {
@@ -204,9 +230,13 @@ describe("renderTemplate — JSX → formatted string", () => {
     const { output } = await renderTemplate(createElement(Template), {
       formatter: textFormatter,
     });
-    expect(output).toContain("Hi");
-    expect(output).toContain("body");
-    expect(output).not.toContain("##");
+    // The text formatter's framing is `role: body` — that part is unchanged.
+    // What DID change (ADR 94): the `# Hi` heading is baked in at collect
+    // time by the markdown-only `lowerSection`, so it survives into text
+    // output instead of being dropped by the text formatter's `frameSection`.
+    // TODO(section-formatter-thread) — the dialect should follow the render
+    // formatter, and then this heading becomes a bare `Hi` again.
+    expect(output).toBe("grounding: # Hi\nbody");
   });
 
   it("awaited useData content reaches the final string", async () => {

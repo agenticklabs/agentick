@@ -40,17 +40,19 @@ async function makeExecutor(opts: ConstructorParameters<typeof FakeLanguageModel
 }
 
 describe("FakeLanguageModelExecutor — project", () => {
-  it("folds a section into a leading system message", async () => {
+  it("folds a system entry into a leading system message", async () => {
     const { exec } = await makeExecutor();
     const tree: RenderedTree = {
       specVersion: "2026-05-08",
       context: {
         entries: [
+          // ADR 94: a `<Section title="Persona">` inside `<System>` reaches
+          // the executor already lowered into the message's blocks.
           {
-            kind: "section",
+            kind: "message",
+            role: "system",
             id: "s.intro",
-            title: "Persona",
-            content: [{ type: "text", text: "You are concise." }],
+            content: [{ type: "text", text: "# Persona\nYou are concise.", id: "s.intro" }],
           },
           {
             kind: "message",

@@ -1,26 +1,44 @@
 /**
  * `<Section>` — typed PascalCase wrapper around the `<section>` intrinsic.
  *
- * Author-facing surface for emitting a structured context entry with an
- * optional title. Mirrors `sectionContributor`'s prop shape so authors
- * get type-checked props without `JSX.IntrinsicElements` augmentation.
+ * A section is CONTENT, and where it lands is decided by what contains it:
  *
- * The lowercase `<section>` intrinsic remains the host primitive; this
- * wrapper is the canonical author API (parallel to `<Message>`).
+ *   - inside `<System>` / `<User>` / any `<Message>` — it becomes part of
+ *     that message's content. `<System>` is not special; it is simply the
+ *     message whose content becomes the provider's system parameter.
+ *   - on its own between messages — it becomes a message at exactly that
+ *     position, `role: "grounding"` unless `role` names another. A
+ *     `<Section>` below `<Timeline />` is the last message the model
+ *     receives.
  *
- * @see packages/compiler-react/src/collect/contributors/section.ts
+ * @see docs/proposals/v2/blueprint/94-positional-sections.md
+ * @see packages/compiler/src/collect/contributors/section.ts
  */
 
 import React, { type ReactNode } from "react";
-import type { SectionMetadata } from "@agentick/spec";
+import type { CacheHint, MessageRole } from "@agentick/spec";
 
 export interface SectionProps {
   readonly id?: string;
   readonly title?: string;
-  /** Hint to executors that may reorder context entries. */
-  readonly priority?: number;
-  readonly cache?: SectionMetadata["cache"];
-  readonly providerMetadata?: SectionMetadata["providerMetadata"];
+  /**
+   * Role for the anonymous message a FREE-STANDING section becomes —
+   * `grounding` by default, which is what non-conversational context is.
+   * Name another when the section IS a turn: `role="user"` makes it a plain
+   * user message whose content is still the section structure.
+   *
+   * Inside a message this is a compile diagnostic, not a silent no-op: the
+   * container has already decided the role, and honouring the prop would
+   * mean breaking the section out of its parent — the hoisting ADR 94
+   * removed.
+   */
+  readonly role?: MessageRole;
+  /**
+   * Prompt-cache breakpoint for this section. Rides the block the section
+   * lowers to, so it stays a real boundary inside its message (#185).
+   */
+  readonly cache?: CacheHint;
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
   readonly metadata?: Record<string, unknown>;
   readonly children?: ReactNode;
 }

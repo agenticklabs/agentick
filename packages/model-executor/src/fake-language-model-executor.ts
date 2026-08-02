@@ -704,7 +704,7 @@ function isLanguageModelExecutionResult(v: unknown): v is LanguageModelExecution
 }
 
 // Projection helpers (`buildMessages` / `buildTools` / `buildParameters`
-// / `collectSectionText` / `messagePartFromBlock`) live in
+// / `messagePartFromBlock`) live in
 // `canonical-projection.ts`. This executor uses them as-is — no
 // fake-specific tweaks.
 

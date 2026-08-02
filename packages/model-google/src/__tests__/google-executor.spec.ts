@@ -114,7 +114,7 @@ describe("google() adapter — non-streaming", () => {
 // ============================================================================
 
 describe("google() adapter — system extraction", () => {
-  it("collects sections into systemInstruction, leaves contents as user/model only", async () => {
+  it("collects system entries into systemInstruction, leaves contents as user/model only", async () => {
     const stub = new StubGoogleClient([
       { kind: "non-streaming", response: mkResponse({ text: "ok" }) },
     ]);
@@ -123,11 +123,13 @@ describe("google() adapter — system extraction", () => {
       specVersion: "2026-05-08",
       context: {
         entries: [
+          // ADR 94: a `<Section title="Persona">` inside `<System>` reaches
+          // the adapter already lowered into the message's blocks.
           {
-            kind: "section",
+            kind: "message",
+            role: "system",
             id: "s1",
-            title: "Persona",
-            content: [{ type: "text", text: "be helpful" }],
+            content: [{ type: "text", text: "# Persona\nbe helpful", id: "s1" }],
           },
           {
             kind: "message",

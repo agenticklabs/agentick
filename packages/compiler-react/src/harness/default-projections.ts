@@ -33,7 +33,8 @@
  * @see docs/proposals/v2/blueprint/63-compiler-surfacing.md
  */
 
-import type { ContentBlock, HookBridges, MessageEntry, SectionEntry } from "@agentick/spec";
+import type { ContentBlock, HookBridges, MessageEntry } from "@agentick/spec";
+import { lowerSection } from "@agentick/formatters";
 import type { DefaultProjection } from "@agentick/compiler";
 
 /** Minimal structural view of a message-kind timeline entry. */
@@ -133,9 +134,14 @@ function readResourcesSnapshot(bridges: HookBridges): StructuralResourcesSnapsho
  * Build the `resources` default projection bound to a mount's bridges.
  * Surfaces the CATALOG (uris + names + descriptions), NOT the content —
  * resources are application-controlled and pulled on demand (ADR 62), so
- * the model reads a specific uri with `resource_read`. Contributes a
- * single `SectionEntry` when the registry is non-empty; nothing
- * otherwise. Overridable via `<Project projectionKey="resources">`.
+ * the model reads a specific uri with `resource_read`. Contributes a single
+ * `grounding` message when the registry is non-empty; nothing otherwise.
+ *
+ * It lands where every default projection lands — appended after the
+ * tree-order stream, so AFTER the timeline. A default has no tree position
+ * to claim (ADR 94: position decides order, and this content was never
+ * placed). An adopter who wants the catalog somewhere specific overrides the
+ * key with `<Project projectionKey="resources">` and puts it there.
  */
 export function resourcesDefaultProjection(bridges: HookBridges): DefaultProjection {
   return {
@@ -163,11 +169,11 @@ export function resourcesDefaultProjection(bridges: HookBridges): DefaultProject
           text: `Readable resources the application exposes on request (by uri):\n${lines.join("\n")}`,
         } as ContentBlock,
       ];
-      const entry: SectionEntry = {
-        kind: "section",
+      const entry: MessageEntry = {
+        kind: "message",
+        role: "grounding",
         id: "resources-catalog",
-        title: "Available resources",
-        content,
+        content: lowerSection({ id: "resources-catalog", title: "Available resources", content }),
       };
       return { entries: [entry] };
     },
@@ -228,7 +234,7 @@ function summarizeCapabilities(caps: Readonly<Record<string, unknown>> | null | 
 
 /**
  * Build the `mcpServerInfo` default projection — the ONE dedicated
- * per-connected-server surfacing (ADR 63). Folds a `SectionEntry`
+ * per-connected-server surfacing (ADR 63). Folds a `grounding` message
  * summarizing each connected server KEYED BY THE ADOPTER ALIAS
  * (`serverInfo.serverId`), never the server's self-reported name (an
  * untrusted display label). Contributes nothing when no servers are
@@ -255,11 +261,11 @@ export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultPro
       const content: readonly ContentBlock[] = [
         { type: "text", text: `Connected MCP servers:\n${lines.join("\n")}` } as ContentBlock,
       ];
-      const entry: SectionEntry = {
-        kind: "section",
+      const entry: MessageEntry = {
+        kind: "message",
+        role: "grounding",
         id: "mcp-server-info",
-        title: "Connected MCP servers",
-        content,
+        content: lowerSection({ id: "mcp-server-info", title: "Connected MCP servers", content }),
       };
       return { entries: [entry] };
     },

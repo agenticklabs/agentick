@@ -47,9 +47,10 @@ export {
   buildProviderTools,
   buildMessages,
   buildParameters,
-  collectSectionText,
-  sectionText,
+  canonicalRole,
+  lowerSemanticRole,
   messagePartFromBlock,
+  UnknownMessageRoleError,
 } from "./canonical-projection.js";
 export { generate, generateStream, type GenerateOptions } from "./generate.js";
 export { createSourceInterner, type SourceInterner } from "./source-interner.js";

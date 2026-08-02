@@ -18,7 +18,7 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import type { HookBridges, TickResult, SectionEntry } from "@agentick/spec";
+import type { HookBridges, MessageEntry, TickResult } from "@agentick/spec";
 
 import { CompilerHarness } from "@agentick/compiler-react";
 import { fakeBridges } from "@agentick/compiler";
@@ -226,7 +226,7 @@ describe("useGate — continuation blocking", () => {
 });
 
 describe("useGate — element rendering", () => {
-  it("renders a <section> with title + instructions only when active", async () => {
+  it("renders a grounding entry with title + instructions only when active", async () => {
     const { knobs, harness, mountId } = await mountGate(
       "verification",
       gate({
@@ -247,12 +247,14 @@ describe("useGate — element rendering", () => {
     await flush();
 
     const { tree } = await harness.renderTree({ mountId, sessionId: "s" });
-    const sections = tree.context.entries.filter((e): e is SectionEntry => e.kind === "section");
+    // ADR 94: the gate's free-floating `<section>` is not an entry kind — it
+    // lands as an anonymous `grounding` message at its own tree position,
+    // keeping the section id, with the title lowered into the text block.
+    const sections = tree.context.entries.filter((e): e is MessageEntry => e.role === "grounding");
     expect(sections).toHaveLength(1);
     expect(sections[0]!.id).toBe("gate:verification");
-    expect(sections[0]!.title).toBe("Verification pending");
     const text = (sections[0]!.content[0] as { text?: string }).text;
-    expect(text).toBe("Run typecheck before completing.");
+    expect(text).toBe("# Verification pending\nRun typecheck before completing.");
   });
 });
 

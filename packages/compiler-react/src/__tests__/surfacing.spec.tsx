@@ -74,10 +74,11 @@ function entryRows(tree: {
   provenance?: { entries?: readonly SurfacingProvenance[] };
 }): Array<[string, SurfacingProvenance | undefined]> {
   return tree.context.entries.map((e, i) => {
-    const entry = e as { kind: string; title?: string; content: never };
-    const label =
-      entry.kind === "message" ? extractText(entry.content) : `section:${entry.title ?? "?"}`;
-    return [label, tree.provenance?.entries?.[i]];
+    const entry = e as { role: string; content: never };
+    // Every entry is a message (ADR 94); a free-floating `<section>` is one
+    // with role `grounding`, so the label reads its lowered text like any
+    // other. What the section contributed is the `# Title` line in it.
+    return [extractText(entry.content), tree.provenance?.entries?.[i]];
   });
 }
 
@@ -95,7 +96,7 @@ describe("timeline default projection", () => {
     );
 
     expect(entryRows(tree)).toEqual([
-      ["section:sys", "authored:content"],
+      ["# sys\nsystem", "authored:content"],
       ["hello", "default:timeline"],
       ["hi", "default:timeline"],
     ]);
@@ -158,9 +159,9 @@ describe("timeline default projection", () => {
     );
 
     expect(entryRows(tree)).toEqual([
-      ["section:A", "authored:content"],
+      ["# A\na", "authored:content"],
       ["MID", "authored:timeline"],
-      ["section:B", "authored:content"],
+      ["# B\nb", "authored:content"],
     ]);
   });
 });

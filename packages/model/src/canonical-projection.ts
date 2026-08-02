@@ -3,31 +3,38 @@
  *
  * Used as the default by `BaseLanguageModelExecutor.projectImpl` and by
  * `defineExecutor`'s `CallbackLanguageModelExecutor`. Concrete provider
- * executors override `projectImpl` when their system-message or
- * tool-declaration shape requires it (e.g., Anthropic preserves
- * per-section `providerMetadata` by emitting one text part per section).
+ * executors override `projectImpl` only when their wire shape genuinely
+ * differs — per-section cache breakpoints no longer require one, because a
+ * section is a BLOCK now and a block is a part (ADR 94).
  *
  * The fold:
- *   - All `section` entries → a single system message (markdown-flavored).
- *   - All `message` entries → corresponding chat messages.
- *   - All `tool` declarations with `model` exposure → `tools[]`.
+ *   - `system` entries → merged, in order, into ONE leading system message.
+ *   - every other entry → a chat message at its own position, semantic role
+ *     intact. Adapters lower `grounding` / `event` to provider vocabulary.
+ *   - `tool` declarations with `model` exposure → `tools[]`.
+ *
+ * What it deliberately does NOT do is move anything. The IR is
+ * position-faithful and so is this: an entry's index in
+ * `tree.context.entries` is its index in `messages`, system aside.
  *
  * Pure / deterministic. No provider dependencies.
+ *
+ * @see docs/proposals/v2/blueprint/94-positional-sections.md
  */
 
 import type {
   ContentBlock,
-  ContextEntry,
   LanguageModelInput,
   LanguageModelMessage,
   LanguageModelMessagePart,
+  LanguageModelMessageRole,
   LanguageModelParameters,
   LanguageModelTool,
+  MessageRole,
   ProjectInput,
   ProviderToolDeclaration,
   ProviderToolWire,
   RenderedTree,
-  SectionEntry,
   ToolDeclaration,
 } from "@agentick/spec";
 import { mergeProviderOptions, TOOL_NARRATION_FIELD, toJsonSchema } from "@agentick/spec";
@@ -114,65 +121,123 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
 }
 
 export function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
-  const messages: LanguageModelMessage[] = [];
-  const sections = tree.context.entries.filter((e): e is SectionEntry => e.kind === "section");
-  // Cache-hinted sections need their boundaries preserved — emit one
-  // text part per section with the hint on the part (#185). Otherwise
-  // keep the single joined blob (compact, provider-friendly).
-  if (sections.some((sec) => sec.metadata?.cache !== undefined)) {
-    const parts = sections
-      .map((sec) => ({ text: sectionText(sec), cache: sec.metadata?.cache }))
-      .filter((p) => p.text.length > 0)
-      .map((p) => ({
-        type: "text" as const,
-        text: p.text,
-        ...(p.cache !== undefined ? { cache: p.cache } : {}),
-      }));
-    if (parts.length > 0) messages.push({ role: "system", content: parts });
-  } else {
-    const systemText = collectSectionText(tree.context.entries);
-    if (systemText.length > 0) {
-      messages.push({ role: "system", content: [{ type: "text", text: systemText }] });
-    }
-  }
+  // Two accumulators, one pass. `system` has no position at the wire — two
+  // of three providers take it as a separate request parameter — so system
+  // entries merge, in tree order, into one leading message. Everything else
+  // keeps its index. A `<System>` that is not leading is a COMPILE
+  // diagnostic (`MID_STREAM_SYSTEM`); the projection still has one path,
+  // because inventing a second one would mean inventing a mid-stream system
+  // position no provider has.
+  const systemParts: LanguageModelMessagePart[] = [];
+  const rest: LanguageModelMessage[] = [];
+
   for (const entry of tree.context.entries) {
-    if (entry.kind !== "message") continue;
+    const parts = entry.content.map(messagePartFromBlock);
     const cache = entry.metadata?.cache;
     // Message-level `providerMetadata` (adopter-stamped input knobs) rides
     // the INPUT channel `providerOptions` at the wire boundary — same
     // send/return split as per-block `providerMetadata` → part
     // `providerOptions` (#173, ADR 57 §2).
     const providerOptions = entry.metadata?.providerMetadata;
-    messages.push({
-      role: entry.role as LanguageModelMessage["role"],
-      content: entry.content.map(messagePartFromBlock),
+
+    if (entry.role === "system") {
+      // A message-level hint marks the LAST part it covers, matching how a
+      // provider breakpoint caches the prefix through that block.
+      for (const [i, part] of parts.entries()) {
+        const marks = cache !== undefined && i === parts.length - 1 && part.type === "text";
+        systemParts.push(marks ? { ...part, cache } : part);
+      }
+      continue;
+    }
+
+    rest.push({
+      role: canonicalRole(entry.role),
+      content: parts,
       ...(providerOptions !== undefined ? { providerOptions } : {}),
       ...(cache !== undefined ? { cache } : {}),
     });
   }
+
+  const messages: LanguageModelMessage[] = [];
+  if (systemParts.length > 0) messages.push({ role: "system", content: systemParts });
+  messages.push(...rest);
   return messages;
 }
 
-export function collectSectionText(entries: ReadonlyArray<ContextEntry>): string {
-  const parts: string[] = [];
-  for (const e of entries) {
-    if (e.kind !== "section") continue;
-    const text = sectionText(e);
-    if (text.length > 0) parts.push(text);
+/** The closed provider-facing role vocabulary, as a runtime set. */
+const CANONICAL_ROLES: ReadonlySet<string> = new Set([
+  "system",
+  "user",
+  "assistant",
+  "tool",
+  "grounding",
+  "event",
+]);
+
+/**
+ * Thrown when a message carries a role no consumer downstream can act on.
+ *
+ * `MessageRole` is an open string so an application can tag its own turns;
+ * `LanguageModelMessageRole` is closed because a provider request has a
+ * fixed set of slots. This is the one place the two meet, and it used to be
+ * an unchecked `entry.role as LanguageModelMessage["role"]` — which sent
+ * `role: "event"` to providers that have no such role and let a typo reach
+ * the wire as a 400 with no local explanation.
+ */
+export class UnknownMessageRoleError extends Error {
+  constructor(readonly role: string) {
+    super(
+      `Unknown message role ${JSON.stringify(role)}. A projected message must carry one of: ` +
+        `${[...CANONICAL_ROLES].join(", ")}. Agentick-semantic roles are lowered to provider ` +
+        `vocabulary by the adapter — add the role there rather than casting it here.`,
+    );
+    this.name = "UnknownMessageRoleError";
   }
-  return parts.join("\n\n");
 }
 
-export function sectionText(section: SectionEntry): string {
-  const lines: string[] = [];
-  if (section.title !== undefined) lines.push(`# ${section.title}`);
-  for (const block of section.content) {
-    if (block.type === "text") lines.push(block.text);
-  }
-  return lines.join("\n");
+/**
+ * Narrow an open {@link MessageRole} to the closed projection vocabulary.
+ * Replaces the cast; an unrecognized role is an error, never a coercion.
+ */
+export function canonicalRole(role: MessageRole): LanguageModelMessageRole {
+  if (!CANONICAL_ROLES.has(role)) throw new UnknownMessageRoleError(role);
+  return role as LanguageModelMessageRole;
+}
+
+/**
+ * Lower an agentick-semantic role to ONE provider's role vocabulary.
+ *
+ * The split is architectural: the canonical fold keeps `grounding` and
+ * `event` intact (they are meaningful to the framework and to any adapter
+ * that has a slot for them), and each adapter collapses them at its own
+ * boundary — OpenAI has `developer` for non-user instructions, Anthropic and
+ * Google do not and take `user`. Wire constraints live at the wire.
+ *
+ * The table is total over the role union, so a role added to the union
+ * breaks every adapter at COMPILE time instead of silently defaulting.
+ */
+export function lowerSemanticRole<R extends string>(
+  role: LanguageModelMessageRole,
+  table: Readonly<Record<LanguageModelMessageRole, R>>,
+): R {
+  const lowered = table[role];
+  // Reachable only from data that entered through a cast — worth the branch,
+  // because the alternative is `undefined` on the wire.
+  if (lowered === undefined) throw new UnknownMessageRoleError(role);
+  return lowered;
 }
 
 export function messagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
+  const part = projectBlock(block);
+  // A block-level cache breakpoint reaches the part unchanged. This is what
+  // keeps a `<Section cache={...}>` a real boundary after ADR 94 dissolved
+  // section entries into message content (#185). Only the TEXT part carries
+  // a hint — the breakpoint is a position in the prompt text, and no
+  // provider marks a cache boundary on a media part.
+  return block.cache !== undefined && part.type === "text" ? { ...part, cache: block.cache } : part;
+}
+
+function projectBlock(block: ContentBlock): LanguageModelMessagePart {
   // Per-block `providerMetadata` (the canonical block's only knob
   // channel — adopter-stamped cacheControl AND model-produced opaque
   // round-trip data like `thoughtSignature`) projects onto the INPUT
@@ -388,7 +453,11 @@ export function buildProviderTools(
   const byKey = new Map<string, ProviderToolWire>();
   for (const decl of providerTools) {
     const name = decl.name ?? decl.type;
-    byKey.set(`${decl.provider} ${name}`, {
+    // `\0` is a deliberate key separator — a provider or tool name cannot
+    // contain it, so no two distinct pairs can collide on the joined key.
+    // Written as an ESCAPE: a raw NUL byte in the source makes `file`
+    // classify this module as binary and makes plain `grep` skip it whole.
+    byKey.set(`${decl.provider}\0${name}`, {
       provider: decl.provider,
       type: decl.type,
       name,

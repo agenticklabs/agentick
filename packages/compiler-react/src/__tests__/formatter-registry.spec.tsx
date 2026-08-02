@@ -71,7 +71,14 @@ describe("CompilerHarness — formatter registry slot", () => {
       mountId: "m_fallback",
       formatter: { id: "xml", format: "xml" },
     });
-    expect(payload.text).toContain('<section id="s"');
+    // ADR 94 deleted `frameSection`, so the old `<section id="s">` witness is
+    // gone. The section is a `grounding` message now, and XML dispatch is
+    // observed through the formatter's MESSAGE framing (markdown would emit
+    // `**grounding:** body`). TODO(section-formatter-thread): the section's
+    // own body is markdown-lowered in the collect path even under xml —
+    // see the note in compiler/src/collect/contributors/section.ts.
+    expect(payload.text).toContain('<message role="grounding">');
+    expect(payload.text).toContain("body");
   });
 
   it("markdown is the default when no formatter is supplied", async () => {
@@ -84,7 +91,11 @@ describe("CompilerHarness — formatter registry slot", () => {
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_default" });
-    expect(payload.text).toContain("## T");
+    // ADR 94 — the title is no longer framed by the formatter as `## T`; it is
+    // lowered into the section's content as a `# T` heading at collect time.
+    // Markdown dispatch is witnessed by its message framing.
+    expect(payload.text).toContain("**grounding:**");
+    expect(payload.text).toContain("# T\nbody");
   });
 });
 
@@ -155,9 +166,15 @@ describe("CompilerHarness — unresolvable formatter refs are REPORTED", () => {
 
   it("the tree still renders through the default — a bad ref degrades, never throws", async () => {
     const { tree } = await renderWithScope("m_ghost_out", { id: "shout-loud" });
-    const first = tree.context.entries[0]!;
-    if (first.kind !== "section") throw new Error("expected a section entry");
-    expect(first.content).toEqual([{ type: "text", text: "body" }]);
+    const first = tree.context.entries[0];
+    if (first === undefined) throw new Error("expected an entry");
+    // ADR 94 — the section is a `grounding` message; its lowered text block
+    // carries the section id + `metadata.section` stamp. Untitled, so no
+    // heading line is prepended.
+    expect(first.role).toBe("grounding");
+    expect(first.content).toEqual([
+      { type: "text", text: "body", id: "s", metadata: { section: "s" } },
+    ]);
   });
 
   it("an id miss that a FORMAT hint rescues is NOT reported (the documented path)", async () => {

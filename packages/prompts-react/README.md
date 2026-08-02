@@ -81,7 +81,7 @@ const { messages } = await prompts.render({
   name: "weekly_status",
   args: { week: "2026-06-28" },
 });
-console.log(messages.map((m) => m.role)); // ["system", "user"]
+console.log(messages.map((m) => m.role)); // ["grounding", "user"]
 ```
 
 ## Composing renderers
@@ -121,22 +121,25 @@ first and your own after it.
 
 ## How JSX projects to `MessageEntry[]`
 
-The renderer compiles the node with `compileTemplate`, then walks the IR's
-context entries. There are only two entry kinds, so the projection is two rules.
+There is no projection step. The renderer compiles the node with
+`compileTemplate` and returns `tree.context.entries` — already
+`MessageEntry[]`, already in authoring order.
 
-| Authored JSX                        | Projected                                     |
-| ----------------------------------- | --------------------------------------------- |
-| `<System>` / `<User>` / `<Message>` | Passthrough `MessageEntry`, role preserved    |
-| `<Section>` and loose text          | Buffered into a running `system`-role message |
-| A section's `title` prop            | A leading `# title` text block in that buffer |
+| Authored JSX                        | Projected                                          |
+| ----------------------------------- | -------------------------------------------------- |
+| `<System>` / `<User>` / `<Message>` | The entry itself, role preserved                   |
+| `<Section>` inside a message        | Content blocks of that message                     |
+| Free-floating `<Section>`           | Its own `grounding` entry, keeping the section id  |
+| A section's `title` prop            | A `# title` line leading that section's text block |
 
-An explicit message **flushes** the buffer, so authoring order survives.
-Consecutive sections concatenate into one system message whose content blocks
-are the parts.
+A section's title and its text runs coalesce into ONE block: one block is one
+projected message part, and splitting a section across parts changes the bytes
+a provider assembles.
 
-The rule behind it: an explicit `<message>` says "this is a turn" — honor it.
-Anything else is ambient grounding, which maps to `system`. That is the same
-projection ordinary agents get for non-message content.
+The rule behind it: the container decides the role, position decides the order
+(ADR 94). An explicit `<message>` says "this is a turn"; a free-floating
+section is ambient grounding and says so with `role: "grounding"` rather than
+being merged into a leading system message.
 
 ## Async data in a prompt body
 
@@ -292,14 +295,14 @@ form for anything static.
   over `.tsx` prompt files is not built, because it needs a bundler or transform
   pipeline.
 - **Structure inside a section flattens to text.** A `<Section>`'s children
-  become the buffered system message's content blocks, and the block-level
-  wrappers (`<H2>`, `<Paragraph>`) currently render intrinsics no contributor
-  claims, so their children pass through as bare text with the structure lost.
-  Author the shape you want in the string, or emit explicit content blocks.
-- **Loose content always projects to `system`.** There is no way to change that
-  default role; wrap in an explicit `<User>` / `<Message>` if you want another.
-- **A section's `id` is dropped.** `MessageEntry` has no analogue, so section
-  identity does not survive projection — only the `title` does, as a heading.
+  become that section's content blocks, and the block-level wrappers (`<H2>`,
+  `<Paragraph>`) currently render intrinsics no contributor claims, so their
+  children pass through as bare text with the structure lost. Author the shape
+  you want in the string, or emit explicit content blocks.
+- **Loose content always projects to `grounding`.** There is no way to change
+  that default role; wrap in an explicit `<User>` / `<Message>` if you want
+  another. A consumer that needs the MCP prompt vocabulary (`user` /
+  `assistant`) has to map it at the wire.
 - **The component tree can't reach `ctx`.** The renderer receives
   `(content, args)`; the invoking `OperationCtx` stops at the declaration's
   `render`. There is no hook for it inside the body.
@@ -312,14 +315,14 @@ form for anything static.
 
 ## Verified by
 
-- `src/__tests__/renderer.spec.tsx` — the projection rules: a loose section
-  becoming one `system` entry, a section `title` emitting a leading
-  `# title` block, an explicit `<message>` passing through with its role, an
-  explicit message flushing the section buffer so order survives, and two
-  sections concatenating into a single system message; the `handles` predicate
+- `src/__tests__/renderer.spec.tsx` — the entry rules: a loose section
+  becoming one `grounding` entry, a section `title` leading that section's
+  coalesced text block, an explicit `<message>` passing through with its role,
+  a section followed by a message keeping authoring order, and two sections
+  staying two entries with their ids intact; the `handles` predicate
   accepting elements, arrays, and strings while rejecting `null` / `undefined`,
   and a narrowed predicate from `createReactPromptRenderer` being respected;
   plus two end-to-end renders through a real prompt catalog wired with
   `reactPromptRenderer` — a single-message JSX template interpolating its
   argument, and a mixed section-plus-message template projecting to
-  `[system, user]`.
+  `[grounding, user]`.

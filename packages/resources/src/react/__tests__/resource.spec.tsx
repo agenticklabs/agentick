@@ -13,8 +13,9 @@
  *   - the template variant resolves the CONCRETE matched uri.
  *   - unmounting unregisters.
  *   - the `resources` default projection folds the catalog into the IR
- *     (a `SectionEntry`, provenance `default:resources`), and a
- *     `<Project projectionKey="resources">` override suppresses it.
+ *     (a `grounding` message entry per ADR 94, provenance
+ *     `default:resources`), and a `<Project projectionKey="resources">`
+ *     override suppresses it.
  */
 
 import React from "react";
@@ -151,7 +152,7 @@ describe("<Resource> — registration + read", () => {
 });
 
 describe("resources default projection (catalog surfacing)", () => {
-  it("folds registered resources into a catalog SectionEntry tagged default:resources", async () => {
+  it("folds registered resources into a catalog grounding entry tagged default:resources", async () => {
     const resources = new ResourcesHarness(
       "r5",
       new MemoryJournal(),
@@ -172,11 +173,14 @@ describe("resources default projection (catalog surfacing)", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m5", sessionId: "s5" });
 
+    // ADR 94: the catalog is a `grounding` message whose content is the
+    // lowered section — the title leads its single coalesced text block.
     const section = tree.context.entries.find(
-      (e) => e.kind === "section" && e.id === "resources-catalog",
+      (e) => e.role === "grounding" && e.id === "resources-catalog",
     );
     expect(section).toBeDefined();
-    const text = (section as unknown as { content: { text?: string }[] }).content[0]?.text ?? "";
+    const text = (section!.content[0] as { text?: string }).text ?? "";
+    expect(text).toContain("# Available resources");
     expect(text).toContain("config://app");
     expect(text).toContain("Runtime configuration");
 
@@ -201,7 +205,7 @@ describe("resources default projection (catalog surfacing)", () => {
     });
     const { tree } = await harness.renderTree({ mountId: "m6", sessionId: "s6" });
     expect(
-      tree.context.entries.some((e) => e.kind === "section" && e.id === "resources-catalog"),
+      tree.context.entries.some((e) => e.role === "grounding" && e.id === "resources-catalog"),
     ).toBe(false);
   });
 
@@ -228,7 +232,7 @@ describe("resources default projection (catalog surfacing)", () => {
     const { tree } = await harness.renderTree({ mountId: "m7", sessionId: "s7" });
     // The default is suppressed — no auto catalog section.
     expect(
-      tree.context.entries.some((e) => e.kind === "section" && e.id === "resources-catalog"),
+      tree.context.entries.some((e) => e.role === "grounding" && e.id === "resources-catalog"),
     ).toBe(false);
     // ...but the binding still registered (registration is a separate axis).
     expect(resources.has("config://app")).toBe(true);

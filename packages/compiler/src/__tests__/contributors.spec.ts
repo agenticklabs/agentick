@@ -157,10 +157,14 @@ describe("declaration contributors align with spec", () => {
 describe("block contributors — jsx-drift fields land", () => {
   it("csv forwards text + headers (not the drifted `data` prop)", () => {
     const { tree } = run(
-      el("section", { title: "s" }, [el("csv", { text: "a,b\n1,2", headers: ["a", "b"] })]),
+      // The wrapper is a `<message>`, not a `<section>`: a section lowers a
+      // title into a leading text block of its own (ADR 94), which would put
+      // the block under test at index 1 for reasons that have nothing to do
+      // with the block contributor these tests are about.
+      el("message", { role: "user" }, [el("csv", { text: "a,b\n1,2", headers: ["a", "b"] })]),
     );
     const block = tree.context.entries[0]!;
-    expect(block.kind).toBe("section");
+    expect(block.role).toBe("user");
     const csv = block.content[0] as {
       type: string;
       text: string;
@@ -173,7 +177,7 @@ describe("block contributors — jsx-drift fields land", () => {
 
   it("custom forwards tag / content / attrs (not the drifted `kind`/`data`)", () => {
     const { tree } = run(
-      el("section", { title: "s" }, [
+      el("message", { role: "user" }, [
         el("custom", { tag: "cite", content: "RFC", attrs: { href: "x" }, selfClosing: true }),
       ]),
     );
@@ -189,7 +193,7 @@ describe("block contributors — jsx-drift fields land", () => {
 
   it("media forwards shared BaseContentBlock fields (metadata / providerMetadata)", () => {
     const { tree } = run(
-      el("section", { title: "s" }, [
+      el("message", { role: "user" }, [
         el("image", {
           source: { type: "url", url: "http://img" },
           altText: "alt",

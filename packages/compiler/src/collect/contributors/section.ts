@@ -1,44 +1,43 @@
 /**
  * Section contributor — `<section>` intrinsic.
  *
- * Produces a `SectionEntry` carrying the section's content blocks (folded
- * from text + content-block child fragments) and metadata derived from
- * props. The in-scope formatter is recorded as `renderedWith`.
+ * A section is CONTENT, not an entry. This contributor lowers its children
+ * to content blocks (via the formatters package's single `lowerSection`
+ * rule) and emits a `section-content` fragment. Where those blocks land is
+ * decided by the CONTAINER, not here:
  *
- * Props derive from {@link SectionEntry}; `title` forwards, the rest are
- * compiler-supplied (see the {@link _conformance} partition below).
+ *   - inside a `<message>` — the fold walker splices them into that
+ *     message's content, whatever its role;
+ *   - at entry level — the collector wraps them in an anonymous message at
+ *     exactly this tree position, `role: "grounding"` unless the author
+ *     named another with the `role` prop.
+ *
+ * @see docs/proposals/v2/blueprint/94-positional-sections.md
  */
 
-import type { SectionEntry, SectionMetadata } from "@agentick/spec";
+import type { CacheHint, ContentBlock, MessageRole } from "@agentick/spec";
+import { lowerSection } from "@agentick/formatters";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
-import { omitUndefined } from "@agentick/utils";
-import type { Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
 /**
- * `<section>` props, derived from {@link SectionEntry}. Deltas: `kind` is
- * the compiler-set constant discriminant (omitted); `id` re-typed OPTIONAL
- * (defaulted from {@link CollectContext.stableId}); `content` is folded
- * from children; `priority`/`cache`/`providerMetadata` are
- * {@link SectionMetadata} fields folded into `metadata`.
+ * `<section>` props. `id` defaults from {@link CollectContext.stableId};
+ * `content` is folded from children.
  */
-export type SectionProps = Omit<
-  SectionEntry,
-  "kind" | "id" | "content" | "renderedWith" | "renderTrace"
-> & {
+export interface SectionProps {
   readonly id?: string;
-  readonly priority?: SectionMetadata["priority"];
-  readonly cache?: SectionMetadata["cache"];
-  readonly providerMetadata?: SectionMetadata["providerMetadata"];
-};
-
-type SectionForwarded = "title";
-/** `kind` = constant; `id`/`content`/`renderedWith` computed; `renderTrace`
- *  is formatter-populated; `metadata` is assembled from the
- *  `priority`/`cache`/`providerMetadata`/`metadata` props. */
-type SectionSupplied = "kind" | "id" | "content" | "renderedWith" | "renderTrace" | "metadata";
-type _conformance = Exhausted<UnhandledSpecKeys<SectionEntry, SectionForwarded, SectionSupplied>>;
+  readonly title?: string;
+  /**
+   * Role for the anonymous message a FREE-STANDING section becomes. Defaults
+   * to `grounding`. Nested inside a message this is a diagnostic — the
+   * container has already decided the role.
+   */
+  readonly role?: MessageRole;
+  readonly cache?: CacheHint;
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+  readonly metadata?: Record<string, unknown>;
+}
 
 export const sectionContributor: Contributor = {
   type: "section",
@@ -46,32 +45,36 @@ export const sectionContributor: Contributor = {
     const props = instance.props as unknown as SectionProps;
     const id = props.id ?? ctx.stableId("section", instance);
     const outbound: IRFragment[] = [];
-    const content = ctx.collectContentBlocks(instance, outbound);
+    const content = ctx.collectContentBlocks(instance, outbound) as readonly ContentBlock[];
+    const renderedWith = ctx.formatter("section");
 
-    const metadata: SectionMetadata | undefined =
-      props.priority !== undefined ||
-      props.cache !== undefined ||
-      props.providerMetadata !== undefined ||
-      props.metadata !== undefined
-        ? {
-            ...omitUndefined({
-              priority: props.priority,
-              cache: props.cache,
-              providerMetadata: props.providerMetadata,
-            }),
-            ...(props.metadata ?? {}),
-          }
-        : undefined;
-
-    const entry: SectionEntry = {
-      kind: "section",
+    // TODO(section-formatter-thread): markdown is the APPLIED dialect, even
+    // under an `<XML>` scope. `lowerSection` implements the xml title→tag
+    // rule and takes the ref, but wiring it here would double-process: the
+    // harness's formatter pass runs AFTER collect and would escape the frame
+    // this produced (`<current_user>` → `&lt;current_user&gt;`) while the
+    // body — already lowered to text — would skip the escaping it needs.
+    // Choosing the dialect correctly means resolving the live formatter
+    // during the collect walk, which is the thread-through this names.
+    const blocks = lowerSection({
       id,
-      ...omitUndefined({ title: props.title }),
       content,
-      renderedWith: ctx.formatter("section"),
-      ...(metadata ? { metadata } : {}),
-    };
+      ...(props.title !== undefined ? { title: props.title } : {}),
+      ...(props.cache !== undefined ? { cache: props.cache } : {}),
+      ...(props.providerMetadata !== undefined ? { providerMetadata: props.providerMetadata } : {}),
+      ...(props.metadata !== undefined ? { metadata: props.metadata } : {}),
+    });
 
-    return [{ kind: "context-entry", entry }, ...outbound];
+    return [
+      {
+        kind: "section-content",
+        id,
+        blocks,
+        ...(props.role !== undefined ? { role: props.role } : {}),
+        renderedWith,
+        ...(props.metadata !== undefined ? { metadata: props.metadata } : {}),
+      },
+      ...outbound,
+    ];
   },
 };

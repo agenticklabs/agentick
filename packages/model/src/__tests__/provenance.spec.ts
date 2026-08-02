@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { ContentBlock, MessageEntry, RenderedTree, SectionEntry } from "@agentick/spec";
+import type { CacheHint, ContentBlock, MessageEntry, RenderedTree } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 
 import { buildMessages } from "../canonical-projection.js";
@@ -28,17 +28,24 @@ const imageRef = (fileId: string): ContentBlock =>
 const msg = (role: string, content: readonly ContentBlock[], id?: string): MessageEntry =>
   ({ kind: "message", role, content, ...(id !== undefined ? { id } : {}) }) as MessageEntry;
 
+/**
+ * One `<Section>` inside `<System>`, as the compiler lowers it (ADR 94): a
+ * text block carrying the section's stable id, and its cache hint when it
+ * has one. Sections are no longer entries, so a "section" in these trees is
+ * a BLOCK — which is exactly the walk the two functions have to agree on.
+ */
 let sectionSeq = 0;
-const section = (title: string, body: string, cache?: unknown): SectionEntry =>
+const sectionBlock = (title: string, body: string, cache?: CacheHint): ContentBlock =>
   ({
-    kind: "section",
+    type: "text",
+    text: body.length > 0 ? `# ${title}\n${body}` : `# ${title}`,
     id: `sec-${++sectionSeq}`,
-    title,
-    content: [text(body)],
-    ...(cache !== undefined ? { metadata: { cache } } : {}),
-  }) as SectionEntry;
+    ...(cache !== undefined ? { cache } : {}),
+  }) as ContentBlock;
 
-const tree = (...entries: Array<MessageEntry | SectionEntry>): RenderedTree =>
+const system = (...blocks: readonly ContentBlock[]): MessageEntry => msg("system", blocks);
+
+const tree = (...entries: MessageEntry[]): RenderedTree =>
   ({ specVersion: SPEC_VERSION, context: { entries } }) as RenderedTree;
 
 /**
@@ -59,37 +66,52 @@ describe("the alignment invariant — provenance[i][j] describes messages[i].con
     expectAligned(tree(msg("user", [text("hi")], "m1"), msg("assistant", [text("hello")], "m2")));
   });
 
-  it("holds with a leading system message from sections", () => {
-    expectAligned(tree(section("Rules", "be terse"), msg("user", [text("hi")], "m1")));
+  it("holds with a leading system message built from sections", () => {
+    expectAligned(tree(system(sectionBlock("Rules", "be terse")), msg("user", [text("hi")], "m1")));
   });
 
-  it("holds with CACHE-HINTED sections, which emit one part per section", () => {
-    // The shape that would break a naive walk: `buildMessages` switches from one joined
-    // blob to one part per section, so a provenance walk that assumed a single system part
-    // would be off by N-1 for every message after it.
+  it("holds with CACHE-HINTED sections, which keep one part each", () => {
     expectAligned(
       tree(
-        section("A", "first", { type: "ephemeral" }),
-        section("B", "second", { type: "ephemeral" }),
+        system(
+          sectionBlock("A", "first", { ttl: "1h" }),
+          sectionBlock("B", "second", { ttl: "1h" }),
+        ),
         msg("user", [text("hi")], "m1"),
       ),
     );
   });
 
-  it("holds when a section is EMPTY and contributes no part", () => {
-    // An empty section is filtered out of the parts list. Counting sections rather than
-    // non-empty sections would over-count.
+  it("holds when SEVERAL system entries merge into one message", () => {
+    // The one place the fold still collapses entries: leading `<System>`
+    // messages merge into the provider system param, so N entries become
+    // ONE message and a walk that pushed a row per entry would be off by
+    // N-1 for everything after it.
     expectAligned(
       tree(
-        section("A", "", { type: "ephemeral" }),
-        section("B", "second", { type: "ephemeral" }),
+        system(sectionBlock("A", "first")),
+        system(sectionBlock("B", "second")),
         msg("user", [text("hi")], "m1"),
       ),
     );
   });
 
-  it("holds when there are NO sections at all (no system message)", () => {
+  it("holds when a system entry contributes NO parts", () => {
+    expectAligned(tree(system(), msg("user", [text("hi")], "m1")));
+  });
+
+  it("holds when there is NO system entry at all", () => {
     expectAligned(tree(msg("user", [text("hi")], "m1")));
+  });
+
+  it("holds for a free-floating section — a grounding message at its own position", () => {
+    expectAligned(
+      tree(
+        msg("user", [text("hi")], "m1"),
+        msg("grounding", [sectionBlock("Current User", "Ryan")]),
+        msg("assistant", [text("hello")], "m2"),
+      ),
+    );
   });
 
   it("holds for a message with several blocks of mixed kinds", () => {
@@ -105,7 +127,7 @@ describe("the alignment invariant — provenance[i][j] describes messages[i].con
 
 describe("what an origin says", () => {
   const t = tree(
-    section("Rules", "be terse"),
+    system(sectionBlock("Rules", "be terse")),
     msg("user", [text("what is that?"), imageRef("019faa2c")], "m_7"),
   );
 
@@ -122,10 +144,18 @@ describe("what an origin says", () => {
     expect(p[1]?.[1]?.blockIndex).toBe(1);
   });
 
-  it("is undefined for a SYSTEM part — sections are not something to quarantine", () => {
-    // Framework-rendered context, not a user attachment. There is no id to name and
-    // nothing a quarantine could act on, so `undefined` is the honest answer.
-    expect(buildMessageProvenance(t)[0]?.[0]).toBeUndefined();
+  it("names the SECTION's stable id for a system part (ADR 94)", () => {
+    // A section is no longer a top-level entry, so the id that used to be
+    // unreachable from a system part now rides the block the section
+    // produced — which is what makes a system part attributable at all.
+    expect(buildMessageProvenance(t)[0]?.[0]).toEqual({ entryId: "sec-1", blockIndex: 0 });
+  });
+
+  it("has no entryId for a system part whose block carries no id", () => {
+    // Nothing DURABLE to record — stated rather than papered over with a
+    // fabricated key.
+    const p = buildMessageProvenance(tree(system(text("bare"))));
+    expect(p[0]![0]).toEqual({ blockIndex: 0 });
   });
 
   it("omits entryId for an ID-LESS entry rather than inventing one", () => {

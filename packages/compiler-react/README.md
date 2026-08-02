@@ -56,23 +56,53 @@ const app = await createApp(<Agent />, {
 
 ### Messages and sections
 
-Two entry kinds land on `RenderedTree.context.entries`. `<Message>` carries a conversational role; `<Section>` carries structured, titled context that isn't a turn.
+A model call is system instructions plus ordered messages, and that is exactly what `RenderedTree.context.entries` is: a flat list of messages in tree order. `<Message>` (and its `<System>` / `<User>` / `<Assistant>` sugar) makes one.
+
+`<Section>` is **content**, not an entry. Two rules decide where it goes:
+
+> **The container decides its role. Its position decides its order.**
+
+Put a section inside a message and it becomes part of that message:
 
 ```tsx
-import { Assistant, Message, Section, System, User } from "@agentick/compiler-react";
+import { Section, System, User } from "@agentick/compiler-react";
 
 function Prompt({ question }: { question: string }) {
   return (
     <>
-      <System>You are a research assistant.</System>
-      <Section title="House style" priority={100}>
-        <p>Cite every claim. Say "unknown" rather than guessing.</p>
-      </Section>
+      <System>
+        You are a research assistant.
+        <Section title="House style">
+          <p>Cite every claim. Say "unknown" rather than guessing.</p>
+        </Section>
+      </System>
       <User>{question}</User>
     </>
   );
 }
 ```
+
+`<System>` is not a special case here — it is simply the message whose content becomes the provider's system parameter. The same section inside `<User>` becomes part of that user turn instead, with the same structure. A tree with no `<System>` sends no system instructions at all; there is no implicit system prompt.
+
+Write a section on its own, between messages, and it becomes a message of its own at that position — role `grounding`, meaning context that is neither an instruction nor something the human typed:
+
+```tsx
+<>
+  <System>You are a support agent.</System>
+  <Timeline />
+  <Section title="Current page">Billing → Invoices, invoice #4417 open.</Section>
+</>
+```
+
+That section is the **last** message the model receives, because that is where you wrote it. Move it above `<Timeline />` and it arrives before the conversation instead. `<Grounding>` is the explicit spelling of the same thing (`<Grounding title="Current page">…</Grounding>`), and it is what a bare `<Section>` compiles to.
+
+Providers differ in what they can carry: OpenAI receives a grounding message on its `developer` channel; Anthropic and Google have no non-user role, so it arrives as `user` — with the section's own structure (`# Current page`) intact, which is what keeps it from reading as an impersonated human turn.
+
+`role` is the escape hatch on that default. A free-standing section is `grounding` because that is what context-about-the-world is, but a section that IS a turn says so — `<Section role="user">` compiles to a plain user message whose content is still the section structure. On a section **inside** a message the prop is a compile warning rather than a silent no-op: the container already decided the role, so wrap the section in `<Message role="…">` instead.
+
+`<Section>` also takes `cache` (a prompt-cache breakpoint that stays a real boundary inside its message) and `id` (stable across recompiles, and what request-provenance names when a provider rejects the request).
+
+There is deliberately no prop for the XML tag. Markdown renders the title's words as a heading and XML renders the same words as a tag, so one section has one name in both dialects; a separate tag prop would let them diverge. When you need an exact tag, use a custom block — the XML formatter preserves its tag and attributes verbatim.
 
 `<System>`, `<User>`, and `<Assistant>` are sugar for `<Message role="…">`. `<Message>` takes a full persisted record — spread one straight in:
 
@@ -268,7 +298,7 @@ function ErrorCorrection() {
   if (!lastError) return null;
 
   return (
-    <Section title="Recover" priority={100}>
+    <Section title="Recover">
       The previous attempt failed with: {lastError}. Try a different approach.
     </Section>
   );
@@ -473,16 +503,17 @@ Anything that needs the live session — tool dispatch, hibernate and resume, ch
 
 ### Components
 
-| Component                                          | Purpose                                                           |
-| -------------------------------------------------- | ----------------------------------------------------------------- |
-| `<Section>`                                        | Structured context entry — `id`, `title`, `priority`, `metadata`  |
-| `<Message role>`                                   | Role-bearing entry; spread a persisted record                     |
-| `<System>` `<User>` `<Assistant>`                  | Sugar for `<Message role="…">`                                    |
-| `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing                                     |
-| `<Project projectionKey>`                          | Override a capability's projection; suppresses that key's default |
-| `<Output schema name? description? strategy?>`     | Declare the shape every execution of this agent produces          |
-| `<ProviderTool provider type name? config?>`       | Declare a provider-executed tool; bypasses the tool executor      |
-| `<ToolGate tool? confirm>`                         | Gate the model's tool calls behind a confirm flow                 |
+| Component                                          | Purpose                                                                                                                                                                           |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<Section>`                                        | Titled content — `id`, `title`, `role`, `cache`, `metadata`. Lands in its containing message; alone, becomes a message at its position (`grounding` unless `role` says otherwise) |
+| `<Message role>`                                   | Role-bearing entry; spread a persisted record                                                                                                                                     |
+| `<System>` `<User>` `<Assistant>`                  | Sugar for `<Message role="…">`                                                                                                                                                    |
+| `<Grounding title?>`                               | A `grounding` message wrapping a `<Section>` — what a bare section compiles to                                                                                                    |
+| `<FormatScope>` `<Markdown>` `<XML>` `<PlainText>` | Per-subtree formatter framing                                                                                                                                                     |
+| `<Project projectionKey>`                          | Override a capability's projection; suppresses that key's default                                                                                                                 |
+| `<Output schema name? description? strategy?>`     | Declare the shape every execution of this agent produces                                                                                                                          |
+| `<ProviderTool provider type name? config?>`       | Declare a provider-executed tool; bypasses the tool executor                                                                                                                      |
+| `<ToolGate tool? confirm>`                         | Gate the model's tool calls behind a confirm flow                                                                                                                                 |
 
 ### Hooks
 

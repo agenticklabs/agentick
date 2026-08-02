@@ -164,7 +164,7 @@ describe("ADR 63 — default timeline surfacing (no timeline-not-rendered warnin
       sessionId: "s",
       // System-only tree: no <Timeline/>. Pre-ADR-63 this dropped the
       // conversation; now the default projection folds it.
-      element: React.createElement("section", { id: "sys" }, "you are helpful"),
+      element: React.createElement("message", { role: "system", id: "sys" }, "you are helpful"),
       bridges: fakeBridges({ timeline: [messageEntry("hello"), messageEntry("world")] }),
     });
     const { tree, diagnostics } = await harness.renderTree({
@@ -173,10 +173,9 @@ describe("ADR 63 — default timeline surfacing (no timeline-not-rendered warnin
     });
 
     // The conversation surfaced — no warning, and the messages are in IR.
+    // Counted by PROVENANCE rather than by kind: every entry is a message now
+    // (ADR 94), so a kind filter would also count the authored system one.
     expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
-    const messages = tree.context.entries.filter((e) => e.kind === "message");
-    expect(messages).toHaveLength(2);
-    // Tagged as default-produced.
     const tags = tree.provenance?.entries ?? [];
     expect(tags.filter((t) => t === "default:timeline")).toHaveLength(2);
   });
@@ -206,7 +205,7 @@ describe("ADR 63 — default timeline surfacing (no timeline-not-rendered warnin
     await harness.mount({
       mountId: "m_empty",
       sessionId: "s",
-      element: React.createElement("section", { id: "sys" }, "you are helpful"),
+      element: React.createElement("message", { role: "system", id: "sys" }, "you are helpful"),
       bridges: fakeBridges(),
     });
     const { tree, diagnostics } = await harness.renderTree({
@@ -214,7 +213,9 @@ describe("ADR 63 — default timeline surfacing (no timeline-not-rendered warnin
       sessionId: "s",
     });
     expect(diagnostics.some((d) => d.code === "timeline-not-rendered")).toBe(false);
-    expect(tree.context.entries.filter((e) => e.kind === "message")).toHaveLength(0);
+    expect((tree.provenance?.entries ?? []).filter((t) => t === "default:timeline")).toHaveLength(
+      0,
+    );
   });
 });
 

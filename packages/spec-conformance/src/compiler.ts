@@ -9,8 +9,10 @@
  *      `JSON.parse(JSON.stringify(t))` without loss.
  *   3. **Contributor dispatch by identity.** Same component instance
  *      produces the same IR fragment shape across renders.
- *   4. **Sectioning.** Section/message intrinsics produce
- *      kind-discriminated context entries.
+ *   4. **Sectioning.** A free-floating section intrinsic surfaces as a
+ *      `role: "grounding"` message entry carrying the section id; the
+ *      message intrinsic keeps its own role (ADR 94 — a section is
+ *      content, not an entry kind).
  *   5. **Lifecycle projection capability (optional).** When the impl
  *      exposes `dispatchLifecycle` (ADR 89 §4 `LifecycleProjectionTarget`),
  *      it routes events per mount and rejects NotMounted for unknown
@@ -132,7 +134,7 @@ export function runCompilerConformance(factory: CompilerConformanceFactory): voi
       expect(Array.isArray(tree.context.entries)).toBe(true);
     });
 
-    it("section + message + tool produce kind-discriminated entries / declarations", async () => {
+    it("section + message + tool produce role-discriminated entries / declarations", async () => {
       const compiler = await factory.createCompiler();
       await compiler.mount({
         mountId: "m_kinds",
@@ -153,7 +155,10 @@ export function runCompilerConformance(factory: CompilerConformanceFactory): voi
         bridges: factory.createBridges(),
       });
       const { tree } = await compiler.renderTree({ mountId: "m_kinds", sessionId: "s" });
-      expect(tree.context.entries.some((e) => e.kind === "section" && e.id === "s.intro")).toBe(
+      // ADR 94: a free-floating section is not an entry kind — it lowers to
+      // an anonymous `role: "grounding"` message at its own tree position,
+      // keeping the section id as the entry id.
+      expect(tree.context.entries.some((e) => e.role === "grounding" && e.id === "s.intro")).toBe(
         true,
       );
       expect(tree.context.entries.some((e) => e.kind === "message" && e.role === "user")).toBe(

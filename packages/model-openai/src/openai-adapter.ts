@@ -42,6 +42,7 @@ import type { FunctionDefinition } from "openai/resources/shared";
 import {
   createSourceInterner,
   defineLanguageModelAdapter,
+  lowerSemanticRole,
   type CustomBlockDefinition,
   type DeltaTransform,
   type LanguageModelAdapter,
@@ -60,6 +61,7 @@ import type {
   LanguageModelExecutionResult,
   LanguageModelInput,
   LanguageModelMessage,
+  LanguageModelMessageRole,
   LanguageModelStopReason,
   LanguageModelTool,
   MediaSource,
@@ -639,7 +641,25 @@ function toOpenAIParams(
   return params;
 }
 
+/**
+ * OpenAI role vocabulary. `developer` is this provider's sanctioned
+ * non-user instruction channel and is legal mid-stream, which makes it the
+ * right landing for `grounding` — context that is not an instruction to
+ * obey and not a human turn. An `event` is a RECORD, not an instruction, so
+ * it stays `user` here as it does everywhere; what distinguishes it is the
+ * structure in its content, not the role.
+ */
+const OPENAI_ROLES = {
+  system: "system",
+  user: "user",
+  assistant: "assistant",
+  tool: "tool",
+  grounding: "developer",
+  event: "user",
+} as const satisfies Record<LanguageModelMessageRole, ChatCompletionMessageParam["role"]>;
+
 function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[] {
+  const role = lowerSemanticRole(m.role, OPENAI_ROLES);
   // Tool result messages must go on their own `role: "tool"` entry.
   const toolResults: ChatCompletionMessageParam[] = [];
   const textParts: { type: "text"; text: string }[] = [];
@@ -708,7 +728,7 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
     }
   }
 
-  if (m.role === "tool") return toolResults;
+  if (role === "tool") return toolResults;
 
   if (
     toolResults.length > 0 &&
@@ -727,8 +747,8 @@ function toOpenAIMessages(m: LanguageModelMessage): ChatCompletionMessageParam[]
           string | null
         >);
 
-  const base = { role: m.role, content } as ChatCompletionMessageParam;
-  if (toolCalls.length > 0 && m.role === "assistant") {
+  const base = { role, content } as ChatCompletionMessageParam;
+  if (toolCalls.length > 0 && role === "assistant") {
     (base as { tool_calls?: typeof toolCalls }).tool_calls = toolCalls;
   }
   if (m.name !== undefined) {

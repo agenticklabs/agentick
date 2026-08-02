@@ -1,7 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type {
   ContentBlock,
-  ContextEntry,
   ContextSpec,
   ExecutionResult,
   ExecutionTarget,
@@ -25,7 +24,6 @@ import type {
   ResourceDeclaration,
   ResponseFormat,
   RuntimeDeclarations,
-  SectionEntry,
   SemanticMetadata,
   SemanticNode,
   SpecConfig,
@@ -128,30 +126,31 @@ describe("@agentick/spec — compiler-facing types", () => {
         role: "user",
         content: [{ type: "text", text: "hi" }],
       };
-      const e: ContextEntry = msg;
-      if (e.kind === "message") {
-        expectTypeOf(e.role).toEqualTypeOf<MessageEntry["role"]>();
-      }
+      expectTypeOf(msg.role).toEqualTypeOf<MessageEntry["role"]>();
+      expect(msg.kind).toBe("message");
     });
 
-    it("SectionEntry requires id", () => {
-      const sec: SectionEntry = {
-        kind: "section",
-        id: "sec.todo",
-        title: "Todos",
-        content: [{ type: "text", text: "1. ship spec" }],
+    it("carries the two semantic roles the adapter lowers (ADR 94)", () => {
+      const grounding: MessageEntry = {
+        kind: "message",
+        role: "grounding",
+        content: [{ type: "text", text: "# Current User\nRyan" }],
       };
-      expect(sec.id).toBe("sec.todo");
+      const event: MessageEntry = { kind: "message", role: "event", content: [] };
+      expect([grounding.role, event.role]).toEqual(["grounding", "event"]);
     });
 
-    it("ContextSpec is just an entries array", () => {
+    it("ContextSpec is an array of MessageEntry ONLY — sections are content (ADR 94)", () => {
       const spec: ContextSpec = {
         entries: [
           { kind: "message", role: "system", content: [{ type: "text", text: "S" }] },
-          { kind: "section", id: "s", content: [] },
+          { kind: "message", role: "grounding", content: [{ type: "text", text: "G" }] },
         ],
       };
       expect(spec.entries).toHaveLength(2);
+      // @ts-expect-error — `kind: "section"` is no longer an entry kind.
+      const rejected: ContextSpec = { entries: [{ kind: "section", id: "s", content: [] }] };
+      expect(rejected.entries).toHaveLength(1);
     });
   });
 

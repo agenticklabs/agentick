@@ -3,17 +3,14 @@ import type {
   AudioBlock,
   CodeBlock,
   ContentBlock,
-  ContextEntry,
   EventBlock,
   EventEnvelope,
   ExecutorTerminal,
   ImageBlock,
   LifecycleEvent,
   MediaBlock,
-  MessageEntry,
   ProtocolEvent,
   RenderedTree,
-  SectionEntry,
   TerminalEvent,
   TextBlock,
   ToolUseBlock,
@@ -36,9 +33,7 @@ import {
   isLifecycleTickEnd,
   isLifecycleTickStart,
   isMediaBlock,
-  isMessageEntry,
   isPhase,
-  isSectionEntry,
   isStateChangeBlock,
   isSucceeded,
   isSucceededTerminal,
@@ -132,21 +127,6 @@ describe("guards — ContentBlock narrowing", () => {
     expect(isUserActionBlock({ type: "user_action", action: "x" })).toBe(true);
     expect(isSystemEventBlock({ type: "system_event", event: "x" })).toBe(true);
     expect(isStateChangeBlock({ type: "state_change", entity: "x", from: 1, to: 2 })).toBe(true);
-  });
-});
-
-describe("guards — ContextEntry narrowing", () => {
-  it("isMessageEntry / isSectionEntry narrow correctly", () => {
-    const entries: ContextEntry[] = [
-      { kind: "message", role: "user", content: [{ type: "text", text: "hi" }] },
-      { kind: "section", id: "s.intro", content: [] },
-    ];
-    const messages = entries.filter(isMessageEntry);
-    const sections = entries.filter(isSectionEntry);
-    expect(messages).toHaveLength(1);
-    expect(sections).toHaveLength(1);
-    expectTypeOf(messages[0]!).toEqualTypeOf<MessageEntry>();
-    expectTypeOf(sections[0]!).toEqualTypeOf<SectionEntry>();
   });
 });
 

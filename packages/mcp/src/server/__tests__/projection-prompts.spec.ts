@@ -265,6 +265,34 @@ describe("prompts projection — list + get", () => {
     await prompts.close();
   });
 
+  it("grounding-role messages flatten to user-role on the wire", async () => {
+    const prompts = await makePromptsHarness();
+    await prompts.register({
+      declaration: {
+        name: "grounded",
+        description: "grounding-role prompt",
+        // ADR 94: a free-floating `<Section>` in a JSX prompt body compiles to
+        // a `grounding` entry — instruction context MCP has no role for.
+        template: [
+          { kind: "message", role: "grounding", content: [{ type: "text", text: "# Ctx\nnotes" }] },
+        ] satisfies readonly MessageEntry[],
+      },
+    });
+
+    const { harness, transport } = await makeServer(prompts);
+    const clientTransport = await transport.connect();
+    const client = await makeClient(clientTransport);
+
+    const result = await client.getPrompt({ name: "grounded" });
+    expect(result.messages).toEqual([
+      { role: "user", content: { type: "text", text: "# Ctx\nnotes" } },
+    ]);
+
+    await client.close();
+    await harness.close();
+    await prompts.close();
+  });
+
   it("system-role messages flatten to user-role on the wire", async () => {
     const prompts = await makePromptsHarness();
     await prompts.register({

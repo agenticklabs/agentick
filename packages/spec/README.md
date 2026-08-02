@@ -36,6 +36,20 @@ if (SPEC_VERSION < "2026-05-01") throw new Error("peer spec too old");
 
 And one non-constraint that follows from them: **spec never enumerates the harnesses, providers, stores, or wire methods that exist.** There is no `KnownHarness` union, no provider registry, no `timeline?:` line anywhere in this package. Those facts arrive from the packages that own them, through the augmentation seams.
 
+### Context entries — the IR is what the wire is
+
+A model call is system instructions plus ordered messages, and nothing else exists at the wire — so nothing else exists in `ContextSpec`:
+
+```ts
+interface ContextSpec {
+  readonly entries: readonly MessageEntry[];
+}
+```
+
+One entry kind. Array order IS the order; there is no `position` field and no reorder hint. `MessageEntry.role` is an OPEN string so an application can tag its own turns, and two of its values are agentick-semantic rather than provider vocabulary: `grounding` (context that is neither an instruction nor a human turn) and `event` (a record of something that happened). Adapters lower those to their own vocabulary at their own boundary; nothing casts.
+
+A **section** is not an entry. It is content that lowers into the blocks of the message containing it — or, written on its own, into an anonymous `grounding` message at its own position (ADR 94). What a section used to carry survives one level down: its stable `id` on the blocks it produced, and its cache breakpoint as `BaseContentBlock.cache`, which the projection forwards onto the message part.
+
 ## The augmentation seams
 
 A seam is an interface spec ships **empty** (or minimally seeded) for the sole purpose of being widened elsewhere. You widen one with TypeScript module augmentation from your own package, and the slot appears — typed — on the framework surface that reads that interface. Adopters who install your package see the slot; adopters who don't, never see it. Spec learns nothing.

@@ -30,27 +30,21 @@ describe("buildMessages — CacheHint carry (#185)", () => {
     expect(messages[0]).toMatchObject({ role: "user", cache: { ttl: "5m" } });
   });
 
-  it("unhinted sections keep the single joined system blob", () => {
-    const messages = buildMessages(
-      tree([
-        { kind: "section", id: "s1", content: [{ type: "text", text: "A" }] },
-        { kind: "section", id: "s2", content: [{ type: "text", text: "B" }] },
-      ]),
-    );
-    expect(messages[0]!.content).toHaveLength(1);
-    expect(messages[0]!.content[0]).toMatchObject({ type: "text", text: "A\n\nB" });
-  });
-
-  it("a cache-hinted section switches system to per-section parts with the hint on the part", () => {
+  it("carries a BLOCK-level hint onto the part it rides (ADR 94)", () => {
+    // The per-section boundary after sections became content: the compiler
+    // stamps the hint on the block a `<Section cache={...}>` produced, and
+    // one block is one part, so the breakpoint survives with no special
+    // system-message handling anywhere.
     const messages = buildMessages(
       tree([
         {
-          kind: "section",
-          id: "s1",
-          content: [{ type: "text", text: "STABLE PREFIX" }],
-          metadata: { cache: { ttl: "1h" } },
+          kind: "message",
+          role: "system",
+          content: [
+            { type: "text", text: "STABLE PREFIX", cache: { ttl: "1h" } },
+            { type: "text", text: "volatile" },
+          ],
         },
-        { kind: "section", id: "s2", content: [{ type: "text", text: "volatile" }] },
       ]),
     );
     const system = messages[0]!;
@@ -58,5 +52,23 @@ describe("buildMessages — CacheHint carry (#185)", () => {
     expect(system.content).toHaveLength(2);
     expect(system.content[0]).toMatchObject({ text: "STABLE PREFIX", cache: { ttl: "1h" } });
     expect(system.content[1]).not.toHaveProperty("cache");
+  });
+
+  it("marks the LAST part when the hint is on the system MESSAGE", () => {
+    const messages = buildMessages(
+      tree([
+        {
+          kind: "message",
+          role: "system",
+          content: [
+            { type: "text", text: "A" },
+            { type: "text", text: "B" },
+          ],
+          metadata: { cache: { ttl: "5m" } },
+        },
+      ]),
+    );
+    expect(messages[0]!.content[0]).not.toHaveProperty("cache");
+    expect(messages[0]!.content[1]).toMatchObject({ text: "B", cache: { ttl: "5m" } });
   });
 });

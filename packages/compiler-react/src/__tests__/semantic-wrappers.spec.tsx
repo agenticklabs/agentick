@@ -27,7 +27,7 @@ let seq = 0;
 
 /** Render an element through the real pipeline and return the first entry. */
 async function renderEntry(element: React.ReactElement): Promise<{
-  readonly kind: string;
+  readonly role: string;
   readonly content: readonly { type: string; text?: string }[];
 }> {
   const harness = new CompilerHarness(
@@ -43,7 +43,7 @@ async function renderEntry(element: React.ReactElement): Promise<{
   const entry = tree.context.entries[0];
   if (entry === undefined) throw new Error("no context entries produced");
   return entry as unknown as {
-    kind: string;
+    role: string;
     content: readonly { type: string; text?: string }[];
   };
 }
@@ -109,7 +109,10 @@ describe("semantic block wrappers — heading semantics survive to compiled outp
         <Paragraph>Second.</Paragraph>
       </Section>,
     );
-    expect(entry.kind).toBe("section");
+    // A free-floating section is a `grounding` message (ADR 94); the
+    // untitled one here contributes no frame, so the semantic run reaches
+    // the same bytes it would in any other container.
+    expect(entry.role).toBe("grounding");
     expect(textOf(entry)).toBe("## Heading\n\nFirst.\n\n### Nested\n\nSecond.\n\n");
   });
 

@@ -30,18 +30,33 @@ describe("collect — minimum RenderedTree", () => {
 });
 
 describe("collect — structural primitives", () => {
-  it("collects sections with stable ids from props", () => {
-    const { tree } = renderAndCollect(
+  it("collects a free-floating section as a grounding message with a stable id", () => {
+    const { tree, diagnostics } = renderAndCollect(
       React.createElement("section", { id: "s.todos", title: "Todos" }, "1. ship compiler"),
     );
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
-    if (entry.kind !== "section") throw new Error("expected section");
+    // ADR 94 — `SectionEntry` is gone. A free-floating `<section>` is an
+    // anonymous `grounding` message at its own tree position, and `title` is
+    // no longer an entry field: `lowerSection` folds it into the content as a
+    // leading `# ` heading, coalesced with the body into ONE text block that
+    // carries the section's stable id + `metadata.section` stamp.
+    expect(entry.kind).toBe("message");
+    expect(entry.role).toBe("grounding");
     expect(entry.id).toBe("s.todos");
-    expect(entry.title).toBe("Todos");
-    expect(entry.content).toEqual([{ type: "text", text: "1. ship compiler" }]);
+    expect(entry.content).toEqual([
+      {
+        type: "text",
+        text: "# Todos\n1. ship compiler",
+        id: "s.todos",
+        metadata: { section: "s.todos" },
+      },
+    ]);
     expect(entry.renderedWith?.id).toBe("markdown");
+    // `features` still reports "sections" — now computed from grounding entries.
     expect(tree.features).toContain("sections");
+    // A bare section ahead of any <System> earns the migration hint (ADR 94).
+    expect(diagnostics.map((d) => d.code)).toContain("SECTION_WITHOUT_SYSTEM");
   });
 
   it("collects messages with role and content", () => {
@@ -81,7 +96,8 @@ describe("collect — structural primitives", () => {
     const { tree } = renderAndCollect(React.createElement("section", null, "anonymous section"));
     expect(tree.context.entries).toHaveLength(1);
     const entry = tree.context.entries[0]!;
-    if (entry.kind !== "section") throw new Error("expected section");
+    // ADR 94 — the derived id rides the grounding message the section became.
+    expect(entry.role).toBe("grounding");
     expect(entry.id).toMatch(/^section\.t#/);
   });
 });
@@ -234,18 +250,18 @@ describe("collect — composition", () => {
     await flush();
     const registry = createBuiltInRegistry();
     const first = collect({ roots: container.children, registry, rootScope: container.rootScope });
-    expect(first.tree.context.entries.map((e) => (e.kind === "section" ? e.id : ""))).toEqual([
-      "s0",
-      "s1",
-      "s2",
+    // ADR 94 — each section is a `grounding` message at its own position, so
+    // declarative order is now read off the entry ids directly.
+    expect(first.tree.context.entries.map((e) => `${e.role}:${e.id}`)).toEqual([
+      "grounding:s0",
+      "grounding:s1",
+      "grounding:s2",
     ]);
 
     compiler.render(React.createElement(App, { count: 1 }), root);
     await flush();
     const second = collect({ roots: container.children, registry, rootScope: container.rootScope });
-    expect(second.tree.context.entries.map((e) => (e.kind === "section" ? e.id : ""))).toEqual([
-      "s0",
-    ]);
+    expect(second.tree.context.entries.map((e) => `${e.role}:${e.id}`)).toEqual(["grounding:s0"]);
   });
 });
 

@@ -39,9 +39,11 @@ import type {
 } from "@anthropic-ai/sdk/resources/messages";
 
 import {
+  buildMessages,
   buildParameters,
   buildTools,
   createSourceInterner,
+  lowerSemanticRole,
   defineLanguageModelAdapter,
   type CustomBlockDefinition,
   type DeltaTransform,
@@ -62,6 +64,7 @@ import type {
   LanguageModelInput,
   LanguageModelMessage,
   LanguageModelMessagePart,
+  LanguageModelMessageRole,
   LanguageModelStopReason,
   LanguageModelTool,
   MediaSource,
@@ -69,8 +72,6 @@ import type {
   ProjectInput,
   ProviderOptions,
   RateCard,
-  RenderedTree,
-  SectionEntry,
   Source,
   ToolCall,
   ToolResultBlock,
@@ -1084,200 +1085,52 @@ function anthropicImageSource(
 }
 
 // ============================================================================
-// IR projection — Anthropic-specific: one text part per system section so
-// per-section providerMetadata.anthropic.cacheControl survives projection.
-// (The base's `defaultProject` joins all section text into one string, which
-// would lose per-section cache breakpoints.)
+// IR projection — Anthropic keeps its own `project` ONLY for the parts of
+// the request the canonical fold does not own. Per-section cache breakpoints
+// USED to be the reason this override existed: `defaultProject` joined every
+// section into one string, so a breakpoint between two of them had nowhere
+// to land. That reason is gone — a section is content now, one section is
+// one block, and one block is one part (ADR 94) — so this delegates the
+// message fold and adds only the Anthropic-specific role lowering.
 // ============================================================================
 
+/**
+ * Anthropic has no non-user instruction role. `grounding` and `event` both
+ * land as `user`; what keeps them distinguishable from a human turn is the
+ * structure already in their content — the section lowering the compiler
+ * applied — not an impersonated role.
+ */
+const ANTHROPIC_ROLES = {
+  system: "system",
+  user: "user",
+  assistant: "assistant",
+  tool: "tool",
+  grounding: "user",
+  event: "user",
+} as const satisfies Record<LanguageModelMessageRole, LanguageModelMessageRole>;
+
 function anthropicProjectImpl(input: ProjectInput): LanguageModelInput {
-  const messages = buildAnthropicMessages(input.compiled);
-  // Tool projection is the canonical fold — Anthropic doesn't need a
-  // provider-specific tool shape at this layer. The system-message
-  // override above exists ONLY because Anthropic preserves per-section
-  // cache_control; tools have no such concern.
+  const messages = buildMessages(input.compiled).map((m) => ({
+    ...m,
+    role: lowerSemanticRole(m.role, ANTHROPIC_ROLES),
+  }));
   const tools = buildTools(input.tools, input.narrate);
-  // Generation params are the canonical fold — Anthropic's projection
-  // override exists ONLY to preserve per-section cache_control on the
-  // system message; the SpecConfig → LanguageModelParameters lift is
-  // identical to the base, so reuse it rather than duplicate (and keep
-  // topP/frequencyPenalty/presencePenalty/stopSequences reachable, #211).
   const parameters = buildParameters(input.compiled);
   // #176: fold tree.providerOptions over target.providerOptions (tree
-  // wins) — same as the canonical `defaultProject`. The Anthropic
-  // override replaces the base projection wholesale, so it must carry
-  // the fold itself or every tree-declared knob is orphaned here.
+  // wins) — same as the canonical `defaultProject`.
   const providerOptions = mergeProviderOptions(
     input.target.providerOptions,
     input.compiled.providerOptions,
   );
+  // TODO(anthropic-provider-tools): this override predates
+  // `LanguageModelInput.providerTools` and never projected them, so an
+  // Anthropic tree declaring a `<ProviderTool>` (server_tool_use, web
+  // search) silently sends none. `defaultProject` does project them.
   return {
     messages,
     ...(tools.length > 0 ? { tools } : {}),
     ...omitUndefined({ parameters, providerOptions }),
   };
-}
-
-function buildAnthropicMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMessage> {
-  const messages: LanguageModelMessage[] = [];
-  // Emit one text part per section (not a single joined string) so
-  // per-section `metadata.providerMetadata` survives projection. The
-  // executor reads each part's `providerOptions` in `toAnthropicMessages`
-  // to decide string vs array system form. (ADR 57 §2 — the section's
-  // adopter-stamped `providerMetadata` knob projects onto the INPUT
-  // part's `providerOptions`.)
-  const systemParts: LanguageModelMessagePart[] = [];
-  for (const e of tree.context.entries) {
-    if (e.kind !== "section") continue;
-    const text = anthropicSectionText(e);
-    if (text.length === 0) continue;
-    const part: LanguageModelMessagePart = { type: "text", text };
-    const pm = e.metadata?.providerMetadata;
-    if (pm !== undefined) {
-      (part as { providerOptions?: Record<string, Record<string, unknown>> }).providerOptions = pm;
-    }
-    // Canonical CacheHint rides the part (#185); toAnthropicMessages
-    // translates it (explicit providerOptions above still wins there).
-    if (e.metadata?.cache !== undefined) {
-      (part as { cache?: unknown }).cache = e.metadata.cache;
-    }
-    systemParts.push(part);
-  }
-  if (systemParts.length > 0) {
-    messages.push({ role: "system", content: systemParts });
-  }
-  for (const entry of tree.context.entries) {
-    if (entry.kind !== "message") continue;
-    const cache = entry.metadata?.cache;
-    // Message-level provider knobs ride the INPUT channel (#173) — same
-    // send/return split as the canonical projection.
-    const providerOptions = entry.metadata?.providerMetadata;
-    messages.push({
-      role: entry.role as LanguageModelMessage["role"],
-      content: entry.content.map(anthropicMessagePartFromBlock),
-      ...(providerOptions !== undefined ? { providerOptions } : {}),
-      ...(cache !== undefined ? { cache } : {}),
-    });
-  }
-  return messages;
-}
-
-function anthropicSectionText(section: SectionEntry): string {
-  const head = section.title ? `## ${section.title}\n\n` : "";
-  const body = section.content
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .filter((t) => t.length > 0)
-    .join("\n\n");
-  return head + body;
-}
-
-function anthropicMessagePartFromBlock(block: ContentBlock): LanguageModelMessagePart {
-  // Per-block `providerMetadata` (the canonical block's knob channel)
-  // projects onto the INPUT part's `providerOptions` (ADR 57 §2). Mirrors
-  // the canonical `messagePartFromBlock`; the Anthropic override exists
-  // only for the system-section shape, not the block mapping.
-  const po =
-    block.providerMetadata !== undefined ? { providerOptions: block.providerMetadata } : {};
-  switch (block.type) {
-    case "text":
-      return { type: "text", text: block.text, ...po };
-    case "image":
-      return {
-        type: "image",
-        source: block.source,
-        ...omitUndefined({ mediaType: block.mimeType }),
-        ...po,
-      };
-    case "document":
-      return {
-        type: "document",
-        source: block.source,
-        ...omitUndefined({ mediaType: block.mimeType }),
-        ...po,
-      };
-    case "audio":
-      return {
-        type: "audio",
-        source: block.source,
-        ...omitUndefined({ mediaType: block.mimeType }),
-        ...po,
-      };
-    case "video":
-      return {
-        type: "video",
-        source: block.source,
-        ...omitUndefined({ mediaType: block.mimeType }),
-        ...po,
-      };
-    case "reasoning":
-      return {
-        type: "reasoning",
-        text: block.text,
-        ...omitUndefined({ signature: block.signature }),
-        ...po,
-      };
-    case "generated_image":
-      // Replay as an image (ADR 57 §Taxonomy) — data URI, not a
-      // JSON.stringify base64 token-bomb.
-      return {
-        type: "image",
-        source: {
-          type: "base64",
-          data: block.data,
-          ...omitUndefined({ mimeType: block.mimeType }),
-        },
-        ...omitUndefined({ mediaType: block.mimeType }),
-        ...po,
-      };
-    case "generated_file":
-      return {
-        type: "document",
-        source: { type: "url", url: block.uri, ...omitUndefined({ mimeType: block.mimeType }) },
-        ...omitUndefined({ mediaType: block.mimeType }),
-        ...po,
-      };
-    case "tool_use":
-      return {
-        type: "tool_use",
-        id: block.toolUseId,
-        name: block.name,
-        input: block.input,
-        ...po,
-      };
-    case "tool_result":
-      return {
-        type: "tool_result",
-        toolUseId: block.toolUseId,
-        content: block.content.map(anthropicMessagePartFromBlock),
-        ...omitUndefined({ isError: block.isError }),
-        ...po,
-      };
-    case "task_ref":
-      // Match the base mapper's drop-in text projection (task_ref stays
-      // canonical `{_kind}` JSON — ADR 57 §Taxonomy). Previously this
-      // override lacked the case and fell to the raw `JSON.stringify`
-      // default below.
-      return {
-        type: "text",
-        text: JSON.stringify({
-          _kind: "session_task_ref",
-          taskId: block.taskId,
-          status: block.status,
-          ...omitUndefined({
-            statusMessage: block.statusMessage,
-            ttl: block.ttl,
-            pollInterval: block.pollInterval,
-          }),
-        }),
-        ...po,
-      };
-    default:
-      return {
-        type: "text",
-        text:
-          "text" in block && typeof block.text === "string" ? block.text : JSON.stringify(block),
-      };
-  }
 }
 
 // ============================================================================

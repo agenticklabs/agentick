@@ -68,27 +68,36 @@ import { createApp } from "../react.js";
 // ---------------------------------------------------------------------------
 
 /**
- * A representative STATIC agent: a system message, two sections (one with
- * an explicit id + semantic children, one with an auto-derived id), and
- * two tools with JSON schemas (one explicit id, one auto). No embedded
- * user message and no time-varying content — the whole tree is a stable
- * cache prefix. The auto-id section/tool deliberately exercise the
+ * A representative STATIC agent: a system message containing two sections
+ * (one with an explicit id + semantic children, one with an auto-derived
+ * id), and two tools with JSON schemas (one explicit id, one auto). No
+ * embedded user message and no time-varying content — the whole tree is a
+ * stable cache prefix. The auto-id section/tool deliberately exercise the
  * `stableId` → `hostId` path so the separate-mount exclusion is real.
+ *
+ * The sections sit INSIDE `<System>`. Before ADR 94 they were free-floating
+ * and were hoisted into the system prompt regardless; now the container is
+ * what puts them there, which is also the shape the compiler's
+ * `SECTION_WITHOUT_SYSTEM` diagnostic tells adopters to migrate to.
  */
 function RepresentativeAgent(): React.ReactElement {
   return React.createElement(
     React.Fragment,
     null,
-    React.createElement(System, null, "You are a helpful assistant."),
-    // Explicit-id section with semantic children (heading + paragraph).
     React.createElement(
-      "section" as never,
-      { id: "guidelines", title: "Guidelines", audience: "model" },
-      React.createElement(H2, null, "House rules"),
-      React.createElement(Paragraph, null, "Be concise. Cite your sources."),
+      System,
+      null,
+      "You are a helpful assistant.",
+      // Explicit-id section with semantic children (heading + paragraph).
+      React.createElement(
+        "section" as never,
+        { id: "guidelines", title: "Guidelines" },
+        React.createElement(H2, null, "House rules"),
+        React.createElement(Paragraph, null, "Be concise. Cite your sources."),
+      ),
+      // Auto-id section (no `id` prop → id defaults from ctx.stableId/hostId).
+      React.createElement("section" as never, { title: "Notes" }, "Static reference notes."),
     ),
-    // Auto-id section (no `id` prop → id defaults from ctx.stableId/hostId).
-    React.createElement("section" as never, { title: "Notes" }, "Static reference notes."),
     // Explicit-id tool with an input schema.
     React.createElement("tool" as never, {
       id: "t.search",
@@ -149,25 +158,36 @@ async function mount(harness: CompilerHarness, mountId: string): Promise<void> {
 }
 
 /**
- * Deep-clone a tree with every context-entry `id` and tool-declaration
- * `id` removed. Isolates the ONLY field that can differ across separate
- * mounts (auto-generated `hostId`-derived ids) so the remainder can be
- * asserted byte-identical.
+ * Deep-clone a tree with every auto-generated id removed: context-entry and
+ * tool-declaration ids, and — since ADR 94 made a section into CONTENT — the
+ * ids a section stamps on the blocks it lowered to. Isolates the ONLY fields
+ * that can differ across separate mounts so the remainder can be asserted
+ * byte-identical.
  */
 function stripIds(tree: RenderedTree): unknown {
   const clone = JSON.parse(JSON.stringify(tree)) as {
     context?: { entries?: Array<Record<string, unknown>> };
     declarations?: { tools?: Array<Record<string, unknown>> };
   };
-  for (const e of clone.context?.entries ?? []) delete e.id;
+  for (const e of clone.context?.entries ?? []) {
+    delete e.id;
+    for (const b of (e.content ?? []) as Array<Record<string, unknown>>) {
+      delete b.id;
+      delete b.metadata;
+    }
+  }
   for (const t of clone.declarations?.tools ?? []) delete t.id;
   return clone;
 }
 
 /** The auto-id "Notes" section's id — the concrete `hostId`-derived value. */
 function notesSectionId(tree: RenderedTree): string | undefined {
-  const e = tree.context.entries.find((x) => x.kind === "section" && x.title === "Notes");
-  return e?.kind === "section" ? e.id : undefined;
+  for (const entry of tree.context.entries) {
+    for (const block of entry.content) {
+      if (block.type === "text" && block.text.startsWith("# Notes")) return block.id;
+    }
+  }
+  return undefined;
 }
 
 /**

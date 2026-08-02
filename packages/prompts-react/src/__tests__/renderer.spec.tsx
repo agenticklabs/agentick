@@ -3,9 +3,9 @@
  *
  * Pins:
  *  - `<message role="...">` JSX → MessageEntry passthrough
- *  - `<section>` JSX → buffered into a system MessageEntry
- *  - section title prepended as `# title` text block
- *  - explicit messages flush the section buffer (preserve authoring order)
+ *  - free-floating `<section>` JSX → its own `grounding` MessageEntry (ADR 94)
+ *  - section title lowers to a leading `# title` line in the section's block
+ *  - authoring order is preserved entry-for-entry
  *  - `handles()` predicate accepts React-shaped content; rejects strings? no — strings ARE ReactNode
  *  - end-to-end via PromptsHarness with `withReactPrompts`-equivalent wiring
  */
@@ -30,22 +30,27 @@ async function makeHarness(): Promise<PromptsHarness> {
 }
 
 describe("reactPromptRenderer — direct render()", () => {
-  it("loose section → single system MessageEntry", async () => {
+  it("loose section → single grounding MessageEntry", async () => {
     const node = createElement("section" as never, { id: "intro" }, "Hello, world.");
     const messages = await reactPromptRenderer.render(node, {});
     expect(messages).toHaveLength(1);
-    expect(messages[0]!.role).toBe("system");
+    // ADR 94: a free-floating section is no longer re-roled to `system` by
+    // this renderer — the compiler gives it `grounding` at its own position.
+    expect(messages[0]!.role).toBe("grounding");
     expect(
       messages[0]!.content.some((b) => b.type === "text" && b.text.includes("Hello, world.")),
     ).toBe(true);
   });
 
-  it("section with title → leading '# title' text block", async () => {
+  it("section with title → '# title' leads the section's coalesced text block", async () => {
     const node = createElement("section" as never, { id: "x", title: "Greeting" }, "Hi.");
     const messages = await reactPromptRenderer.render(node, {});
     expect(messages).toHaveLength(1);
     const blocks = messages[0]!.content;
-    expect(blocks[0]).toEqual({ type: "text", text: "# Greeting" });
+    // ADR 94: title + text runs coalesce into ONE block — one block is one
+    // projected message part.
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: "text", text: "# Greeting\nHi." });
   });
 
   it("explicit <message> → passthrough preserves role", async () => {
@@ -55,7 +60,7 @@ describe("reactPromptRenderer — direct render()", () => {
     expect(messages[0]!.role).toBe("user");
   });
 
-  it("section then message → buffer flushes, message follows", async () => {
+  it("section then message → grounding entry first, message follows", async () => {
     const node = createElement(
       "fragment" as never,
       null,
@@ -69,21 +74,25 @@ describe("reactPromptRenderer — direct render()", () => {
     ];
     const messages = await reactPromptRenderer.render(fragment, {});
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.role).toBe("system");
+    expect(messages[0]!.role).toBe("grounding");
     expect(messages[1]!.role).toBe("user");
     // Suppress unused
     void node;
   });
 
-  it("multiple sections → concatenated into single system message (parts)", async () => {
+  it("multiple sections → one grounding message each, in authoring order", async () => {
     const fragment = [
       createElement("section" as never, { id: "a", key: "a" }, "alpha"),
       createElement("section" as never, { id: "b", key: "b" }, "beta"),
     ];
     const messages = await reactPromptRenderer.render(fragment, {});
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.role).toBe("system");
-    const text = messages[0]!.content
+    // ADR 94: adjacent sections are no longer merged into one leading system
+    // message — position is canonical, so each keeps its own entry + id.
+    expect(messages).toHaveLength(2);
+    expect(messages.map((m) => m.role)).toEqual(["grounding", "grounding"]);
+    expect(messages.map((m) => m.id)).toEqual(["a", "b"]);
+    const text = messages
+      .flatMap((m) => m.content)
       .filter((b) => b.type === "text")
       .map((b) => (b as { text: string }).text)
       .join("\n");
@@ -154,7 +163,7 @@ describe("reactPromptRenderer — end-to-end via PromptsHarness", () => {
     });
     const result = await h.render({ name: "qa", args: { q: "What is 2+2?" } });
     expect(result.messages).toHaveLength(2);
-    expect(result.messages[0]!.role).toBe("system");
+    expect(result.messages[0]!.role).toBe("grounding");
     expect(result.messages[1]!.role).toBe("user");
   });
 });

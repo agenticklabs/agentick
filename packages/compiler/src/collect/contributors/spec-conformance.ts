@@ -2,7 +2,7 @@
  * Type-level conformance harness for contributors.
  *
  * Every contributor turns an element's props into a spec value (a
- * `ToolDeclaration`, a `SectionEntry`, an `ImageBlock`, …). The runtime
+ * `ToolDeclaration`, a `MessageEntry`, an `ImageBlock`, …). The runtime
  * `contribute` body hand-assembles that value, so a NEW optional field on
  * the spec type compiles fine everywhere and is SILENTLY DROPPED — the
  * exact bug class that lost `ToolDeclaration.aliases` and
@@ -74,6 +74,7 @@ export type BaseBlockKey =
   | "metadata"
   | "summary"
   | "providerMetadata"
+  | "cache"
   | "citations"
   | "sources";
 

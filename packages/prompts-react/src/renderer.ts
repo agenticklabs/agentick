@@ -1,23 +1,16 @@
 /**
  * `reactPromptRenderer` — `PromptRenderer` for React content.
  *
- * Compiles a `ReactNode` to `RenderedTree` via `compileTemplate`, then
- * projects context entries to `MessageEntry[]`:
+ * Compiles a `ReactNode` to `RenderedTree` via `compileTemplate` and hands
+ * back the tree's context entries unchanged: `ContextSpec.entries` is already
+ * `MessageEntry[]` in authoring order (ADR 94), so there is nothing left to
+ * project. A `<Section>` lowers into the content of whatever message contains
+ * it; free-floating it arrives as its own `role: "grounding"` entry.
  *
- *  - explicit `<message>` JSX → `MessageEntry` passthrough (preserves
- *    role + content blocks);
- *  - `<Section>`s / loose text → `system`-role `MessageEntry` buffer.
- *    Consecutive sections concatenate into a single system message
- *    where each section's `content` blocks become parts. Section
- *    titles render as a leading `# title` text block.
- *
- * The buffer flushes whenever an explicit message breaks the run, so
- * ordering reflects authoring order. Diagnostics from the compile pass
- * are dropped here — render failures are surfaced via the
- * `PromptRenderFailed` envelope by the harness.
+ * Diagnostics from the compile pass are dropped here — render failures are
+ * surfaced via the `PromptRenderFailed` envelope by the harness.
  */
 
-import type { ContentBlock, MessageEntry, SectionEntry } from "@agentick/spec";
 import type { PromptRenderer } from "@agentick/prompts";
 import { compileTemplate, type CompileTemplateOptions } from "@agentick/compiler-react";
 import type { ReactNode } from "react";
@@ -52,7 +45,7 @@ export function createReactPromptRenderer(
       // dispatched based on `handles(content) === true`.
       const node = content as ReactNode;
       const compiled = await compileTemplate(node, compileOpts);
-      return entriesToMessages(compiled.tree.context.entries);
+      return compiled.tree.context.entries;
     },
   };
 }
@@ -76,33 +69,4 @@ function defaultHandles(content: unknown): boolean {
     return "$$typeof" in (content as object) || "type" in (content as object);
   }
   return false;
-}
-
-function entriesToMessages(
-  entries: readonly (MessageEntry | SectionEntry)[],
-): readonly MessageEntry[] {
-  const out: MessageEntry[] = [];
-  let buffer: ContentBlock[] = [];
-
-  const flush = () => {
-    if (buffer.length === 0) return;
-    out.push({ kind: "message", role: "system", content: buffer });
-    buffer = [];
-  };
-
-  for (const entry of entries) {
-    if (entry.kind === "message") {
-      flush();
-      out.push(entry);
-      continue;
-    }
-    // SectionEntry — buffer into the current system message.
-    if (entry.title) {
-      buffer.push({ type: "text", text: `# ${entry.title}` });
-    }
-    buffer.push(...entry.content);
-  }
-  flush();
-
-  return out;
 }

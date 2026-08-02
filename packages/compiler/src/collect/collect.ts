@@ -14,11 +14,11 @@
 
 import type {
   ContentBlock,
-  ContextEntry,
   FormatDiagnostic,
   FormatPurpose,
   FormatterRef,
   MCPDeclaration,
+  MessageEntry,
   ModelDeclaration,
   OutputDeclaration,
   ProviderOptions,
@@ -33,6 +33,7 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import { SECTION_STAMP } from "@agentick/formatters";
 
 import {
   resolveFormatter,
@@ -49,6 +50,41 @@ import {
   type DefaultProjection,
   type ProjectionSources,
 } from "./projection.js";
+
+/** One contribution inside a content container, before coalescing. */
+type Item =
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "semantic"; readonly value: SemanticNode }
+  | { readonly kind: "block"; readonly value: SemanticContentBlock };
+
+/**
+ * Two ADJACENT sections in one message are two blocks, and one block is one
+ * projected message part — but a provider is free to concatenate text parts
+ * with no separator, which would run `# A`'s body straight into `# B`'s
+ * heading. Merge them into a single block with the blank line between,
+ * which is also the exact byte layout sections had when they were hoisted
+ * into one system blob.
+ *
+ * A block carrying its own `cache` or `providerMetadata` never merges: that
+ * is a per-section prompt-cache breakpoint (#185), and the boundary IS the
+ * block.
+ */
+function mergeAdjacentSections(
+  prev: SemanticContentBlock | undefined,
+  next: SemanticContentBlock,
+): SemanticContentBlock | undefined {
+  if (prev === undefined) return undefined;
+  if (prev.type !== "text" || next.type !== "text") return undefined;
+  const prevSection = prev.metadata?.[SECTION_STAMP];
+  const nextSection = next.metadata?.[SECTION_STAMP];
+  if (prevSection === undefined || nextSection === undefined) return undefined;
+  if (prevSection === nextSection) return undefined;
+  if (prev.cache !== undefined || next.cache !== undefined) return undefined;
+  if (prev.providerMetadata !== undefined || next.providerMetadata !== undefined) return undefined;
+  if ((prev as { semanticNode?: unknown }).semanticNode !== undefined) return undefined;
+  if ((next as { semanticNode?: unknown }).semanticNode !== undefined) return undefined;
+  return { ...prev, text: `${prev.text}\n\n${next.text}` };
+}
 
 export interface CollectInput {
   /** Root host children to walk. Usually the container's children. */
@@ -71,6 +107,55 @@ export interface CollectResult {
   readonly tree: RenderedTree;
   readonly diagnostics: readonly FormatDiagnostic[];
 }
+
+/**
+ * The old `<Section>rules</Section><Timeline />` shape no longer produces a
+ * system prompt — a tree with no `<System>` sends no system instructions.
+ * The fix is one wrapper, so the diagnostic names it. A migration hint, not
+ * a compatibility shim: nothing is folded back.
+ */
+const BARE_LEADING_SECTION: FormatDiagnostic = {
+  severity: "warning",
+  code: "SECTION_WITHOUT_SYSTEM",
+  message:
+    "A <Section> before any message compiles to a `grounding` message at that position, " +
+    "NOT to the system prompt. If these are system instructions, wrap it in <System>. " +
+    "(ADR 94 — container decides role, position decides order.)",
+};
+
+/**
+ * A `role` on a section INSIDE a message. The prop only means anything for
+ * the anonymous message a free-standing section becomes; here the container
+ * has already decided the role, so honouring it would need the section to
+ * break out of its parent — which is the hoisting ADR 94 removed. Reported
+ * rather than ignored, because a silently-dropped prop reads as a bug in the
+ * framework rather than in the tree.
+ */
+function sectionRoleInMessage(role: string): FormatDiagnostic {
+  return {
+    severity: "warning",
+    code: "SECTION_ROLE_IN_MESSAGE",
+    message:
+      `<Section role="${role}"> is nested inside a message, where the container already ` +
+      "decides the role — the prop is ignored. It applies only to a free-standing section, " +
+      `whose anonymous message it names. To emit a ${role} message, write <Message ` +
+      `role="${role}"> around this section instead.`,
+  };
+}
+
+/**
+ * Never mid-stream system. Enforced at compile time rather than by silently
+ * hoisting the message to the front, which is the defect ADR 94 removes.
+ */
+const MID_STREAM_SYSTEM: FormatDiagnostic = {
+  severity: "warning",
+  code: "MID_STREAM_SYSTEM",
+  message:
+    "A <System> message appears at or after the first non-system message. System " +
+    "instructions have no mid-conversation position: leading <System> messages merge " +
+    "into the provider's system parameter, and this one will be merged with them out of " +
+    "tree order. Move it to the top, or use <Grounding> for mid-stream context.",
+};
 
 /**
  * Walk the host tree and produce a `RenderedTree`.
@@ -187,11 +272,6 @@ function makeContextFactory(
   ): readonly SemanticContentBlock[] {
     if (!isElementInstance(parent)) return [];
 
-    type Item =
-      | { readonly kind: "text"; readonly value: string }
-      | { readonly kind: "semantic"; readonly value: SemanticNode }
-      | { readonly kind: "block"; readonly value: SemanticContentBlock };
-
     const items: Item[] = [];
     gatherItems(parent, scope, outbound, items);
     return coalesce(items);
@@ -201,11 +281,7 @@ function makeContextFactory(
     parent: HostInstance,
     scope: HostScope,
     outbound: IRFragment[] | undefined,
-    items: Array<
-      | { readonly kind: "text"; readonly value: string }
-      | { readonly kind: "semantic"; readonly value: SemanticNode }
-      | { readonly kind: "block"; readonly value: SemanticContentBlock }
-    >,
+    items: Item[],
   ): void {
     if (!isElementInstance(parent)) return;
     for (const child of parent.children) {
@@ -232,6 +308,17 @@ function makeContextFactory(
           items.push({ kind: "block", value: f.block });
         } else if (f.kind === "semantic-node") {
           items.push({ kind: "semantic", value: f.node });
+        } else if (f.kind === "section-content") {
+          // THE next.17 FIX. A `<section>` nested in a `<message>` used to
+          // fall off this switch — its fragment was neither a content-block
+          // nor a semantic-node, so the section (and everything in it)
+          // vanished from the compiled context with no diagnostic. It now
+          // splices into the containing message's content, whatever the
+          // message's role (ADR 94).
+          if (f.role !== undefined && outbound) {
+            outbound.push({ kind: "diagnostic", diagnostic: sectionRoleInMessage(f.role) });
+          }
+          for (const b of f.blocks) items.push({ kind: "block", value: b });
         } else if (f.kind === "diagnostic" && outbound) {
           outbound.push(f);
         }
@@ -239,13 +326,7 @@ function makeContextFactory(
     }
   }
 
-  function coalesce(
-    items: ReadonlyArray<
-      | { readonly kind: "text"; readonly value: string }
-      | { readonly kind: "semantic"; readonly value: SemanticNode }
-      | { readonly kind: "block"; readonly value: SemanticContentBlock }
-    >,
-  ): readonly SemanticContentBlock[] {
+  function coalesce(items: readonly Item[]): readonly SemanticContentBlock[] {
     const result: SemanticContentBlock[] = [];
     let runText: string[] = [];
     let runSem: SemanticNode[] = [];
@@ -286,7 +367,9 @@ function makeContextFactory(
       } else {
         // Native ContentBlock breaks the run.
         flush();
-        result.push(item.value);
+        const merged = mergeAdjacentSections(result[result.length - 1], item.value);
+        if (merged) result[result.length - 1] = merged;
+        else result.push(item.value);
       }
     }
     flush();
@@ -356,7 +439,7 @@ function foldFragments(
   // ── Surfacing accumulators (ADR 63) ──
   // `entries` is built with a parallel `entryProvenance` array; the two
   // grow together so indices stay aligned through to the sidecar.
-  const entries: ContextEntry[] = [];
+  const entries: MessageEntry[] = [];
   const entryProvenance: SurfacingProvenance[] = [];
   const tools: ToolDeclaration[] = [];
   const toolProvenance: SurfacingProvenance[] = [];
@@ -382,15 +465,60 @@ function foldFragments(
   const metadata: Record<string, unknown> = {};
   let specConfig: SpecConfig | undefined;
   let providerOptions: ProviderOptions | undefined;
+  /** Has a non-system entry landed yet? Gates both ADR 94 diagnostics. */
+  let sawNonSystem = false;
+  let warnedBareSection = false;
 
   for (const frag of fragments) {
     switch (frag.kind) {
-      case "context-entry":
-        // Raw content append stream — `<Message>` / `<Section>` written
-        // directly in the tree (not through a projection override).
-        entries.push(frag.entry as ContextEntry);
+      case "context-entry": {
+        // Raw content append stream — `<Message>` written directly in the
+        // tree (not through a projection override).
+        const entry = frag.entry;
+        if (entry.role === "system") {
+          if (sawNonSystem) diagnostics.push(MID_STREAM_SYSTEM);
+        } else {
+          sawNonSystem = true;
+        }
+        entries.push(entry);
         entryProvenance.push("authored:content");
         break;
+      }
+      case "section-content": {
+        // The anonymous-box rule (CSS): content appearing where its kind
+        // does not belong is wrapped in an anonymous container of the right
+        // kind. A free-floating `<Section>` becomes a message AT ITS OWN
+        // POSITION — the section below `<Timeline />` is the last message the
+        // model receives (ADR 94).
+        const role = frag.role ?? "grounding";
+        if (role === "system") {
+          // An explicitly system-roled section is a system entry like any
+          // other, and answers to the same never-mid-stream rule.
+          if (sawNonSystem) diagnostics.push(MID_STREAM_SYSTEM);
+        } else {
+          // Only the DEFAULT role earns the migration hint. `role` on the
+          // section means the author chose this shape deliberately.
+          if (
+            frag.role === undefined &&
+            !sawNonSystem &&
+            !entries.some((e) => e.role === "system")
+          ) {
+            if (!warnedBareSection) diagnostics.push(BARE_LEADING_SECTION);
+            warnedBareSection = true;
+          }
+          sawNonSystem = true;
+        }
+        entries.push({
+          kind: "message",
+          role,
+          content: frag.blocks,
+          id: frag.id,
+          ...(frag.renderedWith ? { renderedWith: frag.renderedWith } : {}),
+          ...(frag.metadata ? { metadata: frag.metadata } : {}),
+        });
+        entryProvenance.push("authored:content");
+        break;
+      }
       case "projection-override": {
         // A component overriding its harness's projection for `key`.
         // Suppresses that key's lazy default; its entries/tools land at
@@ -398,6 +526,11 @@ function foldFragments(
         overriddenKeys.add(frag.key);
         const prov: SurfacingProvenance = `authored:${frag.key}`;
         for (const e of frag.result.entries ?? []) {
+          if (e.role === "system") {
+            if (sawNonSystem) diagnostics.push(MID_STREAM_SYSTEM);
+          } else {
+            sawNonSystem = true;
+          }
           entries.push(e);
           entryProvenance.push(prov);
         }
@@ -521,7 +654,7 @@ function foldFragments(
 }
 
 function computeFeatures(input: {
-  readonly entries: readonly ContextEntry[];
+  readonly entries: readonly MessageEntry[];
   readonly tools: readonly ToolDeclaration[];
   readonly outputs: readonly OutputDeclaration[];
   readonly mcps: readonly MCPDeclaration[];
@@ -529,7 +662,7 @@ function computeFeatures(input: {
   readonly freeRootBlocks: readonly ContentBlock[];
 }): readonly SpecFeatureName[] {
   const features: SpecFeatureName[] = [];
-  if (input.entries.some((e) => e.kind === "section")) features.push("sections");
+  if (input.entries.some((e) => e.role === "grounding")) features.push("sections");
   if (input.tools.length > 0) features.push("tool-declarations");
   if (input.providerOptions) features.push("provider-options");
   if (input.freeRootBlocks.length > 0) features.push("free-root-content");

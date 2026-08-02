@@ -11,8 +11,10 @@
 
 import type {
   ContentBlock,
-  ContextEntry,
   FormatDiagnostic,
+  FormatterRef,
+  MessageEntry,
+  MessageRole,
   MCPDeclaration,
   ModelDeclaration,
   OutputDeclaration,
@@ -25,7 +27,27 @@ import type {
 } from "@agentick/spec";
 
 export type IRFragment =
-  | { readonly kind: "context-entry"; readonly entry: ContextEntry }
+  | { readonly kind: "context-entry"; readonly entry: MessageEntry }
+  /**
+   * A `<section>`'s lowered content blocks (ADR 94). NOT an entry — where
+   * these land is the CONTAINER's call: spliced into the content of the
+   * `<message>` that contains them, or, at entry level, wrapped in an
+   * anonymous `role: "grounding"` message at this tree position.
+   */
+  | {
+      readonly kind: "section-content";
+      readonly id: string;
+      readonly blocks: readonly ContentBlock[];
+      /**
+       * Author's override of the anonymous box's default `grounding` role.
+       * Meaningful ONLY at entry level — inside a message the container has
+       * already decided the role, and the collector raises a diagnostic
+       * rather than ignoring it.
+       */
+      readonly role?: MessageRole;
+      readonly renderedWith?: FormatterRef;
+      readonly metadata?: Record<string, unknown>;
+    }
   /**
    * A component overriding its harness's projection for `key` (ADR 63).
    * Emitted by the `<project>` contributor; carries the entries (and/or

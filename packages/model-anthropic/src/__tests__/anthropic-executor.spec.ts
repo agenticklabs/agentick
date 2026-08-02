@@ -104,11 +104,13 @@ describe("anthropic() adapter — system extraction + alternation", () => {
       specVersion: "2026-05-08",
       context: {
         entries: [
+          // ADR 94: a `<Section title="Persona">` inside `<System>` reaches
+          // the adapter already lowered into the message's blocks.
           {
-            kind: "section",
+            kind: "message",
+            role: "system",
             id: "sec1",
-            title: "Persona",
-            content: [{ type: "text", text: "be helpful" }],
+            content: [{ type: "text", text: "# Persona\nbe helpful", id: "sec1" }],
           },
           {
             kind: "message",
@@ -384,7 +386,7 @@ describe("anthropic() adapter — cache tokens (G2)", () => {
     expect(t.result.usage?.cacheCreationTokens).toBe(20);
   });
 
-  it("stamps cache_control on system block via per-section providerMetadata", async () => {
+  it("stamps cache_control on system block via per-block providerMetadata", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
@@ -393,16 +395,22 @@ describe("anthropic() adapter — cache tokens (G2)", () => {
       specVersion: "2026-05-08",
       context: {
         entries: [
+          // ADR 94: per-section provider knobs ride the BLOCK the section
+          // lowered to — the adapter no longer builds system parts itself.
           {
-            kind: "section",
+            kind: "message",
+            role: "system",
             id: "s1",
-            title: "Persona",
-            content: [{ type: "text", text: "be helpful" }],
-            metadata: {
-              providerMetadata: {
-                anthropic: { cacheControl: { type: "ephemeral" } },
+            content: [
+              {
+                type: "text",
+                text: "# Persona\nbe helpful",
+                id: "s1",
+                providerMetadata: {
+                  anthropic: { cacheControl: { type: "ephemeral" } },
+                },
               },
-            },
+            ],
           },
           {
             kind: "message",
@@ -835,7 +843,7 @@ describe("anthropic() adapter — journaled lifecycle", () => {
 });
 
 describe("anthropic() adapter — canonical CacheHint translation (#185)", () => {
-  it("section metadata.cache → cache_control with ttl on the system block", async () => {
+  it("block cache hint → cache_control with ttl on the system block", async () => {
     const stub = new StubAnthropicClient([
       { kind: "non-streaming", message: mkMessage({ text: "ok" }) },
     ]);
@@ -844,11 +852,13 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
       specVersion: "2026-05-08",
       context: {
         entries: [
+          // ADR 94: a section's `cache` breakpoint rides the LAST block it
+          // lowered to, not a section entry's metadata.
           {
-            kind: "section",
+            kind: "message",
+            role: "system",
             id: "s1",
-            content: [{ type: "text", text: "stable persona" }],
-            metadata: { cache: { ttl: "1h" } },
+            content: [{ type: "text", text: "stable persona", id: "s1", cache: { ttl: "1h" } }],
           },
           { kind: "message", id: "m1", role: "user", content: [{ type: "text", text: "hi" }] },
         ],

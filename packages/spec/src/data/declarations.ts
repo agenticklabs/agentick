@@ -7,8 +7,7 @@
  * @see docs/proposals/v2/blueprint/07-tool-executor.md
  */
 
-import type { ContentBlock, ToolExecutor } from "./content-blocks.js";
-import type { CacheHint } from "./entries.js";
+import type { CacheHint, ContentBlock, ToolExecutor } from "./content-blocks.js";
 import type { ProviderToolOptions } from "./rendered-tree.js";
 import type { StandardSchemaV1 } from "./standard-schema.js";
 import type { ToolHandlerCtx } from "./tool-handler.js";

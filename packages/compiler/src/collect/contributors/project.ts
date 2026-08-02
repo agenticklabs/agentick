@@ -21,7 +21,7 @@
  * @see docs/proposals/v2/blueprint/63-compiler-surfacing.md
  */
 
-import type { ContextEntry } from "@agentick/spec";
+import type { MessageEntry } from "@agentick/spec";
 import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
@@ -30,7 +30,7 @@ import type { IRFragment } from "../fragments.js";
  * `<project>` props. NO spec-derivation partition here (a deliberate
  * exception to the contributor ownership convention): this contributor
  * emits a COMPILER-INTERNAL `projection-override` IR fragment (ADR 63),
- * not one of the spec's `RuntimeDeclarations` / `ContextEntry` types. Its
+ * not one of the spec's `RuntimeDeclarations` / `MessageEntry` types. Its
  * only prop — `projectionKey` — is a compiler surfacing key with no spec
  * type to derive from, so there is nothing to `Omit`/partition.
  */
@@ -59,12 +59,12 @@ export const projectContributor: Contributor = {
       ];
     }
 
-    const entries: ContextEntry[] = [];
+    const entries: MessageEntry[] = [];
     const passthrough: IRFragment[] = [];
     for (const child of instance.children) {
       for (const frag of ctx.walk(child)) {
         if (frag.kind === "context-entry") {
-          entries.push(frag.entry as ContextEntry);
+          entries.push(frag.entry);
         } else {
           passthrough.push(frag);
         }

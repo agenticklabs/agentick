@@ -18,7 +18,6 @@ import type {
   CodeBlock,
   CodeExecutionResultBlock,
   ContentBlock,
-  ContextEntry,
   CsvBlock,
   CustomContentBlock,
   DataBlock,
@@ -46,14 +45,12 @@ import type {
   LifecycleTickStart,
   MCPDeclaration,
   MediaBlock,
-  MessageEntry,
   OutputDeclaration,
   ProtocolEvent,
   ReasoningBlock,
   RenderedTree,
   ResourceBlock,
   ResourceDeclaration,
-  SectionEntry,
   SemanticContentBlock,
   SemanticNode,
   SpecFeatureName,
@@ -164,17 +161,6 @@ export function isDataBlock(b: ContentBlock): b is DataBlock {
 }
 export function isEventBlock(b: ContentBlock): b is EventBlock {
   return b.type === "user_action" || b.type === "system_event" || b.type === "state_change";
-}
-
-// ============================================================================
-// ContextEntry — narrow on the `kind` discriminator
-// ============================================================================
-
-export function isMessageEntry(e: ContextEntry): e is MessageEntry {
-  return e.kind === "message";
-}
-export function isSectionEntry(e: ContextEntry): e is SectionEntry {
-  return e.kind === "section";
 }
 
 // ============================================================================

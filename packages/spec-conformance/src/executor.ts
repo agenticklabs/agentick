@@ -37,7 +37,6 @@ import type {
   LanguageModelInput,
   LanguageModelTarget,
   RenderedTree,
-  SectionEntry,
   MediaSource,
 } from "@agentick/spec";
 
@@ -78,10 +77,14 @@ function mkRenderedTree(
     providerOptions?: RenderedTree["providerOptions"];
   } = {},
 ): RenderedTree {
-  const section: SectionEntry = {
-    kind: "section",
+  // ADR 94: a section is content, not an entry — a `<Section>` inside
+  // `<System>` arrives here already lowered into the system message's blocks,
+  // with the section id stamped on each produced block.
+  const system: RenderedTree["context"]["entries"][number] = {
+    kind: "message",
+    role: "system",
     id: "system",
-    content: [{ type: "text", text: "You are a helpful assistant." }],
+    content: [{ type: "text", text: "You are a helpful assistant.", id: "system" }],
   };
   const media = opts.mediaBlock ?? opts.imageBlock;
   const userContent: RenderedTree["context"]["entries"][number] = {
@@ -95,7 +98,7 @@ function mkRenderedTree(
   return {
     specVersion: "2026-05-08",
     context: {
-      entries: [section, userContent],
+      entries: [system, userContent],
     },
     ...omitUndefined({ config: opts.config, providerOptions: opts.providerOptions }),
   };
