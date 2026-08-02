@@ -48,6 +48,7 @@ import type {
   StateDeleteInput,
   StateHarnessProtocol,
   StateListEntry,
+  StateFx,
   StateSetInput,
   StoreCtx,
 } from "@agentick/spec";
@@ -99,6 +100,18 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    */
   readonly set: (input: StateSetInput) => Promise<void>;
   readonly delete: (input: StateDeleteInput) => Promise<void>;
+
+  /**
+   * The Effect-canonical twin (ADR 77). An in-process caller composes
+   * `yield* state.fx.set(...)` and stays in ONE fiber tree, so the resulting
+   * op keeps the ambient `tickId` / `parentOpId`; the plain `state.set(...)`
+   * Promise methods are the derived edge facade. Both dispatch the SAME
+   * declared command — `fxProxy` derives `fx.<action>` from the
+   * `<surface>:<action>` naming convention, so there is no map to maintain.
+   */
+  get fx(): StateFx {
+    return this.fxProxy() as unknown as StateFx;
+  }
 
   get id(): string {
     return this.scopeId;

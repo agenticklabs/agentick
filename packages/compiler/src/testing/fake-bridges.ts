@@ -266,6 +266,17 @@ export function mockStateHarness(
     notifier.notify(key);
   };
 
+  // ONE body per operation, shared by both faces — see `fakeKnobsHarness`.
+  const setValue = ({ key, value }: StateSetInput): void => {
+    values.set(key, value);
+    fire(key);
+  };
+  const deleteKey = ({ key }: StateDeleteInput): void => {
+    if (!values.has(key)) return;
+    values.delete(key);
+    fire(key);
+  };
+
   return {
     id: "mock:state",
     ready: Promise.resolve(),
@@ -274,15 +285,13 @@ export function mockStateHarness(
     list: () => [...values.entries()].map(([key, value]) => ({ key, value })),
     subscribe: (key, l) => notifier.subscribe(key, l),
     subscribeAll: (l) => notifier.subscribeAll(l),
-    set: async ({ key, value }: StateSetInput) => {
-      values.set(key, value);
-      fire(key);
+    fx: {
+      use: () => () => {},
+      set: (input) => Effect.sync(() => setValue(input)),
+      delete: (input) => Effect.sync(() => deleteKey(input)),
     },
-    delete: async ({ key }: StateDeleteInput) => {
-      if (!values.has(key)) return;
-      values.delete(key);
-      fire(key);
-    },
+    set: async (input: StateSetInput) => setValue(input),
+    delete: async (input: StateDeleteInput) => deleteKey(input),
     exportSnapshot: () => {
       const out: Record<string, unknown> = {};
       for (const [k, v] of values) out[k] = v;
