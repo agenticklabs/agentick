@@ -109,9 +109,14 @@ import type { CommandHooks, InterceptorCtx } from "@agentick/runtime";
 // without them in its graph would see `onAfterCompilerRenderTree` as an unknown
 // property. These type-only imports pull the augmentations in explicitly, which
 // is honest: the bag genuinely depends on them.
+/* eslint-disable-next-line import/no-empty-named-blocks -- the empty block IS
+   the point: these load module augmentations, they import no bindings. */
 import type {} from "@agentick/compiler-react";
+/* eslint-disable-next-line import/no-empty-named-blocks */
 import type {} from "@agentick/timeline";
+/* eslint-disable-next-line import/no-empty-named-blocks */
 import type {} from "@agentick/loop-executor";
+/* eslint-disable-next-line import/no-empty-named-blocks */
 import type {} from "@agentick/model-executor";
 
 /** The terminal `message` delta — the canonical assistant message. */
