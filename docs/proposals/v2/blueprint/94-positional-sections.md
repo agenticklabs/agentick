@@ -156,19 +156,46 @@ promised, and the `entry.role as …` cast dies:
   `RagContext`'s hand-rolled `<User>` turn can become a plain mid-stream
   `<Section>` at leisure.
 
-## Status: implemented
+## Status: implemented, fully load-bearing
 
-Landed on `feat/v2`. One deviation from the design above, deliberate and
-marked in code as `TODO(section-formatter-thread)`: the compile path
-applies the MARKDOWN lowering unconditionally, even under an `<XML>`
-scope. The xml title→tag rule is written and tested in
-`lowerSection`, but wiring it into the collect walk would double-process
-— the compiler harness's formatter pass runs AFTER collect and would
-escape a frame emitted during it (`<current_user>` → `&lt;current_user&gt;`)
-while the body, already lowered to text, would skip the escaping it
-needs. Choosing the dialect correctly means resolving the live formatter
-during the collect walk. That is the thread-through the TODO names, and
-it is the only part of this ADR not yet load-bearing.
+Landed on `feat/v2`. The first cut shipped one deliberate deviation —
+the compile path applied the MARKDOWN lowering unconditionally, even
+under an `<XML>` scope — marked in code as
+`TODO(section-formatter-thread)`. That is now closed, and every claim
+above is enforced.
+
+The thread-through was not "resolve the live formatter during the collect
+walk," which is what the deviation note guessed at. It was to stop
+lowering during the walk at all. Collect emits the section's STRUCTURE as
+a `sectionNode` sidecar — the same carrier shape `semanticNode` already
+used for JSX semantic HTML, and for the same reason: a block that is not
+text yet. The formatter pass lowers it, in the dialect that pass is
+running, by rendering the section's BODY first and framing the result
+afterwards. Body-then-frame is what makes the two escaping problems
+disappear together: the tag never reaches the escaper and the body
+reaches it exactly once.
+
+Three consequences fell out of moving the lowering, all of them wanted:
+
+- **A semantic-HTML section is ONE block.** Lowering used to run before
+  the sidecar had any text in it, so a `<Section>` whose body was
+  `<Paragraph>` produced a title block plus a separate body block. One
+  lowering, one block.
+- **`renderedWith` means what it says.** The ref was always stamped from
+  `ctx.formatter("section")`; now it names the dialect that actually ran.
+- **`formatTree` stopped re-running the block pass.** A `RenderedTree`
+  has already been through its compiler's formatter pass, so formatting
+  it again escaped what was escaped once already
+  (`TODO(double-format-in-render-to-string)`, previously invisible
+  because markdown is idempotent on plain text). With a section frame in
+  the output it stopped being invisible, so it was fixed here.
+
+One boundary is worth stating plainly: a section NESTED in a message
+reads in that MESSAGE's dialect. One formatter renders an entry's
+content, and the section's blocks are that content — so the container
+decides the dialect exactly as it decides the role.
+`<FormatScope purpose="section">` still picks the formatter for a
+FREE-STANDING section, whose entry carries the ref.
 
 ## Verified by
 
@@ -183,6 +210,12 @@ it is the only part of this ADR not yet load-bearing.
   role carried for the adapter, `role="system"` answering the
   never-mid-stream rule), `<Grounding>` ≡ bare section, and all three
   diagnostics including `SECTION_ROLE_IN_MESSAGE` on a nested section.
+  Plus the dialect thread-through: the title as an xml TAG, framed and
+  escaped exactly once; a section inside `<System>` under `<XML>`; the
+  heading marker dropped under `<PlainText>`; `renderedWith` naming the
+  formatter that actually lowered the section; a semantic-HTML body
+  collapsing into ONE block; and a nested section lowering in its
+  parent's dialect.
 - `packages/app/src/__tests__/positional-sections-e2e.spec.tsx` — the
   headline consequence at the altitude an adopter sees it: a `<Section>`
   below `<Timeline />` is the LAST `LanguageModelMessage` the executor is
@@ -191,7 +224,11 @@ it is the only part of this ADR not yet load-bearing.
   lowering: markdown bytes, the xml title→tag slug rule (including the
   leading-digit and no-surviving-characters cases), what rides the
   produced blocks, and no-silent-drop around non-text and
-  semantic-sidecar blocks.
+  semantic-sidecar blocks. And the carrier path: the body rendered before
+  the frame is applied (tag unescaped, `&` escaped once), one carrier
+  lowered two ways by two dialects, the adjacent-section blank-line merge
+  that moved here from the collect walker, and its refusal across a cache
+  breakpoint.
 - `packages/model/src/__tests__/semantic-roles.spec.ts` — the role seam:
   the fold narrows and keeps `grounding` / `event`, an unknown role
   throws instead of being cast, the three adapter tables, and system

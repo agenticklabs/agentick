@@ -71,14 +71,14 @@ describe("CompilerHarness — formatter registry slot", () => {
       mountId: "m_fallback",
       formatter: { id: "xml", format: "xml" },
     });
-    // ADR 94 deleted `frameSection`, so the old `<section id="s">` witness is
-    // gone. The section is a `grounding` message now, and XML dispatch is
-    // observed through the formatter's MESSAGE framing (markdown would emit
-    // `**grounding:** body`). TODO(section-formatter-thread): the section's
-    // own body is markdown-lowered in the collect path even under xml —
-    // see the note in compiler/src/collect/contributors/section.ts.
-    expect(payload.text).toContain('<message role="grounding">');
-    expect(payload.text).toContain("body");
+    // The mount's default is markdown; the per-call pin is xml. XML dispatch
+    // is observed at BOTH levels — the message framing (markdown would emit
+    // `**grounding:** body`) and the section lowering inside it, which is
+    // only reachable because the pin applies during the block pass rather
+    // than after it. Untitled section, so the tag falls back to id.
+    expect(payload.text).toBe(
+      '<message role="grounding">\n<section id="s">\nbody\n</section>\n</message>',
+    );
   });
 
   it("markdown is the default when no formatter is supplied", async () => {
@@ -91,9 +91,9 @@ describe("CompilerHarness — formatter registry slot", () => {
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_default" });
-    // ADR 94 — the title is no longer framed by the formatter as `## T`; it is
-    // lowered into the section's content as a `# T` heading at collect time.
-    // Markdown dispatch is witnessed by its message framing.
+    // ADR 94 — the title is no longer framed by the formatter as `## T`; the
+    // markdown formatter lowers it into the section's content as a `# T`
+    // heading. Markdown dispatch is witnessed by its message framing.
     expect(payload.text).toContain("**grounding:**");
     expect(payload.text).toContain("# T\nbody");
   });

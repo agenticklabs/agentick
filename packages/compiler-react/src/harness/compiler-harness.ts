@@ -608,9 +608,17 @@ export class CompilerHarness
     return { mountId: input.mountId, restoredFromSnapshot };
   }
 
+  /**
+   * @param pinned - When set, this formatter renders EVERY entry, whatever
+   *   `renderedWith` says. `renderToString({ formatter })` uses it: the caller
+   *   asked for one dialect for the whole output, and a dialect now decides
+   *   how sections read, so it has to be in force during the block pass
+   *   rather than applied to blocks another dialect already lowered.
+   */
   private async renderTreeBody(
     input: RenderTreeInput,
     state: MountState,
+    pinned?: DefinedFormatter,
   ): Promise<RenderTreeResult> {
     // ADR 54 / 55 — refresh the current render's RenderContext envelope
     // BEFORE rendering, so useContextInfo / useRenderContext read THIS
@@ -761,6 +769,7 @@ export class CompilerHarness
       collected.tree,
       state.rootScope.formatters.default,
       diagnostics,
+      pinned,
     );
 
     return {
@@ -786,9 +795,11 @@ export class CompilerHarness
     tree: import("@agentick/spec").RenderedTree,
     fallback: import("@agentick/spec").FormatterRef,
     diagnostics: ReconcileDiagnostic[],
+    pinned?: DefinedFormatter,
   ): import("@agentick/spec").RenderedTree {
     const reported = new Set<string>();
     const resolve = (ref: import("@agentick/spec").FormatterRef): DefinedFormatter => {
+      if (pinned !== undefined) return pinned;
       const resolution = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
       if (resolution.match === "fallback") {
         const key = `${ref.id} ${ref.format ?? ""}`;
@@ -841,19 +852,12 @@ export class CompilerHarness
     input: RenderToStringInput,
     state: MountState,
   ): Promise<RenderToStringResult> {
-    const tree = await this.renderTreeBody(
-      {
-        mountId: input.mountId,
-        sessionId: state.bridges.session.id,
-        ...omitUndefined({ maxIterations: input.maxIterations }),
-      },
-      state,
-    );
-
     // Two modes:
     //  - Explicit caller override (`input.formatter`): apply to every
     //    entry regardless of its `renderedWith`. The caller wants a
-    //    specific output format.
+    //    specific output format, and that has to be in force during the
+    //    BLOCK pass — a dialect decides how a section reads, so pinning it
+    //    only at serialization time would frame markdown headings in xml.
     //  - No override: honor per-entry `renderedWith` (set by JSX scope
     //    providers like <XML>/<Markdown>). Falls back to the root
     //    scope's default when an entry doesn't pin one.
@@ -864,6 +868,17 @@ export class CompilerHarness
       requestedRef,
       this.defaultFormatterId,
     );
+
+    const tree = await this.renderTreeBody(
+      {
+        mountId: input.mountId,
+        sessionId: state.bridges.session.id,
+        ...omitUndefined({ maxIterations: input.maxIterations }),
+      },
+      state,
+      input.formatter === undefined ? undefined : resolved.formatter,
+    );
+
     // A caller-pinned formatter is resolved HERE, not in `applyFormatters`, so
     // its unresolvable case needs its own report — otherwise
     // `renderToString({ formatter: { id: "typo" } })` silently serializes in
@@ -872,6 +887,9 @@ export class CompilerHarness
       resolved.match === "fallback"
         ? [...tree.diagnostics, unresolvedFormatterDiagnostic(requestedRef, resolved.formatter)]
         : tree.diagnostics;
+    // `renderTreeBody` already ran the block pass; `formatTree` only flattens
+    // and frames. Running the blocks through a formatter a second time
+    // double-escapes and mangles the section frames the first pass emitted.
     const text = formatTree(
       tree.tree,
       resolved.formatter,

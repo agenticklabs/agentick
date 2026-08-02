@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import type { MessageEntry } from "@agentick/spec";
+import { markdownFormatter } from "@agentick/formatters";
 import { createContainer } from "@agentick/compiler";
 import { createHostScope } from "@agentick/compiler";
 import { createCompiler } from "../react/compiler.js";
@@ -191,10 +192,18 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
       ),
     );
     const s = grounding(tree.context.entries[0]);
-    // ADR 94 — the folded blocks now arrive via `lowerSection`, which stamps
-    // the section id + `metadata.section` onto them. The claim under test is
-    // unchanged: the wrapper is transparent, the text still lands.
+    // ADR 94 — collect carries the section's structure and the formatter pass
+    // lowers it, so the folded blocks are inside the `sectionNode` sidecar.
+    // The claim under test is unchanged: the wrapper is transparent, the text
+    // still lands — and it still lands after lowering.
     expect(s.content).toEqual([
+      {
+        type: "text",
+        text: "",
+        sectionNode: { id: "s.wrap", content: [{ type: "text", text: "wrapped text" }] },
+      },
+    ]);
+    expect(markdownFormatter(s.content)).toEqual([
       { type: "text", text: "wrapped text", id: "s.wrap", metadata: { section: "s.wrap" } },
     ]);
   });

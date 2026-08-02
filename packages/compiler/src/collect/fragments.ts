@@ -21,6 +21,7 @@ import type {
   ProviderOptions,
   ProviderToolDeclaration,
   ResourceDeclaration,
+  SemanticContentBlock,
   SemanticNode,
   SpecConfig,
   ToolDeclaration,
@@ -29,15 +30,17 @@ import type {
 export type IRFragment =
   | { readonly kind: "context-entry"; readonly entry: MessageEntry }
   /**
-   * A `<section>`'s lowered content blocks (ADR 94). NOT an entry — where
-   * these land is the CONTAINER's call: spliced into the content of the
+   * A `<section>`'s content blocks — one `sectionNode` carrier holding the
+   * section's structure, still unlowered (ADR 94). NOT an entry: where these
+   * land is the CONTAINER's call — spliced into the content of the
    * `<message>` that contains them, or, at entry level, wrapped in an
-   * anonymous `role: "grounding"` message at this tree position.
+   * anonymous `role: "grounding"` message at this tree position. WHICH
+   * DIALECT they read in is the formatter pass's call.
    */
   | {
       readonly kind: "section-content";
       readonly id: string;
-      readonly blocks: readonly ContentBlock[];
+      readonly blocks: readonly SemanticContentBlock[];
       /**
        * Author's override of the anonymous box's default `grounding` role.
        * Meaningful ONLY at entry level — inside a message the container has

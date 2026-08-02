@@ -12,7 +12,7 @@
  * @see docs/proposals/v2/blueprint/04-formatters.md
  */
 
-import type { ContentBlock } from "./content-blocks.js";
+import type { CacheHint, ContentBlock } from "./content-blocks.js";
 import type { FormatterRef } from "./formatter.js";
 
 /**
@@ -106,10 +106,42 @@ export interface SemanticMetadata {
 }
 
 /**
+ * A `<Section>`'s STRUCTURE, before a dialect has been chosen for it.
+ *
+ * The compiler's collect walk knows what a section IS — id, title, the
+ * content it contains, its cache boundary — but not how it should READ. The
+ * `# Title` of markdown and the `<current_user>` of xml are the same section
+ * told in two dialects, and only the formatter pass knows which one is in
+ * scope. So collect emits this node as a sidecar and the formatter pass lowers
+ * it, exactly as it already does for {@link SemanticNode} (ADR 94).
+ *
+ * `content` is the section's own blocks, still unlowered — the formatter
+ * renders them FIRST (escaping and all) and frames the result afterwards, so a
+ * tag frame is never escaped and a body never escapes twice.
+ */
+export interface SectionNode {
+  /** Stable id — survives recompiles, rides every block the section produces. */
+  readonly id: string;
+  readonly title?: string;
+  readonly content: readonly SemanticContentBlock[];
+  /** Prompt-cache breakpoint for this section (#185). Rides the LAST block. */
+  readonly cache?: CacheHint;
+  /** Per-section provider knobs (Anthropic `cacheControl`). Rides the LAST block. */
+  readonly providerMetadata?: Record<string, Record<string, unknown>>;
+  /** Author-supplied bag. Rides EVERY block the section produces. */
+  readonly metadata?: Record<string, unknown>;
+}
+
+/**
  * Extended {@link ContentBlock} carrying semantic metadata for the formatter
  * harness. All `SemanticContentBlock`s are valid `ContentBlock`s.
+ *
+ * Both sidecars mean the same thing — "this block is structure, not text yet"
+ * — and both are consumed by the formatter pass. Nothing downstream of that
+ * pass should ever observe one.
  */
 export type SemanticContentBlock = ContentBlock & {
   readonly semanticNode?: SemanticNode;
+  readonly sectionNode?: SectionNode;
   readonly semantic?: SemanticMetadata;
 };

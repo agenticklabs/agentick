@@ -17,10 +17,12 @@
  *     non-default handling (e.g., a YAML formatter that wants to emit
  *     image blocks as `image: { url: ... }`).
  *
- * Section framing is NOT one of them: a section is lowered to content
- * blocks by {@link import("./section-lowering.js").lowerSection} before an
- * entry ever exists, so by the time `formatTree` runs there are only
- * messages (ADR 94).
+ * Section framing is NOT one of them, and needs no callback: `createFormatter`
+ * runs {@link import("./section-lowering.js").expandSections} ahead of
+ * `render`, so a section carried from the compile walk is lowered in THIS
+ * formatter's dialect — markdown heading, xml tag, bare text line — with its
+ * body rendered first and framed after. A formatter author writes nothing to
+ * get it, and by the time `formatTree` runs there are only messages (ADR 94).
  *
  * When omitted, `formatTree` falls back to markdown-flavored defaults.
  *
@@ -34,6 +36,8 @@
  */
 
 import { omitUndefined } from "@agentick/utils";
+
+import { expandSections } from "./section-lowering.js";
 
 import type {
   ContentBlock,
@@ -84,7 +88,7 @@ export function createFormatter(spec: CreateFormatterInput): DefinedFormatter {
     ...omitUndefined({ version: spec.version }),
   };
   const fn: DefinedFormatter = Object.assign(
-    (blocks: readonly SemanticContentBlock[]) => spec.render(blocks),
+    (blocks: readonly SemanticContentBlock[]) => expandSections(blocks, spec.render, identity),
     {
       __identity: identity,
       ...omitUndefined({

@@ -33,7 +33,6 @@ import type {
   ToolDeclaration,
 } from "@agentick/spec";
 import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
-import { SECTION_STAMP } from "@agentick/formatters";
 
 import {
   resolveFormatter,
@@ -56,35 +55,6 @@ type Item =
   | { readonly kind: "text"; readonly value: string }
   | { readonly kind: "semantic"; readonly value: SemanticNode }
   | { readonly kind: "block"; readonly value: SemanticContentBlock };
-
-/**
- * Two ADJACENT sections in one message are two blocks, and one block is one
- * projected message part — but a provider is free to concatenate text parts
- * with no separator, which would run `# A`'s body straight into `# B`'s
- * heading. Merge them into a single block with the blank line between,
- * which is also the exact byte layout sections had when they were hoisted
- * into one system blob.
- *
- * A block carrying its own `cache` or `providerMetadata` never merges: that
- * is a per-section prompt-cache breakpoint (#185), and the boundary IS the
- * block.
- */
-function mergeAdjacentSections(
-  prev: SemanticContentBlock | undefined,
-  next: SemanticContentBlock,
-): SemanticContentBlock | undefined {
-  if (prev === undefined) return undefined;
-  if (prev.type !== "text" || next.type !== "text") return undefined;
-  const prevSection = prev.metadata?.[SECTION_STAMP];
-  const nextSection = next.metadata?.[SECTION_STAMP];
-  if (prevSection === undefined || nextSection === undefined) return undefined;
-  if (prevSection === nextSection) return undefined;
-  if (prev.cache !== undefined || next.cache !== undefined) return undefined;
-  if (prev.providerMetadata !== undefined || next.providerMetadata !== undefined) return undefined;
-  if ((prev as { semanticNode?: unknown }).semanticNode !== undefined) return undefined;
-  if ((next as { semanticNode?: unknown }).semanticNode !== undefined) return undefined;
-  return { ...prev, text: `${prev.text}\n\n${next.text}` };
-}
 
 export interface CollectInput {
   /** Root host children to walk. Usually the container's children. */
@@ -367,9 +337,7 @@ function makeContextFactory(
       } else {
         // Native ContentBlock breaks the run.
         flush();
-        const merged = mergeAdjacentSections(result[result.length - 1], item.value);
-        if (merged) result[result.length - 1] = merged;
-        else result.push(item.value);
+        result.push(item.value);
       }
     }
     flush();

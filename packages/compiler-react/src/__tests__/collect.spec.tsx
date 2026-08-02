@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import { jsonSchema } from "@agentick/spec";
+import { markdownFormatter } from "@agentick/formatters";
 import { Output } from "../react/components/index.js";
 import { createContainer } from "@agentick/compiler";
 import { createHostScope } from "@agentick/compiler";
@@ -38,13 +39,25 @@ describe("collect — structural primitives", () => {
     const entry = tree.context.entries[0]!;
     // ADR 94 — `SectionEntry` is gone. A free-floating `<section>` is an
     // anonymous `grounding` message at its own tree position, and `title` is
-    // no longer an entry field: `lowerSection` folds it into the content as a
-    // leading `# ` heading, coalesced with the body into ONE text block that
-    // carries the section's stable id + `metadata.section` stamp.
+    // no longer an entry field. Collect carries the section's STRUCTURE in a
+    // `sectionNode` sidecar; the formatter pass turns it into the leading
+    // `# ` heading, coalesced with the body into ONE text block that carries
+    // the section's stable id + `metadata.section` stamp.
     expect(entry.kind).toBe("message");
     expect(entry.role).toBe("grounding");
     expect(entry.id).toBe("s.todos");
     expect(entry.content).toEqual([
+      {
+        type: "text",
+        text: "",
+        sectionNode: {
+          id: "s.todos",
+          title: "Todos",
+          content: [{ type: "text", text: "1. ship compiler" }],
+        },
+      },
+    ]);
+    expect(markdownFormatter(entry.content)).toEqual([
       {
         type: "text",
         text: "# Todos\n1. ship compiler",

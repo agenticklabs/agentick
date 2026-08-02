@@ -12,39 +12,43 @@
  * in a projection was a formatter bypass, and it is why an XML tree still
  * emitted markdown headings for its sections.
  *
+ * WHEN it runs is the other half. The compile walk emits a
+ * {@link SectionNode} sidecar via {@link sectionBlock} and stops; the
+ * formatter pass calls {@link expandSections}, which renders the section's
+ * body in the in-scope dialect and only then frames it. Body-first-then-frame
+ * is what keeps an xml tag out of the escaper and the body out of it twice.
+ *
  * @see docs/proposals/v2/blueprint/94-positional-sections.md
  */
 
-import type { CacheHint, ContentBlock, FormatterRef, TextBlock } from "@agentick/spec";
+import type {
+  ContentBlock,
+  FormatterRef,
+  SectionNode,
+  SemanticContentBlock,
+  TextBlock,
+} from "@agentick/spec";
+import { isSectionContent } from "@agentick/spec";
 
 /**
- * Block-metadata key marking which section a block came from. Read by the
- * collector to decide separation between ADJACENT sections that landed in
- * the same message: two sections are two blocks, and a provider that
- * concatenates text parts with no separator would otherwise run them
- * together.
+ * Block-metadata key marking which section a block came from. Read when
+ * deciding separation between ADJACENT sections that landed in the same
+ * message: two sections are two blocks, and a provider that concatenates text
+ * parts with no separator would otherwise run them together.
  */
 export const SECTION_STAMP = "section";
 
 /**
- * A section as the compiler sees it, before it becomes content. Deliberately
- * NOT an IR type — `SectionEntry` was deleted with ADR 94, and reintroducing
- * it as an interface would put the same idea back in the type system under a
- * different name. This is the argument shape of one function.
+ * Wrap a section's structure in the carrier block that rides the IR from the
+ * collect walk to the formatter pass.
+ *
+ * The block is `text` with an empty `text` and the structure in the sidecar,
+ * which is precisely the shape a semantic-node block already has — a block
+ * that is not text YET. {@link expandSections} replaces it with the lowered
+ * blocks; nothing downstream of the formatter pass ever sees it.
  */
-export interface SectionSource {
-  /** Stable id — survives recompiles, rides the produced blocks. */
-  readonly id: string;
-  readonly title?: string;
-  readonly content: readonly ContentBlock[];
-  /** Prompt-cache breakpoint for this section (#185). Rides the LAST block. */
-  readonly cache?: CacheHint;
-  /** Per-section provider knobs (Anthropic `cacheControl`). Rides the LAST block. */
-  readonly providerMetadata?: Record<string, Record<string, unknown>>;
-  /** Author-supplied bag. Rides EVERY block, so it survives wherever the
-   *  section landed — including inside a message, where there is no entry
-   *  left to carry it. */
-  readonly metadata?: Record<string, unknown>;
+export function sectionBlock(section: SectionNode): SemanticContentBlock {
+  return { type: "text", text: "", sectionNode: section } as SemanticContentBlock;
 }
 
 /**
@@ -73,7 +77,7 @@ interface Frame {
   readonly close?: string;
 }
 
-function frameFor(section: SectionSource, format: string | undefined): Frame {
+function frameFor(section: SectionNode, format: string | undefined): Frame {
   if (format === "xml") {
     const tag = section.title !== undefined ? sectionTagName(section.title) : undefined;
     return tag !== undefined
@@ -103,13 +107,13 @@ function frameFor(section: SectionSource, format: string | undefined): Frame {
  * is the one a prompt-cache breakpoint should close over, matching how
  * Anthropic marks a message's last block.
  *
- * TODO(section-formatter-thread): the dialect is chosen from the in-scope
- * `FormatterRef.format` hint, not from the resolved formatter instance. A
- * third-party formatter with its own section dialect cannot express it until
- * the live formatter registry is threaded into the collect walk.
+ * `content` is expected to be ALREADY rendered by the dialect named in
+ * `formatter` — {@link expandSections} guarantees that. A block still
+ * carrying a semantic sidecar is passed through rather than joined as text,
+ * because its `text` is empty and joining it would erase it.
  */
 export function lowerSection(
-  section: SectionSource,
+  section: SectionNode,
   formatter?: FormatterRef,
 ): readonly ContentBlock[] {
   const { open, close } = frameFor(section, formatter?.format);
@@ -128,9 +132,6 @@ export function lowerSection(
   };
 
   for (const block of section.content) {
-    // A block carrying a semantic sidecar is NOT plain text yet — the
-    // formatter pass has not run, so its `text` is empty and its content
-    // lives in the sidecar tree. Joining it here would erase it.
     if (block.type === "text" && (block as { semanticNode?: unknown }).semanticNode === undefined) {
       run.push(block.text);
       continue;
@@ -156,5 +157,84 @@ export function lowerSection(
         : {}),
     };
   }
+  return out;
+}
+
+/**
+ * Two ADJACENT sections in one message are two blocks, and one block is one
+ * projected message part — but a provider is free to concatenate text parts
+ * with no separator, which would run `# A`'s body straight into `# B`'s
+ * heading. Merge them into a single block with the blank line between, which
+ * is also the exact byte layout sections had when they were hoisted into one
+ * system blob.
+ *
+ * A block carrying its own `cache` or `providerMetadata` never merges: that is
+ * a per-section prompt-cache breakpoint (#185), and the boundary IS the block.
+ */
+function mergeAdjacentSections(
+  prev: ContentBlock | undefined,
+  next: ContentBlock,
+): ContentBlock | undefined {
+  if (prev === undefined) return undefined;
+  if (prev.type !== "text" || next.type !== "text") return undefined;
+  const prevSection = prev.metadata?.[SECTION_STAMP];
+  const nextSection = next.metadata?.[SECTION_STAMP];
+  if (prevSection === undefined || nextSection === undefined) return undefined;
+  if (prevSection === nextSection) return undefined;
+  if (prev.cache !== undefined || next.cache !== undefined) return undefined;
+  if (prev.providerMetadata !== undefined || next.providerMetadata !== undefined) return undefined;
+  return { ...prev, text: `${prev.text}\n\n${next.text}` };
+}
+
+/**
+ * Replace every {@link SectionNode} carrier in `blocks` with its lowering in
+ * `ref`'s dialect, rendering everything else through `render`.
+ *
+ * This is the whole thread-through. A section's body goes through `render`
+ * BEFORE the frame is applied, so an xml section emits
+ * `<current_user>` around an already-escaped body — the tag never reaches the
+ * escaper, and the body reaches it exactly once. It also collapses what used
+ * to be two passes into one: a section whose body is semantic HTML is a single
+ * coherent lowering rather than a title block followed by a body block.
+ *
+ * Sections nest, so the recursion is on `section.content`.
+ *
+ * Every formatter built with `createFormatter` runs this ahead of its own
+ * block pass, which is why third-party formatters get section lowering without
+ * writing a line of it.
+ */
+export function expandSections(
+  blocks: readonly SemanticContentBlock[],
+  render: (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[],
+  ref: FormatterRef,
+): readonly ContentBlock[] {
+  if (!blocks.some(isSectionContent)) return render(blocks);
+
+  const out: ContentBlock[] = [];
+  let run: SemanticContentBlock[] = [];
+  const flushRun = (): void => {
+    if (run.length === 0) return;
+    for (const b of render(run)) out.push(b);
+    run = [];
+  };
+
+  for (const block of blocks) {
+    if (!isSectionContent(block)) {
+      run.push(block);
+      continue;
+    }
+    flushRun();
+    const section = block.sectionNode;
+    const lowered = lowerSection(
+      { ...section, content: expandSections(section.content, render, ref) },
+      ref,
+    );
+    for (const b of lowered) {
+      const merged = mergeAdjacentSections(out[out.length - 1], b);
+      if (merged) out[out.length - 1] = merged;
+      else out.push(b);
+    }
+  }
+  flushRun();
   return out;
 }

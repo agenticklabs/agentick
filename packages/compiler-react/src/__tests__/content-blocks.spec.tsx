@@ -24,16 +24,20 @@ function renderAndCollect(element: React.ReactNode) {
  * is an anonymous `grounding` message and a `<message>` is itself, so the
  * first entry's content reads the same way regardless of role.
  *
- * Note what the section wrapper adds: `lowerSection` stamps `id` +
- * `metadata.section` on every block it passes through and COALESCES adjacent
- * plain-text blocks into one. Every assertion below is either `toMatchObject`
- * (tolerant of the stamp) or lives under a `<message>` wrapper where block
- * boundaries and block-level ids survive untouched.
+ * The subject of this file is what the BLOCK CONTRIBUTORS produce, which is
+ * what a section's `sectionNode` sidecar carries — the collect walk hands the
+ * structure to the formatter pass without lowering it, so under a `<section>`
+ * wrapper the contributors' blocks live one level in. Unwrapping here keeps
+ * every assertion about the contributor rather than about the lowering (that
+ * rule is pinned in formatters/__tests__/section-lowering.spec.ts).
  */
 function contentOf(tree: ReturnType<typeof renderAndCollect>["tree"]): readonly ContentBlock[] {
   const first = tree.context.entries[0];
   if (first === undefined) throw new Error("expected an entry");
-  return first.content;
+  const [only] = first.content;
+  const section = (only as { sectionNode?: { content: readonly ContentBlock[] } } | undefined)
+    ?.sectionNode;
+  return section ? section.content : first.content;
 }
 
 describe("content blocks — inside <section>", () => {

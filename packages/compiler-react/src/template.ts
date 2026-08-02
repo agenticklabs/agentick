@@ -25,7 +25,11 @@
  *      DataBridge reports no pending fetches (or `maxIterations`
  *      / `awaitTimeoutMs` is exceeded)
  *   4. Run `collect()` against the stabilized host tree
- *   5. Unmount and return the IR (`compileTemplate`) — or pass
+ *   5. Run the formatter pass over every entry — semantic sidecars
+ *      resolved, sections lowered into the entry's dialect — so the IR
+ *      that comes back is wire-shape, the same contract
+ *      `CompilerHarness.renderTree` returns
+ *   6. Unmount and return the IR (`compileTemplate`) — or pass
  *      it through `formatTree` for the string (`renderTemplate`)
  *
  * NOT for reactive workloads. Adopters wiring `<Tool>` (createTool
@@ -58,7 +62,13 @@ import type {
   SessionBridge,
 } from "@agentick/spec";
 import { RenderFailed } from "@agentick/spec";
-import { type DefinedFormatter, formatTree, markdownFormatter } from "@agentick/formatters";
+import {
+  builtInFormatters,
+  formatTree,
+  markdownFormatter,
+  resolveFormatterRef,
+  type DefinedFormatter,
+} from "@agentick/formatters";
 import { isThenable, omitUndefined } from "@agentick/utils";
 
 import { BridgeContext } from "./react/bridge-context.js";
@@ -96,6 +106,12 @@ export interface CompileTemplateOptions {
 }
 
 export interface CompileTemplateResult {
+  /**
+   * Wire-shape IR: entry content has been through the formatter pass, so no
+   * semantic-node or section-node sidecar survives on it. Consumers that ship
+   * this straight to a wire — `@agentick/prompts-react`, and through it MCP
+   * `prompts/get` — get lowered text, not structure.
+   */
   readonly tree: RenderedTree;
   readonly diagnostics: readonly ReconcileDiagnostic[];
   /** Number of render passes the loop went through before stabilizing. */
@@ -137,8 +153,11 @@ export async function renderTemplate(
   element: ReactNode,
   opts: RenderTemplateOptions = {},
 ): Promise<RenderTemplateResult> {
-  const compiled = await compileInternal(element, opts);
+  // The caller asked for ONE dialect for the whole output, and a dialect now
+  // decides how a section reads — so it has to be in force during the block
+  // pass, not applied afterwards to blocks another dialect already lowered.
   const formatter = opts.formatter ?? markdownFormatter;
+  const compiled = await compileInternal(element, opts, formatter);
   const output = formatTree(compiled.tree, formatter);
   return {
     output,
@@ -159,6 +178,7 @@ let mountCounter = 0;
 async function compileInternal(
   element: ReactNode,
   opts: CompileTemplateOptions,
+  pinned?: DefinedFormatter,
 ): Promise<CompileTemplateResult> {
   const maxIterations = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const mountId = `template#${(++mountCounter).toString(36)}`;
@@ -249,7 +269,7 @@ async function compileInternal(
     }
 
     return {
-      tree: collected.tree,
+      tree: applyFormatters(collected.tree, rootScope.formatters.default, pinned),
       diagnostics,
       iterations: hitMax ? maxIterations : iterations + 1,
     };
@@ -260,6 +280,43 @@ async function compileInternal(
       // best-effort cleanup
     }
   }
+}
+
+/**
+ * The formatter pass, standalone: replace each entry's content with the
+ * formatter-flattened version, resolving per-entry `renderedWith` against the
+ * built-in registry. `pinned` forces one formatter over every entry.
+ *
+ * The same pass `CompilerHarness.renderTree` runs — deliberately, because the
+ * two are the only ways to get a `RenderedTree` out of JSX and an adopter
+ * should not have to know which one produced theirs. Unlike the harness's
+ * copy this one is silent about an unresolvable ref: `compileTemplate` has no
+ * formatter registry to configure, so a miss is the caller's `defaultFormatter`
+ * naming something the built-ins do not carry, and markdown is the documented
+ * answer to that rather than a warning.
+ */
+function applyFormatters(
+  tree: RenderedTree,
+  fallback: FormatterRef,
+  pinned: DefinedFormatter | undefined,
+): RenderedTree {
+  const registry = builtInFormatters();
+  const resolve = (ref: FormatterRef): DefinedFormatter =>
+    pinned ?? resolveFormatterRef(registry, ref, markdownFormatter).formatter;
+
+  const entries = tree.context.entries.map((entry) => ({
+    ...entry,
+    content: resolve(entry.renderedWith ?? fallback)(entry.content),
+  }));
+  const content =
+    tree.content && tree.content.length > 0
+      ? resolve(tree.renderedWith ?? fallback)(tree.content)
+      : tree.content;
+  return {
+    ...tree,
+    context: { ...tree.context, entries },
+    ...omitUndefined({ content }),
+  };
 }
 
 function renderOnce(

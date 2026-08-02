@@ -51,6 +51,7 @@ import type {
   RenderedTree,
   ResourceBlock,
   ResourceDeclaration,
+  SectionNode,
   SemanticContentBlock,
   SemanticNode,
   SpecFeatureName,
@@ -389,6 +390,21 @@ export function isSemanticContent(
   block: ContentBlock,
 ): block is SemanticContentBlock & { readonly semanticNode: SemanticNode } {
   return "semanticNode" in block && (block as { semanticNode?: unknown }).semanticNode != null;
+}
+
+/**
+ * True when a `ContentBlock` carries a `sectionNode` sidecar — the section
+ * STRUCTURE the collect walk emitted for the formatter pass to lower into the
+ * in-scope dialect. Same contract as {@link isSemanticContent}: compiler-
+ * internal, and nothing downstream of the formatter pass should observe a
+ * `true` here.
+ *
+ * @see docs/proposals/v2/blueprint/94-positional-sections.md
+ */
+export function isSectionContent(
+  block: ContentBlock,
+): block is SemanticContentBlock & { readonly sectionNode: SectionNode } {
+  return "sectionNode" in block && (block as { sectionNode?: unknown }).sectionNode != null;
 }
 
 /**

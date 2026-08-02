@@ -13,7 +13,15 @@
 import { describe, expect, it } from "vitest";
 import type { ContentBlock } from "@agentick/spec";
 
-import { lowerSection, sectionTagName, SECTION_STAMP } from "../section-lowering.js";
+import { markdownFormatter } from "../markdown.js";
+import {
+  expandSections,
+  lowerSection,
+  sectionBlock,
+  sectionTagName,
+  SECTION_STAMP,
+} from "../section-lowering.js";
+import { xmlFormatter } from "../xml.js";
 
 const text = (t: string): ContentBlock => ({ type: "text", text: t });
 
@@ -137,9 +145,10 @@ describe("no silent drop", () => {
   });
 
   it("keeps a block whose content is still a semantic sidecar", () => {
-    // Lowering runs during collect, BEFORE the formatter pass — a block with
-    // a sidecar has an empty `text` and its content in the tree. Joining it
-    // as text would erase it.
+    // `lowerSection` is public and takes whatever it is handed. A block with
+    // a sidecar has an empty `text` and its content in the tree, so joining it
+    // as text would erase it. (Through `expandSections` this cannot happen —
+    // the body is rendered first — which is what the carrier suite pins.)
     const semantic = {
       type: "text",
       text: "",
@@ -148,6 +157,80 @@ describe("no silent drop", () => {
     const out = lowerSection({ id: "s", title: "T", content: [semantic] });
     expect(out).toHaveLength(2);
     expect(out[1]).toMatchObject({ semanticNode: { children: [{ text: "hi" }] } });
+  });
+});
+
+describe("the carrier — collect emits structure, the formatter lowers it", () => {
+  it("renders the body BEFORE framing it, so the frame is never escaped", () => {
+    // The whole reason lowering moved out of the collect walk. A frame
+    // emitted during collect would be escaped by the formatter pass that runs
+    // after it; a body lowered during collect would be escaped twice.
+    const out = xmlFormatter([
+      sectionBlock({ id: "s", title: "Current User", content: [text("Ryan & Bob")] }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ text: "<current_user>\nRyan &amp; Bob\n</current_user>" });
+  });
+
+  it("lowers the SAME carrier differently per dialect — one section, two dialects", () => {
+    const carrier = sectionBlock({ id: "s", title: "Current User", content: [text("Ryan")] });
+    expect(markdownFormatter([carrier])[0]).toMatchObject({ text: "# Current User\nRyan" });
+    expect(xmlFormatter([carrier])[0]).toMatchObject({
+      text: "<current_user>\nRyan\n</current_user>",
+    });
+  });
+
+  it("collapses a semantic-sidecar body into the section's own block", () => {
+    // Pre-thread-through this was two blocks: a title block from the collect
+    // lowering, and the rendered prose from the formatter pass.
+    const body = {
+      type: "text",
+      text: "",
+      semanticNode: { semantic: "strong", children: [{ text: "loud" }] },
+    } as unknown as ContentBlock;
+    const out = markdownFormatter([sectionBlock({ id: "s", title: "T", content: [body] })]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ text: "# T\n**loud**" });
+  });
+
+  it("joins two adjacent sections with a blank line", () => {
+    // The rule that used to live in the collect walker's `coalesce`, moved
+    // here with the lowering. Byte-identical: two sections in one message are
+    // one block separated by `\n\n`, because a provider may concatenate text
+    // parts with no separator of its own.
+    const out = markdownFormatter([
+      sectionBlock({ id: "a", title: "A", content: [text("first")] }),
+      sectionBlock({ id: "b", title: "B", content: [text("second")] }),
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ text: "# A\nfirst\n\n# B\nsecond" });
+  });
+
+  it("refuses to merge across a cache breakpoint — the boundary IS the block", () => {
+    const out = markdownFormatter([
+      sectionBlock({ id: "a", title: "A", content: [text("first")], cache: { ttl: "1h" } }),
+      sectionBlock({ id: "b", title: "B", content: [text("second")] }),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ text: "# A\nfirst", cache: { ttl: "1h" } });
+  });
+
+  it("passes non-carrier blocks through the formatter untouched", () => {
+    const out = markdownFormatter([
+      text("before"),
+      sectionBlock({ id: "s", title: "T", content: [text("inside")] }),
+      { type: "code", language: "go", text: "package main" } as ContentBlock,
+    ]);
+    expect(out.map((b) => b.type)).toEqual(["text", "text", "text"]);
+    expect(out[0]).toMatchObject({ text: "before" });
+    expect(out[1]).toMatchObject({ text: "# T\ninside" });
+    expect(out[2]).toMatchObject({ text: "```go\npackage main\n```" });
+  });
+
+  it("is a no-op allocation-wise when there is no carrier at all", () => {
+    const render = (blocks: readonly ContentBlock[]): readonly ContentBlock[] => blocks;
+    const blocks = [text("a"), text("b")];
+    expect(expandSections(blocks, render, { id: "x" })).toBe(blocks);
   });
 });
 

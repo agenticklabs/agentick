@@ -21,10 +21,11 @@
  *
  * ADR 94 — a free-floating `<section>` is a `grounding` MESSAGE at its own
  * tree position, `SectionEntry` is gone, and `frameSection` was deleted from
- * every formatter. A section's title is lowered into its content as a `# `
- * heading at COLLECT time (markdown-only for now —
- * TODO(section-formatter-thread)), so the render formatter only ever sees a
- * message with text content.
+ * every formatter. A section's title is lowered into its content by the
+ * FORMATTER PASS, in whatever dialect is in scope: `# Title` under markdown,
+ * `<title>` under xml, a bare line under text. `compileTemplate` runs that
+ * pass, so the IR it returns is wire-shape and `renderTemplate` only frames
+ * and flattens.
  * @see docs/proposals/v2/blueprint/94-positional-sections.md
  */
 
@@ -188,9 +189,9 @@ describe("renderTemplate — JSX → formatted string", () => {
       createElement("section" as never, { id: "intro", title: "Greeting" }, "Hello.");
     const { output, diagnostics } = await renderTemplate(createElement(Template));
     // ADR 94 deleted `frameSection`, so the formatter no longer produces
-    // `## Greeting`. `lowerSection` produces the heading at COLLECT time and
-    // coalesces it with the body into one text block, which markdown then
-    // frames as a `grounding` message.
+    // `## Greeting`. The markdown formatter's own section lowering produces
+    // the heading and coalesces it with the body into one text block, which
+    // markdown then frames as a `grounding` message.
     expect(diagnostics.map((d) => d.code)).toEqual(["SECTION_WITHOUT_SYSTEM"]);
     expect(output).toBe("**grounding:** # Greeting\nHello.");
   });
@@ -212,17 +213,21 @@ describe("renderTemplate — JSX → formatted string", () => {
     const { output } = await renderTemplate(createElement(Template), {
       formatter: xmlFormatter,
     });
-    // ADR 94 deleted `frameSection`, so `<section id="intro">…</section>` is
-    // no longer what the XML formatter emits. The section is a `grounding`
-    // message and xml frames it as one.
-    //
-    // TODO(section-formatter-thread): the xml title→tag rule (`"Current
-    // User"` → `<current_user>`) EXISTS in `lowerSection` and is pinned by
-    // formatters/__tests__/section-lowering.spec.ts — it is simply not wired
-    // into the collect path yet, because choosing the dialect there means
-    // resolving the live formatter during the walk. See the note in
-    // compiler/src/collect/contributors/section.ts.
-    expect(output).toBe('<message role="grounding">\nbody\n</message>');
+    // Two framings, one per level, and they now agree on the dialect: xml
+    // frames the grounding MESSAGE, and xml also lowers the SECTION inside
+    // it. Untitled, so the tag falls back to `<section id="…">`.
+    expect(output).toBe(
+      '<message role="grounding">\n<section id="intro">\nbody\n</section>\n</message>',
+    );
+  });
+
+  it("makes the title the tag when the render formatter is xml", async () => {
+    const Template = () =>
+      createElement("section" as never, { id: "intro", title: "Current User" }, "Ryan");
+    const { output } = await renderTemplate(createElement(Template), { formatter: xmlFormatter });
+    expect(output).toBe(
+      '<message role="grounding">\n<current_user>\nRyan\n</current_user>\n</message>',
+    );
   });
 
   it("honors textFormatter — minimal framing", async () => {
@@ -230,13 +235,10 @@ describe("renderTemplate — JSX → formatted string", () => {
     const { output } = await renderTemplate(createElement(Template), {
       formatter: textFormatter,
     });
-    // The text formatter's framing is `role: body` — that part is unchanged.
-    // What DID change (ADR 94): the `# Hi` heading is baked in at collect
-    // time by the markdown-only `lowerSection`, so it survives into text
-    // output instead of being dropped by the text formatter's `frameSection`.
-    // TODO(section-formatter-thread) — the dialect should follow the render
-    // formatter, and then this heading becomes a bare `Hi` again.
-    expect(output).toBe("grounding: # Hi\nbody");
+    // The text formatter's framing is `role: body`, and its section lowering
+    // is the title on its own line with no marker — plain text has no heading
+    // syntax to borrow, so borrowing markdown's would be a lie.
+    expect(output).toBe("grounding: Hi\nbody");
   });
 
   it("awaited useData content reaches the final string", async () => {

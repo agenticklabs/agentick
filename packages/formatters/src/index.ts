@@ -27,14 +27,17 @@ export { xmlFormatter } from "./xml.js";
 export { textFormatter } from "./text.js";
 
 // The ONE section → content-blocks lowering (ADR 94). A `<Section>` is
-// content, not an entry: the compiler calls this for a section inside a
-// message AND for a free-floating one (which becomes an anonymous
-// `grounding` message wrapping exactly these blocks).
+// content, not an entry: this is called for a section inside a message AND
+// for a free-floating one (which becomes an anonymous `grounding` message
+// wrapping exactly these blocks). The compile walk emits `sectionBlock`;
+// `expandSections` — which every `createFormatter` formatter runs ahead of
+// its own block pass — lowers it in that formatter's dialect.
 export {
+  expandSections,
   lowerSection,
+  sectionBlock,
   sectionTagName,
   SECTION_STAMP,
-  type SectionSource,
 } from "./section-lowering.js";
 
 // Content-reduction policies (v2 home of v1's connector content-pipeline).

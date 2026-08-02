@@ -34,7 +34,7 @@
  */
 
 import type { ContentBlock, HookBridges, MessageEntry } from "@agentick/spec";
-import { lowerSection } from "@agentick/formatters";
+import { sectionBlock } from "@agentick/formatters";
 import type { DefaultProjection } from "@agentick/compiler";
 
 /** Minimal structural view of a message-kind timeline entry. */
@@ -173,7 +173,7 @@ export function resourcesDefaultProjection(bridges: HookBridges): DefaultProject
         kind: "message",
         role: "grounding",
         id: "resources-catalog",
-        content: lowerSection({ id: "resources-catalog", title: "Available resources", content }),
+        content: [sectionBlock({ id: "resources-catalog", title: "Available resources", content })],
       };
       return { entries: [entry] };
     },
@@ -265,7 +265,7 @@ export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultPro
         kind: "message",
         role: "grounding",
         id: "mcp-server-info",
-        content: lowerSection({ id: "mcp-server-info", title: "Connected MCP servers", content }),
+        content: [sectionBlock({ id: "mcp-server-info", title: "Connected MCP servers", content })],
       };
       return { entries: [entry] };
     },

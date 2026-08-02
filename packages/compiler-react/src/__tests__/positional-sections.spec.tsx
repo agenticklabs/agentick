@@ -39,6 +39,7 @@ import {
 } from "../react/components/semantic.js";
 import { Section } from "../react/components/section.js";
 import { Message } from "../react/components/message.js";
+import { PlainText, XML } from "../react/components/format-scope.js";
 
 let seq = 0;
 
@@ -287,6 +288,97 @@ describe("a free-floating section is a grounding message at its own position", (
     const explicit = await compile(<Grounding title="Current User">Ryan</Grounding>);
     expect(entries(explicit)[0]?.role).toBe("grounding");
     expect(textOf(entries(explicit)[0]!)).toBe(textOf(entries(bare)[0]!));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The formatter pass owns the dialect
+// ---------------------------------------------------------------------------
+
+describe("the dialect in scope decides how a section reads", () => {
+  it("makes the title the TAG under <XML>, framed once and escaped once", async () => {
+    const tree = await compile(
+      <XML>
+        <Section title="Current User">Ryan &amp; Bob</Section>
+      </XML>,
+    );
+    const [entry] = entries(tree);
+    expect(textOf(entry!)).toBe("<current_user>\nRyan &amp; Bob\n</current_user>");
+    // The whole point of lowering AFTER the body is rendered: the tag never
+    // meets the escaper, and the body meets it exactly once. A frame emitted
+    // before the escaping ran would read `&lt;current_user&gt;`; a body
+    // escaped twice would read `&amp;amp;`.
+    expect(textOf(entry!)).not.toContain("&lt;current_user&gt;");
+    expect(textOf(entry!)).not.toContain("&amp;amp;");
+  });
+
+  it("lowers a section inside <System> in the dialect too", async () => {
+    // `<System>` is not special — it is the message whose content becomes the
+    // provider system param. Its content is lowered by the message's own
+    // formatter, so a system prompt written under `<XML>` is xml all the way
+    // down rather than xml framing around markdown headings.
+    const tree = await compile(
+      <XML>
+        <System>
+          <Section title="Identity">You are Ernesto.</Section>
+        </System>
+      </XML>,
+    );
+    const [system] = entries(tree);
+    expect(system?.role).toBe("system");
+    expect(textOf(system!)).toBe("<identity>\nYou are Ernesto.\n</identity>");
+  });
+
+  it("drops the heading marker under <PlainText> — text has no heading syntax", async () => {
+    const tree = await compile(
+      <PlainText>
+        <Section title="Current User">Ryan</Section>
+      </PlainText>,
+    );
+    expect(textOf(entries(tree)[0]!)).toBe("Current User\nRyan");
+  });
+
+  it("stamps renderedWith with the formatter that ACTUALLY lowered the section", async () => {
+    // The ref was always stamped; before the thread-through it named a
+    // dialect that had not run. Now the two cannot disagree.
+    const tree = await compile(
+      <>
+        <XML>
+          <Section title="A">one</Section>
+        </XML>
+        <Section title="B">two</Section>
+      </>,
+    );
+    const [xml, md] = entries(tree);
+    expect(xml?.renderedWith?.format).toBe("xml");
+    expect(textOf(xml!)).toBe("<a>\none\n</a>");
+    expect(md?.renderedWith?.format).toBe("markdown");
+    expect(textOf(md!)).toBe("# B\ntwo");
+  });
+
+  it("lowers a semantic-HTML body into ONE block with its title", async () => {
+    // The split-block symptom: lowering used to run at collect, BEFORE the
+    // semantic sidecar had any text in it, so the title became one block and
+    // the rendered prose another. One lowering, one block.
+    const tree = await compile(
+      <Section title="Identity">
+        <Paragraph>You are Ernesto.</Paragraph>
+      </Section>,
+    );
+    const [entry] = entries(tree);
+    expect(entry?.content).toHaveLength(1);
+    expect(textOf(entry!)).toBe("# Identity\nYou are Ernesto.\n\n");
+  });
+
+  it("lowers a NESTED section in the same dialect as its parent", async () => {
+    const tree = await compile(
+      <XML>
+        <Section title="Outer">
+          <Section title="Inner">deep</Section>
+        </Section>
+      </XML>,
+    );
+    expect(textOf(entries(tree)[0]!)).toBe("<outer>\n<inner>\ndeep\n</inner>\n</outer>");
   });
 });
 

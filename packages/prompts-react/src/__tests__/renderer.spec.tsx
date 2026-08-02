@@ -53,6 +53,23 @@ describe("reactPromptRenderer — direct render()", () => {
     expect(blocks[0]).toMatchObject({ type: "text", text: "# Greeting\nHi." });
   });
 
+  it("hands back wire-shape blocks — no sidecar reaches a consumer", async () => {
+    // What this renderer returns goes STRAIGHT to a wire: MCP `prompts/get`
+    // maps these entries to protocol messages with no formatter in between.
+    // So `compileTemplate` runs the formatter pass, and a semantic-HTML body
+    // arrives as rendered text rather than as an empty block with its content
+    // hiding in a `semanticNode` tree.
+    const node = createElement(
+      "section" as never,
+      { id: "x", title: "Rules" },
+      createElement("strong" as never, null, "Be terse."),
+    );
+    const [message] = await reactPromptRenderer.render(node, {});
+    expect(message!.content).toEqual([
+      { type: "text", text: "# Rules\n**Be terse.**", id: "x", metadata: { section: "x" } },
+    ]);
+  });
+
   it("explicit <message> → passthrough preserves role", async () => {
     const node = createElement("message" as never, { role: "user" }, "ping");
     const messages = await reactPromptRenderer.render(node, {});

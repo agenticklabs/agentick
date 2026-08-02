@@ -104,6 +104,21 @@ Providers differ in what they can carry: OpenAI receives a grounding message on 
 
 There is deliberately no prop for the XML tag. Markdown renders the title's words as a heading and XML renders the same words as a tag, so one section has one name in both dialects; a separate tag prop would let them diverge. When you need an exact tag, use a custom block — the XML formatter preserves its tag and attributes verbatim.
 
+Which dialect a section reads in is decided by the formatter in scope, at the same moment everything else is formatted:
+
+```tsx
+<XML>
+  <Section title="Current User">Ryan</Section>
+</XML>
+// <message role="grounding">
+// <current_user>
+// Ryan
+// </current_user>
+// </message>
+```
+
+Under `<Markdown>` the same section is `# Current User\nRyan`; under `<PlainText>` it is `Current User\nRyan`. A section nested inside a message reads in that **message's** dialect — the container decides the dialect the same way it decides the role.
+
 `<System>`, `<User>`, and `<Assistant>` are sugar for `<Message role="…">`. `<Message>` takes a full persisted record — spread one straight in:
 
 ```tsx
@@ -492,6 +507,8 @@ const { tree } = await compileTemplate(<Template />); // RenderedTree IR
 const { output } = await renderTemplate(<Template />); // markdown by default
 const { output: xml } = await renderTemplate(<Template />, { formatter: xmlFormatter });
 ```
+
+Both run the formatter pass, so `compileTemplate`'s IR is wire-shape — semantic HTML rendered, sections lowered — the same contract `renderTree` returns. That matters because what `compileTemplate` hands back goes straight to a wire: `@agentick/prompts-react` returns those entries verbatim and MCP `prompts/get` ships them. `renderTemplate`'s `formatter` option is in force during that pass, not applied afterwards, so a section under `{ formatter: xmlFormatter }` reads as a tag rather than as a markdown heading wrapped in xml.
 
 That covers prompt authoring, MCP prompt and resource bodies, JSX-authored skill content, rich tool descriptions, snapshot tests, and docs generators. `useData` behaves identically — the loop awaits pending fetches and re-renders. `maxIterations` (default 10) caps the loop and `awaitTimeoutMs` (unbounded by default) caps each wait; both surface in `diagnostics` when they trip.
 

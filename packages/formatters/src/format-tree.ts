@@ -4,10 +4,16 @@
  * The single tree-level serialization entry point for
  * `@agentick/formatters`. Delegates ALL serialization work to
  * the resolved formatter:
- *   - block-level formatting via `formatter(blocks)` (existing
- *     contract — `SemanticContentBlock[] → ContentBlock[]`)
  *   - block-to-text flattening via `formatter.blocksToText`
  *   - message framing via `formatter.frameMessage`
+ *
+ * The BLOCK pass is not repeated here. A `RenderedTree` handed to this
+ * function has already been through its compiler's formatter pass — sidecars
+ * resolved, sections lowered, xml escaped — and running a formatter over
+ * wire-shape blocks a second time escapes what it escaped the first time
+ * (`&` → `&amp;` → `&amp;amp;`) and mangles the tags a section lowering just
+ * emitted. Markdown hid this for as long as it did only because markdown is
+ * idempotent on plain text.
  *
  * The built-in markdown / xml / text formatters supply all three
  * tree-level methods. 3rd-party formatters that omit them fall back
@@ -26,12 +32,7 @@
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
  */
 
-import type {
-  FormatterRef,
-  MessageEntry,
-  RenderedTree,
-  SemanticContentBlock,
-} from "@agentick/spec";
+import type { FormatterRef, MessageEntry, RenderedTree } from "@agentick/spec";
 
 import type { DefinedFormatter } from "./create-formatter.js";
 import { resolveFormatterRef } from "./resolve-formatter.js";
@@ -55,15 +56,13 @@ export function formatTree(
 
   for (const entry of tree.context.entries) {
     const formatter = resolveFormatter(entry.renderedWith, defaultFormatter, opts);
-    const formattedBlocks = formatter(entry.content as readonly SemanticContentBlock[]);
-    const bodyText = (formatter.blocksToText ?? defaultBlocksToText)(formattedBlocks);
+    const bodyText = (formatter.blocksToText ?? defaultBlocksToText)(entry.content);
     parts.push((formatter.frameMessage ?? defaultFrameMessage)(entry, bodyText));
   }
 
   if (tree.content && tree.content.length > 0) {
     const formatter = resolveFormatter(tree.renderedWith, defaultFormatter, opts);
-    const formattedBlocks = formatter(tree.content as readonly SemanticContentBlock[]);
-    parts.push((formatter.blocksToText ?? defaultBlocksToText)(formattedBlocks));
+    parts.push((formatter.blocksToText ?? defaultBlocksToText)(tree.content));
   }
 
   return parts.filter((p) => p.length > 0).join("\n\n");

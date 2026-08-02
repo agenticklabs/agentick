@@ -49,29 +49,33 @@ Nothing about the entries changed. The wrapping, the label, the separator — al
 
 ## Sections
 
-A `<Section>` never reaches `formatTree`, because a section is not an entry — it is content inside a message (ADR 94). `lowerSection` is where a section becomes blocks, and it is the one place that rule is written:
+A `<Section>` never reaches `formatTree`, because a section is not an entry — it is content inside a message (ADR 94). The compiler emits the section's STRUCTURE as a `sectionNode` sidecar (`sectionBlock`); the formatter lowers it. Every formatter built with `createFormatter` does this before its own `render` runs, so the dialect in scope is the dialect the section reads in:
 
 ```ts
-import { lowerSection } from "@agentick/formatters";
+import { markdownFormatter, sectionBlock, xmlFormatter } from "@agentick/formatters";
 
-const section = {
+const section = sectionBlock({
   id: "current-user",
   title: "Current User",
   content: [{ type: "text", text: "Ryan" }],
-};
+});
 
-lowerSection(section);
+markdownFormatter([section]);
 // [{ type: "text", text: "# Current User\nRyan", id: "current-user", … }]
 
-lowerSection(section, { id: "formatter.xml", format: "xml" });
+xmlFormatter([section]);
 // [{ type: "text", text: "<current_user>\nRyan\n</current_user>", … }]
 ```
+
+Order matters and is the reason lowering waits for the formatter: the section's BODY is rendered first, then framed. An xml section therefore emits its tag around an already-escaped body — the tag never reaches the escaper (`<current_user>`, not `&lt;current_user&gt;`) and the body reaches it exactly once (`&amp;`, not `&amp;amp;`). Lowering during the compile walk could not have both.
+
+`lowerSection(section, ref)` is the rule itself, exported for anyone assembling blocks by hand; `expandSections` is the pass that finds carriers and applies it.
 
 Markdown makes the title a heading. XML makes it the **tag name**, via a slug rule: lowercase, every run of non-alphanumerics collapsed to one underscore, edges trimmed (`"Current User"` → `current_user`; a leading digit gets an underscore prefix so `"2 Factor Auth"` and `"Factor Auth"` stay distinct). An untitled section falls back to `<section id="…">`.
 
 Text runs coalesce into ONE block, because one block is one projected message part and providers do not agree on how they join parts — a section decides its own internal layout rather than leaving it to whichever adapter runs. A non-text block breaks the run and passes through untouched. The section's `id` rides every block it produced; `cache` and `providerMetadata` ride the last one, which is the block a prompt-cache breakpoint should close over.
 
-**Known gap** — `TODO(section-formatter-thread)`: the compiler applies the markdown lowering unconditionally, even under an `<XML>` scope. The xml rule above works and is tested, but the compiler harness's formatter pass runs after the collect walk and would escape a frame produced during it, so choosing the dialect correctly needs the live formatter threaded into that walk.
+Two adjacent sections in one message merge into a single block with a blank line between them. One block is one projected part, and a provider may concatenate parts with no separator of its own — so the separator is put in at the point the blocks meet. A section carrying its own `cache` or `providerMetadata` never merges: that hint IS the block boundary.
 
 ## What a formatter owns
 
@@ -83,7 +87,7 @@ Text runs coalesce into ONE block, because one block is one projected message pa
 | `blocksToText` | `(ContentBlock[]) => string`                 | How your own output collapses to one string |
 | `frameMessage` | `(MessageEntry, body: string) => string`     | The wrapper around a message's body         |
 
-`render` is the pass that runs on the model-facing path: the compiler hands it the collected blocks — `TextBlock`s carrying optional `semanticNode` sidecars from JSX semantic HTML (`<strong>`, `<h1>`, `<ul>`, `<table>`) — and takes back wire-shape `ContentBlock[]`. Media, tool-use, and tool-result blocks normally pass through untouched so the provider still receives them natively.
+`render` is the pass that runs on the model-facing path: the compiler hands it the collected blocks — `TextBlock`s carrying optional `semanticNode` sidecars from JSX semantic HTML (`<strong>`, `<h1>`, `<ul>`, `<table>`) — and takes back wire-shape `ContentBlock[]`. `sectionNode` carriers are handled for you before `render` sees them. Media, tool-use, and tool-result blocks normally pass through untouched so the provider still receives them natively.
 
 The other two only run when something asks for a string. `formatTree` reads them off the formatter; when a formatter omits one, it falls back to a markdown-flavored default.
 
@@ -326,37 +330,38 @@ Wrapping this way returns a bare `Formatter`, not a `DefinedFormatter` — to re
 
 ## API
 
-| Export                                     | Kind     | Purpose                                                                                 |
-| ------------------------------------------ | -------- | --------------------------------------------------------------------------------------- |
-| `createFormatter(input)`                   | function | Decorate a render function with identity + optional framing callbacks                   |
-| `refOf(formatter)`                         | function | The formatter's `FormatterRef`, for a scope provider or a registry key                  |
-| `formatTree(tree, default, opts?)`         | function | `RenderedTree` → string; `opts.formatters` enables per-entry resolution                 |
-| `resolveFormatterRef(fmts, ref, fallback)` | function | The one shared lookup: `{ formatter, match: "id" \| "format" \| "fallback" }`           |
-| `describeUnresolvedFormatter(ref, used)`   | function | Human-readable line for a ref that resolved by fallback — diagnostics text              |
-| `builtInFormatters()`                      | function | `ReadonlyMap` of the three reference formatters, keyed by id                            |
-| `markdownFormatter`                        | value    | The default — markdown blocks and markdown framing                                      |
-| `xmlFormatter`                             | value    | XML tags, escaped text, `<message>` framing                                             |
-| `textFormatter`                            | value    | Semantic markup stripped; bare `title` / `role:` framing                                |
-| `textOnlyFormatter`                        | value    | Content policy: keep text + media, drop tool blocks                                     |
-| `summarizedFormatter`                      | value    | Content policy: `tool_use` → one line, `tool_result` dropped                            |
-| `createSummarizedFormatter(fn?)`           | function | The same policy with a custom `ToolSummarizer`                                          |
-| `createToolSummarizer(overrides?)`         | function | Build a summarizer: overrides → built-in defaults → `[Used <name>]`                     |
-| `CreateFormatterInput`                     | type     | `id` · `format` · `version?` · `render` · `blocksToText?` · `frameMessage?`             |
-| `DefinedFormatter`                         | type     | A callable `Formatter` carrying `__identity` and its framing callbacks                  |
-| `FormatTreeOptions`                        | type     | `{ formatters?: ReadonlyMap<string, DefinedFormatter> }`                                |
-| `ToolSummarizer`                           | type     | `(name, input) => string`                                                               |
-| `lowerSection`                             | function | The one section → `ContentBlock[]` rule (markdown default, xml title→tag)               |
-| `sectionTagName`                           | function | Section title → XML tag slug; `undefined` when nothing survives                         |
-| `SECTION_STAMP`                            | value    | Block-metadata key marking which section a block came from                              |
-| `SectionSource`                            | type     | `lowerSection`'s argument: `id` · `title?` · `content` · `cache?` · `providerMetadata?` |
+| Export                                     | Kind     | Purpose                                                                              |
+| ------------------------------------------ | -------- | ------------------------------------------------------------------------------------ |
+| `createFormatter(input)`                   | function | Decorate a render function with identity + optional framing callbacks                |
+| `refOf(formatter)`                         | function | The formatter's `FormatterRef`, for a scope provider or a registry key               |
+| `formatTree(tree, default, opts?)`         | function | `RenderedTree` → string; `opts.formatters` enables per-entry resolution              |
+| `resolveFormatterRef(fmts, ref, fallback)` | function | The one shared lookup: `{ formatter, match: "id" \| "format" \| "fallback" }`        |
+| `describeUnresolvedFormatter(ref, used)`   | function | Human-readable line for a ref that resolved by fallback — diagnostics text           |
+| `builtInFormatters()`                      | function | `ReadonlyMap` of the three reference formatters, keyed by id                         |
+| `markdownFormatter`                        | value    | The default — markdown blocks and markdown framing                                   |
+| `xmlFormatter`                             | value    | XML tags, escaped text, `<message>` framing                                          |
+| `textFormatter`                            | value    | Semantic markup stripped; bare `title` / `role:` framing                             |
+| `textOnlyFormatter`                        | value    | Content policy: keep text + media, drop tool blocks                                  |
+| `summarizedFormatter`                      | value    | Content policy: `tool_use` → one line, `tool_result` dropped                         |
+| `createSummarizedFormatter(fn?)`           | function | The same policy with a custom `ToolSummarizer`                                       |
+| `createToolSummarizer(overrides?)`         | function | Build a summarizer: overrides → built-in defaults → `[Used <name>]`                  |
+| `CreateFormatterInput`                     | type     | `id` · `format` · `version?` · `render` · `blocksToText?` · `frameMessage?`          |
+| `DefinedFormatter`                         | type     | A callable `Formatter` carrying `__identity` and its framing callbacks               |
+| `FormatTreeOptions`                        | type     | `{ formatters?: ReadonlyMap<string, DefinedFormatter> }`                             |
+| `ToolSummarizer`                           | type     | `(name, input) => string`                                                            |
+| `sectionBlock(section)`                    | function | Wrap a `SectionNode` in the carrier block the compile walk emits                     |
+| `expandSections(blocks, render, ref)`      | function | Replace every carrier with its lowering in `ref`'s dialect; run by `createFormatter` |
+| `lowerSection`                             | function | The one section → `ContentBlock[]` rule (markdown default, xml title→tag)            |
+| `sectionTagName`                           | function | Section title → XML tag slug; `undefined` when nothing survives                      |
+| `SECTION_STAMP`                            | value    | Block-metadata key marking which section a block came from                           |
 
-`Formatter`, `FormatterRef`, `FormatterIdentity`, `FormatPurpose`, `SemanticContentBlock`, `SemanticNode`, `MessageEntry`, and `RenderedTree` are owned by [@agentick/spec](../spec).
+`Formatter`, `FormatterRef`, `FormatterIdentity`, `FormatPurpose`, `SectionNode`, `SemanticContentBlock`, `SemanticNode`, `MessageEntry`, and `RenderedTree` are owned by [@agentick/spec](../spec).
 
 ## Patterns
 
-**In the compile pipeline.** [@agentick/compiler-react](../compiler-react) runs `render` over every entry on each tick — so `renderedWith` decides what the model sees, not just what a string dump looks like — and delegates the whole string path to `formatTree` from both `renderToString` and `renderTemplate`.
+**In the compile pipeline.** [@agentick/compiler-react](../compiler-react) runs `render` over every entry on each tick — so `renderedWith` decides what the model sees, not just what a string dump looks like, and it decides how a section reads — and delegates framing and flattening to `formatTree` from both `renderToString` and `renderTemplate`.
 
-**Reaching a formatter from elsewhere.** Any holder of a `RenderedTree` can call `formatTree` — a tree that arrived over the wire, one from `compileTemplate`, a doc generator, a snapshot test.
+**Reaching a formatter from elsewhere.** Any holder of a `RenderedTree` can call `formatTree` — a tree that arrived over the wire, one from `compileTemplate`, a doc generator, a snapshot test. `formatTree` frames and flattens; it does NOT re-run the block pass, because a `RenderedTree` has already been through its compiler's formatter pass and running a formatter over its own output escapes twice.
 
 **Content policy at a delivery edge.** [@agentick/connector](../connector) is where `textOnlyFormatter` / `summarizedFormatter` earn their keep: reduce, then chunk with `splitMessage` from [@agentick/utils](../utils), then deliver.
 
@@ -365,7 +370,7 @@ Wrapping this way returns a bare `Formatter`, not a `DefinedFormatter` — to re
 - **No streaming formatter.** The model streams; the formatter does not. A partial-block contract waits on a use case that needs it.
 - **The scope sugar's refs resolve by format hint, not id.** `<Markdown>` emits `{ id: "markdown" }` while `markdownFormatter.__identity.id` is `formatter.markdown`, so those bindings resolve through the `format` hint — intended, tested, and silent. A registry that can serve NEITHER the id nor the format no longer silently lands on the default: the compiler harness reports a `formatter-unresolved` warning naming the requested id/format and the formatter that actually ran. `formatTree` itself still degrades quietly — it is a pure serializer with no diagnostics channel.
 - **A formatter cannot vary its output by purpose.** `purpose` selects _which_ formatter a slot resolves to, but the `Formatter` signature takes only blocks — nothing reaches the formatter to tell it whether it is framing a message or a resource. A formatter that wants both behaviors ships as two registered formatters.
-- **`lowerSection` is not reached by the compiler with a dialect** (`TODO(section-formatter-thread)`). The compile path always applies markdown, so a tree under `<XML>` gets `# Title` rather than `<title>`. The xml rule is implemented and tested here; wiring it needs the live formatter resolved during the collect walk, because the harness formatter pass runs after collect and would escape a frame emitted during it.
+- **A section nested in a message reads in the MESSAGE's dialect, not its own.** `<FormatScope purpose="section">` picks the formatter for a FREE-STANDING section (the entry it becomes carries the ref). Inside a `<System>` or `<User>` the section's blocks are that message's content, and one formatter renders an entry's content — so the container decides the dialect the same way it decides the role.
 - **`FormatterCapabilities` is unused.** The spec declares a capability shape for formatters; nothing advertises or reads it, so there is no negotiation.
 - **`version` is carried, never checked.** `FormatterRef.version` rides through resolution untouched — id, then format, and that is the whole chain.
 - **`blocksToText` has no golden-output suite.** The block-level `render` output of all three bundled formatters is pinned here; their framing and flatten callbacks are covered through the compiler's string tests rather than directly.
@@ -374,7 +379,7 @@ Wrapping this way returns a bare `Formatter`, not a `DefinedFormatter` — to re
 ## Verified by
 
 - `src/__tests__/formatters.spec.ts` — `createFormatter` identity metadata including the optional `version`; `markdownFormatter` passing text through, fencing code, compact-stringifying JSON, `<strong>` → `**`, a nested semantic tree, heading levels, unordered lists, and native image blocks passing through; `xmlFormatter` tag wrapping, special-character escaping, `h1`–`h6`, `<ol>`, and `<code language>`; `textFormatter` stripping markup, flattening code to bare text, and rendering links as `text (href)`; and `builtInFormatters()` keying all three by their `__identity.id`.
-- `src/__tests__/section-lowering.spec.ts` — the markdown bytes (pinned against the projection code this replaced), text-run coalescing into one block, the untitled and empty cases, the xml title→tag rule with its id fallback and attribute escaping, the slug rule including the leading-digit prefix and the nothing-survives `undefined`, what rides the produced blocks (`id` on all, `cache` / `providerMetadata` on the last), and no-silent-drop around a non-text block and a block still carrying a semantic sidecar.
+- `src/__tests__/section-lowering.spec.ts` — the markdown bytes (pinned against the projection code this replaced), text-run coalescing into one block, the untitled and empty cases, the xml title→tag rule with its id fallback and attribute escaping, the slug rule including the leading-digit prefix and the nothing-survives `undefined`, what rides the produced blocks (`id` on all, `cache` / `providerMetadata` on the last), and no-silent-drop around a non-text block and a block still carrying a semantic sidecar. The carrier path too: body-rendered-before-framed (tag unescaped, `&` escaped once), one carrier lowered two ways by two dialects, a semantic-HTML body collapsing into the section's own block, the adjacent-section blank-line merge and its refusal across a cache breakpoint, and non-carrier blocks passing through `render` untouched.
 - `src/__tests__/content-policy.spec.ts` — `textOnlyFormatter` keeping text and media while dropping `tool_use` and `tool_result`; `summarizedFormatter` collapsing a `tool_use` into a summary line and dropping the result; the built-in summaries for known file and shell tools; the generic fallback for an unknown tool; and `createToolSummarizer` overrides winning.
 - Per-subtree selection is pinned in [@agentick/compiler-react](../compiler-react): `formatter-scope.spec.tsx` — `<FormatScope>` contributing no IR fragment of its own, and `<Markdown>` / `<XML>` / `<PlainText>` each stamping `renderedWith` on descendant entries while an outer scope keeps its own.
 - Registry resolution is pinned in [@agentick/compiler-react](../compiler-react): `formatter-registry.spec.tsx` — a custom formatter map taking effect, the missing-id → matching-`format` fallback, and markdown as the default when nothing is supplied.

@@ -75,7 +75,7 @@ describe("renderToString — basic markdown serialization", () => {
 });
 
 describe("renderToString — XML format", () => {
-  it("frames the MESSAGE in xml — the section inside it is markdown-lowered", async () => {
+  it("lowers the section in xml too — the title becomes the tag", async () => {
     const harness = await makeHarness();
     await harness.mount({
       mountId: "m_xml",
@@ -89,13 +89,11 @@ describe("renderToString — XML format", () => {
       defaultFormatter: { id: "markdown", format: "markdown" },
     });
     const { payload } = await harness.renderToString({ mountId: "m_xml" });
-    // `TODO(section-formatter-thread)`: the xml title→tag rule exists in
-    // `lowerSection` (and is pinned in @agentick/formatters), but the compile
-    // path applies markdown unconditionally — so the title is `# T` here, not
-    // `<t>`. What IS xml is the message framing around it.
-    expect(payload.text).toContain('<message role="grounding">');
-    expect(payload.text).toContain("# T\nbody");
-    expect(payload.text).toContain("</message>");
+    // The `<XML>` scope reaches BOTH levels: the message framing around the
+    // grounding entry, and the section lowering inside it. One whole-output
+    // pin rather than three `toContain`s, because the interesting claim is
+    // that nothing sits between the two frames.
+    expect(payload.text).toBe('<message role="grounding">\n<t>\nbody\n</t>\n</message>');
   });
 
   it("escapes xml special chars in the body", async () => {
@@ -114,22 +112,14 @@ describe("renderToString — XML format", () => {
     const { payload } = await harness.renderToString({
       mountId: "m_xml_esc",
     });
-    // The id and title are no longer in attribute position — they are text
-    // now — so what the xml formatter escapes is the block text it is handed.
-    // The id and title are no longer in attribute position — they are text
-    // now — so what the xml formatter escapes is the block text it is handed.
-    //
-    // TODO(double-format-in-render-to-string): it escapes it TWICE, and the
-    // output here is `&amp;amp;`. `renderTree` already ran the formatter pass
-    // over every entry's content, and `renderToString` hands those
-    // ALREADY-FORMATTED blocks to `formatTree`, which formats them again.
-    // Pre-existing and unrelated to ADR 94 — markdown is idempotent on plain
-    // text so nothing noticed, and the old assertion here read the `<section>`
-    // ATTRIBUTES, which `frameSection` produced on a single pass. Asserted as
-    // "escaping happened" rather than pinning the doubled bytes, which would
-    // bless the defect.
-    expect(payload.text).toContain("&amp;");
-    expect(payload.text).not.toContain("<b>body</b>");
+    // ESCAPED EXACTLY ONCE, and the tag frame not escaped at all. The body
+    // goes through the escaper before the section frame is applied, so `&`
+    // becomes `&amp;` and stops there — never `&amp;amp;` — while `<a_b>`
+    // stays a tag. The title's own `&` and `"` are slugged away entirely
+    // (`A&B"` → `a_b`), which is why they cannot be escaped twice either.
+    expect(payload.text).toBe(
+      '<message role="grounding">\n<a_b>\n&lt;b&gt;body&lt;/b&gt; &amp; more\n</a_b>\n</message>',
+    );
   });
 
   it("explicit formatter override per call", async () => {
