@@ -63,3 +63,43 @@ export type PromiseView<T> = {
     ? (...args: A) => Promise<R>
     : T[K];
 };
+
+/**
+ * `HarnessEdge<F>` — BOTH faces of a harness's async surface, derived from
+ * the one hand-authored `Fx` twin: the Promise facade for the adopter edge
+ * *and* the canonical `.fx` for in-process composition.
+ *
+ * ## Why this exists (a protocol that omits `.fx` is a severing root)
+ *
+ * A protocol that declares only `PromiseView<XFx>` types its consumers onto
+ * the FACADE. An in-process caller — another harness, the session, a
+ * controller — then has no typed route to the Effect twin even when the
+ * concrete class exposes one, so it calls the Promise method, and
+ * `runPromise` starts a ROOT fiber. The ambient `RuntimeContext` on the
+ * caller's fiber (`tickId` / `opId` / `parentOpId`) is silently dropped:
+ * the op still runs, still journals, still publishes — it just carries no
+ * tick. Nothing goes red.
+ *
+ * That is not hypothetical. `KnobsHarnessProtocol` declared exactly
+ * `PromiseView<Omit<KnobsFx, "use">>` and no `fx`, so `GatesController`
+ * (typed against a `Pick` of it) could only reach `knobs.set` — and every
+ * gate transition during a tick wrote its knob outside the tick's fiber.
+ * Measured: `knobs:command:set` at `phase=requested|before|terminal`, all
+ * three with no `tickId`.
+ *
+ * Declaring `fx` per protocol by hand is the same fix eleven times, and
+ * omitting it fails open — the protocol still compiles, consumers just
+ * quietly land on the facade. Composing the pair here makes the canonical
+ * surface fall out of the derivation instead: adopt `HarnessEdge<XFx>` and
+ * `.fx` cannot be forgotten.
+ *
+ * @see ./knobs-harness.ts — the first adopter.
+ */
+export type HarnessEdge<F> = PromiseView<Omit<F, "use">> & {
+  /**
+   * The Effect-canonical twin. Compose this (`yield* h.fx.set(...)`) from
+   * anywhere already inside a fiber; the sibling Promise methods are the
+   * same operations with `runPromise` applied, for callers at the edge.
+   */
+  readonly fx: F;
+};

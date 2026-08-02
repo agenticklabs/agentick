@@ -34,13 +34,17 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
+import { Effect } from "effect";
+
 import type {
   KnobPrimitive,
   KnobRegistration,
   KnobsHarnessProtocol,
+  SubstrateError,
   TickResult,
   Unsubscribe,
 } from "@agentick/spec";
+import { runHarnessProtocol } from "@agentick/runtime";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub";
 
 import {
@@ -79,7 +83,7 @@ export interface LoopControlSeam {
  * deliberate composition 2026-07-24 — see
  * docs/proposals/v2/three-audiences-plan.md "value-cell stratification".
  */
-export type GateKnobs = Pick<KnobsHarnessProtocol, "register" | "set" | "get" | "subscribe">;
+export type GateKnobs = Pick<KnobsHarnessProtocol, "register" | "set" | "get" | "subscribe" | "fx">;
 
 /**
  * Where a verified-gate override originated — the audit's authorization
@@ -177,7 +181,10 @@ export interface GatesParentLayer {
    * parent's own knobs + loop + notifiers are used (correct layer
    * ownership — an app gate's state lives in the app layer).
    */
-  evaluateInherited(result: TickResult, shadowed: ReadonlySet<string>): Promise<void>;
+  evaluateInherited(
+    result: TickResult,
+    shadowed: ReadonlySet<string>,
+  ): Effect.Effect<void, SubstrateError, never>;
 }
 
 // ============================================================================
@@ -302,15 +309,10 @@ export class GatesController {
    * commands via {@link bindMutations}, so a host-side release journals.
    */
   private mutations: GateMutationSink = {
-    clear: async (name) => {
-      this.rawClear(name);
-    },
-    defer: async (name) => {
-      this.rawDefer(name);
-    },
-    override: async (name, value, reason) => {
-      this.rawOverride(name, value, reason, "host");
-    },
+    clear: (name) => runHarnessProtocol(this.rawClear(name)),
+    defer: (name) => runHarnessProtocol(this.rawDefer(name)),
+    override: (name, value, reason) =>
+      runHarnessProtocol(this.rawOverride(name, value, reason, "host")),
   };
 
   constructor(deps: GatesControllerDeps) {
@@ -361,6 +363,16 @@ export class GatesController {
     (entry as { handle: GateHandle }).handle = this.makeHandle(entry);
     this.gates.set(name, entry);
 
+    // TODO(op-scope): still fire-and-forget, and it demonstrably orphans. When
+    // a knob write triggers a re-render that re-registers the gate, the
+    // resulting `knobs:command:register` lands with NEITHER `tickId` NOR
+    // `executionId` — measured nested inside a `knobs:command:set` that had
+    // both. `transition` was fixed by composing `knobs.fx.set`; this one
+    // cannot follow directly because `register` is a SYNCHRONOUS public API
+    // (it returns `GateHandle` and `useGate` calls it during render), so
+    // making it Effect-returning ripples into the React front-end. Lower
+    // stakes than the write — a registration is idempotent metadata, not a
+    // value change — but it is the same defect and it is not fixed.
     void this.deps.knobs.register({ id: name, descriptor: this.knobRegistration(descriptor) });
 
     // Keep the synchronous mirror aligned with the knob so a model
@@ -457,16 +469,28 @@ export class GatesController {
    * calls `continueAfterTick` on the injected loop seam; the session
    * drains that seam to compose its continuation decision.
    */
-  async handleTickEnd(result: TickResult): Promise<void> {
-    // Snapshot the entries so a gate registered/unregistered mid-eval
-    // doesn't perturb this tick's pass.
-    for (const entry of [...this.gates.values()]) {
-      await this.evaluate(entry, result);
-    }
-    // Then the inherited layer(s) — self gates shadow parent gates by
-    // name, so pass this layer's names as already-handled. No-op when no
-    // parent (the seam is present, unused, until an app tier is wired).
-    await this.deps.parent?.evaluateInherited(result, new Set(this.gates.keys()));
+  handleTickEndFx(result: TickResult): Effect.Effect<void, SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      // Snapshot the entries so a gate registered/unregistered mid-eval
+      // doesn't perturb this tick's pass.
+      for (const entry of [...this.gates.values()]) {
+        yield* this.evaluate(entry, result);
+      }
+      // Then the inherited layer(s) — self gates shadow parent gates by
+      // name, so pass this layer's names as already-handled. No-op when no
+      // parent (the seam is present, unused, until an app tier is wired).
+      const parent = this.deps.parent;
+      if (parent) yield* parent.evaluateInherited(result, new Set(this.gates.keys()));
+    });
+  }
+
+  /**
+   * Promise facade over {@link handleTickEndFx}, for a caller that is NOT
+   * already in a fiber — a bare controller under test, the `/testing` driver.
+   * The session composes the Effect twin instead; see the class docblock.
+   */
+  handleTickEnd(result: TickResult): Promise<void> {
+    return runHarnessProtocol(this.handleTickEndFx(result));
   }
 
   /**
@@ -474,75 +498,93 @@ export class GatesController {
    * {@link GatesParentLayer.evaluateInherited}). Skips `shadowed` names,
    * then recurses to its own parent accumulating this layer's names.
    */
-  async evaluateInherited(result: TickResult, shadowed: ReadonlySet<string>): Promise<void> {
-    for (const entry of [...this.gates.values()]) {
-      if (shadowed.has(entry.name)) continue;
-      await this.evaluate(entry, result);
-    }
-    if (this.deps.parent) {
-      await this.deps.parent.evaluateInherited(
-        result,
-        new Set([...shadowed, ...this.gates.keys()]),
-      );
-    }
+  evaluateInherited(
+    result: TickResult,
+    shadowed: ReadonlySet<string>,
+  ): Effect.Effect<void, SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      for (const entry of [...this.gates.values()]) {
+        if (shadowed.has(entry.name)) continue;
+        yield* this.evaluate(entry, result);
+      }
+      const parent = this.deps.parent;
+      if (parent) {
+        yield* parent.evaluateInherited(result, new Set([...shadowed, ...this.gates.keys()]));
+      }
+    });
   }
 
-  private async evaluate(entry: GateEntry, result: TickResult): Promise<void> {
-    const { name, descriptor } = entry;
+  private evaluate(
+    entry: GateEntry,
+    result: TickResult,
+  ): Effect.Effect<void, SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      const { name, descriptor } = entry;
 
-    if (isVerifiedGate(descriptor)) {
-      // Optional arming scope: while unarmed the gate is dormant —
-      // `satisfied` is not evaluated and the gate never blocks. The
-      // first tick where `activateWhen` fires arms it (sticky); verification
-      // takes over immediately, same tick.
-      if (!entry.armed) {
-        if (descriptor.activateWhen === undefined || descriptor.activateWhen(result)) {
-          entry.armed = true;
-        } else {
+      if (isVerifiedGate(descriptor)) {
+        // Optional arming scope: while unarmed the gate is dormant —
+        // `satisfied` is not evaluated and the gate never blocks. The
+        // first tick where `activateWhen` fires arms it (sticky); verification
+        // takes over immediately, same tick.
+        if (!entry.armed) {
+          if (descriptor.activateWhen === undefined || descriptor.activateWhen(result)) {
+            entry.armed = true;
+          } else {
+            return;
+          }
+        }
+
+        // Level-triggered: verify every tick; engage/clear from the
+        // predicate alone. Fail-closed — a throwing predicate counts as
+        // unsatisfied (the lifecycle store would otherwise swallow the
+        // error and leave the gate in its previous state).
+        //
+        // `satisfied` is ADOPTER code and may be async, so this IS a genuine
+        // foreign edge — the one place in this pass where `Effect.tryPromise`
+        // is correct. It is scoped to the predicate call alone: everything
+        // around it (and the knob write below) stays in the caller's fiber.
+        const ok = yield* Effect.tryPromise({
+          try: async () => await descriptor.satisfied(result),
+          catch: (err) => err,
+        }).pipe(
+          Effect.catchAll((err) =>
+            Effect.sync(() => {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[@agentick/gates] verified gate "${name}" predicate threw; ` +
+                  `treating as unsatisfied (fail-closed).`,
+                err,
+              );
+              return false;
+            }),
+          ),
+        );
+        if (ok) {
+          yield* this.transition(entry, "inactive");
           return;
         }
-      }
-
-      // Level-triggered: verify every tick; engage/clear from the
-      // predicate alone. Fail-closed — a throwing predicate counts as
-      // unsatisfied (the lifecycle store would otherwise swallow the
-      // error and leave the gate in its previous state).
-      let ok = false;
-      try {
-        ok = await descriptor.satisfied(result);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(
-          `[@agentick/gates] verified gate "${name}" predicate threw; ` +
-            `treating as unsatisfied (fail-closed).`,
-          err,
-        );
-      }
-      if (ok) {
-        this.transition(entry, "inactive");
+        yield* this.transition(entry, "active");
+        if (!result.shouldContinue) {
+          this.loop().continueAfterTick(`gate:${name}`);
+        }
         return;
       }
-      this.transition(entry, "active");
-      if (!result.shouldContinue) {
+
+      // Edge-triggered latch: activate only when inactive — once engaged,
+      // the model is in control.
+      if (entry.value === "inactive" && descriptor.activateWhen(result)) {
+        yield* this.transition(entry, "active");
+      }
+
+      // Block completion when engaged.
+      if (entry.value !== "inactive" && !result.shouldContinue) {
+        if (entry.value === "deferred") {
+          // Un-defer: the model must face the instructions before completing.
+          yield* this.transition(entry, "active");
+        }
         this.loop().continueAfterTick(`gate:${name}`);
       }
-      return;
-    }
-
-    // Edge-triggered latch: activate only when inactive — once engaged,
-    // the model is in control.
-    if (entry.value === "inactive" && descriptor.activateWhen(result)) {
-      this.transition(entry, "active");
-    }
-
-    // Block completion when engaged.
-    if (entry.value !== "inactive" && !result.shouldContinue) {
-      if (entry.value === "deferred") {
-        // Un-defer: the model must face the instructions before completing.
-        this.transition(entry, "active");
-      }
-      this.loop().continueAfterTick(`gate:${name}`);
-    }
+    });
   }
 
   // ─────────── Internals ───────────
@@ -590,15 +632,15 @@ export class GatesController {
    * the name is unknown (self layer only; parent gates clear via their own
    * controller's handle).
    */
-  rawClear(name: string): void {
+  rawClear(name: string): Effect.Effect<void, SubstrateError, never> {
     const entry = this.gates.get(name);
-    if (entry) this.transition(entry, "inactive");
+    return entry ? this.transition(entry, "inactive") : Effect.void;
   }
 
   /** Postpone a latch gate — the raw transition. No-op on verified / unknown. */
-  rawDefer(name: string): void {
+  rawDefer(name: string): Effect.Effect<void, SubstrateError, never> {
     const entry = this.gates.get(name);
-    if (entry && !entry.verified) this.transition(entry, "deferred");
+    return entry && !entry.verified ? this.transition(entry, "deferred") : Effect.void;
   }
 
   /**
@@ -613,22 +655,24 @@ export class GatesController {
     value: GateValue,
     reason: string | undefined,
     origin: GateOverrideOrigin,
-  ): void {
-    const entry = this.gates.get(name);
-    if (!entry) return;
-    if (!entry.verified) {
-      throw new Error(
-        `override() is a verified-gate escape; gate "${name}" is a latch gate — use clear().`,
-      );
-    }
-    this.transition(entry, value);
-    this.deps.audit?.({
-      kind: "gate:override",
-      name,
-      value,
-      at: Date.now(),
-      origin,
-      ...(reason !== undefined ? { reason } : {}),
+  ): Effect.Effect<void, SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      const entry = this.gates.get(name);
+      if (!entry) return;
+      if (!entry.verified) {
+        throw new Error(
+          `override() is a verified-gate escape; gate "${name}" is a latch gate — use clear().`,
+        );
+      }
+      yield* this.transition(entry, value);
+      this.deps.audit?.({
+        kind: "gate:override",
+        name,
+        value,
+        at: Date.now(),
+        origin,
+        ...(reason !== undefined ? { reason } : {}),
+      });
     });
   }
 
@@ -639,17 +683,33 @@ export class GatesController {
    * subscription started in `register` re-confirms the mirror when the
    * async set lands — a no-op when already aligned.
    */
-  private transition(entry: GateEntry, next: GateValue): void {
-    if (entry.value === next) return;
-    entry.value = next;
-    // TODO(state-deltas): a gate's boolean value ALREADY flows to clients as
-    // a knob JSON-Patch delta via this write-through (KnobsHarness emits on
-    // the knobs-state channel, ADR 73). What isn't projected is gate-specific
-    // info (open/closed reason, hit counts, predicate metadata). When that's
-    // wanted client-side, add a `gates-state` snapshot+delta channel here at
-    // the notifier, mirroring packages/knobs/src/channel.ts.
-    void this.deps.knobs.set({ id: entry.name, value: next });
-    this.changes.notify(entry.name);
+  private transition(
+    entry: GateEntry,
+    next: GateValue,
+  ): Effect.Effect<void, SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      if (entry.value === next) return;
+      entry.value = next;
+      // The render-ping is tied to the MIRROR, not to durability — it fires
+      // before the knob write is awaited, exactly as it did when that write
+      // was fire-and-forget. Subscribers observe the new value synchronously.
+      this.changes.notify(entry.name);
+      // TODO(state-deltas): a gate's boolean value ALREADY flows to clients as
+      // a knob JSON-Patch delta via this write-through (KnobsHarness emits on
+      // the knobs-state channel, ADR 73). What isn't projected is gate-specific
+      // info (open/closed reason, hit counts, predicate metadata). When that's
+      // wanted client-side, add a `gates-state` snapshot+delta channel here at
+      // the notifier, mirroring packages/knobs/src/channel.ts.
+      //
+      // COMPOSED, not `void knobs.set(...)`. This is the write that carries the
+      // gate's value into the durable, model-facing cell, and it must run in
+      // the CALLER's fiber: at tick-end that fiber holds the tick's ambient
+      // `RuntimeContext`, so the resulting `knobs:command:set` op is stamped
+      // with the tickId. Fire-and-forget started a root fiber instead and the
+      // op landed tickless (measured on all three phases), which also cost the
+      // `parentOpId` chain on wire-driven `gates:clear`.
+      yield* this.deps.knobs.fx.set({ id: entry.name, value: next });
+    });
   }
 
   private loop(): LoopControlSeam {

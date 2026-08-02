@@ -96,6 +96,10 @@ function stubAdapter(): LanguageModelAdapter<{ text: string }, { raw: string }, 
  */
 const TICKLESS = new Set([
   "session:command:send",
+  // Brackets the ticks, exactly as `session:command:send` does one level up —
+  // it opens before tick 1 and settles after the last, so it is
+  // execution-scoped by construction. It is also this bracket's own endpoint.
+  "loop:command:run-execution",
   "session:command:append",
   "app:command:create-session",
   "app:command:close-app",
@@ -131,14 +135,38 @@ describe("tick scope — every op inside a tick carries its tickId", () => {
     expect(ticks[0]!.scope?.tickId).toBeTruthy();
   });
 
-  it("no operation between tick-start and tick-end is missing its tickId", async () => {
+  it("no operation between tick-start and execution-end is missing its tickId", async () => {
     const seen = await collectEnvelopes();
 
-    // The tick bracket, by envelope order — the same order a subscriber sees.
+    // The bracket runs from the first tick event to the EXECUTION's terminal,
+    // not to the last `loop:command:tick` event.
+    //
+    // It used to end at the last tick event, and that left the DECIDE window
+    // uncovered — the continuation where the session folds its tick-end
+    // predicates runs AFTER `loop:command:tick` settles (ADR 89 §4), and it
+    // WRITES: the steer drain appends to the timeline, a gate transition sets
+    // its backing knob. Those ops were landing tickless and this test stayed
+    // green, because they fell outside its own bracket. A guard that ends
+    // before the interesting window verifies nothing.
+    //
+    // HONEST LIMIT: widening the bracket does not by itself make this test
+    // bite for that class — THIS scenario registers no gate and sends no
+    // steer, so the decide window contains no writes to check. Verified by
+    // reverting the loop's `withContext({ tickId }, …)`: this test still
+    // passed; `session/__tests__/gates-integration` "a gate's tick-end knob
+    // write carries the tick's id" is what failed, and that is the biting
+    // guard (it lives there because gates is a session dependency, not an app
+    // one). The widening earns its place by covering whatever future writes
+    // land in this window — not by covering today's.
     const start = seen.findIndex((e) => e.name === "loop:command:tick" && e.phase !== "terminal");
-    const end =
-      seen.length - 1 - [...seen].reverse().findIndex((e) => e.name === "loop:command:tick");
+    const end = seen.findIndex(
+      (e) => e.name === "loop:command:run-execution" && e.phase === "terminal",
+    );
     expect(start).toBeGreaterThanOrEqual(0);
+    // Labelled so a missing endpoint reports itself rather than surfacing as
+    // a bare "expected -1 to be greater than 12".
+    expect(end >= 0 ? "ok" : "ARRANGE: no run-execution terminal — bracket has no end").toBe("ok");
+    expect(end).toBeGreaterThan(start);
 
     const offenders = seen
       .slice(start, end + 1)

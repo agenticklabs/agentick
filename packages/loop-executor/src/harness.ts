@@ -76,6 +76,7 @@ import {
   type StreamCommand,
   runHarnessProtocol,
   ulid,
+  withContext,
 } from "@agentick/runtime";
 import type {
   TerminalEvent,
@@ -610,17 +611,34 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // already implements the two-tier resolution (stop-force >
         // continue-force > abstain), with `maxTicks` as the tier-1 hard cap.
         // `notifyTickEnd` is a session-provided callback (no span), composed
-        // DIRECTLY in this fiber — it appends to the timeline underneath, and
-        // the ambient `tickId` has to survive the call for those appends to be
-        // attributable to this tick.
+        // DIRECTLY in this fiber — it writes underneath (the steer drain
+        // appends to the timeline; a gate transition sets its backing knob),
+        // and those writes must be attributable to the tick that caused them.
+        //
+        // Composing in-fiber is necessary but NOT sufficient. `tickId` enters
+        // the ambient `RuntimeContext` inside the `loop:command:tick` op and
+        // unwinds when that op settles — and the DECIDE deliberately runs
+        // AFTER it (ADR 89 §4: settle is IN the cascade, decide is OUT). So the
+        // fiber is intact here and `executionId` flows, but `tickId` is already
+        // gone. Measured: `knobs:command:set` from a gate transition landed
+        // with `executionId` and no `tickId`, on all three phases.
+        //
+        // `withContext` re-annotates the ambient scope for the DECIDE's span.
+        // This is an ATTRIBUTION dimension, not a parenthood claim — the tick
+        // op has terminated and is not reopened; these ops simply record which
+        // tick they are the consequence of, which is what makes "everything
+        // tick N did" answerable at all.
         const forward = input.notifyTickEnd
-          ? yield* input.notifyTickEnd({
-              sessionId: input.sessionId,
-              executionId,
-              tickId,
-              outcome: "succeeded",
-              result: tickResult,
-            })
+          ? yield* withContext(
+              { tickId },
+              input.notifyTickEnd({
+                sessionId: input.sessionId,
+                executionId,
+                tickId,
+                outcome: "succeeded",
+                result: tickResult,
+              }),
+            )
           : undefined;
         // §B2 steer-proof stop: a delivered structured answer terminates the
         // execution regardless of steering — `terminalCaptured` short-circuits

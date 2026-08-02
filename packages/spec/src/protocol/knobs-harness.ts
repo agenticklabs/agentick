@@ -26,7 +26,7 @@ import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { Unsubscribe } from "./inbox.js";
-import type { PromiseView } from "./promise-view.js";
+import type { HarnessEdge } from "./promise-view.js";
 import type {
   KnobDescriptor,
   KnobPrimitive,
@@ -135,7 +135,7 @@ export interface KnobsFx extends HarnessFx {
 // ============================================================================
 
 export interface KnobsHarnessProtocol
-  extends SnapshotCapable<KnobsHarnessSnapshot>, PromiseView<Omit<KnobsFx, "use">> {
+  extends SnapshotCapable<KnobsHarnessSnapshot>, HarnessEdge<KnobsFx> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `knobs:{id}` — admin actors send mutations addressed here.
@@ -170,9 +170,12 @@ export interface KnobsHarnessProtocol
 
   // ─────────── Async surface (Operations) ───────────
   //
-  // `set` / `register` / `dispatch` are derived from `PromiseView<Omit<KnobsFx, "use">>`
-  // — the Promise facade of the Effect-canonical {@link KnobsFx} twin. The
-  // concrete harness exposes the canonical Effect surface as `knobs.fx`.
+  // BOTH faces come from `HarnessEdge<KnobsFx>`: `set` / `register` /
+  // `dispatch` as the Promise facade, and `fx` as the Effect-canonical twin.
+  // An in-process caller composes `knobs.fx.set(...)` and stays in the calling
+  // fiber; only the adopter edge takes the Promise face. This protocol used to
+  // declare the facade ALONE, which is what put every gate transition's knob
+  // write outside its tick — see the {@link HarnessEdge} docblock.
 
   // ─────────── Lifecycle ───────────
 

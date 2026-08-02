@@ -155,7 +155,9 @@ export class GatesHarness extends BaseHarness<"gates"> {
           if (this.controller.get(i.name) === undefined) {
             return yield* Effect.fail(new GateNotFound({ gateName: i.name }));
           }
-          this.controller.rawClear(i.name);
+          // COMPOSED — the transition's knob write runs inside THIS command's
+          // fiber, so it nests under the `gates:clear` op instead of orphaning.
+          yield* this.controller.rawClear(i.name);
         }),
     });
 
@@ -169,7 +171,7 @@ export class GatesHarness extends BaseHarness<"gates"> {
           if (this.controller.get(i.name) === undefined) {
             return yield* Effect.fail(new GateNotFound({ gateName: i.name }));
           }
-          this.controller.rawDefer(i.name);
+          yield* this.controller.rawDefer(i.name);
         }),
     });
 
@@ -188,7 +190,7 @@ export class GatesHarness extends BaseHarness<"gates"> {
           if (this.controller.get(i.name) === undefined) {
             return yield* Effect.fail(new GateNotFound({ gateName: i.name }));
           }
-          this.controller.rawOverride(i.name, i.value, i.reason, origin);
+          yield* this.controller.rawOverride(i.name, i.value, i.reason, origin);
         }),
     });
 

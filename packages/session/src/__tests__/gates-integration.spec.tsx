@@ -30,6 +30,31 @@ import type { GatesHandle } from "@agentick/gates";
 import type { ExecutionTarget } from "@agentick/spec";
 
 import { SessionHarness } from "../harness.js";
+import type { ProtocolEvent } from "@agentick/spec";
+
+/**
+ * A bus that keeps every published envelope, for assertions about op SCOPE.
+ *
+ * `hasSubscriberFor` is forced true because `publishLazy` short-circuits to
+ * `Effect.void` when nothing is subscribed — it never reaches `append`, so a
+ * recorder that only overrides `append` would observe an empty log and the
+ * assertion would pass vacuously. Recording IS subscribing, as far as the
+ * lazy-emission gate is concerned.
+ */
+class RecordingBus extends LocalEventBus {
+  readonly seen: ProtocolEvent[] = [];
+  override hasSubscriberFor(): boolean {
+    return true;
+  }
+  override append(event: ProtocolEvent) {
+    this.seen.push(event);
+    return super.append(event);
+  }
+  override appendBatch(events: ReadonlyArray<ProtocolEvent>) {
+    this.seen.push(...events);
+    return super.appendBatch(events);
+  }
+}
 
 const target: ExecutionTarget = {
   kind: "language-model",
@@ -207,6 +232,92 @@ describe("gates ↔ session — one controller, two front-ends", () => {
     expect(session.gate("hold-open")?.value).toBe("active");
     // Stop wins: one tick, not the gate's maxTicks: 3.
     expect(result.ticks).toBe(1);
+
+    await session.close();
+    await tools.close();
+  });
+
+  /**
+   * A gate transition WRITES — every engage/clear sets the gate's backing knob.
+   * That write must land inside the tick that caused it.
+   *
+   * It did not. `GatesController.handleTickEnd` was Promise-shaped and the
+   * session reached it through `Effect.promise`, and `transition` then fired
+   * `void knobs.set(...)` — two severing points, either one enough to start a
+   * root fiber. The ambient `RuntimeContext` carrying `tickId` lives on the
+   * fiber, so the op still ran, still journaled, still published; it just
+   * carried no tick. Measured before the fix, on all three phases:
+   *
+   *     knobs:command:set  phase=requested  tick=MISSING
+   *     knobs:command:set  phase=before     tick=MISSING
+   *     knobs:command:set  phase=terminal   tick=MISSING
+   *
+   * The root cause was in the TYPE: `KnobsHarnessProtocol` declared only
+   * `PromiseView<KnobsFx>` and no `fx`, so `GatesController` — typed against a
+   * `Pick` of it — had no reachable Effect twin to compose. `HarnessEdge<F>`
+   * now derives both faces together (see `spec/protocol/promise-view.ts`).
+   */
+  it("a gate's tick-end knob write carries the tick's id", async () => {
+    function Agent() {
+      // Never satisfied → transitions to "active" on tick 1, so there is
+      // guaranteed to be a knob write to inspect.
+      useGate("scoped-inv", {
+        description: "Never satisfied",
+        instructions: "GATE: hold.",
+        satisfied: () => false,
+      });
+      return React.createElement(System, null, "hi");
+    }
+
+    const journal = new MemoryJournal();
+    const bus = new RecordingBus();
+    const inbox = new LocalInbox();
+    const compiler = new CompilerHarness("gi-ts-r", journal, bus, inbox);
+    const loop = new LoopExecutorHarness("gi-ts-l", journal, bus, inbox);
+    const resolver = new InMemoryHandlerResolver();
+    const elicitation = new ElicitationHarness("gi-ts:elicitation", journal, bus, inbox);
+    const tools = new ToolExecutorHarness("gi-ts-t", journal, bus, inbox, {
+      handlerResolver: resolver,
+      elicitation,
+    });
+    const executor = endExec();
+    await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
+
+    const session = new SessionHarness(journal, bus, inbox, {
+      sessionId: `gi-ts-${Math.random()}`,
+      agent: React.createElement(Agent),
+      compiler,
+      loop,
+      modelExecutor: executor,
+      toolExecutor: tools,
+      target,
+    });
+    await session.ready;
+    await session.mountReady;
+
+    const handle = await session.send({ messages: [{ role: "user", content: "hi" }], maxTicks: 1 });
+    await handle.result;
+
+    // ── ARRANGE GUARD, asserted separately and FIRST ──
+    // An earlier attempt at this test failed with "expected 0 to be greater
+    // than 0" because the gate scaffolding silently never landed — the report
+    // pointed at the invariant while the real fault was the setup. Assert the
+    // precondition on its own so a broken arrange says so in its own words.
+    // Asserted through a labelled string so the failure output NAMES the
+    // broken step; `expect(n).toBeGreaterThan(0)` reports "expected 0 to be
+    // greater than 0", which is what sent the last attempt chasing the
+    // invariant while the real fault was the setup.
+    const knobSets = bus.seen.filter((e) => e.name === "knobs:command:set");
+    expect(
+      knobSets.length > 0 ? "ok" : "ARRANGE: gate never transitioned — no knob write to check",
+    ).toBe("ok");
+    expect(session.gate("scoped-inv")?.value).toBe("active");
+
+    // ── THE INVARIANT ──
+    // Report the PHASES that lost the tick, not a count — the phase list is
+    // what distinguishes "the whole op is orphaned" from "one phase escaped".
+    const tickless = knobSets.filter((e) => e.scope?.tickId === undefined).map((e) => e.phase);
+    expect(tickless).toEqual([]);
 
     await session.close();
     await tools.close();

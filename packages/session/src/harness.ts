@@ -1685,10 +1685,14 @@ export class SessionHarness<P = unknown>
       // loop bridge (below). We evaluate BEFORE draining so a gate's hold is
       // captured in the same drain as any tree request.
       if (result !== undefined) {
-        // The gates CONTROLLER is Promise-shaped (it is not a harness and
-        // declares no ops), so this is a genuine foreign edge — `Effect.promise`
-        // is correct here in a way it never is around one of our own methods.
-        yield* Effect.promise(() => this.bridges.gates.handleTickEnd(result));
+        // COMPOSED. The gates controller is not a harness and declares no ops
+        // of its own, but its evaluation WRITES — every transition sets the
+        // gate's backing knob. Reaching it through the Promise facade started a
+        // root fiber and those writes landed outside the tick (measured:
+        // `knobs:command:set` tickless on all three phases). The controller's
+        // ONE genuine foreign edge — the adopter's `satisfied` predicate — is
+        // wrapped inside `evaluate`, where it belongs.
+        yield* this.bridges.gates.handleTickEndFx(result);
       }
 
       // (b) Tree + gate loop-control requests recorded on the live loop

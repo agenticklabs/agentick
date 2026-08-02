@@ -81,6 +81,20 @@ declare const probe: PromiseView<Fx>;
 probe.set;
 `;
 
+/** The same Fx, reached through `HarnessEdge` — the intersection form. */
+const EDGE_PROBE = (docComment: string) => `
+import type { HarnessEdge } from "../protocol/promise-view.js";
+import type { Effect } from "effect";
+interface Fx {
+  use(): void;
+  ${docComment}
+  set(input: { readonly id: string }): Effect.Effect<void, Error, never>;
+}
+declare const probe: HarnessEdge<Fx>;
+probe.set;
+probe.fx;
+`;
+
 describe("PromiseView — JSDoc preservation", () => {
   it("carries the Fx twin's doc onto the derived Promise method", () => {
     // THE guard — the property invisible to `tsc`. A non-homomorphic rewrite
@@ -96,5 +110,27 @@ describe("PromiseView — JSDoc preservation", () => {
     const { signature } = quickInfo(PROBE(""), "set");
     expect(signature).toContain("Promise<void>");
     expect(signature).not.toContain("Effect");
+  });
+});
+
+describe("HarnessEdge — both faces from one Fx twin", () => {
+  // `promise-view.ts` warns that a non-homomorphic rewrite of PromiseView —
+  // "a union wrapper, an intersection" — drops the per-member JSDoc. That
+  // warning is about the MAPPING itself; HarnessEdge intersects at the USE
+  // site, leaving the mapped type homomorphic. The distinction is invisible
+  // to `tsc`, so it is measured here rather than reasoned about.
+  it("still carries the Fx twin's doc onto the derived Promise method", () => {
+    const { doc } = quickInfo(EDGE_PROBE(`/** ${SENTINEL} */`), "set");
+    expect(doc).toContain(SENTINEL);
+  });
+
+  it("exposes the canonical Effect twin as `.fx` alongside the facade", () => {
+    // The whole point: a consumer typed against the protocol can REACH the
+    // Effect surface. Without this, in-process callers are structurally
+    // forced onto `runPromise` — a root fiber that drops the ambient
+    // tickId/opId. See the HarnessEdge docblock for the measured case.
+    const source = EDGE_PROBE("");
+    expect(quickInfo(source, "set").signature).toContain("Promise<void>");
+    expect(quickInfo(source, "fx").signature).toContain("Fx");
   });
 });

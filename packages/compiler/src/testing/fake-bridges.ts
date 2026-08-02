@@ -26,6 +26,7 @@ import type {
   HookBridges,
   KnobDescriptor,
   KnobPrimitive,
+  ContentBlock,
   KnobsDispatchInput,
   KnobsHarnessProtocol,
   KnobsRegisterInput,
@@ -187,6 +188,27 @@ export function fakeKnobsHarness(
     notifier.notify(id);
   };
 
+  // ONE body per operation, shared by BOTH faces. `fx` is the canonical twin
+  // and the Promise methods are its facade (ADR 77) — writing them as separate
+  // closures would let the fake's two faces drift apart, which is precisely the
+  // infidelity these doubles are supposed to make impossible.
+  const setValue = ({ id, value }: KnobsSetInput): void => {
+    values.set(id, value);
+    const prev = descriptors.get(id);
+    descriptors.set(id, { ...(prev ?? {}), id, value });
+    fire(id);
+  };
+  const registerKnob = ({ id, descriptor }: KnobsRegisterInput): void => {
+    const current = values.has(id) ? values.get(id) : descriptor.defaultValue;
+    if (current !== undefined && !values.has(id)) values.set(id, current);
+    descriptors.set(id, { ...descriptor, id, value: current });
+    fire(id);
+  };
+  // Mock — accept without validation. Returns minimal content.
+  const dispatchKnob = (_input: KnobsDispatchInput): readonly ContentBlock[] => [
+    { type: "text", text: "(mock) knob_set applied" },
+  ];
+
   return {
     id: "mock:knobs",
     ready: Promise.resolve(),
@@ -199,22 +221,15 @@ export function fakeKnobsHarness(
     },
     subscribe: (id, l) => notifier.subscribe(id, l),
     subscribeAll: (l) => notifier.subscribeAll(l),
-    set: async ({ id, value }: KnobsSetInput) => {
-      values.set(id, value);
-      const prev = descriptors.get(id);
-      descriptors.set(id, { ...(prev ?? {}), id, value });
-      fire(id);
+    fx: {
+      use: () => () => {},
+      set: (input) => Effect.sync(() => setValue(input)),
+      register: (input) => Effect.sync(() => registerKnob(input)),
+      dispatch: (input) => Effect.sync(() => dispatchKnob(input)),
     },
-    register: async ({ id, descriptor }: KnobsRegisterInput) => {
-      const current = values.has(id) ? values.get(id) : descriptor.defaultValue;
-      if (current !== undefined && !values.has(id)) values.set(id, current);
-      descriptors.set(id, { ...descriptor, id, value: current });
-      fire(id);
-    },
-    dispatch: async (_input: KnobsDispatchInput) => {
-      // Mock — accept without validation. Returns minimal content.
-      return [{ type: "text", text: "(mock) knob_set applied" }];
-    },
+    set: async (input: KnobsSetInput) => setValue(input),
+    register: async (input: KnobsRegisterInput) => registerKnob(input),
+    dispatch: async (input: KnobsDispatchInput) => dispatchKnob(input),
     exportSnapshot: () => {
       const out: Record<string, KnobPrimitive> = {};
       for (const [k, v] of values) out[k] = v;
