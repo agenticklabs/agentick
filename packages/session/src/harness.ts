@@ -1602,10 +1602,14 @@ export class SessionHarness<P = unknown>
 
   /**
    * The composable `applyExecutorResult` Effect — the state-applicator
-   * `fx` twin the loop composes in-fiber (ADR 77). Returns the un-run
-   * `Effect.tryPromise` so the timeline write's exit-normalization stays
-   * in the loop's fiber rather than launching its own `runPromise` root.
-   * {@link applyExecutorResult} is the facade.
+   * `fx` twin the loop composes in-fiber (ADR 77). {@link applyExecutorResult}
+   * is the facade.
+   *
+   * The body is Effect-native ALL THE WAY DOWN to the timeline write. It used to
+   * be an `async` method reached through `Effect.tryPromise`, which made this
+   * twin a fiber-severing root in its first statement — it composed in the
+   * loop's fiber and then immediately left it. Ambient `RuntimeContext`
+   * (`tickId`) died there, so the timeline append it performs carried no tick.
    */
   // HOOK SCOPE (ADR 83): the `*Fx` twins are what the LOOP composes in-fiber
   // (ADR 77 Stage 3) — deliberately UNWRAPPED, so the loop's hot per-tick result
@@ -1617,7 +1621,7 @@ export class SessionHarness<P = unknown>
   // that must preserve the ADR-77 in-fiber composition.
   private applyExecutorResultFx(
     input: ApplyExecutorResultInput,
-  ): Effect.Effect<ApplyResult, StateApplyError, never> {
+  ): Effect.Effect<ApplyResult, StateApplyError | SubstrateError, never> {
     return Effect.gen(this, function* () {
       // IN-FIBER mint (ADR 91) — the only legal way for the async body to
       // reach `ctx.metrics`, since a synchronous ambient read from a Promise
@@ -1627,10 +1631,7 @@ export class SessionHarness<P = unknown>
       // The facets are LAZY getters, so a session with telemetry off pays for
       // a trunk copy and nothing else.
       const ctx = yield* this.currentOperationCtx();
-      return yield* Effect.tryPromise({
-        try: () => this.applyExecutorResultBody(input, ctx),
-        catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
-      });
+      return yield* this.applyExecutorResultBody(input, ctx);
     });
   }
 
@@ -1643,11 +1644,8 @@ export class SessionHarness<P = unknown>
   /** The composable `applyToolResults` Effect — see {@link applyExecutorResultFx}. */
   private applyToolResultsFx(
     input: ApplyToolResultsInput,
-  ): Effect.Effect<ApplyResult, StateApplyError, never> {
-    return Effect.tryPromise({
-      try: () => this.applyToolResultsBody(input),
-      catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
-    });
+  ): Effect.Effect<ApplyResult, StateApplyError | SubstrateError, never> {
+    return this.applyToolResultsBody(input);
   }
 
   applyToolResults(input: ApplyToolResultsInput): Promise<ApplyResult> {
@@ -1657,14 +1655,7 @@ export class SessionHarness<P = unknown>
   }
 
   appendEntry(input: AppendEntryInput): Promise<ApplyResult> {
-    return runHarnessProtocol(
-      this.sessionOp("append", input, (i) =>
-        Effect.tryPromise({
-          try: () => this.appendEntryBody(i),
-          catch: (cause): StateApplyError => new TimelineWriteFailed({ cause }),
-        }),
-      ),
-    );
+    return runHarnessProtocol(this.sessionOp("append", input, (i) => this.appendEntryBody(i)));
   }
 
   async notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
@@ -3153,50 +3144,52 @@ export class SessionHarness<P = unknown>
     };
   }
 
-  private async applyExecutorResultBody(
+  private applyExecutorResultBody(
     input: ApplyExecutorResultInput,
     ctx: OperationCtx,
-  ): Promise<ApplyResult> {
-    const ids: string[] = [];
-    const { usage, cost, model } = input.result;
-    if (input.result.output.length > 0) {
-      const id = await this.appendMessageEntry({
-        role: "assistant",
-        content: input.result.output,
-        // ADR 53 §2.2: one tick = one generation = one assistant entry;
-        // stamp provenance + the GENERATION's usage on the record — plus the
-        // model that produced it and what it cost, computed ONCE at act time.
-        // Usage without model identity cannot be priced, and a cost that is
-        // recomputed on read reprices history every time a rate changes.
-        // Absent `cost` = the tick was UNPRICED, which is a fact, not a zero.
-        metadata: {
-          executionId: input.executionId,
-          tickId: input.tickId,
-          ...omitUndefined({ usage, cost, model }),
-        },
-      });
-      ids.push(id);
-    }
-    // Fold the tick into BOTH the turn-level rollup and the session record.
-    //
-    // NOTE the session record is deliberately NOT a place a SPAWNED child's
-    // cost lands: a child folds into its OWN record, and "what did this agent
-    // tree cost" is a query over `spawnPath`, never a write-time rollup —
-    // write-time double-counts and freezes one scope answer (usage-cost §7.1).
-    // Gated on `usage` because "no usage at all" is not an unpriced tick — it
-    // is nothing to account for, and folding it would push a `partial` cost
-    // onto a turn that never generated. With usage present but no cost, the
-    // fold degrades the rollup to `partial` and counts the tick unpriced;
-    // it never contributes a zero to a `complete` total.
-    if (usage !== undefined) {
-      this._executionRollup = foldUsageRollup(this._executionRollup, model, usage, cost);
-      this.runtime.addTickAccounting(usage, model, cost);
-      // The metrics plane, mirroring what the two folds above just recorded
-      // durably. Same stamp, second projection — never a second source.
-      this.mirrorTickAccounting(ctx.metrics, usage, model, cost);
-    }
-    this.runtime.bumpTick();
-    return { appendedEntryIds: ids };
+  ): Effect.Effect<ApplyResult, TimelineWriteFailed | SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      const ids: string[] = [];
+      const { usage, cost, model } = input.result;
+      if (input.result.output.length > 0) {
+        const id = yield* this.appendMessageEntryFx({
+          role: "assistant",
+          content: input.result.output,
+          // ADR 53 §2.2: one tick = one generation = one assistant entry;
+          // stamp provenance + the GENERATION's usage on the record — plus the
+          // model that produced it and what it cost, computed ONCE at act time.
+          // Usage without model identity cannot be priced, and a cost that is
+          // recomputed on read reprices history every time a rate changes.
+          // Absent `cost` = the tick was UNPRICED, which is a fact, not a zero.
+          metadata: {
+            executionId: input.executionId,
+            tickId: input.tickId,
+            ...omitUndefined({ usage, cost, model }),
+          },
+        });
+        ids.push(id);
+      }
+      // Fold the tick into BOTH the turn-level rollup and the session record.
+      //
+      // NOTE the session record is deliberately NOT a place a SPAWNED child's
+      // cost lands: a child folds into its OWN record, and "what did this agent
+      // tree cost" is a query over `spawnPath`, never a write-time rollup —
+      // write-time double-counts and freezes one scope answer (usage-cost §7.1).
+      // Gated on `usage` because "no usage at all" is not an unpriced tick — it
+      // is nothing to account for, and folding it would push a `partial` cost
+      // onto a turn that never generated. With usage present but no cost, the
+      // fold degrades the rollup to `partial` and counts the tick unpriced;
+      // it never contributes a zero to a `complete` total.
+      if (usage !== undefined) {
+        this._executionRollup = foldUsageRollup(this._executionRollup, model, usage, cost);
+        this.runtime.addTickAccounting(usage, model, cost);
+        // The metrics plane, mirroring what the two folds above just recorded
+        // durably. Same stamp, second projection — never a second source.
+        this.mirrorTickAccounting(ctx.metrics, usage, model, cost);
+      }
+      this.runtime.bumpTick();
+      return { appendedEntryIds: ids };
+    });
   }
 
   /**
@@ -3248,34 +3241,39 @@ export class SessionHarness<P = unknown>
     }
   }
 
-  private async applyToolResultsBody(input: ApplyToolResultsInput): Promise<ApplyResult> {
-    const ids: string[] = [];
-    for (const tr of input.results) {
-      const block: ContentBlock = {
-        type: "tool_result",
-        toolUseId: tr.toolCallId,
-        name: tr.toolName,
-        content: tr.content,
-        ...(tr.succeeded === false ? { isError: true } : {}),
-      };
-      const id = await this.appendMessageEntry({
-        role: "tool",
-        content: [block],
-        toolCallId: tr.toolCallId,
-        name: tr.toolName,
-        metadata: { executionId: input.executionId, tickId: input.tickId },
-      });
-      ids.push(id);
-    }
-    return { appendedEntryIds: ids };
+  private applyToolResultsBody(
+    input: ApplyToolResultsInput,
+  ): Effect.Effect<ApplyResult, TimelineWriteFailed | SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      const ids: string[] = [];
+      for (const tr of input.results) {
+        const block: ContentBlock = {
+          type: "tool_result",
+          toolUseId: tr.toolCallId,
+          name: tr.toolName,
+          content: tr.content,
+          ...(tr.succeeded === false ? { isError: true } : {}),
+        };
+        const id = yield* this.appendMessageEntryFx({
+          role: "tool",
+          content: [block],
+          toolCallId: tr.toolCallId,
+          name: tr.toolName,
+          metadata: { executionId: input.executionId, tickId: input.tickId },
+        });
+        ids.push(id);
+      }
+      return { appendedEntryIds: ids };
+    });
   }
 
-  private async appendEntryBody(input: AppendEntryInput): Promise<ApplyResult> {
-    const id = await this.appendMessageEntry({
+  private appendEntryBody(
+    input: AppendEntryInput,
+  ): Effect.Effect<ApplyResult, TimelineWriteFailed | SubstrateError, never> {
+    return this.appendMessageEntryFx({
       role: input.entry.role,
       content: input.entry.content,
-    });
-    return { appendedEntryIds: [id] };
+    }).pipe(Effect.map((id) => ({ appendedEntryIds: [id] })));
   }
 
   /**
@@ -3313,7 +3311,17 @@ export class SessionHarness<P = unknown>
    * the append through the TimelineHarness. Returns the message id so
    * `StateApplicator` callers can include it in their `ApplyResult`.
    */
-  private async appendMessageEntry(input: {
+  /**
+   * Append one message entry IN THE CALLER'S FIBER, returning its id.
+   *
+   * Effect-canonical because `RuntimeContext` — which carries `tickId` — is
+   * ambient ON the fiber, and a `runPromise` root severs it. This used to await
+   * the timeline's Promise facade, so every `timeline:append` operation the
+   * session produced was built with no tick on its scope: the recorder could not
+   * join tap ⑤ to its tick, and no timeline envelope on the bus was
+   * attributable to the tick that caused it.
+   */
+  private appendMessageEntryFx(input: {
     readonly role: import("@agentick/spec").SessionMessageRole;
     readonly content: readonly ContentBlock[];
     readonly visibility?: "model" | "observer" | "log";
@@ -3321,7 +3329,7 @@ export class SessionHarness<P = unknown>
     readonly name?: string;
     readonly tags?: readonly string[];
     readonly metadata?: Readonly<Record<string, unknown>>;
-  }): Promise<string> {
+  }): Effect.Effect<string, TimelineWriteFailed | SubstrateError, never> {
     const messageId = `m_${ulid()}`;
     const message: import("@agentick/spec").SessionMessage = {
       id: messageId,
@@ -3339,8 +3347,20 @@ export class SessionHarness<P = unknown>
       message,
       ...omitUndefined({ visibility: input.visibility, tags: input.tags }),
     };
-    await this.bridges.timeline.append(entry);
-    return messageId;
+    return this.bridges.timeline.fx.append([entry]).pipe(Effect.as(messageId));
+  }
+
+  /** Promise facade over {@link appendMessageEntryFx}, for callers not in a fiber. */
+  private async appendMessageEntry(input: {
+    readonly role: import("@agentick/spec").SessionMessageRole;
+    readonly content: readonly ContentBlock[];
+    readonly visibility?: "model" | "observer" | "log";
+    readonly toolCallId?: string;
+    readonly name?: string;
+    readonly tags?: readonly string[];
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  }): Promise<string> {
+    return runHarnessProtocol(this.appendMessageEntryFx(input));
   }
 }
 

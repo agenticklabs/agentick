@@ -143,24 +143,12 @@ describe("roundTripRecorder — the full ⓪–⑤ span through createApp", () =
     expect(trip!.dropped).toEqual({ rawChunks: 0, deltas: 0 });
   });
 
-  // ── KNOWN GAP: tap ⑤ ──────────────────────────────────────────────────────
-  //
-  // `onBeforeTimelineAppend` FIRES, but its `ctx.tickId` is `undefined`, so the
-  // append cannot be joined to the tick that caused it. Verified by probe:
-  // compiler and loop both stamp the same `tick-…` id; every timeline append in
-  // the same execution stamps none.
-  //
-  // `docs/proposals/v2/observability.md` asserted "across harnesses the shared
-  // key is tickId" — that was never checked, and it holds for the compiler and
-  // not the timeline. The fix is in the SESSION, not here: the state applicator
-  // appends as a consequence of a tick and should carry that tick's scope. It is
-  // worth doing beyond this recorder — with no tick on the scope, no
-  // `timeline:command:append` envelope on the bus is attributable to a tick
-  // either, which a devtools timeline view would need.
-  //
-  // `it.fails` so the tree stays green while the gap stays visible, and flipping
-  // it is forced the moment the scope is threaded.
-  it.fails("captures ⑤ — what was actually appended to the timeline", async () => {
+  // Tap ⑤ is the terminus, and it only works because the whole apply path is
+  // Effect-native down to the timeline write. `tickId` is ambient ON the fiber,
+  // so a single `runPromise` root anywhere between the tick and the append
+  // silently drops it — which is exactly what `Effect.tryPromise(() =>
+  // this.applyExecutorResultBody(...))` used to do from inside the fx twin.
+  it("captures ⑤ — what was actually appended to the timeline", async () => {
     const [trip] = await capture(["ok"]);
     expect(trip!.persisted.some((entry) => entry.role === "assistant")).toBe(true);
   });
@@ -203,10 +191,7 @@ describe("roundTripRecorder — the full ⓪–⑤ span through createApp", () =
     expect(trip!.deltas.some((d) => d.type === "content")).toBe(true);
   });
 
-  // Blocked on the same gap: with no ⑤ captured there is nothing to diff the
-  // stream against. The check itself is exercised by the unit test in
-  // `@agentick/session`; this is the end-to-end claim.
-  it.fails("catches text that reached the timeline but was never streamed", async () => {
+  it("catches text that reached the timeline but was never streamed", async () => {
     const [trip] = await capture(["hello"], { splice: ", openai-api" });
 
     const violations = verbatimViolations(trip!);
