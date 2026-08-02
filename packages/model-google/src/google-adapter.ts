@@ -820,6 +820,25 @@ function toGoogleParams(
   if (systemInstruction !== undefined) config.systemInstruction = systemInstruction;
   if (tools.length > 0) config.tools = tools;
 
+  // Ask for the thoughts, not just the bill for them.
+  //
+  // Gemini thinks whether or not you request thought parts: `thoughtsTokenCount`
+  // comes back either way. But with `includeThoughts` unset, NO part carries
+  // `thought: true` — so the reasoning channel this adapter routes to (see the
+  // `part.thought` branch in the chunk mapper) is never fed, and a client that
+  // wants to show or collapse reasoning has nothing to show or collapse.
+  //
+  // Worse than absent: with thinking on and no thought/answer boundary marked,
+  // thought-shaped text has been observed arriving in the ANSWER — a model
+  // narrating its own steps, or reciting its function-binding scaffolding, as
+  // though it were the reply. Requesting thoughts gives the boundary a name.
+  //
+  // Defaulted ON rather than left to each call site: whether reasoning is
+  // DISPLAYED is a client decision, and a client cannot decide about something
+  // it was never sent. Turning it off is one line in `providerOptions.google`,
+  // and the escape hatch below wins.
+  config.thinkingConfig = { includeThoughts: true };
+
   // G5 — adopter escape hatch. `input.providerOptions` (project-time
   // fold of tree over target, #176) wins over the target's own bag;
   // merged defensively so a direct `buildParams(input, target)` still
