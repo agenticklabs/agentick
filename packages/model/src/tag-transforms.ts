@@ -102,31 +102,46 @@ export function thinkTagTransform(): DeltaTransform {
   const tagModes = new Map<string, TagMode>([["think", "reasoning"]]);
   const parser = new StreamTagParser({ tags: { think: {} } });
   let reasoningStarted = false;
+  let lastBlockIndex = 0;
 
   return {
     process(delta: AdapterDelta): readonly AdapterDelta[] {
       if (delta.type !== "content-delta") return [delta];
       const out: AdapterDelta[] = [];
+      lastBlockIndex = delta.blockIndex;
       for (const ev of parser.process(delta.delta)) {
-        handleTagEvent(ev, tagModes, out, () => {
-          if (!reasoningStarted) {
-            reasoningStarted = true;
-            out.push({ type: "reasoning-start", blockIndex: ROUTER_REASONING_BLOCK_INDEX });
-          }
-        });
+        handleTagEvent(
+          ev,
+          tagModes,
+          out,
+          () => {
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              out.push({ type: "reasoning-start", blockIndex: ROUTER_REASONING_BLOCK_INDEX });
+            }
+          },
+          delta.blockIndex,
+        );
       }
       // Replace the original delta with the parsed-out routing.
       return out;
     },
     flush(): readonly AdapterDelta[] {
       const out: AdapterDelta[] = [];
+      // Flush has no delta in hand — the tail belongs to the last block seen.
       for (const ev of parser.flush()) {
-        handleTagEvent(ev, tagModes, out, () => {
-          if (!reasoningStarted) {
-            reasoningStarted = true;
-            out.push({ type: "reasoning-start", blockIndex: ROUTER_REASONING_BLOCK_INDEX });
-          }
-        });
+        handleTagEvent(
+          ev,
+          tagModes,
+          out,
+          () => {
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              out.push({ type: "reasoning-start", blockIndex: ROUTER_REASONING_BLOCK_INDEX });
+            }
+          },
+          lastBlockIndex,
+        );
       }
       return out;
     },
@@ -150,20 +165,23 @@ export function customBlockTransform(
     return { process: (d) => [d], flush: () => [] };
   }
   const parser = new StreamTagParser({ tags: handlers });
+  let lastBlockIndex = 0;
 
   return {
     process(delta: AdapterDelta): readonly AdapterDelta[] {
       if (delta.type !== "content-delta") return [delta];
       const out: AdapterDelta[] = [];
+      lastBlockIndex = delta.blockIndex;
       for (const ev of parser.process(delta.delta)) {
-        handleTagEvent(ev, tagModes, out, () => {});
+        handleTagEvent(ev, tagModes, out, () => {}, delta.blockIndex);
       }
       return out;
     },
     flush(): readonly AdapterDelta[] {
       const out: AdapterDelta[] = [];
+      // Flush has no delta in hand — the tail belongs to the last block seen.
       for (const ev of parser.flush()) {
-        handleTagEvent(ev, tagModes, out, () => {});
+        handleTagEvent(ev, tagModes, out, () => {}, lastBlockIndex);
       }
       return out;
     },
@@ -179,12 +197,27 @@ function handleTagEvent(
   tagModes: Map<string, TagMode>,
   out: AdapterDelta[],
   onReasoningStart: () => void,
+  /**
+   * The block the text came in on. Text OUTSIDE a tag is re-emitted on this
+   * same block — it must not be rewritten to a fixed index.
+   *
+   * This used to hardcode block 0 ("the canonical assistant text block"), which
+   * is only true when the response has exactly one text block. It does not when
+   * a reasoning block precedes the text, or when a function call splits the
+   * response into two text parts: the adapter assigns those distinct indices,
+   * the transform collapsed them all onto 0, and the accumulator concatenated
+   * content the adapter had correctly separated.
+   *
+   * Observed as an assistant reply beginning with the tail of the model's own
+   * thought text, joined with no separator — `", agent-admin."` immediately
+   * followed by the real answer — while the block that was actually opened for
+   * the answer finished empty.
+   */
+  sourceBlockIndex: number,
 ): void {
   if (event.type === "text") {
     if (event.content.length > 0) {
-      // Plain text flows back through as content-delta on block 0 (the
-      // canonical assistant text block).
-      out.push({ type: "content-delta", blockIndex: 0, delta: event.content });
+      out.push({ type: "content-delta", blockIndex: sourceBlockIndex, delta: event.content });
     }
     return;
   }
