@@ -63,8 +63,16 @@ parent/child) the shared key is `tickId`.
 
 Built: `roundTripRecorder` in `@agentick/model-executor` — a plain `CommandHooks`
 bag covering ①–④ plus the terminal message, with `verbatimViolations()` over it.
-It is `opId`-keyed, so it is model-only; spanning ⓪–⑤ means re-keying on
-`tickId`.
+It is `opId`-keyed, so it is model-only.
+
+**Spanning ⓪–⑤ from a hooks bag is blocked**, and not by effort: the recorder
+lives in `@agentick/model-executor`, whose compilation sees only the `model:*`
+augmentations, so it CANNOT NAME `onAfterCompilerRenderTree` or
+`onBeforeTimelineAppend` — those keys do not exist in its type universe. A
+cross-harness bag must be authored where every augmentation is loaded, and today
+nothing quite is (`@agentick/app` carries `compiler-react` as a dev/peer
+dependency only; there is no metapackage directory yet). See §7 — the answer is
+probably that the cross-harness view is a bus subscriber, not a hooks bag.
 
 ---
 
@@ -182,17 +190,71 @@ first line of the boot log.
 
 ---
 
-## 7. Devtools, and the one thing hooks cannot reach
+## 7. Devtools rides the BUS, not the hooks
 
-Devtools is a **hook consumer**, not new instrumentation — with one sharp
-exception.
+**Hooks transform. The bus observes.** A dashboard has no business in the call
+path, so `@agentick/devtools` subscribes to `ProtocolEvent`s rather than
+registering interceptors.
 
-- **Operation granularity** — what crossed which seam, in what order, carrying
-  what. Entirely hooks. The recorder is already the substrate for it.
-- **Component granularity** — WHICH `<Section>` produced this node, why a
-  component re-rendered, what a `useKnob` holds. **Not reachable from any hook.**
-  `compiler:render-tree` yields render's OUTPUT, never the render itself.
+That is not only cleaner, it is the only thing that TYPECHECKS. `CommandRegistry`
+is spec-SEEDED but harness-AUGMENTED: spec owns `WireCommandMap`, which derives
+the `wire:*` gateway commands from `WireMethods` — genuinely spec-only — while
+`model:generate_stream`, `compiler:render-tree` and `timeline:append` are
+augmented in by their own packages. Those keys DO NOT EXIST in a spec-only
+compilation, so a hooks-based devtools could not name them without depending on
+every harness it observes. `ProtocolEvent` is spec-owned, so a subscriber needs
+none of them.
 
-That second row is the only place a real React-devtools backend for
-`compiler-react` would earn its keep, and it is a genuinely separate build rather
-than a layer on the same substrate. Unscoped.
+The spine is already on the bus, already correlated, already reaching the wire —
+verified against a live gateway trace, not assumed:
+
+```jsonc
+{ "surface": "session",  "name": "session:execution:event", "phase": "started",
+  "scope": { "sessionId": "…" },
+  "payload": { "type": "content-delta", "blockIndex": 0, "delta": "…", "tick": 7 } }
+
+{ "surface": "timeline", "name": "timeline:command:append", "phase": "requested",
+  "scope": { "sessionId": "…", "origin": "host" },
+  "payload": { "entries": [{ "kind": "message", "message": { … } }] } }
+```
+
+Every envelope carries `surface` / `name` / `phase` / `scope` / `payload` and is
+cursor-ordered. A gateway-down dashboard is a SUBSCRIBER, not new
+instrumentation.
+
+### Two consumers, one substrate, different depths
+
+|           | **devtools**                  | **the round-trip recorder**                                 |
+| --------- | ----------------------------- | ----------------------------------------------------------- |
+| mechanism | bus subscriber                | `CommandHooks` bag                                          |
+| deps      | spec (or close)               | the harness it taps                                         |
+| audience  | a live dashboard              | one investigation                                           |
+| default   | on, cheap                     | off                                                         |
+| reaches   | the spine, gateway → timeline | pre-normalization payloads (② native request, ③ raw chunks) |
+
+Not a duplication. The recorder deliberately taps payloads that should NOT ride
+the bus by default — a raw provider chunk per token is a diagnostic, not
+telemetry.
+
+### The open question that sizes the whole thing
+
+**Do `model:provider-request`'s raw chunks and `compiler:render-tree`'s output
+publish bus envelopes when something is subscribed?** The executor has a lazy
+path that skips envelope construction with no subscriber, which SUGGESTS they do
+— unverified.
+
+- If yes: devtools gets the full ⓪–⑤ span with zero harness deps, and the
+  recorder collapses into a thin convenience over the same stream.
+- If no: the split above stands as written.
+
+Answer this first; it decides whether devtools is one package or two.
+
+### Component granularity, and why it is no longer an exception
+
+An earlier draft claimed WHICH `<Section>` produced a node — and why a component
+re-rendered, and what a `useKnob` holds — was unreachable, needing a real
+React-devtools backend. It is not: **`compiler-react` can EMIT that itself in dev
+mode**, as ordinary events. Self-reporting beats a devtools backend on every
+axis — it works headless, over the wire, in tests, and in prod behind a flag,
+and it needs no second mechanism. `compiler:render-tree` yields render's OUTPUT;
+dev-mode emission yields the render.
