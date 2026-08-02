@@ -211,6 +211,7 @@ export {
   type CommandMiddlewares,
   type CommandRegistry,
   type HookRegistrars,
+  type InterceptorCtx,
   type NamespaceGuards,
   type NamespaceHooks,
 } from "./middleware.js";

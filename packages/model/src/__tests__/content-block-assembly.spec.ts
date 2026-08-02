@@ -22,7 +22,7 @@ function text(accum: StreamAccumulator, blockIndex: number, delta: string): void
   // (`content-start` / `content-delta` / `content-end`) while the reasoning channel
   // is named for reasoning. Easy to get wrong from memory, which is why the helper
   // exists once here instead of inline per test.
-  accum.apply({ type: "content-start", blockIndex, contentType: "text" });
+  accum.apply({ type: "content-start", blockIndex, blockType: "text" });
   accum.apply({ type: "content-delta", blockIndex, delta });
   accum.apply({ type: "content-end", blockIndex });
 }
@@ -112,7 +112,7 @@ describe("toContentBlocks", () => {
     // An opened-then-unused block is noise, not content: a renderer would draw an
     // empty bubble for it.
     const accum = new StreamAccumulator();
-    accum.apply({ type: "content-start", blockIndex: 0, contentType: "text" });
+    accum.apply({ type: "content-start", blockIndex: 0, blockType: "text" });
     accum.apply({ type: "content-end", blockIndex: 0 });
     accum.apply({ type: "reasoning-start", blockIndex: 1 });
     accum.apply({ type: "reasoning-end", blockIndex: 1 });

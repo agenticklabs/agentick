@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { customBlockTransform, thinkTagTransform } from "../tag-transforms.js";
-import type { AdapterDelta } from "../language-model-adapter.js";
+import type { AdapterDelta } from "@agentick/spec";
 
 /**
  * Text outside a tag must be re-emitted on the block it ARRIVED on.

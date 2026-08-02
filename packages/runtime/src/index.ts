@@ -83,6 +83,10 @@ export {
   type NamespaceHooks,
   type HarnessFx,
   type HarnessShell,
+  // The ctx EVERY hook/guard/middleware receives. `CommandHooks` is typed
+  // against it, so writing a hook as a standalone named function (rather than
+  // inline in the bag, where it is inferred) is impossible without it.
+  type InterceptorCtx,
   type InterceptorKind,
   type Middleware,
   type OperationSignal,
