@@ -1,6 +1,10 @@
 # ADR 45 — Runtime context model: unified scope, closure-capture propagation, structural-identity for auth
 
-**Status:** Revised — 2026-06-30.
+**Status:** Revised — 2026-06-30. **Amended — 2026-08-02:** the ALS rejection is
+UPHELD but two of its five stated reasons were wrong and one is now falsified by
+measurement. Reasoning corrected in "What we considered and rejected → ALS
+coupling"; `withContext` is confirmed as the seam and TC39 `AsyncContext` as the
+adoption target.
 **Supersedes:** the first draft of this same ADR (committed 2026-06-30 earlier, then substantially revised after expert review). The prior draft overclaimed in two places — `Operation.scope` was incorrectly proposed as redundant with `RuntimeContext`, and ALS coupling was proposed as the propagation backbone when closure-capture-via-deps is actually sufficient. Both corrected here.
 
 **Touches:** `@agentick/spec/data/events.ts` (EventScope canonicalization +
@@ -703,27 +707,94 @@ do not consult `ctx.user`.
 ### ALS coupling
 
 Proposed in the first draft as the propagation backbone. Rejected after
-analysis:
+analysis. **Amended 2026-08-02 — the conclusion stands, the reasoning did
+not.** Each original argument, with its verdict:
 
 - **Node-tie.** ALS works in Node, Bun (via `node:async_hooks`), Deno
   (Node compat). Browsers: no. TC39 `AsyncContext` is years out.
+  — **DECAYED.** Measured 2026-08-02: no client package constructs a harness
+  or runs an Operation (`client-core/effect-middleware.ts` only _names_
+  `BaseHarness` in a comment). The operation spine is server-resident, so a
+  bridge would only ever need to live where ALS already works. This argument
+  should not be leaned on.
 - **Worker-thread caveat.** ALS doesn't propagate across worker threads
   — would create surprising behavior for adopters dispatching to worker
-  pools.
+  pools. — **NARROW.** A worker dispatch crosses a serialization boundary
+  where context is re-seeded explicitly regardless.
 - **Library-break risk.** Some callback-based libraries break the ALS
-  chain. Hard to audit, easy to miss.
+  chain. Hard to audit, easy to miss. — **STANDS, minor.**
 - **Solves a problem we mostly don't have.** Closure-capture-via-deps
   handles 90% of adopter cases. Effect-typed substrate handles the
   rest. Structural identity handles auth. The residual is diagnostic
   ambient state — not worth the substrate complexity.
+  — **FALSIFIED. Strike this.** One session (2026-08-02) found five distinct
+  context-loss defects on internal harness→harness paths: the timeline had no
+  `fx` twins at all; `SessionHarness.applyExecutorResultFx` left its fiber on
+  its first statement; the loop awaited `notifyTickEnd` through a bare
+  `Effect.tryPromise`; `GatesController.transition` fired `void knobs.set(...)`;
+  and `GatesController.register` still does. `tickId` is not diagnostic — it is
+  the JOIN KEY for cross-harness attribution, and without it "what did tick N
+  do" is unanswerable. The residual was neither small nor cosmetic.
 - **`readContext()` already broken inside fibers.** Even with ALS,
   inside-Effect-fiber sync reads would still need the FiberRef route.
   Two propagation substrates to keep in sync = double the failure modes.
+  — **STANDS, and is now the load-bearing argument.** Evidence: asked to write
+  the bridge, a frontier model produced twenty lines with the synchronization
+  inverted — `runPromise` called (eagerly starting the effect) BEFORE
+  `AsyncLocalStorage.run` established the store, so nothing inside the effect
+  ever saw it. The mirror is easy to get subtly, silently wrong.
 
-If a real need emerges (third-party library deeply integrated with
-adopter code where ambient context truly is required), revisit with
-TC39 `AsyncContext` as the target — it's the runtime-agnostic answer
-when the standard ships.
+#### What actually decides it
+
+A severed root costs THREE things, and ALS buys back only the one that is
+visible:
+
+| cost of a `runPromise` root                                            | ALS fixes it? |
+| ---------------------------------------------------------------------- | ------------- |
+| ambient scope (`tickId` / `opId` / `parentOpId`)                       | **yes**       |
+| interruption propagation — a detached root outlives its parent's abort | no            |
+| the typed `E` channel — `void promise` swallows the failure            | no            |
+
+So an ALS bridge in place during the 2026-08-02 gates defect would have made
+`tickId` correct while leaving those knob writes uninterruptible and
+unobserved — and the symptom that prompted the investigation would have been
+gone. **It would have hidden two thirds of the defect while fixing one.**
+
+It also would not have been sufficient. That defect had two independent faults;
+ALS addresses only the first. The second — `tickId` unwinding when the
+`loop:command:tick` operation settles, since the DECIDE runs after it (ADR 89
+§4) — is not a propagation failure at all. The value was genuinely out of scope;
+ALS mirrors what the fiber holds and the fiber held nothing. The fix is
+`withContext({ tickId }, …)` either way.
+
+#### The sanctioned alternatives (in order)
+
+1. **Publish both faces in the protocol.** Every one of the five defects was an
+   in-process caller with no typed route to the Effect twin — `GatesController`
+   was not careless, `KnobsHarnessProtocol` declared no `fx` member for it to
+   reach. `HarnessEdge<F>` (`spec/protocol/promise-view.ts`) derives the Promise
+   facade and `.fx` together from one hand-authored twin, so omission is a
+   compile error rather than a silent tickless op. **This removes the ability to
+   make the mistake and is strictly better than any runtime net.**
+2. **`withContext` is THE seam.** Substrate code that needs to re-annotate an
+   ambient scope uses it (the loop's decide span does). Keeping propagation
+   behind this one function is what makes a future substrate swap a one-file
+   change rather than an audit.
+3. **A dev-mode orphan detector at the bus, NOT a parallel context substrate.**
+   An operation published while an execution is open that carries no
+   `executionId` is an orphan; flag it where it happens. Same class of
+   protection, no runtime tie, cross-platform, and it generalizes
+   `app/__tests__/tick-scope-conformance` from one CI scenario into an
+   always-on invariant.
+
+#### If this is revisited
+
+TC39 `AsyncContext` (stage 2) remains the target — runtime-agnostic, browsers
+included, and it retires the Node-tie argument entirely. **Zone.js is not a
+path:** it patches `Promise.prototype.then`, timers, and event listeners, and
+native `async`/`await` does not route through the patchable `.then` (which is
+why Angular had to downlevel async). Adopt `AsyncContext` behind `withContext`
+when it ships; do not build the ALS mirror in the interim.
 
 ### Sync `runWithContext` primitive
 
