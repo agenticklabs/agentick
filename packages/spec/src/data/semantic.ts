@@ -130,6 +130,19 @@ export interface SectionNode {
   readonly providerMetadata?: Record<string, Record<string, unknown>>;
   /** Author-supplied bag. Rides EVERY block the section produces. */
   readonly metadata?: Record<string, unknown>;
+  /**
+   * The dialect DECLARED for this section at its position in the tree —
+   * `ctx.formatter("section")` resolved where the section was written.
+   *
+   * Named to match `MessageEntry.renderedWith`, and load-bearing for the
+   * same reason one level down: **the nearest declared scope decides a
+   * section's dialect, and the default is the container's.** The formatter
+   * pass compares this against the dialect it is running; when they differ the
+   * section is an ISLAND — lowered by its own formatter, in its own frame,
+   * and embedded verbatim (the pass does not re-render its bytes). When they
+   * agree, which is the overwhelmingly common case, nothing happens.
+   */
+  readonly renderedWith?: FormatterRef;
 }
 
 /**

@@ -24,6 +24,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { fakeBridges } from "@agentick/compiler";
+import { markdownFormatter } from "@agentick/formatters";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type { MessageEntry, RenderedTree } from "@agentick/spec";
 
@@ -39,7 +40,7 @@ import {
 } from "../react/components/semantic.js";
 import { Section } from "../react/components/section.js";
 import { Message } from "../react/components/message.js";
-import { PlainText, XML } from "../react/components/format-scope.js";
+import { FormatScope, Markdown, PlainText, XML } from "../react/components/format-scope.js";
 
 let seq = 0;
 
@@ -98,10 +99,13 @@ describe("conservation", () => {
   });
 
   it("joins two sections in one message the way the old system blob did", async () => {
-    // `collectSectionText` joined sections with a blank line. Two sections are
-    // two blocks now, and two blocks can become two parts that a provider
-    // concatenates with NO separator — so the separator is put back at the
-    // point the blocks meet.
+    // `collectSectionText` joined sections with a blank line, and the bytes
+    // have not moved. What changed is WHERE the join is applied: two sections
+    // are two BLOCKS here, each naming itself, and the blank line goes in at
+    // the two exits from the IR — `blocksToText` on the string path (pinned
+    // below) and `joinTextParts` on the wire path (pinned in
+    // `@agentick/model`'s cache-hints suite, which is where a provider
+    // concatenating text parts with no separator is a fact).
     const tree = await compile(
       <System>
         <Section title="A">first</Section>
@@ -109,8 +113,28 @@ describe("conservation", () => {
       </System>,
     );
     const [system] = entries(tree);
-    expect(system?.content).toHaveLength(1);
-    expect(textOf(system!)).toBe("# A\nfirst\n\n# B\nsecond");
+    expect(system?.content).toHaveLength(2);
+    expect(system?.content[0]).toMatchObject({ text: "# A\nfirst", id: expect.any(String) });
+    expect(markdownFormatter.blocksToText!(system!.content)).toBe("# A\nfirst\n\n# B\nsecond");
+  });
+
+  it("keeps both sections separately attributable — one block, one id, each", async () => {
+    // Impossible while the two blocks merged: the merged block could carry
+    // only ONE id, so the second section's id reached nothing downstream and
+    // its bytes could not be attributed to it by provenance or anything else.
+    const tree = await compile(
+      <System>
+        <Section id="sec.a" title="A">
+          first
+        </Section>
+        <Section id="sec.b" title="B">
+          second
+        </Section>
+      </System>,
+    );
+    const [system] = entries(tree);
+    expect(system?.content.map((b) => b.id)).toEqual(["sec.a", "sec.b"]);
+    expect(system?.content.map((b) => b.metadata?.section)).toEqual(["sec.a", "sec.b"]);
   });
 });
 
@@ -379,6 +403,73 @@ describe("the dialect in scope decides how a section reads", () => {
       </XML>,
     );
     expect(textOf(entries(tree)[0]!)).toBe("<outer>\n<inner>\ndeep\n</inner>\n</outer>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Islands — the nearest DECLARED scope overrides the container's dialect
+// ---------------------------------------------------------------------------
+
+describe("a section that declares its own dialect is an island", () => {
+  it("puts an XML island inside a markdown <System>, verbatim", async () => {
+    // The ubiquitous hand-written-prompt shape: markdown prose with a literal
+    // tagged block in it. The island's bytes are NOT re-rendered by the outer
+    // dialect — escaping them would emit `&lt;current_user&gt;`, a rendering
+    // OF an island rather than an island.
+    const tree = await compile(
+      <System>
+        Follow the rules.
+        <XML>
+          <Section title="Current User">Ryan &amp; Bob</Section>
+        </XML>
+      </System>,
+    );
+    const [system] = entries(tree);
+    expect(system?.role).toBe("system");
+    expect(textOf(system!)).toBe(
+      "Follow the rules.<current_user>\nRyan &amp; Bob\n</current_user>",
+    );
+    expect(textOf(system!)).not.toContain("&lt;current_user&gt;");
+  });
+
+  it("puts a markdown island inside an XML <System>, `&` raw and all", async () => {
+    // The mirror, and the honest consequence: markdown does not escape and the
+    // outer xml never sees these bytes, so the `&` stays raw. Well-formedness
+    // across a declared boundary is the author's call.
+    const tree = await compile(
+      <XML>
+        <System>
+          <Markdown>
+            <Section title="Notes">Ryan &amp; Bob</Section>
+          </Markdown>
+        </System>
+      </XML>,
+    );
+    expect(textOf(entries(tree)[0]!)).toBe("# Notes\nRyan & Bob");
+  });
+
+  it("leaves same-dialect nesting alone — the stamp usually names the container", async () => {
+    const tree = await compile(
+      <System>
+        <Section title="Identity">You are Ernesto.</Section>
+      </System>,
+    );
+    expect(textOf(entries(tree)[0]!)).toBe("# Identity\nYou are Ernesto.");
+  });
+
+  it("obeys a purpose-scoped FormatScope, which used to stamp a ref and ignore it", async () => {
+    // `<FormatScope purpose="section">` resolved a formatter for sections and
+    // then rendered them in the message's dialect anyway — a knob that lied.
+    const tree = await compile(
+      <FormatScope formatter={{ id: "xml", format: "xml" }} purpose="section">
+        <System>
+          <Section title="Current User">Ryan</Section>
+        </System>
+      </FormatScope>,
+    );
+    const [system] = entries(tree);
+    expect(system?.renderedWith?.format).toBe("markdown");
+    expect(textOf(system!)).toBe("<current_user>\nRyan\n</current_user>");
   });
 });
 

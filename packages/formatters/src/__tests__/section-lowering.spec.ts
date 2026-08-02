@@ -13,7 +13,9 @@
 import { describe, expect, it } from "vitest";
 import type { ContentBlock } from "@agentick/spec";
 
+import { builtInFormatters } from "../index.js";
 import { markdownFormatter } from "../markdown.js";
+import { declaredFormatterResolver } from "../resolve-formatter.js";
 import {
   expandSections,
   lowerSection,
@@ -193,26 +195,41 @@ describe("the carrier — collect emits structure, the formatter lowers it", () 
     expect(out[0]).toMatchObject({ text: "# T\n**loud**" });
   });
 
-  it("joins two adjacent sections with a blank line", () => {
-    // The rule that used to live in the collect walker's `coalesce`, moved
-    // here with the lowering. Byte-identical: two sections in one message are
-    // one block separated by `\n\n`, because a provider may concatenate text
-    // parts with no separator of its own.
+  it("keeps two adjacent sections as two blocks, each naming itself", () => {
+    // The lowering briefly MERGED these into one block, to put a separator
+    // between them; that join is a transport concern and lives at projection
+    // now (`joinTextParts`). What comes back here is per-section identity: the
+    // merged block could only carry one id, so the second section's id existed
+    // nowhere downstream and nothing could attribute its bytes.
     const out = markdownFormatter([
       sectionBlock({ id: "a", title: "A", content: [text("first")] }),
       sectionBlock({ id: "b", title: "B", content: [text("second")] }),
     ]);
-    expect(out).toHaveLength(1);
-    expect(out[0]).toMatchObject({ text: "# A\nfirst\n\n# B\nsecond" });
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ text: "# A\nfirst", id: "a", metadata: { section: "a" } });
+    expect(out[1]).toMatchObject({ text: "# B\nsecond", id: "b", metadata: { section: "b" } });
   });
 
-  it("refuses to merge across a cache breakpoint — the boundary IS the block", () => {
+  it("renders the two blocks with the blank line between them on the STRING path", () => {
+    // The other exit, and the reason removing the merge moved no visible
+    // bytes: `blocksToText` has always joined blocks with `\n\n`. The wire
+    // exit now agrees with it by construction (`joinTextParts` in
+    // `@agentick/model`) instead of by a separate rule in the formatter.
+    const out = markdownFormatter([
+      sectionBlock({ id: "a", title: "A", content: [text("first")] }),
+      sectionBlock({ id: "b", title: "B", content: [text("second")] }),
+    ]);
+    expect(markdownFormatter.blocksToText!(out)).toBe("# A\nfirst\n\n# B\nsecond");
+  });
+
+  it("keeps a cache-hinted section's hint on its own block", () => {
     const out = markdownFormatter([
       sectionBlock({ id: "a", title: "A", content: [text("first")], cache: { ttl: "1h" } }),
       sectionBlock({ id: "b", title: "B", content: [text("second")] }),
     ]);
     expect(out).toHaveLength(2);
     expect(out[0]).toMatchObject({ text: "# A\nfirst", cache: { ttl: "1h" } });
+    expect(out[1]).not.toHaveProperty("cache");
   });
 
   it("passes non-carrier blocks through the formatter untouched", () => {
@@ -231,6 +248,119 @@ describe("the carrier — collect emits structure, the formatter lowers it", () 
     const render = (blocks: readonly ContentBlock[]): readonly ContentBlock[] => blocks;
     const blocks = [text("a"), text("b")];
     expect(expandSections(blocks, render, { id: "x" })).toBe(blocks);
+  });
+});
+
+describe("islands — the nearest declared scope decides the dialect", () => {
+  const islands = declaredFormatterResolver(builtInFormatters());
+  const xmlRef = { id: "xml", format: "xml" } as const;
+  const mdRef = { id: "markdown", format: "markdown" } as const;
+
+  it("lowers an XML island inside a markdown message in ITS dialect, embedded VERBATIM", () => {
+    // THE EMBEDDING DECISION. The island's bytes go in untouched: the outer
+    // markdown pass never runs over them. Escaping them would produce
+    // `&lt;current_user&gt;` — a rendering OF an island rather than an island,
+    // and the one output nobody who declared an inner scope ever wants.
+    const out = markdownFormatter(
+      [
+        text("intro"),
+        sectionBlock({
+          id: "s",
+          title: "Current User",
+          content: [text("Ryan & Bob")],
+          renderedWith: xmlRef,
+        }),
+      ],
+      islands,
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ text: "intro" });
+    // `&` escaped ONCE, by the island's own dialect. Not re-escaped, not
+    // un-escaped, and the tag never reaches an escaper at all.
+    expect(out[1]).toMatchObject({ text: "<current_user>\nRyan &amp; Bob\n</current_user>" });
+  });
+
+  it("lowers a markdown island inside an XML message in ITS dialect, `&` and all", () => {
+    // The mirror. Markdown does not escape, and the outer xml pass never sees
+    // these bytes — so the `&` stays raw. That is not well-formed XML, and it
+    // is the right answer: prompt "xml" is a convention no provider parses,
+    // and buying validity nobody checks by corrupting the author's markdown is
+    // a bad trade. Well-formedness across a declared boundary is the author's.
+    const out = xmlFormatter(
+      [
+        text("A & B"),
+        sectionBlock({
+          id: "s",
+          title: "Notes",
+          content: [text("Ryan & Bob")],
+          renderedWith: mdRef,
+        }),
+      ],
+      islands,
+    );
+    expect(out).toHaveLength(2);
+    // The outer body IS escaped — the island is the exception, not the rule.
+    expect(out[0]).toMatchObject({ text: "A &amp; B" });
+    expect(out[1]).toMatchObject({ text: "# Notes\nRyan & Bob" });
+  });
+
+  it("does nothing when the declared dialect IS the one running", () => {
+    // The overwhelmingly common case: every section carries a stamp, and the
+    // stamp usually names the container's own dialect.
+    const out = markdownFormatter(
+      [sectionBlock({ id: "s", title: "T", content: [text("body")], renderedWith: mdRef })],
+      islands,
+    );
+    expect(out[0]).toMatchObject({ text: "# T\nbody" });
+  });
+
+  it("nests — an island inside an island lowers in the innermost dialect", () => {
+    const out = markdownFormatter(
+      [
+        sectionBlock({
+          id: "outer",
+          title: "Outer",
+          content: [
+            sectionBlock({
+              id: "inner",
+              title: "Inner",
+              content: [text("deep")],
+              renderedWith: mdRef,
+            }),
+          ],
+          renderedWith: xmlRef,
+        }),
+      ],
+      islands,
+    );
+    expect(out[0]).toMatchObject({ text: "<outer>\n# Inner\ndeep\n</outer>" });
+  });
+
+  it("ignores a declared ref no registry serves — the container's dialect is the honest answer", () => {
+    const out = markdownFormatter(
+      [
+        sectionBlock({
+          id: "s",
+          title: "T",
+          content: [text("body")],
+          renderedWith: { id: "custom-yaml", format: "yaml" },
+        }),
+      ],
+      islands,
+    );
+    expect(out[0]).toMatchObject({ text: "# T\nbody" });
+  });
+
+  it("has no islands at all without a resolver — pinning means one dialect renders everything", () => {
+    const out = markdownFormatter([
+      sectionBlock({
+        id: "s",
+        title: "Current User",
+        content: [text("Ryan")],
+        renderedWith: xmlRef,
+      }),
+    ]);
+    expect(out[0]).toMatchObject({ text: "# Current User\nRyan" });
   });
 });
 

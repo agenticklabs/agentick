@@ -24,6 +24,32 @@
  * body rendered first and framed after. A formatter author writes nothing to
  * get it, and by the time `formatTree` runs there are only messages (ADR 94).
  *
+ * ## Islands embed VERBATIM
+ *
+ * A section can declare its own dialect (`<XML>` around one `<Section>` inside
+ * an otherwise-markdown `<System>`). The pass lowers that section with the
+ * formatter it named and splices the bytes in UNTOUCHED — the outer dialect
+ * never runs over them.
+ *
+ * The alternative was to escape an island in the outer transport when the
+ * dialects differ, and it fails on the case the feature exists for. The
+ * ubiquitous hand-written prompt is markdown prose with literal XML tag blocks
+ * in it; escaping the island turns `<current_user>` into
+ * `&lt;current_user&gt;`, which is a rendering OF an island rather than an
+ * island — the one output no author ever wants, produced exactly when they
+ * took the trouble to ask for a different dialect. The reverse direction
+ * argues the same way: a markdown island inside an XML message keeps its `#`
+ * and its raw `&`, because the author who wrote markdown wants markdown. That
+ * `&` is not well-formed XML, and it does not matter — prompt "XML" is a
+ * convention providers never parse, and buying validity nobody checks by
+ * corrupting the author's bytes is a bad trade. Well-formedness across a
+ * dialect boundary is the author's call, which is the whole reason the
+ * boundary is something they declare.
+ *
+ * Capability, firmly: the mechanism is the island, the default is verbatim,
+ * and an author who wants their bytes escaped by the container declares no
+ * inner scope. There is no conditional escaping to reason about.
+ *
  * When omitted, `formatTree` falls back to markdown-flavored defaults.
  *
  * Per ADR 36 (define vs create): formatters need no parent-harness
@@ -41,9 +67,10 @@ import { expandSections } from "./section-lowering.js";
 
 import type {
   ContentBlock,
-  Formatter,
   FormatterIdentity,
   FormatterRef,
+  FormatterResolver,
+  IdentifiedFormatter,
   MessageEntry,
   SemanticContentBlock,
 } from "@agentick/spec";
@@ -75,8 +102,7 @@ export interface CreateFormatterInput extends FormatterIdentity {
  * `blocksToText` to delegate serialization to the formatter (with
  * markdown-flavored fallbacks when a formatter omits them).
  */
-export interface DefinedFormatter extends Formatter {
-  readonly __identity: FormatterIdentity;
+export interface DefinedFormatter extends IdentifiedFormatter {
   readonly frameMessage?: (entry: MessageEntry, body: string) => string;
   readonly blocksToText?: (blocks: readonly ContentBlock[]) => string;
 }
@@ -88,7 +114,8 @@ export function createFormatter(spec: CreateFormatterInput): DefinedFormatter {
     ...omitUndefined({ version: spec.version }),
   };
   const fn: DefinedFormatter = Object.assign(
-    (blocks: readonly SemanticContentBlock[]) => expandSections(blocks, spec.render, identity),
+    (blocks: readonly SemanticContentBlock[], resolve?: FormatterResolver) =>
+      expandSections(blocks, spec.render, identity, resolve),
     {
       __identity: identity,
       ...omitUndefined({

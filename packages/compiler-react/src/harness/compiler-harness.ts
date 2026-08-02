@@ -92,6 +92,7 @@ import { InterceptorContext } from "../react/interceptor-context.js";
 import { RenderContextContext } from "../react/render-context-context.js";
 import {
   builtInFormatters,
+  declaredFormatterResolver,
   describeUnresolvedFormatter,
   formatTree,
   markdownFormatter,
@@ -810,11 +811,17 @@ export class CompilerHarness
       }
       return resolution.formatter;
     };
+    // Threaded into the formatter so a section that declared its own dialect is
+    // lowered in it (ADR 94 §islands). Withheld under `pinned`: pinning means
+    // one dialect renders everything, and honouring an island would defeat the
+    // `renderToString({ formatter })` caller who asked for exactly one format.
+    const islands = pinned !== undefined ? undefined : declaredFormatterResolver(this.formatters);
 
     const entries = tree.context.entries.map((entry) => {
       const fmt = resolve(entry.renderedWith ?? fallback);
       const formatted = fmt(
         entry.content as readonly import("@agentick/spec").SemanticContentBlock[],
+        islands,
       );
       return { ...entry, content: formatted };
     });
@@ -822,6 +829,7 @@ export class CompilerHarness
       tree.content && tree.content.length > 0
         ? resolve(tree.renderedWith ?? fallback)(
             tree.content as readonly import("@agentick/spec").SemanticContentBlock[],
+            islands,
           )
         : tree.content;
     return {

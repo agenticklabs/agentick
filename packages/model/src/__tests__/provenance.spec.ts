@@ -167,6 +167,39 @@ describe("what an origin says", () => {
     expect(p[0]![0]).not.toHaveProperty("entryId");
   });
 
+  it("names the SECOND of two adjacent sections once anything makes it a part", () => {
+    // RESTORED. While the formatter merged two adjacent sections into ONE
+    // block, the merged block carried only the first section's id and the
+    // second section's id existed nowhere downstream — it was not merely
+    // unaddressable at the wire, it was unreachable, and no fixture could have
+    // made this assertion pass. Two sections are two blocks now, so a
+    // breakpoint (or any other boundary) between them yields two parts naming
+    // two sections.
+    const t = tree(
+      system(sectionBlock("A", "first", { ttl: "1h" }), sectionBlock("B", "second")),
+      msg("user", [text("hi")], "m1"),
+    );
+    expectAligned(t);
+    const p = buildMessageProvenance(t);
+    const [a, b] = [p[0]?.[0], p[0]?.[1]];
+    expect(a?.entryId).not.toBe(b?.entryId);
+    expect(a).toEqual({ entryId: a!.entryId!, blockIndex: 0 });
+    expect(b).toEqual({ entryId: b!.entryId!, blockIndex: 1 });
+  });
+
+  it("names the block a JOINED part STARTS at, because that is what the part is", () => {
+    // The other half of the same change. Adjacent text parts join at the wire
+    // (`joinTextParts`), so two unhinted sections are ONE part — and one part
+    // gets one origin, naming where it begins. The alternative is a provenance
+    // array that no longer indexes the request it describes, which is the one
+    // way this mechanism can be actively harmful.
+    const t = tree(system(sectionBlock("A", "first"), sectionBlock("B", "second")));
+    expectAligned(t);
+    const p = buildMessageProvenance(t);
+    expect(p[0]).toHaveLength(1);
+    expect(p[0]?.[0]?.blockIndex).toBe(0);
+  });
+
   it("returns undefined for an out-of-range lookup rather than throwing", () => {
     const p = buildMessageProvenance(t);
     expect(p[99]?.[0]).toBeUndefined();

@@ -200,7 +200,13 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
       {
         type: "text",
         text: "",
-        sectionNode: { id: "s.wrap", content: [{ type: "text", text: "wrapped text" }] },
+        sectionNode: {
+          id: "s.wrap",
+          content: [{ type: "text", text: "wrapped text" }],
+          // The section's own dialect stamp — the same ref the entry carries,
+          // because nothing inner was declared for the section itself.
+          renderedWith: { id: "markdown", format: "markdown" },
+        },
       },
     ]);
     expect(markdownFormatter(s.content)).toEqual([

@@ -20,6 +20,8 @@
 
 import type { RenderedTree } from "@agentick/spec";
 
+import { messagePartFromBlock, textRuns } from "./canonical-projection.js";
+
 /**
  * Where one projected part came from.
  *
@@ -64,8 +66,18 @@ export function buildMessageProvenance(tree: RenderedTree): MessageProvenance {
     // lowered into this message's content, that is the SECTION's stable id,
     // which is what makes a system part attributable at all now that it is
     // no longer a top-level entry (ADR 94).
-    const origins = entry.content.map((block, blockIndex) => {
-      const entryId = block.id ?? entry.id;
+    //
+    // One origin per PROJECTED part, which is not one per block: adjacent text
+    // parts join at the wire (`joinTextParts`), so a joined part is named by
+    // the block it STARTS at. The grouping comes from the projection itself
+    // rather than being re-derived — the alignment invariant is that these two
+    // walks agree, and two copies of a rule is how they stop agreeing. The
+    // blocks a joined part absorbed are still individually attributable in the
+    // IR; they are simply not separately addressable at the wire, and the wire
+    // is what these coordinates index.
+    const origins = textRuns(entry.content.map(messagePartFromBlock)).map((run) => {
+      const blockIndex = run[0]!;
+      const entryId = entry.content[blockIndex]?.id ?? entry.id;
       return { ...(entryId !== undefined ? { entryId } : {}), blockIndex };
     });
     if (entry.role === "system") system.push(...origins);

@@ -64,6 +64,7 @@ import type {
 import { RenderFailed } from "@agentick/spec";
 import {
   builtInFormatters,
+  declaredFormatterResolver,
   formatTree,
   markdownFormatter,
   resolveFormatterRef,
@@ -303,14 +304,19 @@ function applyFormatters(
   const registry = builtInFormatters();
   const resolve = (ref: FormatterRef): DefinedFormatter =>
     pinned ?? resolveFormatterRef(registry, ref, markdownFormatter).formatter;
+  // Threaded into the formatter so a section that declared its own dialect is
+  // lowered in it (ADR 94 §islands). Withheld under `pinned`: pinning means
+  // one dialect renders everything, and honouring an island would defeat the
+  // caller who asked for exactly one format.
+  const islands = pinned ? undefined : declaredFormatterResolver(registry);
 
   const entries = tree.context.entries.map((entry) => ({
     ...entry,
-    content: resolve(entry.renderedWith ?? fallback)(entry.content),
+    content: resolve(entry.renderedWith ?? fallback)(entry.content, islands),
   }));
   const content =
     tree.content && tree.content.length > 0
-      ? resolve(tree.renderedWith ?? fallback)(tree.content)
+      ? resolve(tree.renderedWith ?? fallback)(tree.content, islands)
       : tree.content;
   return {
     ...tree,

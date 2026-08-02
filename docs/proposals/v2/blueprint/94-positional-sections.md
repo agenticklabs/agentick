@@ -190,20 +190,75 @@ Three consequences fell out of moving the lowering, all of them wanted:
   because markdown is idempotent on plain text). With a section frame in
   the output it stopped being invisible, so it was fixed here.
 
-One boundary is worth stating plainly: a section NESTED in a message
-reads in that MESSAGE's dialect. One formatter renders an entry's
-content, and the section's blocks are that content — so the container
-decides the dialect exactly as it decides the role.
-`<FormatScope purpose="section">` still picks the formatter for a
-FREE-STANDING section, whose entry carries the ref.
+## Addendum (2026-08-02) — the dialect law, and where the join lives
+
+> **The container decides role and dialect; the nearest DECLARED scope
+> overrides the dialect; position decides order.**
+
+Three changes, one sentence.
+
+**Dialect follows the same law as role.** The first cut said a section
+nested in a message simply reads in the MESSAGE's dialect, full stop —
+which made `<FormatScope purpose="section">` a knob that resolved a ref,
+stamped it, and ignored it. The law above keeps the default (the
+container's) and honours the override: `SectionNode` carries the ref
+resolved at its own tree position, and the formatter pass compares it
+against the dialect it is running. When they differ the section is an
+ISLAND, lowered by its own formatter and framed by its own dialect's
+rule. Free-standing sections are unaffected — their entry carries the
+ref, exactly as before.
+
+**Islands embed VERBATIM.** An island's bytes are spliced into the
+containing message untouched; the outer formatter never runs over them.
+The alternative — escaping an island in the outer transport when the
+dialects differ — fails on the case the feature exists for. The
+ubiquitous hand-written prompt is markdown prose with literal XML tag
+blocks in it; escaping the island emits `&lt;current_user&gt;`, a
+rendering OF an island rather than an island, produced precisely when an
+author took the trouble to declare another dialect. The mirror argues the
+same: a markdown island inside an XML message keeps its `#` and its raw
+`&`. That `&` is not well-formed XML and it does not matter — prompt
+"xml" is a convention no provider parses, and buying validity nobody
+checks by corrupting an author's bytes is a bad trade. Well-formedness
+across a dialect boundary is the author's concern, which is the whole
+reason the boundary is something they declare. Capability, firmly: the
+island is the mechanism, verbatim is the default, and there is no
+conditional escaping to reason about.
+
+**The adjacent-section merge is gone; the join moved to the wire.** The
+lowering briefly merged two adjacent sections into one block so a
+provider concatenating text parts could not weld `# B`'s heading onto
+`# A`'s last line. That is a TRANSPORT fact, so the join belongs at
+projection: `buildMessages` joins ADJACENT TEXT PARTS of one message with
+`\n\n` and stops at any part carrying `cache` or provider knobs — a hint
+IS a boundary, the #185 rule restated one level down. Nothing about the
+defect was section-specific; one level down it also covers a text run
+followed by a fenced code block, which the section-shaped rule never did.
+It also agrees with the string exit by construction, since `blocksToText`
+has always joined blocks with `\n\n`. Bytes for every existing section
+tree are unchanged.
+
+What comes back is per-section identity: two adjacent sections are two
+blocks with two ids, end to end. The merged block could carry only ONE
+id, so the second section's id reached nothing downstream — which is why
+`prefix-stability.spec.tsx` had its fixture ordered around the merge, and
+why that ordering is now gone.
+
+**A design call DISSOLVED rather than being decided.** "Which id should a
+merged block keep?" was open. Removing the mechanism removed the
+question: no block is merged, so no block has to choose an id. The
+projection's joined PART is named by the block it starts at, which is not
+a choice between ids but a statement about where a part begins.
 
 ## Verified by
 
 - `packages/compiler-react/src/__tests__/positional-sections.spec.tsx` —
   the law: conservation pins (semantic-HTML system byte-identical; a
   title+text section's markdown bytes identical to the old `sectionText`;
-  two sections in one message joined the way the old system blob joined
-  them), section inside `<System>` / `<User>` / `<Assistant>`,
+  two sections in one message rendering the way the old system blob
+  joined them, now as two blocks the STRING exit joins — and each of them
+  separately attributable, which the merge made impossible), section
+  inside `<System>` / `<User>` / `<Assistant>`,
   cache-hinted section keeps its own block, free-floating section →
   grounding at its position, the `role` prop (default `grounding`,
   `role="user"` as a plain turn with the wrapper intact, a non-provider
@@ -215,7 +270,11 @@ FREE-STANDING section, whose entry carries the ref.
   heading marker dropped under `<PlainText>`; `renderedWith` naming the
   formatter that actually lowered the section; a semantic-HTML body
   collapsing into ONE block; and a nested section lowering in its
-  parent's dialect.
+  parent's dialect. Plus the islands: an xml island inside a markdown
+  `<System>` and a markdown island inside an xml one, both embedded
+  verbatim with `&` escaped exactly once by the island's own dialect;
+  same-dialect nesting unchanged; and `<FormatScope purpose="section">`
+  taking effect on a nested section, which it never did before.
 - `packages/app/src/__tests__/positional-sections-e2e.spec.tsx` — the
   headline consequence at the altitude an adopter sees it: a `<Section>`
   below `<Timeline />` is the LAST `LanguageModelMessage` the executor is
@@ -226,18 +285,28 @@ FREE-STANDING section, whose entry carries the ref.
   produced blocks, and no-silent-drop around non-text and
   semantic-sidecar blocks. And the carrier path: the body rendered before
   the frame is applied (tag unescaped, `&` escaped once), one carrier
-  lowered two ways by two dialects, the adjacent-section blank-line merge
-  that moved here from the collect walker, and its refusal across a cache
-  breakpoint.
+  lowered two ways by two dialects, two adjacent sections staying two
+  blocks with two ids while `blocksToText` puts the blank line between
+  them, and a cache hint staying on its own block. And the island rules:
+  both embedding directions with `&` in the body, same-dialect nesting,
+  nested islands, an unserved ref falling back to the container, and no
+  islands at all without a resolver.
 - `packages/model/src/__tests__/semantic-roles.spec.ts` — the role seam:
   the fold narrows and keeps `grounding` / `event`, an unknown role
   throws instead of being cast, the three adapter tables, and system
   having no position while everything else keeps its own.
 - `packages/model/src/__tests__/cache-hints.spec.ts` — a block-level
-  cache hint reaches the projected part (#185, one level down).
+  cache hint reaches the projected part (#185, one level down). And the
+  join at the wire: two sections producing the exact bytes the formatter
+  merge produced, the refusal across a cache hint and across per-part
+  provider knobs in either direction, a media part breaking the run, and
+  a message with nothing to join coming back untouched.
 - `packages/model/src/__tests__/provenance.spec.ts` — the provenance walk
-  still mirrors the fold part-for-part, and a system part now names the
-  SECTION's stable id.
+  still mirrors the fold part-for-part, a system part now names the
+  SECTION's stable id, two adjacent sections are each attributable once a
+  boundary makes them two parts, and a joined part is named by the block
+  it starts at.
 - `packages/app/src/__tests__/prefix-stability.spec.tsx` — sections
   inside `<System>` keep the prompt-cache prefix byte-stable across
-  renders and across mounts.
+  renders and across mounts, with the fixture back in its natural order
+  now that no merge swallows the auto-id section's id.

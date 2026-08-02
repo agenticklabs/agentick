@@ -55,6 +55,9 @@ describe("buildMessages — CacheHint carry (#185)", () => {
   });
 
   it("marks the LAST part when the hint is on the system MESSAGE", () => {
+    // The image is what keeps this message at three parts: adjacent TEXT parts
+    // join, and a media part breaks the run. Two bare text blocks would now be
+    // ONE part and the "last, not the first" claim would have nowhere to fail.
     const messages = buildMessages(
       tree([
         {
@@ -62,13 +65,116 @@ describe("buildMessages — CacheHint carry (#185)", () => {
           role: "system",
           content: [
             { type: "text", text: "A" },
+            { type: "image", source: { type: "url", url: "https://example.test/1.png" } },
             { type: "text", text: "B" },
           ],
           metadata: { cache: { ttl: "5m" } },
         },
       ]),
     );
+    expect(messages[0]!.content).toHaveLength(3);
     expect(messages[0]!.content[0]).not.toHaveProperty("cache");
-    expect(messages[0]!.content[1]).toMatchObject({ text: "B", cache: { ttl: "5m" } });
+    expect(messages[0]!.content[2]).toMatchObject({ text: "B", cache: { ttl: "5m" } });
+  });
+});
+
+describe("buildMessages — adjacent text parts join at the wire", () => {
+  // The join moved here from the formatter pass, where it applied only to the
+  // two blocks that happened to be adjacent SECTIONS. Nothing about the defect
+  // was ever section-specific: a provider may concatenate a message's text
+  // parts with no separator, so any two adjacent text parts run together.
+
+  it("joins two sections into the exact bytes the formatter merge produced", () => {
+    // THE CONSERVATION PIN for vertical A. `# A\nfirst\n\n# B\nsecond` is what
+    // two sections in one message have produced since before ADR 94, when they
+    // were hoisted into one system blob. Removing the merge must not move a
+    // single byte of it.
+    const messages = buildMessages(
+      tree([
+        {
+          kind: "message",
+          role: "system",
+          content: [
+            { type: "text", text: "# A\nfirst", id: "a", metadata: { section: "a" } },
+            { type: "text", text: "# B\nsecond", id: "b", metadata: { section: "b" } },
+          ],
+        },
+      ]),
+    );
+    expect(messages[0]!.content).toEqual([{ type: "text", text: "# A\nfirst\n\n# B\nsecond" }]);
+  });
+
+  it("refuses to join across a cache hint — the breakpoint IS the boundary", () => {
+    // #185, restated one level down. A hinted part marks a position in the
+    // prompt text; joining it into its neighbour would move the breakpoint.
+    const messages = buildMessages(
+      tree([
+        {
+          kind: "message",
+          role: "system",
+          content: [
+            { type: "text", text: "# A\nfirst", cache: { ttl: "1h" } },
+            { type: "text", text: "# B\nsecond" },
+          ],
+        },
+      ]),
+    );
+    expect(messages[0]!.content).toHaveLength(2);
+    expect(messages[0]!.content[0]).toMatchObject({ text: "# A\nfirst", cache: { ttl: "1h" } });
+    expect(messages[0]!.content[1]).toMatchObject({ text: "# B\nsecond" });
+  });
+
+  it("refuses to join across per-part provider knobs, in either direction", () => {
+    // A `providerMetadata` bag projects to the part's `providerOptions`.
+    // Joining would silently widen one part's knobs over its neighbour's text.
+    const messages = buildMessages(
+      tree([
+        {
+          kind: "message",
+          role: "user",
+          content: [
+            { type: "text", text: "plain" },
+            { type: "text", text: "knobbed", providerMetadata: { anthropic: { x: 1 } } },
+            { type: "text", text: "plain again" },
+          ],
+        },
+      ]),
+    );
+    expect(messages[0]!.content.map((p) => (p.type === "text" ? p.text : p.type))).toEqual([
+      "plain",
+      "knobbed",
+      "plain again",
+    ]);
+  });
+
+  it("joins across nothing else — a media part breaks the run", () => {
+    const messages = buildMessages(
+      tree([
+        {
+          kind: "message",
+          role: "user",
+          content: [
+            { type: "text", text: "one" },
+            { type: "text", text: "two" },
+            { type: "image", source: { type: "url", url: "https://example.test/1.png" } },
+            { type: "text", text: "three" },
+          ],
+        },
+      ]),
+    );
+    expect(messages[0]!.content.map((p) => (p.type === "text" ? p.text : p.type))).toEqual([
+      "one\n\ntwo",
+      "image",
+      "three",
+    ]);
+  });
+
+  it("leaves a message with nothing to join exactly as it was", () => {
+    const entry = {
+      kind: "message" as const,
+      role: "user",
+      content: [{ type: "text" as const, text: "hi" }],
+    };
+    expect(buildMessages(tree([entry]))[0]!.content).toEqual([{ type: "text", text: "hi" }]);
   });
 });

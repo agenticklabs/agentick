@@ -155,7 +155,36 @@ export type FormatResult = FormattedContent;
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
  * @see docs/proposals/v2/blueprint/04-formatters.md
  */
-export type Formatter = (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[];
+export type Formatter = (
+  blocks: readonly SemanticContentBlock[],
+  resolve?: FormatterResolver,
+) => readonly ContentBlock[];
+
+/**
+ * A {@link Formatter} that carries the identity it renders under.
+ *
+ * A bare `Formatter` is anonymous, which is fine while one dialect renders a
+ * whole message. It stops being fine once content can DECLARE a dialect of its
+ * own: framing a section as `<current_user>` rather than `# Current User` is a
+ * decision about the resolved formatter's format, so whoever hands a formatter
+ * over has to hand its identity over with it.
+ */
+export interface IdentifiedFormatter extends Formatter {
+  readonly __identity: FormatterIdentity;
+}
+
+/**
+ * Resolve a {@link FormatterRef} DECLARED inside content to the formatter that
+ * serves it, or `undefined` when this registry serves no such dialect.
+ *
+ * The formatter pass owns a registry; content carries refs. This is the one
+ * seam between them, threaded into {@link Formatter} as an optional second
+ * argument so a formatter can lower a nested scope in ITS dialect rather than
+ * silently rendering it in the container's. `undefined` is the honest answer
+ * for an unserved ref — the container's dialect, not a third one nobody asked
+ * for.
+ */
+export type FormatterResolver = (ref: FormatterRef) => IdentifiedFormatter | undefined;
 
 /**
  * Identity metadata attached to a {@link Formatter} so it can be

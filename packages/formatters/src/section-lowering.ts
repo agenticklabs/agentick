@@ -24,6 +24,7 @@
 import type {
   ContentBlock,
   FormatterRef,
+  FormatterResolver,
   SectionNode,
   SemanticContentBlock,
   TextBlock,
@@ -31,10 +32,14 @@ import type {
 import { isSectionContent } from "@agentick/spec";
 
 /**
- * Block-metadata key marking which section a block came from. Read when
- * deciding separation between ADJACENT sections that landed in the same
- * message: two sections are two blocks, and a provider that concatenates text
- * parts with no separator would otherwise run them together.
+ * Block-metadata key naming which section a block came from.
+ *
+ * Attribution, and nothing else. It briefly also drove a merge of adjacent
+ * sections into one block; that join was a TRANSPORT concern (a provider
+ * concatenating text parts with no separator) and now lives at projection,
+ * where every adjacent text part is joined and not just the two that happen to
+ * be sections. What is left here is the honest use: a block says which section
+ * produced it, and two adjacent sections stay two blocks with two ids.
  */
 export const SECTION_STAMP = "section";
 
@@ -161,32 +166,6 @@ export function lowerSection(
 }
 
 /**
- * Two ADJACENT sections in one message are two blocks, and one block is one
- * projected message part — but a provider is free to concatenate text parts
- * with no separator, which would run `# A`'s body straight into `# B`'s
- * heading. Merge them into a single block with the blank line between, which
- * is also the exact byte layout sections had when they were hoisted into one
- * system blob.
- *
- * A block carrying its own `cache` or `providerMetadata` never merges: that is
- * a per-section prompt-cache breakpoint (#185), and the boundary IS the block.
- */
-function mergeAdjacentSections(
-  prev: ContentBlock | undefined,
-  next: ContentBlock,
-): ContentBlock | undefined {
-  if (prev === undefined) return undefined;
-  if (prev.type !== "text" || next.type !== "text") return undefined;
-  const prevSection = prev.metadata?.[SECTION_STAMP];
-  const nextSection = next.metadata?.[SECTION_STAMP];
-  if (prevSection === undefined || nextSection === undefined) return undefined;
-  if (prevSection === nextSection) return undefined;
-  if (prev.cache !== undefined || next.cache !== undefined) return undefined;
-  if (prev.providerMetadata !== undefined || next.providerMetadata !== undefined) return undefined;
-  return { ...prev, text: `${prev.text}\n\n${next.text}` };
-}
-
-/**
  * Replace every {@link SectionNode} carrier in `blocks` with its lowering in
  * `ref`'s dialect, rendering everything else through `render`.
  *
@@ -199,14 +178,32 @@ function mergeAdjacentSections(
  *
  * Sections nest, so the recursion is on `section.content`.
  *
+ * ## Islands — the nearest declared scope decides
+ *
+ * A section carries the dialect declared at its position
+ * ({@link SectionNode.renderedWith}). When `resolve` can turn that ref into a
+ * DIFFERENT formatter than the one running, the section is an island: its body
+ * is rendered by that formatter (recursively, so islands nest), framed by that
+ * dialect's rule, and the resulting blocks are pushed as they are. They are
+ * NOT passed through `render` — they are already wire-shape for the dialect
+ * their author asked for, and running the outer dialect over them would escape
+ * an xml island's tags into `&lt;current_user&gt;`, which is a rendering OF an
+ * island rather than an island. See the module docblock of
+ * `create-formatter.ts` for the embedding argument in full.
+ *
+ * With no `resolve` (a pinned formatter, a direct `markdownFormatter(blocks)`
+ * call) there are no islands: one dialect renders everything, which is what
+ * pinning means.
+ *
  * Every formatter built with `createFormatter` runs this ahead of its own
- * block pass, which is why third-party formatters get section lowering without
- * writing a line of it.
+ * block pass, which is why third-party formatters get section lowering — and
+ * islands — without writing a line of either.
  */
 export function expandSections(
   blocks: readonly SemanticContentBlock[],
   render: (blocks: readonly SemanticContentBlock[]) => readonly ContentBlock[],
   ref: FormatterRef,
+  resolve?: FormatterResolver,
 ): readonly ContentBlock[] {
   if (!blocks.some(isSectionContent)) return render(blocks);
 
@@ -225,15 +222,15 @@ export function expandSections(
     }
     flushRun();
     const section = block.sectionNode;
-    const lowered = lowerSection(
-      { ...section, content: expandSections(section.content, render, ref) },
-      ref,
-    );
-    for (const b of lowered) {
-      const merged = mergeAdjacentSections(out[out.length - 1], b);
-      if (merged) out[out.length - 1] = merged;
-      else out.push(b);
-    }
+    const island = section.renderedWith !== undefined ? resolve?.(section.renderedWith) : undefined;
+    const lowered =
+      island !== undefined && island.__identity.id !== ref.id
+        ? lowerSection({ ...section, content: island(section.content, resolve) }, island.__identity)
+        : lowerSection(
+            { ...section, content: expandSections(section.content, render, ref, resolve) },
+            ref,
+          );
+    for (const b of lowered) out.push(b);
   }
   flushRun();
   return out;

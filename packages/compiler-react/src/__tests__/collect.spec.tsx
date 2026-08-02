@@ -54,6 +54,11 @@ describe("collect — structural primitives", () => {
           id: "s.todos",
           title: "Todos",
           content: [{ type: "text", text: "1. ship compiler" }],
+          // The dialect declared at this position, carried so a section
+          // nested in a message obeys the same law as this free-standing one:
+          // the nearest declared scope decides. Here it names the root scope,
+          // which is what the entry's `renderedWith` names too.
+          renderedWith: { id: "markdown", format: "markdown" },
         },
       },
     ]);

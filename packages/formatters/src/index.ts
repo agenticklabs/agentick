@@ -62,6 +62,7 @@ export type { FormatTreeOptions } from "./format-tree.js";
 // matched so callers with a diagnostics channel can surface an unresolvable
 // ref instead of silently rendering in the wrong format.
 export {
+  declaredFormatterResolver,
   describeUnresolvedFormatter,
   resolveFormatterRef,
   type FormatterMatch,

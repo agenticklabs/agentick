@@ -48,8 +48,10 @@ export {
   buildMessages,
   buildParameters,
   canonicalRole,
+  joinTextParts,
   lowerSemanticRole,
   messagePartFromBlock,
+  textRuns,
   UnknownMessageRoleError,
 } from "./canonical-projection.js";
 export { generate, generateStream, type GenerateOptions } from "./generate.js";

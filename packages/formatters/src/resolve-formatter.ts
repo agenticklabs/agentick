@@ -22,7 +22,7 @@
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D2
  */
 
-import type { FormatterRef } from "@agentick/spec";
+import type { FormatterRef, FormatterResolver } from "@agentick/spec";
 
 import type { DefinedFormatter } from "./create-formatter.js";
 
@@ -44,6 +44,14 @@ export function resolveFormatterRef(
   fallback: DefinedFormatter,
 ): FormatterResolution {
   if (ref === undefined) return { formatter: fallback, match: "fallback" };
+  return matchFormatter(formatters, ref) ?? { formatter: fallback, match: "fallback" };
+}
+
+/** Steps 1 and 2 alone — `undefined` when the registry serves neither arm. */
+function matchFormatter(
+  formatters: ReadonlyMap<string, DefinedFormatter>,
+  ref: FormatterRef,
+): FormatterResolution | undefined {
   const byId = formatters.get(ref.id);
   if (byId) return { formatter: byId, match: "id" };
   if (ref.format !== undefined) {
@@ -51,7 +59,24 @@ export function resolveFormatterRef(
       if (fmt.__identity.format === ref.format) return { formatter: fmt, match: "format" };
     }
   }
-  return { formatter: fallback, match: "fallback" };
+  return undefined;
+}
+
+/**
+ * The {@link FormatterResolver} a formatter pass hands to its formatters, so a
+ * section that DECLARED a dialect is lowered in that dialect rather than the
+ * container's.
+ *
+ * Steps 1 and 2 of the same lookup, and deliberately not step 3: a declared
+ * ref this registry does not serve is NOT grounds for an island. The
+ * container's dialect is the honest answer for an unserved ref, and the pass
+ * has already reported it through its own diagnostics channel — inventing a
+ * dialect boundary on top of a miss would compound one defect with another.
+ */
+export function declaredFormatterResolver(
+  formatters: ReadonlyMap<string, DefinedFormatter>,
+): FormatterResolver {
+  return (ref) => matchFormatter(formatters, ref)?.formatter;
 }
 
 /**

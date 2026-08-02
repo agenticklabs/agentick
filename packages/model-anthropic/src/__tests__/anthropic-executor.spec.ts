@@ -883,8 +883,13 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
             kind: "message",
             id: "m1",
             role: "user",
+            // The image keeps this at three parts through the canonical
+            // projection, where adjacent TEXT parts now join — two bare text
+            // blocks would arrive as one block and the "LAST, not the first"
+            // claim would have nowhere to fail.
             content: [
               { type: "text", text: "part one" },
+              { type: "image", source: { type: "url", url: "https://example.test/1.png" } },
               { type: "text", text: "part two" },
             ],
             metadata: { cache: {} },
@@ -896,8 +901,9 @@ describe("anthropic() adapter — canonical CacheHint translation (#185)", () =>
     const msgs = stub.calls[0]!.params.messages as Array<{
       content: Array<{ cache_control?: unknown }>;
     }>;
+    expect(msgs[0]!.content).toHaveLength(3);
     expect(msgs[0]!.content[0]!.cache_control).toBeUndefined();
-    expect(msgs[0]!.content[1]!.cache_control).toEqual({ type: "ephemeral" });
+    expect(msgs[0]!.content[2]!.cache_control).toEqual({ type: "ephemeral" });
   });
 
   it("explicit per-block providerMetadata wins over the canonical hint", async () => {

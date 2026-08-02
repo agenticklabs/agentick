@@ -192,6 +192,20 @@ const Mixed = () => (
 
 The `<strong>` renders as `**concisely**` in the first scope and `<strong>concisely</strong>` in the second. Each entry records the formatter that claimed it on `entry.renderedWith`, so nothing downstream has to guess.
 
+**The nearest declared scope decides; the default is the container's.** A scope around a section INSIDE a message makes that section an ISLAND — lowered in the dialect it named and spliced into the message verbatim, with the outer formatter never running over its bytes:
+
+```tsx
+<System>
+  Follow the rules.
+  <XML>
+    <Section title="Current User">Ryan &amp; Bob</Section>
+  </XML>
+</System>
+// → "Follow the rules.<current_user>\nRyan &amp; Bob\n</current_user>"
+```
+
+That is the hand-written-prompt shape: markdown prose with literal tagged blocks in it. Escaping the island in the container's transport would emit `&lt;current_user&gt;` instead — a rendering OF an island rather than an island. The mirror holds too: a `<Markdown>` island inside an `<XML>` message keeps its `#` and its raw `&`, and well-formedness across a declared boundary is the author's call. Declare nothing and the container's dialect renders everything, which is what it has always done.
+
 ### Content blocks
 
 Non-text content — images, code, JSON, documents, media, reasoning — enters as typed blocks. These are lowercase host intrinsics:
@@ -614,6 +628,7 @@ import { flush, waitFor } from "@agentick/compiler-react/testing";
 - `src/__tests__/create-tool.spec.tsx` — register and unregister, and `use()` capture reaching the handler.
 - `src/__tests__/content-blocks.spec.tsx` — every content-block intrinsic and its IR shape.
 - `src/__tests__/formatter-scope.spec.tsx` + `formatter-registry.spec.tsx` — subtree formatter framing and `renderedWith` stamping.
+- `src/__tests__/positional-sections.spec.tsx` — the container/position law, and the island rule on top of it: an xml island inside a markdown `<System>` and a markdown island inside an xml one (both embedded verbatim, `&` escaped exactly once by the island's own dialect), same-dialect nesting unchanged, and `<FormatScope purpose="section">` actually taking effect on a nested section.
 - `src/__tests__/collect.spec.tsx` — `<Output>` forwarding `name` / `description` / `strategy` / `schema` to the declaration.
 - `src/__tests__/template.spec.tsx` — `compileTemplate` and `renderTemplate`, the stability loop, and the diagnostics.
 - `src/__tests__/hooks.spec.tsx` — `useData` returning a cached value synchronously, blocking the loop until resolve, honoring `awaitTimeoutMs`, and propagating a rejection as a render error; `useSession`; `useLoopControl`.

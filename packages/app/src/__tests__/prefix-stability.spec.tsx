@@ -80,11 +80,14 @@ import { createApp } from "../react.js";
  * what puts them there, which is also the shape the compiler's
  * `SECTION_WITHOUT_SYSTEM` diagnostic tells adopters to migrate to.
  *
- * The AUTO-id section is written first because two adjacent sections in one
- * message merge into a single block (the separator rule — a provider may
- * concatenate text parts with nothing between them), and the merged block
- * keeps the FIRST section's id. Written second, the auto id would not survive
- * into the IR for the separate-mount assertion below to read.
+ * Order here is the order the docblock reads, which was briefly not true: while
+ * two adjacent sections in one message MERGED into a single block, the merged
+ * block could carry only the first section's id, so the auto-id section had to
+ * be written first or its id — the thing the separate-mount assertion below
+ * reads — never reached the IR at all. The merge is gone (the join it existed
+ * for now happens at projection, over every adjacent text part rather than
+ * just two sections), each section keeps its own block and its own id, and the
+ * fixture is back to being written for what it tests.
  */
 function RepresentativeAgent(): React.ReactElement {
   return React.createElement(
@@ -94,8 +97,6 @@ function RepresentativeAgent(): React.ReactElement {
       System,
       null,
       "You are a helpful assistant.",
-      // Auto-id section (no `id` prop → id defaults from ctx.stableId/hostId).
-      React.createElement("section" as never, { title: "Notes" }, "Static reference notes."),
       // Explicit-id section with semantic children (heading + paragraph).
       React.createElement(
         "section" as never,
@@ -103,6 +104,8 @@ function RepresentativeAgent(): React.ReactElement {
         React.createElement(H2, null, "House rules"),
         React.createElement(Paragraph, null, "Be concise. Cite your sources."),
       ),
+      // Auto-id section (no `id` prop → id defaults from ctx.stableId/hostId).
+      React.createElement("section" as never, { title: "Notes" }, "Static reference notes."),
     ),
     // Explicit-id tool with an input schema.
     React.createElement("tool" as never, {

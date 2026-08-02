@@ -52,9 +52,17 @@ export const sectionContributor: Contributor = {
     const content = ctx.collectContentBlocks(instance, outbound) as readonly SemanticContentBlock[];
     const renderedWith = ctx.formatter("section");
 
+    // The stamp rides the CARRIER as well as the fragment. On a free-standing
+    // section the fragment's copy becomes the anonymous message's
+    // `renderedWith` and picks the formatter for the whole entry, as it always
+    // has. On a NESTED section that was the end of it — the ref was recorded
+    // and then ignored, because the message's formatter rendered the message's
+    // content. Carrying it here is what makes the nested case obey the same
+    // law as the free-standing one: the nearest declared scope decides.
     const carrier = sectionBlock({
       id,
       content,
+      renderedWith,
       ...(props.title !== undefined ? { title: props.title } : {}),
       ...(props.cache !== undefined ? { cache: props.cache } : {}),
       ...(props.providerMetadata !== undefined ? { providerMetadata: props.providerMetadata } : {}),

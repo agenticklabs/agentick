@@ -132,7 +132,7 @@ export function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMe
   const rest: LanguageModelMessage[] = [];
 
   for (const entry of tree.context.entries) {
-    const parts = entry.content.map(messagePartFromBlock);
+    const parts = joinTextParts(entry.content.map(messagePartFromBlock));
     const cache = entry.metadata?.cache;
     // Message-level `providerMetadata` (adopter-stamped input knobs) rides
     // the INPUT channel `providerOptions` at the wire boundary — same
@@ -162,6 +162,76 @@ export function buildMessages(tree: RenderedTree): ReadonlyArray<LanguageModelMe
   if (systemParts.length > 0) messages.push({ role: "system", content: systemParts });
   messages.push(...rest);
   return messages;
+}
+
+/**
+ * Adjacent TEXT parts of ONE message join into one part, separated by a blank
+ * line — unless a part carries a hint, which is a boundary.
+ *
+ * This is a TRANSPORT rule, which is why it lives here and not in the
+ * formatter. A provider is free to concatenate a message's text parts with no
+ * separator of its own, so `# A\nfirst` followed by `# B\nsecond` arrives as
+ * `# A\nfirst# B\nsecond` — B's heading welded onto A's last line. The join
+ * used to be applied by the formatter pass, to the two blocks that happened to
+ * be adjacent SECTIONS; nothing about the defect was specific to sections, and
+ * a text run followed by a fenced code block ran together exactly the same
+ * way. One level down it covers every case, and it agrees with the string exit
+ * by construction: `blocksToText` has always joined blocks with `\n\n`.
+ *
+ * **A hint IS a boundary** — the #185 rule, restated one more level down where
+ * it always belonged. A part carrying `cache` marks a prompt-cache breakpoint
+ * at a position in the prompt text; a part carrying `providerOptions` /
+ * `providerMetadata` carries per-part provider knobs. Both are properties OF A
+ * PART, so joining that part into its neighbour would move the breakpoint or
+ * silently widen the knob's reach. Such a part neither absorbs nor is
+ * absorbed.
+ *
+ * Exported because {@link import("./provenance.js").buildMessageProvenance}
+ * must emit exactly one origin per PROJECTED part; re-deriving this rule there
+ * is how the two walks drift.
+ */
+export function joinTextParts(
+  parts: readonly LanguageModelMessagePart[],
+): readonly LanguageModelMessagePart[] {
+  const runs = textRuns(parts);
+  if (runs.length === parts.length) return parts;
+  return runs.map((run) =>
+    run.length === 1
+      ? parts[run[0]!]!
+      : { ...parts[run[0]!]!, text: run.map((i) => textOf(parts[i]!)).join("\n\n") },
+  );
+}
+
+/**
+ * The block indices that make up each projected part: `[[0],[1]]` when nothing
+ * joins, `[[0,1]]` when the first two do. The grouping, without the joining —
+ * so the provenance walk can name the block each projected part STARTS at
+ * without rebuilding the parts.
+ */
+export function textRuns(parts: readonly LanguageModelMessagePart[]): readonly number[][] {
+  const runs: number[][] = [];
+  for (const [i, part] of parts.entries()) {
+    const open = runs[runs.length - 1];
+    if (open !== undefined && joinable(parts[open[open.length - 1]!]!) && joinable(part)) {
+      open.push(i);
+    } else {
+      runs.push([i]);
+    }
+  }
+  return runs;
+}
+
+function joinable(part: LanguageModelMessagePart): boolean {
+  return (
+    part.type === "text" &&
+    part.cache === undefined &&
+    part.providerOptions === undefined &&
+    part.providerMetadata === undefined
+  );
+}
+
+function textOf(part: LanguageModelMessagePart): string {
+  return part.type === "text" ? part.text : "";
 }
 
 /** The closed provider-facing role vocabulary, as a runtime set. */
