@@ -21,6 +21,7 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
+import { Effect } from "effect";
 import type {
   HookBridges,
   KnobDescriptor,
@@ -69,6 +70,16 @@ export function fakeTimelineHarness(
   };
   if (initial.length > 0) refresh();
 
+  const appendEntries = async (entries: readonly TimelineEntry[]): Promise<void> => {
+    if (entries.length === 0) return;
+    for (const entry of entries) {
+      persisted.push(entry);
+      projection.push(entry);
+    }
+    refresh();
+    notify();
+  };
+
   return {
     id: "mock:timeline",
     ready: Promise.resolve(),
@@ -94,14 +105,18 @@ export function fakeTimelineHarness(
       persisted.filter((e) => e.kind === "message" && e.message.role === "user").length,
     endTurn: async () => {},
     readPersisted: () => persisted,
+    // The Effect-canonical twin (ADR 77). A fake that only implements the
+    // Promise facade is a fake that cannot be composed in a caller's fiber —
+    // which is the whole reason the twin exists.
+    fx: {
+      use: () => () => {},
+      append: (entries: readonly TimelineEntry[]) =>
+        Effect.promise(async () => {
+          await appendEntries(entries);
+        }),
+    },
     append: async (...entries: TimelineEntry[]) => {
-      if (entries.length === 0) return;
-      for (const entry of entries) {
-        persisted.push(entry);
-        projection.push(entry);
-      }
-      refresh();
-      notify();
+      await appendEntries(entries);
     },
     // No durable store behind the fake — memory is the only tier, so the
     // flush barrier is already satisfied.

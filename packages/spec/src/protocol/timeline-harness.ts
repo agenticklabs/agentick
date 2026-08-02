@@ -30,7 +30,11 @@
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  */
 
+import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { SubstrateError } from "../data/errors.js";
+import type { TimelineWriteFailed } from "../errors/lifecycle.js";
+import type { HarnessFx } from "./middleware.js";
 import type { MessageTimelineEntry, TimelineEntry } from "./session-harness.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { SnapshotCapable } from "./hook-bridges.js";
@@ -217,7 +221,45 @@ export {
 // Protocol
 // ============================================================================
 
+/**
+ * The Effect-canonical composable surface of the timeline (ADR 77) — the twin
+ * the loop's tick body composes into ITS fiber.
+ *
+ * This existed nowhere until it was needed for correlation, and its absence was
+ * a correctness bug, not an ergonomics one. `BaseHarness` hands every harness a
+ * working `.fx` carrying `use`, so `timeline.fx` resolved and typechecked while
+ * having no operation twins at all — the harness looked complete. Every append
+ * therefore went through the Promise facade, and `runHarnessProtocol` is a
+ * `runPromise` ROOT: it severs the fiber. `RuntimeContext` is ambient on the
+ * fiber, so the tick scope was gone by the time `timeline:append`'s Operation
+ * was built, and no timeline envelope on the bus was attributable to the tick
+ * that caused it.
+ *
+ * Same discipline as {@link import("./loop-executor.js").StateApplicatorFx} and
+ * {@link import("./tool-executor.js").ToolExecutorFx}: the twins are the un-run
+ * inners so a caller already in a fiber stays in it.
+ */
+export interface TimelineHarnessFx extends HarnessFx {
+  /**
+   * Append entries in the CALLER's fiber — see {@link TimelineHarnessProtocol.append}
+   * for the semantics. Composing this rather than awaiting the facade is what
+   * keeps the ambient scope (`tickId`, `executionId`) on the resulting
+   * operation.
+   */
+  append(
+    entries: readonly TimelineEntry[],
+  ): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never>;
+}
+
 export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarnessSnapshot> {
+  /**
+   * The Effect-canonical composable surface (ADR 77). Callers already inside a
+   * fiber — the loop's tick, the session's applicator — MUST reach through this
+   * rather than awaiting the Promise facade, or the operation loses the ambient
+   * scope its envelopes are correlated by.
+   */
+  readonly fx: TimelineHarnessFx;
+
   /**
    * Harness identifier. Composes into the inbox address as
    * `timeline:{id}` — admin actors send mutations addressed here.

@@ -58,6 +58,8 @@ import type {
   TimelineHydrator,
 } from "./definition.js";
 import type {
+  TimelineHarnessFx,
+  SubstrateError,
   CompactResult,
   CompactStrategy,
   ContentBlock,
@@ -577,9 +579,41 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
 
   // ─────────── Async surface — full Operations ───────────
 
+  /**
+   * The Effect-canonical composable surface (ADR 77).
+   *
+   * `BaseHarness` hands every harness a working `.fx` carrying `use`, so this
+   * harness typechecked and resolved with NO operation twins at all — and every
+   * append therefore went through the Promise facade below, whose
+   * `runHarnessProtocol` is a `runPromise` ROOT that severs the fiber. Since
+   * `RuntimeContext` is ambient ON the fiber, the tick scope was gone by the
+   * time the append's Operation was built: no timeline envelope was
+   * attributable to the tick that caused it. A caller already in a fiber must
+   * compose `fx.append` instead.
+   */
+  get fx(): TimelineHarnessFx {
+    return {
+      use: (mw) => this.registerEffectMiddleware(mw),
+      append: (entries) => this.appendFx(entries),
+    };
+  }
+
+  /**
+   * The un-run append — the twin `fx.append` exposes and the Promise facade
+   * runs. Zero entries is a no-op that emits NO envelope (the facade's
+   * contract), so the check lives here where both paths cross it.
+   */
+  private appendFx(
+    entries: readonly TimelineEntry[],
+  ): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never> {
+    if (entries.length === 0) return Effect.void;
+    return this.commandEffect<TimelineAppendInput, void, TimelineWriteFailed>("timeline:append", {
+      entries,
+    });
+  }
+
   append(...entries: TimelineEntry[]): Promise<void> {
-    if (entries.length === 0) return Promise.resolve();
-    return this.appendCmd({ entries });
+    return runHarnessProtocol(this.appendFx(entries));
   }
 
   /**
