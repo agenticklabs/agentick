@@ -10,30 +10,20 @@
  *   4. Pass the compiled set as `tools` to `executor.run({...})` /
  *      `executor.project({...})`.
  *
- * Uses a real `ToolExecutorHarness` (not a stub) so the round-trip
- * through the registry's add → list pipeline is exercised. Uses
- * a custom executor stub that records the `tools` arg from its
- * `run()` invocation.
+ * Uses a real `ToolExecutorHarness` (not a stub) so the round-trip through the
+ * registry's add → list pipeline is exercised, and the canonical
+ * `FakeLanguageModelExecutor` — whose `seenRuns` ledger records the projection
+ * on BOTH the streaming and non-streaming paths.
  */
 
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import type {
-  AbortExecutorInput,
-  ContentBlock,
-  ExecuteInput,
-  ExecutorStream,
-  ExecutorTerminal,
-  LanguageModelExecutionResult,
-  LanguageModelExecutor,
-  LanguageModelInput,
-  NormalizeInput,
-  ProjectInput,
   CompilerProtocol,
   RenderedTree,
-  RunInput,
   StateApplicator,
   ToolDeclaration,
   ToolRegistration,
@@ -122,78 +112,9 @@ function noopApplicator(): StateApplicator {
   };
 }
 
-/**
- * Executor that records the `tools` arg from every `run()` call into a
- * shared `captured.runs` array. Always resolves with a trivial
- * succeeded terminal.
- */
-function mkRecordingExecutor(): {
-  readonly executor: LanguageModelExecutor;
-  readonly captured: {
-    runs: Array<readonly ToolDeclaration[]>;
-    projects: Array<readonly ToolDeclaration[]>;
-  };
-} {
-  const captured = {
-    runs: [] as Array<readonly ToolDeclaration[]>,
-    projects: [] as Array<readonly ToolDeclaration[]>,
-  };
-  const result: LanguageModelExecutionResult = {
-    specVersion: SPEC_VERSION,
-    output: [{ type: "text", text: "ok" } satisfies ContentBlock],
-    stopReason: "end",
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  };
-  const runFx = (input: RunInput): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
-    Effect.sync(() => {
-      captured.runs.push(input.tools);
-      return { outcome: "succeeded", result };
-    });
-  const executor: LanguageModelExecutor = {
-    family: "language-model",
-    target: { kind: "language-model", provider: "fake", modelId: "fake-v1" },
-    ready: Promise.resolve(),
-    fx: {
-      use: () => () => {},
-      run: runFx,
-      project: (input) =>
-        Effect.sync(() => {
-          captured.projects.push(input.tools);
-          return { messages: [] };
-        }),
-      normalize: () => Effect.succeed(result),
-      executeStream: () => Effect.succeed(result),
-    },
-    async project(input: ProjectInput): Promise<LanguageModelInput> {
-      captured.projects.push(input.tools);
-      return { messages: [] };
-    },
-    async execute(_: ExecuteInput<LanguageModelInput>): Promise<unknown> {
-      return result;
-    },
-    async normalize(_: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-      return result;
-    },
-    run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      return Effect.runPromise(runFx(input));
-    },
-    executeStream(_: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
-      const iter: AsyncIterableIterator<never> & ExecutorStream<unknown> = {
-        [Symbol.asyncIterator]() {
-          return this;
-        },
-        async next() {
-          return { done: true as const, value: undefined as never };
-        },
-        result: Promise.resolve(result),
-        async abort() {},
-      };
-      return iter;
-    },
-    async abort(_: AbortExecutorInput): Promise<void> {},
-  };
-  return { executor, captured };
-}
+/** The model-facing tool list this executor projected, per tick. */
+const seenTools = (executor: FakeLanguageModelExecutor): Array<readonly ToolDeclaration[]> =>
+  executor.seenRuns.map((r) => r.tools);
 
 // ============================================================================
 // Suite
@@ -218,7 +139,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
 
     const compiler = mkCompiler(tools);
     const toolExecutor = await mkToolExecutor("tools_1", sub);
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("lt_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_1",
@@ -234,8 +155,8 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
 
     // The loop should have passed the compiler-emitted tool through
     // to executor.run via the registry's compile.
-    expect(captured.runs).toHaveLength(1);
-    expect(captured.runs[0]!.map((t) => t.name)).toEqual(["calc"]);
+    expect(seenTools(executor)).toHaveLength(1);
+    expect(seenTools(executor)[0]!.map((t) => t.name)).toEqual(["calc"]);
   });
 
   it("merges compiler tools with pre-existing extension-bound tools via precedence", async () => {
@@ -271,7 +192,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
         handlerRef: "h.calc",
       },
     ]);
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("lt_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_2",
@@ -285,8 +206,12 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       maxTicks: 1,
     });
 
-    expect(captured.runs).toHaveLength(1);
-    expect(captured.runs[0]!.map((t) => t.name).sort()).toEqual(["calc", "search"]);
+    expect(seenTools(executor)).toHaveLength(1);
+    expect(
+      seenTools(executor)[0]!
+        .map((t) => t.name)
+        .sort(),
+    ).toEqual(["calc", "search"]);
   });
 
   it("compiler binding overrides extension binding on name collision", async () => {
@@ -318,7 +243,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
         handlerRef: "h.calc.rendered",
       },
     ]);
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("lt_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_3",
@@ -332,9 +257,9 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       maxTicks: 1,
     });
 
-    expect(captured.runs).toHaveLength(1);
-    expect(captured.runs[0]!).toHaveLength(1);
-    expect(captured.runs[0]![0]!.description).toBe("rendered calc");
+    expect(seenTools(executor)).toHaveLength(1);
+    expect(seenTools(executor)[0]!).toHaveLength(1);
+    expect(seenTools(executor)[0]![0]!.description).toBe("rendered calc");
   });
 
   it("filters compileForTick to model-exposed tools (dispatch-only tools don't reach the model)", async () => {
@@ -361,7 +286,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
         handlerRef: "h.hidden",
       },
     ]);
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("lt_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_4",
@@ -375,7 +300,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       maxTicks: 1,
     });
 
-    expect(captured.runs[0]!.map((t) => t.name)).toEqual(["visible"]);
+    expect(seenTools(executor)[0]!.map((t) => t.name)).toEqual(["visible"]);
   });
 
   it("rendering nothing this tick clears the prior compiler slice via replaceCompilerTools([])", async () => {
@@ -428,7 +353,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       }),
       restore: async () => undefined,
     };
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("lt_exec", sub.journal, sub.bus, sub.inbox);
 
     // Tick 1.
     await loop.runExecution({
@@ -442,7 +367,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       executionId: "exec_5_1",
       maxTicks: 1,
     });
-    expect(captured.runs[0]!.map((t) => t.name)).toEqual(["x"]);
+    expect(seenTools(executor)[0]!.map((t) => t.name)).toEqual(["x"]);
 
     // Tick 2 — same mountId, compiler now emits nothing.
     stage = 1;
@@ -457,6 +382,6 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       executionId: "exec_5_2",
       maxTicks: 1,
     });
-    expect(captured.runs[1]!).toEqual([]);
+    expect(seenTools(executor)[1]!).toEqual([]);
   });
 });

@@ -66,7 +66,6 @@ import type {
 import {
   DEFAULT_JOURNALING_POLICY,
   logEventName,
-  parseHookKey,
   progressEventName,
   HandlerError,
   InvalidPayload,
@@ -184,6 +183,7 @@ import {
   liftMiddleware,
   commandHookMiddleware,
   guardsToMiddlewares,
+  readChunkCarrier,
   type AsyncMiddleware,
   type CommandGuards,
   type CommandHooks,
@@ -204,6 +204,9 @@ export {
   annotateOperationSpan,
   spanAttributes,
   spanMiddleware,
+  chunkCarrier,
+  readChunkCarrier,
+  type ChunkCarrier,
   type SpanAttributes,
   type AsyncMiddleware,
   type CommandGuards,
@@ -626,14 +629,62 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   private registerOwn(mw: Middleware<unknown, unknown, unknown>): Unsubscribe {
     const ownUnsub = this.middleware.use(mw);
+    this.absorbChunkCarrier(mw);
     for (const child of this.interceptorChildren) child.acceptInheritedInterceptor(mw);
     let live = true;
     return () => {
       if (!live) return;
       live = false;
       ownUnsub();
+      this.releaseChunkCarrier(mw);
       for (const child of this.interceptorChildren) child.removeInheritedInterceptor(mw);
     };
+  }
+
+  /**
+   * Live chunk registrations made from {@link ChunkCarrier}s, keyed by carrier
+   * identity — the bookkeeping that lets {@link releaseChunkCarrier} undo
+   * exactly what {@link absorbChunkCarrier} did when the parent unsubscribes.
+   */
+  private readonly carrierRegistrations = new Map<
+    Middleware<unknown, unknown, unknown>,
+    Unsubscribe
+  >();
+
+  /**
+   * Route a chunk carrier OUT of the interceptor cascade and onto this harness's
+   * command runner — the one place a travelling chunk interceptor becomes real
+   * sink state. A no-op for ordinary middleware, so every chain-entry point can
+   * call it unconditionally.
+   *
+   * Idempotent per carrier identity: the same carrier legitimately arrives twice
+   * on a harness constructed mid-registration (once pull-seeded from the
+   * parent's snapshot, once pushed by the parent's live cascade), and must
+   * register once.
+   *
+   * The carrier STAYS in the chain regardless — that is what keeps
+   * `resolvedInterceptors()` handing it to descendants constructed later, and it
+   * is inert when composed.
+   */
+  private absorbChunkCarrier(mw: Middleware<unknown, unknown, unknown>): void {
+    if (this.carrierRegistrations.has(mw)) return;
+    const carrier = readChunkCarrier(mw);
+    if (carrier === undefined) return;
+    this.carrierRegistrations.set(
+      mw,
+      this.commandRunner.registerChunkInterceptor(
+        carrier.key,
+        carrier.interceptor as ChunkInterceptor<unknown, RuntimeContext>,
+      ),
+    );
+  }
+
+  /** Undo {@link absorbChunkCarrier} for one carrier. No-op if never absorbed. */
+  private releaseChunkCarrier(mw: Middleware<unknown, unknown, unknown>): void {
+    const off = this.carrierRegistrations.get(mw);
+    if (off === undefined) return;
+    this.carrierRegistrations.delete(mw);
+    off();
   }
 
   /**
@@ -657,6 +708,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   private acceptInheritedInterceptor(mw: Middleware<unknown, unknown, unknown>): void {
     this.inherited.use(mw);
+    this.absorbChunkCarrier(mw);
     for (const child of this.interceptorChildren) child.acceptInheritedInterceptor(mw);
   }
 
@@ -667,6 +719,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    */
   private removeInheritedInterceptor(mw: Middleware<unknown, unknown, unknown>): void {
     this.inherited.remove(mw);
+    this.releaseChunkCarrier(mw);
     for (const child of this.interceptorChildren) child.removeInheritedInterceptor(mw);
   }
 
@@ -812,29 +865,17 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * it by `ctx.op`, and registers it as a `transform`-kind middleware. The
    * returned {@link Unsubscribe} is the chain's native remover — a hook is now
    * just op-scoped middleware, no separate `Hooks` storage.
+   *
+   * ONE path, chunk hooks included (ADR 80 Phase 2). An `on<Verb>Chunk` key
+   * desugars to a {@link chunkCarrier} that {@link registerOwn} both absorbs
+   * onto this harness's command runner AND pushes down the construction tree —
+   * so an app-level chunk hook reaches the harness that actually declares the
+   * streaming command, which is the whole point and was previously impossible.
    */
   private registerCommandHook(key: string, fn: unknown): Unsubscribe {
     const mw = commandHookMiddleware(key, fn);
     if (mw === undefined) return () => {};
     return this.registerOwn(mw);
-  }
-
-  /**
-   * Dispatch ONE hook-config entry to its registration path (ADR 80 Phase 2):
-   * an `on<Verb>Chunk` key routes to the {@link CommandRunner}'s
-   * `registerChunkInterceptor` (the sink-wrapping path, since chunk state is
-   * command-scoped); every other key routes to {@link registerCommandHook}
-   * (the op-scoped middleware cascade). The single funnel behind {@link hook}
-   * and the {@link hooks} proxy.
-   */
-  private registerHookEntry(key: string, fn: unknown): Unsubscribe {
-    if (parseHookKey(key)?.kind === "chunk") {
-      return this.commandRunner.registerChunkInterceptor(
-        key,
-        fn as ChunkInterceptor<unknown, RuntimeContext>,
-      );
-    }
-    return this.registerCommandHook(key, fn);
   }
 
   /**
@@ -858,7 +899,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     const unsubs: Unsubscribe[] = [];
     for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {
       if (fn === undefined) continue;
-      unsubs.push(this.registerHookEntry(key, fn));
+      unsubs.push(this.registerCommandHook(key, fn));
     }
     if (unsubs.length === 0) return () => {};
     let live = true;
@@ -871,7 +912,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
 
   /**
    * Per-verb imperative registrars (ADR 83) — a typed Proxy over
-   * {@link registerHookEntry}. Uniformly covers the before/after sugar
+   * {@link registerCommandHook}. Uniformly covers the before/after sugar
    * (`harness.hooks.onBeforeToolDispatch(fn)`), the full-middleware `on<Command>`
    * primitive (`harness.hooks.onToolDispatch(mw)`), AND the per-chunk interceptor
    * (`harness.hooks.onModelGenerateStreamChunk(interceptor)`, ADR 80 Phase 2 —
@@ -882,7 +923,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   get hooks(): HookRegistrars {
     return (this._hookRegistrars ??= new Proxy({} as HookRegistrars, {
       get: (_target, name) =>
-        typeof name === "string" ? (fn: unknown) => this.registerHookEntry(name, fn) : undefined,
+        typeof name === "string" ? (fn: unknown) => this.registerCommandHook(name, fn) : undefined,
     }));
   }
   private _hookRegistrars?: HookRegistrars;
@@ -1023,6 +1064,12 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       surface,
       runOperation: this.operationRunner.runOperation,
     });
+
+    // Chunk carriers pull-seeded above could not register then — the command
+    // runner they register ON did not exist yet. Drain them now. (The middleware
+    // half of the seed needed no such deferral, which is why the seed loop
+    // stays where it is: it must precede `attachInterceptorChild`.)
+    for (const mw of this.inherited.snapshot()) this.absorbChunkCarrier(mw);
 
     if (options.autoRegisterInbox !== false) {
       // Register is async — cluster impls may negotiate across nodes.

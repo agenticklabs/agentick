@@ -76,6 +76,7 @@ import {
   ulid,
 } from "@agentick/runtime";
 import type {
+  TerminalEvent,
   ContentBlock,
   ExecutionRunResult,
   ExecutionTarget,
@@ -109,6 +110,7 @@ import {
   HandlerError,
   MultipleStructuredOutputs,
   NoModelForExecutionError,
+  ProviderAborted,
   ProviderRejected,
   ResponseValidationError,
   StructuredOutputIncomplete,
@@ -1132,11 +1134,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       //     a provider tool contributes iff a rendered tree declares it.
       const providerTools = tickCompiled.declarations?.providerTools ?? [];
 
-      // 3. Execute. Streaming path (executeStream) when the caller
-      //    requested streaming AND the executor supports it AND the
-      //    target's capabilities don't explicitly disable it.
+      // 3. Execute. Streaming is the DEFAULT path — it is what every real
+      //    provider call takes, what the session already resolves to
+      //    (`SendInput.stream ?? defaultStreaming ?? capabilityDefault`), and
+      //    the only path that emits deltas for chunk hooks to observe. Omitting
+      //    `stream` used to mean "don't stream", which made the cheap-to-write
+      //    test harness silently exercise a path no deployment takes. Opt OUT
+      //    with an explicit `stream: false`.
+      //
+      //    Still gated on capability: `executeStream` must exist AND the target
+      //    must not explicitly disable streaming.
       const wantsStreaming =
-        (input.stream ?? false) &&
+        (input.stream ?? true) &&
         typeof tickModelExecutor.executeStream === "function" &&
         (tickTarget.capabilities?.supportsStreaming ?? true);
 
@@ -1171,13 +1180,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ),
         );
         if (Either.isLeft(streamed)) {
-          // Model failure — return a failed terminal WITHOUT settling. The
-          // continuation maps `failed` → `executor_failed` and breaks (the
-          // pre-command inline `break` before the tick-end bridge).
-          return failedTickResult(input, {
-            outcome: "failed",
-            error: new ProviderRejected({ cause: streamed.left }),
-          });
+          // Non-success terminal — returned WITHOUT settling. The continuation
+          // maps the outcome to its stop reason and breaks (the pre-command
+          // inline `break` before the tick-end bridge).
+          return failedTickResult(input, streamTerminal(streamed.left));
         }
         const normalized = yield* tickModelExecutor.fx.normalize({
           targetOutput: streamed.right,
@@ -1661,6 +1667,36 @@ function outputSpecFromTree(
     schema: decl.schema,
     strategy: decl.strategy ?? "auto",
   };
+}
+
+/**
+ * Fold a streaming model call's error into the SAME terminal vocabulary the
+ * non-streaming `fx.run` path returns.
+ *
+ * `fx.run` returns a rich `ExecutorTerminal` — `canceled` for an abort, `vetoed`
+ * for a guard verdict, `failed` for a provider rejection — while `fx.executeStream`
+ * signals all three on its error channel. Collapsing that channel to `failed`
+ * meant an aborted stream was reported as a model failure and a vetoed one
+ * likewise: two outcomes the loop already distinguishes everywhere else,
+ * flattened on the path production actually takes.
+ */
+function streamTerminal(cause: unknown): ExecutorTerminal<LanguageModelExecutionResult> {
+  // A guard veto (or a replayed cancel) reaches the caller as an
+  // `OperationOutcomeError` carrying the terminal the substrate already settled
+  // on. Read it structurally — the same discipline the model-executor's
+  // `operationOutcomeToTerminal` uses, and the reason this needs no dependency
+  // on that package.
+  const settled = (cause as { readonly terminal?: TerminalEvent } | null | undefined)?.terminal;
+  if (settled?.outcome === "vetoed" || settled?.outcome === "canceled") {
+    return {
+      outcome: settled.outcome,
+      ...(settled.reason !== undefined ? { reason: settled.reason } : {}),
+    };
+  }
+  if (cause instanceof ProviderAborted) {
+    return { outcome: "canceled", ...(cause.reason !== undefined ? { reason: cause.reason } : {}) };
+  }
+  return { outcome: "failed", error: new ProviderRejected({ cause }) };
 }
 
 /**

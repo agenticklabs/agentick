@@ -270,12 +270,16 @@ export interface RunExecutionInput {
    * loop uses streaming execution and drains every `AdapterDelta`
    * through the run-execution sink as `model` {@link LoopExecutionEvent}s.
    *
-   * When false (or undefined → falls back to the default), the loop
-   * uses the non-streaming `executor.execute` path; only summary-level
-   * events drain to the sink.
+   * When false, the loop uses the non-streaming `executor.execute` path
+   * and only summary-level events drain to the sink.
    *
-   * Default: resolved by the caller (SessionHarness) from the
-   * SendInput / CreateSessionInput / AppHarnessOptions cascade.
+   * **Undefined means STREAM.** Streaming is the path every real provider
+   * call takes and the only one that emits deltas, so it is the default and
+   * `stream: false` is the opt-out. `SessionHarness` still resolves its own
+   * richer cascade (`SendInput.stream` > session default > capability
+   * default) and passes an explicit value; this default governs a direct
+   * loop-executor caller — most often a test harness, which is exactly where
+   * silently taking the non-streaming path did damage.
    */
   readonly stream?: boolean;
 

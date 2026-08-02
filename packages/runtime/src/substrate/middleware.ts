@@ -610,6 +610,65 @@ export const scopeToCommand =
   (input, next, ctx) =>
     ctx.op === command ? mw(input, next, ctx) : next(input);
 
+// ============================================================================
+// Chunk carriers — how a chunk interceptor rides the middleware channel
+// ============================================================================
+
+const CHUNK_CARRIER = Symbol.for("agentick.chunkCarrier");
+
+/** The `on<Verb>Chunk` registration a {@link chunkCarrier} ferries. */
+export interface ChunkCarrier {
+  /** The minted chunk hook name (`on<Verb>Chunk`) to register under. */
+  readonly key: string;
+  /** The `ChunkInterceptor` itself — opaque here; the command runner normalizes it. */
+  readonly interceptor: unknown;
+}
+
+/**
+ * Wrap a chunk interceptor as an inert {@link Middleware} so it can travel the
+ * interceptor-inheritance channel.
+ *
+ * ## Why a carrier and not a second channel
+ *
+ * A chunk interceptor is command-scoped SINK state, so it must end up on the
+ * `CommandRunner` of the harness that DECLARES the streaming command — never on
+ * a middleware chain. But the harness that declares `model:generate_stream` is
+ * not the harness an adopter configures: `createApp({ hooks })` folds one bag
+ * and hands the result down a construction tree several levels deep. Chunk
+ * entries had no way down that tree, so `hooksToMiddlewares` dropped them and
+ * every declaratively-configured `on<Verb>Chunk` silently never ran.
+ *
+ * The alternative was a parallel `inheritedChunkInterceptors` option threaded
+ * through ~20 harness option types, each of which has to remember to forward it.
+ * A carrier needs none of that: it rides the ONE existing channel — the
+ * construction snapshot, the live push-down, and the identity-keyed removal all
+ * work unchanged — and `BaseHarness` routes it out of the cascade at the single
+ * point where an interceptor enters a chain.
+ *
+ * The pass-through body is a safety net, not a path: a carrier that reached
+ * `composeMiddleware` would forward its input untouched rather than corrupt the
+ * op.
+ */
+export function chunkCarrier(
+  key: string,
+  interceptor: unknown,
+): Middleware<unknown, unknown, unknown> {
+  const mw: Middleware<unknown, unknown, unknown> = (input, next) => next(input);
+  (mw as unknown as Record<symbol, unknown>)[CHUNK_CARRIER] = {
+    key,
+    interceptor,
+  } satisfies ChunkCarrier;
+  // `observe` is the honest kind: composing a carrier changes nothing.
+  return tagInterceptor("observe", mw);
+}
+
+/** Read a middleware's {@link ChunkCarrier} payload; `undefined` for real middleware. */
+export function readChunkCarrier(
+  mw: Middleware<unknown, unknown, unknown>,
+): ChunkCarrier | undefined {
+  return (mw as unknown as Record<symbol, unknown>)[CHUNK_CARRIER] as ChunkCarrier | undefined;
+}
+
 /**
  * The Effect-native `guard`/`transform`/`observe` middleware for ONE command
  * hook config entry — the shared core of `BaseHarness.hook` (own, dynamic) and
@@ -626,10 +685,13 @@ export function commandHookMiddleware(
 ): Middleware<unknown, unknown, unknown> | undefined {
   const parsed = parseHookKey(key);
   if (parsed === undefined) return undefined;
-  // Chunk interceptors (ADR 80 Phase 2) SINK-WRAP the streaming body; they are
-  // NOT op-scoped middleware, so they never join the interceptor cascade. Skip
-  // them here — the CommandRunner's `registerChunkInterceptor` owns their path.
-  if (parsed.kind === "chunk") return undefined;
+  // Chunk interceptors (ADR 80 Phase 2) SINK-WRAP the streaming body rather than
+  // composing around the op, so they cannot BE middleware — but they must still
+  // TRAVEL the middleware inheritance channel to reach the harness that declares
+  // the command. They ride as a {@link chunkCarrier}: inert in the cascade,
+  // routed out of it by `BaseHarness` onto the command runner. See the carrier's
+  // docblock for why a parallel `inheritedChunkInterceptors` channel was not it.
+  if (parsed.kind === "chunk") return chunkCarrier(key, fn);
   const wrapped: AsyncMiddleware<unknown, unknown> =
     parsed.kind === "before"
       ? asBefore(fn as BeforeHook<unknown>)

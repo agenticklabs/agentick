@@ -29,6 +29,7 @@
 import { Effect, FiberRef } from "effect";
 import {
   BaseHarness,
+  OperationVeto,
   getContext,
   runHarnessProtocol,
   type StreamCommand,
@@ -187,16 +188,18 @@ export class FakeLanguageModelExecutor
   readonly target: ExecutionTarget;
 
   /**
-   * Ledger of every {@link RunInput} the non-streaming `run` path (`fx.run`)
-   * observed, in call order — the canonical seen-input recorder for tests that
-   * assert on the projection's inputs (the model-facing `tools` list, the
-   * `compiled` tree carrying `config.responseFormat` / `config.toolChoice`).
-   * Appended at the top of {@link runBody}. Replaces per-test bespoke recording
-   * executors: drive the non-streaming path (`defaultStreaming: false`, or a
-   * target without `supportsStreaming`) and read `seenRuns[i].compiled` /
-   * `seenRuns[i].tools`. Empty when the loop took the streaming path.
+   * Ledger of every projection this executor observed, in call order — the
+   * canonical seen-input recorder for tests asserting on what reached the model
+   * (the model-facing `tools` list, the `compiled` tree carrying
+   * `config.responseFormat` / `config.toolChoice`).
+   *
+   * Recorded at the `project` command, which BOTH the streaming and
+   * non-streaming paths cross — so a test reads `seenRuns[i].compiled` without
+   * first having to force the loop off the path production takes. It used to
+   * record in `run` only, which quietly made "assert what the model saw" and
+   * "don't stream" the same decision.
    */
-  readonly seenRuns: RunInput[] = [];
+  readonly seenRuns: ProjectInput[] = [];
 
   private readonly scriptedSequence: ReadonlyArray<MockScriptedRun>;
   private scriptIndex = 0;
@@ -324,6 +327,7 @@ export class FakeLanguageModelExecutor
       scope: input.scope ?? {},
       input,
     };
+    this.seenRuns.push(input);
     return this.runOperation(op, (i) =>
       Effect.try({
         try: () => projectImpl(i),
@@ -536,8 +540,17 @@ export class FakeLanguageModelExecutor
             yield* this.emitDeltaLazy(op, () => delta).pipe(Effect.catchAll(() => Effect.void));
           }
         }
-        if (next?.outcome === "failed") {
-          return yield* Effect.fail(new ProviderRejected({ cause: "scripted stream failure" }));
+        // Scripted non-success outcomes are raised HERE — the one point both
+        // the streaming and non-streaming paths cross — so a script means the
+        // same thing on either. Each rides the signal the real thing would use,
+        // and the loop folds all three back into terminals.
+        switch (next?.outcome) {
+          case "failed":
+            return yield* Effect.fail(new ProviderRejected({ cause: "scripted stream failure" }));
+          case "canceled":
+            return yield* Effect.fail(new ProviderAborted({ reason: "scripted cancel" }));
+          case "vetoed":
+            return yield* Effect.fail(new OperationVeto("scripted veto") as never);
         }
         return scriptedResult as unknown;
       } finally {
@@ -556,20 +569,16 @@ export class FakeLanguageModelExecutor
     never
   > {
     return Effect.gen(this, function* () {
-      // Record the observed run input (the canonical seen-input ledger) — the
-      // model-facing `tools` + the `compiled` tree, for tests asserting on the
-      // projection's inputs. Non-streaming path only (the loop's streaming path
-      // rides `executeStream`, not `run`).
-      this.seenRuns.push(input);
-
       // PEEK (don't consume) the scripted entry — the `model:generate`
       // command is the single cursor-advance for the execute step below;
       // run needs the entry only for bus-delta observability + the
       // scripted vetoed/canceled short-circuit.
       const next = this.peekScripted();
 
-      // 1. project
-      const projected = yield* projectAsEffect(input);
+      // 1. project — through the COMMAND, same as the streaming path. A fake
+      //    that projects out-of-band is a fake whose `model:command:project`
+      //    hooks fire on one path and not the other.
+      const projected = yield* this.projectFx(input);
 
       // 2. Emit scripted deltas (if any) for bus observability.
       //    The loop's streaming path uses `executeStream` directly,
@@ -593,21 +602,7 @@ export class FakeLanguageModelExecutor
         return { outcome: "canceled", reason: "aborted" };
       }
 
-      // 4. Scripted RUN-level non-success terminals. A veto/cancel resolves
-      //    to a terminal WITHOUT a provider call, so consume the entry here
-      //    and short-circuit — the generate command is never reached. (A
-      //    scripted `"failed"` DOES ride the command: `generateBody` surfaces
-      //    it as a ProviderRejected, folded back to a `failed` terminal below.)
-      switch (next?.outcome) {
-        case "vetoed":
-          this.nextScripted();
-          return { outcome: "vetoed", reason: "scripted veto" };
-        case "canceled":
-          this.nextScripted();
-          return { outcome: "canceled", reason: "scripted cancel" };
-      }
-
-      // 5. execute — route through the `model:generate` COMMAND (ADR 89 §1)
+      // 4. execute — route through the `model:generate` COMMAND (ADR 89 §1)
       //    so a NON-STREAMING run fires `onBefore/AfterModelGenerate` +
       //    `guardGenerate` (the streaming path rides `model:generate_stream`
       //    the same way, via `executeStreamFx`). `commandEffect` composes the
@@ -662,17 +657,6 @@ export class FakeLanguageModelExecutor
 // ============================================================================
 // Pure helpers
 // ============================================================================
-
-function projectAsEffect(input: RunInput): Effect.Effect<LanguageModelInput, never, never> {
-  return Effect.sync(() =>
-    projectImpl({
-      compiled: input.compiled,
-      target: input.target,
-      tools: input.tools,
-      ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
-    }),
-  );
-}
 
 function projectImpl(input: ProjectInput): LanguageModelInput {
   const messages = buildMessages(input.compiled);

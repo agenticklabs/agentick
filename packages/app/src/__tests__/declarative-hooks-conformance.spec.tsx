@@ -6,7 +6,8 @@
  * of the surface. `CommandHooks` is `HooksOf & CommandAroundHooks &
  * ChunkHooksOf`, so TypeScript accepts `onModelGenerateStreamChunk` in the
  * declarative bag — while `hooksToMiddlewares` dropped every chunk entry on the
- * floor. No error, no warning; the hook simply never ran.
+ * floor. No error, no warning; the hook simply never ran. Fixed by the
+ * `chunkCarrier` in `@agentick/runtime`; this suite is what keeps it fixed.
  *
  * ## Why nothing caught it
  *
@@ -157,37 +158,26 @@ describe("declarative CommandHooks — every declared kind fires through createA
     expect(names).toContain("onBeforeModelProviderRequest");
   });
 
-  // ── KNOWN GAP, marked `it.fails` so it is load-bearing rather than silent ──
-  //
-  // These three FAIL today and `it.fails` asserts exactly that, so the tree stays
-  // green while the gap stays visible — and the moment someone fixes the fold,
-  // these start failing and force the flip back to `it(...)`. A self-clearing
-  // marker, not a suppression.
-  //
-  // The fix is ARCHITECTURAL, not a branch: chunk interceptors live in a
-  // per-`CommandRunner` map, while `inheritedInterceptors` carries only
-  // `Middleware[]`. There is NO inherited-chunk channel, so an app-level chunk
-  // hook has no route to a child harness's runner. Closing it means threading a
-  // parallel `inheritedChunkInterceptors` through `BaseHarnessOptions` →
-  // `CommandRunner` (plus the live `interceptorParent` resolution), then having
-  // the declarative folds extract chunk entries instead of dropping them at
-  // `middleware.ts`'s `if (parsed.kind === "chunk") return undefined`.
-  //
-  // The imperative path (`harness.hook(...)` → `registerHookEntry`) already
-  // routes them correctly; only the DECLARATIVE construction fold does not.
-  it.fails("fires on<Verb>Chunk declared in the DECLARATIVE bag", async () => {
+  // These three were the defect. Chunk interceptors live in a per-`CommandRunner`
+  // map while `inheritedInterceptors` carries `Middleware[]`, so an app-level
+  // chunk hook had no route to the child harness that declares the streaming
+  // command — and the fold dropped it rather than saying so. Closed by the
+  // `chunkCarrier`: chunk entries now ride the SAME inheritance channel as inert
+  // middleware and `BaseHarness` routes them onto the command runner at every
+  // chain-entry point.
+  it("fires on<Verb>Chunk declared in the DECLARATIVE bag", async () => {
     const { names } = await driveWithDeclarativeHooks();
     expect(names).toContain("onModelGenerateStreamChunk");
   });
 
-  it.fails("fires on<Verb>Chunk on the nested provider-request command", async () => {
+  it("fires on<Verb>Chunk on the nested provider-request command", async () => {
     const { names } = await driveWithDeclarativeHooks();
     expect(names).toContain("onModelProviderRequestChunk");
   });
 
   // The invariant, stated once: the type must not promise what the runtime
   // discards. If a key is accepted by `CommandHooks` it must reach its seam.
-  it.fails("drops NOTHING that the type accepted", async () => {
+  it("drops NOTHING that the type accepted", async () => {
     const { names } = await driveWithDeclarativeHooks();
     expect(names.sort()).toEqual(
       [

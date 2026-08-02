@@ -8,29 +8,21 @@
  * ambient tree/model). Absent, today's precedence (model-decl over tree) is
  * untouched.
  *
- * Observes via a recording executor that captures the `compiled` arg from
- * every `run()` (the same pattern as `layered-tools.spec.ts`).
+ * Observes via `FakeLanguageModelExecutor.seenRuns` — the canonical ledger,
+ * recorded at the `project` command so it fills on the streaming path the loop
+ * actually takes. A bespoke recording executor here used to capture from `run()`
+ * only, which meant this suite silently asserted against a non-streaming path.
  */
 
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import type {
-  AbortExecutorInput,
-  ContentBlock,
-  ExecuteInput,
-  ExecutorStream,
-  ExecutorTerminal,
-  LanguageModelExecutionResult,
-  LanguageModelExecutor,
-  LanguageModelInput,
-  NormalizeInput,
-  ProjectInput,
   CompilerProtocol,
   RenderedTree,
   ResponseFormat,
-  RunInput,
   StateApplicator,
   ModelDeclaration,
   SpecConfig,
@@ -83,69 +75,15 @@ function noopApplicator(): StateApplicator {
   };
 }
 
-/** Executor that records `input.compiled` from every `run()`. */
-function mkRecordingExecutor(): {
-  readonly executor: LanguageModelExecutor;
-  readonly captured: { compiled: RenderedTree[] };
-} {
-  const captured = { compiled: [] as RenderedTree[] };
-  const result: LanguageModelExecutionResult = {
-    specVersion: SPEC_VERSION,
-    output: [{ type: "text", text: "ok" } satisfies ContentBlock],
-    stopReason: "end",
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  };
-  const runFx = (input: RunInput): Effect.Effect<ExecutorTerminal<LanguageModelExecutionResult>> =>
-    Effect.sync(() => {
-      captured.compiled.push(input.compiled);
-      return { outcome: "succeeded", result };
-    });
-  const executor: LanguageModelExecutor = {
-    family: "language-model",
-    target: { kind: "language-model", provider: "fake", modelId: "fake-v1" },
-    ready: Promise.resolve(),
-    fx: {
-      use: () => () => {},
-      run: runFx,
-      project: () => Effect.sync(() => ({ messages: [] })),
-      normalize: () => Effect.succeed(result),
-      executeStream: () => Effect.succeed(result),
-    },
-    async project(_: ProjectInput): Promise<LanguageModelInput> {
-      return { messages: [] };
-    },
-    async execute(_: ExecuteInput<LanguageModelInput>): Promise<unknown> {
-      return result;
-    },
-    async normalize(_: NormalizeInput<unknown>): Promise<LanguageModelExecutionResult> {
-      return result;
-    },
-    run(input: RunInput): Promise<ExecutorTerminal<LanguageModelExecutionResult>> {
-      return Effect.runPromise(runFx(input));
-    },
-    executeStream(_: ExecuteInput<LanguageModelInput>): ExecutorStream<unknown> {
-      const iter: AsyncIterableIterator<never> & ExecutorStream<unknown> = {
-        [Symbol.asyncIterator]() {
-          return this;
-        },
-        async next() {
-          return { done: true as const, value: undefined as never };
-        },
-        result: Promise.resolve(result),
-        async abort() {},
-      };
-      return iter;
-    },
-    async abort(_: AbortExecutorInput): Promise<void> {},
-  };
-  return { executor, captured };
-}
-
 const rf = (name: string): ResponseFormat => ({
   type: "json_schema",
   name,
   schema: { title: name },
 });
+
+/** The compiled trees this executor projected, in tick order. */
+const seen = (executor: FakeLanguageModelExecutor): RenderedTree[] =>
+  executor.seenRuns.map((r) => r.compiled);
 
 function seenName(tree: RenderedTree): string | undefined {
   const format = tree.config?.responseFormat;
@@ -162,7 +100,7 @@ describe("LoopExecutorHarness — responseFormat overlay (trail-response-format-
       { responseFormat: rf("from-tree") },
       { modelRef: "m", parameters: { responseFormat: rf("from-model") } },
     );
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("rf_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_1",
@@ -177,8 +115,8 @@ describe("LoopExecutorHarness — responseFormat overlay (trail-response-format-
       responseFormat: rf("from-send"),
     });
 
-    expect(captured.compiled).toHaveLength(1);
-    expect(seenName(captured.compiled[0]!)).toBe("from-send");
+    expect(seen(executor)).toHaveLength(1);
+    expect(seenName(seen(executor)[0]!)).toBe("from-send");
   });
 
   it("without a send-level responseFormat, model-decl parameters win over tree config (unchanged)", async () => {
@@ -190,7 +128,7 @@ describe("LoopExecutorHarness — responseFormat overlay (trail-response-format-
       { responseFormat: rf("from-tree") },
       { modelRef: "m", parameters: { responseFormat: rf("from-model") } },
     );
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("rf_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_2",
@@ -204,7 +142,7 @@ describe("LoopExecutorHarness — responseFormat overlay (trail-response-format-
       maxTicks: 1,
     });
 
-    expect(seenName(captured.compiled[0]!)).toBe("from-model");
+    expect(seenName(seen(executor)[0]!)).toBe("from-model");
   });
 
   it("with neither model-decl nor send-level, the tree config responseFormat is preserved", async () => {
@@ -213,7 +151,7 @@ describe("LoopExecutorHarness — responseFormat overlay (trail-response-format-
     await loop.ready;
 
     const compiler = mkCompiler({ responseFormat: rf("from-tree") });
-    const { executor, captured } = mkRecordingExecutor();
+    const executor = new FakeLanguageModelExecutor("rf_exec", sub.journal, sub.bus, sub.inbox);
 
     await loop.runExecution({
       sessionId: "s_3",
@@ -227,7 +165,7 @@ describe("LoopExecutorHarness — responseFormat overlay (trail-response-format-
       maxTicks: 1,
     });
 
-    expect(seenName(captured.compiled[0]!)).toBe("from-tree");
+    expect(seenName(seen(executor)[0]!)).toBe("from-tree");
   });
 });
 
