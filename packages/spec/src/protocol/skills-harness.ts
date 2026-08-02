@@ -14,7 +14,14 @@
  * @see docs/proposals/v2/blueprint/32-extension-shape-spectrum.md
  */
 
+import type { Effect } from "effect";
+
 import type { Unsubscribe } from "./inbox.js";
+import type { HarnessFx } from "./middleware.js";
+import type { HarnessEdge } from "./promise-view.js";
+// Re-exported below for adopters; also needed HERE, and `export … from` does
+// not bring a name into local scope.
+import type { SkillsErrorChannel } from "../errors/harnesses.js";
 
 // ============================================================================
 // Skill data model
@@ -159,7 +166,30 @@ export {
  * All impls satisfy the same protocol and pass the same conformance
  * suite.
  */
-export interface SkillsHarnessProtocol {
+/**
+ * The skills harness's **canonical** async surface (ADR 77): the composable
+ * Effect twins of its declared WRITE commands. An in-process caller composes
+ * `yield* skills.fx.register(...)` and stays in ONE fiber tree, so the op
+ * keeps the ambient `tickId` / `parentOpId`; the Promise methods on
+ * {@link SkillsHarnessProtocol} are the derived edge facade.
+ *
+ * `skills:list` / `:get` / `:search` are declared commands too (they are
+ * reachable over the wire) but are absent here: the protocol serves those
+ * reads from the local cache SYNCHRONOUSLY, and a Promise-returning `get`
+ * derived from an Fx member would collide with the sync one. `skills:run` is
+ * wire-only and likewise not part of the in-process surface. The Fx twin
+ * covers what MUTATES.
+ */
+export interface SkillsFx extends HarnessFx {
+  /** Register a new skill. Fails with `SkillAlreadyExists` on name collision. */
+  register(input: SkillsRegisterInput): Effect.Effect<Skill, SkillsErrorChannel, never>;
+  /** Partial update on an existing skill. Fails with `SkillNotFound`. */
+  update(input: SkillsUpdateInput): Effect.Effect<Skill, SkillsErrorChannel, never>;
+  /** Remove a skill. Idempotent — removing an unknown name is a no-op. */
+  remove(input: SkillsRemoveInput): Effect.Effect<void, SkillsErrorChannel, never>;
+}
+
+export interface SkillsHarnessProtocol extends HarnessEdge<SkillsFx> {
   readonly id: string;
   readonly ready: Promise<void>;
   close(): Promise<void>;
@@ -180,13 +210,9 @@ export interface SkillsHarnessProtocol {
   subscribeAll(listener: () => void): Unsubscribe;
 
   // ─── Async surface (full Operations through runOperation) ──────
-
-  /** Register a new skill. Fails with `SkillAlreadyExists` on name collision. */
-  register(input: SkillsRegisterInput): Promise<Skill>;
-  /** Partial update on an existing skill. Fails with `SkillNotFound`. */
-  update(input: SkillsUpdateInput): Promise<Skill>;
-  /** Remove a skill. Idempotent — removing an unknown name is a no-op. */
-  remove(input: SkillsRemoveInput): Promise<void>;
+  //
+  // BOTH faces come from `HarnessEdge<SkillsFx>`: `register` / `update` /
+  // `remove` as the Promise facade, and `fx` as the Effect-canonical twin.
 
   // ─── Snapshot / restore (SnapshotCapable feature) ──────────────
 

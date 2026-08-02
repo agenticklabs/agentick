@@ -45,6 +45,7 @@ import type {
   Skill,
   SkillStoreQuery,
   SkillsHarnessProtocol,
+  SkillsFx,
   SkillsRegisterInput,
   SkillsRemoveInput,
   SkillsSearchInput,
@@ -272,6 +273,17 @@ export class SkillsHarness
    * registry manufactures.
    */
   private readonly runCommand: (input: SkillsRunInput) => Promise<SessionExecutionHandle>;
+
+  /**
+   * The Effect-canonical twin (ADR 77). An in-process caller composes
+   * `yield* skills.fx.register(...)` and stays in ONE fiber tree, so the op
+   * keeps the ambient `tickId` / `parentOpId`; the plain Promise methods are
+   * the derived edge facade. `fxProxy` derives `fx.<action>` from the
+   * `<surface>:<action>` naming convention — no map to maintain.
+   */
+  get fx(): SkillsFx {
+    return this.fxProxy() as unknown as SkillsFx;
+  }
 
   get id(): string {
     return this.scopeId;
