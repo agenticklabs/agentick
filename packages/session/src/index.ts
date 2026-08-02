@@ -27,3 +27,21 @@ export { InMemorySessionStore } from "./session-store.js";
 // Re-export the ports from the same package as the bundled impl so store
 // adapters get the contract + reference from one dep.
 export type { SessionRecord, SessionStore, SessionStoreQuery } from "@agentick/spec";
+// The round-trip recorder (docs/proposals/v2/observability.md) — one artifact
+// per TICK spanning compiler → model → provider → timeline. It lives HERE and
+// not with the model executor because the span crosses harnesses, and a package
+// can only NAME hook keys whose augmenting module is in its compilation. This
+// package depends on every harness it integrates, which is why cross-harness
+// work belongs here.
+export {
+  jsonlSink,
+  memorySink,
+  roundTripRecorder,
+  verbatimViolations,
+  type PersistedEntry,
+  type RoundTrip,
+  type RoundTripRecorderOptions,
+  type RoundTripScope,
+  type RoundTripSink,
+  type VerbatimViolation,
+} from "./round-trip-recorder.js";

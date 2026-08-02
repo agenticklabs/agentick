@@ -355,18 +355,36 @@ describe("AppHarness — closeApp", () => {
 describe("AppHarness — middleware on app commands (command refactor)", () => {
   it("app.fx.use(middleware) wraps createSession after the command refactor", async () => {
     const { Effect } = await import("effect");
-    const calls: string[] = [];
+    const { getContext } = await import("@agentick/runtime");
+    const ops: string[] = [];
     const app = await mkApp();
     app.fx.use((input, next) =>
       Effect.gen(function* () {
-        calls.push("in");
+        const ctx = yield* getContext;
+        ops.push(`in:${ctx.op ?? "?"}`);
         const r = yield* next(input);
-        calls.push("out");
+        ops.push(`out:${ctx.op ?? "?"}`);
         return r;
       }),
     );
     await app.createSession({ sessionId: "mw-1" });
-    expect(calls).toEqual(["in", "out"]);
+
+    // `fx.use` is NOT op-scoped — it composes on every op the construction fold
+    // reaches, which is the documented contract (see the `runOnce` twin below).
+    // The createSession op is wrapped, in order.
+    // The compiler's mount nests INSIDE the createSession op, in order.
+    expect(ops).toEqual([
+      "in:AppCreateSession",
+      "in:CompilerMount",
+      "out:CompilerMount",
+      "out:AppCreateSession",
+    ]);
+
+    // The compiler's mount op is wrapped too, because the compiler now joins the
+    // cascade like every other app-constructed harness. It used to be the one
+    // slot the fold skipped — a `CompilerFactory` got substrate but no
+    // interceptors — so an app-declared `onBefore/AfterCompilerRenderTree` never
+    // fired. This assertion is what keeps that closed.
     await app.closeApp();
   });
 

@@ -63,7 +63,7 @@ import {
   RenderFailed,
   SPEC_VERSION,
 } from "@agentick/spec";
-import { BaseHarness } from "@agentick/runtime";
+import { BaseHarness, type BaseHarnessOptions } from "@agentick/runtime";
 
 import {
   builtInToolsProjection,
@@ -169,7 +169,10 @@ interface MountState {
   errorBoundaryFiredInLastRender: boolean;
 }
 
-export interface CompilerHarnessOptions {
+export interface CompilerHarnessOptions extends Pick<
+  BaseHarnessOptions,
+  "inheritedInterceptors" | "interceptorParent"
+> {
   /** Override the built-in contributor set with caller-supplied registry. */
   readonly registry?: ContributorRegistry;
   /**
@@ -223,7 +226,17 @@ export class CompilerHarness
     inbox: MessageInbox,
     options: CompilerHarnessOptions = {},
   ) {
-    super("compiler", scopeId, journal, bus, inbox);
+    // The host's interceptor cascade rides in on `options` (ADR 93 landmine 11 —
+    // `reactCompiler()` spreads `inheritedFrom(deps)` in). Without forwarding it
+    // an app-declared `onBefore/AfterCompilerRenderTree` never reaches here.
+    super("compiler", scopeId, journal, bus, inbox, {
+      ...(options.inheritedInterceptors !== undefined
+        ? { inheritedInterceptors: options.inheritedInterceptors }
+        : {}),
+      ...(options.interceptorParent !== undefined
+        ? { interceptorParent: options.interceptorParent }
+        : {}),
+    });
     this.registry = options.registry ?? createBuiltInRegistry();
     this.formatters = options.formatters ?? builtInFormatters();
     this.defaultFormatterId = options.defaultFormatterId ?? markdownFormatter.__identity.id;

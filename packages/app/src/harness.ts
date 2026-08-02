@@ -57,6 +57,7 @@ import {
   type SessionHarnessOptions,
 } from "@agentick/session";
 import type {
+  InstallerInterceptors,
   CursorPage,
   PageRequest,
   SessionRecord,
@@ -1246,7 +1247,13 @@ export class AppHarness<P = unknown>
     this.inheritedTools = options.inheritedTools ?? [];
 
     // Compiler slot — instance or options.
-    this.compiler = resolveCompiler(options.compiler, appId, journal, bus, inbox);
+    // The compiler is a sibling of the model + timeline under a tick, and its
+    // `compiler:render-tree` command is the ⓪ tap the round-trip recorder needs,
+    // so it takes the same cascade every other app-constructed harness does.
+    this.compiler = resolveCompiler(options.compiler, appId, journal, bus, inbox, {
+      inheritedInterceptors: this.resolvedInterceptors(),
+      interceptorParent: this,
+    });
 
     // Loop slot: factory → call with shared substrate; instance → use
     // as-is; undefined → bundled default with shared substrate.
@@ -3303,6 +3310,7 @@ function resolveCompiler(
   journal: OperationJournal,
   bus: EventBus,
   inbox: MessageInbox,
+  interceptors: InstallerInterceptors,
 ): CompilerProtocol {
   if (slot === undefined) {
     throw new Error(
@@ -3313,7 +3321,7 @@ function resolveCompiler(
     );
   }
   if (isCompilerFactory(slot)) {
-    return slot({ scopeId, journal, bus, inbox });
+    return slot({ scopeId, journal, bus, inbox, interceptors });
   }
   if (isCompilerInstance(slot)) return slot;
   throw new Error(

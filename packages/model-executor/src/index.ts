@@ -27,14 +27,3 @@ export {
   mergeSignals,
 } from "./language-model-executor.js";
 export { ExecutorLifecycle, type ExecutorInFlightEntry } from "./executor-lifecycle.js";
-export {
-  jsonlSink,
-  memorySink,
-  roundTripRecorder,
-  verbatimViolations,
-  type RoundTrip,
-  type RoundTripRecorderOptions,
-  type RoundTripScope,
-  type RoundTripSink,
-  type VerbatimViolation,
-} from "./round-trip-recorder.js";

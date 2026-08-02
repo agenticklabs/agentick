@@ -46,7 +46,7 @@
  */
 
 import type { CompilerFactory, CompilerFactoryDeps } from "@agentick/spec";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, inheritedFrom, ulid } from "@agentick/runtime";
 import { CompilerHarness, type CompilerHarnessOptions } from "./harness/compiler-harness.js";
 
 export function reactCompiler(options: CompilerHarnessOptions = {}): CompilerFactory {
@@ -60,7 +60,9 @@ export function reactCompiler(options: CompilerHarnessOptions = {}): CompilerFac
       deps?.journal ?? new MemoryJournal(),
       deps?.bus ?? new LocalEventBus(),
       deps?.inbox ?? new LocalInbox(),
-      options,
+      // The host's cascade (ADR 93 landmine 11) — without it an app-declared
+      // `onAfterCompilerRenderTree` never reaches this compiler.
+      { ...options, ...inheritedFrom(deps) },
     );
   return Object.assign(factory, { compilerFactory: true as const });
 }

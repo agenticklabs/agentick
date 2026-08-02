@@ -332,64 +332,22 @@ async function twoTicks(compiled: RenderedTree) {
 | `holdUntil`    | Park the run on a promise; the timing knob for race tests (mid-run abort, concurrent send)                    |
 | `target`       | Override the self-described target (constructor option, not per run)                                          |
 
-`seenRuns` records the non-streaming path only — the streaming path goes through `executeStream`, not `run`, and leaves it empty.
+`seenRuns` records at the `project` command, which BOTH the streaming and non-streaming paths cross — so asserting on what reached the model does not force the loop off the path production takes.
 
-## The round-trip recorder
+## The round-trip recorder — moved
 
-A model call crosses five seams. When a response looks wrong, the question is
-almost always _which seam changed it_ — and that cannot be answered by
-instrumenting any one of them, because a splice is a **difference between two
-seams**. `roundTripRecorder` captures the whole crossing as one artifact.
+`roundTripRecorder` now ships from **`@agentick/session`**. It grew from a
+model-only capture into the full ⓪–⑤ span (rendered tree → compiled input →
+native request → raw provider chunks → canonical deltas → what the timeline
+persists), and that span crosses three harnesses.
 
-```ts
-import { jsonlSink, roundTripRecorder } from "@agentick/model-executor";
+It had to move: `CommandRegistry` is spec-SEEDED but harness-AUGMENTED, so a
+package can only NAME hook keys whose augmenting module is in its compilation.
+This package sees `model:*` and nothing else — it cannot write
+`onAfterCompilerRenderTree` at all. `@agentick/session` depends on every harness
+it integrates, which is why cross-harness work belongs there.
 
-const app = createApp(Agent, {
-  model,
-  hooks: roundTripRecorder({
-    sink: jsonlSink((line) => fs.appendFileSync("round-trips.jsonl", line)),
-  }),
-});
-```
-
-It is a plain `CommandHooks` bag over seams that already exist — no executor
-change, no adapter change, no decorator — and correlation is free, because the
-executor threads `parentOpId` from `model:generate[_stream]` to the nested
-`model:provider-request`.
-
-| Tap | Field       | What it holds                                | Command                   |
-| --- | ----------- | -------------------------------------------- | ------------------------- |
-| ①   | `compiled`  | the canonical `LanguageModelInput`           | `model:generate[_stream]` |
-| ②   | `request`   | the provider-native request, last-mile       | `model:provider-request`  |
-| ③   | `rawChunks` | provider chunks **pre-`mapChunk`**           | `model:provider-request`  |
-| ④   | `deltas`    | canonical `AdapterDelta`s **post-transform** | `model:generate_stream`   |
-| ⑤   | `message`   | the assistant message that gets persisted    | rides in on ④             |
-
-**③ and ④ bracket the entire normalization pipeline** — `mapChunk`,
-`adapterTransforms`, and `customBlockTransform` all run between them. That is
-where a splice has to live, and both sides are now on record.
-
-### The verbatim invariant
-
-An assistant message persisted to the timeline must be what the provider
-emitted. This is a correctness property, not a cosmetic one: the timeline is fed
-back to the model, so a corrupted message becomes an **exemplar it imitates** on
-the next tick.
-
-```ts
-const violations = verbatimViolations(trip);
-// [] when the trip is clean
-```
-
-It compares the streamed `content-delta`s against the accumulator's own per-block
-summaries, and those summaries against the persisted message — catching injected,
-dropped, merged, and reordered text. It deliberately does **not** try to span
-③→④: raw chunks are provider-shaped, and extracting "the text the provider sent"
-from them needs per-provider knowledge this package refuses to encode. Read
-`trip.rawChunks` by eye for that half.
-
-`trip.dropped` reports what the `maxChunks` cap discarded, because a silently
-truncated capture reads as "I saw everything" when it did not.
+See `packages/session/README.md` and `docs/proposals/v2/observability.md`.
 
 ## API
 
@@ -403,10 +361,6 @@ truncated capture reads as "I saw everything" when it did not.
 | `mergeSignals(caller, internal)`                       | Compose two `AbortSignal`s into one that fires on either                    |
 | `LanguageModelExecutorOptions`                         | Construction options: `adapter`, inherited interceptors, interceptor parent |
 | `FakeLanguageModelExecutorOptions` / `MockScriptedRun` | The scripting shapes                                                        |
-| `roundTripRecorder({ sink, maxChunks? })`              | A `CommandHooks` bag recording every seam of a model call                   |
-| `verbatimViolations(trip)`                             | Checks the assembled message against what was streamed                      |
-| `memorySink()` / `jsonlSink(write)`                    | Collect trips in an array, or serialize one JSON line each                  |
-| `RoundTrip` / `RoundTripSink` / `VerbatimViolation`    | The recorder's shapes                                                       |
 
 ### The instance
 
@@ -455,5 +409,4 @@ Adapter hooks that override executor defaults: `project`, `adapterTransforms`, `
 - `src/__tests__/fx-run.spec.ts` + `fx-stream.spec.ts` — the twins are un-run `Effect`s, the Promise methods are their facades, both produce identical output, and `project → executeStream → normalize` composes in one `Effect.gen`.
 - `src/__tests__/command-hooks.spec.ts` — `onBeforeModelProject` and `onBeforeModelGenerate` firing on the direct facades; `onAfterModelProject` seeing the projected input.
 - `src/__tests__/fake-language-model-executor.spec.ts` + `conformance.spec.ts` — the scripted double's projection (section fold into a system message, tool filtering by `model` exposure), one bus delta per scripted chunk, the lazy path skipping envelope construction with no subscriber, pre-abort short-circuit to `canceled`, journaled `requested` and `terminal` envelopes, and the same protocol conformance as the real executor.
-- `src/__tests__/round-trip-recorder.spec.ts` — against the **real** executor, because the claim that matters is a correlation one: four taps on **two different commands** landing in one trip via `parentOpId`. Plus tap ① holding the canonical input and not the native request (and the converse for ②), ③ and ④ holding distinguishably different shapes so the bracket is not vacuous, the persisted message captured from the terminal delta, and `verbatimViolations` catching text spliced into a block summary that no delta carried — with a guard test pinning that the clean case has summaries to compare at all.
 - `src/__tests__/telemetry-parity.spec.ts` — an interceptor on `model:generate` emitting metrics that reach a late-bound meter carrying the ambient labels.

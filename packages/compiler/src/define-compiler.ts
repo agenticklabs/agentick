@@ -37,6 +37,8 @@
 
 import { Effect } from "effect";
 import {
+  inheritedFrom,
+  type BaseHarnessOptions,
   BaseHarness,
   LocalEventBus,
   LocalInbox,
@@ -93,7 +95,7 @@ export function defineCompiler(spec: DefineCompilerInput): CompilerFactory {
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
-    return new CallbackCompiler(scopeId, journal, bus, inbox, spec);
+    return new CallbackCompiler(scopeId, journal, bus, inbox, spec, inheritedFrom(deps));
   };
   return Object.assign(factory, { compilerFactory: true as const });
 }
@@ -111,8 +113,10 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
     bus: EventBus,
     inbox: MessageInbox,
     spec: DefineCompilerInput,
+    // The host's interceptor cascade (ADR 93 landmine 11).
+    interceptors: Pick<BaseHarnessOptions, "inheritedInterceptors" | "interceptorParent">,
   ) {
-    super("compiler", scopeId, journal, bus, inbox);
+    super("compiler", scopeId, journal, bus, inbox, interceptors);
     this.spec = spec;
   }
 

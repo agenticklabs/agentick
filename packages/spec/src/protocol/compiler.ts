@@ -56,6 +56,7 @@
  * @see docs/proposals/v2/blueprint/21-reconciler-implementation.md
  */
 
+import type { InstallerInterceptors } from "./app-extension.js";
 import type { HarnessFx, Middleware } from "./middleware.js";
 import type { Effect } from "effect";
 import type { FormatterRef, RenderedTree, ToolPresentation } from "../data/index.js";
@@ -674,6 +675,17 @@ export interface CompilerProtocol extends PromiseView<Omit<CompilerFx, "use">> {
 // ============================================================================
 
 export interface CompilerFactoryDeps {
+  /**
+   * The host's interceptor cascade, in the SAME nested shape a
+   * {@link InstallerInterceptors} handle takes — so `inheritedFrom(deps)` from
+   * `@agentick/runtime` spreads it straight into your harness options.
+   *
+   * Absent before this existed, which meant a factory-built compiler received
+   * no app hooks, no guards, and no telemetry enrichment — silently, since it
+   * still rendered. `onBefore/AfterCompilerRenderTree` declared on an app
+   * simply never fired.
+   */
+  readonly interceptors?: InstallerInterceptors;
   readonly scopeId: string;
   readonly journal: import("./journal.js").OperationJournal;
   readonly bus: import("./bus.js").EventBus;
