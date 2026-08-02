@@ -1,6 +1,6 @@
 {
   "name": "@agentick/prompts",
-  "version": "1.0.0-next.59",
+  "version": "1.0.0-next.60",
   "description": "PromptsHarness — durable parameterized prompt library. Renders to MessageEntry[] via pluggable framework renderers (String + MessageEntry[] handled natively in core; framework JSX via @agentick/prompts-react).",
   "keywords": [
     "agent",
