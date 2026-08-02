@@ -223,9 +223,19 @@ export interface RunExecutionInput {
    * stopped (steering — new input arrived mid-execution); `stop` forces
    * termination; undefined defers to the default policy.
    */
+  /**
+   * EFFECT-canonical, because this is INTERNAL orchestration: the loop calls
+   * it from inside its tick fiber, and the session's implementation appends to
+   * the timeline (steer drain) and runs gates. `RuntimeContext` — carrying
+   * `tickId` — is ambient ON the fiber, so a Promise-returning callback would
+   * run its body outside it and every append underneath would lose the tick.
+   * The `Effect.tryPromise` that used to await it did not sever the LOOP's
+   * fiber, but the callback's own body had no ambient context, which is the
+   * half that mattered.
+   */
   readonly notifyTickEnd?: (
     input: import("./session-harness.js").NotifyTickEndInput,
-  ) => Promise<import("./session-harness.js").TickEndForwardDecision>;
+  ) => Effect.Effect<import("./session-harness.js").TickEndForwardDecision, unknown, never>;
   readonly maxTicks: number;
 
   /**

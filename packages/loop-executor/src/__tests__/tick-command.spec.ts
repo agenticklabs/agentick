@@ -170,10 +170,11 @@ async function runWithHooks(
     stateApplicator: noopApplicator,
     executionId: "tc-exec",
     maxTicks,
-    notifyTickEnd: async () => {
-      order.push("decide");
-      return undefined;
-    },
+    notifyTickEnd: () =>
+      Effect.promise(async () => {
+        order.push("decide");
+        return undefined;
+      }),
   };
 
   await loop.runExecution(input);

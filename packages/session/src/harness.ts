@@ -1658,58 +1658,78 @@ export class SessionHarness<P = unknown>
     return runHarnessProtocol(this.sessionOp("append", input, (i) => this.appendEntryBody(i)));
   }
 
-  async notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
-    // The session's continuation decision (ADR 67). The loop calls this
-    // AFTER the compiler tick-end has settled the tree, with the settled
-    // `TickResult`. We fold every session-owned continuation predicate
-    // into ONE `TickEndForwardDecision`, in tier order (mirroring the
-    // loop's own resolution): stop-force > continue-force > abstain. The
-    // loop still enforces `maxTicks` as the tier-1 hard cap on top.
-    const result = input.result as TickResult | undefined;
+  /**
+   * Effect-canonical, because the LOOP composes it inside its tick fiber and
+   * this body appends to the timeline underneath (the steer drain). `tickId` is
+   * ambient ON the fiber; an `async` body would run outside it and those
+   * appends would carry no tick — the same defect the applicator had.
+   *
+   * {@link notifyLifecycle} is the Promise facade for a caller not in a fiber.
+   */
+  notifyLifecycleFx(
+    input: NotifyTickEndInput,
+  ): Effect.Effect<TickEndForwardDecision, unknown, never> {
+    return Effect.gen(this, function* () {
+      // The session's continuation decision (ADR 67). The loop calls this
+      // AFTER the compiler tick-end has settled the tree, with the settled
+      // `TickResult`. We fold every session-owned continuation predicate
+      // into ONE `TickEndForwardDecision`, in tier order (mirroring the
+      // loop's own resolution): stop-force > continue-force > abstain. The
+      // loop still enforces `maxTicks` as the tier-1 hard cap on top.
+      const result = input.result as TickResult | undefined;
 
-    // (a) Gates — evaluate the unified registry against the settled
-    // `TickResult`. This drives arming / satisfied / fail-closed /
-    // auto-clear / read-only (unchanged controller logic); a blocking gate
-    // holds the loop open by calling `continueAfterTick` on the session's
-    // loop bridge (below). We evaluate BEFORE draining so a gate's hold is
-    // captured in the same drain as any tree request.
-    if (result !== undefined) {
-      await this.bridges.gates.handleTickEnd(result);
-    }
+      // (a) Gates — evaluate the unified registry against the settled
+      // `TickResult`. This drives arming / satisfied / fail-closed /
+      // auto-clear / read-only (unchanged controller logic); a blocking gate
+      // holds the loop open by calling `continueAfterTick` on the session's
+      // loop bridge (below). We evaluate BEFORE draining so a gate's hold is
+      // captured in the same drain as any tree request.
+      if (result !== undefined) {
+        // The gates CONTROLLER is Promise-shaped (it is not a harness and
+        // declares no ops), so this is a genuine foreign edge — `Effect.promise`
+        // is correct here in a way it never is around one of our own methods.
+        yield* Effect.promise(() => this.bridges.gates.handleTickEnd(result));
+      }
 
-    // (b) Tree + gate loop-control requests recorded on the live loop
-    // bridge across this tick (`useLoopControl().stop/continueAfterTick`
-    // from tree effects, plus the gate holds from (a)). Provenance (ADR
-    // 51): only trusted tree code ever emits `stop` — gates only ever
-    // `continue` — so a drained `stop` is legitimately a tier-1 halt.
-    const loopReq = this.bridges.loop.drainLoopRequests();
+      // (b) Tree + gate loop-control requests recorded on the live loop
+      // bridge across this tick (`useLoopControl().stop/continueAfterTick`
+      // from tree effects, plus the gate holds from (a)). Provenance (ADR
+      // 51): only trusted tree code ever emits `stop` — gates only ever
+      // `continue` — so a drained `stop` is legitimately a tier-1 halt.
+      const loopReq = this.bridges.loop.drainLoopRequests();
 
-    // (b') Drain the per-execution STEER queue (ADR 53 §5). Steers
-    // enqueued during THIS tick (by a concurrent `send({ onBusy: "steer" })`)
-    // are appended to the timeline NOW — after the tick's tool results applied
-    // (loop `tickBody` step 4) and BEFORE the next render — so the next tick's
-    // compile sees them positioned AFTER this tick's assistant output +
-    // tool_results, preserving `tool_use`/`tool_result` adjacency. This bumps
-    // `inputEntryCount`, so the (c) steering predicate below fires and holds
-    // the loop open for another tick to answer the steer.
-    await this.drainSteerQueue();
+      // (b') Drain the per-execution STEER queue (ADR 53 §5). Steers
+      // enqueued during THIS tick (by a concurrent `send({ onBusy: "steer" })`)
+      // are appended to the timeline NOW — after the tick's tool results applied
+      // (loop `tickBody` step 4) and BEFORE the next render — so the next tick's
+      // compile sees them positioned AFTER this tick's assistant output +
+      // tool_results, preserving `tool_use`/`tool_result` adjacency. This bumps
+      // `inputEntryCount`, so the (c) steering predicate below fires and holds
+      // the loop open for another tick to answer the steer.
+      yield* this.drainSteerQueueFx();
 
-    // (c) Steering (ADR 53) — new input appended since this execution's
-    // last-observed count means the next render has new user input →
-    // continue. LIVE, in-memory, nothing durable (crashes never
-    // auto-resume).
-    const count = this.bridges.timeline.inputEntryCount();
-    const steering = count > this._inputEntriesSeen;
-    if (steering) this._inputEntriesSeen = count;
+      // (c) Steering (ADR 53) — new input appended since this execution's
+      // last-observed count means the next render has new user input →
+      // continue. LIVE, in-memory, nothing durable (crashes never
+      // auto-resume).
+      const count = this.bridges.timeline.inputEntryCount();
+      const steering = count > this._inputEntriesSeen;
+      if (steering) this._inputEntriesSeen = count;
 
-    // Tier resolution.
-    if (loopReq.stop !== undefined) {
-      return { kind: "stop", reason: loopReq.stop };
-    }
-    if (loopReq.continue !== undefined || steering) {
-      return { kind: "continue" };
-    }
-    return undefined;
+      // Tier resolution.
+      if (loopReq.stop !== undefined) {
+        return { kind: "stop", reason: loopReq.stop };
+      }
+      if (loopReq.continue !== undefined || steering) {
+        return { kind: "continue" };
+      }
+      return undefined;
+    });
+  }
+
+  /** Promise facade over {@link notifyLifecycleFx}, for a caller not in a fiber. */
+  notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
+    return runHarnessProtocol(this.notifyLifecycleFx(input));
   }
 
   // ──────── Extended interaction surface (block 5) ────────
@@ -2722,7 +2742,7 @@ export class SessionHarness<P = unknown>
                   applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
                   appendEntry: (i) => this.appendEntry(i).then(() => undefined),
                 },
-                notifyTickEnd: (i) => this.notifyLifecycle(i),
+                notifyTickEnd: (i) => this.notifyLifecycleFx(i),
                 // ADR 55 — the session is the per-render fact producer. It folds
                 // every RenderContext slot it can supply: the active model's
                 // window (via effectiveModelInfo) into `contextInfo`, and the
@@ -3284,11 +3304,13 @@ export class SessionHarness<P = unknown>
    * that arrives while we await the appends lands in the next drain, not this
    * one. A no-op when the queue is empty (the hot per-tick path).
    */
-  private async drainSteerQueue(): Promise<void> {
-    if (this._steerQueue.length === 0) return;
-    const pending = this._steerQueue;
-    this._steerQueue = [];
-    for (const m of pending) await this.appendInputMessage(m);
+  private drainSteerQueueFx(): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never> {
+    return Effect.gen(this, function* () {
+      if (this._steerQueue.length === 0) return;
+      const pending = this._steerQueue;
+      this._steerQueue = [];
+      for (const m of pending) yield* this.appendInputMessageFx(m);
+    });
   }
 
   /**
@@ -3296,14 +3318,26 @@ export class SessionHarness<P = unknown>
    * — the user's words are a fact the moment they arrive. Input carries
    * no execution provenance (it wasn't produced BY an execution).
    */
-  private async appendInputMessage(m: SendMessageInput): Promise<void> {
+  private appendInputMessageFx(
+    m: SendMessageInput,
+  ): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-    await this.appendMessageEntry({
+    return this.appendMessageEntryFx({
       role: m.role,
       content,
       ...omitUndefined({ metadata: m.metadata }),
-    });
+    }).pipe(Effect.asVoid);
+  }
+
+  /**
+   * Promise facade over {@link appendInputMessageFx}. Used by `sendBody`, which
+   * is still `async` — it sits at the top of the user-facing send path, so it
+   * has no ambient fiber to preserve and paying a root here costs nothing. Once
+   * `sendBody` is Effect-native it should compose the twin instead.
+   */
+  private appendInputMessage(m: SendMessageInput): Promise<void> {
+    return runHarnessProtocol(this.appendInputMessageFx(m));
   }
 
   /**

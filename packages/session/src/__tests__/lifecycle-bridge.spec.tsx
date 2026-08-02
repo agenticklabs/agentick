@@ -10,6 +10,7 @@
 
 import React from "react";
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
@@ -363,17 +364,22 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
       executor,
     );
 
-    // Observe the DECIDE: the loop calls session.notifyLifecycle (the
-    // ADR-67 continuation fold) AFTER the tick command's terminal. Read
-    // the knob exactly there.
+    // Observe the DECIDE: the loop calls the session's tick-end bridge (the
+    // ADR-67 continuation fold) AFTER the tick command's terminal. Read the
+    // knob exactly there.
+    //
+    // Patch the Fx TWIN, not the Promise facade: the bridge is Effect-canonical
+    // so the loop composes it in its own fiber, and the facade is no longer on
+    // the path at all. Wrapping the facade here would observe nothing.
     const knobAtDecide: Array<string | undefined> = [];
-    const original = session.notifyLifecycle.bind(session);
-    (session as { notifyLifecycle: typeof session.notifyLifecycle }).notifyLifecycle = async (
+    const original = session.notifyLifecycleFx.bind(session);
+    (session as { notifyLifecycleFx: typeof session.notifyLifecycleFx }).notifyLifecycleFx = (
       i: NotifyTickEndInput,
-    ): Promise<TickEndForwardDecision> => {
-      knobAtDecide.push(session.knobs.get("flag") as string | undefined);
-      return original(i);
-    };
+    ): Effect.Effect<TickEndForwardDecision, unknown, never> =>
+      Effect.suspend(() => {
+        knobAtDecide.push(session.knobs.get("flag") as string | undefined);
+        return original(i);
+      });
 
     const handle = await session.send({
       messages: [{ role: "user", content: "hi" }],

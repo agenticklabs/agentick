@@ -53,11 +53,13 @@
  * .renderTree(...)`, `executor.fx.run(...)`, `toolExecutor.fx.dispatch
  * (...)`, `stateApplicator.fx.apply*(...)`) — no `runPromise` root between
  * boundaries, so telemetry/interruption propagate through the whole tree.
- * The only Promise boundary is the session's `notifyTickEnd` callback
- * (no span) — awaited in-fiber via {@link awaitBridge} (a bare
- * `Effect.tryPromise`, NOT a severing `runHarnessProtocol` root). The
- * genuine external-I/O boundaries (`adapter.execute`, the user tool
- * handler) live INSIDE the executor / tool-executor, not here.
+ * There is NO Promise boundary left on this path: the session's
+ * `notifyTickEnd` bridge is Effect-canonical too, composed directly. It used
+ * to be awaited through `Effect.tryPromise`, which did not sever THIS fiber
+ * but ran the callback's body outside it — so the timeline appends underneath
+ * it (the steer drain) lost the ambient `tickId`. The genuine external-I/O
+ * boundaries (`adapter.execute`, the user tool handler) live INSIDE the
+ * executor / tool-executor, not here.
  *
  * Per-phase events on `surface: "loop"` give a single subscriber the
  * full execution flow without having to compose four other harnesses'
@@ -366,9 +368,8 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   /**
    * The tick loop as ONE `Effect.gen` fiber (ADR 77). Every downstream
    * harness call composes in-fiber via its `.fx` twin — no `runPromise`
-   * root between boundaries. The session's `notifyTickEnd` bridge callback
-   * carries no span and is awaited via {@link awaitBridge}
-   * (a bare `Effect.tryPromise`, in-fiber, NOT a severing root).
+   * root between boundaries — the session's `notifyTickEnd` bridge callback
+   * is Effect-canonical and composed directly (it carries no span).
    * The imperative control flow (while / break /
    * accumulate) is unchanged from the Promise original — the characterization
    * suite pins it byte-identical. Any uncaught twin failure folds to
@@ -608,18 +609,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // `TickResult`. The loop's combination below is UNCHANGED — it
         // already implements the two-tier resolution (stop-force >
         // continue-force > abstain), with `maxTicks` as the tier-1 hard cap.
-        // `notifyTickEnd` is a session-provided callback (no span) — awaited
-        // in-fiber via the bridge.
+        // `notifyTickEnd` is a session-provided callback (no span), composed
+        // DIRECTLY in this fiber — it appends to the timeline underneath, and
+        // the ambient `tickId` has to survive the call for those appends to be
+        // attributable to this tick.
         const forward = input.notifyTickEnd
-          ? yield* awaitBridge(() =>
-              input.notifyTickEnd!({
-                sessionId: input.sessionId,
-                executionId,
-                tickId,
-                outcome: "succeeded",
-                result: tickResult,
-              }),
-            )
+          ? yield* input.notifyTickEnd({
+              sessionId: input.sessionId,
+              executionId,
+              tickId,
+              outcome: "succeeded",
+              result: tickResult,
+            })
           : undefined;
         // §B2 steer-proof stop: a delivered structured answer terminates the
         // execution regardless of steering — `terminalCaptured` short-circuits
@@ -1721,18 +1722,4 @@ function failedTickResult(
     toolResults: [],
     shouldContinue: false,
   };
-}
-
-/**
- * Await the session's `notifyTickEnd` bridge callback in-fiber. It
- * carries no span and is bare `async` (no `runHarnessProtocol` root), so
- * `Effect.tryPromise` composes it WITHOUT severing the fiber — the right
- * tool for an external, non-twin promise boundary. A rejection lands on
- * the `E` channel, folding to `ExecutionError` at the loop boundary (the
- * Promise original's "an un-caught awaited throw fails the run"). NOT
- * `Effect.promise` — that turns a reject into a defect that would bypass
- * the boundary's catch.
- */
-function awaitBridge<A>(thunk: () => Promise<A> | A): Effect.Effect<A, unknown, never> {
-  return Effect.tryPromise({ try: async () => thunk(), catch: (e: unknown) => e });
 }

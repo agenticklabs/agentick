@@ -258,10 +258,11 @@ async function runChar(cfg: CharConfig): Promise<CharTrace> {
     ...omitUndefined({ stream: cfg.stream, signal: cfg.signal }),
     ...(cfg.notifyTickEnd
       ? {
-          notifyTickEnd: async () => {
-            order.push("decide:notifyTickEnd");
-            return cfg.notifyTickEnd!();
-          },
+          notifyTickEnd: () =>
+            Effect.promise(async () => {
+              order.push("decide:notifyTickEnd");
+              return cfg.notifyTickEnd!();
+            }),
         }
       : {}),
   };
