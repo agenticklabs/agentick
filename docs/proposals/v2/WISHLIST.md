@@ -1206,6 +1206,79 @@ deferred; recorded so it is not lost.
 
 ---
 
+### W30 · `<XML>` / `FormatScope` does not reach the section it wraps · [framework] · **bug**
+
+**Want.** A subtree wrapped in `<XML>` renders its KNOWN semantics as tags —
+`<ul><li>` rather than `- item`, `<strong>` rather than `**bold**`.
+
+**Current state — confirmed broken 2026-08-03.** Probed with `renderTemplate`:
+
+```
+XML-SCOPED: "**grounding:** # Things\n- alpha\n- beta …"
+DEFAULT:    "**grounding:** # Things\n- alpha …"
+```
+
+Byte-identical apart from the extra item. `<XML purpose="section">` behaves the
+same. So the scope has no effect on the built-in vocabulary.
+
+**Both halves of the mechanism exist; the hand-off is missing.** `FormatScope`
+pushes a formatter into `HostScope`
+(`compiler-react/src/react/components/format-scope.tsx`), and `template.ts:315`
+resolves `entry.renderedWith` per entry against the tree fallback. What nothing
+does is carry the in-scope formatter from `HostScope` onto the lowered section's
+`renderedWith`, so `resolve()` always falls back and the island in
+`SemanticSection.renderedWith`'s docblock — "when they differ the section is an
+ISLAND, lowered by its own formatter, in its own frame, embedded verbatim" —
+never triggers.
+
+**Not urgent, and that is worth stating.** `<custom>` now emits its tag in EVERY
+dialect (W-fix landed same day), so explicit boundaries — the thing RAG, tasks,
+todos and the sub-agent graph actually need — no longer depend on this. `<XML>`
+matters only when the built-in vocabulary itself should be tags.
+
+**Done when.** The probe above yields `<li>` under `<XML>` and `- alpha` without
+it, in one test; and a section whose dialect differs from its container is
+embedded verbatim rather than re-rendered.
+
+**Open.** Whether the stamp happens at section lowering or at `compileTemplate`.
+Whether `purpose` scoping is meant to narrow it further.
+
+---
+
+### W31 · Should XML be the DEFAULT formatter? · [framework] · **needs a measurement**
+
+**Want.** Decide whether the default dialect flips, making `<Markdown>` the
+opt-in rather than `<XML>`.
+
+**Why it is tempting (Ryan, 2026-08-03).** Marking the exception reads better
+than marking the rule, and in an agent prompt the prose-heavy sections are the
+smaller set. XML boundaries are also the recommended way to delimit prompt
+regions.
+
+**The counterargument, which is measurable rather than aesthetic.** XML is a
+token tax on the LARGEST region. `- alpha\n- beta` is 14 characters;
+`<ul><li>alpha</li><li>beta</li></ul>` is 36. That multiplier lands on the
+timeline, already 117 KB in the 2026-08-03 trips, and the xml formatter also
+frames every message (`<message role="grounding">…</message>`) — scaffolding on
+scaffolding. Second: models are trained overwhelmingly on markdown; XML is what
+you reach for to make BOUNDARIES unambiguous, not to render prose.
+
+**My read: markdown body, XML boundaries** — the standard shape, and exactly what
+`<custom>` now makes reachable. Tags where the model needs to see an edge;
+markdown inside, where density is free. Keep markdown default; use `<custom>` to
+delimit; reserve `<XML>` for regions whose STRUCTURE is the information (a task
+table, a state graph).
+
+**Done when.** One real Ernesto prompt is rendered under both formatters and
+compared on bytes and cache divergence. The decision follows the number, not the
+argument — flipping the default moves every existing tree's output, and with it
+every cache prefix in the product.
+
+**Open.** Whether a third position exists: markdown default with XML framing only
+at message/section boundaries.
+
+---
+
 ## Sequencing
 
 Rough order, cheapest-and-most-certain first:
