@@ -32,6 +32,7 @@
 
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { OperationCtx } from "../data/runtime-context.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { TimelineWriteFailed } from "../errors/lifecycle.js";
 import type { HarnessFx } from "./middleware.js";
@@ -115,7 +116,18 @@ export interface TimelineEndTurnInput {
  * a model call but anything async works (rule-based, dedup, custom
  * vector-store summarization, sub-agent execution, ...).
  */
-export type CompactRun = (ctx: {
+export type CompactRun = (ctx: CompactRunCtx) => Promise<readonly TimelineEntry[]>;
+
+/**
+ * What a compaction strategy is handed. Extends {@link OperationCtx} because
+ * the `(entries, ctx)` shorthand is sugar over this — a configured strategy
+ * that saw less than its own sugar would make the general form the poorer one,
+ * and every facet added later would land on one side only.
+ *
+ * The harness mints this ONCE and both forms receive it; the shorthand adapter
+ * is a destructure, not a second construction.
+ */
+export interface CompactRunCtx extends OperationCtx {
   readonly entries: readonly TimelineEntry[];
   readonly instructions?: string | readonly ContentBlock[];
   /**
@@ -128,7 +140,7 @@ export type CompactRun = (ctx: {
    * is determinate exactly when a cap exists — nothing here is a forecast.
    */
   readonly progress?: (u: import("../data/signals.js").ProgressUpdate) => void;
-}) => Promise<readonly TimelineEntry[]>;
+}
 
 /**
  * The one model call a compaction strategy needs. Narrower than an executor on

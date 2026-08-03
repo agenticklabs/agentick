@@ -5,7 +5,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { CompactGenerate, ProgressUpdate, TimelineEntry } from "@agentick/spec";
+import { deriveTestContext } from "@agentick/runtime/testing";
+
 import { rollingSummary, DEFAULT_SUMMARY_INSTRUCTIONS } from "../strategies.js";
+
+/** The facets a harness mints; a strategy only ever reads them. */
+const ctx = () => deriveTestContext();
 
 function entries(count: number, offset = 0): TimelineEntry[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -36,7 +41,7 @@ const summaryOf = (e: TimelineEntry) =>
 describe("the fold", () => {
   it("replaces everything but the kept tail with one summary event", async () => {
     const strategy = rollingSummary({ keepVerbatim: 2 });
-    const out = await strategy.run({ entries: entries(10), generate: stubGenerate() });
+    const out = await strategy.run({ ...ctx(), entries: entries(10), generate: stubGenerate() });
 
     expect(out).toHaveLength(3);
     expect(summaryOf(out[0]!)).toBe("a summary");
@@ -45,7 +50,7 @@ describe("the fold", () => {
 
   it("records what it folded", async () => {
     const strategy = rollingSummary({ keepVerbatim: 2 });
-    const out = await strategy.run({ entries: entries(10), generate: stubGenerate() });
+    const out = await strategy.run({ ...ctx(), entries: entries(10), generate: stubGenerate() });
     const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
       .message.content[0]!.data;
 
@@ -55,7 +60,7 @@ describe("the fold", () => {
   it("does nothing when there is nothing older than the tail", async () => {
     const strategy = rollingSummary({ keepVerbatim: 6 });
     const input = entries(4);
-    expect(await strategy.run({ entries: input, generate: stubGenerate() })).toBe(input);
+    expect(await strategy.run({ ...ctx(), entries: input, generate: stubGenerate() })).toBe(input);
   });
 
   it("reads the projection, not the durable log", () => {
@@ -63,7 +68,9 @@ describe("the fold", () => {
   });
 
   it("says so when nothing bound a model", async () => {
-    await expect(rollingSummary().run({ entries: entries(10) })).rejects.toThrow(/needs a model/);
+    await expect(rollingSummary().run({ ...ctx(), entries: entries(10) })).rejects.toThrow(
+      /needs a model/,
+    );
   });
 });
 
@@ -72,6 +79,7 @@ describe("truncation is not persisted", () => {
     const strategy = rollingSummary({ keepVerbatim: 2 });
     const input = entries(10);
     const out = await strategy.run({
+      ...ctx(),
       entries: input,
       generate: stubGenerate({ truncated: true, text: "a summary cut off mid-" }),
     });
@@ -83,13 +91,18 @@ describe("truncation is not persisted", () => {
 describe("instructions", () => {
   it("sends the standing rules when the caller supplies none", async () => {
     const seen = vi.fn(stubGenerate());
-    await rollingSummary({ keepVerbatim: 2 }).run({ entries: entries(10), generate: seen });
+    await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: seen,
+    });
     expect(seen.mock.calls[0]![0].instructions).toBe(DEFAULT_SUMMARY_INSTRUCTIONS);
   });
 
   it("appends a per-call steer AFTER the standing rules", async () => {
     const seen = vi.fn(stubGenerate());
     await rollingSummary({ instructions: "Standing.", keepVerbatim: 2 }).run({
+      ...ctx(),
       entries: entries(10),
       instructions: "Keep every number.",
       generate: seen,
@@ -99,6 +112,7 @@ describe("instructions", () => {
 
   it("keeps the steer on the event so a steered fold is distinguishable", async () => {
     const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
       entries: entries(10),
       instructions: "Keep every number.",
       generate: stubGenerate(),
@@ -113,6 +127,7 @@ describe("the cap is the progress denominator", () => {
   it("reports emitted against the budget as the summary streams", async () => {
     const seen: ProgressUpdate[] = [];
     await rollingSummary({ maxOutputTokens: 500, keepVerbatim: 2 }).run({
+      ...ctx(),
       entries: entries(10),
       generate: stubGenerate({}, [100, 250]),
       progress: (u) => seen.push(u),
@@ -126,7 +141,11 @@ describe("the cap is the progress denominator", () => {
 
   it("caps at 8192 by default", async () => {
     const seen = vi.fn(stubGenerate());
-    await rollingSummary({ keepVerbatim: 2 }).run({ entries: entries(10), generate: seen });
+    await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: seen,
+    });
     expect(seen.mock.calls[0]![0].maxOutputTokens).toBe(8192);
   });
 
@@ -135,7 +154,7 @@ describe("the cap is the progress denominator", () => {
     await rollingSummary({
       keepVerbatim: 2,
       maxOutputTokens: ({ entries }) => entries.length * 100,
-    }).run({ entries: entries(10), generate: seen });
+    }).run({ ...ctx(), entries: entries(10), generate: seen });
     expect(seen.mock.calls[0]![0].maxOutputTokens).toBe(800);
   });
 });
@@ -169,7 +188,7 @@ describe("keepSummaries bounds the stack", () => {
     const shapes: string[][] = [];
     let current: readonly TimelineEntry[] = entries(10);
     for (let r = 0; r < rounds; r++) {
-      current = await strategy.run({ entries: current, generate: stubGenerate() });
+      current = await strategy.run({ ...ctx(), entries: current, generate: stubGenerate() });
       shapes.push(current.map(label));
       current = [...current, ...entries(4, 100 * (r + 1))];
     }
@@ -188,9 +207,9 @@ describe("keepSummaries bounds the stack", () => {
 
   it("earlier summaries pass through untouched while under the bound", async () => {
     const strategy = rollingSummary({ keepVerbatim: 6, keepSummaries: 4 });
-    const first = await strategy.run({ entries: entries(10), generate: stubGenerate() });
+    const first = await strategy.run({ ...ctx(), entries: entries(10), generate: stubGenerate() });
     const seen = vi.fn(stubGenerate());
-    await strategy.run({ entries: [...first, ...entries(4, 100)], generate: seen });
+    await strategy.run({ ...ctx(), entries: [...first, ...entries(4, 100)], generate: seen });
 
     expect(seen.mock.calls[0]![0].entries.some(isSummaryEntry)).toBe(false);
   });

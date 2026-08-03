@@ -442,9 +442,12 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     // the durable log. The ctx is derived PER CALL so the compactor sees the
     // invoking op's identity + diagnostics, and the signal form's advisory
     // `instructions` ride on it.
+    // A DESTRUCTURE, not a second construction. `compactBody` mints the ctx and
+    // both forms receive the same one, so a facet added later cannot land on the
+    // sugar and miss the configured form.
     return {
       source: "persisted",
-      run: async ({ entries, instructions }) => fn(entries, this.compactCtx(instructions)),
+      run: async ({ entries, ...ctx }) => fn(entries, ctx),
     };
   }
 
@@ -741,8 +744,9 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       const next = yield* Effect.tryPromise({
         try: () =>
           s.run({
+            ...this.compactCtx(s.instructions),
             entries: sourceEntries,
-            ...omitUndefined({ instructions: s.instructions, generate: this.generate }),
+            ...omitUndefined({ generate: this.generate }),
             progress: (u) => Effect.runFork(this.emitProgress({}, { token, ...u })),
           }),
         catch: (cause) => new CompactHandlerFailed({ cause }),

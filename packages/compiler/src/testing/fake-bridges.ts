@@ -47,6 +47,7 @@ import type {
 import { createKeyedNotifier, createNotifier } from "@agentick/pubsub";
 import { InMemoryDataBridge } from "../bridges/in-memory-data-bridge.js";
 import { InMemoryModelBridge } from "../bridges/in-memory-model-bridge.js";
+import { deriveTestContext } from "@agentick/runtime/testing";
 import { omitUndefined } from "@agentick/utils";
 
 /**
@@ -127,9 +128,16 @@ export function fakeTimelineHarness(
       const entries = source === "persisted" ? persisted : projection;
       const before = entries.length;
       const next = await strategy.run({
+        ...deriveTestContext(),
         entries,
         ...omitUndefined({ instructions: strategy.instructions }),
       });
+      // Mirrors the real harness: what the fold produced is appended, so a
+      // consumer of this fake sees the same two-tier result it will see live.
+      const known = new Set(persisted.map((e) => (e.kind === "message" ? e.message.id : e.kind)));
+      persisted.push(
+        ...next.filter((e) => !known.has(e.kind === "message" ? e.message.id : e.kind)),
+      );
       projection = [...next];
       refresh();
       notify();
