@@ -290,6 +290,43 @@ export class LogView<T> {
   }
 
   /**
+   * Land a compaction as ONE mutation: what it produced is appended to the
+   * durable log, the projection becomes the fold, and subscribers ping once.
+   *
+   * Doing it as `append` then `replaceProjection` publishes an intermediate
+   * state — the pre-fold projection with the summary stuck on its tail — which
+   * a `useSyncExternalStore` subscriber renders.
+   *
+   * Durability follows the write policy exactly as {@link append}: `"through"`
+   * awaits the store, `"behind"` buffers for the pump.
+   */
+  async commitCompaction(
+    produced: readonly T[],
+    projection: readonly T[],
+    ctx: StoreCtx,
+    meta?: LogProjectionMeta,
+  ): Promise<void> {
+    for (const entry of produced) this._persisted.push(entry);
+    this._projection = [...projection];
+    if (produced.length > 0) this._persistedVersion += 1;
+    this._projectionVersion += 1;
+    this._lastCompaction = meta;
+    this.refreshSnapshot();
+    this.notify();
+
+    if (produced.length === 0) return;
+    if (this.writePolicy === "through") {
+      try {
+        await this.store.append(this.logKey, produced, ctx);
+      } catch (cause) {
+        throw this.wrapWriteError(cause);
+      }
+    } else {
+      this.enqueueWriteBehind(produced, ctx);
+    }
+  }
+
+  /**
    * Reset the projection to a live mirror of the durable log — clears any
    * compaction divergence. Bumps the projection version, clears the last
    * provenance, refreshes the snapshot, and pings.

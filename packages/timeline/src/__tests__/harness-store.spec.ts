@@ -7,7 +7,7 @@
  *   - write-through persists synchronously with each append;
  *   - hydrate() loads the durable log into memory (the resume path);
  *   - close() flushes buffered writes (session-close barrier);
- *   - compaction NEVER touches the store (persisted tier is append-only);
+ *   - compaction APPENDS what it produced and rewrites nothing;
  *   - a store-write failure surfaces (flush rejects / write-through throws).
  */
 
@@ -128,8 +128,8 @@ describe("TimelineHarness — close flushes", () => {
   });
 });
 
-describe("TimelineHarness — compaction never touches the store", () => {
-  it("compact() rewrites only the projection; the durable log is untouched", async () => {
+describe("TimelineHarness — compaction appends, never rewrites", () => {
+  it("what the fold produced reaches the store; what was there is untouched", async () => {
     const store = new MemoryTimelineStore();
     const h = stubTimelineHarness([], { store });
     await h.append(messageEntry("a"), messageEntry("b"), messageEntry("c"));
@@ -144,8 +144,10 @@ describe("TimelineHarness — compaction never touches the store", () => {
 
     // Projection collapsed…
     expect(ids(h.read().entries)).toEqual(["summary"]);
-    // …but the store's append-only log is exactly the original three.
-    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b", "c"]);
+    // …and the store still holds the original three, in order, with the
+    // summary appended after them. A summary that lived only in the projection
+    // evaporated on restart, which is what pushed adopters into a side table.
+    expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b", "c", "summary"]);
   });
 });
 

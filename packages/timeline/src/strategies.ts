@@ -66,14 +66,18 @@ export interface RollingSummaryOptions {
   /** Recent entries that survive verbatim. Default 6. */
   readonly keepVerbatim?: number;
   /**
-   * How many summary events the projection may hold. Below the bound a fold
+   * How many summary events the PROJECTION may hold. Below the bound a fold
    * leaves earlier summaries alone and appends a new one; at the bound it
-   * collapses the whole prefix back into one.
+   * folds the prefix back into one so nothing leaves context unaccounted for.
    *
-   * Default 1 — every fold re-summarizes the previous summary. Raise it to stop
-   * the oldest material being re-compressed on every pass: a summary of a
-   * summary loses exactly the ids and figures the instructions ask for, because
-   * the second pass cannot tell which of them still matter.
+   * Every summary ever produced stays in the durable log either way — a fold
+   * writes a view, and `compact` appends what it produced. So the bound windows
+   * what the model carries, it does not decide what is kept.
+   *
+   * Default 1. Raise it to stop the oldest material being re-compressed on
+   * every pass: a summary of a summary loses exactly the ids and figures the
+   * instructions ask for, because the second pass cannot tell which still
+   * matter.
    */
   readonly keepSummaries?: number;
   /** Standing rules, ahead of any per-call instructions. */

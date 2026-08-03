@@ -748,12 +748,22 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
         catch: (cause) => new CompactHandlerFailed({ cause }),
       });
       const entries = [...next];
-      this.log.replaceProjection(entries, {
-        at: Date.now(),
-        source,
-        entriesBefore: before,
-        entriesAfter: entries.length,
-        ...omitUndefined({ strategyMetadata: s.metadata }),
+      // A compaction PRODUCES facts — a summary is one. Appending them keeps
+      // the log append-only (this is not a rewrite) and stops the strategy's
+      // output being a projection artifact that evaporates on restart, which is
+      // what forced every adopter to build a side table for it.
+      const known = new Set(this.log.readPersisted().map(entryKey));
+      const produced = entries.filter((e) => !known.has(entryKey(e)));
+      yield* Effect.tryPromise({
+        try: () =>
+          this.log.commitCompaction(produced, entries, this.storeCtx(), {
+            at: Date.now(),
+            source,
+            entriesBefore: before,
+            entriesAfter: entries.length,
+            ...omitUndefined({ strategyMetadata: s.metadata }),
+          }),
+        catch: (cause) => new CompactHandlerFailed({ cause }),
       });
       const result: CompactResult = {
         entriesBefore: before,
@@ -941,4 +951,13 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   ): Effect.Effect<unknown, MessageHandlerError, never> {
     return Effect.fail(new HandlerError({ cause: `Unknown timeline message type: ${msg.type}` }));
   }
+}
+
+/**
+ * Identity for the compaction append-diff. A message entry is its `id`; any
+ * other shape has no stable key, so it counts as newly produced — duplicating
+ * an entry in the log is recoverable, silently dropping one is not.
+ */
+function entryKey(entry: TimelineEntry): string {
+  return entry.kind === "message" ? `m:${entry.message.id}` : `#${JSON.stringify(entry)}`;
 }

@@ -51,8 +51,9 @@ describe("TimelineHarness — construction-bound default compact (ADR 51 signal 
     const result = await timeline.compact();
     expect(result).toMatchObject({ entriesBefore: 2, entriesAfter: 1 });
     expect(timeline.read().entries.map(idOf)).toEqual(["default-summary"]);
-    // The log is untouched (projection-only compaction).
-    expect(timeline.readPersisted().map(idOf)).toEqual(["a", "b"]);
+    // The log is never REWRITTEN, but what the compaction produced is appended
+    // to it — a summary is a fact, and the log is what happened.
+    expect(timeline.readPersisted().map(idOf)).toEqual(["a", "b", "default-summary"]);
     await timeline.close();
   });
 
@@ -136,5 +137,57 @@ describe("TimelineHarness — compact as an addressable verb (ADR 51 slice 4)", 
       "timeline:history",
     ]);
     await timeline.close();
+  });
+});
+
+describe("what a compaction produces is durable", () => {
+  it("appends the summary to the log — it is a fact, not a projection artifact", async () => {
+    const tl = mkTimeline(summaryStrategy("S1"));
+    await tl.ready;
+    await tl.append(entry("a"), entry("b"), entry("c"));
+
+    await tl.compact();
+
+    expect(tl.read().entries.map(idOf)).toEqual(["S1"]);
+    // Before this, `replaceProjection` never reached the store and the summary
+    // vanished on restart — which is what forced adopters into a side table.
+    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b", "c", "S1"]);
+  });
+
+  it("keeps every iteration in the log while the projection stays small", async () => {
+    const tl = mkTimeline();
+    await tl.ready;
+    await tl.append(entry("a"), entry("b"));
+
+    await tl.compact(summaryStrategy("S1"));
+    await tl.append(entry("c"));
+    await tl.compact(summaryStrategy("S2"));
+
+    expect(tl.read().entries.map(idOf)).toEqual(["S2"]);
+    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b", "S1", "c", "S2"]);
+  });
+
+  it("does not re-append entries the strategy carried through", async () => {
+    const keepTail: CompactStrategy = { run: async ({ entries }) => entries.slice(-1) };
+    const tl = mkTimeline(keepTail);
+    await tl.ready;
+    await tl.append(entry("a"), entry("b"));
+
+    await tl.compact();
+
+    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b"]);
+  });
+
+  it("a strategy that CLONES entries still does not duplicate the log", async () => {
+    const clone: CompactStrategy = {
+      run: async ({ entries }) => entries.map((e) => structuredClone(e)),
+    };
+    const tl = mkTimeline(clone);
+    await tl.ready;
+    await tl.append(entry("a"), entry("b"));
+
+    await tl.compact();
+
+    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b"]);
   });
 });

@@ -173,8 +173,8 @@ describe("compact — the definition's (entries, ctx) sugar", () => {
     const result = await h.compact();
     expect(result).toMatchObject({ entriesBefore: 2, entriesAfter: 1, source: "persisted" });
     expect(h.read().entries).toHaveLength(1);
-    // The DURABLE log is untouched — compaction targets the projection only.
-    expect(h.readPersisted()).toHaveLength(2);
+    // Nothing was rewritten; the summary is appended after the two turns.
+    expect(h.readPersisted()).toHaveLength(3);
     await h.close();
   });
 

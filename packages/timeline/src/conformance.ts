@@ -149,14 +149,14 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const projAfter = h.read().entries;
       expect(projAfter).toHaveLength(2);
       expect(projAfter[1]).toEqual(e3);
-      // Log still has all three.
-      expect(h.readPersisted()).toHaveLength(3);
+      // Log has the three appends plus the summary the compaction produced.
+      expect(h.readPersisted()).toHaveLength(4);
       await h.close();
     });
   });
 
   describe("TimelineHarness — compact", () => {
-    it("compact() rewrites the projection but leaves the log intact", async () => {
+    it("compact() rewrites the projection and appends what it produced", async () => {
       const h = await deps.make();
       const e1 = messageEntry("e1", "a");
       const e2 = messageEntry("e2", "b");
@@ -170,9 +170,10 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       expect(result.entriesAfter).toBe(1);
       expect(result.source).toBe("persisted");
 
-      // Log preserved.
-      expect(h.readPersisted()).toEqual([e1, e2, e3]);
-      // Projection compacted.
+      // Nothing that was in the log was rewritten or removed…
+      expect(h.readPersisted().slice(0, 3)).toEqual([e1, e2, e3]);
+      // …and the summary is now durable rather than a projection-only artifact.
+      expect(h.readPersisted()).toHaveLength(4);
       expect(h.read().entries).toHaveLength(1);
       await h.close();
     });
@@ -239,7 +240,10 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       await h.compact(summarizeCompact());
       expect(h.read().entries).toHaveLength(1);
       await h.resetProjection();
-      expect(h.read().entries).toEqual([e1, e2]);
+      // Back to a mirror of the log — which now records that a compaction
+      // happened, alongside the turns it covered.
+      expect(h.read().entries.slice(0, 2)).toEqual([e1, e2]);
+      expect(h.read().entries).toHaveLength(3);
       await h.close();
     });
 
@@ -264,9 +268,10 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       await h.compact(summarizeCompact());
 
       const snap = h.exportSnapshot();
-      expect(snap.persisted).toEqual([e1, e2]);
+      expect(snap.persisted.slice(0, 2)).toEqual([e1, e2]);
+      expect(snap.persisted).toHaveLength(3);
       expect(snap.projection).toHaveLength(1);
-      expect(snap.persistedVersion).toBe(2);
+      expect(snap.persistedVersion).toBe(3);
       expect(snap.projectionVersion).toBeGreaterThanOrEqual(3);
       expect(snap.lastCompaction).toBeDefined();
       await h.close();
