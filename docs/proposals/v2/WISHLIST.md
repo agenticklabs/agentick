@@ -27,134 +27,6 @@ framework by being well-worn in the application first.
 
 ---
 
-## Track A — modality and context shape (near-term, buildable now)
-
-### W1 · Image input modality on Gemini · [both]
-
-**Want.** Image input works end-to-end on the Gemini path. If enabling it turns
-out to be anything more than a `providerOptions` / declaration-level change, that
-is itself the finding — it means we have built something wrong and the shape needs
-fixing rather than working around.
-
-**Why.** Users send screenshots. A harness that cannot read them is not a
-harness for this product.
-
-**Current state.** The capability is _declared_: `google-adapter.ts:262` sets
-`media.image: ["base64", "url"]` with `urlSchemes: ["https","http","data","gs"]`,
-and all four modalities route through the single `googlePartFromSource` path
-(`:1065`). Ernesto resolves `{ type: "reference" }` sources to a provider-
-appropriate form in `libs/ernesto-v2/src/apps/ernesto/media.ts` — `gs://`
-passthrough for Google, base64 pull for others. So the declaration and the
-projection both exist. **What is unverified is the live path**: whether an image
-a user actually attaches survives upload → reference → projection → wire.
-
-**Done when.** A real image sent through the running app reaches Gemini and is
-described back correctly, and a round-trip capture shows the `inlineData` /
-`fileData` part on the wire. Not a unit test — the adopter's entry point.
-
-**Open.** Whether the blocker (if any) is in agentick, in `media.ts`, or upstream
-in how the client attaches files. Measure before touching.
-
----
-
-### W2 · Ernesto's own timeline component, with `<message-metadata>` · [app]
-
-**Want.** A custom timeline component in `libs/ernesto-v2`, in the spirit of v1's
-`libs/ernesto/src/context/timeline.tsx`. Its hard requirement: **every user
-message carries a `<message-metadata>` content block as its FIRST content
-block** — timestamp, device, possibly location, the page (application state) the
-user is currently on, and whatever else earns a slot.
-
-**Why.** The model is answering questions about a screen it cannot see. "What's
-the status of this?" only resolves if the harness says which page _this_ is. And
-temporal awareness ("yesterday", "last week") is unanswerable without a
-timestamp on the turn.
-
-**Current state.** v2's timeline is currently the framework default —
-`<Timeline />` rendered twice in `apps/ernesto/agent/agent.tsx:162,171`, split
-around the trailing user run. The app-level `timeline.ts` slot
-(`apps/ernesto/timeline.ts`) supplies a store and a compaction fold, not a
-rendering. So there is **no** per-message metadata today.
-
-v1 had this and it is the reference implementation: `UserMessageMetadata` in
-`libs/ernesto/src/context/timeline.tsx:183` rendered `<user-metadata>` on first
-occurrence and `<user-metadata-updates>` with only the _changed_ fields
-thereafter — a diff, to keep repeated metadata from flooding context. Worth
-carrying forward; worth deciding deliberately, because a diff-based block and a
-per-message-verbatim block have different cache behavior.
-
-Also carry forward from v1, since both were learned the hard way:
-
-- **assistant messages are always verbatim** — summarizing them corrupts
-  in-context learning (the model starts emitting metadata strings where tool
-  calls belong);
-- **event messages are verbatim** — they are short, model-critical corrective
-  signals, and collapsing one to `[system_event]` strips the instruction.
-
-**Done when.** Every user message in the compiled context opens with a
-`<message-metadata>` block; a test asserts it for the first _and_ subsequent user
-turns; the page/state field reflects the live client state.
-
-**Metadata-updates diff — consider, not required.** v1's changed-fields-only form
-is a **token-bloat reduction** for metadata that has not moved since the previous
-user message, and that is the only reason to want it. Worth considering; not a
-requirement of this item. The full block on every user message is an acceptable
-shipping state, and the diff can be layered on once we can see what the repetition
-actually costs.
-
-**Open.** Tag name (`<message-metadata>` as stated, vs v1's `<user-metadata>`).
-Whether location is in scope at all.
-
----
-
-### W3 · RAG context moves below the user's message, in XML · [app]
-
-**Want.** Retrieved context stops sitting _above_ the timeline and moves to
-**immediately following the user message that produced the query** — the message
-whose text was used to search the corpus. It must be **XML-formatted with
-unambiguous tag boundaries**, so the model can tell at a glance that this is
-system-produced material offered as _potentially relevant information_, not
-something the human said.
-
-**Why.** Two problems with the current position. Provenance: a grounding turn
-adjacent to a user turn can read as the user having said it. And association: if
-several user messages arrive in a batch, "the context for your question" is only
-unambiguous when it is attached to _that_ question.
-
-**Current state.** `<RagContext />` renders between the two `<Timeline>` halves
-(`agent/agent.tsx:163-170`) — i.e. after history, **before** this turn's user
-messages. That position was chosen deliberately and the reasoning is worth
-respecting rather than overwriting (`agent.tsx:138-161`):
-
-1. **Prefix-cache stability** — grounding placed before the trailing user run
-   does not move as the execution grows (tool call, tool result, per tick), so
-   each tick's prompt is a strict extension of the last.
-2. **Question-last** — the model reads what it knows, then what was asked.
-
-Moving RAG below the user message trades (2) away, and possibly (1). That is a
-real cost and the item should be built with eyes open — measure whether
-instruction-following degrades.
-
-There is already a trailhead for the mechanism: `rag-context.tsx` carries a
-`TODO(adr-94)` noting the compiler now folds a nested `<Section>` into its
-message, so the component could render _inside_ a `<User>` carrier and make the
-association **explicit rather than positional**. That is exactly this item, and
-`__tests__/grounding-placement.spec.tsx` already pins that the nested form works.
-The nested form is probably the right build: it also removes the coupling where
-`agent.tsx`'s child order silently decides correctness.
-
-**Done when.** RAG hits render inside/immediately after the specific user message
-they were retrieved for, wrapped in explicit XML tags with a stated contract
-("this is retrieved reference material, may be irrelevant, was not said by the
-user"), and a test pins both the position and the tagging.
-
-**Open.** Whether the block goes _inside_ the user message (one turn carrying
-question + evidence) or as a distinct turn immediately after it. Ryan's phrasing
-("immediately following") permits either; the nested form is the cleaner
-mechanism. Cache impact of the move — worth measuring, not assuming.
-
----
-
 ## Track B — context economics
 
 ### W4 · Long tool results live outside the context, behind a pointer · [both]
@@ -218,71 +90,6 @@ we have a measurement showing the token/cost delta. Explicitly experimental.
 **Open.** Whether cache expiry is even observable per-provider (Anthropic
 publishes a TTL; Google's implicit caching is less legible). Whether this
 composes with W4 or subsumes part of it.
-
----
-
-### W13 · Compaction has to actually RUN in Ernesto — pick the strategy · [app]
-
-**Want.** Compaction is not firing in Ernesto and it has to. Settle the strategy:
-**what triggers it, where the summary lives, and whether the fact of it becoming
-visible to the model as an `event`-role message** ("conversation compacted, at
-this time").
-
-**Why.** This is the item under W5. Cache-expiry-scheduled compaction is an
-optimization _of a thing that does not run at all right now_. Every long thread is
-carrying its full history until the window fills.
-
-The `event` message is worth building deliberately rather than skipping. Without
-it, compaction is a silent amnesia — the model's own history changes shape between
-turns with no marker explaining why, and it cannot reason about the gap ("I
-summarized earlier context at 10:42; details before that are lossy"). With it, the
-elision is a _fact in the transcript_ the model can cite and work around.
-
-**Current state.**
-
-- **The fold exists, the trigger does not.** `apps/ernesto/timeline.ts` supplies a
-  `compact` fold — v1's prompt verbatim, a 4-message floor, best-effort failure
-  handling — but it is invoked by `timeline.compact()`, which is host-driven. The
-  file carries an explicit `TODO(ernesto-port)`: _"nothing fires automatically
-  today."_ v1's threshold was **0.7 utilization with a 4-message floor**, self-fired
-  from `useOnTickStart`.
-- **Where it lives — Ryan's guess is right.** `SummaryEntity`
-  (`apps/assistant-api/src/assistant/storage/entities/summary.entity.ts`) is the
-  v1 home: `text`, `thread_id`, `until_interaction_id`, `starting_at`,
-  `ending_at`, indexed `['thread_id','ending_at']`. It is already a _ranged_
-  record — it knows which span it summarizes — which is exactly what a
-  restart-safe compaction needs. `ThreadCompactionService` is the v2 accessor
-  (`lib/thread-compaction.ts`, 67 lines) and `timeline.ts` already calls
-  `threadCompaction.get/append`.
-- **`until_interaction_id` is the friction.** It is an FK to `InteractionEntity`,
-  a v1 domain object the agentick timeline has no equivalent of. The v2 path will
-  need that column nullable, or a parallel cursor keyed on the agentick message
-  seq. Worth resolving now rather than at write time.
-- **The durable log is never rewritten.** `compact` returns a _projection_; the
-  timeline rows stay intact. That is the right design (v1 replaced messages in
-  context and kept its own summaries table) and it is what makes the `event`
-  marker necessary — the projection is the only place the elision is visible.
-
-**Does the message table support agentick roles, including `event`? — YES, and
-it already stores them.** `messages.role` is `varchar(16)`, **not a Postgres
-enum**, so no migration is needed for a new role value. And this is not
-theoretical: `KnowifyTimelineStore` (`apps/assistant-api/src/v2/stores/
-knowify-timeline-store.ts:88`) already writes `{ role: "event", source: "system",
-isInternal: true }`. The one stale thing is the **TypeScript** enum —
-`MessageRole` in `core/dto/v2/block-types.ts:116` is still `USER | ASSISTANT |
-TOOL`, so it does not describe what the column actually holds. Widen the enum (or
-stop typing the column with it); that is the whole of the work.
-
-**Done when.** Compaction fires on a stated trigger without a human asking; the
-summary persists to `summaries` and survives a process restart; an `event`
-message records that it happened and when; and a long thread demonstrably stops
-growing its prompt.
-
-**Open.** The trigger — token utilization (v1's 0.7), cache expiry (W5), message
-count, or a combination. Whether the `event` message is persisted to the timeline
-or exists only in the projection (persisted is more honest, and it is what the
-store already supports). What the event says: bare fact + timestamp, or a
-one-line gist of what was folded. `until_interaction_id` resolution.
 
 ---
 
@@ -685,162 +492,6 @@ calls.
 
 ---
 
-### W21 · Put query-api's `AGENTS.md` primer into the model's context · [app]
-
-**Want.** `apps/query-api/src/guides/AGENTS.md` — the query-api agent primer —
-reaches the model's context.
-
-**Why.** It is 181 lines of exactly the knowledge that makes the difference
-between a correct answer and a confident wrong one, and it is knowledge the model
-cannot derive. It is a domain dictionary written from real failures — "job →
-`Projects`, always", "todo → `ListItems`, not `Tasks`", `Assets.LastServiced` is
-unmaintained, prevailing-wage rates are in **dollars** while `HourlyRate` is in
-cents. Nearly every line carries an HTML-comment provenance note naming the QA
-session and the specific wrong answer that caused it. That is a corpus of
-paid-for lessons sitting outside the prompt.
-
-**Current state.** It exists and is maintained; it is not in Ernesto's context.
-
-**Size is the whole problem.** 181 dense lines is a large, permanent addition to
-every prompt. Three shapes, and I do not think it is obvious:
-
-1. **Verbatim in the system prompt.** Simplest, and it is stable content so it
-   sits inside the cached prefix — the marginal per-turn cost is a cache read, not
-   a write. Cost is context _window_, not tokens billed at full rate.
-2. **As a skill**, loaded when the model is about to query. Pays only when
-   relevant; risks the model not knowing it needs it (the same "cannot ask for
-   what you don't know you've forgotten" problem `rag-context.tsx` names as the
-   reason retrieval exists alongside `recall`).
-3. **Chunked into the knowledge corpus** and retrieved by W3's RAG. Wrong, I
-   think: retrieval returns top-N, and this document's value is _coverage_ — the
-   trap you did not retrieve is the one that bites.
-
-My read: **(1)**, precisely because it is stable and therefore cache-friendly.
-The primer's whole point is being present before the mistake.
-
-**Done when.** The primer is in context, sourced from the file rather than copied
-(it is actively maintained — a copy goes stale silently), and a query-shaped
-regression that the primer covers now answers correctly.
-
-**Settled 2026-08-03 — front-load it. This is a regression, not a new idea.**
-v1 already shipped shape (1): `KnowifyAppOptions.primer` is read with
-`fs.readFileSync` and rendered into the system prompt by
-`libs/ernesto/src/agents/ernesto/identity.tsx`, where it _replaces_ a shorter
-built-in data catalog. `context/memory.tsx` even tells the model not to re-read
-it ("already inlined into your system prompt"). v2 dropped the option and nobody
-noticed, because losing a primer produces confidently wrong answers rather than
-errors. So the question is not "which shape" — it is "put back what worked."
-
-**Why retrieval is the wrong shape here, stated precisely.** RAG retrieves on
-similarity to the QUESTION. The primer's traps fire on the model's chosen
-APPROACH, which does not exist yet at retrieval time. "todo → `ListItems`" gets
-retrieved when the user says "todo" — but the failure is the model querying
-`Tasks`, getting nothing, and inventing a reason, which happens two steps after
-retrieval closed. Coverage is the value; the trap you did not retrieve is the one
-that bites.
-
-**And the size argument inverts under prefix caching.** A stable block in the
-prefix is a cache READ. Measured this session: every tick transition is a strict
-append, 126–191 tokens re-paid. ~7 KB of primer costs its full rate once per
-conversation and near-nothing thereafter — while the ~5 turns of flailing it
-prevents cost more than that every time it happens (measured: four ticks spent
-correcting field names after `# Relevant Memory` fell out of context).
-
-**This is not in tension with the catalog trim (−20 KB).** The catalog was an
-INDEX — 27 KB of prose describing documents that were one `resource_read` away,
-so deleting it lost nothing. The primer is the CONTENT, with no cheaper handle.
-Trim indexes; keep knowledge.
-
-**The one real refinement:** front-load the dense trap list (the domain
-dictionary — job → `Projects`, todo → `ListItems`, prevailing-wage in dollars vs
-`HourlyRate` in cents) and leave the long-form workflow prose behind
-`knowify://guide/primer`, which already exists as a resource. ~40 lines resident
-instead of 181. Do the whole thing first, measure, then decide whether the split
-is worth the complexity.
-
-**The standing ambition (Ryan, 2026-08-03): make retrieval good enough that
-front-loading is never needed.** Right goal, and it is reachable for most of the
-corpus — but not all of it, and the line is worth naming so we stop re-litigating
-it per document:
-
-- **Facts retrieve well.** Large, query-shaped, one answer needed: report schemas,
-  API operations, workflow walkthroughs, per-model column lists. The corpus is
-  big, the question names the subject, top-N is the right tool. Most of the primer
-  by VOLUME is this, and it should live in the corpus.
-- **Standing constraints do not.** Small, always-applicable, and triggered by the
-  model's chosen approach rather than the user's words: "job → `Projects`",
-  "prevailing-wage rates are dollars, `HourlyRate` is cents", "never surface
-  internal IDs". No query retrieves these, because at retrieval time the mistake
-  has not been made yet. They are closer to system instruction than to knowledge.
-
-So the target end state is not "nothing front-loaded" — it is **the dictionary
-resident, everything else retrieved**, which is also the ~40-line split above.
-Getting retrieval good enough to shrink the resident block from 181 lines to 40 is
-the win; driving it to 0 would be trading a cache read for a class of silent wrong
-answers. Front-load now, and let the retriever earn each line back.
-
-**Open.** Only the plumbing: how the file reaches the Ernesto lib without a bad
-dependency (build-time embed, shared asset, or served by query-api — v1 used
-`readFileSync` at the host, which is the least clever and probably right).
-Whether `libs/developers-sdk/AGENTS.md` and the root `AGENTS.md` deserve the same
-treatment.
-
----
-
-### W22 · Reconcile MCP server instructions with Ernesto's own context · [app]
-
-**Want.** Make sure the Knowify MCP server's instructions and tool descriptions —
-when connected **in-process** — do not **conflict with or duplicate** what Ernesto
-already puts in context.
-
-**Why.** Two authorities describing the same world to one model. Where they merely
-duplicate, we pay tokens twice. Where they _disagree_, the model gets to pick, and
-neither of us knows which it picked.
-
-**Current state — the overlap is real and I can name it.**
-`libs/mcp-v2/src/instructions.ts` builds `InitializeResult.instructions` as three
-parts: `MCP_BASE_INSTRUCTIONS`, optional additional instructions, then
-`userAndCompanyInfoText(user)`. Against Ernesto's tree:
-
-| MCP instructions say                                        | Ernesto already renders                |
-| ----------------------------------------------------------- | -------------------------------------- |
-| user + company context block                                | `<UserContext />` — "# Current User"   |
-| "Knowify is a project management platform for contractors…" | `<ErnestoIdentity />` in `<System>`    |
-| lists `knowify://me`, `knowify://company`                   | `<Resources />` — the resource catalog |
-| tenant scoping, UTC dates, beta/support note                | partly identity, partly nowhere        |
-
-So the **user identity is stated twice from two sources**, the platform
-description twice, and the resource list twice.
-
-**This became newly visible, and that is why it is worth doing now.** MCP server
-instructions were being _dropped_ until the recent fix that populates
-`McpServerInfo.instructions` from `getInstructions()` and renders them under
-`### <alias> — server instructions` via `<McpServers />`. Before that, the
-duplication existed in principle and cost nothing because half of it never
-reached the prompt. Now it does.
-
-**The in-process case is what makes this tractable.** For a third-party MCP
-server, its instructions are its own and we take them as given. For our own server
-connected in-process we control both sides, so the fix is a real choice: one owner
-per fact. My read is that **Ernesto owns identity and platform framing** (it has
-richer sources and renders them anyway) and the **server owns only what is true of
-the server** — its resource URIs, its tenant-scoping and date-handling contract,
-its tool semantics. `buildInstructions` already takes an `additionalInstructions`
-parameter and the user block is conditional, so this is likely configuration
-rather than surgery.
-
-**Done when.** A compiled context for an in-process connection states each fact
-once, with a named owner; a test pins that the user identity appears exactly once.
-
-**Open.** Whether the MCP server should emit _different_ instructions for
-in-process vs remote connections (it is per-connection already, so it can). Tool
-_descriptions_ — I have only checked instructions; the description overlap needs
-its own read. Whether any of this should be an agentick-level concern (a
-"suppress this server's instructions" knob on `<McpServers />`) or stays app
-config.
-
----
-
 ### W17 · Model-proposed knowledge, at every scope, into human review · [app]
 
 **Want.** The model can **propose knowledge** beyond a single user's memory:
@@ -923,8 +574,8 @@ a closed identifier set**:
 | field aliases     | "the due date"             | schema columns          |
 | report selection  | "how are we doing on jobs" | the ~10 report models   |
 
-Everything the query-api primer (W21) is made of has this shape. What does NOT:
-_"AfMan prefers EFT"_, _"retainage is 10%"_ — unbounded content, claims about the
+Everything the query-api primer (shipped as AGENTS*CORE.md) is made of has this shape. What does NOT:
+*"AfMan prefers EFT"_, _"retainage is 10%"\_ — unbounded content, claims about the
 world, no target to validate. Those stay behind W17's review.
 
 **Current state.** The substrate is ready and the tool is the only wall.
@@ -1051,46 +702,6 @@ that re-enter review?
 
 ---
 
-### W27 · Bind a DURABLE task store in Ernesto · [app]
-
-**Want.** Long-running work survives a restart.
-
-**Why.** A task whose record dies with the process is not a background task, it
-is a promise the app cannot keep. Ernesto submits research tasks today and the
-model can `task_await` them — across a deploy, every one of those is orphaned
-with nothing to report.
-
-**Current state — the framework half is DONE; we simply never plugged it in.**
-Verified 2026-08-03:
-
-- `TaskStore` is a spec protocol (`packages/spec/src/protocol/tasks-store.ts`) —
-  the collection archetype, `put` / `get` / `list` / `delete` / optional `prune`,
-  keyed by `taskId`, queryable by scope + status.
-- `runTaskStoreConformance` exists, so any implementation is certifiable.
-- **`@agentick/tasks-store-postgres` already exists and is written** —
-  `postgresTaskStore`, bring-your-own-pool.
-- `TasksHarness` is app/gateway-scoped and rehydrates on construction: records
-  left `working` from a previous process are reconciled as orphans. That logic is
-  a same-process no-op against the in-memory store and only becomes real with a
-  durable one.
-- **`ErnestoAppPorts.stores` declares only `timeline` and `session`.** No `tasks`
-  slot, so every session gets `InMemoryTaskStore`.
-- **There is no TABLE.** The adapter defines the `agentick_tasks` schema
-  (`task_id` PK, `scope` jsonb + GIN, `status` btree, `updated_at` bigint,
-  `payload` jsonb, `schema_ver`) and exports the DDL, but ADR 68/49 deliberately
-  prefers the adopter apply it through their own tooling rather than running DDL
-  at boot. Knowify's migration list has nothing for it. So the work is: one
-  TypeORM migration + one port binding.
-
-**Done when.** `ports.stores.tasks` exists, the host binds `postgresTaskStore`
-over the existing pool, and a kill/resume test shows a task submitted before the
-restart reported as orphaned (not silently missing) after it.
-
-**Open.** Whether the table lives in the Knowify schema or agentick's own
-migration. Whether `prune` runs on a schedule or on boot.
-
----
-
 ### W28 · Agent-managed todo lists · [app] · **needs a decision**
 
 **Want.** The agent keeps a visible, durable checklist and manages it itself —
@@ -1104,7 +715,7 @@ honesty mechanism we have: a list the model wrote and did not finish is visible
 without anyone reading a transcript.
 
 **This is NOT the tasks harness, and conflating them would be the mistake.**
-Tasks (W27) are framework-spawned background EXECUTION with an FSM, a worker and
+Tasks (the `tasks` table) are framework-spawned background EXECUTION with an FSM, a worker and
 an inbox. A todo list is a planning SCRATCHPAD — no execution, no concurrency, no
 lifecycle beyond `open → done | dropped`. Same word, different machine. Ernesto
 should have both.
@@ -1203,77 +814,6 @@ rather than a silent drop.
 
 **Open.** Where they ride — model config, per-execution, or both. Explicitly
 deferred; recorded so it is not lost.
-
----
-
-### W33 · Preview the compiled context for any run · [both]
-
-**Want.** A first-class, built-in way to see exactly what a given run sent the
-model — reachable from the app as a dev "debug" button, and reusable as the input
-to the interaction enricher rather than having the enricher re-derive it.
-
-**Why.** Every defect found on 2026-08-03 was found by reading a trace, not by a
-failing test: the resource catalog at 36 % of the prompt, `# Relevant Memory`
-falling out between ticks, the primer at 62 KB rather than the 7 KB estimated,
-attachments silently dropped, `<retrieved-context>` never rendering. Each cost a
-round trip through "add a temporary recorder, restart, reproduce, read a file".
-The framework should answer "what did the model actually see" without that.
-
-**The primitive already exists and is 90 % of the way there.**
-`roundTripRecorder` (`@agentick/session/round-trip-recorder.ts`) is a
-`CommandHooks` bag capturing, per tick: ⓪ the rendered tree, ① the canonical
-`LanguageModelInput`, ② the provider-native request, ③ raw provider chunks, ④
-canonical deltas, ⑤ the assembled message, and what was persisted. Ernesto
-already installs it behind `ERNESTO_ROUND_TRIPS`.
-
-What it lacks is everything AROUND it:
-
-- **a sink that is not a file** — today it appends JSONL to a path, so nothing
-  can query it by execution or tick;
-- **retention** — no bound, no eviction, no opt-in per session;
-- **a wire verb** — no way for a client to ask for the trips of a run, so a
-  debug button has nothing to call;
-- **redaction** — a trip contains the entire prompt, which is the most sensitive
-  artifact in the system. Anything projecting it to a client needs the same
-  care `identityProjection` gets, and probably a scope beyond "authenticated".
-
-**The enricher case is the interesting one.** If the enricher consumes the
-recorded `compiled` input instead of re-deriving context, the summary describes
-what the model ACTUALLY saw — including retrieved context and grounding it would
-otherwise have to guess at. That also makes the recorder load-bearing rather than
-diagnostic, which raises the bar on retention and cost.
-
-**Done when.** A run can be asked for its trips through a verb the client can
-call; a dev surface renders the compiled prompt for a chosen tick; the enricher
-reads from the same source; and none of it is on by default.
-
-**Open.** Whether the sink is a store port (the collection archetype again) or
-rides the journal. Whether trips are retained for every run or only when a
-session opts in — full-prompt capture on every request is not free. Whether the
-tree (⓪) is worth keeping or only the compiled input.
-
----
-
-#### W33a · `session.dryRun()` — compile without sending — **DONE**
-
-Landed 2026-08-03. `session.dryRun()` / `compile()` / `project()` /
-`prepareRequest()` on the harness and the protocol, `session/dry_run` /
-`session/compile` / `session/project` on the wire, and the three matching methods
-on the client session handle.
-
-`ExecutorProtocol` gained an optional `prepareRequest` phase — the executor
-already called the adapter's, privately, so exposing it was a keyword. The
-provider-native rung deliberately does not cross the wire: adapter-shaped, not
-guaranteed JSON-clean.
-
-Documented in `@agentick/session`'s README, including the two caveats worth
-repeating — a dry run RENDERS (so `useData` fetches and a retrieval-backed agent
-issues a real query), and the response is the entire prompt, which makes it the
-most sensitive read in the session namespace.
-
-Still open, and the reason the history half of W33 stays: nothing retains trips,
-so this previews the CURRENT state only. "What did run #47 send" needs the sink,
-retention and redaction W33 describes.
 
 ---
 
@@ -1383,7 +923,7 @@ SAME mechanism with a different prompt:
 
 | instruction                                                                  | consumer                 |
 | ---------------------------------------------------------------------------- | ------------------------ |
-| "summarize what matters going forward"                                       | compaction (W13 / W36)   |
+| "summarize what matters going forward"                                       | compaction (W36)         |
 | "what was this about, what went right, what went wrong, keywords, learnings" | episodic memory          |
 | "title this conversation"                                                    | thread titling           |
 | "what did the user actually get"                                             | the interaction enricher |
@@ -1408,23 +948,6 @@ warm and nothing blocks the user) or on demand. Whether several passes share ONE
 call with a structured-output schema — four questions, one round trip — or stay
 separate calls for separable failure. Whether `reflect` is a session method or a
 harness of its own once there are several consumers.
-
----
-
-### W37 · Compaction takes INSTRUCTIONS, and `/compact` passes them · [both]
-
-**Want.** `compact` accepts an optional instruction ("focus on the billing
-decisions", "keep every number") threaded to the summarizing model IN ADDITION to
-the standing compaction prompt — and a `/compact [instructions]` runnable that
-carries it from the user.
-
-**Current state.** The framework field ALREADY EXISTS:
-`CompactStrategy.instructions?: string | readonly ContentBlock[]`. What is
-missing is the threading — Ernesto's fold ignores it, the wire verb does not
-carry it, and no command exposes it.
-
-**Done when.** `session.timeline.compact({ instructions })` reaches the prompt;
-the wire verb carries it; `/compact keep the numbers` works from the palette.
 
 ---
 
@@ -1496,38 +1019,35 @@ at message/section boundaries.
 
 Rough order, cheapest-and-most-certain first:
 
-1. **W16** (drop the CoT dock tenant) — minutes; one template block.
-2. **W1** (image modality) — likely small, and it is blocking real usage.
-3. **W22** (MCP vs Ernesto context overlap) — cheap, and it is _paying rent right
-   now_ on every turn. Likely config, not surgery.
-4. **W21** (AGENTS.md primer) — the highest answer-quality-per-token item here,
-   and now known to be a v1 REGRESSION rather than a design question: restore
-   `readFileSync` → system prompt, which is what v1 shipped.
-5. **W2** (timeline + `<message-metadata>`) — foundational; W3 lands on top of it,
-   and the metadata block is what every later item wants.
-6. **W27** (durable task store) — small: the port, the conformance suite and
-   `@agentick/tasks-store-postgres` all exist; Ernesto declares no `tasks` slot.
-   Every restart currently orphans in-flight work with nothing to report.
-7. **W13** (compaction actually runs) — threads grow unbounded _today_. Strictly
-   before W5, which is an optimization of this.
-8. **W3** (RAG placement + XML) — mechanism already proven by
-   `grounding-placement.spec.tsx`; a positioning decision plus a wrapper.
-9. **W28** (agent todo lists) — a collection store plus a stateful tool; wants
-   the W27 decision about where app-owned tables live to land first.
-10. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
-    first: it is also the delivery channel for W7.
-11. **W14** (media summaries at ingest) — the supply side for W4 and W5.
-12. **W4** (tool results out of context) — needs design; touches the framework.
-13. **W20** (JS execution) — deliberately _after_ W4, which is its best use case,
+1. **W38** (progress signals) — the smallest thing here and it has a determinate
+   bar for free: cap the summarizer's output and the fraction is
+   `emitted / budget`, not an estimate. Wants W36's capped call.
+2. **W36** (same model, same context) — the first real consumer of `project()`,
+   and the thing W39 generalizes. Compaction currently summarizes uncapped.
+3. **W39** (the reflection pass) — extract the primitive once W36 has proven the
+   shape on one caller. Episodic memory and thread titling are the next callers.
+4. **W16** (drop the CoT dock tenant) — minutes; one template block.
+5. **W28** (agent todo lists) — a collection store plus a stateful tool. The
+   app-owned-table question W27 raised is now answered by the `tasks` migration.
+6. **W35** (context panel v2) — fold by entry, the `request` rung, per-region
+   sizes. Wants the executor's `prepareRequest` on the wire.
+7. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
+   first: it is also the delivery channel for W7.
+8. **W14** (media summaries at ingest) — the supply side for W4 and W5.
+9. **W4** (tool results out of context) — needs design; touches the framework.
+10. **W20** (JS execution) — deliberately _after_ W4, which is its best use case,
     and it needs a real security design rather than a quick isolate.
-14. **W17 + W19 together**, with **W18** as their surface — do _not_ build these
+11. **W17 + W19 together**, with **W18** as their surface — do _not_ build these
     separately. They are one proposal/review mechanism over three entity types
     plus one portal that consumes it; solving them one at a time guarantees three
     incompatible review flows.
-15. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
-    exist before dedup or critique can attach to it).
-16. **W5** — research, and it wants W13's trigger and W14's summaries first.
-17. **W15** — deferred.
+12. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
+    exist before dedup or critique can attach to it). W6 is a W39 caller.
+13. **W5** — research, and it wants W14's summaries first.
+14. **W34** (hypothetical input) — needs a timeline scratch overlay; `send()`
+    appends before rendering, so there is no seam for it yet.
+15. **W31** — needs a measurement, not a decision.
+16. **W15** — deferred.
 
 **Not sequenced — blocked on a conversation, not on effort:** **W23** (the real
 execution graph). W16 clears the slot without prejudging what fills it, so the
@@ -1561,3 +1081,503 @@ deferred behind this list:
 - **ADR 95 remainder** — drop the three positional defaults, add the
   warn-don't-fill diagnostic, audit `skills`/`prompts`/`connectors`, project MCP
   prompts.
+
+---
+
+## Done
+
+Moved here with the commit that did it. Kept whole — the **Why** is the
+reasoning we would otherwise re-derive.
+
+### W1 · Image input modality on Gemini · [both]
+
+> **Done** — attachments reach the model — the ownership coordinate was the bug
+
+**Want.** Image input works end-to-end on the Gemini path. If enabling it turns
+out to be anything more than a `providerOptions` / declaration-level change, that
+is itself the finding — it means we have built something wrong and the shape needs
+fixing rather than working around.
+
+**Why.** Users send screenshots. A harness that cannot read them is not a
+harness for this product.
+
+**Current state.** The capability is _declared_: `google-adapter.ts:262` sets
+`media.image: ["base64", "url"]` with `urlSchemes: ["https","http","data","gs"]`,
+and all four modalities route through the single `googlePartFromSource` path
+(`:1065`). Ernesto resolves `{ type: "reference" }` sources to a provider-
+appropriate form in `libs/ernesto-v2/src/apps/ernesto/media.ts` — `gs://`
+passthrough for Google, base64 pull for others. So the declaration and the
+projection both exist. **What is unverified is the live path**: whether an image
+a user actually attaches survives upload → reference → projection → wire.
+
+**Done when.** A real image sent through the running app reaches Gemini and is
+described back correctly, and a round-trip capture shows the `inlineData` /
+`fileData` part on the wire. Not a unit test — the adopter's entry point.
+
+**Open.** Whether the blocker (if any) is in agentick, in `media.ts`, or upstream
+in how the client attaches files. Measure before touching.
+
+---
+
+### W2 · Ernesto's own timeline component, with `<message-metadata>` · [app]
+
+> **Done** — `KnowifyTimeline` + `<message-metadata>`, verified on the wire
+
+**Want.** A custom timeline component in `libs/ernesto-v2`, in the spirit of v1's
+`libs/ernesto/src/context/timeline.tsx`. Its hard requirement: **every user
+message carries a `<message-metadata>` content block as its FIRST content
+block** — timestamp, device, possibly location, the page (application state) the
+user is currently on, and whatever else earns a slot.
+
+**Why.** The model is answering questions about a screen it cannot see. "What's
+the status of this?" only resolves if the harness says which page _this_ is. And
+temporal awareness ("yesterday", "last week") is unanswerable without a
+timestamp on the turn.
+
+**Current state.** v2's timeline is currently the framework default —
+`<Timeline />` rendered twice in `apps/ernesto/agent/agent.tsx:162,171`, split
+around the trailing user run. The app-level `timeline.ts` slot
+(`apps/ernesto/timeline.ts`) supplies a store and a compaction fold, not a
+rendering. So there is **no** per-message metadata today.
+
+v1 had this and it is the reference implementation: `UserMessageMetadata` in
+`libs/ernesto/src/context/timeline.tsx:183` rendered `<user-metadata>` on first
+occurrence and `<user-metadata-updates>` with only the _changed_ fields
+thereafter — a diff, to keep repeated metadata from flooding context. Worth
+carrying forward; worth deciding deliberately, because a diff-based block and a
+per-message-verbatim block have different cache behavior.
+
+Also carry forward from v1, since both were learned the hard way:
+
+- **assistant messages are always verbatim** — summarizing them corrupts
+  in-context learning (the model starts emitting metadata strings where tool
+  calls belong);
+- **event messages are verbatim** — they are short, model-critical corrective
+  signals, and collapsing one to `[system_event]` strips the instruction.
+
+**Done when.** Every user message in the compiled context opens with a
+`<message-metadata>` block; a test asserts it for the first _and_ subsequent user
+turns; the page/state field reflects the live client state.
+
+**Metadata-updates diff — consider, not required.** v1's changed-fields-only form
+is a **token-bloat reduction** for metadata that has not moved since the previous
+user message, and that is the only reason to want it. Worth considering; not a
+requirement of this item. The full block on every user message is an acceptable
+shipping state, and the diff can be layered on once we can see what the repetition
+actually costs.
+
+**Open.** Tag name (`<message-metadata>` as stated, vs v1's `<user-metadata>`).
+Whether location is in scope at all.
+
+---
+
+### W3 · RAG context moves below the user's message, in XML · [app]
+
+> **Done** — RAG moved below the user turn, in XML
+
+**Want.** Retrieved context stops sitting _above_ the timeline and moves to
+**immediately following the user message that produced the query** — the message
+whose text was used to search the corpus. It must be **XML-formatted with
+unambiguous tag boundaries**, so the model can tell at a glance that this is
+system-produced material offered as _potentially relevant information_, not
+something the human said.
+
+**Why.** Two problems with the current position. Provenance: a grounding turn
+adjacent to a user turn can read as the user having said it. And association: if
+several user messages arrive in a batch, "the context for your question" is only
+unambiguous when it is attached to _that_ question.
+
+**Current state.** `<RagContext />` renders between the two `<Timeline>` halves
+(`agent/agent.tsx:163-170`) — i.e. after history, **before** this turn's user
+messages. That position was chosen deliberately and the reasoning is worth
+respecting rather than overwriting (`agent.tsx:138-161`):
+
+1. **Prefix-cache stability** — grounding placed before the trailing user run
+   does not move as the execution grows (tool call, tool result, per tick), so
+   each tick's prompt is a strict extension of the last.
+2. **Question-last** — the model reads what it knows, then what was asked.
+
+Moving RAG below the user message trades (2) away, and possibly (1). That is a
+real cost and the item should be built with eyes open — measure whether
+instruction-following degrades.
+
+There is already a trailhead for the mechanism: `rag-context.tsx` carries a
+`TODO(adr-94)` noting the compiler now folds a nested `<Section>` into its
+message, so the component could render _inside_ a `<User>` carrier and make the
+association **explicit rather than positional**. That is exactly this item, and
+`__tests__/grounding-placement.spec.tsx` already pins that the nested form works.
+The nested form is probably the right build: it also removes the coupling where
+`agent.tsx`'s child order silently decides correctness.
+
+**Done when.** RAG hits render inside/immediately after the specific user message
+they were retrieved for, wrapped in explicit XML tags with a stated contract
+("this is retrieved reference material, may be irrelevant, was not said by the
+user"), and a test pins both the position and the tagging.
+
+**Open.** Whether the block goes _inside_ the user message (one turn carrying
+question + evidence) or as a distinct turn immediately after it. Ryan's phrasing
+("immediately following") permits either; the nested form is the cleaner
+mechanism. Cache impact of the move — worth measuring, not assuming.
+
+---
+
+### W13 · Compaction has to actually RUN in Ernesto — pick the strategy · [app]
+
+> **Done** — 69af28d6bc9 — compaction runs, and survives a restart
+
+**Want.** Compaction is not firing in Ernesto and it has to. Settle the strategy:
+**what triggers it, where the summary lives, and whether the fact of it becoming
+visible to the model as an `event`-role message** ("conversation compacted, at
+this time").
+
+**Why.** This is the item under W5. Cache-expiry-scheduled compaction is an
+optimization _of a thing that does not run at all right now_. Every long thread is
+carrying its full history until the window fills.
+
+The `event` message is worth building deliberately rather than skipping. Without
+it, compaction is a silent amnesia — the model's own history changes shape between
+turns with no marker explaining why, and it cannot reason about the gap ("I
+summarized earlier context at 10:42; details before that are lossy"). With it, the
+elision is a _fact in the transcript_ the model can cite and work around.
+
+**Current state.**
+
+- **The fold exists, the trigger does not.** `apps/ernesto/timeline.ts` supplies a
+  `compact` fold — v1's prompt verbatim, a 4-message floor, best-effort failure
+  handling — but it is invoked by `timeline.compact()`, which is host-driven. The
+  file carries an explicit `TODO(ernesto-port)`: _"nothing fires automatically
+  today."_ v1's threshold was **0.7 utilization with a 4-message floor**, self-fired
+  from `useOnTickStart`.
+- **Where it lives — Ryan's guess is right.** `SummaryEntity`
+  (`apps/assistant-api/src/assistant/storage/entities/summary.entity.ts`) is the
+  v1 home: `text`, `thread_id`, `until_interaction_id`, `starting_at`,
+  `ending_at`, indexed `['thread_id','ending_at']`. It is already a _ranged_
+  record — it knows which span it summarizes — which is exactly what a
+  restart-safe compaction needs. `ThreadCompactionService` is the v2 accessor
+  (`lib/thread-compaction.ts`, 67 lines) and `timeline.ts` already calls
+  `threadCompaction.get/append`.
+- **`until_interaction_id` is the friction.** It is an FK to `InteractionEntity`,
+  a v1 domain object the agentick timeline has no equivalent of. The v2 path will
+  need that column nullable, or a parallel cursor keyed on the agentick message
+  seq. Worth resolving now rather than at write time.
+- **The durable log is never rewritten.** `compact` returns a _projection_; the
+  timeline rows stay intact. That is the right design (v1 replaced messages in
+  context and kept its own summaries table) and it is what makes the `event`
+  marker necessary — the projection is the only place the elision is visible.
+
+**Does the message table support agentick roles, including `event`? — YES, and
+it already stores them.** `messages.role` is `varchar(16)`, **not a Postgres
+enum**, so no migration is needed for a new role value. And this is not
+theoretical: `KnowifyTimelineStore` (`apps/assistant-api/src/v2/stores/
+knowify-timeline-store.ts:88`) already writes `{ role: "event", source: "system",
+isInternal: true }`. The one stale thing is the **TypeScript** enum —
+`MessageRole` in `core/dto/v2/block-types.ts:116` is still `USER | ASSISTANT |
+TOOL`, so it does not describe what the column actually holds. Widen the enum (or
+stop typing the column with it); that is the whole of the work.
+
+**Done when.** Compaction fires on a stated trigger without a human asking; the
+summary persists to `summaries` and survives a process restart; an `event`
+message records that it happened and when; and a long thread demonstrably stops
+growing its prompt.
+
+**Open.** The trigger — token utilization (v1's 0.7), cache expiry (W5), message
+count, or a combination. Whether the `event` message is persisted to the timeline
+or exists only in the projection (persisted is more honest, and it is what the
+store already supports). What the event says: bare fact + timestamp, or a
+one-line gist of what was folded. `until_interaction_id` resolution.
+
+---
+
+### W21 · Put query-api's `AGENTS.md` primer into the model's context · [app]
+
+> **Done** — `AGENTS_CORE.md` — 7.6KB resident, the other 62KB retrievable
+
+**Want.** `apps/query-api/src/guides/AGENTS.md` — the query-api agent primer —
+reaches the model's context.
+
+**Why.** It is 181 lines of exactly the knowledge that makes the difference
+between a correct answer and a confident wrong one, and it is knowledge the model
+cannot derive. It is a domain dictionary written from real failures — "job →
+`Projects`, always", "todo → `ListItems`, not `Tasks`", `Assets.LastServiced` is
+unmaintained, prevailing-wage rates are in **dollars** while `HourlyRate` is in
+cents. Nearly every line carries an HTML-comment provenance note naming the QA
+session and the specific wrong answer that caused it. That is a corpus of
+paid-for lessons sitting outside the prompt.
+
+**Current state.** It exists and is maintained; it is not in Ernesto's context.
+
+**Size is the whole problem.** 181 dense lines is a large, permanent addition to
+every prompt. Three shapes, and I do not think it is obvious:
+
+1. **Verbatim in the system prompt.** Simplest, and it is stable content so it
+   sits inside the cached prefix — the marginal per-turn cost is a cache read, not
+   a write. Cost is context _window_, not tokens billed at full rate.
+2. **As a skill**, loaded when the model is about to query. Pays only when
+   relevant; risks the model not knowing it needs it (the same "cannot ask for
+   what you don't know you've forgotten" problem `rag-context.tsx` names as the
+   reason retrieval exists alongside `recall`).
+3. **Chunked into the knowledge corpus** and retrieved by W3's RAG. Wrong, I
+   think: retrieval returns top-N, and this document's value is _coverage_ — the
+   trap you did not retrieve is the one that bites.
+
+My read: **(1)**, precisely because it is stable and therefore cache-friendly.
+The primer's whole point is being present before the mistake.
+
+**Done when.** The primer is in context, sourced from the file rather than copied
+(it is actively maintained — a copy goes stale silently), and a query-shaped
+regression that the primer covers now answers correctly.
+
+**Settled 2026-08-03 — front-load it. This is a regression, not a new idea.**
+v1 already shipped shape (1): `KnowifyAppOptions.primer` is read with
+`fs.readFileSync` and rendered into the system prompt by
+`libs/ernesto/src/agents/ernesto/identity.tsx`, where it _replaces_ a shorter
+built-in data catalog. `context/memory.tsx` even tells the model not to re-read
+it ("already inlined into your system prompt"). v2 dropped the option and nobody
+noticed, because losing a primer produces confidently wrong answers rather than
+errors. So the question is not "which shape" — it is "put back what worked."
+
+**Why retrieval is the wrong shape here, stated precisely.** RAG retrieves on
+similarity to the QUESTION. The primer's traps fire on the model's chosen
+APPROACH, which does not exist yet at retrieval time. "todo → `ListItems`" gets
+retrieved when the user says "todo" — but the failure is the model querying
+`Tasks`, getting nothing, and inventing a reason, which happens two steps after
+retrieval closed. Coverage is the value; the trap you did not retrieve is the one
+that bites.
+
+**And the size argument inverts under prefix caching.** A stable block in the
+prefix is a cache READ. Measured this session: every tick transition is a strict
+append, 126–191 tokens re-paid. ~7 KB of primer costs its full rate once per
+conversation and near-nothing thereafter — while the ~5 turns of flailing it
+prevents cost more than that every time it happens (measured: four ticks spent
+correcting field names after `# Relevant Memory` fell out of context).
+
+**This is not in tension with the catalog trim (−20 KB).** The catalog was an
+INDEX — 27 KB of prose describing documents that were one `resource_read` away,
+so deleting it lost nothing. The primer is the CONTENT, with no cheaper handle.
+Trim indexes; keep knowledge.
+
+**The one real refinement:** front-load the dense trap list (the domain
+dictionary — job → `Projects`, todo → `ListItems`, prevailing-wage in dollars vs
+`HourlyRate` in cents) and leave the long-form workflow prose behind
+`knowify://guide/primer`, which already exists as a resource. ~40 lines resident
+instead of 181. Do the whole thing first, measure, then decide whether the split
+is worth the complexity.
+
+**The standing ambition (Ryan, 2026-08-03): make retrieval good enough that
+front-loading is never needed.** Right goal, and it is reachable for most of the
+corpus — but not all of it, and the line is worth naming so we stop re-litigating
+it per document:
+
+- **Facts retrieve well.** Large, query-shaped, one answer needed: report schemas,
+  API operations, workflow walkthroughs, per-model column lists. The corpus is
+  big, the question names the subject, top-N is the right tool. Most of the primer
+  by VOLUME is this, and it should live in the corpus.
+- **Standing constraints do not.** Small, always-applicable, and triggered by the
+  model's chosen approach rather than the user's words: "job → `Projects`",
+  "prevailing-wage rates are dollars, `HourlyRate` is cents", "never surface
+  internal IDs". No query retrieves these, because at retrieval time the mistake
+  has not been made yet. They are closer to system instruction than to knowledge.
+
+So the target end state is not "nothing front-loaded" — it is **the dictionary
+resident, everything else retrieved**, which is also the ~40-line split above.
+Getting retrieval good enough to shrink the resident block from 181 lines to 40 is
+the win; driving it to 0 would be trading a cache read for a class of silent wrong
+answers. Front-load now, and let the retriever earn each line back.
+
+**Open.** Only the plumbing: how the file reaches the Ernesto lib without a bad
+dependency (build-time embed, shared asset, or served by query-api — v1 used
+`readFileSync` at the host, which is the least clever and probably right).
+Whether `libs/developers-sdk/AGENTS.md` and the root `AGENTS.md` deserve the same
+treatment.
+
+---
+
+### W22 · Reconcile MCP server instructions with Ernesto's own context · [app]
+
+> **Done** — per-connection MCP projection + Ernesto owns identity
+
+**Want.** Make sure the Knowify MCP server's instructions and tool descriptions —
+when connected **in-process** — do not **conflict with or duplicate** what Ernesto
+already puts in context.
+
+**Why.** Two authorities describing the same world to one model. Where they merely
+duplicate, we pay tokens twice. Where they _disagree_, the model gets to pick, and
+neither of us knows which it picked.
+
+**Current state — the overlap is real and I can name it.**
+`libs/mcp-v2/src/instructions.ts` builds `InitializeResult.instructions` as three
+parts: `MCP_BASE_INSTRUCTIONS`, optional additional instructions, then
+`userAndCompanyInfoText(user)`. Against Ernesto's tree:
+
+| MCP instructions say                                        | Ernesto already renders                |
+| ----------------------------------------------------------- | -------------------------------------- |
+| user + company context block                                | `<UserContext />` — "# Current User"   |
+| "Knowify is a project management platform for contractors…" | `<ErnestoIdentity />` in `<System>`    |
+| lists `knowify://me`, `knowify://company`                   | `<Resources />` — the resource catalog |
+| tenant scoping, UTC dates, beta/support note                | partly identity, partly nowhere        |
+
+So the **user identity is stated twice from two sources**, the platform
+description twice, and the resource list twice.
+
+**This became newly visible, and that is why it is worth doing now.** MCP server
+instructions were being _dropped_ until the recent fix that populates
+`McpServerInfo.instructions` from `getInstructions()` and renders them under
+`### <alias> — server instructions` via `<McpServers />`. Before that, the
+duplication existed in principle and cost nothing because half of it never
+reached the prompt. Now it does.
+
+**The in-process case is what makes this tractable.** For a third-party MCP
+server, its instructions are its own and we take them as given. For our own server
+connected in-process we control both sides, so the fix is a real choice: one owner
+per fact. My read is that **Ernesto owns identity and platform framing** (it has
+richer sources and renders them anyway) and the **server owns only what is true of
+the server** — its resource URIs, its tenant-scoping and date-handling contract,
+its tool semantics. `buildInstructions` already takes an `additionalInstructions`
+parameter and the user block is conditional, so this is likely configuration
+rather than surgery.
+
+**Done when.** A compiled context for an in-process connection states each fact
+once, with a named owner; a test pins that the user identity appears exactly once.
+
+**Open.** Whether the MCP server should emit _different_ instructions for
+in-process vs remote connections (it is per-connection already, so it can). Tool
+_descriptions_ — I have only checked instructions; the description overlap needs
+its own read. Whether any of this should be an agentick-level concern (a
+"suppress this server's instructions" knob on `<McpServers />`) or stays app
+config.
+
+---
+
+### W27 · Bind a DURABLE task store in Ernesto · [app]
+
+> **Done** — `knowifyTaskStore` bound at `v2/module.ts:633`; `tasks` migration
+
+**Want.** Long-running work survives a restart.
+
+**Why.** A task whose record dies with the process is not a background task, it
+is a promise the app cannot keep. Ernesto submits research tasks today and the
+model can `task_await` them — across a deploy, every one of those is orphaned
+with nothing to report.
+
+**Current state — the framework half is DONE; we simply never plugged it in.**
+Verified 2026-08-03:
+
+- `TaskStore` is a spec protocol (`packages/spec/src/protocol/tasks-store.ts`) —
+  the collection archetype, `put` / `get` / `list` / `delete` / optional `prune`,
+  keyed by `taskId`, queryable by scope + status.
+- `runTaskStoreConformance` exists, so any implementation is certifiable.
+- **`@agentick/tasks-store-postgres` already exists and is written** —
+  `postgresTaskStore`, bring-your-own-pool.
+- `TasksHarness` is app/gateway-scoped and rehydrates on construction: records
+  left `working` from a previous process are reconciled as orphans. That logic is
+  a same-process no-op against the in-memory store and only becomes real with a
+  durable one.
+- **`ErnestoAppPorts.stores` declares only `timeline` and `session`.** No `tasks`
+  slot, so every session gets `InMemoryTaskStore`.
+- **There is no TABLE.** The adapter defines the `agentick_tasks` schema
+  (`task_id` PK, `scope` jsonb + GIN, `status` btree, `updated_at` bigint,
+  `payload` jsonb, `schema_ver`) and exports the DDL, but ADR 68/49 deliberately
+  prefers the adopter apply it through their own tooling rather than running DDL
+  at boot. Knowify's migration list has nothing for it. So the work is: one
+  TypeORM migration + one port binding.
+
+**Done when.** `ports.stores.tasks` exists, the host binds `postgresTaskStore`
+over the existing pool, and a kill/resume test shows a task submitted before the
+restart reported as orphaned (not silently missing) after it.
+
+**Open.** Whether the table lives in the Knowify schema or agentick's own
+migration. Whether `prune` runs on a schedule or on boot.
+
+---
+
+### W33 · Preview the compiled context for any run · [both]
+
+> **Done** — 739e2ce3 — `session.dryRun()` / `compile()` / `project()`, on the wire
+
+**Want.** A first-class, built-in way to see exactly what a given run sent the
+model — reachable from the app as a dev "debug" button, and reusable as the input
+to the interaction enricher rather than having the enricher re-derive it.
+
+**Why.** Every defect found on 2026-08-03 was found by reading a trace, not by a
+failing test: the resource catalog at 36 % of the prompt, `# Relevant Memory`
+falling out between ticks, the primer at 62 KB rather than the 7 KB estimated,
+attachments silently dropped, `<retrieved-context>` never rendering. Each cost a
+round trip through "add a temporary recorder, restart, reproduce, read a file".
+The framework should answer "what did the model actually see" without that.
+
+**The primitive already exists and is 90 % of the way there.**
+`roundTripRecorder` (`@agentick/session/round-trip-recorder.ts`) is a
+`CommandHooks` bag capturing, per tick: ⓪ the rendered tree, ① the canonical
+`LanguageModelInput`, ② the provider-native request, ③ raw provider chunks, ④
+canonical deltas, ⑤ the assembled message, and what was persisted. Ernesto
+already installs it behind `ERNESTO_ROUND_TRIPS`.
+
+What it lacks is everything AROUND it:
+
+- **a sink that is not a file** — today it appends JSONL to a path, so nothing
+  can query it by execution or tick;
+- **retention** — no bound, no eviction, no opt-in per session;
+- **a wire verb** — no way for a client to ask for the trips of a run, so a
+  debug button has nothing to call;
+- **redaction** — a trip contains the entire prompt, which is the most sensitive
+  artifact in the system. Anything projecting it to a client needs the same
+  care `identityProjection` gets, and probably a scope beyond "authenticated".
+
+**The enricher case is the interesting one.** If the enricher consumes the
+recorded `compiled` input instead of re-deriving context, the summary describes
+what the model ACTUALLY saw — including retrieved context and grounding it would
+otherwise have to guess at. That also makes the recorder load-bearing rather than
+diagnostic, which raises the bar on retention and cost.
+
+**Done when.** A run can be asked for its trips through a verb the client can
+call; a dev surface renders the compiled prompt for a chosen tick; the enricher
+reads from the same source; and none of it is on by default.
+
+**Open.** Whether the sink is a store port (the collection archetype again) or
+rides the journal. Whether trips are retained for every run or only when a
+session opts in — full-prompt capture on every request is not free. Whether the
+tree (⓪) is worth keeping or only the compiled input.
+
+---
+
+#### W33a · `session.dryRun()` — compile without sending — **DONE**
+
+Landed 2026-08-03. `session.dryRun()` / `compile()` / `project()` /
+`prepareRequest()` on the harness and the protocol, `session/dry_run` /
+`session/compile` / `session/project` on the wire, and the three matching methods
+on the client session handle.
+
+`ExecutorProtocol` gained an optional `prepareRequest` phase — the executor
+already called the adapter's, privately, so exposing it was a keyword. The
+provider-native rung deliberately does not cross the wire: adapter-shaped, not
+guaranteed JSON-clean.
+
+Documented in `@agentick/session`'s README, including the two caveats worth
+repeating — a dry run RENDERS (so `useData` fetches and a retrieval-backed agent
+issues a real query), and the response is the entire prompt, which makes it the
+most sensitive read in the session namespace.
+
+Still open, and the reason the history half of W33 stays: nothing retains trips,
+so this previews the CURRENT state only. "What did run #47 send" needs the sink,
+retention and redaction W33 describes.
+
+---
+
+### W37 · Compaction takes INSTRUCTIONS, and `/compact` passes them · [both]
+
+> **Done** — df10840e268 — `/compact [instructions]` through to the fold
+
+**Want.** `compact` accepts an optional instruction ("focus on the billing
+decisions", "keep every number") threaded to the summarizing model IN ADDITION to
+the standing compaction prompt — and a `/compact [instructions]` runnable that
+carries it from the user.
+
+**Current state.** The framework field ALREADY EXISTS:
+`CompactStrategy.instructions?: string | readonly ContentBlock[]`. What is
+missing is the threading — Ernesto's fold ignores it, the wire verb does not
+carry it, and no command exposes it.
+
+**Done when.** `session.timeline.compact({ instructions })` reaches the prompt;
+the wire verb carries it; `/compact keep the numbers` works from the palette.
+
+---
