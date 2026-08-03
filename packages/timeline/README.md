@@ -242,6 +242,77 @@ await session.timeline.compact(keepRecent);
 
 Both forms go in the same `compact` slot. The no-argument `compact()` is the form that can arrive as a bare `timeline:compact` verb over the wire — a strategy is executable configuration and never travels, so the resident default is what runs, optionally taking advisory `instructions` off the signal. An explicit call-site strategy wins over the bound default; calling with neither rejects with a typed error.
 
+### `rollingSummary` — fold the old turns into one summary event
+
+```ts
+import { rollingSummary } from "@agentick/timeline/strategies";
+
+defineTimeline({
+  compact: rollingSummary({
+    maxOutputTokens: 8192,
+    threshold: 120_000,
+    keepVerbatim: 6,
+    instructions: "Preserve every figure and every job number verbatim.",
+  }),
+  generate: mySummarizer,
+});
+```
+
+Everything older than the last `keepVerbatim` entries becomes one `event`-role message carrying a `system_event` block — the summary, what it folded, and any steer that shaped it, in one record. It renders through the formatter like any other event, so a summary written today and one replayed after a restart read identically.
+
+**`generate` is what makes it work, and this package does not supply it.** A strategy that calls a model receives one as `ctx.generate`; `@agentick/timeline` depends on no executor and never will. Bind it wherever you can see both a timeline and a model — you supply prose over entries, and everything about how the request is built stays yours:
+
+```ts
+const mySummarizer: CompactGenerate = async ({
+  entries,
+  instructions,
+  maxOutputTokens,
+  onDelta,
+}) => {
+  const res = await myModel.stream({ ...toRequest(entries, instructions), maxOutputTokens });
+  return {
+    text: res.text,
+    outputTokens: res.usage.output,
+    truncated: res.finishReason === "length",
+  };
+};
+```
+
+Without a binding, `rollingSummary` throws rather than silently doing nothing.
+
+#### The cap, and why truncation must not be persisted
+
+`maxOutputTokens` defaults to **8192**. A summary allowed 100k tokens is not a summary, and an uncapped one is unbounded cost on a large fold.
+
+A cap introduces a failure the uncapped version did not have. Hit it, and the model stops mid-sentence — and that severed text would become the compaction event, which the model reads back next tick as its own notes. **So a truncated summary is never folded.** `rollingSummary` returns the entries unchanged, leaving a timeline that is too large but intact; a corrupted memory is not recoverable, an uncompacted one is.
+
+Report truncation from your `generate` (`finishReason === "length"` on most providers) or the policy cannot fire.
+
+#### Progress, and why the bar is determinate
+
+`maxOutputTokens` is also the denominator. As the summary streams, `rollingSummary` reports `{ progress, total }` and the harness emits it as `timeline:signal:progress` — the payload is byte-identical to MCP's `notifications/progress`, so a client passing a `progressToken` receives it through the gateway with nothing further to wire.
+
+Nothing here is predicted: `total` is the cap you set, which is the only reason a compaction can show a real percentage at all. Omit the cap and frames carry no `total` — an indeterminate spinner, correctly.
+
+#### Numbers that are functions
+
+`maxOutputTokens` and `threshold` each take a number **or** a function of the facts at hand:
+
+```ts
+rollingSummary({
+  maxOutputTokens: ({ entries }) => clamp(entries.length * 120, 2_000, 16_000),
+  threshold: ({ contextWindow }) => (contextWindow ?? 200_000) * 0.5,
+});
+```
+
+`threshold` answers _when_ rather than _how much_, and it is read through `strategy.shouldCompact({ usedTokens, contextWindow })` — a trigger asks the strategy rather than keeping its own copy of the number. It defaults to a flat **120k tokens**, not a fraction of the window: a model reporting a million-token window makes any fraction meaningless, and what you are managing is per-turn cost and latency, not running out of room.
+
+#### Instructions stack
+
+The `instructions` you configure are standing rules. The `instructions` on a `compact()` call — what a `/compact keep every number` command passes — arrive **after** them, so the human's steer wins a conflict without erasing the policy. The steer is recorded on the event, so a steered fold stays distinguishable from an automatic one.
+
+The default rules ask for two things, because a summary with only one of them is useless: **the shape** (what is being attempted, what was decided, where things stand) and **the anchors** — ids, paths, figures, exact values, open questions. The anchors are what make a summary navigable rather than merely descriptive; a detail dropped there cannot be looked up again.
+
 ## Configuring it — `defineTimeline`
 
 One object configures the timeline, and it goes on the app:
@@ -453,7 +524,17 @@ Both splices are copy-on-write — a new array reference each time, satisfying t
 | `TimelineHandle` (type)                           | What `session.timeline` exposes                                    |
 | `TimelineStore` / `TimelineEntry` / `SeqTagged`   | Port and data types, re-exported from the shapes package           |
 
-Definition slots: `store` · `hydrate` · `compact` · `writePolicy` · `turnBoundaries` · `hooks` · `guards`.
+Definition slots: `store` · `hydrate` · `compact` · `generate` · `writePolicy` · `turnBoundaries` · `hooks` · `guards`.
+
+### `@agentick/timeline/strategies`
+
+| Export                             | Purpose                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| `fromHandler({ handler, source })` | Wrap any async function over entries into a `CompactStrategy`           |
+| `rollingSummary(options?)`         | Fold all but the recent tail into one summary event, via `ctx.generate` |
+| `DEFAULT_SUMMARY_INSTRUCTIONS`     | The standing rules `rollingSummary` sends — shape plus anchors          |
+
+`rollingSummary` options: `maxOutputTokens` (default 8192, or a function of the fold) · `threshold` (default 120_000, or a function of the live sizing) · `keepVerbatim` (default 6) · `instructions` · `metadata`.
 
 ### `session.timeline`
 

@@ -166,6 +166,12 @@ export interface TimelineDefinition<TStore extends TimelineStore = TimelineStore
    * call-site argument overrides it (inner-scope-wins, in-process only).
    */
   readonly compact?: TimelineCompactor | import("@agentick/spec").CompactStrategy;
+  /**
+   * The model a compaction strategy calls. Bound by whoever can see both a
+   * timeline and a model — this package reaches no executor, and `rollingSummary`
+   * throws without it.
+   */
+  readonly generate?: import("@agentick/spec").CompactGenerate;
   /** `"behind"` (default; write-behind pump + flush barrier) | `"through"`. */
   readonly writePolicy?: "behind" | "through";
   /**

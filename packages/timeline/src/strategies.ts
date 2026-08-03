@@ -10,14 +10,15 @@
  * a loader's `fromUrl({...})`. They live under `/strategies` so an adopter
  * never confuses `compact: rollingSummary({...})` with an extension install.
  *
- * Step 5a ships the raw escape hatch (`fromHandler`). Named policies
- * (`rollingSummary`, `slidingWindow`) and executor-wired factories land in
- * Step 5b once the dependency direction (timeline ⇆ executor / app) settles.
+ * The dependency direction that held `rollingSummary` back is settled: a
+ * strategy that needs a model receives one as `ctx.generate`, bound by whoever
+ * can see both. This package still depends on no executor.
+ *
  * Adopters can write their own — anything returning a {@link CompactStrategy}.
  */
 
-import type { CompactRun, CompactStrategy } from "@agentick/spec";
-import { omitUndefined } from "@agentick/utils";
+import type { CompactRun, CompactStrategy, ContentBlock, TimelineEntry } from "@agentick/spec";
+import { omitUndefined, ulid } from "@agentick/utils";
 
 export interface FromHandlerOptions {
   readonly handler: CompactRun;
@@ -36,5 +37,149 @@ export function fromHandler(options: FromHandlerOptions): CompactStrategy {
     source: options.source ?? "persisted",
     run: options.handler,
     ...omitUndefined({ metadata: options.metadata }),
+  };
+}
+
+// ─── rollingSummary ───
+
+/** A number, or a function of the facts available where the number is needed. */
+export type Sized<TCtx> = number | ((ctx: TCtx) => number);
+
+export interface RollingSummaryOptions {
+  /**
+   * Ceiling on the summary itself. A summary allowed 100k tokens is not a
+   * summary, and an uncapped one is unbounded cost on a large fold. The cap is
+   * also the progress bar's denominator — pass `undefined` for neither.
+   *
+   * Default 8192.
+   */
+  readonly maxOutputTokens?: Sized<{ readonly entries: readonly TimelineEntry[] }> | undefined;
+  /**
+   * Token ceiling that makes {@link CompactStrategy.shouldCompact} true.
+   * A fraction of the context window measures the wrong thing on a model that
+   * reports a million — what you are managing is per-turn cost, not running out
+   * of room.
+   *
+   * Default 120_000.
+   */
+  readonly threshold?: Sized<{ readonly usedTokens: number; readonly contextWindow?: number }>;
+  /** Recent entries that survive verbatim. Default 6. */
+  readonly keepVerbatim?: number;
+  /** Standing rules, ahead of any per-call instructions. */
+  readonly instructions?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
+const DEFAULT_THRESHOLD = 120_000;
+const DEFAULT_KEEP_VERBATIM = 6;
+
+export const DEFAULT_SUMMARY_INSTRUCTIONS = `Summarize the conversation so far, for your own use as context going forward.
+
+Capture both of these — a summary with only one of them is useless:
+
+1. THE SHAPE. What the user is trying to accomplish, what has been decided and
+   why, what approach is in play, and where things currently stand.
+2. THE ANCHORS. Specific identifiers, names, numbers, file paths, URLs, ids,
+   exact values, error messages, and open questions. These are what make the
+   summary navigable rather than merely descriptive — a detail dropped here is
+   one that cannot be looked up again.
+
+Preserve every open thread and anything asked for that is not yet done. Write it
+as notes to yourself, not as a report for a reader.`;
+
+function resolve<TCtx>(sized: Sized<TCtx> | undefined, fallback: number, ctx: TCtx): number {
+  if (sized === undefined) return fallback;
+  return typeof sized === "function" ? sized(ctx) : sized;
+}
+
+function joinInstructions(
+  standing: string,
+  perCall: string | readonly ContentBlock[] | undefined,
+): string | readonly ContentBlock[] {
+  if (perCall === undefined) return standing;
+  if (typeof perCall === "string") return `${standing}\n\n${perCall}`;
+  return [{ type: "text", text: standing } as ContentBlock, ...perCall];
+}
+
+/**
+ * Fold everything but the last `keepVerbatim` entries into one summary event,
+ * produced by the model bound as `ctx.generate`.
+ *
+ * The summary lands as a `system_event` block rather than prose so the fact and
+ * its payload travel together, and so replay renders it the same way a fresh
+ * one renders.
+ *
+ * Binding `generate` is the caller's job — the timeline package reaches no
+ * model, and W36 wants the SAME model over the SAME context, which only the
+ * session can supply.
+ */
+export function rollingSummary(options: RollingSummaryOptions = {}): CompactStrategy {
+  const keepVerbatim = options.keepVerbatim ?? DEFAULT_KEEP_VERBATIM;
+  const standing = options.instructions ?? DEFAULT_SUMMARY_INSTRUCTIONS;
+
+  const run: CompactRun = async ({ entries, instructions, generate, progress }) => {
+    if (!generate) {
+      throw new Error(
+        "rollingSummary needs a model: nothing bound `generate` on the compaction context.",
+      );
+    }
+    const fold = entries.slice(0, Math.max(0, entries.length - keepVerbatim));
+    const keep = entries.slice(fold.length);
+    if (fold.length === 0) return entries;
+
+    const budget = resolve(options.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, { entries: fold });
+    const result = await generate({
+      entries: fold,
+      instructions: joinInstructions(standing, instructions),
+      ...omitUndefined({ maxOutputTokens: budget }),
+      onDelta: progress
+        ? ({ outputTokens }) => progress({ progress: outputTokens, total: budget })
+        : undefined,
+    });
+
+    // A truncated summary is cut mid-thought, and folding it would make the
+    // model's own damaged notes the exemplar it reads next tick. Leaving the
+    // timeline alone is recoverable; persisting this is not.
+    if (result.truncated) return entries;
+
+    return [summaryEntry(result.text, fold.length, keep.length, instructions), ...keep];
+  };
+
+  return {
+    source: "projection",
+    run,
+    shouldCompact: (ctx) => ctx.usedTokens >= resolve(options.threshold, DEFAULT_THRESHOLD, ctx),
+    ...omitUndefined({ metadata: options.metadata }),
+  };
+}
+
+function summaryEntry(
+  summary: string,
+  entriesBefore: number,
+  entriesAfter: number,
+  instructions: string | readonly ContentBlock[] | undefined,
+): TimelineEntry {
+  const steer = typeof instructions === "string" ? instructions : undefined;
+  return {
+    kind: "message",
+    message: {
+      id: ulid(),
+      ts: Date.now(),
+      role: "event",
+      content: [
+        {
+          type: "system_event",
+          event: "compaction",
+          source: "timeline",
+          data: {
+            summary,
+            entriesBefore,
+            entriesAfter,
+            ...omitUndefined({ instructions: steer }),
+          },
+        },
+      ],
+    },
   };
 }

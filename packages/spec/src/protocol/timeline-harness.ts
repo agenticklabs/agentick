@@ -118,7 +118,36 @@ export interface TimelineEndTurnInput {
 export type CompactRun = (ctx: {
   readonly entries: readonly TimelineEntry[];
   readonly instructions?: string | readonly ContentBlock[];
+  /**
+   * Bound by whoever can see both a timeline and a model — the session, or an
+   * adopter wiring `withTimeline`. Absent for strategies that need no model.
+   */
+  readonly generate?: CompactGenerate;
+  /**
+   * Reports as the summary streams. `total` is the cap the caller set, so a bar
+   * is determinate exactly when a cap exists — nothing here is a forecast.
+   */
+  readonly progress?: (u: import("../data/signals.js").ProgressUpdate) => void;
 }) => Promise<readonly TimelineEntry[]>;
+
+/**
+ * The one model call a compaction strategy needs. Narrower than an executor on
+ * purpose: a strategy asks for prose over entries, and everything about how the
+ * request is built stays with whoever bound this.
+ */
+export type CompactGenerate = (input: {
+  readonly entries: readonly TimelineEntry[];
+  readonly instructions: string | readonly ContentBlock[];
+  readonly maxOutputTokens?: number;
+  readonly onDelta?: (d: { readonly text: string; readonly outputTokens: number }) => void;
+}) => Promise<CompactGenerateResult>;
+
+export interface CompactGenerateResult {
+  readonly text: string;
+  readonly outputTokens: number;
+  /** The cap was hit — the text is cut mid-thought and must not be persisted. */
+  readonly truncated: boolean;
+}
 
 /**
  * Opaque strategy object the harness consumes. Built by strategy-value
@@ -135,6 +164,15 @@ export interface CompactStrategy {
   readonly run: CompactRun;
   /** Optional instructions threaded to `run`. */
   readonly instructions?: string | readonly ContentBlock[];
+  /**
+   * Whether this strategy wants to run at the current size. A strategy knows
+   * both when it should fire and how much it may emit, so a trigger asks rather
+   * than carrying its own copy of the thresholds.
+   */
+  readonly shouldCompact?: (ctx: {
+    readonly usedTokens: number;
+    readonly contextWindow?: number;
+  }) => boolean;
   /**
    * Stable metadata describing the strategy (model id, sliding-window
    * size, etc). Recorded on the snapshot as projection provenance.

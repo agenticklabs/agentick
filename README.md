@@ -68,6 +68,35 @@ plus a brand — it returns the object you gave it, so a definition is a value y
 export from a config module, import in a test, and override one slot on. Nothing
 is constructed until a session installs it.
 
+`compact` above drops the oldest turns on the floor. When you'd rather keep what
+they said, `rollingSummary` folds them into a single summary event:
+
+```ts
+import { rollingSummary } from "@agentick/timeline/strategies";
+
+defineTimeline({
+  store,
+  compact: rollingSummary({ maxOutputTokens: 8192, keepVerbatim: 6 }),
+  generate: mySummarizer, // a strategy that calls a model is handed one
+});
+```
+
+Three things that fall out of the cap, and are the reason it defaults to a number
+rather than to nothing:
+
+- **The progress bar is determinate.** `maxOutputTokens` is the denominator, so a
+  compaction reports real progress instead of a spinner — and it reports it as
+  `timeline:signal:progress`, whose payload is byte-identical to MCP's
+  `notifications/progress`.
+- **A truncated summary is never persisted.** Hit the cap and the model stops
+  mid-sentence; folding that would make the model's own severed notes the context
+  it reads next tick. The timeline is left intact instead.
+- **`generate` stays yours.** `@agentick/timeline` depends on no executor and
+  never will, so a strategy that needs a model receives one — you supply prose
+  over entries, the framework supplies nothing about how you ask.
+
+See [@agentick/timeline](packages/timeline#rollingsummary--fold-the-old-turns-into-one-summary-event).
+
 Every slot takes the same two forms and no third: a **definition**
 (`defineTimeline({ store })`, or the identical inline bag `timeline: { store }`) or
 a **live instance** when you own the lifecycle.

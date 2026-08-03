@@ -269,6 +269,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * body consumes.
    */
   private readonly compactStrategy?: CompactStrategy;
+  private readonly generate: import("@agentick/spec").CompactGenerate | undefined;
   private readonly compactor?: TimelineCompactor;
   /**
    * The genesis seam (ADR 93) — resolved at construction from the definition's
@@ -313,6 +314,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     this.store = options.store ?? new MemoryTimelineStore();
     this.turnBoundaries = options?.turnBoundaries ?? true;
     this.writePolicy = options.writePolicy ?? "behind";
+    this.generate = options.generate;
     // The `compact` slot takes either form of the ADR-42 dichotomy: a
     // `(entries, ctx)` function (declarative shorthand) or a configured
     // `CompactStrategy` value (`fromHandler(...)`, an adopter factory).
@@ -726,6 +728,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     s: CompactStrategy,
   ): Effect.Effect<CompactResult, CompactHandlerFailed, never> {
     const source: "persisted" | "projection" = s.source ?? "persisted";
+    const token = `timeline:compact:${ulid()}`;
     return Effect.gen(this, function* () {
       const sourceEntries = source === "persisted" ? this.log.readPersisted() : this.log.read();
       const before = sourceEntries.length;
@@ -739,7 +742,8 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
         try: () =>
           s.run({
             entries: sourceEntries,
-            ...omitUndefined({ instructions: s.instructions }),
+            ...omitUndefined({ instructions: s.instructions, generate: this.generate }),
+            progress: (u) => Effect.runFork(this.emitProgress({}, { token, ...u })),
           }),
         catch: (cause) => new CompactHandlerFailed({ cause }),
       });
