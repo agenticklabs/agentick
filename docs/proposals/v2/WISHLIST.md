@@ -722,11 +722,67 @@ The primer's whole point is being present before the mistake.
 (it is actively maintained — a copy goes stale silently), and a query-shaped
 regression that the primer covers now answers correctly.
 
-**Open.** Which shape. Whether it belongs in the system prompt or as a grounding
-section (system prompt: it is standing instruction, not a fact about the world).
-How the file gets from `apps/query-api` to the Ernesto lib without a bad
-dependency — build-time embed, a shared asset, or served by query-api. Whether
-`libs/developers-sdk/AGENTS.md` and the root `AGENTS.md` deserve the same
+**Settled 2026-08-03 — front-load it. This is a regression, not a new idea.**
+v1 already shipped shape (1): `KnowifyAppOptions.primer` is read with
+`fs.readFileSync` and rendered into the system prompt by
+`libs/ernesto/src/agents/ernesto/identity.tsx`, where it _replaces_ a shorter
+built-in data catalog. `context/memory.tsx` even tells the model not to re-read
+it ("already inlined into your system prompt"). v2 dropped the option and nobody
+noticed, because losing a primer produces confidently wrong answers rather than
+errors. So the question is not "which shape" — it is "put back what worked."
+
+**Why retrieval is the wrong shape here, stated precisely.** RAG retrieves on
+similarity to the QUESTION. The primer's traps fire on the model's chosen
+APPROACH, which does not exist yet at retrieval time. "todo → `ListItems`" gets
+retrieved when the user says "todo" — but the failure is the model querying
+`Tasks`, getting nothing, and inventing a reason, which happens two steps after
+retrieval closed. Coverage is the value; the trap you did not retrieve is the one
+that bites.
+
+**And the size argument inverts under prefix caching.** A stable block in the
+prefix is a cache READ. Measured this session: every tick transition is a strict
+append, 126–191 tokens re-paid. ~7 KB of primer costs its full rate once per
+conversation and near-nothing thereafter — while the ~5 turns of flailing it
+prevents cost more than that every time it happens (measured: four ticks spent
+correcting field names after `# Relevant Memory` fell out of context).
+
+**This is not in tension with the catalog trim (−20 KB).** The catalog was an
+INDEX — 27 KB of prose describing documents that were one `resource_read` away,
+so deleting it lost nothing. The primer is the CONTENT, with no cheaper handle.
+Trim indexes; keep knowledge.
+
+**The one real refinement:** front-load the dense trap list (the domain
+dictionary — job → `Projects`, todo → `ListItems`, prevailing-wage in dollars vs
+`HourlyRate` in cents) and leave the long-form workflow prose behind
+`knowify://guide/primer`, which already exists as a resource. ~40 lines resident
+instead of 181. Do the whole thing first, measure, then decide whether the split
+is worth the complexity.
+
+**The standing ambition (Ryan, 2026-08-03): make retrieval good enough that
+front-loading is never needed.** Right goal, and it is reachable for most of the
+corpus — but not all of it, and the line is worth naming so we stop re-litigating
+it per document:
+
+- **Facts retrieve well.** Large, query-shaped, one answer needed: report schemas,
+  API operations, workflow walkthroughs, per-model column lists. The corpus is
+  big, the question names the subject, top-N is the right tool. Most of the primer
+  by VOLUME is this, and it should live in the corpus.
+- **Standing constraints do not.** Small, always-applicable, and triggered by the
+  model's chosen approach rather than the user's words: "job → `Projects`",
+  "prevailing-wage rates are dollars, `HourlyRate` is cents", "never surface
+  internal IDs". No query retrieves these, because at retrieval time the mistake
+  has not been made yet. They are closer to system instruction than to knowledge.
+
+So the target end state is not "nothing front-loaded" — it is **the dictionary
+resident, everything else retrieved**, which is also the ~40-line split above.
+Getting retrieval good enough to shrink the resident block from 181 lines to 40 is
+the win; driving it to 0 would be trading a cache read for a class of silent wrong
+answers. Front-load now, and let the retriever earn each line back.
+
+**Open.** Only the plumbing: how the file reaches the Ernesto lib without a bad
+dependency (build-time embed, shared asset, or served by query-api — v1 used
+`readFileSync` at the host, which is the least clever and probably right).
+Whether `libs/developers-sdk/AGENTS.md` and the root `AGENTS.md` deserve the same
 treatment.
 
 ---
@@ -995,6 +1051,140 @@ that re-enter review?
 
 ---
 
+### W27 · Bind a DURABLE task store in Ernesto · [app]
+
+**Want.** Long-running work survives a restart.
+
+**Why.** A task whose record dies with the process is not a background task, it
+is a promise the app cannot keep. Ernesto submits research tasks today and the
+model can `task_await` them — across a deploy, every one of those is orphaned
+with nothing to report.
+
+**Current state — the framework half is DONE; we simply never plugged it in.**
+Verified 2026-08-03:
+
+- `TaskStore` is a spec protocol (`packages/spec/src/protocol/tasks-store.ts`) —
+  the collection archetype, `put` / `get` / `list` / `delete` / optional `prune`,
+  keyed by `taskId`, queryable by scope + status.
+- `runTaskStoreConformance` exists, so any implementation is certifiable.
+- **`@agentick/tasks-store-postgres` already exists and is written** —
+  `postgresTaskStore`, bring-your-own-pool.
+- `TasksHarness` is app/gateway-scoped and rehydrates on construction: records
+  left `working` from a previous process are reconciled as orphans. That logic is
+  a same-process no-op against the in-memory store and only becomes real with a
+  durable one.
+- **`ErnestoAppPorts.stores` declares only `timeline` and `session`.** No `tasks`
+  slot, so every session gets `InMemoryTaskStore`.
+- **There is no TABLE.** The adapter defines the `agentick_tasks` schema
+  (`task_id` PK, `scope` jsonb + GIN, `status` btree, `updated_at` bigint,
+  `payload` jsonb, `schema_ver`) and exports the DDL, but ADR 68/49 deliberately
+  prefers the adopter apply it through their own tooling rather than running DDL
+  at boot. Knowify's migration list has nothing for it. So the work is: one
+  TypeORM migration + one port binding.
+
+**Done when.** `ports.stores.tasks` exists, the host binds `postgresTaskStore`
+over the existing pool, and a kill/resume test shows a task submitted before the
+restart reported as orphaned (not silently missing) after it.
+
+**Open.** Whether the table lives in the Knowify schema or agentick's own
+migration. Whether `prune` runs on a schedule or on boot.
+
+---
+
+### W28 · Agent-managed todo lists · [app] · **needs a decision**
+
+**Want.** The agent keeps a visible, durable checklist and manages it itself —
+the Claude Code `TodoWrite` shape. The user sees what it intends to do, what is
+done, and what it dropped.
+
+**Why.** Multi-step work currently lives entirely in the model's head between
+ticks. Nothing survives compaction, nothing is inspectable mid-run, and a plan
+abandoned halfway looks identical to one completed. It is also the cheapest
+honesty mechanism we have: a list the model wrote and did not finish is visible
+without anyone reading a transcript.
+
+**This is NOT the tasks harness, and conflating them would be the mistake.**
+Tasks (W27) are framework-spawned background EXECUTION with an FSM, a worker and
+an inbox. A todo list is a planning SCRATCHPAD — no execution, no concurrency, no
+lifecycle beyond `open → done | dropped`. Same word, different machine. Ernesto
+should have both.
+
+**Where it lives — jsonb bag vs table.** My read is **a table**, and the
+deciding question is not size, it is whether a todo is ever interesting outside
+the thread that created it:
+
+- jsonb on the thread is cheap and needs no migration, but it is unqueryable
+  across threads, has no per-item timestamps, and every concurrent tool call is a
+  read-modify-write race against the whole bag. A model that emits two `todo_*`
+  calls in one tick loses one.
+- A table gives per-item history, indexes on `(tenant, user, status)`, and
+  answers "what did you say you would do for me?" across threads — which the AI
+  portal (W18) wants anyway.
+
+**The shape, and this is the part worth getting right.** Not a new subsystem: a
+`CollectionStore<TodoRecord, TodoQuery>` — the SAME archetype `TaskStore`,
+`TimelineStore` and the catalog stores already use. Ernesto owns it in userland
+(the framework's own line is that todos are "state parallel to the timeline,
+built by users from primitives"), and the model reaches it through a stateful
+tool whose `render` puts the current list in context.
+
+**Resist the generic-records temptation.** W17 (knowledge proposals), W19
+(skill/prompt proposals) and this all want "a durable scoped collection that is
+not the timeline" — three consumers, which is normally when a shared primitive
+earns its place. It does not here: their queries, lifecycles and approval
+semantics differ, and one `records` table with a `kind` column is a database
+inside a database. Separate tables, same archetype.
+
+**Done when.** The model can add / complete / drop items, the list renders into
+context (so it can see its own plan), it survives a restart, and the client can
+display it.
+
+**Open.** Whether todos are thread-scoped or user-scoped (I lean thread-scoped
+with a cross-thread query, not the reverse). Whether completing a todo emits a
+timeline `event` entry — probably not; the list IS the record and duplicating it
+into the transcript pays twice. Whether the framework should eventually absorb
+this — by the React-style absorption rule, only after it is well-worn here.
+
+---
+
+### W29 · One door from Nest to the gateway's verbs · [app] · **needs discussion**
+
+**Want.** REST controllers can reach what the gateway exposes — cancel a task,
+act on a session — without each one inventing its own route to it.
+
+**Why now.** `TaskService.cancel` is stubbed for exactly this: the FSM lives in
+`TasksHarness`, the wire already carries `tasks/cancel`, and what is missing is a
+host-side handle. Ryan named the two shapes (2026-08-03): export the gateway
+instance and proxy method calls through a service, or expose an HTTP interface as
+a gateway extension. Deferred — the read surface is enough for now.
+
+**The argument against the proxy, which is stronger than "it is less tidy."** The
+gateway owns AUTHORIZATION for these verbs — the `Authorizer` plus the
+principal-override hooks that stamp session ownership from the credential. A
+service holding the gateway object and calling methods on it bypasses all of it,
+so authz gets re-implemented at a second door and the two copies drift. That is
+the `TaskStore` two-writer problem one layer up.
+
+**The cheap form of the right answer.** Not a REST projection of every wire verb —
+the controller becomes an IN-PROCESS WIRE CLIENT. `inProcessTransport` plus an
+authenticating handler already exist and are composed exactly this way in
+`libs/ernesto-v2/src/testing/index.ts`. Same verbs, same authorizer, one path.
+The controller maps its Nest `RequestContext` onto the credential and dispatches.
+
+**And it generalizes, which is why it should be a seam.** Sessions, elicitation
+and knobs all want the same door. Three consumers is the bar; per-controller
+plumbing would be built three times.
+
+**Done when.** `TaskService.cancel` routes through the gateway and the
+`TODO(task-cancel)` marker is gone; a test shows a cross-tenant cancel refused by
+the gateway's own authorizer rather than by a check in the controller.
+
+**Open.** Whether the door is a lib export from `@knowify/ernesto-v2` or an
+agentick-level concern (a `hostClient()` on the gateway). Whether REST shapes are
+hand-written per verb or generated from the wire schema.
+
+---
+
 ## Track E — framework capabilities
 
 ### W15 · Custom stop sequences · [framework] · _deferred_
@@ -1024,28 +1214,34 @@ Rough order, cheapest-and-most-certain first:
 2. **W1** (image modality) — likely small, and it is blocking real usage.
 3. **W22** (MCP vs Ernesto context overlap) — cheap, and it is _paying rent right
    now_ on every turn. Likely config, not surgery.
-4. **W21** (AGENTS.md primer) — the highest answer-quality-per-token item here.
-   Mostly a placement decision.
+4. **W21** (AGENTS.md primer) — the highest answer-quality-per-token item here,
+   and now known to be a v1 REGRESSION rather than a design question: restore
+   `readFileSync` → system prompt, which is what v1 shipped.
 5. **W2** (timeline + `<message-metadata>`) — foundational; W3 lands on top of it,
    and the metadata block is what every later item wants.
-6. **W13** (compaction actually runs) — threads grow unbounded _today_. Strictly
+6. **W27** (durable task store) — small: the port, the conformance suite and
+   `@agentick/tasks-store-postgres` all exist; Ernesto declares no `tasks` slot.
+   Every restart currently orphans in-flight work with nothing to report.
+7. **W13** (compaction actually runs) — threads grow unbounded _today_. Strictly
    before W5, which is an optimization of this.
-7. **W3** (RAG placement + XML) — mechanism already proven by
+8. **W3** (RAG placement + XML) — mechanism already proven by
    `grounding-placement.spec.tsx`; a positioning decision plus a wrapper.
-8. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
-   first: it is also the delivery channel for W7.
-9. **W14** (media summaries at ingest) — the supply side for W4 and W5.
-10. **W4** (tool results out of context) — needs design; touches the framework.
-11. **W20** (JS execution) — deliberately _after_ W4, which is its best use case,
+9. **W28** (agent todo lists) — a collection store plus a stateful tool; wants
+   the W27 decision about where app-owned tables live to land first.
+10. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
+    first: it is also the delivery channel for W7.
+11. **W14** (media summaries at ingest) — the supply side for W4 and W5.
+12. **W4** (tool results out of context) — needs design; touches the framework.
+13. **W20** (JS execution) — deliberately _after_ W4, which is its best use case,
     and it needs a real security design rather than a quick isolate.
-12. **W17 + W19 together**, with **W18** as their surface — do _not_ build these
+14. **W17 + W19 together**, with **W18** as their surface — do _not_ build these
     separately. They are one proposal/review mechanism over three entity types
     plus one portal that consumes it; solving them one at a time guarantees three
     incompatible review flows.
-13. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
+15. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
     exist before dedup or critique can attach to it).
-14. **W5** — research, and it wants W13's trigger and W14's summaries first.
-15. **W15** — deferred.
+16. **W5** — research, and it wants W13's trigger and W14's summaries first.
+17. **W15** — deferred.
 
 **Not sequenced — blocked on a conversation, not on effort:** **W23** (the real
 execution graph). W16 clears the slot without prejudging what fills it, so the
