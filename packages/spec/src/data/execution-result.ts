@@ -148,6 +148,24 @@ export type LanguageModelStopReason =
   | "max_tokens"
   | "content_filter"
   | "stop_sequence"
+  /**
+   * The model TRIED to call a tool and produced something the provider
+   * rejected — Gemini's `MALFORMED_FUNCTION_CALL` / `UNEXPECTED_TOOL_CALL` /
+   * `TOO_MANY_TOOL_CALLS` / `MISSING_THOUGHT_SIGNATURE`, and the equivalent
+   * elsewhere.
+   *
+   * Distinct from `"other"` because it is **transient and diagnosable**, not a
+   * normal ending. Folded into `"other"` it is indistinguishable from a clean
+   * stop, so a loop sees "the model finished with no tool calls" and ends the
+   * execution — observed in production as "the model keeps stopping without
+   * calling anything", where the model had in fact emitted a tool call as
+   * Python source and the provider aborted the turn.
+   *
+   * A caller that wants to re-tick on this can now branch on it;
+   * {@link LanguageModelExecutionResult.stopMessage} carries the provider's
+   * own explanation (Gemini puts the offending text in `finishMessage`).
+   */
+  | "malformed_tool_call"
   | "other";
 
 /**
@@ -171,6 +189,17 @@ export interface ToolCall {
 export interface LanguageModelExecutionResult extends ExecutionResult {
   readonly toolCalls?: readonly ToolCall[];
   readonly stopReason: LanguageModelStopReason;
+  /**
+   * The provider's own explanation for a non-clean stop, when it gives one —
+   * Gemini's `finishMessage`, which for a malformed tool call contains the
+   * OFFENDING TEXT the model emitted.
+   *
+   * Unlike {@link raw} this IS meant to be read: it is the difference between
+   * "the model stopped" and "the model tried to call `knowify__query` by
+   * writing Python and the provider rejected it". Surface it in logs and
+   * errors; do not parse it — the format is provider-specific prose.
+   */
+  readonly stopMessage?: string;
   /** Pass-through raw provider response. Debug only — MUST NOT be load-bearing. */
   readonly raw?: unknown;
 }

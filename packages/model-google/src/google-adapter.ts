@@ -205,6 +205,8 @@ interface GoogleStreamState {
   blockIndex: number;
   activeKind: "text" | "reasoning" | null;
   finishReasonRaw: string | null;
+  /** Google's `finishMessage` — the provider's own explanation, when given. */
+  finishMessageRaw: string | null;
   /** Per-tool-call thoughtSignature carry (Gemini 2.5+). */
   thoughtSignatureByCallId: Map<string, string>;
 }
@@ -216,6 +218,7 @@ function getGoogleState(accum: StreamAccumulatorView): GoogleStreamState {
       blockIndex: -1,
       activeKind: null,
       finishReasonRaw: null,
+      finishMessageRaw: null,
       thoughtSignatureByCallId: new Map(),
     };
     accum.providerExtra = s;
@@ -426,6 +429,8 @@ export function google(
 
       if (candidate.finishReason) {
         state.finishReasonRaw = candidate.finishReason;
+        const msg = (candidate as { finishMessage?: unknown }).finishMessage;
+        if (typeof msg === "string" && msg !== "") state.finishMessageRaw = msg;
         // Don't close blocks or emit message-end here — `finalizeStream`
         // does both with consistent accumulator state. We just emit a
         // `usage` delta so the base's finalize message-end carries the
@@ -513,6 +518,10 @@ export function google(
           {
             content: { role: "model", parts },
             finishReason: state.finishReasonRaw ?? "STOP",
+            // Replayed onto the synthetic candidate so the SHARED normalize
+            // path lifts it to `stopMessage` — one construction site, not two
+            // that drift.
+            ...(state.finishMessageRaw !== null ? { finishMessage: state.finishMessageRaw } : {}),
           },
         ],
         modelVersion: modelSeen ?? defaultModel ?? target.modelId,
@@ -1233,11 +1242,18 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       : mapFinishReason(candidate?.finishReason);
   const usage = toUsageStats(raw.usageMetadata);
 
+  // The provider's own explanation, when it gives one. For a malformed tool
+  // call this holds the OFFENDING TEXT the model emitted, which is the whole
+  // diagnostic — without it the failure is indistinguishable from a clean stop.
+  const finishMessage = (candidate as { finishMessage?: unknown } | undefined)?.finishMessage;
   const result: LanguageModelExecutionResult = {
     specVersion: SPEC_VERSION_LITERAL,
     output,
     stopReason,
     usage,
+    ...(typeof finishMessage === "string" && finishMessage !== ""
+      ? { stopMessage: finishMessage }
+      : {}),
     ...(toolCalls.length > 0 ? { toolCalls } : {}),
     raw,
   };
@@ -1399,9 +1415,14 @@ function mapFinishReason(
     case "UNEXPECTED_TOOL_CALL":
     case "TOO_MANY_TOOL_CALLS":
     case "MISSING_THOUGHT_SIGNATURE":
-      // Spec's LanguageModelStopReason has no "error" — fold to "other"
-      // with the underlying reason recoverable from raw if needed.
-      return "other";
+      // The model TRIED to call a tool and Google rejected the attempt. This
+      // used to fold into "other" — "recoverable from raw if needed" — and
+      // nothing ever recovered it, so a loop could not tell this from a clean
+      // stop. Observed in production as "the model keeps stopping without
+      // calling anything": Gemini had emitted the call as Python source
+      // (`print(default_api.knowify__query(...))`) and aborted its own turn.
+      // `finishMessage` carries that offending text; see `stopMessage`.
+      return "malformed_tool_call";
     default:
       return "other";
   }

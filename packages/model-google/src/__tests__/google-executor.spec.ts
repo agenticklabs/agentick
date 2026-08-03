@@ -95,7 +95,12 @@ describe("google() adapter — non-streaming", () => {
     expect(t.result.stopReason).toBe("content_filter");
   });
 
-  it("maps finishReason=MISSING_THOUGHT_SIGNATURE to stopReason=other", async () => {
+  // Was `→ other`. The tool-call rejection family now has its OWN stop reason:
+  // folded into `other` it is indistinguishable from a clean stop, so a loop
+  // ends the execution rather than re-ticking — which is how a malformed call
+  // read in production as "the model keeps stopping without calling anything".
+  // See `malformed-tool-call.spec.ts`.
+  it("maps finishReason=MISSING_THOUGHT_SIGNATURE to stopReason=malformed_tool_call", async () => {
     const stub = new StubGoogleClient([
       {
         kind: "non-streaming",
@@ -105,7 +110,7 @@ describe("google() adapter — non-streaming", () => {
     const { exec } = await makeExecutor(stub);
     const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     if (t.outcome !== "succeeded") throw new Error("expected success");
-    expect(t.result.stopReason).toBe("other");
+    expect(t.result.stopReason).toBe("malformed_tool_call");
   });
 });
 
