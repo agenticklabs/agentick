@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client-extensions",
-  "version": "1.0.0-next.76",
+  "version": "1.0.0-next.77",
   "description": "First-party extensions (middleware) for @agentick/client-core. Subpath exports — adopters opt into individual behaviors: retry, telemetry, cache, offline. Tree-shakeable. Same family pattern as Apollo Link / TanStack Query plugins.",
   "keywords": [
     "agent",
