@@ -1274,11 +1274,27 @@ methods each running the previous — `compile()` → `render()` → `preview()`
 So the answer to "can it be done" is yes, and it is composition rather than new
 machinery.
 
-**But NOT four methods, and this is the design point.** The stages are not
-independent computations — stage 3 already computed stages 1 and 2 on its way.
-Four methods means either four passes or a cache to explain, and a render pass is
-not free (it runs `useData`, which for Ernesto is a live retrieval query). ONE
-call that returns the whole ladder costs exactly what the deepest rung costs:
+**The point is the GRANULARITY** (Ryan, 2026-08-03): see the IR, see the model
+input, see the provider input — three artifacts, distinctly inspectable. Not a
+cost argument.
+
+Both shapes deliver that, and they trade differently:
+
+- **One call returning the ladder.** A render pass is not free — it runs
+  `useData`, which for Ernesto is a live retrieval query — so three separate
+  calls means three retrievals or a cache to explain. Stage 3 already computed
+  stages 1 and 2 on its way, so returning all three costs what the deepest rung
+  costs.
+- **Separate calls.** The rungs FAIL independently: `prepareRequest` needs a
+  resolved target and adapter, so on a model-less session a single call either
+  throws or returns a half-populated object, while `compile()` still works and
+  `prepare()` can say why it cannot. They are also independently testable.
+
+**Do both, and it is not a compromise:** the three seams are already public
+methods on their harnesses, so the session exposing each rung costs a
+pass-through. `dryRun()` is then the ergonomic call that walks all three in one
+render — what a debug button wants — and the individual rungs stay available for
+when you want one, or when the later ones cannot run at all.
 
 ```ts
 const preview = await session.dryRun();
