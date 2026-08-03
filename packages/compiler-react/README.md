@@ -113,7 +113,7 @@ There is deliberately no prop for the XML tag. Markdown renders the title's word
 </custom>
 ```
 
-**Every dialect emits that tag, markdown included** — no `<XML>` wrapper required. `custom` is the escape hatch for "these exact bytes under this exact tag", and a dialect that dropped it would make the hatch unreachable. Markdown is a superset of HTML (CommonMark specifies raw HTML blocks), so the tag is valid there; the formatter already emits `<kbd>` and `<var>` on the same grounds.
+**Every dialect emits that tag, markdown included** — no `<XML>` wrapper required, and it nests to any depth. `custom` is the escape hatch for "these exact bytes under this exact tag", and a dialect that dropped it would make the hatch unreachable. Markdown is a superset of HTML (CommonMark specifies raw HTML blocks), so the tag is valid there; the formatter already emits `<kbd>` and `<var>` on the same grounds.
 
 Attribute values are escaped in both dialects — a quote would end the attribute. Content is escaped in XML and left verbatim in markdown, where escaping `<` would break every other construct.
 
@@ -640,7 +640,8 @@ import { flush, waitFor } from "@agentick/compiler-react/testing";
 - `src/__tests__/render-context.spec.tsx` — `useActiveModel` and render-context threading.
 - `src/__tests__/create-tool.spec.tsx` — register and unregister, and `use()` capture reaching the handler.
 - `src/__tests__/content-blocks.spec.tsx` — every content-block intrinsic and its IR shape.
-- `src/__tests__/formatter-scope.spec.tsx` + `formatter-registry.spec.tsx` — subtree formatter framing and `renderedWith` stamping.
+- `src/__tests__/formatter-scope.spec.tsx` + `formatter-registry.spec.tsx` — subtree formatter framing and `renderedWith` stamping, AND that the stamp changes rendered output: `<XML>` really emits tags, an explicit `formatter` option still pins over a declared dialect, and the inner scope wins when they nest.
+- `src/__tests__/nested-custom.spec.tsx` — `<custom>` nests to any depth with attributes at every level, and still emits the flat block form for a leaf or an explicit `content` prop.
 - `src/__tests__/positional-sections.spec.tsx` — the container/position law, and the island rule on top of it: an xml island inside a markdown `<System>` and a markdown island inside an xml one (both embedded verbatim, `&` escaped exactly once by the island's own dialect), same-dialect nesting unchanged, and `<FormatScope purpose="section">` actually taking effect on a nested section.
 - `src/__tests__/collect.spec.tsx` — `<Output>` forwarding `name` / `description` / `strategy` / `schema` to the declaration.
 - `src/__tests__/template.spec.tsx` — `compileTemplate` and `renderTemplate`, the stability loop, and the diagnostics.

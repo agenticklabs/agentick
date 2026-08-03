@@ -1206,6 +1206,56 @@ deferred; recorded so it is not lost.
 
 ---
 
+### W33 · Preview the compiled context for any run · [both]
+
+**Want.** A first-class, built-in way to see exactly what a given run sent the
+model — reachable from the app as a dev "debug" button, and reusable as the input
+to the interaction enricher rather than having the enricher re-derive it.
+
+**Why.** Every defect found on 2026-08-03 was found by reading a trace, not by a
+failing test: the resource catalog at 36 % of the prompt, `# Relevant Memory`
+falling out between ticks, the primer at 62 KB rather than the 7 KB estimated,
+attachments silently dropped, `<retrieved-context>` never rendering. Each cost a
+round trip through "add a temporary recorder, restart, reproduce, read a file".
+The framework should answer "what did the model actually see" without that.
+
+**The primitive already exists and is 90 % of the way there.**
+`roundTripRecorder` (`@agentick/session/round-trip-recorder.ts`) is a
+`CommandHooks` bag capturing, per tick: ⓪ the rendered tree, ① the canonical
+`LanguageModelInput`, ② the provider-native request, ③ raw provider chunks, ④
+canonical deltas, ⑤ the assembled message, and what was persisted. Ernesto
+already installs it behind `ERNESTO_ROUND_TRIPS`.
+
+What it lacks is everything AROUND it:
+
+- **a sink that is not a file** — today it appends JSONL to a path, so nothing
+  can query it by execution or tick;
+- **retention** — no bound, no eviction, no opt-in per session;
+- **a wire verb** — no way for a client to ask for the trips of a run, so a
+  debug button has nothing to call;
+- **redaction** — a trip contains the entire prompt, which is the most sensitive
+  artifact in the system. Anything projecting it to a client needs the same
+  care `identityProjection` gets, and probably a scope beyond "authenticated".
+
+**The enricher case is the interesting one.** If the enricher consumes the
+recorded `compiled` input instead of re-deriving context, the summary describes
+what the model ACTUALLY saw — including retrieved context and grounding it would
+otherwise have to guess at. That also makes the recorder load-bearing rather than
+diagnostic, which raises the bar on retention and cost.
+
+**Done when.** A run can be asked for its trips through a verb the client can
+call; a dev surface renders the compiled prompt for a chosen tick; the enricher
+reads from the same source; and none of it is on by default.
+
+**Open.** Whether the sink is a store port (the collection archetype again) or
+rides the journal. Whether trips are retained for every run or only when a
+session opts in — full-prompt capture on every request is not free. Whether the
+tree (⓪) is worth keeping or only the compiled input. Whether "preview" should
+also be able to compile WITHOUT sending — a dry run — which is a different and
+possibly more useful verb than reading history.
+
+---
+
 ### W31 · Should XML be the DEFAULT formatter? · [framework] · **needs a measurement**
 
 **Want.** Decide whether the default dialect flips, making `<Markdown>` the

@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import React from "react";
 import type { MessageEntry } from "@agentick/spec";
-import { markdownFormatter } from "@agentick/formatters";
+import { markdownFormatter, xmlFormatter } from "@agentick/formatters";
 import { createContainer } from "@agentick/compiler";
 import { createHostScope } from "@agentick/compiler";
 import { createCompiler } from "../react/compiler.js";
 import { collect } from "@agentick/compiler";
 import { createBuiltInRegistry } from "@agentick/compiler";
 import { FormatScope, Markdown, XML, PlainText } from "../react/components/format-scope.js";
+import { Section, renderTemplate } from "../index.js";
 
 /**
  * Render an element + collect with the markdown-default root scope.
@@ -212,5 +213,53 @@ describe("FormatScope (and Markdown / XML / PlainText sugar)", () => {
     expect(markdownFormatter(s.content)).toEqual([
       { type: "text", text: "wrapped text", id: "s.wrap", metadata: { section: "s.wrap" } },
     ]);
+  });
+});
+
+/**
+ * The other half of the claim above: a stamped `renderedWith` has to CHANGE THE
+ * OUTPUT. Everything up to here asserts the stamp at collect time, which is why
+ * it stayed green while `renderTemplate` pinned markdown at every call and threw
+ * the stamp away — an unsupplied `formatter` option was defaulted and then passed
+ * as the pin, so `<XML>` and every island silently did nothing through the one
+ * helper most tests reach for.
+ */
+const scoped = (
+  <Section id="s" title="Things">
+    <ul>
+      <li>alpha</li>
+    </ul>
+  </Section>
+);
+
+describe("FormatScope", () => {
+  it("renders the subtree as XML", async () => {
+    const { output } = await renderTemplate(<XML>{scoped}</XML>);
+    expect(output).toContain("<things>");
+    expect(output).toContain("<ul><li>alpha</li></ul>");
+  });
+
+  it("leaves the default alone", async () => {
+    const { output } = await renderTemplate(scoped);
+    expect(output).toContain("# Things");
+    expect(output).toContain("- alpha");
+  });
+
+  it("an explicit formatter still PINS, overriding a declared dialect", async () => {
+    // Naming one means "this dialect, everywhere" — the island is deliberately
+    // not honoured, or the caller who asked for exactly one format loses.
+    const { output } = await renderTemplate(<Markdown>{scoped}</Markdown>, {
+      formatter: xmlFormatter,
+    });
+    expect(output).toContain("<things>");
+  });
+
+  it("nests — the inner scope wins", async () => {
+    const { output } = await renderTemplate(
+      <XML>
+        <Markdown>{scoped}</Markdown>
+      </XML>,
+    );
+    expect(output).toContain("# Things");
   });
 });
