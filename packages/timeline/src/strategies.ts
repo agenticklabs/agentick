@@ -65,6 +65,17 @@ export interface RollingSummaryOptions {
   readonly threshold?: Sized<{ readonly usedTokens: number; readonly contextWindow?: number }>;
   /** Recent entries that survive verbatim. Default 6. */
   readonly keepVerbatim?: number;
+  /**
+   * How many summary events the projection may hold. Below the bound a fold
+   * leaves earlier summaries alone and appends a new one; at the bound it
+   * collapses the whole prefix back into one.
+   *
+   * Default 1 — every fold re-summarizes the previous summary. Raise it to stop
+   * the oldest material being re-compressed on every pass: a summary of a
+   * summary loses exactly the ids and figures the instructions ask for, because
+   * the second pass cannot tell which of them still matter.
+   */
+  readonly keepSummaries?: number;
   /** Standing rules, ahead of any per-call instructions. */
   readonly instructions?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -73,6 +84,21 @@ export interface RollingSummaryOptions {
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 const DEFAULT_THRESHOLD = 120_000;
 const DEFAULT_KEEP_VERBATIM = 6;
+const DEFAULT_KEEP_SUMMARIES = 1;
+
+const isSummary = (e: TimelineEntry): boolean =>
+  e.kind === "message" &&
+  e.message.role === "event" &&
+  e.message.content.some((b) => b.type === "system_event" && b.event === "compaction");
+
+const summariesIn = (entries: readonly TimelineEntry[]) => entries.filter(isSummary);
+
+/** Summaries sit at the front — they are the oldest material. A fold is a prefix. */
+function afterLastSummary(entries: readonly TimelineEntry[]): number {
+  let i = 0;
+  while (i < entries.length && isSummary(entries[i]!)) i++;
+  return i;
+}
 
 export const DEFAULT_SUMMARY_INSTRUCTIONS = `Summarize the conversation so far, for your own use as context going forward.
 
@@ -116,6 +142,7 @@ function joinInstructions(
  */
 export function rollingSummary(options: RollingSummaryOptions = {}): CompactStrategy {
   const keepVerbatim = options.keepVerbatim ?? DEFAULT_KEEP_VERBATIM;
+  const keepSummaries = options.keepSummaries ?? DEFAULT_KEEP_SUMMARIES;
   const standing = options.instructions ?? DEFAULT_SUMMARY_INSTRUCTIONS;
 
   const run: CompactRun = async ({ entries, instructions, generate, progress }) => {
@@ -124,8 +151,11 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
         "rollingSummary needs a model: nothing bound `generate` on the compaction context.",
       );
     }
-    const fold = entries.slice(0, Math.max(0, entries.length - keepVerbatim));
-    const keep = entries.slice(fold.length);
+    const older = entries.slice(0, Math.max(0, entries.length - keepVerbatim));
+    const keep = entries.slice(older.length);
+    const foldFrom = summariesIn(older).length >= keepSummaries ? 0 : afterLastSummary(older);
+    const survivors = older.slice(0, foldFrom);
+    const fold = older.slice(foldFrom);
     if (fold.length === 0) return entries;
 
     const budget = resolve(options.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, { entries: fold });
@@ -143,7 +173,11 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
     // timeline alone is recoverable; persisting this is not.
     if (result.truncated) return entries;
 
-    return [summaryEntry(result.text, fold.length, keep.length, instructions), ...keep];
+    return [
+      ...survivors,
+      summaryEntry(result.text, fold.length, keep.length, instructions),
+      ...keep,
+    ];
   };
 
   return {

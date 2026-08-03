@@ -7,14 +7,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompactGenerate, ProgressUpdate, TimelineEntry } from "@agentick/spec";
 import { rollingSummary, DEFAULT_SUMMARY_INSTRUCTIONS } from "../strategies.js";
 
-function entries(count: number): TimelineEntry[] {
+function entries(count: number, offset = 0): TimelineEntry[] {
   return Array.from({ length: count }, (_, i) => ({
     kind: "message" as const,
     message: {
-      id: `m${i}`,
-      ts: i,
+      id: `m${i + offset}`,
+      ts: i + offset,
       role: "user" as const,
-      content: [{ type: "text" as const, text: `turn ${i}` }],
+      content: [{ type: "text" as const, text: `turn ${i + offset}` }],
     },
   }));
 }
@@ -155,3 +155,63 @@ describe("shouldCompact", () => {
     expect(strategy.shouldCompact!({ usedTokens: 40_000, contextWindow: 100_000 })).toBe(false);
   });
 });
+
+describe("keepSummaries bounds the stack", () => {
+  const label = (e: TimelineEntry) =>
+    (e as { message: { content: readonly { type: string }[]; id: string } }).message.content[0]!
+      .type === "system_event"
+      ? "S"
+      : (e as { message: { id: string } }).message.id;
+
+  /** Fold `rounds` times, four new turns between each. */
+  async function foldRepeatedly(keepSummaries: number, rounds: number): Promise<string[][]> {
+    const strategy = rollingSummary({ keepVerbatim: 6, keepSummaries });
+    const shapes: string[][] = [];
+    let current: readonly TimelineEntry[] = entries(10);
+    for (let r = 0; r < rounds; r++) {
+      current = await strategy.run({ entries: current, generate: stubGenerate() });
+      shapes.push(current.map(label));
+      current = [...current, ...entries(4, 100 * (r + 1))];
+    }
+    return shapes;
+  }
+
+  it("default 1 re-summarizes the previous summary — one summary, always", async () => {
+    const shapes = await foldRepeatedly(1, 4);
+    for (const shape of shapes) expect(shape.filter((s) => s === "S")).toHaveLength(1);
+  });
+
+  it("a bound of 4 stacks summaries instead of compressing them again", async () => {
+    const shapes = await foldRepeatedly(4, 3);
+    expect(shapes.map((s) => s.filter((x) => x === "S").length)).toEqual([1, 2, 3]);
+  });
+
+  it("earlier summaries pass through untouched while under the bound", async () => {
+    const strategy = rollingSummary({ keepVerbatim: 6, keepSummaries: 4 });
+    const first = await strategy.run({ entries: entries(10), generate: stubGenerate() });
+    const seen = vi.fn(stubGenerate());
+    await strategy.run({ entries: [...first, ...entries(4, 100)], generate: seen });
+
+    expect(seen.mock.calls[0]![0].entries.some(isSummaryEntry)).toBe(false);
+  });
+
+  it("collapses back to one when the bound is reached", async () => {
+    const shapes = await foldRepeatedly(2, 4);
+    expect(shapes.map((s) => s.filter((x) => x === "S").length)).toEqual([1, 2, 1, 2]);
+  });
+
+  it("never exceeds the bound", async () => {
+    const shapes = await foldRepeatedly(3, 8);
+    for (const shape of shapes) {
+      expect(shape.filter((s) => s === "S").length).toBeLessThanOrEqual(3);
+    }
+  });
+});
+
+function isSummaryEntry(e: TimelineEntry): boolean {
+  return (
+    e.kind === "message" &&
+    e.message.role === "event" &&
+    e.message.content.some((b) => b.type === "system_event" && b.event === "compaction")
+  );
+}

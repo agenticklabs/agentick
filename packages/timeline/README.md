@@ -307,6 +307,20 @@ rollingSummary({
 
 `threshold` answers _when_ rather than _how much_, and it is read through `strategy.shouldCompact({ usedTokens, contextWindow })` — a trigger asks the strategy rather than keeping its own copy of the number. It defaults to a flat **120k tokens**, not a fraction of the window: a model reporting a million-token window makes any fraction meaningless, and what you are managing is per-turn cost and latency, not running out of room.
 
+#### Summaries stack — or don't
+
+By default a fold eats the previous summary. Compact ten times and the oldest material has been through ten model calls, each pass compressing an already-compressed thing. What dies first is exactly what the instructions ask for — the ids, the figures, the paths — because the second pass has no way to know which of them still matter.
+
+`keepSummaries` stops that:
+
+```ts
+rollingSummary({ keepSummaries: 4 });
+```
+
+Below the bound, a fold leaves earlier summaries alone and appends a new one covering only the raw turns since. At the bound, it collapses the whole prefix back into one and starts again. So the count sawtooths 1 → 4 → 1 rather than growing without limit, and no summary is re-compressed until the budget actually demands it.
+
+**Default is 1** — every fold re-summarizes, which is the cheapest and the lossiest. Raise it when the conversation carries detail worth navigating back to; leave it when the recent shape is all that matters.
+
 #### Instructions stack
 
 The `instructions` you configure are standing rules. The `instructions` on a `compact()` call — what a `/compact keep every number` command passes — arrive **after** them, so the human's steer wins a conflict without erasing the policy. The steer is recorded on the event, so a steered fold stays distinguishable from an automatic one.
@@ -534,7 +548,7 @@ Definition slots: `store` · `hydrate` · `compact` · `generate` · `writePolic
 | `rollingSummary(options?)`         | Fold all but the recent tail into one summary event, via `ctx.generate` |
 | `DEFAULT_SUMMARY_INSTRUCTIONS`     | The standing rules `rollingSummary` sends — shape plus anchors          |
 
-`rollingSummary` options: `maxOutputTokens` (default 8192, or a function of the fold) · `threshold` (default 120_000, or a function of the live sizing) · `keepVerbatim` (default 6) · `instructions` · `metadata`.
+`rollingSummary` options: `maxOutputTokens` (default 8192, or a function of the fold) · `threshold` (default 120_000, or a function of the live sizing) · `keepVerbatim` (default 6) · `keepSummaries` (default 1) · `instructions` · `metadata`.
 
 ### `session.timeline`
 
