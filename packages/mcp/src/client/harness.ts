@@ -251,6 +251,17 @@ export interface McpServerInfo {
   readonly implementation: { readonly name: string; readonly version: string } | null;
   /** Capability map the server advertised in `initialize`, if connected. */
   readonly capabilities: Readonly<Record<string, unknown>> | null;
+  /**
+   * The server's own `InitializeResult.instructions` — free-form guidance it
+   * wants the model to have, and the ONE field on this interface whose entire
+   * purpose is to reach the prompt.
+   *
+   * TRUST: like `implementation`, this is server-authored and untrusted. It is
+   * guidance, never authorization — a server cannot grant itself capability by
+   * saying so here. Surfaced under the server's own heading so its provenance
+   * is legible to the model rather than reading as the application's voice.
+   */
+  readonly instructions: string | null;
 }
 
 /** A declared command's public invoker (ADR 51). */
@@ -598,11 +609,13 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
   get serverInfo(): McpServerInfo {
     const impl = this.client?.getServerVersion();
     const caps = this.client?.getServerCapabilities();
+    const instructions = this.client?.getInstructions();
     return {
       serverId: this.serverId,
       status: this._status,
       implementation: impl !== undefined ? { name: impl.name, version: impl.version } : null,
       capabilities: caps !== undefined ? (caps as Readonly<Record<string, unknown>>) : null,
+      instructions: instructions !== undefined && instructions !== "" ? instructions : null,
     };
   }
 

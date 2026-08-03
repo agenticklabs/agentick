@@ -52,6 +52,7 @@ function bridgesWithCatalog(): HookBridges {
             status: { kind: "connected" },
             implementation: { name: "knowify", version: "0.0.4" },
             capabilities: { tools: {}, resources: {} },
+            instructions: "Always read knowify://me before answering.",
           },
         },
       ],
@@ -155,5 +156,26 @@ describe("ADR 95 — surfacing components", () => {
     // "I rendered this and chose nothing" must beat "you rendered nothing, so
     // I appended the catalog after your conversation".
     expect(entries.map(textOf).some((t) => t.includes("Readable resources"))).toBe(false);
+  });
+});
+
+describe("MCP server instructions reach the prompt", () => {
+  it("renders the server's own instructions under its alias", async () => {
+    const entries = await render(
+      React.createElement(
+        React.Fragment,
+        null,
+        msg("system", "sys"),
+        React.createElement(McpServers, null),
+      ),
+      "m-instructions",
+    );
+    const text = entries.map(textOf).find((t) => t.includes("Connected MCP servers")) ?? "";
+    // The field whose entire purpose is to reach the prompt was captured from
+    // `initialize` and then dropped; we rendered `capabilities:` instead.
+    expect(text).toContain("Always read knowify://me before answering.");
+    // Under the SERVER'S heading — provenance must be legible, so the model
+    // can tell this is the server talking and not the application.
+    expect(text).toContain("### knowify — server instructions");
   });
 });

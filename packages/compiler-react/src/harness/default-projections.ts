@@ -176,28 +176,9 @@ export function resourcesDefaultProjection(bridges: HookBridges): DefaultProject
   return {
     key: "resources",
     project: () => {
-      const snap = readResourcesSnapshot(bridges);
-      if (!snap) return {};
-      const lines: string[] = [];
-      for (const r of snap.resources ?? []) {
-        if (!r || typeof r.uri !== "string") continue;
-        lines.push(formatCatalogLine(r.uri, r.name, r.description, r.mimeType));
-      }
-      for (const t of snap.templates ?? []) {
-        if (!t || typeof t.uriTemplate !== "string") continue;
-        lines.push(formatCatalogLine(t.uriTemplate, t.name, t.description, t.mimeType));
-      }
-      if (lines.length === 0) return {};
-      const content: readonly ContentBlock[] = [
-        {
-          type: "text",
-          // Advertise availability only — don't hard-name a read tool.
-          // `withResources()` exposes `resource_read` (whose own
-          // description tells the model how to read); resources can also
-          // be surfaced (e.g. via withMCP) without that tool present.
-          text: `Readable resources the application exposes on request (by uri):\n${lines.join("\n")}`,
-        } as ContentBlock,
-      ];
+      const text = resourcesCatalogText(bridges);
+      if (text === undefined) return {};
+      const content: readonly ContentBlock[] = [{ type: "text", text } as ContentBlock];
       const entry: MessageEntry = {
         kind: "message",
         role: "grounding",
@@ -232,6 +213,8 @@ export interface StructuralServerInfo {
   readonly status?: { readonly kind?: string };
   readonly implementation?: { readonly name?: string; readonly version?: string } | null;
   readonly capabilities?: Readonly<Record<string, unknown>> | null;
+  /** The server's own `InitializeResult.instructions` — see `mcpServersText`. */
+  readonly instructions?: string | null;
 }
 
 /**
@@ -256,6 +239,24 @@ export function readMcpServerInfos(
 }
 
 /** Summarize a capability map to a comma list of advertised surfaces. */
+export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultProjection {
+  return {
+    key: "mcpServerInfo",
+    project: () => {
+      const text = mcpServersText(bridges);
+      if (text === undefined) return {};
+      const content: readonly ContentBlock[] = [{ type: "text", text } as ContentBlock];
+      const entry: MessageEntry = {
+        kind: "message",
+        role: "grounding",
+        id: "mcp-server-info",
+        content: [sectionBlock({ id: "mcp-server-info", title: "Connected MCP servers", content })],
+      };
+      return { entries: [entry] };
+    },
+  };
+}
+
 function summarizeCapabilities(caps: Readonly<Record<string, unknown>> | null | undefined): string {
   if (caps === null || caps === undefined) return "";
   const known = ["tools", "resources", "prompts", "logging", "completions", "elicitation"];
@@ -283,7 +284,22 @@ export function mcpServersText(bridges: HookBridges): string | undefined {
   for (const info of infos) {
     lines.push(mcpServerLine(info));
   }
-  return `Connected MCP servers:\n${lines.join("\n")}`;
+  let out = `Connected MCP servers:\n${lines.join("\n")}`;
+
+  // A server's own `instructions` — the one field in `InitializeResult` whose
+  // entire purpose is to reach the prompt. It was captured and then dropped:
+  // a server telling the model how to use it, and we rendered `capabilities:`
+  // instead. Rendered UNDER THE SERVER'S OWN HEADING, never merged into the
+  // application's prose, so the model can tell whose voice it is — the same
+  // provenance reason the summary is keyed by adopter alias rather than by the
+  // server's self-reported name.
+  for (const info of infos) {
+    const instructions = typeof info.instructions === "string" ? info.instructions.trim() : "";
+    if (instructions === "") continue;
+    const alias = typeof info.serverId === "string" ? info.serverId : "(unknown)";
+    out += `\n\n### ${alias} — server instructions\n${instructions}`;
+  }
+  return out;
 }
 
 /**
@@ -302,28 +318,4 @@ export function mcpServerLine(info: StructuralServerInfo): string {
       : "—";
   const caps = summarizeCapabilities(info.capabilities);
   return `- ${alias} [${state}] — ${impl}${caps ? ` — capabilities: ${caps}` : ""}`;
-}
-
-export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultProjection {
-  return {
-    key: "mcpServerInfo",
-    project: () => {
-      const infos = readMcpServerInfos(bridges);
-      if (!infos || infos.length === 0) return {};
-      const lines: string[] = [];
-      for (const info of infos) {
-        lines.push(mcpServerLine(info));
-      }
-      const content: readonly ContentBlock[] = [
-        { type: "text", text: `Connected MCP servers:\n${lines.join("\n")}` } as ContentBlock,
-      ];
-      const entry: MessageEntry = {
-        kind: "message",
-        role: "grounding",
-        id: "mcp-server-info",
-        content: [sectionBlock({ id: "mcp-server-info", title: "Connected MCP servers", content })],
-      };
-      return { entries: [entry] };
-    },
-  };
 }
