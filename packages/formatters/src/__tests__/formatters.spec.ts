@@ -231,12 +231,14 @@ describe("custom content blocks — the tag is the whole point", () => {
     );
   });
 
-  it("markdown escapes the quote that would end an attribute, and nothing else", () => {
-    // Content is markdown and stays verbatim — escaping `<` there would break
-    // every other construct. The attribute value is the only escaping needed.
+  it("markdown escapes attribute values, and leaves content verbatim", () => {
+    // Attribute position is attribute position in any dialect — a raw quote,
+    // `<` or `&` there is a malformed tag. Content is markdown and stays as
+    // written; escaping `<` there would break every other construct.
     expect(mdText({ ...block, attrs: { note: 'a "quoted" & <raw>' } })).toBe(
-      '<memory-kind note="a &quot;quoted&quot; & <raw>">episodic recall</memory-kind>',
+      '<memory-kind note="a &quot;quoted&quot; &amp; &lt;raw&gt;">episodic recall</memory-kind>',
     );
+    expect(mdText({ ...block, content: "keep <this> & that" })).toContain("keep <this> & that");
   });
 
   it("markdown honours selfClosing", () => {

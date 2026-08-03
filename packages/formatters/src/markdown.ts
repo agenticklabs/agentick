@@ -33,14 +33,24 @@ import { createFormatter } from "./create-formatter.js";
 // ============================================================================
 
 /**
- * Attribute list for a custom tag. Only the value is escaped — a quote there
- * would end the attribute; the surrounding markdown is left alone.
+ * Attribute list for a custom tag. Values are escaped exactly as the xml
+ * formatter escapes them — attribute position is attribute position in any
+ * dialect, and a raw `"`, `<` or `&` there produces a malformed tag. The
+ * surrounding markdown is untouched.
  */
 function renderAttrs(attrs: unknown): string {
   if (attrs === null || typeof attrs !== "object") return "";
   return Object.entries(attrs as Record<string, unknown>)
-    .map(([k, v]) => ` ${k}="${String(v).replace(/"/g, "&quot;")}"`)
+    .map(([k, v]) => ` ${k}="${escapeAttr(String(v))}"`)
     .join("");
+}
+
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function formatNode(node: SemanticNode): string {

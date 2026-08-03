@@ -1245,6 +1245,40 @@ Whether `purpose` scoping is meant to narrow it further.
 
 ---
 
+### W32 · A nested `custom` loses its tag before the formatter sees it · [framework] · **bug**
+
+**Want.** `<custom tag="outer"><custom tag="inner">…</custom></custom>` emits both
+tags.
+
+**Current state — confirmed 2026-08-03, against next.72.** Only the OUTERMOST
+tag survives:
+
+```
+<retrieved-context>Reference material…retainage is 10%</retrieved-context>
+```
+
+`<about>` and `<result rank="1" …>` are gone, their text concatenated. The same
+elements as SIBLINGS under a `<Section>` render correctly, attributes included —
+so this is not the formatter. The formatter's semantic-node case handles nested
+customs (fixed the same day, `renderAttrs` shared with the block case); the
+compiler collapses the inner elements to text before a node ever reaches it.
+
+**Workaround in use.** Siblings, with `<Section>` as the boundary —
+`libs/ernesto-v2/.../rag-context.tsx`. Adequate for one level of nesting, which
+is all RAG needs; a task list with per-task sub-structure would want the real
+thing.
+
+**Done when.** The nesting probe above emits both tags, and a test pins it in
+compiler-react (the formatters suite cannot see this — it tests the formatter,
+and the loss happens upstream).
+
+**Open.** Whether the collapse is in the intrinsic handler or in section
+lowering. Whether it is deliberate (a `custom` BLOCK carries `content: string`,
+so nested elements have nowhere to go without becoming nodes) — if so, the fix is
+to make a custom with element children compile to a node rather than a block.
+
+---
+
 ### W31 · Should XML be the DEFAULT formatter? · [framework] · **needs a measurement**
 
 **Want.** Decide whether the default dialect flips, making `<Markdown>` the
