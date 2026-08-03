@@ -1250,9 +1250,70 @@ reads from the same source; and none of it is on by default.
 **Open.** Whether the sink is a store port (the collection archetype again) or
 rides the journal. Whether trips are retained for every run or only when a
 session opts in — full-prompt capture on every request is not free. Whether the
-tree (⓪) is worth keeping or only the compiled input. Whether "preview" should
-also be able to compile WITHOUT sending — a dry run — which is a different and
-possibly more useful verb than reading history.
+tree (⓪) is worth keeping or only the compiled input.
+
+---
+
+#### W33a · `session.dryRun()` — compile without sending
+
+**The more useful half, and separable from the history half.** "Show me what this
+run sent" needs retention; "compile the current state and show me" needs none, and
+it is what you actually want while iterating on a prompt.
+
+**The ladder is already three PUBLIC seams.** Ryan's instinct was a chain of
+methods each running the previous — `compile()` → `render()` → `preview()` →
+`prepare()`. The stages are real, and every one is already reachable:
+
+| stage | artifact                | seam that exists today             |
+| ----- | ----------------------- | ---------------------------------- |
+| 1     | `RenderedTree`          | `compiler.renderTree({ mountId })` |
+| 2     | `LanguageModelInput`    | `executor.project({ tree, … })`    |
+| 3     | provider-native request | `adapter.prepareRequest({ … })`    |
+| —     | formatted text          | `formatTree(tree, formatter)`      |
+
+So the answer to "can it be done" is yes, and it is composition rather than new
+machinery.
+
+**But NOT four methods, and this is the design point.** The stages are not
+independent computations — stage 3 already computed stages 1 and 2 on its way.
+Four methods means either four passes or a cache to explain, and a render pass is
+not free (it runs `useData`, which for Ernesto is a live retrieval query). ONE
+call that returns the whole ladder costs exactly what the deepest rung costs:
+
+```ts
+const preview = await session.dryRun();
+preview.tree; // RenderedTree
+preview.input; // LanguageModelInput — what the model would see
+preview.request; // provider-native — what goes on the wire
+preview.text(); // formatted, for a debug panel
+```
+
+**And it should return the SAME SHAPE the recorder already records.** `RoundTrip`
+is `{ scope, tree, compiled, request, rawChunks, deltas, message, persisted }` —
+the first four are exactly a dry run, and the rest are the response half. Make
+the preview type the request half of a trip and the debug button renders live
+previews and recorded history through one component, with one vocabulary for
+"what we sent" whether it is about to be sent or already was.
+
+**`dryRun` over `preview`.** Well-worn CS vocabulary that states the contract —
+no provider call, no persistence — where `preview` describes the intent of the
+caller rather than the behaviour of the method.
+
+**The honest caveat: a dry run is not side-effect free.** Rendering runs the tree,
+and the tree does real work — `useData` issues the RAG query, MCP servers may be
+consulted, lifecycle hooks fire. It sends nothing to the provider and writes no
+timeline entry, and that is the guarantee worth making; "no side effects at all"
+is not one we can honour without a render mode that stubs the bridges, which is a
+much larger idea.
+
+**Done when.** `session.dryRun()` returns the ladder without a provider call or a
+timeline write; the recorded-trip type and the preview type are the same type;
+and a test pins that calling it twice leaves the session's tick count unmoved.
+
+**Open.** Whether it takes a hypothetical input (`dryRun({ messages })` — "what
+would you send if I said this") or only previews current state. Both are useful;
+the hypothetical one has to build the timeline projection without appending, which
+is the interesting part.
 
 ---
 
