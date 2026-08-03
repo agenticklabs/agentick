@@ -10,6 +10,13 @@ export type { SectionProps } from "./section.js";
 export { Project } from "./project.js";
 export type { ProjectProps } from "./project.js";
 
+// ADR 95 — surfacing components. `<MCP>` / `<Resource>` REGISTER; these
+// SURFACE, at a tree position you chose. Rendering one suppresses the
+// corresponding lazy default projection, which is what stops framework
+// grounding landing after the conversation.
+export { Resources, McpServers, McpServerLine } from "./surfacing.js";
+export type { ResourcesProps, McpServersProps, McpServerLineProps } from "./surfacing.js";
+
 export { ProviderTool } from "./provider-tool.js";
 export type { ProviderToolProps } from "./provider-tool.js";
 export { Output } from "./output.js";

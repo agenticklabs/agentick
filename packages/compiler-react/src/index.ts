@@ -109,6 +109,12 @@ export type { ReactToolSpec, CreatedReactTool } from "./react/create-tool.js";
 // `useTimeline`, `useSessionState` moved similarly.
 export { FormatScope, Markdown, XML, PlainText } from "./react/components/index.js";
 export type { FormatScopeProps, NamedFormatScopeProps } from "./react/components/index.js";
+export { Resources, McpServers, McpServerLine } from "./react/components/index.js";
+export type {
+  ResourcesProps,
+  McpServersProps,
+  McpServerLineProps,
+} from "./react/components/index.js";
 export { Message } from "./react/components/index.js";
 export type { MessageProps } from "./react/components/index.js";
 export { Section } from "./react/components/index.js";

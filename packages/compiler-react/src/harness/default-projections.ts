@@ -143,6 +143,35 @@ function readResourcesSnapshot(bridges: HookBridges): StructuralResourcesSnapsho
  * placed). An adopter who wants the catalog somewhere specific overrides the
  * key with `<Project projectionKey="resources">` and puts it there.
  */
+/**
+ * The catalog TEXT, or undefined when there is nothing to advertise.
+ *
+ * Extracted so the default projection and the `<Resources />` component render
+ * the SAME bytes from ONE implementation. Two copies of this would drift, and
+ * an adopter who repositioned the catalog would silently get different content
+ * than the default — the failure mode that makes "override to reposition"
+ * unusable in the first place.
+ */
+export function resourcesCatalogText(bridges: HookBridges): string | undefined {
+  const snap = readResourcesSnapshot(bridges);
+  if (!snap) return undefined;
+  const lines: string[] = [];
+  for (const r of snap.resources ?? []) {
+    if (!r || typeof r.uri !== "string") continue;
+    lines.push(formatCatalogLine(r.uri, r.name, r.description, r.mimeType));
+  }
+  for (const t of snap.templates ?? []) {
+    if (!t || typeof t.uriTemplate !== "string") continue;
+    lines.push(formatCatalogLine(t.uriTemplate, t.name, t.description, t.mimeType));
+  }
+  if (lines.length === 0) return undefined;
+  // Advertise availability only — don't hard-name a read tool.
+  // `withResources()` exposes `resource_read` (whose own description tells the
+  // model how to read); resources can also be surfaced (e.g. via withMCP)
+  // without that tool present.
+  return `Readable resources the application exposes on request (by uri):\n${lines.join("\n")}`;
+}
+
 export function resourcesDefaultProjection(bridges: HookBridges): DefaultProjection {
   return {
     key: "resources",
@@ -198,7 +227,7 @@ function formatCatalogLine(
 // ============================================================================
 
 /** Minimal structural view of one `McpServerInfo` snapshot. */
-interface StructuralServerInfo {
+export interface StructuralServerInfo {
   readonly serverId?: string;
   readonly status?: { readonly kind?: string };
   readonly implementation?: { readonly name?: string; readonly version?: string } | null;
@@ -211,7 +240,9 @@ interface StructuralServerInfo {
  * sync `serverInfo` snapshot. Returns `undefined` when no mcp bridge is
  * present. NO `@agentick/mcp` import — pure duck-typing (ADR 27).
  */
-function readMcpServerInfos(bridges: HookBridges): readonly StructuralServerInfo[] | undefined {
+export function readMcpServerInfos(
+  bridges: HookBridges,
+): readonly StructuralServerInfo[] | undefined {
   const mcp = (bridges as { mcp?: unknown }).mcp;
   if (mcp === null || mcp === undefined) return undefined;
   const clients = (mcp as { clients?: unknown }).clients;
@@ -240,6 +271,39 @@ function summarizeCapabilities(caps: Readonly<Record<string, unknown>> | null | 
  * untrusted display label). Contributes nothing when no servers are
  * connected. Overridable via `<Project projectionKey="mcpServerInfo">`.
  */
+/**
+ * The connected-server summary TEXT, or undefined when none are connected.
+ * Shared with `<McpServers />` — see {@link resourcesCatalogText} on why this
+ * is one implementation and not two.
+ */
+export function mcpServersText(bridges: HookBridges): string | undefined {
+  const infos = readMcpServerInfos(bridges);
+  if (!infos || infos.length === 0) return undefined;
+  const lines: string[] = [];
+  for (const info of infos) {
+    lines.push(mcpServerLine(info));
+  }
+  return `Connected MCP servers:\n${lines.join("\n")}`;
+}
+
+/**
+ * ONE server's summary line, keyed by the ADOPTER ALIAS (`serverId`) rather
+ * than the server's self-reported name, which is an untrusted display label.
+ * Exported because `<McpServerContext>` renders exactly this — partial
+ * override ("customize one of twenty") is only possible if the default for the
+ * other nineteen is reachable.
+ */
+export function mcpServerLine(info: StructuralServerInfo): string {
+  const alias = typeof info.serverId === "string" ? info.serverId : "(unknown)";
+  const state = info.status?.kind ?? "unknown";
+  const impl =
+    info.implementation && typeof info.implementation.name === "string"
+      ? `${info.implementation.name} v${info.implementation.version ?? "?"}`
+      : "—";
+  const caps = summarizeCapabilities(info.capabilities);
+  return `- ${alias} [${state}] — ${impl}${caps ? ` — capabilities: ${caps}` : ""}`;
+}
+
 export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultProjection {
   return {
     key: "mcpServerInfo",
@@ -248,15 +312,7 @@ export function mcpServerInfoDefaultProjection(bridges: HookBridges): DefaultPro
       if (!infos || infos.length === 0) return {};
       const lines: string[] = [];
       for (const info of infos) {
-        const alias = typeof info.serverId === "string" ? info.serverId : "(unknown)";
-        const state = info.status?.kind ?? "unknown";
-        // Self-reported name/version — display only, alias governs identity.
-        const impl =
-          info.implementation && typeof info.implementation.name === "string"
-            ? `${info.implementation.name} v${info.implementation.version ?? "?"}`
-            : "—";
-        const caps = summarizeCapabilities(info.capabilities);
-        lines.push(`- ${alias} [${state}] — ${impl}${caps ? ` — capabilities: ${caps}` : ""}`);
+        lines.push(mcpServerLine(info));
       }
       const content: readonly ContentBlock[] = [
         { type: "text", text: `Connected MCP servers:\n${lines.join("\n")}` } as ContentBlock,

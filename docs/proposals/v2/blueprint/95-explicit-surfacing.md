@@ -84,6 +84,14 @@ Four default projections exist. Exactly one survives:
 | `resources`     | entries           | message stream | **DROP** — needs `<Resources>`  |
 | `mcpServerInfo` | entries           | message stream | **DROP** — needs `<McpServers>` |
 
+**CAVEAT — `tools` surviving is a judgment call, not a law.** It is safe
+_because_ `config.tools` is non-positional today. If a provider ever wants tool
+descriptions inline in the prompt — or an adopter wants them rendered as prose
+for a model without native tool-calling — `tools` becomes positional and this
+exact defect returns through it. The rule in §2 is the invariant; `tools`
+merely happens to satisfy it right now. Re-check this the moment a tool surface
+starts producing entries.
+
 `knobs` never had a default: you render `<Knobs />` or you get nothing. The
 explicit model is already the majority behavior; the positional three are the
 exception, and they are the ones that produced a defect.
