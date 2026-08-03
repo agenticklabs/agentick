@@ -22,6 +22,8 @@ export {
   type DefinedFormatter,
 } from "./create-formatter.js";
 
+export { renderEventPlain, renderEventTag, type TagEscapers } from "./event-block.js";
+
 export { markdownFormatter } from "./markdown.js";
 export { xmlFormatter } from "./xml.js";
 export { textFormatter } from "./text.js";

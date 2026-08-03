@@ -17,6 +17,7 @@ import type {
 } from "@agentick/spec";
 
 import { createFormatter } from "./create-formatter.js";
+import { renderEventTag, type TagEscapers } from "./event-block.js";
 
 function escapeXml(s: string): string {
   return s
@@ -25,6 +26,8 @@ function escapeXml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+const xmlEscapers: TagEscapers = { attr: escapeXml, content: escapeXml };
 
 /**
  * Attribute list for a custom tag. Values are escaped because they sit in
@@ -174,10 +177,7 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
     case "user_action":
     case "system_event":
     case "state_change":
-      return {
-        type: "text",
-        text: `<${block.type}>${escapeXml(block.text ?? "")}</${block.type}>`,
-      } satisfies TextBlock;
+      return { type: "text", text: renderEventTag(block, xmlEscapers) } satisfies TextBlock;
     default:
       return block;
   }
@@ -228,19 +228,10 @@ function blockToText(block: ContentBlock): string {
     case "user_action":
     case "system_event":
     case "state_change":
-      return block.text ?? "";
+      return renderEventTag(block, xmlEscapers);
     case "custom": {
-      // A custom block's WHOLE PURPOSE is "render this under my own tag", and
-      // `tag`/`attrs` are required fields on it — so dropping them and
-      // returning bare `content` lost the only thing the block carried. This
-      // case now matches the custom SEMANTIC node one switch above, which has
-      // always emitted `<tag>…</tag>`; the two were inconsistent inside one
-      // formatter. Markdown keeps dropping the tag on BOTH paths, which is
-      // correct for a syntax with no tags.
-      //
-      // Attribute values are escaped (they sit in attribute position);
-      // `content` is escaped too, matching the `text` block case — an adopter
-      // who wants raw markup through has the `html` block for that.
+      // Content is escaped here, unlike markdown — the `html` block is the
+      // way through in this dialect.
       const attrs = renderAttrs(block.attrs);
       return block.selfClosing === true
         ? `<${block.tag}${attrs} />`

@@ -14,6 +14,7 @@ import type {
 } from "@agentick/spec";
 
 import { createFormatter } from "./create-formatter.js";
+import { renderEventPlain } from "./event-block.js";
 
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
@@ -83,7 +84,7 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
     case "user_action":
     case "system_event":
     case "state_change":
-      return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+      return { type: "text", text: renderEventPlain(block) } satisfies TextBlock;
     default:
       return block;
   }
@@ -130,7 +131,7 @@ function blockToText(block: ContentBlock): string {
     case "user_action":
     case "system_event":
     case "state_change":
-      return block.text ?? "";
+      return renderEventPlain(block);
     case "custom":
       return block.content;
     default:

@@ -44,6 +44,18 @@ export const User = passThrough("user");
 export const Assistant = passThrough("assistant");
 
 /**
+ * `<Event>...</Event>` — a record of something that happened. Sugar for
+ * `<Message role="event">`.
+ *
+ * The idiom is a structured event block, not prose — the formatter derives the
+ * rendering, so an event authored here and the same event replayed from a store
+ * read identically:
+ *
+ *   <Event><system_event event="compaction" data={{ summary }} /></Event>
+ */
+export const Event = passThrough("event");
+
+/**
  * `<Grounding>...</Grounding>` — non-conversational context at this position
  * in the conversation: what the user is looking at, who they are, what the
  * retrieval returned. Not an instruction and not a human turn.

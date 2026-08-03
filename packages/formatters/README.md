@@ -168,6 +168,37 @@ attributes too — the node and block paths share one `renderAttrs`, after a lon
 run of the two disagreeing (one fix aligned them on the tag and left the node
 path silently dropping `attrs`).
 
+### Event blocks — structure in, text out
+
+```ts
+{ type: "system_event", event: "compaction", source: "timeline",
+  data: { summary: "Discussed the store substrate.", entriesBefore: 42 } }
+```
+
+```xml
+<system_event event="compaction" source="timeline">
+<summary>Discussed the store substrate.</summary>
+<entriesBefore>42</entriesBefore>
+</system_event>
+```
+
+The three event blocks — `system_event`, `user_action`, `state_change` — carry
+**structure**, and the durable timeline stores that structure rather than a
+rendering of it. Identifying fields become attributes; the payload becomes child
+elements. An event authored in JSX and the same event replayed from a store a
+year later reach the model identically, because both go through this function.
+
+`text`, when present, replaces the derived body; the attributes still render.
+Use it to override a rendering, not to supply one — a hand-written `text` is a
+rendering frozen into storage, and it stops tracking the formatter.
+
+The text dialect uses no markup: `[system_event event=compaction]` followed by
+`key: value` lines. Non-scalar values serialize as JSON in every dialect.
+
+Writing your own formatter? `renderEventTag(block, escapers)` and
+`renderEventPlain(block)` are exported — reuse them, or ignore them and lay the
+same fields out your own way.
+
 ## Choosing a formatter per subtree
 
 Selection is data. Every IR entry carries an optional `renderedWith: FormatterRef` — `{ id, format?, version? }` — and the compiler stamps it from the nearest formatter scope in the tree. [@agentick/compiler-react](../compiler-react) ships the scope providers:

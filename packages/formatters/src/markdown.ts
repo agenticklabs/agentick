@@ -27,6 +27,7 @@ import type {
 } from "@agentick/spec";
 
 import { createFormatter } from "./create-formatter.js";
+import { renderEventTag, type TagEscapers } from "./event-block.js";
 
 // ============================================================================
 // Semantic node walker
@@ -52,6 +53,9 @@ function escapeAttr(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+/** Content stays verbatim — markdown's raw-HTML passthrough, same as `<custom>`. */
+const markdownEscapers: TagEscapers = { attr: escapeAttr, content: (s) => s };
 
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
@@ -210,7 +214,7 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
     case "user_action":
     case "system_event":
     case "state_change":
-      return { type: "text", text: block.text ?? "" } satisfies TextBlock;
+      return { type: "text", text: renderEventTag(block, markdownEscapers) } satisfies TextBlock;
     default:
       // image / audio / video / document / tool_use / tool_result / generated_* /
       // executable_code / code_execution_result / custom — pass through unchanged.
@@ -262,7 +266,7 @@ function blockToText(block: ContentBlock): string {
     case "user_action":
     case "system_event":
     case "state_change":
-      return block.text ?? "";
+      return renderEventTag(block, markdownEscapers);
     case "custom": {
       const attrs = renderAttrs(block.attrs);
       return block.selfClosing === true

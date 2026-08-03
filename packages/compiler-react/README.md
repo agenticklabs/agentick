@@ -235,7 +235,29 @@ const WithBlocks = () => (
 ```
 
 > [!NOTE]
-> `<code>`, `<image>`, `<audio>`, `<video>`, and `<text>` are handled by the compiler but are **not** declared in the JSX namespace — TypeScript keeps React's built-in HTML/SVG typings for those tag names and declaration merging can't override them. Reach them through `React.createElement("code", { language: "typescript" }, source)`. `<json>`, `<document>`, `<csv>`, `<xml-block>`, `<reasoning>`, `<custom>`, and `<content>` have no such collision and are fully typed.
+> `<code>`, `<image>`, `<audio>`, `<video>`, and `<text>` are handled by the compiler but are **not** declared in the JSX namespace — TypeScript keeps React's built-in HTML/SVG typings for those tag names and declaration merging can't override them. Use the PascalCase wrappers `<Code>`, `<Image>`, `<Audio>`, `<Video>`, `<Text>`, which emit byte-identical IR. `<json>`, `<document>`, `<csv>`, `<xml-block>`, `<reasoning>`, `<custom>`, and `<content>` have no such collision and stay lowercase — no wrapper is minted where none is forced.
+
+### Event blocks
+
+An `event`-role message records something that happened. Its contents are the three event blocks — lowercase, since none collide:
+
+```tsx
+import { Event } from "@agentick/compiler-react";
+
+<Event>
+  <system_event event="compaction" source="timeline" data={{ summary }} />
+</Event>;
+```
+
+| Intrinsic        | Fields                                       |
+| ---------------- | -------------------------------------------- |
+| `<system_event>` | `event`, `source?`, `data?`                  |
+| `<user_action>`  | `action`, `actor?`, `target?`, `details?`    |
+| `<state_change>` | `entity`, `field?`, `from`, `to`, `trigger?` |
+
+An event carries **structure**; the formatter derives the text — identifiers become attributes, the payload becomes child elements. That is what makes an event authored here and the same event replayed from a store render identically.
+
+Every block also accepts `text`, which replaces the derived body. Reach for it to override a rendering, not to supply one: a hand-written `text` is a rendering frozen into the durable timeline. See [@agentick/formatters](../formatters#event-blocks--structure-in-text-out).
 
 ## Reading live facts during render
 

@@ -23,7 +23,7 @@ export { Output } from "./output.js";
 export type { OutputProps } from "./output.js";
 
 // Semantic role + block wrappers — short aliases over the intrinsics.
-export { System, User, Assistant, Grounding, Paragraph, H1, H2, H3 } from "./semantic.js";
+export { System, User, Assistant, Event, Grounding, Paragraph, H1, H2, H3 } from "./semantic.js";
 export type { GroundingProps } from "./semantic.js";
 export { Text, Code, Image, Audio, Video } from "./content-blocks.js";
 

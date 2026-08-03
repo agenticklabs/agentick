@@ -183,16 +183,36 @@ Typed content blocks for composing rich message content:
 | `<Document>`         | Document attachment                  |
 | `<Audio>`, `<Video>` | Media blocks                         |
 
-#### Message Role Components (`packages/compiler-react/src/react/components/message.tsx`)
+#### Message Role Components (`packages/compiler-react/src/react/components/semantic.tsx`)
 
 | Component     | Purpose                                |
 | ------------- | -------------------------------------- |
 | `<System>`    | System prompt message                  |
 | `<User>`      | User message                           |
 | `<Assistant>` | Assistant message                      |
-| `<Event>`     | Persisted event entry                  |
-| `<Ephemeral>` | Non-persisted context (current state)  |
+| `<Event>`     | Event entry — see event blocks below   |
 | `<Grounding>` | Semantic wrapper for grounding context |
+
+#### Event Blocks
+
+The contents of an `event`-role message. Lowercase intrinsics — no PascalCase
+wrapper, because none of the three collide with an HTML or SVG element.
+
+| Intrinsic        | Shape                                        |
+| ---------------- | -------------------------------------------- |
+| `<system_event>` | `event`, `source?`, `data?`                  |
+| `<user_action>`  | `action`, `actor?`, `target?`, `details?`    |
+| `<state_change>` | `entity`, `field?`, `from`, `to`, `trigger?` |
+
+An event carries structure; the formatter derives the text. Authoring `text` by
+hand freezes a rendering into the durable timeline, so reach for it only to
+override the derived body:
+
+```tsx
+<Event>
+  <system_event event="compaction" source="timeline" data={{ summary }} />
+</Event>
+```
 
 #### Model Components
 

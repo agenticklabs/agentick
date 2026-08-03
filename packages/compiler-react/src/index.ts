@@ -129,6 +129,7 @@ export {
   System,
   User,
   Assistant,
+  Event,
   Grounding,
   Paragraph,
   H1,
