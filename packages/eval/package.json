@@ -1,6 +1,6 @@
 {
   "name": "@agentick/eval",
-  "version": "1.0.0-next.69",
+  "version": "1.0.0-next.70",
   "description": "Testing-shaped eval framework for Agentick v2. `defineEval(...)` returns a callable function with runtime parameterization (model swap, fixture injection, tool stubs); a single eval definition supports matrix runs, A/B sweeps, and CI-vs-prod profiles. Inspired by Eve evals; Agentick twist: defineEval returns a function, not a config. See ADR 37.",
   "keywords": [
     "agentick",
