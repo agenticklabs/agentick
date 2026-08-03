@@ -1,6 +1,6 @@
 {
   "name": "@agentick/elicitation",
-  "version": "1.0.0-next.73",
+  "version": "1.0.0-next.74",
   "description": "ElicitationHarness — substrate-level 'ask the user for a structured response' primitive. Backs tool confirmation, MCP elicitation/create, and any future user-in-the-loop step. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
