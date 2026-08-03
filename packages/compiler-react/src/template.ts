@@ -154,12 +154,13 @@ export async function renderTemplate(
   element: ReactNode,
   opts: RenderTemplateOptions = {},
 ): Promise<RenderTemplateResult> {
-  // The caller asked for ONE dialect for the whole output, and a dialect now
-  // decides how a section reads — so it has to be in force during the block
-  // pass, not applied afterwards to blocks another dialect already lowered.
-  const formatter = opts.formatter ?? markdownFormatter;
-  const compiled = await compileInternal(element, opts, formatter);
-  const output = formatTree(compiled.tree, formatter);
+  // A caller who NAMES a formatter wants one dialect for the whole output, so it
+  // pins: in force during the block pass, and overriding any `renderedWith` a
+  // subtree declared. A caller who names none has asked for nothing — passing a
+  // default here as if it were a pin silently disabled `<XML>` / `<Markdown>`
+  // and every island with it.
+  const compiled = await compileInternal(element, opts, opts.formatter);
+  const output = formatTree(compiled.tree, opts.formatter ?? markdownFormatter);
   return {
     output,
     diagnostics: compiled.diagnostics,

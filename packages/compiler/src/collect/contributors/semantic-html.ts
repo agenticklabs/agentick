@@ -18,7 +18,8 @@
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md §D5
  */
 
-import type { SemanticNode, SemanticType } from "@agentick/spec";
+import type { CustomContentBlock, SemanticNode, SemanticType } from "@agentick/spec";
+import { omitUndefined } from "@agentick/utils";
 
 import type { ElementInstance, HostInstance } from "../../host/host-instance.js";
 import { isTextInstance } from "../../host/host-instance.js";
@@ -98,7 +99,7 @@ export function makeSemanticContributor(
  * inside `<strong>` is a misuse, and silently dropping it is safer than
  * crashing.
  */
-function collectSemanticChildren(
+export function collectSemanticChildren(
   parent: HostInstance,
   ctx: CollectContext,
 ): readonly SemanticNode[] {
@@ -116,10 +117,33 @@ function collectSemanticChildren(
     // contributor).
     const fragments = ctx.walk(child);
     for (const frag of fragments) {
-      if (frag.kind === "semantic-node") out.push(frag.node);
+      if (frag.kind === "semantic-node") {
+        out.push(frag.node);
+        continue;
+      }
+      // A leaf `<custom>` contributes a content-block, not a semantic node —
+      // dropping it here is what made a nested custom lose its tag while the
+      // parent's `collectText` still scraped its bare words. It is the one
+      // ContentBlock with a faithful node form, so convert rather than drop.
+      if (frag.kind === "content-block" && frag.block.type === "custom") {
+        out.push(customNode(frag.block));
+      }
     }
   }
   return out;
+}
+
+/** The node form of a custom content block — same tag, attrs and content. */
+export function customNode(block: CustomContentBlock): SemanticNode {
+  return {
+    semantic: "custom",
+    props: omitUndefined({
+      tag: block.tag,
+      attrs: block.attrs,
+      selfClosing: block.selfClosing,
+    }),
+    children: block.content.length > 0 ? [{ text: block.content }] : [],
+  };
 }
 
 // ============================================================================

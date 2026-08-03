@@ -18,6 +18,8 @@ import type { ElementInstance } from "../../host/host-instance.js";
 import type { CollectContext, Contributor } from "../contributor.js";
 import type { IRFragment } from "../fragments.js";
 import { omitUndefined } from "@agentick/utils";
+import { isTextInstance } from "../../host/host-instance.js";
+import { collectSemanticChildren } from "./semantic-html.js";
 import type { BaseBlockKey, Exhausted, UnhandledSpecKeys } from "./spec-conformance.js";
 
 /**
@@ -48,6 +50,25 @@ export const customBlockContributor: Contributor = {
             severity: "warning",
             code: "MISSING_TAG",
             message: `<custom> requires a "tag" prop`,
+          },
+        },
+      ];
+    }
+    // Element children mean structure, and structure has to survive: collapsing
+    // them with `collectText` is what flattened a nested custom to bare words.
+    // The node form nests; the block form is the leaf.
+    if (props.content === undefined && instance.children.some((c) => !isTextInstance(c))) {
+      return [
+        {
+          kind: "semantic-node",
+          node: {
+            semantic: "custom",
+            props: omitUndefined({
+              tag: props.tag,
+              attrs: props.attrs,
+              selfClosing: props.selfClosing,
+            }),
+            children: collectSemanticChildren(instance, ctx),
           },
         },
       ];
