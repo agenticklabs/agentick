@@ -1277,6 +1277,187 @@ retention and redaction W33 describes.
 
 ---
 
+### W34 · Preview a HYPOTHETICAL input — `send({ dryRun: true })` · [framework]
+
+**Want.** A field in the debug panel where you type a question and see the
+context that question WOULD produce — not the context as it stands.
+
+**Why it is the whole point.** `dryRun()` previews CURRENT state, so the pending
+question is absent and so is the retrieval it would trigger: `<RagContext>` keys
+off `currentTurnIds(entries)`, the timeline. The panel therefore shows everything
+standing (system, tools, identity, resources, MCP, history) and none of the part
+you most want to inspect while tuning a prompt.
+
+**The shape, and why it is not `dryRun(input)`.** One code path is the argument:
+`send({ dryRun: true })` means the previewed prompt is produced by the SAME path
+that would send it, every `send` option applies automatically, and there is no
+parallel option surface to keep in step. `--dry-run` is well-worn for exactly
+this.
+
+**But it is not a flag, and that is the work.** `send()` APPENDS the user message
+to the timeline before rendering. A dry run must render WITH the message and
+persist NOTHING — so it needs a scratch overlay on the timeline projection, not a
+boolean threaded down the path. A naive flag is precisely where preview and
+reality would drift, which is the failure this whole feature exists to prevent.
+
+**Done when.** Typing a question in the panel shows the prompt including that
+question and its retrieved context; the timeline is unchanged afterwards; and one
+test asserts the overlay leaves `snapshot()` byte-identical.
+
+**Open.** Whether the return type discriminates on the flag (preview vs execution
+handle) or `send` gains a sibling verb sharing its body. Whether the overlay is a
+timeline concern or a projection one.
+
+---
+
+### W35 · The context panel, v2 · [app]
+
+**Want.** The dev context preview is readable rather than a JSON wall.
+
+**Current state.** `ContextPreviewComponent` renders `JSON.stringify(…, 2)` in a
+`<pre>` with an Input/IR tab switch and a char/token count. Landed 2026-08-03.
+
+**Three things it needs.**
+
+1. **Fold by ENTRY, not by brace.** The payload is a list of messages, each with a
+   role and content — a `<details>` per entry with `role · N chars` in the summary
+   beats folding punctuation, and needs no editor. CodeMirror 6 IS available at
+   the workspace root (`state` / `view` / `language`, and `ai-portal` already
+   wires a `basic-setup`), but `@codemirror/lang-json` is not installed and the
+   data is structured, not a text blob. Reach for it only if raw editing arrives.
+2. **The `request` rung.** The panel shows tree + input; the provider-native
+   request is where `inlineData` appears, so today the panel CANNOT tell you
+   whether media resolution worked — the IR always shows `{ type: "reference" }`
+   because the media middleware runs at `model:generate`, downstream of the
+   preview. That is a real hole in the debug surface.
+3. **A size breakdown per region**, so "the primer is 43% of this request" is
+   visible without exporting to a script.
+
+**Open.** Whether `request` crosses the wire at all (it is adapter-shaped — see
+W33a) or the panel asks a server-side endpoint for it.
+
+---
+
+### W36 · Summarize with the SAME model over the SAME context · [both]
+
+**Want.** Compaction's summary is produced by the session's own model over the
+session's own compiled context, not by a separate cheap model over a transcript.
+
+**Why (Ryan, 2026-08-03).** Cache. Same model + byte-identical prefix means the
+summarization call is an extra turn on a prompt already in the cache — a cache
+READ for everything above the instruction, full rate only on the instruction and
+the output. A separate cheap model is a COLD prompt: its full rate over the
+entire transcript. Fidelity is the second argument and may be the better one — a
+summarizer that saw the real context cannot drift from what the model believes.
+
+**The pieces exist as of the same day.** `session.project()` returns the
+`LanguageModelInput` — the same prompt, same bytes. Append one trailing
+instruction, hand it to `executor.execute()`, and the prefix is a cache hit.
+`compact(strategy)`'s explicit argument is the in-process override, so a trigger
+can compute the summary and pass a strategy whose `run` returns the fold;
+`useModelBridge` reaches the session's own executor.
+
+**The wrinkle to solve first.** The trigger fires from `useOnTickStart`, and
+`project()` renders the tree — calling it there is RE-ENTRANT. Either the
+compaction call moves just outside the render, or the fold receives the projected
+input rather than fetching it. The second is probably right and is the same shape
+W34's overlay needs, so build them together.
+
+**Done when.** A compaction call shows a cache hit on the prefix in the round-trip
+capture, and `services.summarize` is no longer required for compaction to work.
+
+**Build it as W39's first consumer, not as its own path** — episodic memory,
+thread titling and the enricher all want the identical mechanism.
+
+---
+
+### W39 · The REFLECTION PASS — one primitive, many instructions · [both]
+
+**Want.** Ask the session's own model about the conversation it just had, over
+the context it already holds, with a different instruction each time. The answer
+does not become a turn.
+
+**The observation (Ryan, 2026-08-03), and it is the load-bearing one.**
+Compaction and episodic-memory creation are not similar mechanisms — they are the
+SAME mechanism with a different prompt:
+
+| instruction                                                                  | consumer                 |
+| ---------------------------------------------------------------------------- | ------------------------ |
+| "summarize what matters going forward"                                       | compaction (W13 / W36)   |
+| "what was this about, what went right, what went wrong, keywords, learnings" | episodic memory          |
+| "title this conversation"                                                    | thread titling           |
+| "what did the user actually get"                                             | the interaction enricher |
+
+Every one is `project()` → append an instruction → `execute()` → do something
+with the text that is NOT appending it to the timeline. Building compaction's
+version as a one-off would mean building the same thing three more times.
+
+**Why it is cheap, and why that is the point.** The prefix is byte-identical to
+what the model was just sent, so every pass after the first is a cache READ on
+everything above the instruction. A reflection pass costs its instruction plus
+its output. That is what makes running four of them post-execution reasonable
+instead of extravagant.
+
+**Shape.** A `reflect(instruction) → string` on the session, over the same three
+rungs `dryRun` exposes: `project()` for the input, the session's own executor for
+the call, nothing persisted. Compaction becomes its first consumer rather than
+its own path; the post-execution passes are the second.
+
+**Open.** Whether it runs post-execution (after the turn settles, so the cache is
+warm and nothing blocks the user) or on demand. Whether several passes share ONE
+call with a structured-output schema — four questions, one round trip — or stay
+separate calls for separable failure. Whether `reflect` is a session method or a
+harness of its own once there are several consumers.
+
+---
+
+### W37 · Compaction takes INSTRUCTIONS, and `/compact` passes them · [both]
+
+**Want.** `compact` accepts an optional instruction ("focus on the billing
+decisions", "keep every number") threaded to the summarizing model IN ADDITION to
+the standing compaction prompt — and a `/compact [instructions]` runnable that
+carries it from the user.
+
+**Current state.** The framework field ALREADY EXISTS:
+`CompactStrategy.instructions?: string | readonly ContentBlock[]`. What is
+missing is the threading — Ernesto's fold ignores it, the wire verb does not
+carry it, and no command exposes it.
+
+**Done when.** `session.timeline.compact({ instructions })` reaches the prompt;
+the wire verb carries it; `/compact keep the numbers` works from the palette.
+
+---
+
+### W38 · Progress signals on slow framework operations · [framework]
+
+**Want.** Compaction (and anything else slow enough for a human to wonder) says
+it started and finished, so a client can show a spinner.
+
+**The rule already exists — compaction just is not following it.**
+`packages/spec/src/data/signals.ts` defines the family and its naming law:
+`<surface>:signal:log` / `<surface>:signal:progress`, middle segment always
+`signal`, distinct from `command` (operation lifecycle) and `channel` (state).
+Subscribers match across surfaces with `*:signal:progress`, and the gateway
+already fans these onto `notifications/progress` for any caller passing
+`_meta.progressToken` — the plumbing tools use today.
+
+**So the general rule is:** an operation slow enough to wonder about emits
+`<surface>:signal:progress` on its OWN surface and gets the wire for free.
+Compaction emits `timeline:signal:progress`.
+
+**And the boundary worth stating, because it is the part that gets confused.**
+Progress is a SIGNAL — diagnostic, droppable, best-effort. "Compaction
+started/ended" as an operation-lifecycle FACT is a COMMAND
+(`onBeforeTimelineCompact` / `onAfterTimelineCompact`) — what you audit or gate
+on. The spinner wants the signal; a hook that vetoes a compaction wants the
+command. Both exist; they are different tiers deliberately.
+
+**Done when.** A compaction emits progress start/end, a client with a progress
+token receives them, and the rule is written down somewhere other than this
+wishlist.
+
+---
+
 ### W31 · Should XML be the DEFAULT formatter? · [framework] · **needs a measurement**
 
 **Want.** Decide whether the default dialect flips, making `<Markdown>` the
