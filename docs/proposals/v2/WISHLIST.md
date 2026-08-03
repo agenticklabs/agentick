@@ -29,6 +29,56 @@ framework by being well-worn in the application first.
 
 ## Track B — context economics
 
+### W40 · The configured form must not be poorer than its own sugar · [framework]
+
+**Want.** A `CompactStrategy` value can reach everything the `(entries, ctx)`
+function shorthand reaches. Today it cannot, and the gap blocks a real move.
+
+**Why.** ADR 42's dichotomy says a slot takes a declarative shorthand OR a
+configured value, and that the value form is the general one — the shorthand is
+sugar over it. `compact` inverts that:
+
+```ts
+TimelineCompactCtx extends OperationCtx   // sessionId, log, run, trace, metrics
+CompactRun ctx = { entries, instructions, generate?, progress? }
+```
+
+The sugar is RICHER than the thing it is sugar for. So moving from the shorthand
+to a strategy — which you must do to set `source`, or to use `rollingSummary` —
+silently costs you `sessionId` and the diagnostic facets.
+
+**This is not hypothetical.** Ernesto folds `source: "persisted"`. Now that a
+compaction appends its summary to the log, that fold re-covers material an
+earlier summary already covers; the fix is `source: "projection"`, which is only
+expressible as a strategy value, which loses the `sessionId` its summaries store
+is keyed by. So it stays on the wrong source.
+
+**Current state.** The two forms are built at two different sites. The shorthand
+is adapted in `TimelineHarness.defaultStrategy()`, which calls
+`this.compactCtx(instructions)` → `deriveOperationCtx(...)` — the full facet
+mint. A strategy value is called with a hand-built object literal in
+`compactBody`. Same call, two constructions, and only one of them is rich.
+
+The session coordinate is NOT missing from the harness: `withTimeline` declares
+`parentScope: { sessionId: installer.hostId }` (`extension.ts:88`), so
+`this.parentScope?.sessionId` is the real one. The trap is that `this.scopeId`
+is `<sessionId>:timeline` and reads like the answer — a mistake the
+`event-scope-authority` conformance gate already catches by name, and did catch
+during this work.
+
+**Done when.** One construction site: the harness derives the ctx once and both
+forms receive it, so `compact: (entries, ctx) => …` is literally
+`run({ entries, ...ctx })`. Adding a facet then lands on both by construction
+rather than by remembering. Plus: an audit of every other ADR-42 dichotomy slot
+for the same split — `hydrate` passes one ctx to both forms and is fine, so this
+is a check, not an assumption.
+
+**Open.** Whether `CompactRun`'s ctx should be `OperationCtx` outright or a
+named subset. Outright is uniform and drags the whole facet surface into a type
+adopters implement; a subset needs a rule for what earns a place.
+
+---
+
 ### W4 · Long tool results live outside the context, behind a pointer · [both]
 
 **Want.** Large tool results stop being pasted into the conversation. In their
@@ -1019,35 +1069,37 @@ at message/section boundaries.
 
 Rough order, cheapest-and-most-certain first:
 
-1. **W38** (progress signals) — the smallest thing here and it has a determinate
+1. **W40** (the configured form's ctx) — small and it unblocks an app that is
+   currently on a knowingly-wrong `source`. One construction site, one audit.
+2. **W38** (progress signals) — the smallest thing here and it has a determinate
    bar for free: cap the summarizer's output and the fraction is
    `emitted / budget`, not an estimate. Wants W36's capped call.
-2. **W36** (same model, same context) — the first real consumer of `project()`,
+3. **W36** (same model, same context) — the first real consumer of `project()`,
    and the thing W39 generalizes. Compaction currently summarizes uncapped.
-3. **W39** (the reflection pass) — extract the primitive once W36 has proven the
+4. **W39** (the reflection pass) — extract the primitive once W36 has proven the
    shape on one caller. Episodic memory and thread titling are the next callers.
-4. **W16** (drop the CoT dock tenant) — minutes; one template block.
-5. **W28** (agent todo lists) — a collection store plus a stateful tool. The
+5. **W16** (drop the CoT dock tenant) — minutes; one template block.
+6. **W28** (agent todo lists) — a collection store plus a stateful tool. The
    app-owned-table question W27 raised is now answered by the `tasks` migration.
-6. **W35** (context panel v2) — fold by entry, the `request` rung, per-region
+7. **W35** (context panel v2) — fold by entry, the `request` rung, per-region
    sizes. Wants the executor's `prepareRequest` on the wire.
-7. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
+8. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
    first: it is also the delivery channel for W7.
-8. **W14** (media summaries at ingest) — the supply side for W4 and W5.
-9. **W4** (tool results out of context) — needs design; touches the framework.
-10. **W20** (JS execution) — deliberately _after_ W4, which is its best use case,
+9. **W14** (media summaries at ingest) — the supply side for W4 and W5.
+10. **W4** (tool results out of context) — needs design; touches the framework.
+11. **W20** (JS execution) — deliberately _after_ W4, which is its best use case,
     and it needs a real security design rather than a quick isolate.
-11. **W17 + W19 together**, with **W18** as their surface — do _not_ build these
+12. **W17 + W19 together**, with **W18** as their surface — do _not_ build these
     separately. They are one proposal/review mechanism over three entity types
     plus one portal that consumes it; solving them one at a time guarantees three
     incompatible review flows.
-12. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
+13. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
     exist before dedup or critique can attach to it). W6 is a W39 caller.
-13. **W5** — research, and it wants W14's summaries first.
-14. **W34** (hypothetical input) — needs a timeline scratch overlay; `send()`
+14. **W5** — research, and it wants W14's summaries first.
+15. **W34** (hypothetical input) — needs a timeline scratch overlay; `send()`
     appends before rendering, so there is no seam for it yet.
-15. **W31** — needs a measurement, not a decision.
-16. **W15** — deferred.
+16. **W31** — needs a measurement, not a decision.
+17. **W15** — deferred.
 
 **Not sequenced — blocked on a conversation, not on effort:** **W23** (the real
 execution graph). W16 clears the slot without prejudging what fills it, so the
