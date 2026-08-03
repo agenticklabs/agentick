@@ -1,6 +1,6 @@
 {
   "name": "@agentick/skills",
-  "version": "1.0.0-next.68",
+  "version": "1.0.0-next.69",
   "description": "SkillsHarness — durable library of reusable agent skills. OpenClaw / Hermes style: searchable, shareable, persistent across sessions. Shape 1 harness per ADR 32 (audit + swappable backend + cross-session persistence).",
   "keywords": [
     "agent",
