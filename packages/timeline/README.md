@@ -307,6 +307,31 @@ rollingSummary({
 
 `threshold` answers _when_ rather than _how much_, and it is read through `strategy.shouldCompact({ usedTokens, contextWindow })` — a trigger asks the strategy rather than keeping its own copy of the number. It defaults to a flat **120k tokens**, not a fraction of the window: a model reporting a million-token window makes any fraction meaningless, and what you are managing is per-turn cost and latency, not running out of room.
 
+#### The projection is a pure function of the log
+
+A compaction event records the **range it stands in for**:
+
+```ts
+data: { summary, coversFrom: "m0", coversThrough: "m93", entriesBefore, entriesAfter }
+```
+
+That one field is what makes the two-tier claim true rather than nearly true. A summary is appended when it is written, but it _covers_ the beginning — position and coverage are different facts, and only the second one lets you rebuild the view. Without it, resume needs a cursor kept somewhere else, and a materialized view that needs outside state is not one: the log and that state can disagree.
+
+With it, rebuilding is a fold over the log and nothing else:
+
+```ts
+import { hydrateProjected } from "@agentick/timeline";
+
+defineTimeline({ store, hydrate: hydrateProjected() });
+```
+
+`projectLog(entries)` is that fold, exported for tooling: walk the log, emit each summary at the point its range starts, drop what the range covers. It is idempotent — folding a projection returns it unchanged — and a summary whose range no longer resolves stays where it is rather than vanishing.
+
+Ranges are entry **ids**, not `seq`: a strategy has ids and never sees a `seq` (entries carry none until `history()` wraps them in `SeqTagged`). Seq ranges would range-query better; they are blocked behind `StoreCtx.sessionId` meaning two things at once.
+
+> [!NOTE]
+> This is why you do not need a summaries table. Keep one as a _performance index_ if an O(1) "where does the last summary start" beats a backward page — but nothing about correctness depends on it.
+
 #### Summaries stack — or don't
 
 By default a fold eats the previous summary. Compact ten times and the oldest material has been through ten model calls, each pass compressing an already-compressed thing. What dies first is exactly what the instructions ask for — the ids, the figures, the paths — because the second pass has no way to know which of them still matter.

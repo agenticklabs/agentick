@@ -97,6 +97,15 @@ const isSummary = (e: TimelineEntry): boolean =>
 
 const summariesIn = (entries: readonly TimelineEntry[]) => entries.filter(isSummary);
 
+/**
+ * Ranges are entry IDs, not `seq`. A strategy has ids and never sees a `seq` —
+ * entries carry none until `history()` wraps them in `SeqTagged`. Seq ranges
+ * would range-query better and are blocked behind `TODO(store-ctx-key-name)`.
+ */
+export function entryId(entry: TimelineEntry | undefined): string | undefined {
+  return entry?.kind === "message" ? entry.message.id : undefined;
+}
+
 /** Summaries sit at the front — they are the oldest material. A fold is a prefix. */
 function afterLastSummary(entries: readonly TimelineEntry[]): number {
   let i = 0;
@@ -177,11 +186,7 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
     // timeline alone is recoverable; persisting this is not.
     if (result.truncated) return entries;
 
-    return [
-      ...survivors,
-      summaryEntry(result.text, fold.length, keep.length, instructions),
-      ...keep,
-    ];
+    return [...survivors, summaryEntry(result.text, fold, keep.length, instructions), ...keep];
   };
 
   return {
@@ -194,7 +199,7 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
 
 function summaryEntry(
   summary: string,
-  entriesBefore: number,
+  fold: readonly TimelineEntry[],
   entriesAfter: number,
   instructions: string | readonly ContentBlock[] | undefined,
 ): TimelineEntry {
@@ -212,7 +217,15 @@ function summaryEntry(
           source: "timeline",
           data: {
             summary,
-            entriesBefore,
+            // The RANGE this summary stands in for. Its own position in the log
+            // records when it was written, which is not what it covers — without
+            // this, rebuilding the projection needs state the log does not hold,
+            // and a materialized view that needs outside state is not one.
+            ...omitUndefined({
+              coversFrom: entryId(fold[0]),
+              coversThrough: entryId(fold[fold.length - 1]),
+            }),
+            entriesBefore: fold.length,
             entriesAfter,
             ...omitUndefined({ instructions: steer }),
           },

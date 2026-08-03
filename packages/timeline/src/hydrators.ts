@@ -25,6 +25,7 @@
 
 import type { TimelineStore } from "@agentick/spec";
 import type { TimelineHydrator } from "./definition.js";
+import { projectLog } from "./project.js";
 
 /**
  * The DEFAULT hydrator when a `store` is configured (ADR 93) — the full ordered
@@ -91,4 +92,19 @@ export function hydrateTail<TStore extends TimelineStore = TimelineStore>(
     const window = await store.history(logKey, { limit: n }, ctx);
     return window.map((t) => t.entry);
   };
+}
+
+/**
+ * Genesis as the fold: read the durable log, substitute every compaction event
+ * at the range it covers, and open the session on the result.
+ *
+ * This is the hydrator the event-sourced framing implies — resume needs no
+ * cursor and no side table, because a compaction event carries the range it
+ * stands in for. A session that reopens on this sees exactly what it saw before
+ * the process died.
+ */
+export function hydrateProjected<
+  TStore extends TimelineStore = TimelineStore,
+>(): TimelineHydrator<TStore> {
+  return async (ctx) => projectLog(await ctx.store.read(ctx.sessionId ?? "", ctx));
 }
