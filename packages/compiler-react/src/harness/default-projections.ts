@@ -155,16 +155,22 @@ function readResourcesSnapshot(bridges: HookBridges): StructuralResourcesSnapsho
 export function resourcesCatalogText(bridges: HookBridges): string | undefined {
   const snap = readResourcesSnapshot(bridges);
   if (!snap) return undefined;
-  const lines: string[] = [];
+  const entries: CatalogEntry[] = [];
   for (const r of snap.resources ?? []) {
     if (!r || typeof r.uri !== "string") continue;
-    lines.push(formatCatalogLine(r.uri, r.name, r.description, r.mimeType));
+    entries.push({ uri: r.uri, name: r.name, description: r.description, mimeType: r.mimeType });
   }
   for (const t of snap.templates ?? []) {
     if (!t || typeof t.uriTemplate !== "string") continue;
-    lines.push(formatCatalogLine(t.uriTemplate, t.name, t.description, t.mimeType));
+    entries.push({
+      uri: t.uriTemplate,
+      name: t.name,
+      description: t.description,
+      mimeType: t.mimeType,
+    });
   }
-  if (lines.length === 0) return undefined;
+  if (entries.length === 0) return undefined;
+  const lines = groupByPrefix(entries);
   // Advertise availability only — don't hard-name a read tool.
   // `withResources()` exposes `resource_read` (whose own description tells the
   // model how to read); resources can also be surfaced (e.g. via withMCP)
@@ -190,16 +196,87 @@ export function resourcesDefaultProjection(bridges: HookBridges): DefaultProject
   };
 }
 
-function formatCatalogLine(
-  uri: string,
-  name: string | undefined,
-  description: string | undefined,
-  mimeType: string | undefined,
-): string {
-  let line = `- ${uri}`;
-  if (name !== undefined && name !== uri) line += ` (${name})`;
-  if (description !== undefined) line += ` — ${description}`;
-  if (mimeType !== undefined) line += ` [${mimeType}]`;
+interface CatalogEntry {
+  readonly uri: string;
+  readonly name?: string | undefined;
+  readonly description?: string | undefined;
+  readonly mimeType?: string | undefined;
+}
+
+/**
+ * How much of a resource's own description the CATALOG carries.
+ *
+ * A catalog is an INDEX, not a summary. Measured on a production prompt: 106
+ * resources, 35,250 characters, of which **26,977 (77%) were descriptions** and
+ * 61 of them ran past 150 characters — several past 500, restating the contents
+ * of a document in the line that points at that document. The model was reading a
+ * précis of every resource, on every request, to decide whether to read one.
+ *
+ * The full text is not lost: it is inside the resource, one `resource_read` away,
+ * and it costs nothing until something wants it. An adopter who genuinely needs
+ * the long form renders `<Resources>` with a render prop (ADR 95) and formats the
+ * snapshot however they like — this is the DEFAULT, not the only shape.
+ */
+const CATALOG_GLOSS_MAX = 100;
+
+/** First sentence, capped — enough to tell two resources apart and no more. */
+function gloss(description: string): string {
+  const trimmed = description.trim().replace(/\s+/g, " ");
+  if (trimmed.length <= CATALOG_GLOSS_MAX) return trimmed;
+  // Prefer a sentence boundary, then a word boundary — a description cut
+  // mid-word reads as corrupted output rather than as an abbreviation.
+  const stop = trimmed.slice(0, CATALOG_GLOSS_MAX).lastIndexOf(". ");
+  if (stop > CATALOG_GLOSS_MAX / 2) return trimmed.slice(0, stop + 1);
+  const space = trimmed.slice(0, CATALOG_GLOSS_MAX).lastIndexOf(" ");
+  return `${trimmed.slice(0, space > 0 ? space : CATALOG_GLOSS_MAX)}…`;
+}
+
+/**
+ * Everything up to and including the last `/` — the shared stem a tree hangs on.
+ */
+function stemOf(uri: string): string {
+  const cut = uri.lastIndexOf("/");
+  return cut <= 0 ? "" : uri.slice(0, cut + 1);
+}
+
+/**
+ * The catalog as a shallow tree, grouped by uri stem.
+ *
+ * Worth ~5% on its own — the repeated `mcp://server/scheme://schema/` stem was
+ * 1,776 of 35,250 characters. It earns its place by making the TRUNCATION legible:
+ * once descriptions are one line, a bare leaf name is ambiguous without the stem
+ * standing over it.
+ *
+ * Groups of one are inlined rather than given a heading of their own, which would
+ * cost more than it saved.
+ */
+function groupByPrefix(entries: readonly CatalogEntry[]): string[] {
+  const groups = new Map<string, CatalogEntry[]>();
+  for (const entry of entries) {
+    const stem = stemOf(entry.uri);
+    const bucket = groups.get(stem) ?? [];
+    bucket.push(entry);
+    groups.set(stem, bucket);
+  }
+  const out: string[] = [];
+  for (const [stem, bucket] of groups) {
+    const grouped = stem !== "" && bucket.length > 1;
+    if (grouped) out.push(`${stem}`);
+    for (const entry of bucket) {
+      out.push(formatCatalogLine(entry, grouped ? stem : ""));
+    }
+  }
+  return out;
+}
+
+function formatCatalogLine(entry: CatalogEntry, stem: string): string {
+  const shown =
+    stem !== "" && entry.uri.startsWith(stem) ? entry.uri.slice(stem.length) : entry.uri;
+  let line = `${stem !== "" ? "  " : ""}- ${shown}`;
+  if (entry.name !== undefined && entry.name !== entry.uri) line += ` (${entry.name})`;
+  if (entry.description !== undefined) line += ` — ${gloss(entry.description)}`;
+  // The mime type is dropped: it was on every line, it is `text/markdown` for
+  // almost all of them, and nothing the model decides turns on it.
   return line;
 }
 
