@@ -362,9 +362,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
       const ctx = yield* getContext;
       const emitOutput = (chunk: SandboxExecDelta): void => {
         Effect.runFork(
-          this.emitDeltaLazy(this.execDeltaOp(ctx), () => chunk).pipe(
-            Effect.catchAll(() => Effect.void),
-          ),
+          this.emitDelta(this.execDeltaOp(ctx), chunk).pipe(Effect.catchAll(() => Effect.void)),
         );
       };
       return yield* Effect.tryPromise<SandboxExecResult, SandboxExecError>({
@@ -384,7 +382,7 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   }
 
   /**
-   * Synthesize the exec Operation shell that {@link BaseHarness.emitDeltaLazy}
+   * Synthesize the exec Operation shell that {@link BaseHarness.emitDelta}
    * needs to stamp a `delta` envelope onto the in-flight `sandbox:command:exec`
    * op — reconstructed from the captured {@link getContext} because the
    * provider's `onOutput` callback runs outside the command fiber.

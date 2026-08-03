@@ -14,7 +14,7 @@
  *   1. iterating chunks
  *   2. mapping each chunk via `mapChunk` → `AdapterDelta`
  *   3. emitting a `bus.publishLazy` envelope per delta via
- *      `emitDeltaLazy` (a fresh `Effect.runPromise` entrance per delta)
+ *      `emitDelta` (a fresh `Effect.runPromise` entrance per delta)
  *   4. accumulating into `StreamAccumulator` AND the in-loop
  *      `Map<number, BlockState>` (the dual-walk pattern)
  *   5. final `normalize()` walk.

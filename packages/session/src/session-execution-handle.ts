@@ -12,7 +12,7 @@
  * calls/sec, no cross-session interference).
  *
  * Bus envelopes still fire in parallel for observability (via
- * `emitDeltaLazy`); `app.events()` subscribers (devtools, telemetry)
+ * `emitDelta`); `app.events()` subscribers (devtools, telemetry)
  * see them. The handle iterator is the in-band consumer-facing channel;
  * the bus is the out-of-band fan-out channel. Two independent paths.
  *

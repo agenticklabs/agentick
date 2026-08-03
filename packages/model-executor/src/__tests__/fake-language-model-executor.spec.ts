@@ -139,7 +139,7 @@ describe("FakeLanguageModelExecutor — run + streaming", () => {
   });
 
   it("skips delta envelope construction when no subscriber matches", async () => {
-    // Without a subscriber, emitDeltaLazy probes hasSubscriber and
+    // Without a subscriber, emitDelta probes hasSubscriber and
     // skips the thunk. Streaming is invisible but the run still
     // succeeds with the scripted terminal.
     let builds = 0;

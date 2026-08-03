@@ -142,7 +142,7 @@ export interface OpenAIAdapterOptions {
    * Stream every `execute()`. When false (default), uses non-streaming
    * completions and delta envelopes are not emitted. When true, every
    * call streams and per-chunk `executor:delta` envelopes are emitted
-   * via `emitDeltaLazy`.
+   * via `emitDelta`.
    */
   readonly stream?: boolean;
   /**

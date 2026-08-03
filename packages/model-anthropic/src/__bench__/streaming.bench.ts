@@ -13,7 +13,7 @@
  * streaming loop:
  *   1. iterating events
  *   2. mapping each event via `mapChunk` → `AdapterDelta`
- *   3. emitting `bus.publishLazy` per delta via `emitDeltaLazy`
+ *   3. emitting `bus.publishLazy` per delta via `emitDelta`
  *      (a fresh `Effect.runPromise` entrance per delta)
  *   4. accumulating into `StreamAccumulator` AND the per-block
  *      `Map<number, BlockState>` in the main loop (dual-walk pattern)

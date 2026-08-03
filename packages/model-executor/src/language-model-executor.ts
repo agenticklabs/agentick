@@ -996,11 +996,11 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
             // Accumulator update — synchronous, in-fiber.
             Stream.tap((delta) => Effect.sync(() => accum.apply(delta))),
             // Bus emission — runs in-fiber so interrupt tears it down.
-            // emitDeltaLazy publishes to a bounded internal bus; ignore
+            // emitDelta publishes to a bounded internal bus; ignore
             // subscriber-count failures so slow subscribers don't kill
             // the stream.
             Stream.tap((delta) =>
-              harness.emitDeltaLazy(op, () => delta).pipe(Effect.catchAll(() => Effect.void)),
+              harness.emitDelta(op, delta).pipe(Effect.catchAll(() => Effect.void)),
             ),
           );
 

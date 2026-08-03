@@ -313,7 +313,7 @@ describe("SandboxHarness — exec streaming (#219)", () => {
     const { harness, bus } = await makeHarnessBundle({ exec: { allow: ["*"] } }, handle);
 
     // Fork the collector, then let the subscription register (setImmediate)
-    // BEFORE exec fires onOutput — emitDeltaLazy probes hasSubscriberFor.
+    // BEFORE exec fires onOutput — emitDelta probes hasSubscriberFor.
     const fiber = Effect.runFork(
       Stream.runCollect(
         Stream.take(

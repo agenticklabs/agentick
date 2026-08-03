@@ -355,7 +355,7 @@ describe("streaming simulation — 10 ops × 10 deltas", () => {
     await Promise.all(tasks);
   });
 
-  bench("lazy: ops emit delta via emitDeltaLazy (no subscriber)", async () => {
+  bench("gated: ops emit delta via emitDelta (no subscriber)", async () => {
     if (!ready) {
       await h.ready;
       ready = true;
@@ -374,7 +374,7 @@ describe("streaming simulation — 10 ops × 10 deltas", () => {
           return yield* h["runOperation"](op, () =>
             Effect.gen(function* () {
               for (let i = 0; i < 10; i++) {
-                yield* h["emitDeltaLazy"](op, () => ({ token: i }));
+                yield* h["emitDelta"](op, { token: i });
               }
               return 1;
             }),

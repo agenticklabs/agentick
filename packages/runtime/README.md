@@ -626,25 +626,25 @@ Key types: `Middleware` · `AsyncMiddleware` · `InterceptorKind` · `CommandReg
 
 ### `BaseHarness` surfaces
 
-| Member                                              | Visibility | Purpose                                                              |
-| --------------------------------------------------- | ---------- | -------------------------------------------------------------------- |
-| `use(mw)` / `fx.use(mw)`                            | public     | Register an async / Effect-native interceptor; returns `Unsubscribe` |
-| `guard(decide)` / `guard(bag)`                      | public     | Admission control, per harness or per named verb                     |
-| `hook(config)` / `hooks.on<Verb>(fn)`               | public     | Command lifecycle hooks, declaratively or per verb                   |
-| `listInterceptors(op)`                              | public     | Enumerate the composed kinds, outermost first                        |
-| `onMessage(type, handler)`                          | public     | Add or override inbox handling for one message type                  |
-| `commands()`                                        | public     | Wire-safe summaries of the declared verbs                            |
-| `address` · `principal` · `metadata` · `input`      | public     | Construction identity                                                |
-| `ready` · `onClose(h)` · `close()`                  | public     | Lifecycle — `ready` settles once inbox registration lands            |
-| `teardown()`                                        | protected  | The subclass's own shutdown work — override this, never `close()`    |
-| `command(def)` / `commandStream(def)`               | protected  | The two declaration sites                                            |
-| `commandEffect(name, input)`                        | protected  | Invoke a declared verb in-fiber so causality threads                 |
-| `runOperation(op, body)`                            | protected  | The heavy path directly, for a verb that is not a declared command   |
-| `emit` / `emitLazy` / `emitDelta` / `emitDeltaLazy` | protected  | The light path; the lazy forms skip construction with no subscriber  |
-| `emitLog` / `emitProgress`                          | protected  | The runtime signal family                                            |
-| `request` / `notifyChannel` / `pendingRequests`     | protected  | Correlated ask, one-way notify, and the projectable pending set      |
-| `spanAttributes(op)`                                | protected  | Override to add domain attributes to every operation span            |
-| `handleMessage(msg)`                                | abstract   | The subclass's typed inbox switch                                    |
+| Member                                          | Visibility | Purpose                                                                                                          |
+| ----------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| `use(mw)` / `fx.use(mw)`                        | public     | Register an async / Effect-native interceptor; returns `Unsubscribe`                                             |
+| `guard(decide)` / `guard(bag)`                  | public     | Admission control, per harness or per named verb                                                                 |
+| `hook(config)` / `hooks.on<Verb>(fn)`           | public     | Command lifecycle hooks, declaratively or per verb                                                               |
+| `listInterceptors(op)`                          | public     | Enumerate the composed kinds, outermost first                                                                    |
+| `onMessage(type, handler)`                      | public     | Add or override inbox handling for one message type                                                              |
+| `commands()`                                    | public     | Wire-safe summaries of the declared verbs                                                                        |
+| `address` · `principal` · `metadata` · `input`  | public     | Construction identity                                                                                            |
+| `ready` · `onClose(h)` · `close()`              | public     | Lifecycle — `ready` settles once inbox registration lands                                                        |
+| `teardown()`                                    | protected  | The subclass's own shutdown work — override this, never `close()`                                                |
+| `command(def)` / `commandStream(def)`           | protected  | The two declaration sites                                                                                        |
+| `commandEffect(name, input)`                    | protected  | Invoke a declared verb in-fiber so causality threads                                                             |
+| `runOperation(op, body)`                        | protected  | The heavy path directly, for a verb that is not a declared command                                               |
+| `emit` / `emitLazy` / `emitDelta`               | protected  | The light path; `emitLazy` skips construction with no subscriber, `emitDelta` is gated by policy then subscriber |
+| `emitLog` / `emitProgress`                      | protected  | The runtime signal family                                                                                        |
+| `request` / `notifyChannel` / `pendingRequests` | protected  | Correlated ask, one-way notify, and the projectable pending set                                                  |
+| `spanAttributes(op)`                            | protected  | Override to add domain attributes to every operation span                                                        |
+| `handleMessage(msg)`                            | abstract   | The subclass's typed inbox switch                                                                                |
 
 ### `@agentick/runtime/testing`
 

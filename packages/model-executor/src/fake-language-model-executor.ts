@@ -16,7 +16,7 @@
  *     the scripted result as-is. Real adapters parse provider response
  *     shapes here.
  *   - `run()` composes project → execute → normalize, emitting deltas
- *     via `emitDeltaLazy` so the streaming sim path stays cheap when
+ *     via `emitDelta` so the streaming sim path stays cheap when
  *     nobody is listening.
  *   - `abort()` marks the named execution as aborted; the next `run`
  *     for that id fails with `ProviderAborted`. In-flight runs are
@@ -470,7 +470,7 @@ export class FakeLanguageModelExecutor
    * The shared `model:generate[_stream]` command body (ADR 89 §1). Runs INSIDE
    * the command cascade, so the ambient {@link RuntimeContext} carries this op's
    * `opId` / `parentOpId` / scope — rebuilt here into the {@link Operation}
-   * shape {@link emitDeltaLazy} needs for bus parity. `sink` is `null` for
+   * shape {@link emitDelta} needs for bus parity. `sink` is `null` for
    * `model:generate` (non-streaming — returns the scripted raw) and the real
    * delta sink for `model:generate_stream` (replays the scripted deltas to the
    * sink AND the bus). A scripted `outcome: "failed"` fails the run — driving the
@@ -537,7 +537,7 @@ export class FakeLanguageModelExecutor
             yield* rawSink(delta);
             yield* sink(delta);
             // Bus parity — observability subscribers see the same deltas.
-            yield* this.emitDeltaLazy(op, () => delta).pipe(Effect.catchAll(() => Effect.void));
+            yield* this.emitDelta(op, delta).pipe(Effect.catchAll(() => Effect.void));
           }
         }
         // Scripted non-success outcomes are raised HERE — the one point both
@@ -586,7 +586,7 @@ export class FakeLanguageModelExecutor
       const deltas = next?.deltas;
       if (deltas && deltas.length > 0) {
         for (const delta of deltas) {
-          yield* this.emitDeltaLazy(op, () => delta).pipe(Effect.orDie);
+          yield* this.emitDelta(op, delta).pipe(Effect.orDie);
         }
       }
 

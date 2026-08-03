@@ -57,6 +57,17 @@ on the executor hot path.
 `lazy` is **1.21× faster** than `eager` here. Build-skip win shows
 because the no-subscriber probe avoids constructing 100 payloads.
 
+> **Amended 2026-08-02 — this row is misattributed, and the two methods
+> have since been collapsed into one.** The win measured here is the
+> SUBSCRIBER GATE, not the thunk. `emitDelta` (eager) carried no gate at
+> all and published all 100 envelopes; `emitDeltaLazy` probed
+> `hasSubscriberFor` and published none. The thunk deferred nothing —
+> every real call site passed a closure over an already-constructed
+> value (`() => delta`, `() => chunk`), so it only added one closure
+> allocation per delta. The surviving `emitDelta` keeps the gate and
+> takes the payload directly. Numbers left as recorded; re-run to get a
+> post-collapse figure.
+
 ## Phase A — `compileQuery` per-event filter cost
 
 | Bench                                              |         hz | mean (μs/op) | vs `matchesQuery` |

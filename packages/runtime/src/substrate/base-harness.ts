@@ -1269,41 +1269,31 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
-   * Streaming progress within an active operation. Delta envelopes are
-   * by default bus-only (per `DEFAULT_JOURNALING_POLICY`) — they don't
-   * hit the journal unless an override flips the policy. The lazy
-   * variant `emitDeltaLazy` is the recommended path for hot streams
-   * (model tokens, dense sandbox output) where the delta payload may
-   * cost meaningful CPU to construct.
+   * Streaming progress within an active operation — the ONE delta emitter.
+   *
+   * Gated twice, in order: the journaling policy for this op shape
+   * (`decideFromShape`), then, for the bus-only default, the subscriber index.
+   * A delta with no journaling mandate and no subscriber allocates no envelope
+   * and touches no bus.
+   *
+   * There used to be two methods. The eager `emitDelta` published
+   * UNCONDITIONALLY — skipping both gates — and had zero callers; the gated one
+   * (`emitDeltaLazy`) took a `() => payload` thunk so hot publishers "wouldn't
+   * pay payload construction when no observer is listening". Every real call
+   * site passed a closure over an ALREADY-CONSTRUCTED value (`() => delta`,
+   * `() => chunk`), so the thunk deferred nothing and cost one closure
+   * allocation per delta on the hottest path in the system. Taking the payload
+   * directly is both less code and less work.
    */
   protected emitDelta(
     op: Operation<unknown, unknown, unknown>,
     payload: unknown,
   ): Effect.Effect<void, JournalError, never> {
-    return this.operationRunner.publish(
-      this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload }),
-    );
-  }
-
-  /**
-   * Construction-on-demand delta emission. The `buildPayload` thunk
-   * runs only when the policy demands journaling OR a subscriber wants
-   * the envelope. Hot publishers (streaming model tokens, dense
-   * sandbox stdout) should prefer this form so they don't pay payload
-   * construction when no observer is listening.
-   */
-  protected emitDeltaLazy(
-    op: Operation<unknown, unknown, unknown>,
-    buildPayload: () => unknown,
-  ): Effect.Effect<void, JournalError, never> {
     const decision = this.operationRunner.decideFromShape(op.name, "delta");
     if (decision === "drop") return Effect.void;
-    if (decision === "always" || decision === "journal") {
-      return this.operationRunner.publish(
-        this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
-      );
-    }
     if (
+      decision !== "always" &&
+      decision !== "journal" &&
       !this.bus.hasSubscriberFor({
         surface: op.surface ?? this.surface,
         name: op.name,
@@ -1313,7 +1303,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       return Effect.void;
     }
     return this.operationRunner.publish(
-      this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload: buildPayload() }),
+      this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload }),
     );
   }
 
