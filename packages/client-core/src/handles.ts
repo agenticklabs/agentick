@@ -211,6 +211,17 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
       const result = await client.request("session/snapshot", { sessionId });
       return result.snapshot;
     },
+    async dryRun() {
+      return client.request("session/dry_run", { sessionId });
+    },
+    async compile(): Promise<unknown> {
+      const result = await client.request("session/compile", { sessionId });
+      return result.tree;
+    },
+    async project(): Promise<unknown> {
+      const result = await client.request("session/project", { sessionId });
+      return result.input;
+    },
     async rebind(auth) {
       await client.request("session/rebind", { sessionId, auth });
     },

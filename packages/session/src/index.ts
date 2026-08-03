@@ -7,7 +7,7 @@
  * @see docs/proposals/v2/blueprint/08-session-harness.md
  */
 
-export { SessionHarness, type SessionHarnessOptions } from "./harness.js";
+export { SessionHarness, type SessionDryRun, type SessionHarnessOptions } from "./harness.js";
 export { SessionRuntime } from "./session-state.js";
 // ADR 89 §2 — the `session.model` selection / swap facade. The facade
 // impl + its handle type ship here; the `SessionHarnessProtocol.model`

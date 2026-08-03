@@ -35,9 +35,11 @@
 
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
 import type { EventEnvelope } from "../data/events.js";
+import type { RenderedTree } from "../data/rendered-tree.js";
 import type { ContentBlock } from "../data/content-blocks.js";
 import type { LanguageModelStopReason, StopCause, UsageStats } from "../data/execution-result.js";
 import type { TickResult } from "./loop-executor.js";
+import type { LanguageModelInput } from "./executor.js";
 import type { StreamEvent } from "../data/streaming.js";
 import type { SessionStatus as BridgeSessionStatus } from "./hook-bridges.js";
 import type { LoopToolResult } from "./loop-executor.js";
@@ -678,6 +680,21 @@ export interface ApplyResult {
 // barrel.
 
 /**
+/**
+ * What {@link SessionHarnessProtocol.dryRun} produced. Deliberately the same
+ * shape as the request half of a recorded round trip, so one surface renders a
+ * live preview and recorded history alike.
+ */
+export interface SessionDryRunResult {
+  /** What the components produced, pre-dialect. */
+  readonly tree: RenderedTree;
+  /** What the MODEL sees — messages, tools, system. */
+  readonly input: LanguageModelInput;
+  /** What would go on the wire. Absent when the executor has no adapter. */
+  readonly request?: unknown;
+}
+
+/**
  * Read-only snapshot of session state. Returned by `snapshot()`; consumed
  * by `restore()`. Used by persistence backends + hibernate/restore.
  *
@@ -965,6 +982,47 @@ export interface SessionHarnessProtocol<P = unknown> {
    * @throws {SessionError}
    */
   snapshot(): Promise<SessionSnapshot>;
+
+  /**
+   * Compile what a tick WOULD send, without sending it — the three artifacts
+   * that exist on the way to the provider.
+   *
+   * ```ts
+   * const { tree, input, request } = await session.dryRun();
+   * ```
+   *
+   * Nothing reaches the provider, no timeline entry is written, and the tick
+   * counter does not move. It is NOT side-effect free: rendering runs the tree,
+   * so `useData` fetches and lifecycle hooks on the render path fire. For a
+   * retrieval-backed agent that means a real query.
+   *
+   * The rungs are individually available ({@link compile}, {@link project},
+   * {@link prepareRequest}) for when a later one cannot run — `compile` needs
+   * no model, the other two do.
+   *
+   * @throws {SessionError} when no model is configured (the later rungs only).
+   */
+  dryRun(): Promise<SessionDryRunResult>;
+
+  /** Rung 1 — the rendered IR. Needs no model. */
+  compile(): Promise<RenderedTree>;
+
+  /**
+   * Rung 2 — the canonical input the MODEL sees, post-formatter. Pass a tree
+   * from {@link compile} to reuse it; omit to render one.
+   *
+   * @throws {SessionError} when no model is configured.
+   */
+  project(tree?: RenderedTree): Promise<LanguageModelInput>;
+
+  /**
+   * Rung 3 — the provider-native request. `undefined` when the executor has no
+   * provider adapter behind it, and it is the request BEFORE
+   * `onBeforeModelProviderRequest` hooks run.
+   *
+   * @throws {SessionError} when no model is configured.
+   */
+  prepareRequest(input: LanguageModelInput): unknown;
 
   /**
    * Restore a previously captured {@link SessionSnapshot} into this live

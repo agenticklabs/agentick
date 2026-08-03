@@ -14,7 +14,8 @@
  *
  * The protocol exposes three logical phases — `project`, `execute`,
  * `normalize` — plus a convenience `run` that composes them with delta
- * emission, plus `abort`. Implementations MAY collapse phases internally
+ * emission, `abort`, and an optional `prepareRequest` that stops one step
+ * short of sending (the provider-native request, for inspection). Implementations MAY collapse phases internally
  * for performance, but the **harness boundary preserves the phases as
  * observable events and interceptor seams**.
  *
@@ -624,6 +625,31 @@ export interface ExecutorProtocol<
 
   // `project` is derived from `PromiseView<ExecutorFx>` — the Promise
   // facade of the Effect-canonical {@link ExecutorFx.project} twin.
+
+  /**
+   * **Optional.** The projected input → the PROVIDER-NATIVE request, without
+   * sending it. Pure, synchronous, and the last artifact that exists before
+   * bytes leave the process — so this is what you inspect to answer "what did
+   * we actually ask the provider for".
+   *
+   * ```ts
+   * const tree    = await compiler.renderTree({ mountId });
+   * const input   = await executor.project({ compiled: tree, target, tools });
+   * const request = executor.prepareRequest?.({ targetInput: input, target });
+   * ```
+   *
+   * **Two honest caveats.**
+   *
+   * 1. It is the request BEFORE the `model:provider-request` command runs, so
+   *    an `onBeforeModelProviderRequest` hook that rewrites the native request
+   *    has not been applied. What ships can differ from what this returns;
+   *    everything up to the hook is identical.
+   * 2. Absent on an executor with no provider adapter behind it — a fake, a
+   *    replay executor, a scripted double. Feature-detect rather than assume.
+   *
+   * Nothing is sent, nothing is journaled, and no timeline entry is written.
+   */
+  prepareRequest?(input: ExecuteInput<TInput>): unknown;
 
   /**
    * Target/provider request execution. Returns the final accumulated

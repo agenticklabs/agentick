@@ -398,6 +398,61 @@ const app = await createApp(<Agent />, {
 > [!NOTE]
 > This is distinct from resume. A durable `TimelineStore` hydrates the conversation at open, and `createSession` with a known id is create-and-resume. `snapshot()`/`restore()` is the on-demand full-session capture and transplant — it moves knobs, state and every extension too, and it is what a fork is built on.
 
+## Seeing what a tick would send
+
+`dryRun()` compiles the current tree and stops one step short of the provider:
+
+```ts
+const { tree, input, request } = await session.dryRun();
+```
+
+| rung      | artifact             | answers                             |
+| --------- | -------------------- | ----------------------------------- |
+| `tree`    | `RenderedTree`       | what the components produced (IR)   |
+| `input`   | `LanguageModelInput` | what the MODEL sees, post-formatter |
+| `request` | provider-native      | what would go on the wire           |
+
+Nothing is sent, no timeline entry is written, and the tick counter does not
+move — two consecutive dry runs leave `snapshot()` byte-identical, which is what
+`@agentick/app`'s `dry-run.spec.tsx` pins.
+
+**It is not free of side effects, and assuming otherwise will mislead you.**
+Answering means rendering, so `useData` fetches, suspense resolves, and lifecycle
+hooks on the render path fire. For a retrieval-backed agent a dry run issues a
+real retrieval query.
+
+The rungs are also available on their own, because they fail differently:
+
+```ts
+const tree = await session.compile(); // needs no model
+const input = await session.project(tree); // needs a model; reuses the tree
+const request = session.prepareRequest(input);
+```
+
+`compile()` works on a session with no model bound; `project()` and
+`prepareRequest()` throw `NoModelForExecutionError`. `request` is `undefined`
+when the executor has no provider adapter behind it (a fake, a replay double),
+and it is the request BEFORE `onBeforeModelProviderRequest` hooks run — so a hook
+that rewrites the native request is not reflected.
+
+### Over the wire
+
+```ts
+const { tree, input } = await client.session(id).dryRun();
+```
+
+`session/dry_run`, `session/compile` and `session/project` resolve the session
+through the same ownership rules as every other session verb, so a caller
+reaches only their own. The provider-native rung deliberately does NOT cross:
+it is adapter-shaped and not guaranteed JSON-clean, so it stays where the adapter
+that produced it lives.
+
+> [!IMPORTANT]
+> The response is the entire prompt — system instructions, retrieved context, the
+> user's identity block. It is the most sensitive read in the session namespace.
+> Authentication scopes it to the caller's own sessions; a deployment that treats
+> prompt contents as privileged should gate the verbs beyond that.
+
 ## The render ↔ runtime feedback loop
 
 A session is the per-render fact producer for the loop. Each send hands the loop two resolvers it calls per tick, which is how the tree renders _for the model it is about to call_, _within the window it has left_:
@@ -697,6 +752,8 @@ const session = factory({
 - **`defineSession` has no inbox dispatch.** A callback-built session stores an escalation interceptor for protocol conformance but never consults it, and every inbox message rejects. Escalation and task-wake work on `SessionHarness` only.
 
 ## Verified by
+
+- `@agentick/app` `src/__tests__/dry-run.spec.tsx` — the tree and the model input reach the caller, two dry runs leave `snapshot()` byte-identical, and `compile()` is the rung that needs no model.
 
 - `src/__tests__/conformance.spec.ts` — the protocol conformance suite against a real journal, bus and inbox.
 - `src/__tests__/extended-surface.spec.ts` — host-door `dispatch` including `ToolPermissionError`, the tool registry read surface, timeline append and `trailingInput`, channel publish/subscribe plus correlated request/response and its timeout, the knob handle, `spawn` routing through a spawn context and defaulting to the parent's own agent, the **spawn boundary pair** on the parent's stream (`spawn-start` carrying the child's session and execution ids plus the origin tool `callId` off the dispatch ctx, `spawn-end` carrying `isError`, both attributed to the parent's `executionId`; the unbound spawn form emits neither), **steering** (the join returns the in-flight handle and the loop answers the new input), two un-awaited sends collapsing to one execution, a send after settle running fresh rather than joining a dead handle, provenance and per-generation usage stamps, and `onBusy` steer-vs-queue including an aborted execution dropping an undrained steer; cancellation parity — `abort()` on an in-flight execution and a pre-aborted send `signal` both RESOLVE with `stopReason: "aborted"` rather than rejecting.

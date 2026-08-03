@@ -326,6 +326,40 @@ export interface SessionSendResult {
   readonly result: SendResult;
 }
 
+/**
+ * Params for the preview verbs — `session/dry_run`, `session/compile`,
+ * `session/project`. Compile what a tick would send, without sending it.
+ *
+ * The response carries the WHOLE prompt, which makes these the most sensitive
+ * reads in the session namespace: system instructions, retrieved context, and
+ * the user's identity block all cross. They resolve the session through the
+ * same ownership rules as every other session verb, so a caller sees only their
+ * own — but a deployment that treats prompt contents as privileged should gate
+ * the namespace rather than assume authentication is enough.
+ */
+export interface SessionPreviewParams extends WireRequestParams {
+  readonly sessionId: string;
+}
+
+/**
+ * The rungs that cross the wire — the projection of the harness's
+ * `SessionDryRunResult`. `request` (the provider-native one) is
+ * deliberately absent: it is adapter-shaped and not guaranteed JSON-clean, so
+ * it stays server-side where the adapter that produced it lives.
+ */
+export interface SessionDryRunWireResult {
+  readonly tree: unknown;
+  readonly input: unknown;
+}
+
+export interface SessionCompileResult {
+  readonly tree: unknown;
+}
+
+export interface SessionProjectResult {
+  readonly input: unknown;
+}
+
 export interface SessionDispatchParams extends WireRequestParams {
   readonly sessionId: string;
   readonly tool: string;
@@ -766,6 +800,9 @@ export interface WireMethods {
   "app/close": { params: AppCloseParams; result: AppCloseResult };
 
   "session/send": { params: SessionSendParams; result: SessionSendResult };
+  "session/dry_run": { params: SessionPreviewParams; result: SessionDryRunWireResult };
+  "session/compile": { params: SessionPreviewParams; result: SessionCompileResult };
+  "session/project": { params: SessionPreviewParams; result: SessionProjectResult };
   "session/dispatch": { params: SessionDispatchParams; result: SessionDispatchResult };
   "session/list_tools": { params: SessionListToolsParams; result: SessionListToolsResult };
   "session/abort": { params: SessionAbortParams; result: SessionAbortResult };

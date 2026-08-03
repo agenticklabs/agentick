@@ -234,6 +234,30 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
    * in-process harness takes, over the wire.
    */
   abort(reason?: string, opts?: SessionAbortOptions): Promise<void>;
+  /**
+   * Compile what a tick WOULD send, without sending it — for a debug surface
+   * that shows a developer the live prompt.
+   *
+   * ```ts
+   * const { tree, input } = await session.dryRun();
+   * ```
+   *
+   * `tree` is the IR the components produced; `input` is what the model sees.
+   * The provider-native request stays server-side — it is adapter-shaped and
+   * not guaranteed JSON-clean, so ask the server that holds the adapter.
+   *
+   * Nothing is sent and no timeline entry is written, but this is NOT free:
+   * the server renders the tree to answer, so `useData` fetches and any
+   * lifecycle hook on the render path fires.
+   *
+   * The response carries the entire prompt — system instructions, retrieved
+   * context, identity. Treat it as the most sensitive read on this handle.
+   */
+  dryRun(): Promise<{ readonly tree: unknown; readonly input: unknown }>;
+  /** Rung 1 alone — the rendered IR. Needs no model on the server. */
+  compile(): Promise<unknown>;
+  /** Rung 2 alone — the canonical input the model sees. */
+  project(): Promise<unknown>;
   snapshot(): Promise<unknown>;
   /**
    * Rebind the session to a refreshed auth context. Used when a token

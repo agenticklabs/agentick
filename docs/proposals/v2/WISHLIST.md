@@ -1254,82 +1254,26 @@ tree (⓪) is worth keeping or only the compiled input.
 
 ---
 
-#### W33a · `session.dryRun()` — compile without sending
+#### W33a · `session.dryRun()` — compile without sending — **DONE**
 
-**The more useful half, and separable from the history half.** "Show me what this
-run sent" needs retention; "compile the current state and show me" needs none, and
-it is what you actually want while iterating on a prompt.
+Landed 2026-08-03. `session.dryRun()` / `compile()` / `project()` /
+`prepareRequest()` on the harness and the protocol, `session/dry_run` /
+`session/compile` / `session/project` on the wire, and the three matching methods
+on the client session handle.
 
-**The ladder is already three PUBLIC seams.** Ryan's instinct was a chain of
-methods each running the previous — `compile()` → `render()` → `preview()` →
-`prepare()`. The stages are real, and every one is already reachable:
+`ExecutorProtocol` gained an optional `prepareRequest` phase — the executor
+already called the adapter's, privately, so exposing it was a keyword. The
+provider-native rung deliberately does not cross the wire: adapter-shaped, not
+guaranteed JSON-clean.
 
-| stage | artifact                | seam that exists today             |
-| ----- | ----------------------- | ---------------------------------- |
-| 1     | `RenderedTree`          | `compiler.renderTree({ mountId })` |
-| 2     | `LanguageModelInput`    | `executor.project({ tree, … })`    |
-| 3     | provider-native request | `adapter.prepareRequest({ … })`    |
-| —     | formatted text          | `formatTree(tree, formatter)`      |
+Documented in `@agentick/session`'s README, including the two caveats worth
+repeating — a dry run RENDERS (so `useData` fetches and a retrieval-backed agent
+issues a real query), and the response is the entire prompt, which makes it the
+most sensitive read in the session namespace.
 
-So the answer to "can it be done" is yes, and it is composition rather than new
-machinery.
-
-**The point is the GRANULARITY** (Ryan, 2026-08-03): see the IR, see the model
-input, see the provider input — three artifacts, distinctly inspectable. Not a
-cost argument.
-
-Both shapes deliver that, and they trade differently:
-
-- **One call returning the ladder.** A render pass is not free — it runs
-  `useData`, which for Ernesto is a live retrieval query — so three separate
-  calls means three retrievals or a cache to explain. Stage 3 already computed
-  stages 1 and 2 on its way, so returning all three costs what the deepest rung
-  costs.
-- **Separate calls.** The rungs FAIL independently: `prepareRequest` needs a
-  resolved target and adapter, so on a model-less session a single call either
-  throws or returns a half-populated object, while `compile()` still works and
-  `prepare()` can say why it cannot. They are also independently testable.
-
-**Do both, and it is not a compromise:** the three seams are already public
-methods on their harnesses, so the session exposing each rung costs a
-pass-through. `dryRun()` is then the ergonomic call that walks all three in one
-render — what a debug button wants — and the individual rungs stay available for
-when you want one, or when the later ones cannot run at all.
-
-```ts
-const preview = await session.dryRun();
-preview.tree; // RenderedTree
-preview.input; // LanguageModelInput — what the model would see
-preview.request; // provider-native — what goes on the wire
-preview.text(); // formatted, for a debug panel
-```
-
-**And it should return the SAME SHAPE the recorder already records.** `RoundTrip`
-is `{ scope, tree, compiled, request, rawChunks, deltas, message, persisted }` —
-the first four are exactly a dry run, and the rest are the response half. Make
-the preview type the request half of a trip and the debug button renders live
-previews and recorded history through one component, with one vocabulary for
-"what we sent" whether it is about to be sent or already was.
-
-**`dryRun` over `preview`.** Well-worn CS vocabulary that states the contract —
-no provider call, no persistence — where `preview` describes the intent of the
-caller rather than the behaviour of the method.
-
-**The honest caveat: a dry run is not side-effect free.** Rendering runs the tree,
-and the tree does real work — `useData` issues the RAG query, MCP servers may be
-consulted, lifecycle hooks fire. It sends nothing to the provider and writes no
-timeline entry, and that is the guarantee worth making; "no side effects at all"
-is not one we can honour without a render mode that stubs the bridges, which is a
-much larger idea.
-
-**Done when.** `session.dryRun()` returns the ladder without a provider call or a
-timeline write; the recorded-trip type and the preview type are the same type;
-and a test pins that calling it twice leaves the session's tick count unmoved.
-
-**Open.** Whether it takes a hypothetical input (`dryRun({ messages })` — "what
-would you send if I said this") or only previews current state. Both are useful;
-the hypothetical one has to build the timeline projection without appending, which
-is the interesting part.
+Still open, and the reason the history half of W33 stays: nothing retains trips,
+so this previews the CURRENT state only. "What did run #47 send" needs the sink,
+retention and redaction W33 describes.
 
 ---
 

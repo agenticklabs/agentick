@@ -198,6 +198,17 @@ export function defineSession<P = unknown>(spec: DefineSessionInput<P>): Session
 // CallbackSessionHarness
 // ============================================================================
 
+/** A callback session has no render pipeline to preview. */
+function unsupportedPreview(rung: string): SessionError {
+  return coerceSessionError(
+    new Error(
+      `${rung}() is unavailable on a callback session — it has no compiler or ` +
+        `executor to render through. Use a compiled session (createApp / ` +
+        `createSession) to preview what a tick would send.`,
+    ),
+  );
+}
+
 class CallbackSessionHarness<P = unknown>
   extends BaseHarness<"session">
   implements SessionHarnessProtocol<P>
@@ -286,6 +297,27 @@ class CallbackSessionHarness<P = unknown>
         cause: new Error("defineSession: abort() not configured"),
       }) satisfies SessionError,
     );
+  }
+
+  /**
+   * A callback session has no compiler and no executor — it IS the callback —
+   * so there is no tree to render and no request to prepare. Refusing loudly
+   * beats returning an empty preview a caller would read as "nothing rendered".
+   */
+  dryRun(): Promise<never> {
+    return Promise.reject(unsupportedPreview("dryRun"));
+  }
+
+  compile(): Promise<never> {
+    return Promise.reject(unsupportedPreview("compile"));
+  }
+
+  project(): Promise<never> {
+    return Promise.reject(unsupportedPreview("project"));
+  }
+
+  prepareRequest(): never {
+    throw unsupportedPreview("prepareRequest");
   }
 
   async snapshot(): Promise<SessionSnapshot> {

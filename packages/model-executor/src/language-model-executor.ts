@@ -345,7 +345,16 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   // adapter; these thin privates keep every pipeline call site stable.
   // ──────────────────────────────────────────────────────────────────
 
-  private prepareRequest(input: ExecuteInput<LanguageModelInput>): unknown {
+  /**
+   * The provider-native request, without sending it (protocol phase).
+   *
+   * Used internally by `generateBody` on its way to `send` / `openStream`, and
+   * exposed because it is the last artifact before bytes leave the process.
+   * Note that `generateBody` runs this value through the
+   * `model:provider-request` command afterwards, so a hook that rewrites the
+   * native request is NOT reflected here.
+   */
+  prepareRequest(input: ExecuteInput<LanguageModelInput>): unknown {
     return this.adapter.prepareRequest(input);
   }
 

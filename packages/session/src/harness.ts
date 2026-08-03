@@ -92,6 +92,8 @@ import type {
   TickResult,
   TimelineEntry,
   TokenKind,
+  LanguageModelInput,
+  RenderedTree,
   ToolExecutorProtocol,
   ToolsHandle,
   TreeInterceptionSource,
@@ -107,6 +109,7 @@ import {
   HandlerError,
   isChannelSnapshotProvider,
   isSnapshotCapable,
+  NoModelForExecutionError,
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   SessionClosedError,
@@ -203,6 +206,21 @@ export type CaptureSnapshotInput = Record<string, never>;
  * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md §Two-phase construction
  */
 export type { SessionSubstrateParent };
+
+/**
+ * What a dry run produced — the three artifacts a tick makes on its way to the
+ * provider. Deliberately the same shape as the request half of a recorded
+ * `RoundTrip`, so a debug surface renders a live preview and recorded history
+ * through one component.
+ */
+export interface SessionDryRun {
+  /** What the components produced, pre-dialect. */
+  readonly tree: RenderedTree;
+  /** What the MODEL sees — messages, tools, system, post-formatter. */
+  readonly input: LanguageModelInput;
+  /** What would go on the wire. Absent when the executor has no adapter. */
+  readonly request?: unknown;
+}
 
 export interface SessionHarnessOptions<P = unknown> {
   /** Stable session id. */
@@ -1424,6 +1442,83 @@ export class SessionHarness<P = unknown>
    */
   get model(): ModelSelectionHandle {
     return this.modelFacade;
+  }
+
+  /**
+   * Compile the current tree WITHOUT sending it — the three artifacts a tick
+   * produces on its way to the provider, for inspection.
+   *
+   * ```ts
+   * const { tree, input, request } = await session.dryRun();
+   * ```
+   *
+   * | rung      | artifact              | what it answers                        |
+   * | --------- | --------------------- | -------------------------------------- |
+   * | `tree`    | `RenderedTree`        | what the components produced (the IR)  |
+   * | `input`   | `LanguageModelInput`  | what the MODEL sees, post-formatter    |
+   * | `request` | provider-native       | what would go on the wire              |
+   *
+   * Nothing is sent, no timeline entry is written, and the tick counter does
+   * not move. It is NOT free of side effects, and pretending otherwise would
+   * mislead: rendering runs the tree, so `useData` fetches, suspense resolves,
+   * and any lifecycle hook on the render path fires. For a retrieval-backed
+   * agent that means a real query.
+   *
+   * `request` is `undefined` when the executor has no provider adapter behind
+   * it (a fake, a replay double) — see `ExecutorProtocol.prepareRequest`. It is
+   * also the request BEFORE `onBeforeModelProviderRequest` hooks run, so a hook
+   * that rewrites the native request is not reflected.
+   *
+   * The individual rungs are available separately ({@link compile},
+   * {@link project}, {@link prepareRequest}) for when a later one cannot run —
+   * `prepareRequest` needs a resolved model, `compile` does not.
+   */
+  async dryRun(): Promise<SessionDryRun> {
+    const tree = await this.compile();
+    const input = await this.project(tree);
+    const request = this.prepareRequest(input);
+    return omitUndefined({ tree, input, request }) as SessionDryRun;
+  }
+
+  /** Rung 1 — render the tree to IR. Needs no model. */
+  async compile(): Promise<RenderedTree> {
+    const { tree } = await this.compiler.renderTree({
+      mountId: this.mountId,
+      sessionId: this.id,
+      // Not a tick: this render is a read of current state, and saying so keeps
+      // it out of anything that counts ticks or fires tick lifecycle.
+      purpose: "free-root",
+    });
+    return tree;
+  }
+
+  /**
+   * Rung 2 — IR to the canonical input the model sees. Tools come from the
+   * same `compileForTick({ exposure: "model" })` the loop uses, so the
+   * projected tool list is the precedence-resolved one, not the compiler slice.
+   */
+  async project(tree?: RenderedTree): Promise<LanguageModelInput> {
+    const model = this.modelFacade.current;
+    if (!model) throw new NoModelForExecutionError();
+    const compiled = tree ?? (await this.compile());
+    const tools = await this.toolExecutor.compileForTick({ exposure: "model" });
+    return model.modelExecutor.project({
+      compiled,
+      target: model.target,
+      scope: { sessionId: this.id },
+      tools,
+    }) as Promise<LanguageModelInput>;
+  }
+
+  /**
+   * Rung 3 — the provider-native request. `undefined` when the executor
+   * exposes no `prepareRequest` (no adapter behind it).
+   */
+  prepareRequest(input: LanguageModelInput): unknown {
+    const model = this.modelFacade.current;
+    if (!model) throw new NoModelForExecutionError();
+    const executor = model.modelExecutor;
+    return executor.prepareRequest?.({ targetInput: input, target: model.target });
   }
 
   snapshot(): Promise<SessionSnapshot> {

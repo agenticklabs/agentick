@@ -243,6 +243,28 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         completeProgress?.();
       }
     },
+    // Compile what a tick WOULD send, without sending it. The whole prompt is
+    // in the response, which is why it is same-principal only — `findSession`
+    // resolves through the gateway's own ownership rules, the same as every
+    // other session verb.
+    //
+    // `request` (the provider-native rung) is dropped: it is adapter-shaped and
+    // not guaranteed JSON-clean, and a client that wants it should ask the
+    // server that holds the adapter. The two rungs a client can act on — the IR
+    // and the model input — cross intact.
+    "session/dry_run": async ({ sessionId }, ctx) => {
+      const sess = ctx.session ?? findSession(ctx, sessionId);
+      const { tree, input } = await sess.dryRun();
+      return { tree, input };
+    },
+    "session/compile": async ({ sessionId }, ctx) => {
+      const sess = ctx.session ?? findSession(ctx, sessionId);
+      return { tree: await sess.compile() };
+    },
+    "session/project": async ({ sessionId }, ctx) => {
+      const sess = ctx.session ?? findSession(ctx, sessionId);
+      return { input: await sess.project() };
+    },
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {
       const sess = ctx.session ?? findSession(ctx, sessionId);
       const content = await sess.tools.dispatch(tool, input as Record<string, unknown>);
