@@ -189,11 +189,12 @@ describe("textFormatter", () => {
 });
 
 describe("custom content blocks — the tag is the whole point", () => {
-  // `CustomContentBlock` declares `tag` and `attrs` as REQUIRED fields, and the
-  // xml formatter already honours a custom SEMANTIC NODE by emitting
-  // `<tag>…</tag>`. Its BLOCK case dropped both and returned bare `content`,
-  // so the one construct whose purpose is "render this under my own tag" lost
-  // its tag — inconsistent with the same formatter one switch over.
+  // `CustomContentBlock` declares `tag` and `attrs` as REQUIRED fields, so a
+  // formatter that drops them returns the one thing the block did not carry.
+  // EVERY dialect emits the tag now, including markdown: CommonMark specifies
+  // raw HTML blocks, so "markdown has no tag syntax" was never true — and this
+  // formatter already emits `<kbd>` and `<var>`. While markdown dropped it, the
+  // escape hatch was unreachable in the only dialect anyone renders.
   const block = {
     type: "custom" as const,
     tag: "memory-kind",
@@ -224,10 +225,52 @@ describe("custom content blocks — the tag is the whole point", () => {
     );
   });
 
-  it("markdown keeps dropping the tag — consistent with its semantic-node case", () => {
-    // NOT a bug: markdown's custom SEMANTIC node also returns bare child text,
-    // because markdown has no tag syntax. Pinned so the two stay aligned.
-    expect(mdText(block)).toBe("episodic recall");
+  it("markdown emits the custom tag too", () => {
+    expect(mdText(block)).toBe(
+      '<memory-kind kind="episodic" weight="0.8">episodic recall</memory-kind>',
+    );
+  });
+
+  it("markdown escapes the quote that would end an attribute, and nothing else", () => {
+    // Content is markdown and stays verbatim — escaping `<` there would break
+    // every other construct. The attribute value is the only escaping needed.
+    expect(mdText({ ...block, attrs: { note: 'a "quoted" & <raw>' } })).toBe(
+      '<memory-kind note="a &quot;quoted&quot; & <raw>">episodic recall</memory-kind>',
+    );
+  });
+
+  it("markdown honours selfClosing", () => {
+    expect(mdText({ ...block, content: "", selfClosing: true })).toBe(
+      '<memory-kind kind="episodic" weight="0.8" />',
+    );
+  });
+
+  // The SEMANTIC-NODE path — what a nested `<custom>` becomes, since only the
+  // outermost one is a block. It emitted `<tag>` but silently dropped `attrs`
+  // and `selfClosing`, the mirror image of the block-case bug: one fix made the
+  // block match the node on the TAG, and nobody noticed the node had never
+  // handled the rest. `renderAttrs` is now shared so they cannot drift again.
+  const node = {
+    semantic: "custom" as const,
+    props: { tag: "memory-kind", attrs: { kind: "episodic" } },
+    children: [{ text: "episodic recall" }],
+  };
+  // A semantic node reaches a formatter as a block carrying `semanticNode`, and
+  // only on the RENDER path — the formatter itself is callable; `blocksToText`
+  // is the separate collapse path that sees already-formatted blocks.
+  const rendered = (f: typeof xmlFormatter, n: unknown): string => {
+    const out = f([{ type: "text", text: "", semanticNode: n } as never]);
+    return out.map((b) => (b as { text?: string }).text ?? "").join("");
+  };
+  const xmlNode = (n: unknown) => rendered(xmlFormatter, n);
+  const mdNode = (n: unknown) => rendered(markdownFormatter, n);
+
+  it("xml carries attributes on a NESTED custom node, not just a block", () => {
+    expect(xmlNode(node)).toContain('<memory-kind kind="episodic">');
+  });
+
+  it("markdown carries them too", () => {
+    expect(mdNode(node)).toContain('<memory-kind kind="episodic">');
   });
 });
 

@@ -146,6 +146,28 @@ textFormatter(blocks);
 
 All three cover the full semantic-node vocabulary the compiler can emit, including tables, blockquotes, and the generic structural (`block`) and inline (`inline`) containers. `markdownFormatter` is the default.
 
+### `custom` — the same tag in every dialect
+
+```ts
+{ type: "custom", tag: "memory-kind", attrs: { kind: "episodic" }, content: "recall" }
+// every formatter → '<memory-kind kind="episodic">recall</memory-kind>'
+```
+
+A custom block's whole purpose is "render this under my own tag", so **no dialect
+drops it** — markdown included. Markdown used to, on the reasoning that it "has
+no tag syntax"; that was never true (CommonMark specifies raw HTML blocks, and
+this formatter already emits `<kbd>` and `<var>`), and while it held, the escape
+hatch was unreachable in the only dialect most trees render with.
+
+Attribute values are escaped in all dialects — a quote there would end the
+attribute. Content is escaped in XML and left **verbatim** in markdown, where
+escaping `<` would break every other construct.
+
+`selfClosing: true` emits `<tag … />`. Nested custom nodes carry their
+attributes too — the node and block paths share one `renderAttrs`, after a long
+run of the two disagreeing (one fix aligned them on the tag and left the node
+path silently dropping `attrs`).
+
 ## Choosing a formatter per subtree
 
 Selection is data. Every IR entry carries an optional `renderedWith: FormatterRef` — `{ id, format?, version? }` — and the compiler stamps it from the nearest formatter scope in the tree. [@agentick/compiler-react](../compiler-react) ships the scope providers:

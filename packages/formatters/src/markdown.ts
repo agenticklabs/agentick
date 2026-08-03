@@ -32,6 +32,17 @@ import { createFormatter } from "./create-formatter.js";
 // Semantic node walker
 // ============================================================================
 
+/**
+ * Attribute list for a custom tag. Only the value is escaped — a quote there
+ * would end the attribute; the surrounding markdown is left alone.
+ */
+function renderAttrs(attrs: unknown): string {
+  if (attrs === null || typeof attrs !== "object") return "";
+  return Object.entries(attrs as Record<string, unknown>)
+    .map(([k, v]) => ` ${k}="${String(v).replace(/"/g, "&quot;")}"`)
+    .join("");
+}
+
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
     return node.text;
@@ -133,8 +144,22 @@ function formatNode(node: SemanticNode): string {
       // Generic inline container (`<span>`). No wrapping; children
       // concatenate inline.
       return childText;
-    case "custom":
-      return childText;
+    case "custom": {
+      // The tag SURVIVES. A custom node's declared purpose is "render this
+      // under my own tag", and markdown is a superset of HTML — CommonMark
+      // specifies raw HTML blocks, and this formatter already emits `<kbd>`
+      // and `<var>` a few cases up. Dropping it left the escape hatch
+      // unreachable in the only dialect anyone renders.
+      //
+      // Content is NOT escaped: it is markdown, and escaping `<` would break
+      // every other construct. Attribute values are, since a quote there ends
+      // the tag.
+      const tag = String(node.props?.tag ?? "custom");
+      const attrs = renderAttrs(node.props?.attrs);
+      return node.props?.selfClosing === true
+        ? `<${tag}${attrs} />`
+        : `<${tag}${attrs}>${childText}</${tag}>`;
+    }
     default:
       return childText;
   }
@@ -228,8 +253,12 @@ function blockToText(block: ContentBlock): string {
     case "system_event":
     case "state_change":
       return block.text ?? "";
-    case "custom":
-      return block.content;
+    case "custom": {
+      const attrs = renderAttrs(block.attrs);
+      return block.selfClosing === true
+        ? `<${block.tag}${attrs} />`
+        : `<${block.tag}${attrs}>${block.content}</${block.tag}>`;
+    }
     default:
       return "";
   }

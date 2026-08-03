@@ -26,6 +26,18 @@ function escapeXml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Attribute list for a custom tag. Values are escaped because they sit in
+ * attribute position; shared by the node and block cases so the two cannot
+ * drift again.
+ */
+function renderAttrs(attrs: unknown): string {
+  if (attrs === null || typeof attrs !== "object") return "";
+  return Object.entries(attrs as Record<string, unknown>)
+    .map(([k, v]) => ` ${k}="${escapeXml(String(v))}"`)
+    .join("");
+}
+
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
     return escapeXml(node.text);
@@ -113,7 +125,10 @@ function formatNode(node: SemanticNode): string {
       return `<span>${childText}</span>`;
     case "custom": {
       const tag = String(node.props?.tag ?? "custom");
-      return `<${tag}>${childText}</${tag}>`;
+      const attrs = renderAttrs(node.props?.attrs);
+      return node.props?.selfClosing === true
+        ? `<${tag}${attrs} />`
+        : `<${tag}${attrs}>${childText}</${tag}>`;
     }
     default:
       return childText;
@@ -226,9 +241,7 @@ function blockToText(block: ContentBlock): string {
       // Attribute values are escaped (they sit in attribute position);
       // `content` is escaped too, matching the `text` block case — an adopter
       // who wants raw markup through has the `html` block for that.
-      const attrs = Object.entries(block.attrs ?? {})
-        .map(([k, v]) => ` ${k}="${escapeXml(String(v))}"`)
-        .join("");
+      const attrs = renderAttrs(block.attrs);
       return block.selfClosing === true
         ? `<${block.tag}${attrs} />`
         : `<${block.tag}${attrs}>${escapeXml(block.content)}</${block.tag}>`;

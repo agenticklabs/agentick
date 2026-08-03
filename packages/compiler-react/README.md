@@ -102,7 +102,20 @@ Providers differ in what they can carry: OpenAI receives a grounding message on 
 
 `<Section>` also takes `cache` (a prompt-cache breakpoint that stays a real boundary inside its message) and `id` (stable across recompiles, and what request-provenance names when a provider rejects the request).
 
-There is deliberately no prop for the XML tag. Markdown renders the title's words as a heading and XML renders the same words as a tag, so one section has one name in both dialects; a separate tag prop would let them diverge. When you need an exact tag, use a custom block — the XML formatter preserves its tag and attributes verbatim.
+There is deliberately no prop for the XML tag. Markdown renders the title's words as a heading and XML renders the same words as a tag, so one section has one name in both dialects; a separate tag prop would let them diverge. When you need an exact tag, use `<custom>`:
+
+```tsx
+<custom tag="retrieved-context">
+  <custom tag="about">System-produced. May be irrelevant.</custom>
+  <custom tag="result" attrs={{ rank: "1", title: doc.title }}>
+    {snippet}
+  </custom>
+</custom>
+```
+
+**Every dialect emits that tag, markdown included** — no `<XML>` wrapper required. `custom` is the escape hatch for "these exact bytes under this exact tag", and a dialect that dropped it would make the hatch unreachable. Markdown is a superset of HTML (CommonMark specifies raw HTML blocks), so the tag is valid there; the formatter already emits `<kbd>` and `<var>` on the same grounds.
+
+Attribute values are escaped in both dialects — a quote would end the attribute. Content is escaped in XML and left verbatim in markdown, where escaping `<` would break every other construct.
 
 Which dialect a section reads in is decided by the formatter in scope, at the same moment everything else is formatted:
 
