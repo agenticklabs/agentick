@@ -1,6 +1,6 @@
 {
   "name": "@agentick/gateway",
-  "version": "1.0.0-next.75",
+  "version": "1.0.0-next.76",
   "description": "GatewayHarness — v2 runtime-root harness (formerly @agentick/gateway/v2). Per ADR 31, hosts apps + owns top-level substrate.",
   "files": [
     "dist"
