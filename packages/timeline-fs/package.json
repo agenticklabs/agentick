@@ -1,6 +1,6 @@
 {
   "name": "@agentick/timeline-fs",
-  "version": "1.0.0-next.72",
+  "version": "1.0.0-next.73",
   "description": "fsTimelineStore — zero-dependency JSONL TimelineStore adapter (ADR 49). One append-only transcript file per session; human-greppable; the local-pole durable shape. Node built-ins only.",
   "keywords": [
     "agent",
