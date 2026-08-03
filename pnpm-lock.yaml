@@ -1344,9 +1344,6 @@ importers:
       '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
-      '@agentick/compiler-react':
-        specifier: workspace:*
-        version: link:../compiler-react
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
@@ -1402,6 +1399,9 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4
     devDependencies:
+      '@agentick/compiler-react':
+        specifier: workspace:*
+        version: link:../compiler-react
       '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
