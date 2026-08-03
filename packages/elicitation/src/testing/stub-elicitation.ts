@@ -13,6 +13,8 @@
  * the test site, not a silent runtime cast.
  */
 
+import { Effect } from "effect";
+
 import type {
   ElicitationHarnessProtocol,
   ElicitationRequest,
@@ -85,6 +87,20 @@ export function stubElicitation(options: StubElicitationOptions = {}): Elicitati
     address: `elicitation:${id}`,
     ready: Promise.resolve(),
     elicit: elicitImpl,
+    // Both faces resolve to the SAME canned body — a stub whose Effect twin
+    // could answer differently from its Promise face would be lying about the
+    // thing it stands in for.
+    elicitFx: <TSchema extends StandardSchemaV1>(
+      request: ElicitationRequest<TSchema> | UrlElicitationRequest,
+      opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+    ) =>
+      Effect.promise(() =>
+        elicitImpl(request as FormElicitationRequest<TSchema>, opts),
+      ) as Effect.Effect<
+        ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>,
+        unknown,
+        never
+      >,
     async respond(_response: ElicitationResponse): Promise<void> {
       // no-op — the stub doesn't track in-flight elicitations.
     },

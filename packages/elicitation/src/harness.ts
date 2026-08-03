@@ -238,6 +238,33 @@ export class ElicitationHarness
     request: ElicitationRequest,
     run: (request: ElicitationRequest) => Promise<R>,
   ): Promise<R> {
+    return runHarnessProtocol(this.elicitOpFx(request, run));
+  }
+
+  /**
+   * The un-run operation Effect behind {@link elicitOp} — the composable form.
+   *
+   * Why this is separate: `runHarnessProtocol` starts a ROOT fiber, which
+   * inherits no FiberRef, so the op's ambient `RuntimeContext` is EMPTY and
+   * `inheritScope` has nothing to merge. An elicit raised from a tool handler
+   * therefore landed with neither `executionId` nor `tickId` even though the
+   * `tool:command:dispatch` it came from carried both — measured in
+   * `session/__tests__/dispatch-scope-inheritance.spec.tsx`.
+   *
+   * The `scope: this.parentScope ?? {}` below is NOT the cause and was wrongly
+   * blamed at first: `inheritScope(ambient, own)` merges ambient UNDER own and
+   * drops undefined, so a construction-bound scope that declares no
+   * `executionId` / `tickId` never erases an inherited one. The empty ambient
+   * was the whole problem.
+   *
+   * Handing the caller the Effect lets them run it on a runtime captured
+   * IN-FIBER (`runHarnessProtocolOn`), which carries that fiber's FiberRefs —
+   * so the op nests under the dispatch instead of orphaning.
+   */
+  elicitOpFx<R>(
+    request: ElicitationRequest,
+    run: (request: ElicitationRequest) => Promise<R>,
+  ): Effect.Effect<R, unknown, never> {
     const op: Operation<ElicitationRequest, R> = {
       opId: `elicitation:elicit:${ulid()}`,
       surface: "elicitation",
@@ -245,18 +272,38 @@ export class ElicitationHarness
       scope: this.parentScope ?? {},
       input: request,
     };
-    return runHarnessProtocol(
-      this.runOperation(op, (req) =>
-        Effect.tryPromise({
-          // `elicitForm` / `elicitUrl` NEVER reject — every terminal
-          // (user-driven, transport, timeout, schema) lands on an
-          // `ElicitationResult`. The `catch` re-raises verbatim purely to
-          // preserve the pre-wrap async surface's contract (a bug that DID
-          // throw would have rejected `elicit()` before too).
-          try: () => run(req),
-          catch: (cause) => cause,
-        }),
-      ),
+    return this.runOperation(op, (req) =>
+      Effect.tryPromise({
+        // `elicitForm` / `elicitUrl` NEVER reject — every terminal
+        // (user-driven, transport, timeout, schema) lands on an
+        // `ElicitationResult`. The `catch` re-raises verbatim purely to
+        // preserve the pre-wrap async surface's contract (a bug that DID
+        // throw would have rejected `elicit()` before too).
+        try: () => run(req),
+        catch: (cause) => cause,
+      }),
+    );
+  }
+
+  /**
+   * Effect-canonical twin of {@link elicit} — the same operation, un-run.
+   * Compose it in-fiber, or run it on a captured runtime so the op inherits
+   * the caller's scope. See {@link elicitOpFx}.
+   */
+  elicitFx<TSchema extends StandardSchemaV1>(
+    request: ElicitationRequest<TSchema> | UrlElicitationRequest,
+    opts: { readonly timeoutMs?: number; readonly signal?: AbortSignal } = {},
+  ): Effect.Effect<
+    ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>,
+    unknown,
+    never
+  > {
+    return this.elicitOpFx<ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>>(
+      request as ElicitationRequest,
+      (req) => {
+        if (req.mode === "url") return this.elicitUrl(req, opts);
+        return this.elicitForm(req as FormElicitationRequest<TSchema>, opts);
+      },
     );
   }
 

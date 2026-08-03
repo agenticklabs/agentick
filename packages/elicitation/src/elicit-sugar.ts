@@ -18,6 +18,9 @@
  * @see ../docs/proposals/v2/blueprint/43-unified-tool-handler-ctx.md
  */
 
+import type { Runtime } from "effect";
+import { runHarnessProtocolOn } from "@agentick/runtime";
+
 import type {
   Elicit,
   ElicitFn,
@@ -264,6 +267,19 @@ function timeoutOptToMs(opt: ElicitTimeoutOption | undefined): number | undefine
 
 export interface BuildSessionElicitOptions {
   readonly harness: ElicitationHarnessProtocol;
+  /**
+   * A `Runtime` captured IN-FIBER by the caller (`yield* Effect.runtime()`
+   * inside its operation body). When present, the elicit operation runs on it
+   * rather than on a fresh root, so it inherits the caller's ambient
+   * `RuntimeContext` — `executionId`, `tickId`, the op trunk — and nests under
+   * the operation that raised it.
+   *
+   * Omit at a genuine edge (no enclosing operation); the elicit then runs as a
+   * root, which is what it always did. See
+   * `session/__tests__/dispatch-scope-inheritance.spec.tsx` for the measured
+   * difference.
+   */
+  readonly runtime?: Runtime.Runtime<never>;
 }
 
 /**
@@ -277,7 +293,14 @@ export interface BuildSessionElicitOptions {
  * routes straight to the live harness (direct-to-client on a tick).
  */
 export function buildSessionElicit(options: BuildSessionElicitOptions): Elicit {
-  const { harness } = options;
+  const { harness, runtime } = options;
+  if (runtime !== undefined) {
+    // Same operation, run on the caller's captured fiber runtime so it
+    // inherits their scope instead of orphaning as a root.
+    return buildElicitSugar((request, opts) =>
+      runHarnessProtocolOn(runtime, harness.elicitFx(request, opts)),
+    );
+  }
   return buildElicitSugar((request, opts) =>
     // Branch so overload resolution picks the form / url signature — the
     // union arg alone won't resolve an overloaded call.

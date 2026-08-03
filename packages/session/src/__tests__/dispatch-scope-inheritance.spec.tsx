@@ -6,38 +6,54 @@
  * work, and that work is attributable to the same dispatch, the same tick, the
  * same execution — or the journal cannot answer "what did this tool call do".
  *
- * It does not inherit any of it today. Measured:
+ * It inherited none of it. Measured before the fix:
  *
  *     tool:command:dispatch              exec=Y tick=Y   ← the parent
  *     elicitation:command:elicit         exec=- tick=-   ← its child: NEITHER
  *     session:channel:task-status        exec=- tick=-   ← NEITHER
  *
- * This is a DIFFERENT defect from the gates one (fixed in 934b8204), and worse.
- * Gates lost only `tickId`, because `GatesController` reached knobs through the
- * Promise facade while `executionId` was still ambient. Here the loss is total,
- * for two compounding structural reasons:
+ * Worse than the gates defect (fixed in 934b8204), which lost only `tickId`
+ * because `GatesController` reached knobs through the Promise facade while
+ * `executionId` was still ambient. Here the loss was total.
  *
- *   1. `ElicitationHarness.elicitOp` (`elicitation/src/harness.ts:238`) builds
- *      its `Operation` literal with `scope: this.parentScope ?? {}` — the
- *      CONSTRUCTION-BOUND scope. A per-session harness therefore stamps every
- *      elicit with the same scope no matter which execution or tick called it.
- *   2. It runs that op through `runHarnessProtocol`, which starts a root fiber
- *      that inherits no FiberRef — so there is no ambient scope to gap-fill
- *      from either.
+ * ## ONE cause, not two
  *
- * `HarnessEdge` does NOT fix this. These harnesses declare no commands
- * (`this.command(...)` count: elicitation 1 hand-built op, tasks 0), so there
- * is nothing for `BaseHarness.fxProxy()` to derive an `fx` twin from. The fix
- * is `runHarnessProtocolOn(capturedRuntime, …)` — the existing primitive whose
- * docblock names this exact symptom ("an orphaned root: no `parentOpId`, no
- * ambient `RuntimeContext`") — with the runtime captured in-fiber during
- * dispatch, the way `ctx.run` already does it. See task #7.
+ * The first diagnosis blamed two things and was half wrong. The op literal in
+ * `ElicitationHarness.elicitOpFx` carries `scope: this.parentScope ?? {}` — a
+ * CONSTRUCTION-bound scope — which looks like it would pin every elicit to the
+ * same coordinates. It does not: `inheritScope(ambient, own)`
+ * (`runtime/src/substrate/operation-runner.ts:649`) merges ambient UNDER own
+ * and drops undefined values, so a declared scope that names no `executionId` /
+ * `tickId` never erases an inherited one.
  *
- * The first test below is the ARRANGE, asserted separately and expected to
- * PASS: the handler runs and the elicit op actually fires. The second is the
- * invariant, marked `it.fails` so it self-clears the moment the fix lands —
- * splitting them is deliberate, so a broken arrange can never make the marker
- * "pass" for the wrong reason.
+ * The whole cause was that there was nothing to inherit. `elicit()` resolves
+ * through `runHarnessProtocol`, which starts a ROOT fiber inheriting no
+ * FiberRef, so the ambient `RuntimeContext` was empty.
+ *
+ * ## The fix
+ *
+ * `ToolExecutorHarness.dispatchBody` already captures its fiber runtime
+ * in-fiber (`yield* Effect.runtime()`) for the trace and ops facets. `ctx.elicit`
+ * is now a third consumer of that ONE capture: `buildSessionElicit({ harness,
+ * runtime })` runs `harness.elicitFx(...)` via `runHarnessProtocolOn`, so the
+ * op executes on a runtime carrying the dispatch's FiberRefs and nests under it.
+ *
+ * `HarnessEdge` (#9) does NOT apply — elicitation declares no commands, so
+ * `fxProxy()` has nothing to derive from and `elicitFx` is hand-written. But
+ * the LAW is the same one: a protocol that publishes only the Promise face
+ * structurally forces in-process callers onto a severing root.
+ *
+ * ## Still unfixed
+ *
+ * `ctx.elicitation` (the RAW harness escape hatch, beside the `ctx.elicit`
+ * sugar) is still handed over unbound, so an elicit raised through it still
+ * orphans. Same for `session:channel:task-status`, which is a channel delta
+ * rather than an operation — see task #7 for both.
+ *
+ * The first test is the ARRANGE, asserted separately: the handler runs, the
+ * dispatch carries the scope, and the elicit op actually fires. Keeping it
+ * separate is deliberate — it is what stops the invariant below from passing
+ * vacuously when the setup breaks.
  */
 
 import React from "react";
@@ -214,9 +230,8 @@ describe("a child operation inherits its causing operation's scope", () => {
     ).toBe("ok");
   });
 
-  // KNOWN GAP — task #7. Delete the `.fails` when the fix lands; this
-  // self-clears by failing once the child inherits the dispatch scope.
-  it.fails("elicitation's op inherits the dispatching tick + execution", async () => {
+  // Was a `.fails` marker; the fix landed and it self-cleared.
+  it("elicitation's op inherits the dispatching tick + execution", async () => {
     const { seen } = await runWithElicitingTool();
     const elicit = seen.find((e) => e.name === "elicitation:command:elicit");
 

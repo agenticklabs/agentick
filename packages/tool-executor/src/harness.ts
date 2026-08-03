@@ -814,8 +814,10 @@ export class ToolExecutorHarness
       // Capture the operation runtime IN-FIBER (inside the dispatch op body,
       // so it carries the op span + the ambient RuntimeContext.opId). Shared
       // by the Observability facet's `trace` (child spans nest under the op
-      // span, ADR-77) and the Ops facet's `run`/`runner` (ad-hoc ops parent +
-      // auto-link under this dispatch). One capture, both facets.
+      // span, ADR-77), the Ops facet's `run`/`runner` (ad-hoc ops parent +
+      // auto-link under this dispatch), and `ctx.elicit`, whose operation runs
+      // ON this runtime so it inherits the dispatch's executionId / tickId
+      // instead of orphaning as a root. One capture, three consumers.
       const capturedRuntime = yield* Effect.runtime<never>();
       // Observability facet (ADR 64/78). `log` keeps its existing scope-bound
       // bus-emit behavior (fire-and-forget); `trace`/`metrics` come from the
@@ -896,7 +898,12 @@ export class ToolExecutorHarness
           // protocol. Same `Elicit` interface as the MCP-server side
           // (built by `buildMcpElicit`), so tool handlers calling
           // `ctx.elicit.text(...)` work identically across transports.
-          elicit: buildSessionElicit({ harness: this.elicitation }),
+          // Bound to THIS dispatch's fiber runtime, so the elicit operation
+          // nests under `tool:command:dispatch` and inherits its
+          // `executionId` / `tickId`. Unbound, it ran as a root with an empty
+          // ambient context and landed with neither — measured in
+          // `session/__tests__/dispatch-scope-inheritance.spec.tsx`.
+          elicit: buildSessionElicit({ harness: this.elicitation, runtime: capturedRuntime }),
           ...omitUndefined({ tasks: this.tasks }),
           // ADR 62 — the session's read-projection seam. Handlers resolve
           // readable content by URI (`ctx.resource.read(uri)`); the

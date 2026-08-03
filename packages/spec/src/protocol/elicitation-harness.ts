@@ -60,6 +60,8 @@
  * @see https://modelcontextprotocol.io/specification/draft/client/elicitation
  */
 
+import type { Effect } from "effect";
+
 import type { StandardSchemaV1 } from "../data/standard-schema.js";
 
 // ============================================================================
@@ -372,6 +374,35 @@ export interface ElicitationHarnessProtocol {
     request: UrlElicitationRequest,
     opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
   ): Promise<ElicitationResult<undefined>>;
+
+  /**
+   * Effect-canonical twin of {@link elicit} — the same operation, un-run.
+   *
+   * Published because a caller that is ALREADY inside an operation must be
+   * able to keep the elicit under it. `elicit()` resolves through
+   * `runHarnessProtocol`, which starts a root fiber inheriting no FiberRef, so
+   * the op's ambient `RuntimeContext` is empty and `inheritScope` has nothing
+   * to merge: an elicit raised from a tool handler landed with neither
+   * `executionId` nor `tickId` while the `tool:command:dispatch` that caused it
+   * carried both. Handing out the un-run Effect lets the caller run it on a
+   * runtime captured in-fiber (`runHarnessProtocolOn`) so the op nests instead
+   * of orphaning.
+   *
+   * A protocol that publishes only the Promise face structurally forces every
+   * in-process caller onto a severing root — the same defect `HarnessEdge`
+   * exists to prevent for command-shaped harnesses. This harness declares no
+   * commands (it hand-builds its Operation), so the twin is hand-written.
+   *
+   * @see packages/session/src/__tests__/dispatch-scope-inheritance.spec.tsx
+   */
+  elicitFx<TSchema extends StandardSchemaV1>(
+    request: ElicitationRequest<TSchema> | UrlElicitationRequest,
+    opts?: { readonly timeoutMs?: number; readonly signal?: AbortSignal },
+  ): Effect.Effect<
+    ElicitationResult<InferOutput<TSchema>> | ElicitationResult<undefined>,
+    unknown,
+    never
+  >;
 
   /**
    * Typed convenience for delivering a client's response to a pending
