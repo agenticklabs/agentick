@@ -1,6 +1,6 @@
 {
   "name": "@agentick/session",
-  "version": "1.0.0-next.63",
+  "version": "1.0.0-next.65",
   "description": "Reference session harness for Agentick v2. Integration site that wires JSX agent + compiler + loop executor into the user-facing `session.send({ messages })` surface.",
   "keywords": [
     "agent",
@@ -66,7 +66,6 @@
   },
   "dependencies": {
     "@agentick/compiler": "workspace:*",
-    "@agentick/compiler-react": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/gates": "workspace:*",
     "@agentick/knobs": "workspace:*",
@@ -87,6 +86,7 @@
     "react": "^19.2.4"
   },
   "devDependencies": {
+    "@agentick/compiler-react": "workspace:*",
     "@agentick/skills": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
     "@agentick/timeline-fs": "workspace:*",
@@ -96,7 +96,13 @@
     "pg": "^8.13.1"
   },
   "peerDependencies": {
+    "@agentick/compiler-react": "workspace:*",
     "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@agentick/compiler-react": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=20.19"
