@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cluster-redis",
-  "version": "1.0.0-next.77",
+  "version": "1.0.0-next.78",
   "description": "Redis cluster transport for Agentick v2. The production multi-host story — adopters reach for Redis (or Valkey / KeyDB / Dragonfly, RESP-protocol-compatible) for clustering instead of running our own broker process. Pub/sub for the event bus + inbox; SET + TTL heartbeats for membership. No leader election; no broker to deploy — adopters use the Redis HA they already have (Sentinel / Cluster). Built directly against `ioredis`; symmetric across all nodes (no broker/client role distinction).",
   "keywords": [
     "agentick",
