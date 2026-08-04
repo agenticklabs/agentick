@@ -334,6 +334,15 @@ describe("google() adapter — thoughtSignature round-trip (G18-G)", () => {
               },
             ],
           },
+          // The result is here because `repairToolSpans` prunes a call nothing
+          // answers — a half-open span is a 400, so a fixture carrying one is not
+          // testing anything the provider would have accepted.
+          {
+            kind: "message",
+            id: "m3",
+            role: "tool",
+            content: [{ type: "tool_result", toolUseId: "call_xyz", name: "calc", content: [] }],
+          },
         ],
       },
     };

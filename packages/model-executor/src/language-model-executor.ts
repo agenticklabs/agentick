@@ -79,6 +79,8 @@ import {
 import {
   applyMediaSupport,
   type PartDeclined,
+  repairToolSpans,
+  type DanglingToolPart,
   composeTransforms,
   customBlockTransform,
   defaultFinalizeStream,
@@ -468,6 +470,28 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   }
 
   /**
+   * Prune tool parts whose other end is absent — see `repairToolSpans`.
+   *
+   * Same placement argument as {@link screenMedia}, and it runs AFTER it so the
+   * invariant holds on the message list that actually goes out. The media screen
+   * cannot break a span today (it governs media part types only), which is
+   * exactly why the order should not depend on that staying true.
+   */
+  private repairSpans(input: ExecuteInput<LanguageModelInput>): {
+    readonly input: ExecuteInput<LanguageModelInput>;
+    readonly pruned: readonly DanglingToolPart[];
+  } {
+    const { messages, pruned } = repairToolSpans(input.targetInput.messages);
+    return {
+      input:
+        messages === input.targetInput.messages
+          ? input
+          : { ...input, targetInput: { ...input.targetInput, messages } },
+      pruned,
+    };
+  }
+
+  /**
    * Provider-internal `DeltaTransform`s applied to chunk-mapped deltas
    * BEFORE the customBlocks pipeline. Use this for provider-shape
    * cleanup (e.g. `thinkTagTransform()` for OpenAI-compatible servers
@@ -848,7 +872,27 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
           );
         }
       }
-      const request = this.prepareRequest(screened.input);
+      // Spans last: this is the invariant that must hold on the messages actually
+      // sent. Unlike a declined attachment it is never a judgement call — the
+      // request was going to be REFUSED — so a prune here means something
+      // upstream cut between a call and its result, and the position names it.
+      const spans = this.repairSpans(screened.input);
+      for (const part of spans.pruned) {
+        const opCtx = yield* this.currentOperationCtx();
+        opCtx.log.warning(
+          {
+            event: "model.tool_span.pruned",
+            provider: this.adapter.provider,
+            modelId: input.target.modelId,
+            messageIndex: part.messageIndex,
+            partIndex: part.partIndex,
+            danglingEnd: part.end,
+            toolUseId: part.toolUseId,
+          },
+          "model",
+        );
+      }
+      const request = this.prepareRequest(spans.input);
       // (3) Invoke the nested provider-request command in-fiber. Its OWN sink
       // (raw TChunk) is a no-op here — the raw chunk hook wraps it; the
       // AdapterDelta flow rides `call.deltaSink`/the bus inside the body. The

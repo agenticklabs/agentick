@@ -24,6 +24,7 @@ import type {
   ContentBlock,
   TimelineEntry,
 } from "@agentick/spec";
+import { toolSpanEnd } from "@agentick/spec";
 import { omitUndefined, ulid } from "@agentick/utils";
 
 export interface FromHandlerOptions {
@@ -138,21 +139,85 @@ const isUserTurn = (e: TimelineEntry): boolean =>
   e.message.role === "user" &&
   !e.message.content.some((b) => b.type === "tool_result");
 
+const contentOf = (e: TimelineEntry): readonly ContentBlock[] =>
+  e.kind === "message" ? e.message.content : [];
+
 /**
- * The turn start NEAREST `index` — the cut that keeps closest to `keepVerbatim`
- * entries while still landing on a turn boundary.
+ * Indices INTERIOR to an open tool span — the positions where the model has
+ * asked and not yet heard back.
  *
- * A turn BEGINS with a user message, so cutting anywhere else keeps a fragment:
- * an assistant reply with no visible prompt, or — one entry further — a
- * `tool_result` whose `tool_use` was folded away, which Anthropic and Google
- * both reject outright.
+ * A cut at `i` folds `[0, i)` into a summary and keeps `[i, …)` verbatim, so it
+ * lands inside span `x` exactly when `open(x) < i <= close(x)`. Cutting there
+ * summarises the call and keeps the result, which Anthropic and Google both
+ * reject outright.
  *
- * Nearest, not the previous one. Searching backward alone makes ONE long turn
- * defeat compaction: a tail of tool calls has no boundary inside it, so the walk
- * runs to the front, keeps nearly everything, and leaves the fold with only the
- * old summary to chew on. Looking both ways costs a second scan and bounds the
- * error at "the closest legal cut" instead of "however far back the last human
- * sentence happens to be".
+ * A span missing an end is skipped — a timeline that arrived already broken must
+ * not be uncompactable forever. Stored as the interior rather than its
+ * complement because the interior is tiny (spans are normally one entry long)
+ * while the complement is the whole conversation.
+ */
+function insideOpenSpan(entries: readonly TimelineEntry[]): ReadonlySet<number> {
+  const openedAt = new Map<string, number>();
+  const closedAt = new Map<string, number>();
+  for (const [i, entry] of entries.entries()) {
+    for (const block of contentOf(entry)) {
+      const span = toolSpanEnd(block);
+      if (span === undefined) continue;
+      const at = span.end === "open" ? openedAt : closedAt;
+      if (!at.has(span.toolUseId)) at.set(span.toolUseId, i);
+    }
+  }
+  const interior = new Set<number>();
+  for (const [id, open] of openedAt) {
+    const close = closedAt.get(id);
+    if (close === undefined) continue;
+    for (let i = open + 1; i <= close; i++) interior.add(i);
+  }
+  return interior;
+}
+
+/** The index nearest `target` satisfying `ok`, or -1. A tie goes forward — it folds more. */
+function nearest(
+  entries: readonly TimelineEntry[],
+  target: number,
+  ok: (index: number) => boolean,
+): number {
+  let back = -1;
+  for (let i = target; i > 0; i--) {
+    if (ok(i)) {
+      back = i;
+      break;
+    }
+  }
+  let forward = -1;
+  for (let i = target + 1; i < entries.length; i++) {
+    if (ok(i)) {
+      forward = i;
+      break;
+    }
+  }
+  if (back < 0) return forward;
+  if (forward < 0) return back;
+  return target - back < forward - target ? back : forward;
+}
+
+/**
+ * Where to cut so the fold keeps close to `keepVerbatim` entries.
+ *
+ * Two rules, and the older version of this function conflated them because a
+ * user-turn start happens to satisfy both:
+ *
+ *   - **Legality.** A cut must not separate a call from its result. Not
+ *     negotiable — the request is refused.
+ *   - **Coherence.** A turn BEGINS with a user message, so cutting elsewhere
+ *     keeps a fragment: an assistant reply with no visible prompt.
+ *
+ * Coherence is a preference, and treating it as a constraint is what let ONE
+ * long turn defeat compaction: an agentic tail of tool calls contains no user
+ * turn, so the search found nothing in either direction, returned 0, and the
+ * fold ran on nothing at all. So a turn start is preferred, and when none is
+ * reachable the cut falls back to the nearest legal index — a worse-looking
+ * window beats a conversation that can never be compacted.
  *
  * `keepVerbatim` is a target, not a guarantee — the boundary decides.
  */
@@ -161,25 +226,13 @@ function nearestTurnStart(entries: readonly TimelineEntry[], index: number): num
   // nothing older to fold. Searching forward from here would cut INTO the tail.
   if (index <= 0) return 0;
   const target = Math.min(index, entries.length - 1);
-  let back = -1;
-  for (let i = target; i > 0; i--) {
-    if (isUserTurn(entries[i]!)) {
-      back = i;
-      break;
-    }
-  }
-  let forward = -1;
-  for (let i = target + 1; i < entries.length; i++) {
-    if (isUserTurn(entries[i]!)) {
-      forward = i;
-      break;
-    }
-  }
-  if (back < 0) return forward < 0 ? 0 : forward;
-  if (forward < 0) return back;
-  // A tie goes forward: both cuts are legal, and the one that folds more is the
-  // one that does what was asked.
-  return target - back < forward - target ? back : forward;
+  const midSpan = insideOpenSpan(entries);
+  const settled = (i: number): boolean => !midSpan.has(i);
+
+  const turn = nearest(entries, target, (i) => isUserTurn(entries[i]!) && settled(i));
+  if (turn >= 0) return turn;
+  const nearestSettled = nearest(entries, target, settled);
+  return nearestSettled < 0 ? 0 : nearestSettled;
 }
 
 /**

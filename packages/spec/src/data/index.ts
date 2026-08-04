@@ -34,6 +34,7 @@ export * from "./journaling-policy.js";
 export * from "./standard-schema.js";
 
 export * from "./content-blocks.js";
+export * from "./tool-span.js";
 export * from "./signals.js";
 export * from "./observability.js";
 export * from "./ops.js";

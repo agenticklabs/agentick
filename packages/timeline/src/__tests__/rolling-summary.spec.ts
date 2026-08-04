@@ -524,13 +524,21 @@ describe("the fold cuts on a turn boundary", () => {
     expect(roleOf(out[1]!)).toBe("user");
   });
 
-  it("keeps everything rather than emit a fragment when no turn start precedes", async () => {
+  it("falls back to the nearest legal cut when no turn start is reachable", async () => {
+    // The shape of an agent run: one request, then a tail of tool calls with no
+    // further human turn. Preferring a turn start is right; REQUIRING one meant
+    // this conversation could never be compacted at all, which is how a long run
+    // grows until the window overflows. A fragment is also less bad than the old
+    // docblock implies — the fold puts a summary immediately before the tail, so
+    // the kept window is never actually unprefaced.
     const noUserTurn = turns(1).slice(1); // starts at the assistant's tool_use
     const out = await rollingSummary({ keepVerbatim: 1 }).run({
       ...ctx(),
       entries: noUserTurn,
       generate: stubGenerate(),
     });
-    expect(out).toBe(noUserTurn);
+    expect(out).not.toBe(noUserTurn);
+    // The pair went into the fold together — the cut landed after the result.
+    expect(out.slice(1).map(firstBlock)).not.toContain("tool_result");
   });
 });

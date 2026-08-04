@@ -255,6 +255,15 @@ describe("anthropic() adapter — tool-use round-trip", () => {
       specVersion: "2026-05-08",
       context: {
         entries: [
+          // The call is here because `repairToolSpans` prunes a result whose
+          // call is absent — a half-open span is a 400, so a fixture carrying
+          // one is not testing anything the provider would have accepted.
+          {
+            kind: "message",
+            id: "m0",
+            role: "assistant",
+            content: [{ type: "tool_use", toolUseId: "call_x", name: "noop", input: {} }],
+          },
           {
             kind: "message",
             id: "m1",
@@ -273,11 +282,14 @@ describe("anthropic() adapter — tool-use round-trip", () => {
     };
     await exec.run({ compiled: tree, target: mkTarget(), tools: [] });
     const sent = stub.calls[0]!.params.messages;
-    const content = sent[0]!.content as Array<{
-      type: string;
-      content?: Array<{ type: string; text?: string }>;
-    }>;
-    const tr = content.find((b) => b.type === "tool_result");
+    const blocks = sent.flatMap(
+      (m) =>
+        m.content as Array<{
+          type: string;
+          content?: Array<{ type: string; text?: string }>;
+        }>,
+    );
+    const tr = blocks.find((b) => b.type === "tool_result");
     expect(tr?.content?.[0]).toMatchObject({ type: "text", text: "Done" });
   });
 });

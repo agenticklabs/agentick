@@ -14,6 +14,7 @@
  */
 
 import type { ContentBlock, TimelineEntry } from "@agentick/spec";
+import { danglingToolIds, isDangling, isIntact, toolSpanEnd } from "@agentick/spec";
 
 // ============================================================================
 // Types
@@ -202,6 +203,46 @@ function slidingWindowStrategy(
   return { kept, evicted };
 }
 
+/**
+ * Evict the entries left holding one end of a broken span — a `tool_result`
+ * whose `tool_use` the strategy dropped, or the reverse.
+ *
+ * Eviction cannot do what the fold does and simply choose a different cut:
+ * `maxTokens` is a ceiling and every entry either fits or does not. So the
+ * partner goes too, which is also the only repair that returns its tokens to the
+ * budget rather than charging them to a message no longer being sent.
+ *
+ * Neither built-in strategy produces a contiguous window — both scan newest-first
+ * and keep whatever individually fits, so a fat assistant turn carrying a
+ * `tool_use` is evicted while the small `tool` message after it fits and is kept.
+ * A custom `CompactionFunction` can break a span any way it likes. So the rule
+ * lives at the entry point, the only place that sees every strategy's answer.
+ */
+function evictDanglingHalves(
+  entries: readonly MessageTimelineEntry[],
+  result: CompactionResult,
+): CompactionResult {
+  const dangling = danglingToolIds(result.kept.map((e) => e.message.content));
+  if (isIntact(dangling)) return result;
+
+  const isDangler = (entry: MessageTimelineEntry): boolean =>
+    entry.message.content.some((block) => {
+      const span = toolSpanEnd(block);
+      return span !== undefined && isDangling(span, dangling);
+    });
+
+  // `evicted` reaches adopters through `onEvict`, so it stays chronological
+  // rather than growing a tail of late additions.
+  const position = new Map(entries.map((entry, i) => [entry, i]));
+  const at = (entry: MessageTimelineEntry): number =>
+    position.get(entry) ?? Number.MAX_SAFE_INTEGER;
+
+  return {
+    kept: result.kept.filter((entry) => !isDangler(entry)),
+    evicted: [...result.evicted, ...result.kept.filter(isDangler)].sort((a, b) => at(a) - at(b)),
+  };
+}
+
 // ============================================================================
 // Entry point
 // ============================================================================
@@ -244,7 +285,8 @@ export function compactEntries(
     result = slidingWindowStrategy(entries, effectiveBudget, preserveRoles);
   }
 
+  const intact = evictDanglingHalves(entries, result);
   let keptTokens = 0;
-  for (const e of result.kept) keptTokens += getEntryTokens(e);
-  return { kept: result.kept, evicted: result.evicted, currentTokens: keptTokens };
+  for (const e of intact.kept) keptTokens += getEntryTokens(e);
+  return { kept: intact.kept, evicted: intact.evicted, currentTokens: keptTokens };
 }
