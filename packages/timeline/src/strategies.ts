@@ -317,10 +317,23 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
       entries: fold,
       instructions: joinInstructions(standing, instructions, questionsInstruction),
       ...omitUndefined({ maxOutputTokens: budget }),
+      // The message says what is being folded, which is the one thing a bar
+      // cannot: 8% of 8192 tokens means nothing, "folding 274 entries" is the
+      // work. Derived from the fold, so it cannot drift from what ran.
       onDelta: progress
-        ? ({ outputTokens }) => progress({ progress: outputTokens, total: budget })
+        ? ({ outputTokens }) =>
+            progress({
+              progress: outputTokens,
+              total: budget,
+              message: `Folding ${fold.length} ${fold.length === 1 ? "entry" : "entries"}`,
+            })
         : undefined,
     });
+
+    // Whatever happened next, the fold is over — said on the way out rather than
+    // at each return below, so no exit can forget it and leave an indicator
+    // spinning forever.
+    progress?.({ progress: budget, total: budget, done: true });
 
     // A truncated summary is cut mid-thought, and folding it would make the
     // model's own damaged notes the exemplar it reads next tick. Leaving the

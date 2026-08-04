@@ -306,6 +306,20 @@ Set `questions: false` to skip it. It defaults on because the moment does not co
 
 Nothing here is predicted: `total` is the cap you set, which is the only reason a compaction can show a real percentage at all. Omit the cap and frames carry no `total` — an indeterminate spinner, correctly.
 
+Each frame also carries a `message` — `"Folding 274 entries"` — because a token count alone says nothing a user can act on. It is derived from the fold, so it cannot drift from what actually ran.
+
+The last frame carries `done: true`, whatever the outcome — including the truncation case that leaves the timeline untouched. A subscriber that outlives one call has no promise to await and no other way to learn the work ended, and `progress === total` cannot stand in for it: indeterminate work has no total, and a capped call that stops early never reaches one.
+
+Subscribe on the client with the SURFACE named, or a tool calling `ctx.progress` will drive the same bar:
+
+```ts
+const stop = session.onProgress(
+  ({ progress, total, message, done }) =>
+    bar.set(done ? undefined : { message, value: total ? progress / total : null }),
+  { surface: "timeline" },
+);
+```
+
 #### Numbers that are functions
 
 `maxOutputTokens` and `threshold` each take a number **or** a function of the facts at hand:
