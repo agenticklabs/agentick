@@ -104,16 +104,17 @@ it.
 
 ### 4. What a degraded block becomes
 
-A `role: "event"` message carrying a `<system_event>` block. Never `role:
-"user"` — re-attributing the assistant's own tool call to the user corrupts
-in-context learning, and the model reads its own turns as exemplars. Never
+An event-role message carrying a `<system_event>` block. Never the user role —
+re-attributing the assistant's own tool call to the user corrupts in-context
+learning, and the model reads its own turns as exemplars. Never
 hand-written prose — `event` collapses to `user` at the wire, and the
 _structure_ is what keeps it distinguishable from speech. That is the argument
 ADR 94 already made for `<Grounding>`, applied to a second kind of non-speech
 content.
 
-Every degraded entry carries `metadata.degradedFrom = { messageId, provenance,
-reason }` — the id and the provenance, **never the original content**. A pointer
+Every degraded entry carries `metadata.degradedFrom` — `messageId`,
+`provenance`, `reason`. The id and the provenance, **never the original
+content**. A pointer
 records; a copy doubles the memory for every degraded turn and puts the original
 one careless renderer away from the prompt. It makes the transform auditable,
 gives hooks and adapters something to key on, and is the honest statement that
