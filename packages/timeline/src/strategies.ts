@@ -139,20 +139,63 @@ const isUserTurn = (e: TimelineEntry): boolean =>
   !e.message.content.some((b) => b.type === "tool_result");
 
 /**
- * Walk back from `index` to where a turn starts. A turn BEGINS with a user
- * message, so cutting anywhere else keeps a fragment: an assistant reply with no
- * visible prompt, or — one entry further — a `tool_result` whose `tool_use` was
- * folded away, which Anthropic and Google both reject outright.
+ * The turn start NEAREST `index` — the cut that keeps closest to `keepVerbatim`
+ * entries while still landing on a turn boundary.
  *
- * `keepVerbatim` is therefore a floor, not a count: at least that many entries
- * survive, rounded out to whole turns. Returns 0 when nothing before `index` is
- * a user message — keeping everything beats emitting a fragment.
+ * A turn BEGINS with a user message, so cutting anywhere else keeps a fragment:
+ * an assistant reply with no visible prompt, or — one entry further — a
+ * `tool_result` whose `tool_use` was folded away, which Anthropic and Google
+ * both reject outright.
+ *
+ * Nearest, not the previous one. Searching backward alone makes ONE long turn
+ * defeat compaction: a tail of tool calls has no boundary inside it, so the walk
+ * runs to the front, keeps nearly everything, and leaves the fold with only the
+ * old summary to chew on. Looking both ways costs a second scan and bounds the
+ * error at "the closest legal cut" instead of "however far back the last human
+ * sentence happens to be".
+ *
+ * `keepVerbatim` is a target, not a guarantee — the boundary decides.
  */
-function turnStartAtOrBefore(entries: readonly TimelineEntry[], index: number): number {
-  for (let i = Math.min(index, entries.length - 1); i > 0; i--) {
-    if (isUserTurn(entries[i]!)) return i;
+function nearestTurnStart(entries: readonly TimelineEntry[], index: number): number {
+  // Fewer entries than the tail asked for — the target clamps to 0 and there is
+  // nothing older to fold. Searching forward from here would cut INTO the tail.
+  if (index <= 0) return 0;
+  const target = Math.min(index, entries.length - 1);
+  let back = -1;
+  for (let i = target; i > 0; i--) {
+    if (isUserTurn(entries[i]!)) {
+      back = i;
+      break;
+    }
   }
-  return 0;
+  let forward = -1;
+  for (let i = target + 1; i < entries.length; i++) {
+    if (isUserTurn(entries[i]!)) {
+      forward = i;
+      break;
+    }
+  }
+  if (back < 0) return forward < 0 ? 0 : forward;
+  if (forward < 0) return back;
+  // A tie goes forward: both cuts are legal, and the one that folds more is the
+  // one that does what was asked.
+  return target - back < forward - target ? back : forward;
+}
+
+/**
+ * The id range a fold covers, skipping entries that carry no id.
+ *
+ * A `boundary` entry has none, and one sitting at either edge of the fold used
+ * to make `coversThrough` undefined — which silently breaks the rebuild, because
+ * `projectLog` needs both ends to know what a summary stands in for. A
+ * materialized view whose range does not resolve is not a materialized view.
+ */
+function coveredRange(fold: readonly TimelineEntry[]): {
+  readonly coversFrom?: string;
+  readonly coversThrough?: string;
+} {
+  const ids = fold.map(entryId).filter((id): id is string => id !== undefined);
+  return omitUndefined({ coversFrom: ids[0], coversThrough: ids[ids.length - 1] });
 }
 
 /** Summaries sit at the front — they are the oldest material. A fold is a prefix. */
@@ -256,13 +299,18 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
         "rollingSummary needs a model: nothing bound `generate` on the compaction context.",
       );
     }
-    const cut = turnStartAtOrBefore(entries, Math.max(0, entries.length - keepVerbatim));
+    const cut = nearestTurnStart(entries, Math.max(0, entries.length - keepVerbatim));
     const older = entries.slice(0, cut);
     const keep = entries.slice(cut);
     const foldFrom = summariesIn(older).length >= keepSummaries ? 0 : afterLastSummary(older);
     const survivors = older.slice(0, foldFrom);
     const fold = older.slice(foldFrom);
     if (fold.length === 0) return entries;
+    // Nothing but summaries to fold means nothing NEW to compress. Running
+    // anyway costs a model call to turn a summary into a worse summary — the
+    // second pass cannot tell which ids and figures still matter — and reports
+    // success while the context is exactly the size it was.
+    if (fold.every(isSummary)) return entries;
 
     const budget = resolve(options.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, { entries: fold });
     const result = await generate({
@@ -325,10 +373,7 @@ function summaryEntry(
             // records when it was written, which is not what it covers — without
             // this, rebuilding the projection needs state the log does not hold,
             // and a materialized view that needs outside state is not one.
-            ...omitUndefined({
-              coversFrom: entryId(fold[0]),
-              coversThrough: entryId(fold[fold.length - 1]),
-            }),
+            ...coveredRange(fold),
             entriesBefore: fold.length,
             entriesAfter,
             ...omitUndefined({ instructions: steer }),

@@ -139,6 +139,110 @@ describe("instructions", () => {
   });
 });
 
+describe("what your log caught", () => {
+  /** A real turn: user asks, assistant calls a tool, the tool replies, assistant answers. */
+  const turn = (n: number): TimelineEntry[] =>
+    [
+      { role: "user" as const, content: [{ type: "text" as const, text: `ask ${n}` }] },
+      {
+        role: "assistant" as const,
+        content: [{ type: "tool_use" as const, toolUseId: `c${n}`, name: "q", input: {} }],
+      },
+      {
+        role: "tool" as const,
+        content: [{ type: "tool_result" as const, toolUseId: `c${n}`, content: [] }],
+      },
+      { role: "assistant" as const, content: [{ type: "text" as const, text: `answer ${n}` }] },
+    ].map((message, i) => ({
+      kind: "message" as const,
+      message: { id: `t${n}_${i}`, ts: n * 10 + i, ...message },
+    })) as TimelineEntry[];
+
+  const summaryEntry = (id: string): TimelineEntry =>
+    ({
+      kind: "message",
+      message: {
+        id,
+        ts: 0,
+        role: "event",
+        content: [
+          {
+            type: "system_event",
+            event: "compaction",
+            source: "timeline",
+            data: { summary: "older" },
+          },
+        ],
+      },
+    }) as TimelineEntry;
+
+  it("refuses to re-summarize a summary when that is all it would fold", async () => {
+    // Measured: a second /compact folded ONE entry — the previous summary —
+    // spending 3194 output tokens with a COLD cache to produce a worse summary,
+    // and reported 11 entries in, 11 out. One open turn leaves the fold nothing
+    // else to reach, which is exactly when the churn used to fire.
+    const seen = vi.fn(stubGenerate());
+    const openTurn = [
+      { role: "user" as const, content: [{ type: "text" as const, text: "ask" }] },
+      ...Array.from({ length: 5 }, () => ({
+        role: "assistant" as const,
+        content: [{ type: "text" as const, text: "step" }],
+      })),
+    ].map((message, i) => ({
+      kind: "message" as const,
+      message: { id: `o${i}`, ts: i, ...message },
+    })) as TimelineEntry[];
+    const input = [summaryEntry("s0"), ...openTurn];
+
+    const out = await rollingSummary({ keepVerbatim: 6 }).run({
+      ...ctx(),
+      entries: input,
+      generate: seen,
+    });
+
+    expect(out).toBe(input);
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it("cuts at the NEAREST turn start, so one long turn cannot defeat the fold", async () => {
+    // Searching backward alone walked past three turns to the only boundary it
+    // could find, kept ten entries against a keepVerbatim of six, and left the
+    // fold with nothing but the summary.
+    const input = [summaryEntry("s0"), ...turn(1), ...turn(2), ...turn(3)];
+    const out = await rollingSummary({ keepVerbatim: 6 }).run({
+      ...ctx(),
+      entries: input.slice(0, 9),
+      generate: stubGenerate(),
+    });
+
+    // Folded past the summary into real material, and kept a whole turn.
+    expect(out.length).toBeLessThan(9);
+    expect(summaryOf(out[0]!)).toBe("a summary");
+    expect((out[1] as { message: { id: string } }).message.id).toBe("t2_0");
+  });
+
+  it("resolves the range even when a boundary sits at the edge of the fold", async () => {
+    // Measured: `coversThrough` came back null because the last folded entry was
+    // a turn boundary, which carries no id — and a range that does not resolve
+    // cannot rebuild the projection.
+    const boundary = {
+      kind: "boundary",
+      boundary: { executionId: "e1", outcome: "succeeded" },
+      ts: 1,
+    } as unknown as TimelineEntry;
+    const out = await rollingSummary({ keepVerbatim: 4 }).run({
+      ...ctx(),
+      entries: [...turn(1), boundary, ...turn(2)],
+      generate: stubGenerate(),
+    });
+    const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
+      .message.content[0]!.data;
+
+    expect(data["coversFrom"]).toBe("t1_0");
+    expect(data["coversThrough"]).toBe("t1_3");
+  });
+});
+
 describe("the fold names what it answers", () => {
   const reply = `<questions>
 - How does Harbor View handle retainage?
