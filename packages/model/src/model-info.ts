@@ -158,6 +158,14 @@ export const SEED_MODELS: ModelRegistry = {
       maxOutputTokens: 65536,
       capabilities: VISION_TOOLS,
     },
+    // TODO(pricing): `gemini-3.5-flash` rates are not published here — an
+    // unpriced row still answers "how big is the window", which is what the
+    // compaction threshold reads, and leaves cost `undefined` rather than 0.
+    "gemini-3.5-flash": {
+      contextWindow: 1048576,
+      maxOutputTokens: 65536,
+      capabilities: VISION_TOOLS,
+    },
   },
 };
 

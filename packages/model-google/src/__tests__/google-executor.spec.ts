@@ -627,7 +627,9 @@ describe("google() adapter — factory providerOptions", () => {
     });
     await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
     const config = stub.calls[0]!.params.config as { thinkingConfig?: unknown };
-    expect(config.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+    // Merged, not replaced: naming a budget (or a `thinkingLevel`) configures
+    // how much the model thinks, not whether we are sent the thoughts.
+    expect(config.thinkingConfig).toEqual({ includeThoughts: true, thinkingBudget: 8192 });
   });
 
   it("reaches the request config on the streaming path too", async () => {
@@ -641,7 +643,9 @@ describe("google() adapter — factory providerOptions", () => {
     await exec.run({ compiled: emptyTree(), target: exec.target, tools: [] });
     expect(stub.calls[0]!.streaming).toBe(true);
     const config = stub.calls[0]!.params.config as { thinkingConfig?: unknown };
-    expect(config.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+    // Merged, not replaced: naming a budget (or a `thinkingLevel`) configures
+    // how much the model thinks, not whether we are sent the thoughts.
+    expect(config.thinkingConfig).toEqual({ includeThoughts: true, thinkingBudget: 8192 });
   });
 
   it("folds over an explicit target's bag — factory wins per key, the rest survives", async () => {
@@ -1204,5 +1208,21 @@ describe("google() adapter — canonical toolChoice", () => {
     expect((params.config as Record<string, unknown>).toolConfig).toEqual({
       functionCallingConfig: { mode: "NONE" },
     });
+  });
+});
+
+describe("google() adapter — model catalog", () => {
+  it("takes its window and output ceiling from the catalog row, per model", () => {
+    // A static 8k ceiling against a 64k model is not cosmetic: it is what the
+    // compaction threshold and every headroom calculation read.
+    const caps = google("gemini-3.5-flash").target?.capabilities;
+    expect(caps?.contextWindow).toBe(1_048_576);
+    expect(caps?.maxOutputTokens).toBe(65_536);
+  });
+
+  it("still answers for a model the catalog has never heard of", () => {
+    const caps = google("gemini-9.9-experimental").target?.capabilities;
+    expect(caps?.contextWindow).toBe(1_000_000);
+    expect(caps?.maxOutputTokens).toBe(8_192);
   });
 });

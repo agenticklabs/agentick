@@ -66,6 +66,7 @@ import {
   type DeltaTransform,
   lowerSemanticRole,
   type LanguageModelAdapter,
+  resolveModelInfo,
   type SourceInterner,
   type StreamAccumulatorView,
   StreamTagParser,
@@ -243,6 +244,7 @@ export function google(
   const defaultModel = model;
   const parseThinkTags = options.parseThinkTags ?? false;
   const customBlocks = options.customBlocks;
+  const catalog = resolveModelInfo({ provider: "google", modelId: model ?? DEFAULT_MODEL });
   const baseTarget: ExecutionTarget = options.target ?? {
     kind: "language-model",
     provider: "google",
@@ -268,8 +270,12 @@ export function google(
         // it is declared here as a scheme rather than encoded as a source shape.
         urlSchemes: ["https", "http", "data", "gs"],
       },
-      contextWindow: 1_000_000,
-      maxOutputTokens: 8_192,
+      // The catalog knows the per-model numbers; these are the floor for a
+      // model it has no row for. A wrong `maxOutputTokens` is not cosmetic —
+      // it is what the compaction threshold and every headroom calculation
+      // read, and 8k against a 64k model reserves eight times what it should.
+      contextWindow: catalog?.contextWindow ?? 1_000_000,
+      maxOutputTokens: catalog?.maxOutputTokens ?? 8_192,
     },
   };
   // `rates` and `providerOptions` layer OVER the resolved target, explicit
@@ -855,6 +861,15 @@ function toGoogleParams(
   const overrides = mergeProviderOptions(target.providerOptions, input.providerOptions)?.google;
   if (overrides && typeof overrides === "object") {
     Object.assign(config, overrides);
+    // `thinkingConfig` merges rather than replaces. An adopter naming a
+    // `thinkingLevel` (or a `thinkingBudget`) is configuring how much the model
+    // thinks, not asking to stop being SENT the thoughts — and a bare assign
+    // dropped `includeThoughts`, which silently closes the reasoning channel
+    // and puts thought-shaped text back in the answer.
+    const declared = (overrides as { thinkingConfig?: Record<string, unknown> }).thinkingConfig;
+    if (declared && typeof declared === "object") {
+      config.thinkingConfig = { includeThoughts: true, ...declared };
+    }
   }
 
   const params: GenerateContentParameters = {
