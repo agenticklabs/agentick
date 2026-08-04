@@ -250,12 +250,30 @@ entries.flatMap((entry) =>
   `functionCall` part _is_ the 400. It was either a no-op or the bug.
 - **A projection-level policy seam.** One consumer, which already has a
   tree-level seam in `compact`. Absorb it after it is worn in.
+- **A preemptive framework-wide pass on every tick.** There is no correct
+  always-on default: degrade on any mismatch and the MODAL model change
+  (`gemini-2.5-flash` → `3.5-flash`, signatures carried fine) is degraded for
+  nothing; never degrade and the pass does nothing. Anything between needs the
+  compatibility fact nobody publishes. The native default is the recovery path
+  below, not a second pass.
 - **Quarantine-on-rejection as the primary path.** It mutates history
   mid-conversation: a turn replayed fine for ten turns, then gets refused and
   removed, rewriting the prompt in the middle. Keep it in the drawer as
   _recovery_ — for a legal timeline refused for a reason the adopter had no
   information to predict, which includes the brownfield `unknown` case. It
   composes cleanly on top: decide what to attempt, handle being refused anyway.
+
+  **It IS the native default, as recovery.** Send it, and on refusal locate the
+  part, degrade it with the same `degradeMessage`, retry, and persist the
+  quarantine record. Optimal (nothing degrades that did not have to), safe (the
+  400 never reaches the user), self-healing, and it needs no compatibility
+  knowledge because the provider is the oracle. The prefix-cache objection above
+  does not apply in the case it fires for: a model change has already discarded
+  the provider's cache. It stands for a same-model rejection — a stale
+  `fileUri` — which is why this is recovery and not the routine path.
+
+  Both paths call the same `degradeMessage`. One implementation, two triggers;
+  an adopter who degrades in the tree never trips the recovery.
 
 ## Open before implementation
 
