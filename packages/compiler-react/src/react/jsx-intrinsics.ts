@@ -283,11 +283,12 @@ declare module "react" {
       };
 
       /**
-       * Content passthrough — flattens children into parent's content
-       * blocks without introducing a wrapping entry.
+       * Content passthrough — folds pre-built blocks into the parent's
+       * content with no wrapping entry. Takes `blocks`, not children:
+       * `<content>` re-emits spec-shape blocks verbatim.
        */
       content: {
-        readonly children?: ReactChildren;
+        readonly blocks?: readonly ContentBlock[];
         readonly key?: ReactKey;
       };
 

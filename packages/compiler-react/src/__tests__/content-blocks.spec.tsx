@@ -294,6 +294,27 @@ describe("content blocks — composing inside <message>", () => {
     const types = blocks.map((b) => b.type);
     expect(types).toEqual(["text", "image", "text", "code"]);
   });
+
+  it("<content> folds persisted blocks in place, between authored siblings", () => {
+    // Replaying a stored message as children — the alternative is building the
+    // `content` array by hand, which shadows every child and decides the dialect
+    // at construction time.
+    const persisted: ContentBlock[] = [{ type: "text", text: "persisted" }];
+    const { tree } = renderAndCollect(
+      React.createElement(
+        "message",
+        { role: "user" },
+        React.createElement("text", { text: "before" }),
+        React.createElement("content", { blocks: persisted }),
+        React.createElement("text", { text: "after" }),
+      ),
+    );
+    expect(contentOf(tree).map((b) => (b as { text?: string }).text)).toEqual([
+      "before",
+      "persisted",
+      "after",
+    ]);
+  });
 });
 
 describe("<message> — `content` prop precedence (v1-compat)", () => {
