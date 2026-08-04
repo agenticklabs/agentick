@@ -25,6 +25,7 @@
 import { Cause, Effect, Exit } from "effect";
 
 import {
+  progressEventQuery,
   WireRpcError,
   type Authorizer,
   type CommandInfo,
@@ -33,6 +34,8 @@ import {
   type WireExtension,
   type WireExtensionContext,
 } from "@agentick/spec";
+
+import { fanOutProgressSignals } from "./wire/progress-fanout.js";
 
 /**
  * Session-scoped surfaces the dynamic lane can address (VERB-MATRIX).
@@ -141,7 +144,7 @@ export function createDynamicCommandResolver(
     if (rest.length === 0) return undefined;
     const verb = `${surface}:${rest}`;
 
-    const handler = async (params: unknown, _rawCtx: unknown): Promise<unknown> => {
+    const handler = async (params: unknown, rawCtx: unknown): Promise<unknown> => {
       const p = (params ?? {}) as DynamicParams;
 
       const address = resolveAddress(surface, p);
@@ -164,7 +167,27 @@ export function createDynamicCommandResolver(
       // Authorization happened at the dispatch choke point (ADR 51
       // §3.3 — ONE gate, both lanes); this handler owns only exposure
       // semantics (deny-by-default: non-wire == absent).
-      return runAsk(inbox.ask(address, { type: verb, origin: "wire", payload: p }));
+      const ask = () => runAsk(inbox.ask(address, { type: verb, origin: "wire", payload: p }));
+
+      // A command can be long — a compaction is a model call — and every harness
+      // already reports through `ctx.progress`. One generic lane, so a verb
+      // becomes observable by emitting, not by earning wire plumbing.
+      const progressToken = (p._meta as { readonly progressToken?: string | number } | undefined)
+        ?.progressToken;
+      const ctx = rawCtx as WireExtensionContext | undefined;
+      if (progressToken === undefined || ctx?.gateway === undefined) return ask();
+
+      const reporter = ctx.wire.progress(progressToken);
+      const signals = fanOutProgressSignals((q) => ctx.gateway.events(q), reporter, {
+        ...progressEventQuery(),
+        scope: { sessionId: p.sessionId as string },
+      });
+      try {
+        return await ask();
+      } finally {
+        signals.stop();
+        void signals.drained.then(() => reporter.close());
+      }
     };
 
     return { extension: DYNAMIC_EXTENSION, handler };

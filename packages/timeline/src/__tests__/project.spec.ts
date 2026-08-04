@@ -30,7 +30,7 @@ function entries(count: number, offset = 0): TimelineEntry[] {
 
 const gen =
   (text: string): CompactGenerate =>
-  async () => ({ text, outputTokens: 1, truncated: false });
+  async () => ({ text, truncated: false });
 
 const label = (e: TimelineEntry): string => {
   const m = e as { message: { id: string; content: readonly { type: string }[] } };

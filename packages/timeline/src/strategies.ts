@@ -17,7 +17,13 @@
  * Adopters can write their own — anything returning a {@link CompactStrategy}.
  */
 
-import type { CompactRun, CompactStrategy, ContentBlock, TimelineEntry } from "@agentick/spec";
+import type {
+  CompactGenerateResult,
+  CompactRun,
+  CompactStrategy,
+  ContentBlock,
+  TimelineEntry,
+} from "@agentick/spec";
 import { omitUndefined, ulid } from "@agentick/utils";
 
 export interface FromHandlerOptions {
@@ -214,7 +220,7 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
     // timeline alone is recoverable; persisting this is not.
     if (result.truncated) return entries;
 
-    return [...survivors, summaryEntry(result.text, fold, keep.length, instructions), ...keep];
+    return [...survivors, summaryEntry(result, fold, keep.length, instructions), ...keep];
   };
 
   return {
@@ -226,7 +232,7 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
 }
 
 function summaryEntry(
-  summary: string,
+  result: CompactGenerateResult,
   fold: readonly TimelineEntry[],
   entriesAfter: number,
   instructions: string | readonly ContentBlock[] | undefined,
@@ -244,7 +250,7 @@ function summaryEntry(
           event: "compaction",
           source: "timeline",
           data: {
-            summary,
+            summary: result.text,
             // The RANGE this summary stands in for. Its own position in the log
             // records when it was written, which is not what it covers — without
             // this, rebuilding the projection needs state the log does not hold,
@@ -255,7 +261,7 @@ function summaryEntry(
             }),
             entriesBefore: fold.length,
             entriesAfter,
-            ...omitUndefined({ instructions: steer }),
+            ...omitUndefined({ instructions: steer, usage: result.usage }),
           },
         },
       ],

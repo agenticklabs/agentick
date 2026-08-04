@@ -135,7 +135,13 @@ import {
   type SetModelInput,
 } from "./model-facade.js";
 import { SessionRuntime } from "./session-state.js";
-import { withInstruction, textOf, type ReflectInput, type ReflectResult } from "./reflect.js";
+import {
+  forwardDeltas,
+  withInstruction,
+  textOf,
+  type ReflectInput,
+  type ReflectResult,
+} from "./reflect.js";
 import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
 
 // ============================================================================
@@ -983,7 +989,7 @@ export class SessionHarness<P = unknown>
           generate: (gen) =>
             this.reflect({
               instructions: gen.instructions,
-              ...omitUndefined({ maxOutputTokens: gen.maxOutputTokens }),
+              ...omitUndefined({ maxOutputTokens: gen.maxOutputTokens, onDelta: gen.onDelta }),
             }),
           ...options.timeline,
         },
@@ -1513,18 +1519,24 @@ export class SessionHarness<P = unknown>
     // so it has no seam to append an instruction through — which is the one
     // thing this needs.
     const projected = await this.project();
-    const targetOutput = await executor.execute({
+    const executeInput = {
       targetInput: withInstruction(projected, input.instructions, input.maxOutputTokens),
       target: model.target,
       scope,
       ...omitUndefined({ signal: input.signal }),
-    });
-    const result = await executor.normalize({ targetOutput, target: model.target, scope });
-    return {
-      text: textOf(result.output),
-      outputTokens: result.usage?.outputTokens ?? 0,
-      truncated: result.stopReason === "max_tokens",
     };
+    // Streamed only when someone is listening — the deltas exist to move a
+    // progress bar, and nothing else here reads them.
+    const targetOutput =
+      input.onDelta && executor.executeStream
+        ? await forwardDeltas(executor.executeStream(executeInput), input.onDelta)
+        : await executor.execute(executeInput);
+    const result = await executor.normalize({ targetOutput, target: model.target, scope });
+    return omitUndefined({
+      text: textOf(result.output),
+      usage: result.usage,
+      truncated: result.stopReason === "max_tokens",
+    }) as ReflectResult;
   }
 
   /** Rung 1 — render the tree to IR. Needs no model. */

@@ -8,8 +8,20 @@
 
 import { describe, expect, it } from "vitest";
 
-import { WireRpcError, ErrorCode, type CommandInfo } from "@agentick/spec";
+import {
+  ErrorCode,
+  progressEventName,
+  WireRpcError,
+  type CommandInfo,
+  type EventQuery,
+  type GatewayHarnessProtocol,
+  type ProtocolEvent,
+  type WireExtensionContext,
+} from "@agentick/spec";
 import { stubInbox, type StubInboxCall } from "@agentick/runtime/testing";
+import { waitFor } from "@agentick/utils/testing";
+
+import { fakeWireCtx } from "./fake-wire-ctx.js";
 
 import { permissiveAuthorizer, staticAuthorizer, unconfiguredAuthorizer } from "../authorizers.js";
 import { createCommandsListHandler, createDynamicCommandResolver } from "../dynamic-commands.js";
@@ -170,6 +182,85 @@ describe("dynamic command lane — deny-by-default", () => {
       .handler({ sessionId: "s1" }, { principal: "alice" })
       .catch((e: unknown) => e);
     expect((badSurface as WireRpcError).code).toBe(ErrorCode.MethodNotFound);
+  });
+});
+
+describe("progress rides any command", () => {
+  /** A gateway whose `events()` yields one signal, then stays open until stopped. */
+  function gatewayEmitting(envelope: ProtocolEvent) {
+    const queries: EventQuery[] = [];
+    let returned = false;
+    const gateway = {
+      events(query: EventQuery) {
+        queries.push(query);
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield envelope;
+            await new Promise<void>((resolve) => setTimeout(resolve, 50));
+            returned = true;
+          },
+        };
+      },
+    } as unknown as GatewayHarnessProtocol;
+    return { gateway, queries, stopped: () => returned };
+  }
+
+  const signal = {
+    id: "e1",
+    surface: "timeline",
+    name: progressEventName("timeline"),
+    phase: "terminal",
+    timestamp: 0,
+    scope: { sessionId: "s1" },
+    payload: { token: "t", progress: 3, total: 10 },
+  } as ProtocolEvent;
+
+  function ctxWith(gateway: GatewayHarnessProtocol) {
+    const pushed: ProtocolEvent[] = [];
+    let closed = false;
+    const ctx = {
+      ...fakeWireCtx(gateway),
+      principal: "alice",
+      wire: {
+        progress: () => ({
+          push: (e: ProtocolEvent) => pushed.push(e),
+          close: () => {
+            closed = true;
+          },
+        }),
+        registerCancel: () => {},
+      },
+    } as unknown as WireExtensionContext;
+    return { ctx, pushed, wasClosed: () => closed };
+  }
+
+  it("fans the session's progress signals onto the caller's token", async () => {
+    const { resolver } = lane({ alice: ["timeline:compact"] });
+    const { gateway, queries } = gatewayEmitting(signal);
+    const { ctx, pushed, wasClosed } = ctxWith(gateway);
+
+    await resolver("timeline/compact")!.handler(
+      { sessionId: "s1", _meta: { progressToken: "p-1" } },
+      ctx,
+    );
+
+    await waitFor(() => pushed.length === 1);
+    expect(pushed[0]).toBe(signal);
+    // Filtered to THIS session at the bus — a concurrent session's compaction
+    // must not surface on this token.
+    expect(queries.at(-1)).toMatchObject({ scope: { sessionId: "s1" } });
+    await waitFor(() => wasClosed());
+  });
+
+  it("opens nothing when the caller asked for no progress", async () => {
+    const { resolver } = lane({ alice: ["timeline:compact"] });
+    const { gateway, queries } = gatewayEmitting(signal);
+    const { ctx, pushed } = ctxWith(gateway);
+
+    await resolver("timeline/compact")!.handler({ sessionId: "s1" }, ctx);
+
+    expect(queries).toHaveLength(0);
+    expect(pushed).toHaveLength(0);
   });
 });
 

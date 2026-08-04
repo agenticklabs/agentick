@@ -14,7 +14,14 @@
  * the whole conversation, because it IS the turn it would otherwise have taken.
  */
 
-import type { ContentBlock, LanguageModelInput, LanguageModelMessage } from "@agentick/spec";
+import type {
+  ContentBlock,
+  ExecutorStream,
+  LanguageModelInput,
+  LanguageModelMessage,
+  UsageStats,
+} from "@agentick/spec";
+import { estimateTokens } from "@agentick/model";
 
 export interface ReflectInput {
   /** What to think about. Appended after everything the next tick would send. */
@@ -27,7 +34,8 @@ export interface ReflectInput {
 
 export interface ReflectResult {
   readonly text: string;
-  readonly outputTokens: number;
+  /** What the call cost. Absent when the provider reports none. */
+  readonly usage?: UsageStats;
   /** The cap was hit — the text stops mid-thought and should not be persisted. */
   readonly truncated: boolean;
 }
@@ -63,4 +71,27 @@ export function textOf(blocks: readonly ContentBlock[]): string {
     .map((b) => (b.type === "text" ? b.text : ""))
     .join("")
     .trim();
+}
+
+/**
+ * Forward the stream to `onDelta` and return what `execute` would have.
+ *
+ * Most providers report `outputTokens` only when the message ends, so until one
+ * arrives the count is estimated from the text — a bar that only moves at the
+ * end is a spinner with extra steps.
+ */
+export async function forwardDeltas<T>(
+  stream: ExecutorStream<T>,
+  onDelta: NonNullable<ReflectInput["onDelta"]>,
+): Promise<T> {
+  let text = "";
+  let reported: number | undefined;
+  for await (const delta of stream) {
+    if (delta.type === "content-delta") text += delta.delta;
+    else if (delta.type === "usage" || delta.type === "message-end" || delta.type === "message") {
+      reported = delta.usage.outputTokens;
+    } else continue;
+    onDelta({ text, outputTokens: reported ?? estimateTokens(text) });
+  }
+  return stream.result;
 }

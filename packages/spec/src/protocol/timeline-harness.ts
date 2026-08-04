@@ -156,7 +156,13 @@ export type CompactGenerate = (input: {
 
 export interface CompactGenerateResult {
   readonly text: string;
-  readonly outputTokens: number;
+  /**
+   * What the call cost. A compaction rides the same prefix as the next tick, so
+   * `cachedInputTokens` against `inputTokens` is what says whether that held —
+   * a strategy that records it makes the claim auditable instead of asserted.
+   * Absent when the provider reports none.
+   */
+  readonly usage?: import("../data/execution-result.js").UsageStats;
   /** The cap was hit — the text is cut mid-thought and must not be persisted. */
   readonly truncated: boolean;
 }

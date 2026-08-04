@@ -30,7 +30,7 @@ function stubGenerate(
 ): CompactGenerate {
   return async ({ onDelta }) => {
     for (const outputTokens of deltas) onDelta?.({ text: "…", outputTokens });
-    return { text: "a summary", outputTokens: 12, truncated: false, ...result };
+    return { text: "a summary", truncated: false, ...result };
   };
 }
 
@@ -120,6 +120,35 @@ describe("instructions", () => {
     const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
       .message.content[0]!.data;
     expect(data["instructions"]).toBe("Keep every number.");
+  });
+});
+
+describe("what the fold cost", () => {
+  it("records the call's usage on the event", async () => {
+    // A compaction rides the next tick's prefix; `cachedInputTokens` against
+    // `inputTokens` is the only thing that says whether that actually held.
+    const usage = { inputTokens: 40_000, outputTokens: 900, totalTokens: 40_900 };
+    const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: stubGenerate({ usage: { ...usage, cachedInputTokens: 34_000 } }),
+    });
+    const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
+      .message.content[0]!.data;
+
+    expect(data["usage"]).toEqual({ ...usage, cachedInputTokens: 34_000 });
+  });
+
+  it("omits the key when the provider reported none", async () => {
+    const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: stubGenerate(),
+    });
+    const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
+      .message.content[0]!.data;
+
+    expect(data).not.toHaveProperty("usage");
   });
 });
 

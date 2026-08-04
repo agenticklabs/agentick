@@ -25,6 +25,8 @@ import {
 } from "@agentick/spec";
 import { omitUndefined, paginate } from "@agentick/utils";
 
+import { fanOutProgressSignals } from "./progress-fanout.js";
+
 /**
  * Structural view of the session's tool executor seam. The gateway is
  * harness-agnostic — it does NOT depend on `@agentick/tool-executor` — so
@@ -191,30 +193,15 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // where this keys on the EXECUTION tree (`executionTreeContains`, one
         // turn). Turn interiors here; living subtree there.
         const fanIn = params.fanIn === true;
-        const signalEvents = ctx.gateway.events(
+        const signals = fanOutProgressSignals(
+          (q) => ctx.gateway.events(q),
+          reporter,
           fanIn
             ? progressEventQuery()
             : { ...progressEventQuery(), scope: { executionId: handle.executionId } },
+          fanIn ? (e) => inThisTurn(e, handle.executionId, ctx.app) : undefined,
         );
-        const signalIter = signalEvents[Symbol.asyncIterator]();
-        stopSignalDrain = () => {
-          void signalIter.return?.(undefined);
-        };
-        const signalDrain = (async () => {
-          try {
-            for (
-              let step = await signalIter.next();
-              step.done !== true;
-              step = await signalIter.next()
-            ) {
-              const envelope = step.value as ProtocolEvent;
-              if (fanIn && !inThisTurn(envelope, handle.executionId, ctx.app)) continue;
-              reporter.push(envelope);
-            }
-          } catch {
-            /* best-effort — progress is never a control path (ADR 64) */
-          }
-        })();
+        stopSignalDrain = signals.stop;
 
         // End-of-stream marker for this token. It must follow the LAST
         // pushed frame, so it waits on both fan-outs draining — but the RPC
@@ -225,7 +212,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // once the signal subscription has been told to stop (which is what
         // lets `signalDrain` resolve at all).
         completeProgress = () => {
-          void Promise.all([eventDrain, signalDrain]).then(() => reporter.close());
+          void Promise.all([eventDrain, signals.drained]).then(() => reporter.close());
         };
       }
 
