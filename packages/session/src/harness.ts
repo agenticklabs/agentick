@@ -135,6 +135,7 @@ import {
   type SetModelInput,
 } from "./model-facade.js";
 import { SessionRuntime } from "./session-state.js";
+import { withInstruction, textOf, type ReflectInput, type ReflectResult } from "./reflect.js";
 import { createSessionExecutionHandle, type SessionEmitInput } from "./session-execution-handle.js";
 
 // ============================================================================
@@ -973,8 +974,19 @@ export class SessionHarness<P = unknown>
           elicitation: options.elicitation,
           tasks: options.tasks,
           resources: options.resources,
-          timeline: options.timeline,
         }),
+        // A compaction strategy that needs a model gets THIS session's — the
+        // same one the loop uses, over the context the next tick would send.
+        // Bound here because only the session sees both; an adopter supplying
+        // its own `generate` keeps it.
+        timeline: {
+          generate: (gen) =>
+            this.reflect({
+              instructions: gen.instructions,
+              ...omitUndefined({ maxOutputTokens: gen.maxOutputTokens }),
+            }),
+          ...options.timeline,
+        },
         // ADR 76 tier 3 + ADR 83 amendment — the session's RESOLVED
         // interceptors (app-inherited incl. the app+session command hooks as
         // op-scoped middleware, plus the session's own), so `session.use()` /
@@ -1478,6 +1490,41 @@ export class SessionHarness<P = unknown>
     const input = await this.project(tree);
     const request = this.prepareRequest(input);
     return omitUndefined({ tree, input, request }) as SessionDryRun;
+  }
+
+  /**
+   * One more turn of this session, with an extra instruction at the end.
+   *
+   * Compaction, episodic memory and thread titling are this operation under
+   * different instructions. Appending at the END keeps the prefix
+   * byte-identical to the next tick's, so the provider reads it from cache
+   * rather than charging for it twice — and the model sees the system prompt,
+   * the grounding and the whole conversation, because it IS that turn.
+   *
+   * Nothing is appended to the timeline: a reflection is a question ABOUT the
+   * conversation, not a move within it.
+   */
+  async reflect(input: ReflectInput): Promise<ReflectResult> {
+    const model = this.modelFacade.current;
+    if (!model) throw new NoModelForExecutionError();
+    const executor = model.modelExecutor;
+    const scope = { sessionId: this.id };
+    // The executor's own three phases, run by hand. `run` projects internally,
+    // so it has no seam to append an instruction through — which is the one
+    // thing this needs.
+    const projected = await this.project();
+    const targetOutput = await executor.execute({
+      targetInput: withInstruction(projected, input.instructions, input.maxOutputTokens),
+      target: model.target,
+      scope,
+      ...omitUndefined({ signal: input.signal }),
+    });
+    const result = await executor.normalize({ targetOutput, target: model.target, scope });
+    return {
+      text: textOf(result.output),
+      outputTokens: result.usage?.outputTokens ?? 0,
+      truncated: result.stopReason === "max_tokens",
+    };
   }
 
   /** Rung 1 — render the tree to IR. Needs no model. */
