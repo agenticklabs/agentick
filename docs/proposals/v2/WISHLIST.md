@@ -1001,36 +1001,6 @@ harness of its own once there are several consumers.
 
 ---
 
-### W38 · Progress signals on slow framework operations · [framework]
-
-**Want.** Compaction (and anything else slow enough for a human to wonder) says
-it started and finished, so a client can show a spinner.
-
-**The rule already exists — compaction just is not following it.**
-`packages/spec/src/data/signals.ts` defines the family and its naming law:
-`<surface>:signal:log` / `<surface>:signal:progress`, middle segment always
-`signal`, distinct from `command` (operation lifecycle) and `channel` (state).
-Subscribers match across surfaces with `*:signal:progress`, and the gateway
-already fans these onto `notifications/progress` for any caller passing
-`_meta.progressToken` — the plumbing tools use today.
-
-**So the general rule is:** an operation slow enough to wonder about emits
-`<surface>:signal:progress` on its OWN surface and gets the wire for free.
-Compaction emits `timeline:signal:progress`.
-
-**And the boundary worth stating, because it is the part that gets confused.**
-Progress is a SIGNAL — diagnostic, droppable, best-effort. "Compaction
-started/ended" as an operation-lifecycle FACT is a COMMAND
-(`onBeforeTimelineCompact` / `onAfterTimelineCompact`) — what you audit or gate
-on. The spinner wants the signal; a hook that vetoes a compaction wants the
-command. Both exist; they are different tiers deliberately.
-
-**Done when.** A compaction emits progress start/end, a client with a progress
-token receives them, and the rule is written down somewhere other than this
-wishlist.
-
----
-
 ### W31 · Should XML be the DEFAULT formatter? · [framework] · **needs a measurement**
 
 **Want.** Decide whether the default dialect flips, making `<Markdown>` the
@@ -1140,6 +1110,50 @@ deferred behind this list:
 
 Moved here with the commit that did it. Kept whole — the **Why** is the
 reasoning we would otherwise re-derive.
+
+### W38 · Progress signals on slow framework operations · [framework]
+
+> **Done** — the fold reports; and the token lane reaches every verb, not just `session/send`
+>
+> Three links were missing, not one. `reflect()` dropped `onDelta` and did not
+> stream, so the callback never fired. The gateway fanned signals for
+> `session/send` alone, so `timeline/compact` had no token lane — now
+> `fanOutProgressSignals`, used by the dynamic command lane, so ANY
+> wire-exposed verb called with `_meta.progressToken` reports. The claim above
+> that "the gateway already fans these" was true only of `send`.
+>
+> The OTHER lane was already complete and this wishlist did not know it:
+> `session.onProgress(handler)` in `client-core` subscribes to
+> `*:signal:progress` over `sub/subscribe`, session-scoped, outliving any one
+> call. Token lane per-RPC; subscription lane per-session. Both real.
+
+**Want.** Compaction (and anything else slow enough for a human to wonder) says
+it started and finished, so a client can show a spinner.
+
+**The rule already exists — compaction just is not following it.**
+`packages/spec/src/data/signals.ts` defines the family and its naming law:
+`<surface>:signal:log` / `<surface>:signal:progress`, middle segment always
+`signal`, distinct from `command` (operation lifecycle) and `channel` (state).
+Subscribers match across surfaces with `*:signal:progress`, and the gateway
+already fans these onto `notifications/progress` for any caller passing
+`_meta.progressToken` — the plumbing tools use today.
+
+**So the general rule is:** an operation slow enough to wonder about emits
+`<surface>:signal:progress` on its OWN surface and gets the wire for free.
+Compaction emits `timeline:signal:progress`.
+
+**And the boundary worth stating, because it is the part that gets confused.**
+Progress is a SIGNAL — diagnostic, droppable, best-effort. "Compaction
+started/ended" as an operation-lifecycle FACT is a COMMAND
+(`onBeforeTimelineCompact` / `onAfterTimelineCompact`) — what you audit or gate
+on. The spinner wants the signal; a hook that vetoes a compaction wants the
+command. Both exist; they are different tiers deliberately.
+
+**Done when.** A compaction emits progress start/end, a client with a progress
+token receives them, and the rule is written down somewhere other than this
+wishlist.
+
+---
 
 ### W1 · Image input modality on Gemini · [both]
 
