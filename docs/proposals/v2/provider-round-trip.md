@@ -69,6 +69,34 @@ per-entry predicate is a trap: it lets an adopter degrade one half and orphan
 the other, which trades one rejection for a different one. Grouping makes the
 pairing impossible to get wrong, and returns data the tree can map over.
 
+### Tool calls are NOT the only failure mode
+
+The check is per **block**, not per entry — `providerMetadata` already lives on
+the block, and promoting the check to the entry is what made an earlier draft of
+this design look tool-specific when the problem is not.
+
+- **Reasoning blocks carry signatures too.** Anthropic `thinking` blocks carry a
+  validated `signature` and are expected on the replay of a turn that made a
+  tool call; Gemini 3.x signs thought parts, not only `functionCall` parts;
+  OpenAI reasoning items carry `encrypted_content`. Claude + extended thinking +
+  tools is the default shape of a coding agent, so a design covering only
+  `tool_use`/`tool_result` covers about half the surface.
+- **The coupling rule is per-dialect and belongs to the adapter.**
+  `tool_use`↔`tool_result` is one wire's grammar; `thinking`↔`tool_use`-in-the-
+  same-turn is another's. Adapters declare the coupling; the framework enforces
+  it. Same split as `capabilities.media`.
+- **Disposition differs by kind**, and the question that separates them is
+  whether the block's absence is recoverable from what remains:
+  - **reasoning → drop.** The assistant's text survives and nothing downstream
+    needs to know a thinking block was there. No event, no collapse.
+  - **tool call → degrade.** Dropping it loses a fact the model needs — that a
+    tool ran, and what came back.
+
+**Out of scope: request-level pointers.** OpenAI's `previous_response_id` names
+server-side state rather than a block. There is nothing to strip or group; it
+lives in `providerOptions` and degrades by being omitted. No helper here touches
+it.
+
 ### 4. `degradeForReplay(entries, target)` — the default
 
 `replayGroups` plus the default collapse, for adopters who want it handled:
@@ -186,6 +214,9 @@ expressible from the tree without it, media handling included.
 
 - [ ] Verify / add target-at-render
 - [ ] Stamp `metadata.model` on the assistant message
-- [ ] `isReplayable`, `replayGroups`, `degradeForReplay` + the orphan rule
+- [ ] Per-dialect coupling rules declared by each adapter (google, anthropic, openai)
+- [ ] `isReplayable` (per BLOCK), `replayGroups`, `degradeForReplay`
+- [ ] Reasoning blocks: drop, not degrade — verify against Anthropic's actual
+      validation semantics before relying on the wording above
 - [ ] Tests: the pair rule, determinism across ticks, `unknown` ≠ `foreign`
 - [ ] Adopter docs, with Ernesto's timeline as the worked example
