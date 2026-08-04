@@ -82,7 +82,7 @@ declare module "react" {
       message: {
         readonly id?: string;
         readonly role: SessionMessageRole;
-        /** Pre-built content blocks; takes precedence over children when non-empty. */
+        /** Pre-built content blocks — used when this element has no children. */
         readonly content?: readonly ContentBlock[];
         readonly cache?: Record<string, unknown>;
         readonly providerMetadata?: Record<string, unknown>;

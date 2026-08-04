@@ -4,15 +4,17 @@
  * Produces a `MessageEntry` carrying the message's content blocks and
  * an Agentick semantic role (user/assistant/system/tool/event/...).
  *
- * Content resolution follows v1's controlled-or-uncontrolled precedence:
+ * **Children win.** They are the content; `content` is the shorthand for a
+ * message that has none:
  *
- *   1. If `content` prop is supplied and non-empty → use it verbatim
- *      (skip walking children).
- *   2. Else if children produce content blocks → use those.
+ *   1. If children produce content blocks → use those.
+ *   2. Else → the `content` prop, verbatim.
  *   3. Else → empty content array.
  *
- * The non-empty guard on the prop is intentional: `<message content={[]}>
- * fallback</message>` still folds the children, matching v1.
+ * The prop cannot shadow children, because `<Message {...entry.message}>` is
+ * how a persisted message is replayed with something added to it — a metadata
+ * section ahead of the body, retrieved context after it — and a spread that
+ * silently dropped every child made the whole composition unwritable.
  *
  * Props derive from {@link MessageEntry}; `role`/`id` forward, the rest
  * are compiler-supplied (see the {@link _conformance} partition below).
@@ -36,7 +38,7 @@ export type MessageProps = Omit<
   MessageEntry,
   "kind" | "content" | "renderedWith" | "renderTrace"
 > & {
-  /** Pre-built content blocks; takes precedence over children when non-empty. */
+  /** Pre-built content blocks — used when the element has no children. */
   readonly content?: readonly ContentBlock[];
   readonly cache?: MessageMetadata["cache"];
   readonly providerMetadata?: MessageMetadata["providerMetadata"];
@@ -68,12 +70,9 @@ export const messageContributor: Contributor = {
     }
 
     const outbound: IRFragment[] = [];
-    let content: readonly ContentBlock[];
-    if (Array.isArray(props.content) && props.content.length > 0) {
-      content = props.content;
-    } else {
-      content = ctx.collectContentBlocks(instance, outbound);
-    }
+    const fromChildren = ctx.collectContentBlocks(instance, outbound);
+    const content: readonly ContentBlock[] =
+      fromChildren.length > 0 ? fromChildren : (props.content ?? []);
 
     const metadata: MessageMetadata | undefined =
       props.cache !== undefined ||

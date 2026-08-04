@@ -7,9 +7,13 @@
  *
  *   <Message {...entry.message} />
  *
- * Content resolution follows the contributor's controlled-or-uncontrolled
- * rule: a non-empty `content` prop wins; otherwise children are folded
- * via `ctx.collectContentBlocks()`.
+ * Children ARE the content. `content` is the shorthand for a message with
+ * none, so a persisted record can be spread and still composed with:
+ *
+ *   <Message {...entry.message}>
+ *     <TurnMetadata message={entry.message} />
+ *     <content blocks={entry.message.content} />
+ *   </Message>
  *
  * The lowercase `<message>` intrinsic remains the host primitive — this
  * wrapper exists for TypeScript ergonomics (typed prop bag without
@@ -24,11 +28,7 @@ import type { ContentBlock, MessageMetadata, MessageRole } from "@agentick/spec"
 export interface MessageProps {
   readonly role: MessageRole;
   readonly id?: string;
-  /**
-   * Pre-built content blocks. When supplied and non-empty, takes
-   * precedence over children. Empty arrays fall through to children
-   * (matching v1's controlled-or-uncontrolled precedence).
-   */
+  /** Pre-built content blocks — used when this element has no children. */
   readonly content?: readonly ContentBlock[];
   /** Cross-provider caching intent. Maps to provider-native mechanics. */
   readonly cache?: MessageMetadata["cache"];

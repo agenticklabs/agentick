@@ -317,29 +317,46 @@ describe("content blocks — composing inside <message>", () => {
   });
 });
 
-describe("<message> — `content` prop precedence (v1-compat)", () => {
-  it("non-empty `content` prop wins over children", () => {
+describe("<message> — children win over the `content` prop", () => {
+  it("children replace a supplied `content`, so a spread record can be composed with", () => {
+    // `<Message {...entry.message}>` is how a persisted message is replayed with
+    // something added to it. When the prop won, that spread silently dropped
+    // every child and the composition could not be written at all.
+    const prebuilt: ContentBlock[] = [{ type: "text", text: "from prop" }];
+    const { tree } = renderAndCollect(
+      React.createElement(
+        "message",
+        { role: "user", content: prebuilt },
+        "from children",
+        React.createElement("image", { source: { type: "url", url: "https://x.test/a.png" } }),
+      ),
+    );
+    const blocks = contentOf(tree);
+    expect(blocks.map((b) => b.type)).toEqual(["text", "image"]);
+    expect((blocks[0] as { text: string }).text).toBe("from children");
+  });
+
+  it("uses `content` when there are no children — the shorthand still works", () => {
     const prebuilt: ContentBlock[] = [
       { type: "text", text: "from prop" },
       { type: "code", language: "typescript", text: "const x = 1" },
     ];
     const { tree } = renderAndCollect(
-      React.createElement(
-        "message",
-        { role: "user", content: prebuilt },
-        // Children should be ignored when prop is non-empty.
-        "from children",
-        React.createElement("image", {
-          source: { type: "url", url: "https://x.test/a.png" },
-        }),
-      ),
+      React.createElement("message", { role: "user", content: prebuilt }),
     );
-    const blocks = contentOf(tree);
-    expect(blocks.map((b) => b.type)).toEqual(["text", "code"]);
-    expect((blocks[0] as { text: string }).text).toBe("from prop");
+    expect(contentOf(tree).map((b) => b.type)).toEqual(["text", "code"]);
   });
 
-  it("empty `content` prop falls through to children", () => {
+  it("children that produce NO blocks fall back to `content`", () => {
+    // A conditional that rendered nothing must not empty the message.
+    const prebuilt: ContentBlock[] = [{ type: "text", text: "from prop" }];
+    const { tree } = renderAndCollect(
+      React.createElement("message", { role: "user", content: prebuilt }, null, false),
+    );
+    expect(contentOf(tree).map((b) => (b as { text?: string }).text)).toEqual(["from prop"]);
+  });
+
+  it("empty `content` with children folds the children", () => {
     const { tree } = renderAndCollect(
       React.createElement(
         "message",
@@ -347,14 +364,12 @@ describe("<message> — `content` prop precedence (v1-compat)", () => {
         "fallback text",
       ),
     );
-    const blocks = contentOf(tree);
-    expect(blocks).toHaveLength(1);
-    expect(blocks[0]).toMatchObject({ type: "text", text: "fallback text" });
+    expect(contentOf(tree)).toEqual([{ type: "text", text: "fallback text" }]);
   });
 
-  it("omitted `content` prop collects from children as before", () => {
-    const { tree } = renderAndCollect(React.createElement("message", { role: "user" }, "hello"));
-    expect(contentOf(tree)).toEqual([{ type: "text", text: "hello" }]);
+  it("neither present is an empty message, not a crash", () => {
+    const { tree } = renderAndCollect(React.createElement("message", { role: "user" }));
+    expect(contentOf(tree)).toEqual([]);
   });
 });
 
