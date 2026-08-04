@@ -113,6 +113,40 @@ collapses to `user` at the wire, and the _structure_ is what keeps it
 distinguishable from speech. That is the argument ADR 94 already made for
 `<Grounding>`, applied to a second kind of non-speech content.
 
+### The transform, concretely
+
+```
+assistant [thinking, text, tool_use]   →  assistant(text) · event(call+result)
+assistant [text, tool_use, text]       →  assistant(text) · event(call+result) · assistant(text)
+assistant [tool_use]                   →  event(call+result)          ← message dropped, it emptied
+tool      [tool_result]                →  folded into its partner's event
+```
+
+Four rules, each earned:
+
+1. **In position, never hoisted.** The dominant shape is text-then-call ("Let me
+   check that." + `tool_use`). Emitting the call before the assistant message
+   says it called first and explained afterwards — backwards, and it teaches bad
+   turn structure to a model reading its own history as exemplars.
+2. **Thinking drops silently — no event.** Wrapping a dropped thinking block in
+   an announcement is context-window noise for a fact nothing consumes.
+3. **An emptied assistant message is dropped.** A bare `tool_use` with no
+   preamble is extremely common; after extraction there is no content left, and
+   an empty assistant message is meaningless at best.
+4. **One event per call/result pair.** Two events would need a correlation
+   scheme to replace the one just discarded.
+
+**The `tool` message carries no provenance of its own** — we produced that
+result, not the model, and there is no signature on it. It is condemned by
+COUPLING: its partner cannot be replayed and an orphan result is its own
+rejection. So it cannot be decided by looking at it, which is why the primitive
+groups rather than filters. A per-message predicate would examine that message,
+find nothing wrong, keep it, and orphan it.
+
+The assistant message is the harder case for the opposite reason: it is MIXED —
+some blocks replayable, some not, in one message, and the split must preserve
+order and handle emptying. Hiding that asymmetry is the helper's whole job.
+
 ## Ergonomics
 
 ### Level 1 — handled
