@@ -160,7 +160,14 @@ export async function renderTemplate(
   // default here as if it were a pin silently disabled `<XML>` / `<Markdown>`
   // and every island with it.
   const compiled = await compileInternal(element, opts, opts.formatter);
-  const output = formatTree(compiled.tree, opts.formatter ?? markdownFormatter);
+  // Without the registry, the flatten reads no entry's `renderedWith` and every
+  // island lands in the default dialect — the pass honours a declared scope and
+  // the serialization then throws it away.
+  const output = formatTree(
+    compiled.tree,
+    opts.formatter ?? markdownFormatter,
+    opts.formatter !== undefined ? {} : { formatters: builtInFormatters() },
+  );
   return {
     output,
     diagnostics: compiled.diagnostics,
