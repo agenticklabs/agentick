@@ -342,24 +342,7 @@ describe("the cap is the progress denominator", () => {
     expect(seen).toEqual([
       { progress: 100, total: 500, message: "Folding 8 entries" },
       { progress: 250, total: 500, message: "Folding 8 entries" },
-      // The last frame says the fold is over, so a subscriber that outlives the
-      // call knows to close its indicator.
-      { progress: 500, total: 500, done: true },
     ]);
-  });
-
-  it("closes with `done`, even when the summary was truncated", async () => {
-    // The one exit that leaves the timeline alone still has to end the bar —
-    // otherwise the honest "we changed nothing" reads as "still working".
-    const seen: ProgressUpdate[] = [];
-    await rollingSummary({ keepVerbatim: 2 }).run({
-      ...ctx(),
-      entries: entries(10),
-      generate: stubGenerate({ truncated: true }),
-      progress: (u) => seen.push(u),
-    });
-
-    expect(seen.at(-1)).toMatchObject({ done: true });
   });
 
   it("says what it is folding, since a token count alone means nothing", async () => {

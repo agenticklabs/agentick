@@ -124,20 +124,6 @@ export interface ProgressUpdate {
   readonly progress: number;
   readonly total?: number;
   readonly message?: string;
-  /**
-   * The last frame for this token — the operation is over, however it ended.
-   *
-   * Without it a subscriber can open an indicator and never learn when to close
-   * one. The token lane has `notifications/progress/complete`; the SUBSCRIPTION
-   * lane has no envelope for "done", and a consumer that outlives one call has
-   * no promise to await either. Inferring it from `progress === total` fails on
-   * exactly the two cases that matter — indeterminate work has no total, and a
-   * capped call that stops early never reaches one.
-   *
-   * Extra fields are permitted on MCP's `notifications/progress`, so this stays
-   * byte-compatible in both directions.
-   */
-  readonly done?: boolean;
 }
 
 /**

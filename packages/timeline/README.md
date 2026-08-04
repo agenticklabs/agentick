@@ -308,14 +308,13 @@ Nothing here is predicted: `total` is the cap you set, which is the only reason 
 
 Each frame also carries a `message` — `"Folding 274 entries"` — because a token count alone says nothing a user can act on. It is derived from the fold, so it cannot drift from what actually ran.
 
-The last frame carries `done: true`, whatever the outcome — including the truncation case that leaves the timeline untouched. A subscriber that outlives one call has no promise to await and no other way to learn the work ended, and `progress === total` cannot stand in for it: indeterminate work has no total, and a capped call that stops early never reaches one.
+Nothing on the frame says "terminal" — that is law 4 on `ProgressUpdate`, and it is what keeps the payload byte-identical to MCP's `notifications/progress` in BOTH directions. The bar closes on the OPERATION: the `timeline/compact` call resolves, or the `timeline:command:compact` event reaches its `terminal` phase, which a subscriber outliving any one call is already watching.
 
 Subscribe on the client with the SURFACE named, or a tool calling `ctx.progress` will drive the same bar:
 
 ```ts
 const stop = session.onProgress(
-  ({ progress, total, message, done }) =>
-    bar.set(done ? undefined : { message, value: total ? progress / total : null }),
+  ({ progress, total, message }) => bar.set({ message, value: total ? progress / total : null }),
   { surface: "timeline" },
 );
 ```

@@ -330,11 +330,6 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
         : undefined,
     });
 
-    // Whatever happened next, the fold is over — said on the way out rather than
-    // at each return below, so no exit can forget it and leave an indicator
-    // spinning forever.
-    progress?.({ progress: budget, total: budget, done: true });
-
     // A truncated summary is cut mid-thought, and folding it would make the
     // model's own damaged notes the exemplar it reads next tick. Leaving the
     // timeline alone is recoverable; persisting this is not.
