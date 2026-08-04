@@ -348,12 +348,7 @@ function projectBlock(block: ContentBlock): LanguageModelMessagePart {
         ...po,
       };
     case "reasoning":
-      return {
-        type: "reasoning",
-        text: block.text,
-        ...omitUndefined({ signature: block.signature }),
-        ...po,
-      };
+      return { type: "reasoning", text: block.text, ...po };
     case "generated_image":
       // Replayed as input → reuse the `image` variant (ADR 57
       // §Taxonomy). Emit a data URI, NOT `JSON.stringify(block)` — the

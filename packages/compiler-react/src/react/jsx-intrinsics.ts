@@ -223,7 +223,6 @@ declare module "react" {
       reasoning: {
         readonly id?: string;
         readonly text?: string;
-        readonly signature?: string;
         readonly isRedacted?: boolean;
         readonly children?: ReactChildren;
         readonly key?: ReactKey;

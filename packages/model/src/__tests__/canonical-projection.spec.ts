@@ -131,16 +131,19 @@ describe("messagePartFromBlock — wire-native modalities (ADR 57)", () => {
     expect(video.type).toBe("video");
   });
 
-  it("projects a reasoning block to a reasoning part carrying the signature", () => {
+  it("carries a reasoning signature in the DIALECT namespace, not to everyone", () => {
+    // The signature is opaque and Anthropic's. It used to ride a bare
+    // `ReasoningBlock.signature` that this projection forwarded to every
+    // adapter, so a switch to Google offered Google an Anthropic blob.
     const part = messagePartFromBlock({
       type: "reasoning",
       text: "step by step",
-      signature: "sig-abc",
+      providerMetadata: { anthropic: { signature: "sig-abc" } },
     } as ContentBlock);
     expect(part.type).toBe("reasoning");
     if (part.type !== "reasoning") return;
     expect(part.text).toBe("step by step");
-    expect(part.signature).toBe("sig-abc");
+    expect(part.providerOptions).toEqual({ anthropic: { signature: "sig-abc" } });
   });
 
   it("a generated_image reuses the image variant — NOT a JSON.stringify base64 text bomb (regression)", () => {

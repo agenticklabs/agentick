@@ -168,7 +168,7 @@ export const htmlContributor: Contributor = {
 
 export type ReasoningProps = Omit<ReasoningBlock, "type">;
 type _reasoningConformance = Exhausted<
-  UnhandledSpecKeys<ReasoningBlock, BaseBlockKey | "signature" | "isRedacted", "type" | "text">
+  UnhandledSpecKeys<ReasoningBlock, BaseBlockKey | "isRedacted", "type" | "text">
 >;
 
 export const reasoningContributor: Contributor = {

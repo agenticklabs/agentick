@@ -885,7 +885,7 @@ function toAnthropicMessages(messages: ReadonlyArray<LanguageModelMessage>): {
             content.push({
               type: "thinking",
               thinking: part.text,
-              signature: part.signature ?? "",
+              signature: reasoningSignature(part) ?? "",
             } as ThinkingBlockParam);
           }
           break;
@@ -1027,8 +1027,29 @@ function reasoningRedactedData(part: {
   readonly providerOptions?: ProviderOptions;
 }): string | undefined {
   if (typeof part.data === "string") return part.data;
+  return anthropicReasoningKey(part, "redactedData");
+}
+
+/**
+ * The signed thinking block's signature, which Anthropic requires replayed
+ * unchanged on the next turn of an extended-thinking + tools conversation.
+ *
+ * Read from the dialect namespace, same as `redactedData`. It used to ride a
+ * bare `ReasoningBlock.signature`, which the canonical projection then handed to
+ * every adapter — an opaque Anthropic blob offered to Google.
+ */
+function reasoningSignature(part: {
+  readonly providerOptions?: ProviderOptions;
+}): string | undefined {
+  return anthropicReasoningKey(part, "signature");
+}
+
+function anthropicReasoningKey(
+  part: { readonly providerOptions?: ProviderOptions },
+  key: string,
+): string | undefined {
   const bag = part.providerOptions as Record<string, Record<string, unknown>> | undefined;
-  const v = bag?.["anthropic"]?.["redactedData"];
+  const v = bag?.["anthropic"]?.[key];
   return typeof v === "string" ? v : undefined;
 }
 
@@ -1378,7 +1399,7 @@ function anthropicContentToContentBlocks(
         output.push({
           type: "reasoning",
           text: t.thinking,
-          ...(t.signature ? { signature: t.signature } : {}),
+          ...(t.signature ? { providerMetadata: { anthropic: { signature: t.signature } } } : {}),
         });
         break;
       }

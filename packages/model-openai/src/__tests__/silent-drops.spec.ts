@@ -30,7 +30,10 @@ describe("openai() — inputs currently discarded", () => {
           content: [
             part("text", { text: "hi" }),
             part("video", { source: { type: "base64", data: "AAAA" } }),
-            part("reasoning", { text: "prior thought", signature: "sig" }),
+            part("reasoning", {
+              text: "prior thought",
+              providerOptions: { anthropic: { signature: "sig" } },
+            }),
           ],
         },
       ],

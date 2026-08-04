@@ -30,7 +30,10 @@ describe("google() — inputs currently discarded", () => {
           role: "user",
           content: [
             part("text", { text: "hi" }),
-            part("reasoning", { text: "prior thought", signature: "sig" }),
+            part("reasoning", {
+              text: "prior thought",
+              providerOptions: { anthropic: { signature: "sig" } },
+            }),
           ],
         },
       ],

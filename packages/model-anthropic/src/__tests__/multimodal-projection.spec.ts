@@ -92,10 +92,12 @@ describe("anthropic() adapter — ADR 57 multimodal projection", () => {
     const reasoning = result.output.find((b) => b.type === "reasoning") as {
       type: "reasoning";
       text: string;
-      signature?: string;
+      providerMetadata?: Record<string, Record<string, unknown>>;
     };
-    // The signature must survive normalize (previously dropped).
-    expect(reasoning.signature).toBe("sig-round-trip");
+    // The signature must survive normalize, under the DIALECT that produced it.
+    // A bare canonical field lost whose blob it was, and the projection then
+    // offered an Anthropic signature to every adapter.
+    expect(reasoning.providerMetadata).toEqual({ anthropic: { signature: "sig-round-trip" } });
 
     // 2. re-project the canonical block → INPUT part (carries signature).
     const part = messagePartFromBlock(reasoning as never) as LanguageModelMessagePart;

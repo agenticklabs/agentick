@@ -355,11 +355,18 @@ export interface TextBlock extends BaseContentBlock {
   readonly text: string;
 }
 
+/**
+ * A thinking / chain-of-thought block.
+ *
+ * The provider's opaque signature rides {@link BaseContentBlock.providerMetadata}
+ * under the DIALECT that produced it — `providerMetadata.anthropic.signature`,
+ * `providerMetadata.google.thoughtSignature`. It was a bare `signature` field
+ * here, which lost the one fact that makes an opaque blob interpretable: whose
+ * it is. The projection then handed an Anthropic signature to every adapter.
+ */
 export interface ReasoningBlock extends BaseContentBlock {
   readonly type: "reasoning";
   readonly text: string;
-  /** Provider-supplied opaque signature for redacted reasoning. */
-  readonly signature?: string;
   readonly isRedacted?: boolean;
 }
 

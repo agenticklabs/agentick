@@ -150,7 +150,11 @@ describe("reasoning content survives the fold onto the timeline", () => {
   it("keeps a reasoning block, its text, and its signature on the assistant entry", async () => {
     const { session } = await mkSession(
       scriptedLoop([
-        { type: "reasoning", text: "the user wants a sum", signature: "sig-abc" },
+        {
+          type: "reasoning",
+          text: "the user wants a sum",
+          providerMetadata: { anthropic: { signature: "sig-abc" } },
+        },
         { type: "text", text: "42" },
       ]),
     );
@@ -163,7 +167,9 @@ describe("reasoning content survives the fold onto the timeline", () => {
     expect(reasoning.text).toBe("the user wants a sum");
     // Anthropic rejects the NEXT turn if a signed thinking block does not
     // replay verbatim, so losing this is a broken conversation, not a lost label.
-    expect(reasoning.signature).toBe("sig-abc");
+    // Namespaced by DIALECT — an opaque blob nobody can read is only meaningful
+    // alongside whose it is.
+    expect(reasoning.providerMetadata).toEqual({ anthropic: { signature: "sig-abc" } });
 
     await session.close();
   });
@@ -220,7 +226,11 @@ describe("reasoning content survives the fold onto the timeline", () => {
   it("survives snapshot → restore — reasoning that vanishes on reload is not persisted", async () => {
     const { session } = await mkSession(
       scriptedLoop([
-        { type: "reasoning", text: "thinking out loud", signature: "sig-xyz" },
+        {
+          type: "reasoning",
+          text: "thinking out loud",
+          providerMetadata: { anthropic: { signature: "sig-xyz" } },
+        },
         { type: "text", text: "answer" },
       ]),
     );
@@ -235,7 +245,7 @@ describe("reasoning content survives the fold onto the timeline", () => {
       (b) => b.type === "reasoning",
     ) as ReasoningBlock;
     expect(reasoning.text).toBe("thinking out loud");
-    expect(reasoning.signature).toBe("sig-xyz");
+    expect(reasoning.providerMetadata).toEqual({ anthropic: { signature: "sig-xyz" } });
 
     await restored.close();
   });

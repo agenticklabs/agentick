@@ -391,7 +391,6 @@ export type LanguageModelMessagePart =
        */
       readonly type: "reasoning";
       readonly text: string;
-      readonly signature?: string;
       readonly data?: unknown;
       readonly providerOptions?: ProviderOptions;
       readonly providerMetadata?: ProviderMetadataBag;
