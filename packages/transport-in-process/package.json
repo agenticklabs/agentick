@@ -1,6 +1,6 @@
 {
   "name": "@agentick/transport-in-process",
-  "version": "1.0.0-next.78",
+  "version": "1.0.0-next.79",
   "description": "In-process `ClientTransport` for agentick — direct function calls between client and gateway in the same process. Used for tests, embedded library deploys, and same-process TUI / daemon shapes (tentickle-class agents). Zero serialization cost; optional `wireParity: true` test mode roundtrips frames through JSON to catch wire-shape regressions.",
   "keywords": [
     "agent",

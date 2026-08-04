@@ -1,6 +1,6 @@
 {
   "name": "@agentick/completions",
-  "version": "1.0.0-next.78",
+  "version": "1.0.0-next.79",
   "description": "CompletionsHarness — argument completion as a first-class seam: a registry of name→resolver bindings plus one resolve door, with the complete* sugar family (list, enum, prefix-match, dependent, async). Owns no data; resolvers read from wherever the candidates already live. No wire cap — each wire trims to its own limit.",
   "keywords": [
     "agent",
