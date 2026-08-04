@@ -283,8 +283,33 @@ override never reaches the tree. If it is not readable, that is the first commit
 — and it is worth making regardless, because no target-conditional decision is
 expressible from the tree without it, media handling included.
 
+## A separate, unconditional pass: orphan detection
+
+Distinct from everything above and worth building first. An orphaned
+`tool_result` — a result whose `tool_use` is not in the projection — is illegal
+regardless of provenance, and degradation is not the only thing that creates
+one:
+
+- a `<Timeline>` `filter` that drops the assistant turn but keeps the tool message
+- token-budget eviction cutting between a call and its result
+- `preserveRoles: ["system", "user"]` evicting the assistant turn out from under
+  its own result
+
+None involve a model switch; adopters can hit all three today, on one model,
+with no provenance in the picture. Unlike provenance degradation this has a
+correct always-on answer, it is grammar rather than meaning, and it fires for
+the common case rather than the rare one — so it runs at collect,
+unconditionally.
+
+| pass               | when            | decides                                 |
+| ------------------ | --------------- | --------------------------------------- |
+| orphan check       | collect, always | grammar — never emit an illegal request |
+| provenance degrade | tree, opt-in    | meaning — is losing continuity worth it |
+| quarantine         | on rejection    | recovery for what nobody could predict  |
+
 ## Checklist
 
+- [ ] Orphan detection at collect (independent of everything else — ship first)
 - [ ] Verify / add target-at-render
 - [ ] Stamp `metadata.model` on EVERY message an execution produces (tool
       results included — this is what makes the transform local)
