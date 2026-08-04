@@ -31,11 +31,18 @@ model id.
 
 ## What the framework provides
 
-### 1. Provenance on the assistant message
+### 1. Provenance on every message an execution produces
 
 `message.metadata.model = { provider, modelId }` — the target we actually
 called. The boundary entry already carries this; the message does not, and an
 app cannot observe what it was never told.
+
+**Not only assistant messages.** A `tool` message carries no provenance of its
+own — we produced that result, not the model — so a per-message rule reads it as
+`unknown` and degrades it even when the turn it belongs to was fine. We know the
+target when the result is appended, so we stamp it. That one line is what makes
+the transform local: both halves of a call carry the same stamp, the coupling is
+guaranteed rather than reconstructed, and nothing needs to look ahead.
 
 ### 2. `isReplayable(entry, target)` — three-valued
 
@@ -48,26 +55,24 @@ Gemini rejects _missing_ signatures, so an imported or brownfield timeline — t
 one carrying no provenance at all — is the most likely to fail. Collapsing it
 with `foreign` would hide that; collapsing it with `replayable` would break it.
 
-### 3. `replayGroups(entries, target)` — the primitive
+### 3. `degradeMessage(entry, target)` — the primitive
 
-Returns the entries partitioned into replay units:
+One entry in, N entries out:
 
 ```ts
-type ReplayGroup =
-  | { readonly replayable: true; readonly entry: TimelineEntry }
-  | {
-      readonly replayable: false;
-      readonly entries: readonly TimelineEntry[]; // the call AND its result
-      readonly provenance?: { provider: string; modelId: string };
-      readonly reason: "foreign" | "unknown";
-    };
+function degradeMessage(entry: TimelineEntry, target: ExecutionTarget): TimelineEntry[];
 ```
 
-**The unit is the sequence, not the entry**, and that is the whole reason this
-exists. A `tool_use` lives in one entry and its `tool_result` in the next, so a
-per-entry predicate is a trap: it lets an adopter degrade one half and orphan
-the other, which trades one rejection for a different one. Grouping makes the
-pairing impossible to get wrong, and returns data the tree can map over.
+Give every block a disposition — `keep`, `drop`, `degrade` — then collapse
+contiguous **keeper** runs into one message of the original role and emit each
+degraded block as its own `event`, in place. Order comes from block positions,
+not from a fixed layout.
+
+Make the disposition **data-driven, not type-driven**: a block is at risk if it
+carries foreign `providerMetadata`, not if it is of some enumerated type. Block
+kinds added later then work without touching this.
+
+`degradeForReplay(entries, target)` is `entries.flatMap((e) => degradeMessage(e, target))`.
 
 ### Tool calls are NOT the only failure mode
 
@@ -97,55 +102,65 @@ server-side state rather than a block. There is nothing to strip or group; it
 lives in `providerOptions` and degrades by being omitted. No helper here touches
 it.
 
-### 4. `degradeForReplay(entries, target)` — the default
+### 4. What a degraded block becomes
 
-`replayGroups` plus the default collapse, for adopters who want it handled:
+A `role: "event"` message carrying a `<system_event>` block. Never `role:
+"user"` — re-attributing the assistant's own tool call to the user corrupts
+in-context learning, and the model reads its own turns as exemplars. Never
+hand-written prose — `event` collapses to `user` at the wire, and the
+_structure_ is what keeps it distinguishable from speech. That is the argument
+ADR 94 already made for `<Grounding>`, applied to a second kind of non-speech
+content.
 
-```ts
-const safe = degradeForReplay(entries, target); // TimelineEntry[]
-```
-
-A degraded group becomes ONE `role: "event"` message per call/result pair,
-carrying a `<system_event>` block. Never `role: "user"` — re-attributing the
-assistant's own tool call to the user corrupts in-context learning, and the
-model reads its own turns as exemplars. Never hand-written prose — `event`
-collapses to `user` at the wire, and the _structure_ is what keeps it
-distinguishable from speech. That is the argument ADR 94 already made for
-`<Grounding>`, applied to a second kind of non-speech content.
+Every degraded entry carries `metadata.degradedFrom = { messageId, provenance,
+reason }` — the id and the provenance, **never the original content**. A pointer
+records; a copy doubles the memory for every degraded turn and puts the original
+one careless renderer away from the prompt. It makes the transform auditable,
+gives hooks and adapters something to key on, and is the honest statement that
+this entry is derived rather than authored.
 
 ### The transform, concretely
 
 ```
-assistant [thinking, text, tool_use]   →  assistant(text) · event(call+result)
-assistant [text, tool_use, text]       →  assistant(text) · event(call+result) · assistant(text)
-assistant [tool_use]                   →  event(call+result)          ← message dropped, it emptied
-tool      [tool_result]                →  folded into its partner's event
+assistant [thinking, text, tool_use]   →  event(call) · assistant(text)     ← order follows the blocks
+assistant [text, tool_use, text]       →  assistant(text) · event(call) · assistant(text)
+assistant [text, image, tool_use]      →  assistant(text, image) · event(call)
+assistant [tool_use]                   →  event(call)                       ← nothing left to place
+tool      [tool_result]                →  event(result)                     ← converts wholesale
 ```
 
 Four rules, each earned:
 
-1. **In position, never hoisted.** The dominant shape is text-then-call ("Let me
-   check that." + `tool_use`). Emitting the call before the assistant message
-   says it called first and explained afterwards — backwards, and it teaches bad
-   turn structure to a model reading its own history as exemplars.
+1. **In position, never hoisted.** Order comes from the block positions. The
+   dominant shape is text-then-call ("Let me check that." + `tool_use`), and
+   emitting the call first says it called and then explained itself — backwards,
+   and it teaches bad turn structure to a model reading its own history.
 2. **Thinking drops silently — no event.** Wrapping a dropped thinking block in
    an announcement is context-window noise for a fact nothing consumes.
-3. **An emptied assistant message is dropped.** A bare `tool_use` with no
-   preamble is extremely common; after extraction there is no content left, and
-   an empty assistant message is meaningless at best.
-4. **One event per call/result pair.** Two events would need a correlation
-   scheme to replace the one just discarded.
+3. **An emptied message is dropped.** A bare `tool_use` with no preamble is
+   extremely common; nothing remains to place.
+4. **Adjacency is the correlation.** A call event and its result event sit next
+   to each other exactly as they did on the wire, and `degradedFrom` carries the
+   tool id for anything that needs certainty. An earlier draft folded the pair
+   into one event to "preserve the correlation" — it was already preserved.
 
-**The `tool` message carries no provenance of its own** — we produced that
-result, not the model, and there is no signature on it. It is condemned by
-COUPLING: its partner cannot be replayed and an orphan result is its own
-rejection. So it cannot be decided by looking at it, which is why the primitive
-groups rather than filters. A per-message predicate would examine that message,
-find nothing wrong, keep it, and orphan it.
+**Non-text blocks stay.** Images, code, JSON and audio the model produced carry
+no signature and are replayable, so the keeper run is _everything not
+provenance-bound_, not "text only".
 
-The assistant message is the harder case for the opposite reason: it is MIXED —
-some blocks replayable, some not, in one message, and the split must preserve
-order and handle emptying. Hiding that asymmetry is the helper's whole job.
+**The `tool` message converts wholesale.** Its entire content is the result of a
+call that cannot be replayed, there is nothing in it worth keeping separately,
+and it has no voice to preserve. The assistant message is the harder case for
+the opposite reason: it is MIXED, and the split must preserve order and handle
+emptying. Hiding that asymmetry is the helper's whole job.
+
+**Why not convert the assistant message wholesale too?** Most assistant messages
+carry no round-trip data at all — a text answer has no signature and replays
+against anything. A message-level rule degrades every one of them on a model
+switch, leaving `user · event · user · event` for the entire pre-switch history
+with no exemplar of the model's own voice anywhere in it. Summarising an
+assistant turn is the most expensive mistake this codebase has made; converting
+every one of them is a gentler version of it, applied all at once.
 
 ## Ergonomics
 
@@ -166,11 +181,13 @@ order and handle emptying. Hiding that asymmetry is the helper's whole job.
 ```tsx
 <Timeline>
   {(entries) =>
-    replayGroups(entries, useTarget()).map((group) =>
-      group.replayable ? (
-        <Message key={group.entry.message.id} {...group.entry.message} />
-      ) : (
-        <CollapsedTurn key={keyOf(group)} group={group} />
+    entries.flatMap((entry) =>
+      degradeMessage(entry, useTarget()).map((out) =>
+        out.message.metadata?.degradedFrom ? (
+          <CollapsedTurn key={out.message.id} entry={out} />
+        ) : (
+          <Message key={out.message.id} {...out.message} />
+        ),
       ),
     )
   }
@@ -178,14 +195,14 @@ order and handle emptying. Hiding that asymmetry is the helper's whole job.
 ```
 
 ```tsx
-function CollapsedTurn({ group }: { group: DegradedGroup }): React.ReactNode {
-  const { name, input, result } = toolCallOf(group);
+function CollapsedTurn({ entry }: { entry: TimelineEntry }): React.ReactNode {
+  const { degradedFrom } = entry.message.metadata;
   return (
     <Event>
       <system_event
         event="tool_call"
         source="replay"
-        data={{ name, input, result, producedBy: group.provenance?.modelId }}
+        data={{ ...toolCallOf(entry), producedBy: degradedFrom.provenance?.modelId }}
       />
     </Event>
   );
@@ -197,12 +214,15 @@ markdown and XML from one tree.
 
 ### Level 3 — a different policy entirely
 
-`replayGroups` is analysis; nothing obliges you to degrade. Drop foreign turns,
+`isReplayable` is analysis; nothing obliges you to degrade. Drop foreign turns,
 keep them and gamble, or degrade only the ones older than the last fold:
 
 ```tsx
-const groups = replayGroups(entries, target);
-const keep = groups.filter((g) => g.replayable || g.reason === "unknown");
+entries.flatMap((entry) =>
+  isReplayable(entry, target) === "replayable" || withinLastFold(entry)
+    ? [entry]
+    : degradeMessage(entry, target),
+);
 ```
 
 ## Rules an adopter must not have to discover
@@ -215,8 +235,9 @@ const keep = groups.filter((g) => g.replayable || g.reason === "unknown");
   on every tick. A wobble rewrites the middle of the prompt and invalidates the
   prefix cache from that point down — the same failure the execution-anchored
   recency boundary exists to prevent.
-- **One event per call/result pair**, not per turn. Parallel tool calls are
-  common, and a stable 1:1 mapping is what keeps the rendering deterministic.
+- **One event per degraded block.** Parallel tool calls are common, and a stable
+  1:1 mapping is what keeps the rendering deterministic. Derive the event's id
+  from the source message id plus the block index, never from a counter.
 
 ## Rejected, with reasons
 
@@ -247,9 +268,11 @@ expressible from the tree without it, media handling included.
 ## Checklist
 
 - [ ] Verify / add target-at-render
-- [ ] Stamp `metadata.model` on the assistant message
+- [ ] Stamp `metadata.model` on EVERY message an execution produces (tool
+      results included — this is what makes the transform local)
 - [ ] Per-dialect coupling rules declared by each adapter (google, anthropic, openai)
-- [ ] `isReplayable` (per BLOCK), `replayGroups`, `degradeForReplay`
+- [ ] `isReplayable` (per BLOCK), `degradeMessage` (one in, N out),
+      `degradeForReplay` (the flatMap over it), `degradedFrom` on every output
 - [ ] Reasoning blocks: drop, not degrade — verify against Anthropic's actual
       validation semantics before relying on the wording above
 - [ ] Tests: the pair rule, determinism across ticks, `unknown` ≠ `foreign`
