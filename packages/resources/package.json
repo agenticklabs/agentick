@@ -1,6 +1,6 @@
 {
   "name": "@agentick/resources",
-  "version": "1.0.0-next.82",
+  "version": "1.0.0-next.83",
   "description": "ResourcesHarness — a read-projection seam (registry of URI→resolver bindings + subscribe/list_changed notifier) that projects agentick's application-controlled readable content onto MCP resources. Owns no content; resolvers read from wherever it already lives. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
