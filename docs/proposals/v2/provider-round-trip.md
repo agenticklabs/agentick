@@ -1,0 +1,191 @@
+# Provider round-trip data across a model change
+
+**Status:** design agreed 2026-08-04, unbuilt. Ryan + Claude.
+
+## The problem
+
+Providers attach opaque blobs to assistant turns that must come back on replay:
+Gemini `thoughtSignature` on `functionCall` parts, Anthropic `signature` on
+thinking blocks, OpenAI encrypted reasoning items. Gemini 3.x **rejects** a
+multi-step replay whose first function call lacks one — a 400, not a degradation.
+
+The timeline is durable and the model is not. Every long-lived conversation
+eventually replays blobs produced by a model it is no longer talking to. This is
+not an edge case; it is a certainty with a date on it.
+
+Observed: `gemini-2.5-flash` → `gemini-3.5-flash` carried signatures fine. So
+compatibility follows the _format_, which providers do not publish, and not the
+model id.
+
+## The split
+
+**Framework ships facts and wire grammar. It decides no policy.**
+
+- **Facts** — what we observed. The provenance of a turn is not a claim about
+  compatibility; it is a record of which target produced it.
+- **Grammar** — a request malformed by construction. A `tool_result` whose
+  `tool_use` was removed is its own rejection. This is not a matter of opinion
+  and no adopter should learn it from a 400.
+- **Meaning** — whether losing reasoning continuity is an acceptable price for
+  this conversation. A product judgment. Never the framework's.
+
+## What the framework provides
+
+### 1. Provenance on the assistant message
+
+`message.metadata.model = { provider, modelId }` — the target we actually
+called. The boundary entry already carries this; the message does not, and an
+app cannot observe what it was never told.
+
+### 2. `isReplayable(entry, target)` — three-valued
+
+```ts
+type Replayability = "replayable" | "foreign" | "unknown";
+```
+
+`unknown` (no provenance) is the **dangerous** state, not the benign one.
+Gemini rejects _missing_ signatures, so an imported or brownfield timeline — the
+one carrying no provenance at all — is the most likely to fail. Collapsing it
+with `foreign` would hide that; collapsing it with `replayable` would break it.
+
+### 3. `replayGroups(entries, target)` — the primitive
+
+Returns the entries partitioned into replay units:
+
+```ts
+type ReplayGroup =
+  | { readonly replayable: true; readonly entry: TimelineEntry }
+  | {
+      readonly replayable: false;
+      readonly entries: readonly TimelineEntry[]; // the call AND its result
+      readonly provenance?: { provider: string; modelId: string };
+      readonly reason: "foreign" | "unknown";
+    };
+```
+
+**The unit is the sequence, not the entry**, and that is the whole reason this
+exists. A `tool_use` lives in one entry and its `tool_result` in the next, so a
+per-entry predicate is a trap: it lets an adopter degrade one half and orphan
+the other, which trades one rejection for a different one. Grouping makes the
+pairing impossible to get wrong, and returns data the tree can map over.
+
+### 4. `degradeForReplay(entries, target)` — the default
+
+`replayGroups` plus the default collapse, for adopters who want it handled:
+
+```ts
+const safe = degradeForReplay(entries, target); // TimelineEntry[]
+```
+
+A degraded group becomes ONE `role: "event"` message per call/result pair,
+carrying a `<system_event>` block. Never `role: "user"` — re-attributing the
+assistant's own tool call to the user corrupts in-context learning, and the
+model reads its own turns as exemplars. Never hand-written prose — `event`
+collapses to `user` at the wire, and the _structure_ is what keeps it
+distinguishable from speech. That is the argument ADR 94 already made for
+`<Grounding>`, applied to a second kind of non-speech content.
+
+## Ergonomics
+
+### Level 1 — handled
+
+```tsx
+<Timeline>
+  {(entries) =>
+    degradeForReplay(entries, useTarget()).map((entry) => (
+      <Message key={entry.message.id} {...entry.message} />
+    ))
+  }
+</Timeline>
+```
+
+### Level 2 — your own rendering of a degraded turn
+
+```tsx
+<Timeline>
+  {(entries) =>
+    replayGroups(entries, useTarget()).map((group) =>
+      group.replayable ? (
+        <Message key={group.entry.message.id} {...group.entry.message} />
+      ) : (
+        <CollapsedTurn key={keyOf(group)} group={group} />
+      ),
+    )
+  }
+</Timeline>
+```
+
+```tsx
+function CollapsedTurn({ group }: { group: DegradedGroup }): React.ReactNode {
+  const { name, input, result } = toolCallOf(group);
+  return (
+    <Event>
+      <system_event
+        event="tool_call"
+        source="replay"
+        data={{ name, input, result, producedBy: group.provenance?.modelId }}
+      />
+    </Event>
+  );
+}
+```
+
+Structure, so the formatter decides the wording, so it reads correctly in
+markdown and XML from one tree.
+
+### Level 3 — a different policy entirely
+
+`replayGroups` is analysis; nothing obliges you to degrade. Drop foreign turns,
+keep them and gamble, or degrade only the ones older than the last fold:
+
+```tsx
+const groups = replayGroups(entries, target);
+const keep = groups.filter((g) => g.replayable || g.reason === "unknown");
+```
+
+## Rules an adopter must not have to discover
+
+- **Degradation is non-destructive.** It shapes the projection, never the
+  timeline. Switch back to a compatible model and the fast path returns with
+  nothing to restore. Rewriting history to fix a model change is a one-way door
+  paid before you know the switch stuck.
+- **It must be deterministic.** The same collapsed turn renders byte-identically
+  on every tick. A wobble rewrites the middle of the prompt and invalidates the
+  prefix cache from that point down — the same failure the execution-anchored
+  recency boundary exists to prevent.
+- **One event per call/result pair**, not per turn. Parallel tool calls are
+  common, and a stable 1:1 mapping is what keeps the rendering deterministic.
+
+## Rejected, with reasons
+
+- **A compatibility-token registry in the catalog.** Hand-maintained claims
+  about blobs nobody versions publicly. Wrong means confident replay and a
+  silent outage on every old thread — the exact failure it was built to prevent,
+  with a config file making it look handled. The ecosystem (ai-sdk, LangChain)
+  declines to model this, and that is not an oversight.
+- **`strip` as an outcome.** Removing a signature while keeping the
+  `functionCall` part _is_ the 400. It was either a no-op or the bug.
+- **A projection-level policy seam.** One consumer, which already has a
+  tree-level seam in `compact`. Absorb it after it is worn in.
+- **Quarantine-on-rejection as the primary path.** It mutates history
+  mid-conversation: a turn replayed fine for ten turns, then gets refused and
+  removed, rewriting the prompt in the middle. Keep it in the drawer as
+  _recovery_ — for a legal timeline refused for a reason the adopter had no
+  information to predict, which includes the brownfield `unknown` case. It
+  composes cleanly on top: decide what to attempt, handle being refused anyway.
+
+## Open before implementation
+
+**Is the resolved `ExecutionTarget` readable at render?** Every example above
+assumes `useTarget()`. The `<Model>` cascade resolves per tick and a per-call
+override never reaches the tree. If it is not readable, that is the first commit
+— and it is worth making regardless, because no target-conditional decision is
+expressible from the tree without it, media handling included.
+
+## Checklist
+
+- [ ] Verify / add target-at-render
+- [ ] Stamp `metadata.model` on the assistant message
+- [ ] `isReplayable`, `replayGroups`, `degradeForReplay` + the orphan rule
+- [ ] Tests: the pair rule, determinism across ticks, `unknown` ≠ `foreign`
+- [ ] Adopter docs, with Ernesto's timeline as the worked example
