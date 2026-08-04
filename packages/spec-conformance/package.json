@@ -1,6 +1,6 @@
 {
   "name": "@agentick/spec-conformance",
-  "version": "1.0.0-next.80",
+  "version": "1.0.0-next.81",
   "private": true,
   "description": "Conformance test fixtures for @agentick/spec implementations. Internal — not published.",
   "license": "UNLICENSED",
