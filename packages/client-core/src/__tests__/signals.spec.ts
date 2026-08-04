@@ -118,8 +118,9 @@ describe("onLog (ADR 64)", () => {
         data: { code: 7 },
         logger: "lg",
         scope: { sessionId: "s1", executionId: "e1" },
+        surface: "tool",
       },
-      { level: "info", data: "hi", scope: { sessionId: "s1" } },
+      { level: "info", data: "hi", scope: { sessionId: "s1" }, surface: "mcp" },
     ]);
   });
 
@@ -141,6 +142,44 @@ describe("onLog (ADR 64)", () => {
   });
 });
 
+describe("telling one surface's progress from another's", () => {
+  it("names the emitting surface, because the subscription spans all of them", async () => {
+    // `*:signal:progress` matches every harness. Without the surface a
+    // compaction bar and a tool's progress are the same event, and both move
+    // whichever widget subscribed first.
+    const stream = streamOf([
+      frame({
+        surface: "timeline",
+        name: progressEventName("timeline"),
+        payload: { token: "timeline:compact:1", progress: 900, total: 8192 },
+      }),
+      frame(
+        {
+          surface: "tool",
+          name: progressEventName("tool"),
+          payload: { token: "tool:recall:1", progress: 1, total: 3 },
+        },
+        2,
+      ),
+    ]);
+    const got: ReceivedProgress[] = [];
+    onProgress(fakeClient(stream, {}), { kind: "session", id: "s1" }, (e) => got.push(e));
+    await tick();
+
+    expect(got.map((e) => e.surface)).toEqual(["timeline", "tool"]);
+  });
+
+  it("narrows at the BUS when a surface is named — an unwatched one costs nothing", async () => {
+    const captured: Captured = {};
+    onProgress(fakeClient(streamOf([]), captured), { kind: "session", id: "s1" }, () => {}, {
+      surface: "timeline",
+    });
+    await tick();
+
+    expect(captured.query).toEqual({ name: { exact: "timeline:signal:progress" } });
+  });
+});
+
 describe("onProgress (ADR 64)", () => {
   it("subscribes with the cross-surface progress query and maps payload + scope", async () => {
     const stream = streamOf([
@@ -159,7 +198,14 @@ describe("onProgress (ADR 64)", () => {
 
     expect(captured.query).toEqual({ name: { wildcard: "*:signal:progress" } });
     expect(got).toEqual([
-      { token: "tok-1", progress: 2, total: 10, message: "go", scope: { executionId: "e1" } },
+      {
+        token: "tok-1",
+        progress: 2,
+        total: 10,
+        message: "go",
+        scope: { executionId: "e1" },
+        surface: "tool",
+      },
     ]);
   });
 });
@@ -226,7 +272,9 @@ describe("client.onLog / client.onProgress instance methods", () => {
     await tick();
 
     expect(captured.query).toEqual({ name: { wildcard: "*:signal:log" } });
-    expect(got).toEqual([{ level: "info", data: "hi", scope: { executionId: "e1" } }]);
+    expect(got).toEqual([
+      { level: "info", data: "hi", scope: { executionId: "e1" }, surface: "tool" },
+    ]);
     off();
     expect((stream as SubscriptionStream & { closed: boolean }).closed).toBe(true);
   });
@@ -248,7 +296,14 @@ describe("client.onLog / client.onProgress instance methods", () => {
 
     expect(captured.query).toEqual({ name: { wildcard: "*:signal:progress" } });
     expect(got).toEqual([
-      { token: "tok-1", progress: 2, total: 10, message: "go", scope: { executionId: "e1" } },
+      {
+        token: "tok-1",
+        progress: 2,
+        total: 10,
+        message: "go",
+        scope: { executionId: "e1" },
+        surface: "tool",
+      },
     ]);
   });
 });

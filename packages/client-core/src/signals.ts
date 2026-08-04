@@ -67,8 +67,8 @@ export function onLog(
   handler: (event: ReceivedLog) => void,
   opts?: OnSignalOptions,
 ): Unsubscribe {
-  return subscribeSignal(client, scope, logEventQuery(), opts, (payload, evScope) => {
-    handler({ ...(payload as LogEventPayload), scope: evScope });
+  return subscribeSignal(client, scope, logEventQuery(opts?.surface), opts, (payload, origin) => {
+    handler({ ...(payload as LogEventPayload), ...origin });
   });
 }
 
@@ -83,9 +83,15 @@ export function onProgress(
   handler: (event: ReceivedProgress) => void,
   opts?: OnSignalOptions,
 ): Unsubscribe {
-  return subscribeSignal(client, scope, progressEventQuery(), opts, (payload, evScope) => {
-    handler({ ...(payload as ProgressEventPayload), scope: evScope });
-  });
+  return subscribeSignal(
+    client,
+    scope,
+    progressEventQuery(opts?.surface),
+    opts,
+    (payload, origin) => {
+      handler({ ...(payload as ProgressEventPayload), ...origin });
+    },
+  );
 }
 
 function subscribeSignal(
@@ -93,7 +99,7 @@ function subscribeSignal(
   scope: SubscriptionScope,
   query: ReturnType<typeof logEventQuery>,
   opts: OnSignalOptions | undefined,
-  emit: (payload: unknown, scope: EventScope) => void,
+  emit: (payload: unknown, origin: { scope: EventScope; surface: string }) => void,
 ): Unsubscribe {
   const sub = client.transport.subscribe(scope, query, opts?.fromCursor);
   let closed = false;
@@ -103,7 +109,7 @@ function subscribeSignal(
       const env = frame.envelope;
       if (env.payload === undefined) continue;
       try {
-        emit(env.payload, (env.scope ?? {}) as EventScope);
+        emit(env.payload, { scope: (env.scope ?? {}) as EventScope, surface: env.surface });
       } catch {
         // Isolate handler faults — never tear down the subscription.
       }

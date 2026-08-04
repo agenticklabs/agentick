@@ -153,7 +153,10 @@ describe("pre-scoped handle onLog / onProgress", () => {
 
     expect(captured.scope).toEqual({ kind: "session", id: "s1" });
     expect(captured.query).toEqual({ name: { wildcard: "*:signal:log" } });
-    expect(got).toEqual([{ level: "info", data: "hi", scope: { executionId: "e1" } }]);
+    // `surface` names the emitting harness — the push stream stamps "session".
+    expect(got).toEqual([
+      { level: "info", data: "hi", scope: { executionId: "e1" }, surface: "session" },
+    ]);
 
     off();
     await tick();
@@ -197,7 +200,14 @@ describe("pre-scoped handle onLog / onProgress", () => {
     await waitFor(() => got.length === 1);
     expect(captured.scope).toEqual({ kind: "session", id: "s1" });
     expect(got).toEqual([
-      { token: "tok-1", progress: 2, total: 10, message: "go", scope: { executionId: "e1" } },
+      {
+        token: "tok-1",
+        progress: 2,
+        total: 10,
+        message: "go",
+        scope: { executionId: "e1" },
+        surface: "session",
+      },
     ]);
   });
 });

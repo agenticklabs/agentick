@@ -385,8 +385,10 @@ export function progressEventName(surface: string): string {
  *
  * @verifiedBy packages/spec/src/__tests__/signals.spec.ts
  */
-export function logEventQuery(): EventQuery {
-  return { name: { wildcard: `*:${SIGNAL_NAME_DOMAIN}:log` } };
+export function logEventQuery(surface?: string): EventQuery {
+  return surface === undefined
+    ? { name: { wildcard: `*:${SIGNAL_NAME_DOMAIN}:log` } }
+    : { name: { exact: logEventName(surface) } };
 }
 
 /**
@@ -395,8 +397,10 @@ export function logEventQuery(): EventQuery {
  *
  * @verifiedBy packages/spec/src/__tests__/signals.spec.ts
  */
-export function progressEventQuery(): EventQuery {
-  return { name: { wildcard: `*:${SIGNAL_NAME_DOMAIN}:progress` } };
+export function progressEventQuery(surface?: string): EventQuery {
+  return surface === undefined
+    ? { name: { wildcard: `*:${SIGNAL_NAME_DOMAIN}:progress` } }
+    : { name: { exact: progressEventName(surface) } };
 }
 
 /**
