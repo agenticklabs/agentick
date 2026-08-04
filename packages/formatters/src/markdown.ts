@@ -27,6 +27,7 @@ import type {
 } from "@agentick/spec";
 
 import { createFormatter } from "./create-formatter.js";
+import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
 import { renderEventTag, type TagEscapers } from "./event-block.js";
 
 // ============================================================================
@@ -39,13 +40,6 @@ import { renderEventTag, type TagEscapers } from "./event-block.js";
  * dialect, and a raw `"`, `<` or `&` there produces a malformed tag. The
  * surrounding markdown is untouched.
  */
-function renderAttrs(attrs: unknown): string {
-  if (attrs === null || typeof attrs !== "object") return "";
-  return Object.entries(attrs as Record<string, unknown>)
-    .map(([k, v]) => ` ${k}="${escapeAttr(String(v))}"`)
-    .join("");
-}
-
 function escapeAttr(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -168,11 +162,13 @@ function formatNode(node: SemanticNode): string {
       // Content is NOT escaped: it is markdown, and escaping `<` would break
       // every other construct. Attribute values are, since a quote there ends
       // the tag.
-      const tag = String(node.props?.tag ?? "custom");
-      const attrs = renderAttrs(node.props?.attrs);
-      return node.props?.selfClosing === true
-        ? `<${tag}${attrs} />`
-        : `<${tag}${attrs}>${childText}</${tag}>`;
+      return renderCustomTag(
+        String(node.props?.tag ?? "custom"),
+        node.props?.attrs,
+        childText,
+        node.props?.selfClosing === true,
+        markdownEscapers,
+      );
     }
     default:
       return childText;
@@ -215,9 +211,11 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
     case "system_event":
     case "state_change":
       return { type: "text", text: renderEventTag(block, markdownEscapers) } satisfies TextBlock;
+    case "custom":
+      return { type: "text", text: renderCustomBlock(block, markdownEscapers) } satisfies TextBlock;
     default:
       // image / audio / video / document / tool_use / tool_result / generated_* /
-      // executable_code / code_execution_result / custom — pass through unchanged.
+      // executable_code / code_execution_result — pass through unchanged.
       return block;
   }
 }
@@ -267,12 +265,8 @@ function blockToText(block: ContentBlock): string {
     case "system_event":
     case "state_change":
       return renderEventTag(block, markdownEscapers);
-    case "custom": {
-      const attrs = renderAttrs(block.attrs);
-      return block.selfClosing === true
-        ? `<${block.tag}${attrs} />`
-        : `<${block.tag}${attrs}>${block.content}</${block.tag}>`;
-    }
+    case "custom":
+      return renderCustomBlock(block, markdownEscapers);
     default:
       return "";
   }

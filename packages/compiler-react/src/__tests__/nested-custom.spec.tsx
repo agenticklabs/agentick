@@ -7,7 +7,7 @@
 import React from "react";
 import { describe, expect, it } from "vitest";
 
-import { Section, renderTemplate } from "../index.js";
+import { Section, compileTemplate, renderTemplate } from "../index.js";
 
 describe("nested custom tags", () => {
   it("keeps every level, with attributes", async () => {
@@ -49,5 +49,23 @@ describe("nested custom tags", () => {
     );
     expect(output).toContain("<x>explicit</x>");
     expect(output).not.toContain("<ignored>");
+  });
+});
+
+describe("a custom tag reaches the model", () => {
+  it("lowers to text in the block pass, not only when something flattens it", async () => {
+    // A `custom` block used to pass through the block pass unchanged, so the
+    // provider projection — which has no case for it — dropped the tag and
+    // everything inside it. The prompt simply lost the section's body.
+    const { tree } = await compileTemplate(
+      <Section id="rc" title="Message metadata">
+        <custom tag="path">/projects/1234</custom>
+      </Section>,
+    );
+    const blocks = tree.context.entries[0]!.content;
+    expect(blocks.every((b) => b.type === "text")).toBe(true);
+    expect(blocks.map((b) => (b as { text: string }).text).join("\n")).toContain(
+      "<path>/projects/1234</path>",
+    );
   });
 });

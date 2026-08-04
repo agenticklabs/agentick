@@ -17,6 +17,7 @@ import type {
 } from "@agentick/spec";
 
 import { createFormatter } from "./create-formatter.js";
+import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
 import { renderEventTag, type TagEscapers } from "./event-block.js";
 
 function escapeXml(s: string): string {
@@ -28,18 +29,6 @@ function escapeXml(s: string): string {
 }
 
 const xmlEscapers: TagEscapers = { attr: escapeXml, content: escapeXml };
-
-/**
- * Attribute list for a custom tag. Values are escaped because they sit in
- * attribute position; shared by the node and block cases so the two cannot
- * drift again.
- */
-function renderAttrs(attrs: unknown): string {
-  if (attrs === null || typeof attrs !== "object") return "";
-  return Object.entries(attrs as Record<string, unknown>)
-    .map(([k, v]) => ` ${k}="${escapeXml(String(v))}"`)
-    .join("");
-}
 
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
@@ -126,13 +115,15 @@ function formatNode(node: SemanticNode): string {
       // Generic inline container (`<span>`). Wrap in `<span>` so
       // the inline structure round-trips in xml output.
       return `<span>${childText}</span>`;
-    case "custom": {
-      const tag = String(node.props?.tag ?? "custom");
-      const attrs = renderAttrs(node.props?.attrs);
-      return node.props?.selfClosing === true
-        ? `<${tag}${attrs} />`
-        : `<${tag}${attrs}>${childText}</${tag}>`;
-    }
+    case "custom":
+      // The children are already escaped — they came through this walk.
+      return renderCustomTag(
+        String(node.props?.tag ?? "custom"),
+        node.props?.attrs,
+        childText,
+        node.props?.selfClosing === true,
+        { attr: escapeXml, content: (c) => c },
+      );
     default:
       return childText;
   }
@@ -178,6 +169,8 @@ function formatBlock(block: SemanticContentBlock): ContentBlock {
     case "system_event":
     case "state_change":
       return { type: "text", text: renderEventTag(block, xmlEscapers) } satisfies TextBlock;
+    case "custom":
+      return { type: "text", text: renderCustomBlock(block, xmlEscapers) } satisfies TextBlock;
     default:
       return block;
   }
@@ -229,14 +222,10 @@ function blockToText(block: ContentBlock): string {
     case "system_event":
     case "state_change":
       return renderEventTag(block, xmlEscapers);
-    case "custom": {
+    case "custom":
       // Content is escaped here, unlike markdown — the `html` block is the
       // way through in this dialect.
-      const attrs = renderAttrs(block.attrs);
-      return block.selfClosing === true
-        ? `<${block.tag}${attrs} />`
-        : `<${block.tag}${attrs}>${escapeXml(block.content)}</${block.tag}>`;
-    }
+      return renderCustomBlock(block, xmlEscapers);
     default:
       return "";
   }
