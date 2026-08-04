@@ -234,3 +234,85 @@ function isSummaryEntry(e: TimelineEntry): boolean {
     e.message.content.some((b) => b.type === "system_event" && b.event === "compaction")
   );
 }
+
+describe("the fold cuts on a turn boundary", () => {
+  /** user → assistant(tool_use) → tool_result → assistant(text), repeated. */
+  function turns(count: number): TimelineEntry[] {
+    const out: TimelineEntry[] = [];
+    for (let t = 0; t < count; t++) {
+      const mk = (role: string, type: string, i: number) =>
+        ({
+          kind: "message",
+          message: {
+            id: `t${t}-${i}`,
+            ts: t * 10 + i,
+            role,
+            content: [
+              type === "text"
+                ? { type: "text", text: `t${t}` }
+                : type === "tool_use"
+                  ? { type: "tool_use", id: `c${t}`, name: "nav", input: {} }
+                  : { type: "tool_result", toolUseId: `c${t}`, content: [] },
+            ],
+          },
+        }) as TimelineEntry;
+      out.push(mk("user", "text", 0), mk("assistant", "tool_use", 1));
+      out.push(mk("user", "tool_result", 2), mk("assistant", "text", 3));
+    }
+    return out;
+  }
+
+  const roleOf = (e: TimelineEntry) => (e as { message: { role: string } }).message.role;
+  const firstBlock = (e: TimelineEntry) =>
+    (e as { message: { content: readonly { type: string }[] } }).message.content[0]!.type;
+
+  it("the entry after the summary is a real user message, not a fragment", async () => {
+    const out = await rollingSummary({ keepVerbatim: 6 }).run({
+      ...ctx(),
+      entries: turns(5),
+      generate: stubGenerate(),
+    });
+
+    expect(firstBlock(out[0]!)).toBe("system_event");
+    expect(roleOf(out[1]!)).toBe("user");
+    expect(firstBlock(out[1]!)).toBe("text");
+  });
+
+  it("never orphans a tool_result from its tool_use", async () => {
+    // The cut landing between them is a hard provider error, not a quality
+    // problem — Anthropic and Google both reject the request.
+    for (const keepVerbatim of [1, 2, 3, 4, 5, 6, 7, 8, 9]) {
+      const out = await rollingSummary({ keepVerbatim }).run({
+        ...ctx(),
+        entries: turns(5),
+        generate: stubGenerate(),
+      });
+      const kept = out.slice(1).map(firstBlock);
+      const firstResult = kept.indexOf("tool_result");
+      if (firstResult >= 0) {
+        expect(kept.slice(0, firstResult)).toContain("tool_use");
+      }
+    }
+  });
+
+  it("keepVerbatim is a floor — it rounds OUT to a whole turn", async () => {
+    const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: turns(5),
+      generate: stubGenerate(),
+    });
+    // 2 would have cut mid-turn; the whole final turn (4 entries) survives.
+    expect(out.slice(1)).toHaveLength(4);
+    expect(roleOf(out[1]!)).toBe("user");
+  });
+
+  it("keeps everything rather than emit a fragment when no turn start precedes", async () => {
+    const noUserTurn = turns(1).slice(1); // starts at the assistant's tool_use
+    const out = await rollingSummary({ keepVerbatim: 1 }).run({
+      ...ctx(),
+      entries: noUserTurn,
+      generate: stubGenerate(),
+    });
+    expect(out).toBe(noUserTurn);
+  });
+});

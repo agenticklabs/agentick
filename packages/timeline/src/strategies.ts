@@ -106,6 +106,33 @@ export function entryId(entry: TimelineEntry | undefined): string | undefined {
   return entry?.kind === "message" ? entry.message.id : undefined;
 }
 
+/**
+ * A turn opens with something the HUMAN said. A `tool_result` also rides a
+ * `user` message — it is the transport for a tool's reply, not a new turn — so
+ * role alone cuts in exactly the place this rule exists to avoid.
+ */
+const isUserTurn = (e: TimelineEntry): boolean =>
+  e.kind === "message" &&
+  e.message.role === "user" &&
+  !e.message.content.some((b) => b.type === "tool_result");
+
+/**
+ * Walk back from `index` to where a turn starts. A turn BEGINS with a user
+ * message, so cutting anywhere else keeps a fragment: an assistant reply with no
+ * visible prompt, or — one entry further — a `tool_result` whose `tool_use` was
+ * folded away, which Anthropic and Google both reject outright.
+ *
+ * `keepVerbatim` is therefore a floor, not a count: at least that many entries
+ * survive, rounded out to whole turns. Returns 0 when nothing before `index` is
+ * a user message — keeping everything beats emitting a fragment.
+ */
+function turnStartAtOrBefore(entries: readonly TimelineEntry[], index: number): number {
+  for (let i = Math.min(index, entries.length - 1); i > 0; i--) {
+    if (isUserTurn(entries[i]!)) return i;
+  }
+  return 0;
+}
+
 /** Summaries sit at the front — they are the oldest material. A fold is a prefix. */
 function afterLastSummary(entries: readonly TimelineEntry[]): number {
   let i = 0;
@@ -164,8 +191,9 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
         "rollingSummary needs a model: nothing bound `generate` on the compaction context.",
       );
     }
-    const older = entries.slice(0, Math.max(0, entries.length - keepVerbatim));
-    const keep = entries.slice(older.length);
+    const cut = turnStartAtOrBefore(entries, Math.max(0, entries.length - keepVerbatim));
+    const older = entries.slice(0, cut);
+    const keep = entries.slice(cut);
     const foldFrom = summariesIn(older).length >= keepSummaries ? 0 : afterLastSummary(older);
     const survivors = older.slice(0, foldFrom);
     const fold = older.slice(foldFrom);
