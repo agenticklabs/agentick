@@ -270,11 +270,7 @@ const mySummarizer: CompactGenerate = async ({
   onDelta,
 }) => {
   const res = await myModel.stream({ ...toRequest(entries, instructions), maxOutputTokens });
-  return {
-    text: res.text,
-    outputTokens: res.usage.output,
-    truncated: res.finishReason === "length",
-  };
+  return { text: res.text, usage: res.usage, truncated: res.finishReason === "length" };
 };
 ```
 
@@ -287,6 +283,22 @@ Without a binding, `rollingSummary` throws rather than silently doing nothing.
 A cap introduces a failure the uncapped version did not have. Hit it, and the model stops mid-sentence — and that severed text would become the compaction event, which the model reads back next tick as its own notes. **So a truncated summary is never folded.** `rollingSummary` returns the entries unchanged, leaving a timeline that is too large but intact; a corrupted memory is not recoverable, an uncompacted one is.
 
 Report truncation from your `generate` (`finishReason === "length"` on most providers) or the policy cannot fire.
+
+#### The fold names what it answers
+
+A summary is the most searchable artifact a long conversation produces, and the hardest to retrieve. Dense retrieval matches a query against stored text; queries are questions and summaries are statements, so they sit in different regions of the embedding space and the match is weaker than it looks. The usual fix is a later pass that rewrites the document into query shape.
+
+`rollingSummary` skips that pass, because a better one is already running. The fold IS a model call over the whole conversation at the point of maximum context — so it is asked, in the same generation, to name the questions this stretch answers:
+
+```ts
+const block = summaryEntry.message.content[0];
+block.metadata.questions;
+// ["How does Harbor View handle retainage?", "What did we decide about the March invoice?"]
+```
+
+They land on the block's `metadata`, not its `data`, and the distinction is load-bearing: **every key of `data` is rendered into the model's context** by the formatter, `metadata` is not. Retrieval keys and token accounting are for whatever indexes the log; putting a list of unanswered questions in front of the model invites it to answer them.
+
+Set `questions: false` to skip it. It defaults on because the moment does not come back — a summary written without keys can only be given them later by the worse process this exists to avoid.
 
 #### Progress, and why the bar is determinate
 
@@ -572,6 +584,7 @@ Definition slots: `store` · `hydrate` · `compact` · `generate` · `writePolic
 | `fromHandler({ handler, source })` | Wrap any async function over entries into a `CompactStrategy`           |
 | `rollingSummary(options?)`         | Fold all but the recent tail into one summary event, via `ctx.generate` |
 | `DEFAULT_SUMMARY_INSTRUCTIONS`     | The standing rules `rollingSummary` sends — shape plus anchors          |
+| `QUESTIONS_INSTRUCTION`            | Appended after your rules — asks the fold for its retrieval keys        |
 
 `rollingSummary` options: `maxOutputTokens` (default 8192, or a function of the fold) · `threshold` (default 120_000, or a function of the live sizing) · `keepVerbatim` (default 6) · `keepSummaries` (default 1) · `instructions` · `metadata`.
 

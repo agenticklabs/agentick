@@ -26,6 +26,26 @@ const plainText = (b: unknown) => textFormatter.blocksToText!([b as never]);
 const rendered = (fmt: typeof xmlFormatter, b: unknown) =>
   (fmt([b as SemanticContentBlock])[0] as { text: string }).text;
 
+describe("metadata is the other side of the line", () => {
+  it("never reaches the model — `data` is read, `metadata` is recorded", () => {
+    // The split every producer relies on: retrieval keys and token accounting
+    // ride the block so a projector can read them, and cost the model nothing.
+    const withMeta = {
+      ...compaction,
+      metadata: {
+        questions: ["How does Harbor View handle retainage?"],
+        usage: { inputTokens: 40_000, outputTokens: 900, totalTokens: 40_900 },
+      },
+    };
+    for (const render of [xmlText, mdText, plainText]) {
+      const out = render(withMeta);
+      expect(out).toBe(render(compaction));
+      expect(out).not.toContain("retainage");
+      expect(out).not.toContain("40000");
+    }
+  });
+});
+
 describe("the payload renders", () => {
   it("xml emits identifiers as attributes and the data bag as children", () => {
     expect(xmlText(compaction)).toBe(

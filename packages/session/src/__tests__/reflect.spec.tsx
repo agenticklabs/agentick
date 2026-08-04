@@ -130,8 +130,16 @@ const summaryEvent = (entries: readonly unknown[]) =>
   entries
     .map(
       (e) =>
-        (e as { message?: { content?: readonly { data?: Record<string, unknown> }[] } }).message
-          ?.content?.[0],
+        (
+          e as {
+            message?: {
+              content?: readonly {
+                data?: Record<string, unknown>;
+                metadata?: Record<string, unknown>;
+              }[];
+            };
+          }
+        ).message?.content?.[0],
     )
     .find((b) => b?.data?.["summary"] !== undefined);
 
@@ -151,7 +159,8 @@ describe("compaction through a real session", () => {
 
     await rig.session.timeline.compact();
 
-    expect(summaryEvent(rig.session.timeline.read().entries)?.data?.["usage"]).toEqual(USAGE);
+    // On `metadata`, not `data` — `data` is rendered into the model's context.
+    expect(summaryEvent(rig.session.timeline.read().entries)?.metadata?.["usage"]).toEqual(USAGE);
     await rig.close();
   });
 

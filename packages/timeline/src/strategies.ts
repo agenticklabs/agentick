@@ -88,6 +88,22 @@ export interface RollingSummaryOptions {
   readonly keepSummaries?: number;
   /** Standing rules, ahead of any per-call instructions. */
   readonly instructions?: string;
+  /**
+   * Ask the fold to name the questions this stretch answers, recorded on the
+   * event's `metadata.questions`. Default true.
+   *
+   * Dense retrieval matches a query against stored text, and queries are
+   * questions while summaries are statements — so they sit in different regions
+   * of the embedding space and the match is weaker than it looks. The usual fix
+   * is a later pass that rewrites the document into query shape; this asks the
+   * model that JUST READ the conversation, which knows what it was about in a
+   * way a cold reader has to guess.
+   *
+   * On by default because the moment does not come back: a summary written
+   * without keys cannot be given them later except by a worse process, and the
+   * cost is a few tokens on a call that already spent thousands.
+   */
+  readonly questions?: boolean;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -146,6 +162,41 @@ function afterLastSummary(entries: readonly TimelineEntry[]): number {
   return i;
 }
 
+/**
+ * Appended AFTER whatever rules the adopter set, because it is asked of every
+ * fold — an adopter replacing `instructions` is naming what to capture, not
+ * opting out of being findable.
+ */
+export const QUESTIONS_INSTRUCTION = `First, list the questions this stretch of conversation answers — the ones a
+future search would arrive with. Phrase each as a person would ask it, and
+prefer the general form over the specific instance. Wrap the list in
+<questions> tags, one per line, each starting with "- ".
+
+Then write the summary. Do not mention the questions in it.`;
+
+/**
+ * Pull the retrieval keys out of the reply.
+ *
+ * The block is stripped from the summary: it is a key for finding this later,
+ * not part of the conversation, and leaving it in would put a list of unanswered
+ * questions in front of a model that will try to answer them.
+ *
+ * A reply without the block is not an error — the summary is the artifact that
+ * matters and a missing key costs findability, not correctness.
+ */
+function parseQuestions(text: string): {
+  readonly questions: readonly string[];
+  readonly summary: string;
+} {
+  const match = /<questions>([\s\S]*?)<\/questions>/i.exec(text);
+  if (!match) return { questions: [], summary: text.trim() };
+  const questions = match[1]!
+    .split("\n")
+    .map((line) => line.replace(/^\s*[-*]\s*/, "").trim())
+    .filter((line) => line.length > 0);
+  return { questions, summary: text.replace(match[0], "").trim() };
+}
+
 export const DEFAULT_SUMMARY_INSTRUCTIONS = `Summarize the conversation so far, for your own use as context going forward.
 
 Capture both of these — a summary with only one of them is useless:
@@ -168,10 +219,17 @@ function resolve<TCtx>(sized: Sized<TCtx> | undefined, fallback: number, ctx: TC
 function joinInstructions(
   standing: string,
   perCall: string | readonly ContentBlock[] | undefined,
+  trailing: string | undefined,
 ): string | readonly ContentBlock[] {
-  if (perCall === undefined) return standing;
-  if (typeof perCall === "string") return `${standing}\n\n${perCall}`;
-  return [{ type: "text", text: standing } as ContentBlock, ...perCall];
+  const parts = [standing, ...(typeof perCall === "string" ? [perCall] : []), trailing].filter(
+    (p): p is string => p !== undefined,
+  );
+  if (perCall === undefined || typeof perCall === "string") return parts.join("\n\n");
+  return [
+    { type: "text", text: standing } as ContentBlock,
+    ...perCall,
+    ...(trailing ? [{ type: "text", text: trailing } as ContentBlock] : []),
+  ];
 }
 
 /**
@@ -190,6 +248,7 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
   const keepVerbatim = options.keepVerbatim ?? DEFAULT_KEEP_VERBATIM;
   const keepSummaries = options.keepSummaries ?? DEFAULT_KEEP_SUMMARIES;
   const standing = options.instructions ?? DEFAULT_SUMMARY_INSTRUCTIONS;
+  const questionsInstruction = options.questions === false ? undefined : QUESTIONS_INSTRUCTION;
 
   const run: CompactRun = async ({ entries, instructions, generate, progress }) => {
     if (!generate) {
@@ -208,7 +267,7 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
     const budget = resolve(options.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS, { entries: fold });
     const result = await generate({
       entries: fold,
-      instructions: joinInstructions(standing, instructions),
+      instructions: joinInstructions(standing, instructions, questionsInstruction),
       ...omitUndefined({ maxOutputTokens: budget }),
       onDelta: progress
         ? ({ outputTokens }) => progress({ progress: outputTokens, total: budget })
@@ -238,6 +297,7 @@ function summaryEntry(
   instructions: string | readonly ContentBlock[] | undefined,
 ): TimelineEntry {
   const steer = typeof instructions === "string" ? instructions : undefined;
+  const { questions, summary } = parseQuestions(result.text);
   return {
     kind: "message",
     message: {
@@ -249,8 +309,18 @@ function summaryEntry(
           type: "system_event",
           event: "compaction",
           source: "timeline",
+          // `data` is RENDERED — every key of it reaches the model as a child
+          // element of the event. Only what belongs in the conversation goes
+          // here; bookkeeping goes on `metadata`, which the formatters do not
+          // read.
+          //
+          // TODO(event-payload-split): the range and the counts are bookkeeping
+          // too, and the model currently reads a pair of ULIDs. Moving them
+          // means moving `projectLog`'s `coverageIn` with them, and summaries
+          // already written carry them under `data` — a read-both migration,
+          // not a rename.
           data: {
-            summary: result.text,
+            summary,
             // The RANGE this summary stands in for. Its own position in the log
             // records when it was written, which is not what it covers — without
             // this, rebuilding the projection needs state the log does not hold,
@@ -261,8 +331,16 @@ function summaryEntry(
             }),
             entriesBefore: fold.length,
             entriesAfter,
-            ...omitUndefined({ instructions: steer, usage: result.usage }),
+            ...omitUndefined({ instructions: steer }),
           },
+          ...(questions.length > 0 || result.usage !== undefined
+            ? {
+                metadata: omitUndefined({
+                  questions: questions.length > 0 ? questions : undefined,
+                  usage: result.usage,
+                }),
+              }
+            : {}),
         },
       ],
     },

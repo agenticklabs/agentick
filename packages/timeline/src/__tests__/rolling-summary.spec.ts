@@ -7,7 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompactGenerate, ProgressUpdate, TimelineEntry } from "@agentick/spec";
 import { deriveTestContext } from "@agentick/runtime/testing";
 
-import { rollingSummary, DEFAULT_SUMMARY_INSTRUCTIONS } from "../strategies.js";
+import {
+  rollingSummary,
+  DEFAULT_SUMMARY_INSTRUCTIONS,
+  QUESTIONS_INSTRUCTION,
+} from "../strategies.js";
 
 /** The facets a harness mints; a strategy only ever reads them. */
 const ctx = () => deriveTestContext();
@@ -33,6 +37,18 @@ function stubGenerate(
     return { text: "a summary", truncated: false, ...result };
   };
 }
+
+const blockOf = (e: TimelineEntry) =>
+  (
+    e as {
+      message: {
+        content: readonly {
+          data?: Record<string, unknown>;
+          metadata?: Record<string, unknown>;
+        }[];
+      };
+    }
+  ).message.content[0]!;
 
 const summaryOf = (e: TimelineEntry) =>
   (e as { message: { content: readonly { data?: { summary?: string } }[] } }).message.content[0]
@@ -91,7 +107,7 @@ describe("truncation is not persisted", () => {
 describe("instructions", () => {
   it("sends the standing rules when the caller supplies none", async () => {
     const seen = vi.fn(stubGenerate());
-    await rollingSummary({ keepVerbatim: 2 }).run({
+    await rollingSummary({ keepVerbatim: 2, questions: false }).run({
       ...ctx(),
       entries: entries(10),
       generate: seen,
@@ -101,7 +117,7 @@ describe("instructions", () => {
 
   it("appends a per-call steer AFTER the standing rules", async () => {
     const seen = vi.fn(stubGenerate());
-    await rollingSummary({ instructions: "Standing.", keepVerbatim: 2 }).run({
+    await rollingSummary({ instructions: "Standing.", keepVerbatim: 2, questions: false }).run({
       ...ctx(),
       entries: entries(10),
       instructions: "Keep every number.",
@@ -123,20 +139,79 @@ describe("instructions", () => {
   });
 });
 
+describe("the fold names what it answers", () => {
+  const reply = `<questions>
+- How does Harbor View handle retainage?
+- What did we decide about the March invoice?
+</questions>
+
+We reviewed Harbor View's retainage terms.`;
+
+  it("asks for the questions on top of whatever rules the adopter set", async () => {
+    const seen = vi.fn(stubGenerate());
+    await rollingSummary({ instructions: "Ernesto's rules.", keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: seen,
+    });
+    const sent = String(seen.mock.calls[0]![0].instructions);
+    expect(sent).toContain("Ernesto's rules.");
+    expect(sent).toContain(QUESTIONS_INSTRUCTION);
+    expect(sent.indexOf("Ernesto's rules.")).toBeLessThan(sent.indexOf(QUESTIONS_INSTRUCTION));
+  });
+
+  it("records them off the model's path, and the summary keeps none of the block", async () => {
+    // Left in, the summary would put a list of unanswered questions in front of
+    // a model that will try to answer them.
+    const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: stubGenerate({ text: reply }),
+    });
+
+    expect(blockOf(out[0]!).metadata?.["questions"]).toEqual([
+      "How does Harbor View handle retainage?",
+      "What did we decide about the March invoice?",
+    ]);
+    expect(summaryOf(out[0]!)).toBe("We reviewed Harbor View's retainage terms.");
+  });
+
+  it("takes the summary as-is when the model wrote no block", async () => {
+    // A missing key costs findability, not correctness — never the summary.
+    const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: stubGenerate({ text: "just prose" }),
+    });
+
+    expect(summaryOf(out[0]!)).toBe("just prose");
+    expect(blockOf(out[0]!).metadata ?? {}).not.toHaveProperty("questions");
+  });
+
+  it("can be turned off", async () => {
+    const seen = vi.fn(stubGenerate());
+    await rollingSummary({ keepVerbatim: 2, questions: false }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: seen,
+    });
+    expect(String(seen.mock.calls[0]![0].instructions)).not.toContain("<questions>");
+  });
+});
+
 describe("what the fold cost", () => {
-  it("records the call's usage on the event", async () => {
-    // A compaction rides the next tick's prefix; `cachedInputTokens` against
-    // `inputTokens` is the only thing that says whether that actually held.
+  it("records the call's usage where the model does not read it", async () => {
+    // `data` is rendered into the model's context, key by key. Cost is
+    // bookkeeping — it belongs on the block's metadata, which formatters skip.
     const usage = { inputTokens: 40_000, outputTokens: 900, totalTokens: 40_900 };
     const out = await rollingSummary({ keepVerbatim: 2 }).run({
       ...ctx(),
       entries: entries(10),
       generate: stubGenerate({ usage: { ...usage, cachedInputTokens: 34_000 } }),
     });
-    const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
-      .message.content[0]!.data;
 
-    expect(data["usage"]).toEqual({ ...usage, cachedInputTokens: 34_000 });
+    expect(blockOf(out[0]!).metadata?.["usage"]).toEqual({ ...usage, cachedInputTokens: 34_000 });
+    expect(blockOf(out[0]!).data).not.toHaveProperty("usage");
   });
 
   it("omits the key when the provider reported none", async () => {
@@ -145,10 +220,8 @@ describe("what the fold cost", () => {
       entries: entries(10),
       generate: stubGenerate(),
     });
-    const data = (out[0] as { message: { content: readonly { data: Record<string, unknown> }[] } })
-      .message.content[0]!.data;
 
-    expect(data).not.toHaveProperty("usage");
+    expect(blockOf(out[0]!).metadata ?? {}).not.toHaveProperty("usage");
   });
 });
 
