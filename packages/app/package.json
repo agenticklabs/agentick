@@ -1,6 +1,6 @@
 {
   "name": "@agentick/app",
-  "version": "1.0.0-next.91",
+  "version": "1.0.0-next.92",
   "description": "Reference app harness for Agentick v2. Outermost runtime boundary — owns shared substrate, shared sub-harnesses (compiler, loop, executor), the session registry, and the createApp ergonomic surface. Compiler-agnostic — adopters writing React agents import from `@agentick/app/react` for the React default.",
   "keywords": [
     "agent",
