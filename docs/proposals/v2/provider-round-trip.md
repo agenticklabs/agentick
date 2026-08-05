@@ -1,7 +1,78 @@
 # Provider round-trip data across a model change
 
-**Status:** design revised 2026-08-04 against the code. Ryan + Claude.
-Tool-span grammar **landed** (`4dca94a8`); the rest is unbuilt.
+**Status:** **PARKED 2026-08-05.** Two pieces landed (`4dca94a8`, `41034325`).
+The rest is unbuilt and should stay that way until someone hits the failure —
+read the next section before building anything from the checklist.
+
+## Parked: `foreign` is a phantom
+
+Everything below that needed a "which dialect produced this" verdict was solving
+a problem the architecture already prevents. Two facts, both from the code:
+
+**Every adapter reads only its own namespace, by key.**
+
+```js
+// google-adapter.ts — the tool_use input path
+const signature = part.providerOptions?.["google"]?.["thoughtSignature"];
+```
+
+An explicit two-level index. Not a splat, not a merge. Anthropic does the same
+for `anthropic`. So a block carrying `providerMetadata.anthropic.signature` sent
+to Google is never read, never projected, and cannot cause a 400. It is inert.
+Namespacing already makes cross-dialect blobs harmless — that is what it is for.
+
+**The provider already reports the one real case.** Google's
+`MISSING_THOUGHT_SIGNATURE` is mapped to the canonical `malformed_tool_call`
+stop reason today, and an adopter can act on it now.
+
+### What that collapses
+
+- **`foreign` as a state.** No mechanism needs to detect someone else's blob,
+  because nobody consumes it.
+- **The "one blocking prerequisite" below.** The `providerMetadata` overload only
+  bit a "namespace differs from my dialect" test, and that test should not exist.
+  An adopter's `cacheControl` reaching Google is ignored like anything else
+  foreign. **Do not split the block or add key declarations for this reason.**
+- **The four-valued `RoundTripState`.** `none` and `foreign` both mean "nothing
+  to do". What survives is one question: does my target's required key exist on
+  this block?
+
+### The lesson
+
+The design escalated — four-valued enum, adapter declarations, a registry union —
+each step answering "is this right?" by adding structure instead of re-checking
+the premise. The premise was never verified against the adapters' actual read
+paths. Ten minutes of grep would have removed most of this document.
+
+Being blocked on an unanswerable sub-question was the signal. A prerequisite
+nobody can decide usually means the thing it is a prerequisite FOR should not be
+built yet.
+
+### Correction to the record
+
+An earlier revision said the framework "hands an Anthropic thinking signature to
+Google". Literally true — the bare field was on the projected part for every
+adapter — but Google never read it, and it drops replayed reasoning parts
+entirely. That was a **latent mis-modeling, not an active break**. Fixing it in
+`41034325` is what makes cross-dialect contamination structurally impossible
+rather than merely unobserved, and it is worth having. It did not repair an
+outage.
+
+Contrast `4dca94a8`, which repaired a **proven live defect**. Token-budget
+eviction dropped an assistant turn and kept the `tool_result` that answered its
+call, which every provider rejects.
+
+### When to come back
+
+When someone actually hits a cross-provider replay failure. Ernesto's observed
+switch was `gemini-2.5-flash` → `gemini-3.5-flash` — same dialect, signatures
+carried, nothing to do. Until a real failure exists, the recovery path below
+(send it, let the provider be the oracle, degrade on refusal) is the whole answer
+and needs none of the prediction apparatus.
+
+The transform design (`degradeMessage`, the event-role output, the four rules,
+the ergonomics) is still good and still what you want when the time comes. It is
+the **classification** machinery in front of it that was invented.
 
 ## The problem
 
@@ -350,20 +421,31 @@ Ship it opt-in, watch it, then decide.
 
 ## Checklist
 
+**Read "Parked: `foreign` is a phantom" before starting anything here.** Three
+items are struck because the verdict they serve does not need computing.
+
 - [x] Tool-span grammar at the wire, shared predicate in spec (`4dca94a8`)
 - [x] Target readable at render — `useActiveModel()`, ADR 55
 - [x] Provenance on execution-produced messages — `metadata.model`
-- [ ] **Split the canonical block's `providerMetadata`**: adapters declare which
-      keys are round-trip state, so an adopter's `cacheControl` is not mistaken
-      for one. Blocks everything below.
-- [ ] **Delete `ReasoningBlock.signature`**; Anthropic stamps
-      `providerMetadata.anthropic.signature`
-- [ ] `roundTripState(block, dialect, rules)` — the four-valued check
+- [x] Round-trip state namespaced by dialect — `ReasoningBlock.signature` deleted,
+      Anthropic stamps `providerMetadata.anthropic.signature` (`41034325`)
+- [x] ~~Split the canonical block's `providerMetadata`~~ — **moot.** Adapters read
+      only their own namespace by key, so an adopter's `cacheControl` is never
+      mistaken for round-trip state. It is never read at all.
+- [x] ~~`roundTripState` — the four-valued check~~ — **moot.** `none` and `foreign`
+      both mean "nothing to do"; the survivor is "does my target's required key
+      exist", which the provider already answers.
+- [x] ~~Adapter round-trip key declarations~~ — **moot.** They existed to identify
+      `foreign`.
+
+Still open, and only worth doing when a real failure arrives:
+
+- [ ] Recovery on rejection: the provider is the oracle, and it already says
+      `malformed_tool_call`. Degrade the offending message, retry.
 - [ ] `degradeMessage` (one in, N out), `degradeForReplay`, `degradedFrom` on
-      every output. Returns messages, not counterfeit entries.
+      every output. Returns messages, not counterfeit entries. The transform
+      design above is sound — it is the classification in front of it that was
+      invented.
 - [ ] Reasoning blocks: drop, not degrade — verify against Anthropic's actual
       validation semantics before relying on the wording above
-- [ ] Recovery on rejection, with the observed-compatibility cache
-- [ ] Tests: the modal case does NOT degrade; `missing` ≠ `foreign`; determinism
-      across ticks
 - [ ] Adopter docs, with Ernesto's timeline as the worked example
