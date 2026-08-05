@@ -22,16 +22,12 @@
 
 import type { ExecutionTarget, UsageStats } from "@agentick/spec";
 
-import {
-  resolveModelInfo,
-  SEED_MODELS,
-  type ModelInfo,
-  type ModelPricing,
-  type ModelRegistry,
-} from "./model-info.js";
+import type { ModelPricing } from "@agentick/spec";
 
-/** USD per MILLION tokens (industry convention). Canonical shape in `./model-info.ts`. */
-export type { ModelPricing } from "./model-info.js";
+import { resolveModelInfo, SEED_MODELS, type ModelInfo, type ModelRegistry } from "./model-info.js";
+
+/** USD per MILLION tokens (industry convention). Canonical shape in `@agentick/spec`. */
+export type { ModelPricing } from "@agentick/spec";
 
 /**
  * `"<provider>/<modelId-prefix>"` → pricing. Longest-prefix match, so

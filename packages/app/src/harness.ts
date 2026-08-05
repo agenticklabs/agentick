@@ -40,10 +40,17 @@ import {
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks";
 import type { TaskExecutor, TaskStore } from "@agentick/tasks";
-import type { TaskRecord, TaskWakePolicy } from "@agentick/spec";
+import type { ModelFacts, TaskRecord, TaskWakePolicy } from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
-import { isLanguageModelAdapter, type LanguageModelAdapter } from "@agentick/model";
+import {
+  isLanguageModelAdapter,
+  mergeRegistry,
+  modelFactsOf,
+  resolveModelInfo,
+  SEED_MODELS,
+  type LanguageModelAdapter,
+} from "@agentick/model";
 import {
   buildTelemetryInterceptors,
   normalizeTelemetry,
@@ -1813,6 +1820,31 @@ export class AppHarness<P = unknown>
    */
   getSessionRecord(sessionId: string): Promise<SessionRecord | undefined> {
     return this.sessionStore.get(sessionId, this.storeCtx());
+  }
+
+  /**
+   * What this app knows about a model — the adopter's `models` registry folded
+   * over the seed catalog. `undefined` when no layer describes it; the catalog
+   * never fabricates, so "unknown" is an answer rather than a zero.
+   *
+   * SYNCHRONOUS and pure: the registry is in memory and the fold is a
+   * longest-prefix match. Projected to clients as `app/model_info`, whose one
+   * real consumer today is a context-window gauge — it has the numerator
+   * (`metadata.usage`, stamped on every assistant entry) and needs the
+   * denominator.
+   *
+   * Resolves WITHOUT a target, so the middle precedence tier — the adapter's
+   * self-description — is not consulted. In practice the two agree: an adapter
+   * that reports a window reads it from this same catalog
+   * (`google-adapter.ts` does exactly that). A caller holding a live target
+   * wants `effectiveModelInfo(target, registry)` instead.
+   */
+  modelInfo(provider: string, modelId: string): ModelFacts | undefined {
+    const info = resolveModelInfo(
+      { provider, modelId },
+      this.models ? mergeRegistry(SEED_MODELS, this.models) : SEED_MODELS,
+    );
+    return info ? modelFactsOf(info) : undefined;
   }
 
   /**

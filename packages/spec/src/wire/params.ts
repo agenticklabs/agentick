@@ -15,6 +15,7 @@ import type { ToolResultInput } from "../data/tool-result.js";
 import type { EventQuery } from "../data/events.js";
 import type { ExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
+import type { ModelFacts } from "../data/model-facts.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
 import type { DestroySessionResult, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
 import type {
@@ -142,6 +143,34 @@ export interface AppGetSessionParams extends WireRequestParams {
  * metadata) so it crosses the wire without translation.
  */
 export type AppGetSessionResult = SessionEntry;
+
+/**
+ * Look up what the SERVER knows about a model. The client keys this off the
+ * `metadata.model` provenance already stamped on every assistant entry, so it
+ * never has to guess which model produced a turn.
+ *
+ * App-scoped because the registry is: an adopter's `models` overrides are
+ * merged over the seed once, at the app, and the same answer serves every
+ * session.
+ */
+export interface AppModelInfoParams extends WireRequestParams {
+  readonly appId: string;
+  readonly provider: string;
+  readonly modelId: string;
+}
+
+/**
+ * The request echoed back with the answer, so a cached row is self-describing
+ * and a late response cannot be filed under the wrong key.
+ *
+ * `info: null` is a legitimate answer, not an error — no layer describes that
+ * model. The catalog never fabricates, so "unknown" has to be expressible.
+ */
+export interface AppModelInfoResult {
+  readonly provider: string;
+  readonly modelId: string;
+  readonly info: ModelFacts | null;
+}
 
 /**
  * The paging half of a session-list request, shared by the app-scoped and the
@@ -794,6 +823,7 @@ export interface WireMethods {
 
   "app/create_session": { params: AppCreateSessionParams; result: AppCreateSessionResult };
   "app/get_session": { params: AppGetSessionParams; result: AppGetSessionResult };
+  "app/model_info": { params: AppModelInfoParams; result: AppModelInfoResult };
   "app/list_sessions": { params: AppListSessionsParams; result: AppListSessionsResult };
   "app/destroy_session": { params: AppDestroySessionParams; result: AppDestroySessionResult };
   "app/run_once": { params: AppRunOnceParams; result: AppRunOnceResult };

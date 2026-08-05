@@ -11,6 +11,7 @@
 
 import type {
   AppHandle,
+  AppModelInfoResult,
   ChannelView,
   ChannelViewConfig,
   ClientProtocol,
@@ -129,6 +130,13 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
     },
     async getSession(sessionId): Promise<SessionEntry> {
       return client.request("app/get_session", { appId, sessionId }) as Promise<SessionEntry>;
+    },
+    modelInfo(provider: string, modelId: string) {
+      return client.request("app/model_info", {
+        appId,
+        provider,
+        modelId,
+      }) as Promise<AppModelInfoResult>;
     },
     async listSessions(filter?: SessionFilter, page?: SessionPageRequest) {
       return client.request("app/list_sessions", {

@@ -26,33 +26,27 @@
  * @see packages/shared/src/model-catalog.ts (v1 prior art)
  */
 
-import type { ExecutionTarget, LanguageModelInput, TargetCapabilities } from "@agentick/spec";
+import type {
+  ExecutionTarget,
+  LanguageModelInput,
+  ModelFacts,
+  TargetCapabilities,
+} from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
-/** USD per MILLION tokens (industry convention). */
-export interface ModelPricing {
-  readonly inputPerMTok: number;
-  readonly outputPerMTok: number;
-  /** Prompt-cache READ rate. Default: `inputPerMTok` (no discount). */
-  readonly cachedInputPerMTok?: number;
-  /** Prompt-cache WRITE rate. Default: `inputPerMTok` (no surcharge). */
-  readonly cacheWritePerMTok?: number;
-}
+/** USD per MILLION tokens (industry convention). Canonical shape in `@agentick/spec`. */
+export type { ModelFacts, ModelPricing } from "@agentick/spec";
 
 /**
  * Per-model reference data. Every field is optional — the registry is a
  * best-effort catalog, and a partial row (pricing only, or window only)
  * is legitimate.
+ *
+ * Extends spec's {@link ModelFacts} — the serializable half — with the one
+ * thing that cannot cross a wire. Restating the data fields here would give
+ * the client projection a second definition to drift from.
  */
-export interface ModelInfo {
-  /** USD/MTok rates. Projected to `SEED_PRICING` by `./pricing.ts`. */
-  readonly pricing?: ModelPricing;
-  /** Total context window in tokens. */
-  readonly contextWindow?: number;
-  /** Max output tokens (when narrower than the window). */
-  readonly maxOutputTokens?: number;
-  /** Advertised capabilities (vision / tools / reasoning / streaming / json-schema). */
-  readonly capabilities?: TargetCapabilities;
+export interface ModelInfo extends ModelFacts {
   /**
    * Token counter for the model. Defaults to a char/4 heuristic
    * (`estimateTokens`); adapters/adopters inject a real tokenizer
@@ -60,6 +54,16 @@ export interface ModelInfo {
    * (#175).
    */
   readonly tokenEstimator?: (input: LanguageModelInput | string) => number;
+}
+
+/** The serializable subset — what `app/model_info` returns to a client. */
+export function modelFactsOf(info: ModelInfo): ModelFacts {
+  return omitUndefined({
+    pricing: info.pricing,
+    contextWindow: info.contextWindow,
+    maxOutputTokens: info.maxOutputTokens,
+    capabilities: info.capabilities,
+  });
 }
 
 /**

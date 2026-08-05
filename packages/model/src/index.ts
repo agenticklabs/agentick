@@ -83,6 +83,7 @@ export {
   contextUtilization,
   effectiveModelInfo,
   estimateTokens,
+  modelFactsOf,
   mergeRegistry,
   resolveModelInfo,
   SEED_MODELS,

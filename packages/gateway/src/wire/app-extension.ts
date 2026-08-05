@@ -67,6 +67,14 @@ export const appWireExtension: WireExtension = defineWireExtension({
       if (!record) throw new SessionNotFoundError({ sessionId });
       return toSessionEntry(record);
     },
+    "app/model_info": async ({ appId, provider, modelId }, ctx) => {
+      const app = ctx.gateway.app(appId);
+      if (!app) throw new AppNotFoundError({ appId });
+      // The request rides back with the answer so a cached row is
+      // self-describing. `null`, not a throw: "no layer describes this model"
+      // is a legitimate answer from a catalog that never fabricates.
+      return { provider, modelId, info: app.modelInfo(provider, modelId) ?? null };
+    },
     "app/destroy_session": async ({ appId, sessionId, reason }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });

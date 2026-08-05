@@ -31,6 +31,7 @@ import type {
   AppCreateSessionResult,
   AppDestroySessionResult,
   AppListSessionsResult,
+  AppModelInfoResult,
   AppRunOnceResult,
   SessionPageRequest,
 } from "../wire/params.js";
@@ -121,6 +122,22 @@ export interface GatewayHandle extends HandleSubscriptions {
 export interface AppHandle extends ResourceHandle, HandleSubscriptions {
   createSession<P = unknown>(input?: CreateSessionInput<P>): Promise<AppCreateSessionResult>;
   getSession(sessionId: string): Promise<SessionEntry>;
+  /**
+   * What the SERVER knows about a model — window, output cap, pricing,
+   * capabilities. Key it off the `metadata.model` provenance stamped on every
+   * assistant entry, so a client never guesses which model produced a turn.
+   *
+   * Ask, do not derive. The adopter's `models` registry is merged over the seed
+   * server-side, so a client resolving from the seed catalog alone would
+   * compute a different answer than the server actually used.
+   *
+   * The reply is STATIC for a given model — cache it for the life of the page
+   * and re-fetch only when the provenance changes. There is no push for this:
+   * a model change is announced by the next assistant entry carrying a
+   * different `metadata.model`, and a second path to one fact is worse than
+   * one path that is a turn late.
+   */
+  modelInfo(provider: string, modelId: string): Promise<AppModelInfoResult>;
   /**
    * One page of this app's durable session registry — the "my threads" read.
    *

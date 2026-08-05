@@ -98,6 +98,45 @@ onScrollTop(async () => {
 const modelOnly = session.timeline.view({ filter: (e) => e.visibility === "model" });
 ```
 
+### Asking what the server knows about a model
+
+The client never derives model facts. An adopter's `models` registry is merged
+over the seed catalog **server-side**, so a client resolving from the seed alone
+would compute a different answer than the server actually used.
+
+```ts
+// Every assistant entry carries the model that produced it.
+const last = session.timeline.list().findLast((e) => e.message?.role === "assistant");
+const stamp = last?.message.metadata?.model; // { provider, modelId }
+
+const { info } = await client.app(appId).modelInfo(stamp.provider, stamp.modelId);
+info?.contextWindow; // 1048576 — the denominator for a usage gauge
+info?.pricing?.outputPerMTok; // 7.5
+info?.capabilities?.supportsVision; // gate an attach button on this, not on a hardcoded list
+```
+
+`info` is `null` when no layer describes that model. That is an answer, not an
+error — the catalog never fabricates, so a gauge with no denominator should
+render _unknown_ rather than zero.
+
+The reply is **static** for a given model: cache it for the life of the page and
+re-fetch only when the provenance changes. There is deliberately no push. A
+model change is announced by the next assistant entry carrying a different
+`metadata.model`, and a second path to one fact is worse than one path that is a
+turn late — two sources can disagree, and the client would have to arbitrate.
+
+A context-window gauge needs both halves, and the numerator is already local:
+
+```ts
+const used = last?.message.metadata?.usage?.inputTokens;
+const ratio = used && info?.contextWindow ? used / info.contextWindow : undefined;
+```
+
+One caveat worth designing around: `usage` is what the LAST request carried, so
+the gauge reads "as of your last turn", and it is empty until the first one
+completes. Both are honest — a fresh conversation has no measured usage, and
+rendering zero would claim otherwise.
+
 ### Answering the server
 
 Two slots are request-shaped: the server asks, the client replies. Both list
@@ -201,6 +240,11 @@ server, reachable through `session.timeline.loadOlder()`.
 
 ## Verified by
 
+- `@agentick/transport-in-process/src/__tests__/model-info-e2e.spec.ts` —
+  `client.app(id).modelInfo(...)` over a real gateway and transport: the seed
+  answer, longest-prefix on a dated model id, `null` for an unknown model, the
+  adopter registry beating the seed (the reason the client asks rather than
+  derives), and the `tokenEstimator` function never crossing the wire.
 - `src/__tests__/bundle.spec.ts` — importing the bundle registers all eleven
   built-in slots, and a session handle self-assembles every one of them with no
   per-capability imports (each asserted down to its read and write members).

@@ -25,6 +25,7 @@ import type { Layer } from "effect";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { MetricReader } from "@opentelemetry/sdk-metrics";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
+import type { ModelFacts } from "../data/model-facts.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
 import type { CursorPage, PageRequest } from "./paging.js";
@@ -747,6 +748,18 @@ export interface AppHarnessProtocol<P = unknown> {
    * (E11) — the durable superset, so a closed / historical session (absent from
    * the live registry) still resolves. `undefined` when unknown.
    */
+  /**
+   * What this app knows about a model — the adopter's `models` registry folded
+   * over the seed catalog. `undefined` when no layer describes it; the catalog
+   * never fabricates, so "unknown" is an answer rather than a zero.
+   *
+   * Returns the SERIALIZABLE facts, not the full catalog row: the row carries a
+   * `tokenEstimator` function, and this is the shape `app/model_info` hands a
+   * client. Keeping the projection here means the gateway needs no knowledge of
+   * the model layer to serve it.
+   */
+  modelInfo(provider: string, modelId: string): ModelFacts | undefined;
+
   getSessionRecord(sessionId: string): Promise<SessionRecord | undefined>;
 
   /**
