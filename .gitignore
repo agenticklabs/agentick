@@ -66,3 +66,6 @@ packages/*/docs/
 .codex/
 
 .claude/worktrees/*
+
+# Publish artifacts — one immutable tarball set per version (scripts/publish.mjs).
+.artifacts/

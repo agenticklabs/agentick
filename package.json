@@ -39,9 +39,10 @@
     "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "format": "oxfmt --write .",
     "format:check": "turbo format:check",
-    "publish-dev": "pnpm turbo build --filter './packages/*' && pnpm publish -r --registry http://localhost:4873/ --no-git-checks --tag next",
-    "publish-staging": "node scripts/publish-staging.mjs",
-    "set-version": "node scripts/set-version.mjs"
+    "publish-dev": "node scripts/publish.mjs verdaccio",
+    "publish-staging": "node scripts/publish.mjs staging",
+    "set-version": "node scripts/set-version.mjs",
+    "publish-all": "node scripts/publish.mjs verdaccio staging"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.4.1",
