@@ -245,6 +245,28 @@ export function google(
   const parseThinkTags = options.parseThinkTags ?? false;
   const customBlocks = options.customBlocks;
   const catalog = resolveModelInfo({ provider: "google", modelId: model ?? DEFAULT_MODEL });
+  /**
+   * `gs://` is a VERTEX capability, not a Google one — the two endpoints behind
+   * this adapter differ, and declaring the union was wrong for whichever was
+   * configured. The Gemini / Agent Platform endpoint refuses a bucket URI
+   * outright:
+   *
+   *   Referencing Google Cloud Storage files directly is not supported.
+   *   Register them using FileService.RegisterFile first.
+   *
+   * Declared honestly, the framework DECLINES such a part with a stated reason
+   * (`applyMediaSupport`) instead of letting the provider reject the whole
+   * request — and an adopter reads a decline as "resolve this to something else
+   * first", which is exactly the fix (`files.registerFiles` takes the bucket URI
+   * itself and hands back a handle).
+   *
+   * Read off the same reconciliation the client is built from, so the
+   * declaration cannot drift from the endpoint actually called.
+   */
+  const onVertex = isVertexConfig(options.clientOptions);
+  const urlSchemes: readonly string[] = onVertex
+    ? ["https", "http", "data", "gs"]
+    : ["https", "http", "data"];
   const baseTarget: ExecutionTarget = options.target ?? {
     kind: "language-model",
     provider: "google",
@@ -265,10 +287,8 @@ export function google(
         document: ["base64", "url"],
         audio: ["base64", "url"],
         video: ["base64", "url"],
-        // The `gs:` scheme is the whole reason `gcs` used to be a MediaSource variant.
-        // Gemini's `fileUri` reads a Cloud Storage URI natively — zero bytes moved — so
-        // it is declared here as a scheme rather than encoded as a source shape.
-        urlSchemes: ["https", "http", "data", "gs"],
+        // `gs:` ONLY on Vertex — see `onVertex` above.
+        urlSchemes,
       },
       // The catalog knows the per-model numbers; these are the floor for a
       // model it has no row for. A wrong `maxOutputTokens` is not cosmetic —
@@ -730,14 +750,27 @@ export function mapProviderError(cause: unknown): ExecuteErrorChannel {
  * Exported because the reconciliation has a rule in it (see `vertex` below) that
  * is worth pinning directly rather than inferring from a client that throws.
  */
+/**
+ * Has the adopter chosen VERTEX?
+ *
+ * `project` / `location` select Vertex on their own — `vertexai: true` is not
+ * required — so this cannot be recovered by reading `vertexai` back off the
+ * built options, which is why it is a predicate over the SUPPLIED ones.
+ *
+ * Two things depend on the answer and must never disagree: the client (Vertex
+ * and an API key are mutually exclusive, and the env fallback would poison an
+ * explicit Vertex config) and the media declaration (only Vertex reads `gs://`).
+ */
+export function isVertexConfig(opts: GoogleGenAIOptions | undefined): boolean {
+  return opts?.vertexai === true || opts?.project !== undefined || opts?.location !== undefined;
+}
+
 export function buildClientOptions(opts: GoogleAdapterOptions): GoogleGenAIOptions {
   // Adopter-supplied clientOptions wins; env-var fallbacks fill in any
   // missing fields. Spread last so explicit clientOptions overrides
   // env-derived values.
   const supplied = opts.clientOptions;
   /**
-   * Has the adopter explicitly chosen VERTEX?
-   *
    * `GoogleGenAI` treats `project`/`location` and `apiKey` as MUTUALLY EXCLUSIVE
    * and throws in its constructor when given both. The env fallback below is
    * therefore not merely a default — on a Vertex configuration it is poison: an
@@ -750,10 +783,7 @@ export function buildClientOptions(opts: GoogleAdapterOptions): GoogleGenAIOptio
    * A fallback must never be able to invalidate an explicit choice. The adopter
    * said Vertex; the framework's job is to not undo that.
    */
-  const vertex =
-    supplied?.vertexai === true ||
-    supplied?.project !== undefined ||
-    supplied?.location !== undefined;
+  const vertex = isVertexConfig(supplied);
 
   const base: GoogleGenAIOptions = {};
   const envApiKey = process.env["GOOGLE_API_KEY"] ?? process.env["GEMINI_API_KEY"];

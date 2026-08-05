@@ -109,7 +109,16 @@ Gemini is natively multimodal, and the adapter projects `image`, `document`, `au
 | `url`       | `fileData` with `fileUri` set to the URL |
 | `reference` | **declined** — see below                 |
 
-A `gs://` URI is just a `url` whose scheme is declared: Gemini's `fileUri` reads Cloud Storage natively, so `urlSchemes` lists `gs` and the URI passes through with zero bytes moved. The `gcs` MediaSource variant this used to require is gone — the adapter's `url` arm was already doing the work, and the framework was only recomposing `gs://${bucket}/${object}` on its behalf.
+A `gs://` URI is just a `url` whose scheme is declared. The `gcs` MediaSource variant this used to require is gone — the adapter's `url` arm was already doing the work, and the framework was only recomposing `gs://${bucket}/${object}` on its behalf.
+
+**But `gs:` is a VERTEX capability, not a Google one, and this adapter fronts both endpoints.** Vertex reads Cloud Storage natively, zero bytes moved; the Gemini / Agent Platform endpoint refuses a bucket URI outright:
+
+```
+Referencing Google Cloud Storage files directly is not supported.
+Register them using FileService.RegisterFile first.
+```
+
+So the declaration is derived from the resolved client config rather than hardcoded — `isVertexConfig` reads the same signal the client is built from (`vertexai: true`, **or** `project` / `location` on their own), so the declaration cannot claim a capability the configured endpoint lacks.
 
 Declared as `capabilities.media`, so the framework screens an unsupported source out _before_ this adapter is asked to project it:
 
@@ -119,9 +128,14 @@ media: {
   document: ["base64", "url"],
   audio: ["base64", "url"],
   video: ["base64", "url"],
-  urlSchemes: ["https", "http", "data", "gs"], // ← `gs:` is why this field exists
+  // `gs:` ONLY when the client is configured for Vertex.
+  urlSchemes: onVertex
+    ? ["https", "http", "data", "gs"]
+    : ["https", "http", "data"],
 }
 ```
+
+On the API-key endpoint a `gs://` source is therefore **declined with a stated reason** rather than 400-ing the whole request — and a decline is the signal to resolve it first. `ai.files.registerFiles({ uris })` takes the bucket URI itself and returns a handle, so registration moves no bytes either; the returned `File` carries an `expirationTime`, which is what a caching layer needs to know when to re-register.
 
 > [!IMPORTANT]
 > A `reference` source is **declined**, not forwarded. Its `fileId` lives in the adopter's namespace and Gemini's `fileUri` accepts only a `gs://` URI or one of its own Files API URIs — so this adapter used to emit the bare id and earn, every single time:
@@ -131,7 +145,7 @@ media: {
 > HTTP(S) URI but the entered value was '019faa2c-5506-7000-b8ea-3c63628e4c89'
 > ```
 >
-> A deterministic rejection against a durable timeline entry, so every later turn resent it and failed identically — **one attachment made a conversation permanently unusable.** Resolve a `reference` to a `url` or `base64` source in an `onModelGenerate` hook (that seam runs _before_ the screen, precisely so it gets its chance) — hand over the `gs://` URI itself and Vertex reads it natively, zero bytes moved.
+> A deterministic rejection against a durable timeline entry, so every later turn resent it and failed identically — **one attachment made a conversation permanently unusable.** Resolve a `reference` to a `url` or `base64` source in an `onModelGenerate` hook (that seam runs _before_ the screen, precisely so it gets its chance). On **Vertex**, hand over the `gs://` URI itself — read natively, zero bytes moved. On the **API-key** endpoint, register it first and hand over the resulting file URI, or inline the bytes.
 
 A replayed `reasoning` part is **dropped rather than flattened**, because Gemini round-trips thinking through the `thoughtSignature` on the function-call part, not through a replayed reasoning block. That drop is silent today and pinned by `src/__tests__/silent-drops.spec.ts` so a fix cannot land unnoticed.
 
