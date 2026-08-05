@@ -6,6 +6,7 @@ export * from "./effect-lift.js";
 export * from "./json-patch.js";
 export * from "./map-concurrent.js";
 export * from "./match-filter.js";
+export { LruCacheStore, type CacheEntry, type CacheStore } from "./lru-cache.js";
 export * from "./merge-layered.js";
 export * from "./omit-undefined.js";
 export * from "./paginate.js";

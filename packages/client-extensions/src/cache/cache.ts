@@ -7,7 +7,7 @@
  */
 
 import type { ClientExtension, RequestMiddleware } from "@agentick/spec";
-import { LruCacheStore, type CacheStore } from "./lru.js";
+import { LruCacheStore, type CacheStore } from "@agentick/utils";
 
 export interface CacheMethodPolicy {
   /** Time-to-live in milliseconds. Required — no implicit fallback. */
@@ -43,7 +43,8 @@ export function cache(options: CacheOptions): ClientExtension {
 
     const key = makeKey(req.method, req.params, policy);
     const cached = store.get(key);
-    if (cached && cached.expiresAt > nowMs()) {
+    // `get` reaps what has expired, so a hit is live by construction.
+    if (cached) {
       return cached.value as never;
     }
 

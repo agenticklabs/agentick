@@ -427,6 +427,9 @@ importers:
       '@agentick/spec':
         specifier: workspace:*
         version: link:../spec
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       '@agentick/client-core':
         specifier: workspace:*

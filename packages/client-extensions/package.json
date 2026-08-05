@@ -109,7 +109,8 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/spec": "workspace:*"
+    "@agentick/spec": "workspace:*",
+    "@agentick/utils": "workspace:*"
   },
   "devDependencies": {
     "@agentick/client-core": "workspace:*",

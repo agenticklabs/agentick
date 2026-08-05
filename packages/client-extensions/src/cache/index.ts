@@ -12,4 +12,8 @@
  */
 
 export { cache, type CacheOptions, type CacheMethodPolicy } from "./cache.js";
-export { LruCacheStore, type CacheStore, type CacheEntry } from "./lru.js";
+// Re-exported, not owned: the store moved to `@agentick/utils` when a second
+// consumer appeared, and a copy is how two subsystems come to disagree about
+// eviction. Kept on this subpath so an adopter already importing it here is
+// undisturbed.
+export { LruCacheStore, type CacheStore, type CacheEntry } from "@agentick/utils";
