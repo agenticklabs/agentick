@@ -29,6 +29,32 @@ describe("resolveModelInfo", () => {
     expect(full?.maxOutputTokens).toBe(16384);
   });
 
+  it("flash-lite is not billed as flash — the gemini prefix collision", () => {
+    // `gemini-3.5-flash` is a strict prefix of `gemini-3.5-flash-lite`, so a
+    // first-match resolver would bill Lite at 5x its input and 3.6x its output.
+    const lite = resolveModelInfo({ provider: "google", modelId: "gemini-3.5-flash-lite" });
+    expect(lite?.pricing).toEqual({
+      inputPerMTok: 0.3,
+      outputPerMTok: 2.5,
+      cachedInputPerMTok: 0.03,
+    });
+
+    const flash = resolveModelInfo({ provider: "google", modelId: "gemini-3.5-flash" });
+    expect(flash?.pricing?.inputPerMTok).toBe(1.5);
+    // Every Gemini 3.x flash row is sized — an absent window silently disables
+    // utilization-driven rendering, so the seed states it or states nothing.
+    for (const id of ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash"]) {
+      const info = resolveModelInfo({ provider: "google", modelId: id });
+      expect(info?.contextWindow).toBe(1048576);
+      expect(info?.maxOutputTokens).toBe(65536);
+    }
+    // A dated suffix still resolves to the base row.
+    expect(
+      resolveModelInfo({ provider: "google", modelId: "gemini-3.5-flash-002" })?.pricing
+        ?.outputPerMTok,
+    ).toBe(9);
+  });
+
   it("unknown model / provider → undefined, never fabricated", () => {
     expect(resolveModelInfo({ provider: "openai", modelId: "gpt-99" })).toBeUndefined();
     expect(resolveModelInfo({ provider: "nobody", modelId: "x" })).toBeUndefined();

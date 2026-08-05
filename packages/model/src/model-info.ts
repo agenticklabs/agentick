@@ -158,14 +158,38 @@ export const SEED_MODELS: ModelRegistry = {
       maxOutputTokens: 65536,
       capabilities: VISION_TOOLS,
     },
-    // TODO(pricing): `gemini-3.5-flash` rates are not published here — an
-    // unpriced row still answers "how big is the window", which is what the
-    // compaction threshold reads, and leaves cost `undefined` rather than 0.
+    // Google's published GLOBAL rates. The non-global endpoints are 10% dearer
+    // ($1.65 / $9.90 for 3.5 Flash); an adopter pinned to a region overrides via
+    // the `registry` parameter rather than this table guessing which they use.
+    // No cache-WRITE surcharge — Google's caching is implicit and charges only
+    // the discounted read, so `cacheWritePerMTok` is deliberately absent.
     "gemini-3.5-flash": {
+      pricing: { inputPerMTok: 1.5, outputPerMTok: 9, cachedInputPerMTok: 0.15 },
       contextWindow: 1048576,
       maxOutputTokens: 65536,
       capabilities: VISION_TOOLS,
     },
+    "gemini-3.5-flash-lite": {
+      pricing: { inputPerMTok: 0.3, outputPerMTok: 2.5, cachedInputPerMTok: 0.03 },
+      contextWindow: 1048576,
+      maxOutputTokens: 65536,
+      capabilities: VISION_TOOLS,
+    },
+    // Cheaper per output token than 3.5 Flash AND it emits fewer of them —
+    // Google reports a 17% reduction in output token usage, which compounds
+    // with the 17% lower rate to roughly a third off generation. Reasoning
+    // bills as output, so that lands hardest on a thinking agent.
+    "gemini-3.6-flash": {
+      pricing: { inputPerMTok: 1.5, outputPerMTok: 7.5, cachedInputPerMTok: 0.15 },
+      contextWindow: 1048576,
+      maxOutputTokens: 65536,
+      capabilities: VISION_TOOLS,
+    },
+    // TODO(pricing-tiers): Gemini 3.1 Pro is priced in TWO tiers by input size
+    // ($2/$12 under 200K, $4/$18 over), and `ModelPricing` has one rate per
+    // direction. It is omitted rather than entered at the low tier, which would
+    // under-report every long-context call. `gemini-2.5-pro` above already
+    // carries that inaccuracy. Fixing it means a size-dependent rate.
   },
 };
 
