@@ -35,19 +35,25 @@ async function makeStack(models?: Record<string, unknown>) {
 
   const gateway = await createGateway();
   await gateway.listen();
-  await gateway.createApp({
+  const app = await gateway.createApp({
     appId: "mi-app",
     rootElement: null,
     options: {
       modelExecutor: executor,
       compiler: fakeCompiler(),
+      target: { kind: "language-model", provider: "google", modelId: "gemini-3.5-flash" } as never,
       ...(models !== undefined ? { models: models as never } : {}),
     },
   });
+  const session = await app.createSession({ sessionId: "mi-session" });
 
   const client = await createClient({ transport: inProcessTransport({ gateway }) });
   await client.connect();
-  return { client, cleanup: async () => (await client.close(), await gateway.close()) };
+  return {
+    client,
+    session,
+    cleanup: async () => (await client.close(), await gateway.close()),
+  };
 }
 
 describe("app/model_info", () => {
@@ -99,6 +105,37 @@ describe("app/model_info", () => {
     expect(res.info).toBeDefined();
     expect(res.info).not.toHaveProperty("tokenEstimator");
     expect(JSON.parse(JSON.stringify(res.info))).toEqual(res.info);
+    await cleanup();
+  });
+});
+
+describe("session/model_info — the session is the ground truth", () => {
+  it("reports the session's own model, resolved with its window", async () => {
+    const { client, cleanup } = await makeStack();
+    const res = await client.session("mi-session").modelInfo();
+    expect(res).toMatchObject({ provider: "google", modelId: "gemini-3.5-flash" });
+    expect(res?.info?.contextWindow).toBe(1048576);
+    await cleanup();
+  });
+
+  it("follows a RUNTIME model swap — which the app-scoped lookup cannot", async () => {
+    // The reason this verb exists. `setTarget` swaps the session default
+    // through `session:set-model`; the app still reports its own configured
+    // model, and message provenance still names the OLD one until another turn
+    // runs. Only the session knows what is actually bound right now.
+    const { client, session, cleanup } = await makeStack();
+
+    await session.model.setTarget({
+      kind: "language-model",
+      provider: "google",
+      modelId: "gemini-3.5-flash-lite",
+    } as never);
+
+    const res = await client.session("mi-session").modelInfo();
+    expect(res?.modelId).toBe("gemini-3.5-flash-lite");
+    // Lite's rates, not flash's — the prefix collision resolved against the
+    // live target.
+    expect(res?.info?.pricing?.outputPerMTok).toBe(2.5);
     await cleanup();
   });
 });

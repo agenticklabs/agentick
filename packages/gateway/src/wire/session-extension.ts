@@ -272,6 +272,12 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const { page, nextCursor } = paginate(all, cursor);
       return { tools: page, ...omitUndefined({ nextCursor }) };
     },
+    "session/model_info": async ({ sessionId }, ctx) => {
+      // The session's LIVE target, not the app's default: a runtime swap
+      // (`session:set-model`, a spawn override) is invisible to the app-scoped
+      // catalog lookup until the next turn stamps its provenance.
+      return (ctx.session ?? findSession(ctx, sessionId)).modelInfo() ?? null;
+    },
     "session/abort": async ({ sessionId, reason, cascade }, ctx) => {
       // The STANDALONE cancellation verb — reaches a session by id, with no
       // in-flight RPC to correlate against. (`notifications/cancelled` is the

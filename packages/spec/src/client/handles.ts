@@ -31,6 +31,7 @@ import type {
   AppCreateSessionResult,
   AppDestroySessionResult,
   AppListSessionsResult,
+  SessionModelInfoResult,
   AppModelInfoResult,
   AppRunOnceResult,
   SessionPageRequest,
@@ -251,6 +252,18 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
    * in-process harness takes, over the wire.
    */
   abort(reason?: string, opts?: SessionAbortOptions): Promise<void>;
+  /**
+   * The model this session is about to call, and what is known about it —
+   * window, output cap, pricing, capabilities.
+   *
+   * Prefer this over `client.app(id).modelInfo(...)` for anything describing
+   * the CURRENT conversation. The app knows its default; a session changes
+   * model at runtime, and only the session knows what is actually bound. It
+   * also answers before the first turn, where message provenance cannot.
+   *
+   * `null` when the session has no model bound — a legal state, not a failure.
+   */
+  modelInfo(): Promise<SessionModelInfoResult>;
   /**
    * Compile what a tick WOULD send, without sending it — for a debug surface
    * that shows a developer the live prompt.

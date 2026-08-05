@@ -34,6 +34,7 @@
  */
 
 import type { CommandOutcome, TerminalEvent } from "../data/outcomes.js";
+import type { ModelInfoResult } from "../wire/params.js";
 import type { EventEnvelope } from "../data/events.js";
 import type { RenderedTree } from "../data/rendered-tree.js";
 import type { ContentBlock } from "../data/content-blocks.js";
@@ -1144,6 +1145,20 @@ export interface SessionHarnessProtocol<P = unknown> {
    *   failures otherwise.
    */
   fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>>;
+
+  /**
+   * The model this session is about to call, and what is known about it —
+   * resolved against the session's LIVE target with the full precedence fold
+   * (adopter registry > the target's self-description > seed).
+   *
+   * This is the ground truth, and it is not the app's default: a session
+   * changes model at runtime through `session:set-model`, a spawn override, or
+   * a per-tick `<Model>`. It also answers before any turn has run, where
+   * message provenance cannot.
+   *
+   * `undefined` when no model is bound (a model-less send) — a legal state.
+   */
+  modelInfo(): ModelInfoResult | undefined;
 
   /**
    * The session's tools handle — the curated projection of the tool registry

@@ -104,15 +104,32 @@ The client never derives model facts. An adopter's `models` registry is merged
 over the seed catalog **server-side**, so a client resolving from the seed alone
 would compute a different answer than the server actually used.
 
+**Use the session verb for anything about the current conversation.** It reads
+the session's LIVE target, so it follows a runtime model change — `setModel` /
+`setTarget`, a spawn override, a per-tick `<Model>` — and it answers before the
+first turn, where message provenance cannot.
+
+```ts
+const current = await client.session(id).modelInfo();
+current?.modelId; // "gemini-3.6-flash" — what THIS session will call next
+current?.info?.contextWindow; // 1048576 — the denominator for a usage gauge
+current?.info?.pricing?.outputPerMTok; // 7.5
+current?.info?.capabilities?.supportsVision; // gate an attach button on this, not a hardcoded list
+```
+
+`null` when the session has no model bound — a legal state, not a failure.
+
+The app-scoped verb answers a different question: **what is model X?** Reach for
+it when the model is not the session's current one — pricing out a history where
+each turn may have run on a different model, or filling a model picker.
+
 ```ts
 // Every assistant entry carries the model that produced it.
 const last = session.timeline.list().findLast((e) => e.message?.role === "assistant");
 const stamp = last?.message.metadata?.model; // { provider, modelId }
 
 const { info } = await client.app(appId).modelInfo(stamp.provider, stamp.modelId);
-info?.contextWindow; // 1048576 — the denominator for a usage gauge
-info?.pricing?.outputPerMTok; // 7.5
-info?.capabilities?.supportsVision; // gate an attach button on this, not on a hardcoded list
+info?.pricing?.outputPerMTok; // what THAT turn was billed at
 ```
 
 `info` is `null` when no layer describes that model. That is an answer, not an
@@ -129,7 +146,8 @@ A context-window gauge needs both halves, and the numerator is already local:
 
 ```ts
 const used = last?.message.metadata?.usage?.inputTokens;
-const ratio = used && info?.contextWindow ? used / info.contextWindow : undefined;
+const window = current?.info?.contextWindow;
+const ratio = used && window ? used / window : undefined; // undefined ⇒ render unknown
 ```
 
 One caveat worth designing around: `usage` is what the LAST request carried, so
@@ -241,10 +259,11 @@ server, reachable through `session.timeline.loadOlder()`.
 ## Verified by
 
 - `@agentick/transport-in-process/src/__tests__/model-info-e2e.spec.ts` —
-  `client.app(id).modelInfo(...)` over a real gateway and transport: the seed
-  answer, longest-prefix on a dated model id, `null` for an unknown model, the
-  adopter registry beating the seed (the reason the client asks rather than
-  derives), and the `tokenEstimator` function never crossing the wire.
+  both model-info verbs over a real gateway and transport: the seed answer,
+  longest-prefix on a dated model id, `null` for an unknown model, the adopter
+  registry beating the seed (the reason the client asks rather than derives),
+  the `tokenEstimator` function never crossing the wire — and the session verb
+  following a runtime `setTarget` swap that the app-scoped lookup cannot see.
 - `src/__tests__/bundle.spec.ts` — importing the bundle registers all eleven
   built-in slots, and a session handle self-assembles every one of them with no
   per-capability imports (each asserted down to its read and write members).

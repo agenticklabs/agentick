@@ -160,17 +160,38 @@ export interface AppModelInfoParams extends WireRequestParams {
 }
 
 /**
- * The request echoed back with the answer, so a cached row is self-describing
- * and a late response cannot be filed under the wrong key.
+ * A model named, and what is known about it.
+ *
+ * The identity rides WITH the facts so one reply is self-describing: a cache
+ * needs no separate key, and a late response cannot be filed under a model the
+ * session has since moved off.
  *
  * `info: null` is a legitimate answer, not an error — no layer describes that
  * model. The catalog never fabricates, so "unknown" has to be expressible.
  */
-export interface AppModelInfoResult {
+export interface ModelInfoResult {
   readonly provider: string;
   readonly modelId: string;
   readonly info: ModelFacts | null;
 }
+
+/** Catalog lookup by name — app-scoped, because the registry is. */
+export type AppModelInfoResult = ModelInfoResult;
+
+export interface SessionModelInfoParams extends WireRequestParams {
+  readonly sessionId: string;
+}
+
+/**
+ * What THIS session is about to call, resolved against its live target — the
+ * ground truth, and different from the app's default the moment a session
+ * changes model at runtime (`session:set-model`, a spawn override, a per-tick
+ * `<Model>`).
+ *
+ * `null` when the session has no model bound at all (a model-less send), which
+ * is a legal state rather than a failure.
+ */
+export type SessionModelInfoResult = ModelInfoResult | null;
 
 /**
  * The paging half of a session-list request, shared by the app-scoped and the
@@ -836,6 +857,7 @@ export interface WireMethods {
   "session/dispatch": { params: SessionDispatchParams; result: SessionDispatchResult };
   "session/list_tools": { params: SessionListToolsParams; result: SessionListToolsResult };
   "session/abort": { params: SessionAbortParams; result: SessionAbortResult };
+  "session/model_info": { params: SessionModelInfoParams; result: SessionModelInfoResult };
   "session/snapshot": { params: SessionSnapshotParams; result: SessionSnapshotResult };
   "session/rebind": { params: SessionRebindParams; result: SessionRebindResult };
   "session/close": { params: SessionCloseParams; result: SessionCloseResult };

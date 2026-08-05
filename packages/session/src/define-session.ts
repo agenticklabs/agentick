@@ -79,6 +79,7 @@ import type {
   SpawnInput,
   TickEndForwardDecision,
   Unsubscribe,
+  ModelInfoResult,
 } from "@agentick/spec";
 import type { KnobsHandle } from "@agentick/knobs";
 import type { GateHandle, GatesHandle } from "@agentick/gates";
@@ -130,6 +131,7 @@ export interface DefineSessionInput<P = unknown> {
     input: SpawnInput<P>,
   ) => Promise<SessionExecutionHandle | SessionHarnessProtocol<P>>;
   readonly fork?: (input?: ForkInput) => Promise<SessionHarnessProtocol<P>>;
+  readonly modelInfo?: () => ModelInfoResult | undefined;
   /**
    * The session's tools handle (three-audiences-plan §F). Replaces the former
    * `dispatch` callback — a whole `ToolsHandle` (View reads + host-door
@@ -370,6 +372,15 @@ class CallbackSessionHarness<P = unknown>
         cause: new Error("defineSession: spawn() not configured"),
       }) satisfies SessionError,
     );
+  }
+
+  /**
+   * A callback session has no model layer of its own — the spec supplies one or
+   * there is nothing to describe. `undefined` is the honest answer, and it is
+   * the same one a model-less real session gives.
+   */
+  modelInfo(): ModelInfoResult | undefined {
+    return this.spec.modelInfo?.();
   }
 
   fork(input?: ForkInput): Promise<SessionHarnessProtocol<P>> {

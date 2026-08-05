@@ -32,7 +32,12 @@ import {
   type SessionTaskWakePayload,
   type TelemetryProvider,
 } from "@agentick/runtime";
-import type { JournalingPolicy, LoopExecutorProtocol, CompilerProtocol } from "@agentick/spec";
+import type {
+  CompilerProtocol,
+  JournalingPolicy,
+  LoopExecutorProtocol,
+  ModelInfoResult,
+} from "@agentick/spec";
 import type {
   AppendEntryInput,
   ApplyExecutorResultInput,
@@ -121,7 +126,12 @@ import {
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
 import { buildSessionElicit } from "@agentick/elicitation";
 import { withScope } from "@agentick/tool-executor";
-import { effectiveModelInfo, type LanguageModelAdapter, type ModelRegistry } from "@agentick/model";
+import {
+  effectiveModelInfo,
+  modelFactsOf,
+  type LanguageModelAdapter,
+  type ModelRegistry,
+} from "@agentick/model";
 import type { KnobsHandle } from "@agentick/knobs";
 import type { GateHandle, GatesHandle } from "@agentick/gates";
 import type { StateHandle } from "@agentick/state";
@@ -2031,6 +2041,31 @@ export class SessionHarness<P = unknown>
       );
     }
     return childHandle;
+  }
+
+  /**
+   * The model this session is about to call, and what is known about it.
+   *
+   * Reads the LIVE target — `modelFacade.current`, not the construction-bound
+   * one — so a runtime swap (`session:set-model`, a spawn override) is
+   * reflected immediately rather than after the next turn lands its
+   * provenance. That is the whole reason this exists alongside the app-scoped
+   * lookup: the app knows its default, the session knows what is actually
+   * bound.
+   *
+   * Same fold the render path uses for `contextInfo` — `effectiveModelInfo`
+   * against the session's registry — so the number a client sees is the number
+   * the tree saw.
+   */
+  modelInfo(): ModelInfoResult | undefined {
+    const target = this.modelFacade.current?.target ?? this.target;
+    if (target?.provider === undefined || target.modelId === undefined) return undefined;
+    const info = effectiveModelInfo(target, this.models);
+    return {
+      provider: target.provider,
+      modelId: target.modelId,
+      info: info ? modelFactsOf(info) : null,
+    };
   }
 
   async fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {

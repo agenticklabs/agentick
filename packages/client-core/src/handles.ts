@@ -12,6 +12,7 @@
 import type {
   AppHandle,
   AppModelInfoResult,
+  SessionModelInfoResult,
   ChannelView,
   ChannelViewConfig,
   ClientProtocol,
@@ -197,6 +198,11 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
     id: sessionId,
     send<P = unknown>(input: ClientSendInput<P>): ClientSessionExecutionHandle {
       return createSessionExecutionHandle(client, sessionId, input);
+    },
+    modelInfo() {
+      return client.request("session/model_info", {
+        sessionId,
+      }) as Promise<SessionModelInfoResult>;
     },
     async dispatch(tool, input): Promise<readonly ContentBlock[]> {
       const result = await client.request("session/dispatch", {
