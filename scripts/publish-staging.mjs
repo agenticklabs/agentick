@@ -81,13 +81,15 @@ allowBothOrigins("pre-publish");
 
 execSync("pnpm verify:publish", { stdio: "inherit" });
 
-execSync(`pnpm publish -r --registry ${REGISTRY} --no-git-checks --tag next`, {
+// The scoped registry MUST ride the CLI. An `npm_config_@agentick:registry`
+// env var does NOT outrank the project .npmrc's `@agentick:registry` line, and
+// a plain `--registry` loses to a scope entry for a scoped package — so both
+// earlier forms silently published all 59 packages to verdaccio instead. The
+// token stays in the environment: a command line is world-readable in `ps`.
+execSync(`pnpm publish -r --no-git-checks --tag next --config.@agentick:registry=${REGISTRY}`, {
   stdio: "inherit",
   env: {
     ...process.env,
-    // env config outranks the project .npmrc, whose @agentick scope line
-    // would otherwise redirect scoped publishes to verdaccio.
-    "npm_config_@agentick:registry": REGISTRY,
     [`npm_config_//${HOST}/npm/${REPO}/:_authToken`]: token,
   },
 });
