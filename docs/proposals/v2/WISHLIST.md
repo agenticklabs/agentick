@@ -29,53 +29,59 @@ framework by being well-worn in the application first.
 
 ## Track B — context economics
 
-### W40 · The configured form must not be poorer than its own sugar · [framework]
+### W41 · A reflection's COST and its STRUCTURE both stop at the boundary · [framework]
 
-**Want.** A `CompactStrategy` value can reach everything the `(entries, ctx)`
-function shorthand reaches. Today it cannot, and the gap blocks a real move.
+**Want.** Two gaps with one cause — the reflection pass returns rich data and the
+callers receive a narrowed shape.
 
-**Why.** ADR 42's dichotomy says a slot takes a declarative shorthand OR a
-configured value, and that the value form is the general one — the shorthand is
-sugar over it. `compact` inverts that:
+1. **Usage reaches the entry, not the caller.** `CompactGenerateResult.usage`
+   exists and `rollingSummary` records it onto the summary entry's metadata, but
+   `CompactResult` is `{ entriesBefore, entriesAfter, source }` — so
+   `await timeline.compact()` cannot tell you what the compaction cost. The
+   number is captured and then dropped at the return. Ryan, 2026-08-05: usage
+   metrics _"should be added somehow to the compaction result response."_
+2. **Structure is parsed out of prose.** `parseQuestions` in `strategies.ts` runs
+   `/<questions>([\s\S]*?)<\/questions>/i` over the summary text, splits on
+   `- `, and strips the block back out. That is a hand-rolled structured output
+   in a framework that ships three real ones.
 
-```ts
-TimelineCompactCtx extends OperationCtx   // sessionId, log, run, trace, metrics
-CompactRun ctx = { entries, instructions, generate?, progress? }
-```
+**Why they are one item.** Both are the `ReflectResult → CompactRun → CompactResult`
+seam being lossy. A `reflect()` that could return a typed object would carry
+`{ summary, questions }` natively AND make room for `usage` on the way back.
 
-The sugar is RICHER than the thing it is sugar for. So moving from the shorthand
-to a strategy — which you must do to set `source`, or to use `rollingSummary` —
-silently costs you `sessionId` and the diagnostic facets.
+**Current state.**
 
-**This is not hypothetical.** Ernesto folds `source: "persisted"`. Now that a
-compaction appends its summary to the log, that fold re-covers material an
-earlier summary already covers; the fix is `source: "projection"`, which is only
-expressible as a strategy value, which loses the `sessionId` its summaries store
-is keyed by. So it stays on the wrong source.
+- `ReflectResult { text, usage, truncated }` — usage is there.
+- `CompactRun` returns `readonly TimelineEntry[]`, so the strategy's own model
+  call is invisible to the harness. The harness cannot surface what it never saw;
+  this is a contract change, not a plumbing fix.
+- `generateObject()` (`@agentick/model`) sets `responseFormat: json_schema` and
+  validates with the shared `parseJsonWithSchema`. **Anthropic drops
+  `responseFormat`** — its `TODO(trail-anthropic-structured)` names the
+  tool-shaped strategy as the fix — so this path is not cross-provider today.
+- The loop's §B2 terminal tool IS cross-provider: a synthetic tool whose
+  `inputSchema` is the output schema, filtered out of dispatch, with a synthesized
+  `tool_result` to keep the span closed. That is the mechanism that works
+  everywhere.
+- `withInstruction` sets `tools: []`, which forecloses exactly that mechanism.
 
-**Current state.** The two forms are built at two different sites. The shorthand
-is adapted in `TimelineHarness.defaultStrategy()`, which calls
-`this.compactCtx(instructions)` → `deriveOperationCtx(...)` — the full facet
-mint. A strategy value is called with a hand-built object literal in
-`compactBody`. Same call, two constructions, and only one of them is rich.
+**Done when.** `compact()` returns what the fold cost; and a reflection can be
+asked for a typed object without a regex, on every provider.
 
-The session coordinate is NOT missing from the harness: `withTimeline` declares
-`parentScope: { sessionId: installer.hostId }` (`extension.ts:88`), so
-`this.parentScope?.sessionId` is the real one. The trap is that `this.scopeId`
-is `<sessionId>:timeline` and reads like the answer — a mistake the
-`event-scope-authority` conformance gate already catches by name, and did catch
-during this work.
+**Open — and worth deciding together, not one at a time.**
 
-**Done when.** One construction site: the harness derives the ctx once and both
-forms receive it, so `compact: (entries, ctx) => …` is literally
-`run({ entries, ...ctx })`. Adding a facet then lands on both by construction
-rather than by remembering. Plus: an audit of every other ADR-42 dichotomy slot
-for the same split — `hydrate` passes one ctx to both forms and is fine, so this
-is a check, not an assumption.
-
-**Open.** Whether `CompactRun`'s ctx should be `OperationCtx` outright or a
-named subset. Outright is uniform and drags the whole facet surface into a type
-adopters implement; a subset needs a rule for what earns a place.
+- How usage crosses: `CompactRun` returns `{ entries, usage }`, or the ctx gains a
+  `report(usage)` sink symmetric with the `progress` one it already has. The sink
+  composes better with multi-call strategies.
+- Whether `reflect({ schema })` uses `responseFormat` (simple, silently degrades
+  on Claude) or the terminal-tool strategy (cross-provider, and it means
+  `tools: []` becomes `tools: [terminal]` with forced choice).
+- **Whether structured output makes summaries WORSE.** A summary written into a
+  JSON string field is not obviously as good as free prose, and the `<questions>`
+  tag trick — ugly as it is — keeps the body as raw generation. Measure before
+  converting the summary itself; `questions` is the safe half to move first.
+- Whether forcing a tool changes the prefix enough to cost the cache hit that
+  justifies the whole pass (see W36).
 
 ---
 
@@ -928,79 +934,6 @@ W33a) or the panel asks a server-side endpoint for it.
 
 ---
 
-### W36 · Summarize with the SAME model over the SAME context · [both]
-
-**Want.** Compaction's summary is produced by the session's own model over the
-session's own compiled context, not by a separate cheap model over a transcript.
-
-**Why (Ryan, 2026-08-03).** Cache. Same model + byte-identical prefix means the
-summarization call is an extra turn on a prompt already in the cache — a cache
-READ for everything above the instruction, full rate only on the instruction and
-the output. A separate cheap model is a COLD prompt: its full rate over the
-entire transcript. Fidelity is the second argument and may be the better one — a
-summarizer that saw the real context cannot drift from what the model believes.
-
-**The pieces exist as of the same day.** `session.project()` returns the
-`LanguageModelInput` — the same prompt, same bytes. Append one trailing
-instruction, hand it to `executor.execute()`, and the prefix is a cache hit.
-`compact(strategy)`'s explicit argument is the in-process override, so a trigger
-can compute the summary and pass a strategy whose `run` returns the fold;
-`useModelBridge` reaches the session's own executor.
-
-**The wrinkle to solve first.** The trigger fires from `useOnTickStart`, and
-`project()` renders the tree — calling it there is RE-ENTRANT. Either the
-compaction call moves just outside the render, or the fold receives the projected
-input rather than fetching it. The second is probably right and is the same shape
-W34's overlay needs, so build them together.
-
-**Done when.** A compaction call shows a cache hit on the prefix in the round-trip
-capture, and `services.summarize` is no longer required for compaction to work.
-
-**Build it as W39's first consumer, not as its own path** — episodic memory,
-thread titling and the enricher all want the identical mechanism.
-
----
-
-### W39 · The REFLECTION PASS — one primitive, many instructions · [both]
-
-**Want.** Ask the session's own model about the conversation it just had, over
-the context it already holds, with a different instruction each time. The answer
-does not become a turn.
-
-**The observation (Ryan, 2026-08-03), and it is the load-bearing one.**
-Compaction and episodic-memory creation are not similar mechanisms — they are the
-SAME mechanism with a different prompt:
-
-| instruction                                                                  | consumer                 |
-| ---------------------------------------------------------------------------- | ------------------------ |
-| "summarize what matters going forward"                                       | compaction (W36)         |
-| "what was this about, what went right, what went wrong, keywords, learnings" | episodic memory          |
-| "title this conversation"                                                    | thread titling           |
-| "what did the user actually get"                                             | the interaction enricher |
-
-Every one is `project()` → append an instruction → `execute()` → do something
-with the text that is NOT appending it to the timeline. Building compaction's
-version as a one-off would mean building the same thing three more times.
-
-**Why it is cheap, and why that is the point.** The prefix is byte-identical to
-what the model was just sent, so every pass after the first is a cache READ on
-everything above the instruction. A reflection pass costs its instruction plus
-its output. That is what makes running four of them post-execution reasonable
-instead of extravagant.
-
-**Shape.** A `reflect(instruction) → string` on the session, over the same three
-rungs `dryRun` exposes: `project()` for the input, the session's own executor for
-the call, nothing persisted. Compaction becomes its first consumer rather than
-its own path; the post-execution passes are the second.
-
-**Open.** Whether it runs post-execution (after the turn settles, so the cache is
-warm and nothing blocks the user) or on demand. Whether several passes share ONE
-call with a structured-output schema — four questions, one round trip — or stay
-separate calls for separable failure. Whether `reflect` is a session method or a
-harness of its own once there are several consumers.
-
----
-
 ### W31 · Should XML be the DEFAULT formatter? · [framework] · **needs a measurement**
 
 **Want.** Decide whether the default dialect flips, making `<Markdown>` the
@@ -1037,22 +970,26 @@ at message/section boundaries.
 
 ## Sequencing
 
-Rough order, cheapest-and-most-certain first:
+Rough order, cheapest-and-most-certain first. **W40, W38, W36 and W39 are done**
+— the reflection pass exists, and with it the learning-loop track is unblocked.
 
-1. **W40** (the configured form's ctx) — small and it unblocks an app that is
-   currently on a knowingly-wrong `source`. One construction site, one audit.
-2. **W38** (progress signals) — the smallest thing here and it has a determinate
-   bar for free: cap the summarizer's output and the fraction is
-   `emitted / budget`, not an estimate. Wants W36's capped call.
-3. **W36** (same model, same context) — the first real consumer of `project()`,
-   and the thing W39 generalizes. Compaction currently summarizes uncapped.
-4. **W39** (the reflection pass) — extract the primitive once W36 has proven the
-   shape on one caller. Episodic memory and thread titling are the next callers.
-5. **W16** (drop the CoT dock tenant) — minutes; one template block.
-6. **W28** (agent todo lists) — a collection store plus a stateful tool. The
+1. **W36's measurement** — take the round-trip capture the item asks for. It is
+   the cheapest thing on this list and four other items lean on the claim it
+   would prove. If `tools: []` costs the prefix, several arguments change.
+2. **W41** (usage + structure at the reflection boundary) — small, and W6 will
+   want the structured half immediately, so decide it before there are two
+   callers parsing prose instead of one.
+3. **W16** (drop the CoT dock tenant) — minutes; one template block.
+4. **W28** (agent todo lists) — a collection store plus a stateful tool. The
    app-owned-table question W27 raised is now answered by the `tasks` migration.
-7. **W35** (context panel v2) — fold by entry, the `request` rung, per-region
+5. **W35** (context panel v2) — fold by entry, the `request` rung, per-region
    sizes. Wants the executor's `prepareRequest` on the wire.
+6. **W26** (feedback controls) — moved UP, ahead of the learning loop. It is the
+   only ground-truth signal on this list, and its own item argues a negative
+   rating is the right trigger for W7 rather than reflecting on every turn.
+7. **W6 → W8 → W7** — the learning loop. No longer blocked: `reflect()` exists,
+   so W6 is app work over a framework primitive that is already there. Build W41
+   first so the memories come back typed.
 8. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
    first: it is also the delivery channel for W7.
 9. **W14** (media summaries at ingest) — the supply side for W4 and W5.
@@ -1063,13 +1000,12 @@ Rough order, cheapest-and-most-certain first:
     separately. They are one proposal/review mechanism over three entity types
     plus one portal that consumes it; solving them one at a time guarantees three
     incompatible review flows.
-13. **W6 → W8 → W7** — the learning loop, in that order (a reflection pass has to
-    exist before dedup or critique can attach to it). W6 is a W39 caller.
-14. **W5** — research, and it wants W14's summaries first.
-15. **W34** (hypothetical input) — needs a timeline scratch overlay; `send()`
-    appends before rendering, so there is no seam for it yet.
-16. **W31** — needs a measurement, not a decision.
-17. **W15** — deferred.
+13. **W5** — research, and it wants W14's summaries first.
+14. **W34** (hypothetical input) — needs a timeline scratch overlay; `send()`
+    appends before rendering, so there is no seam for it yet. Same seam W36's
+    re-entrancy wrinkle wanted, so they may fall together.
+15. **W31** — needs a measurement, not a decision.
+16. **W15** — deferred.
 
 **Not sequenced — blocked on a conversation, not on effort:** **W23** (the real
 execution graph). W16 clears the slot without prejudging what fills it, so the
@@ -1110,6 +1046,178 @@ deferred behind this list:
 
 Moved here with the commit that did it. Kept whole — the **Why** is the
 reasoning we would otherwise re-derive.
+
+### W40 · The configured form must not be poorer than its own sugar · [framework]
+
+> **Done** — one construction site; `compactBody` mints, `defaultStrategy` destructures
+>
+> Verified 2026-08-05. `compactBody` mints the ctx via `compactCtx`, and
+> `defaultStrategy` adapts the sugar by destructuring that same ctx back out. The
+> comment there says it outright: _"A DESTRUCTURE, not a second construction."_
+>
+> **Caveat, unresolved.** `compactCtx` passes `sessionId: this.scopeId`, which is
+> `<sessionId>:timeline` — defended in-comment as the STORE KEY. That is exactly
+> the trap this item's Current-state paragraph flagged as _"reads like the
+> answer"_. A compactor keying a side table by `ctx.sessionId` gets the composed
+> key, not the session id. Confirm that is what Ernesto wants.
+
+**Want.** A `CompactStrategy` value can reach everything the `(entries, ctx)`
+function shorthand reaches. Today it cannot, and the gap blocks a real move.
+
+**Why.** ADR 42's dichotomy says a slot takes a declarative shorthand OR a
+configured value, and that the value form is the general one — the shorthand is
+sugar over it. `compact` inverts that:
+
+```ts
+TimelineCompactCtx extends OperationCtx   // sessionId, log, run, trace, metrics
+CompactRun ctx = { entries, instructions, generate?, progress? }
+```
+
+The sugar is RICHER than the thing it is sugar for. So moving from the shorthand
+to a strategy — which you must do to set `source`, or to use `rollingSummary` —
+silently costs you `sessionId` and the diagnostic facets.
+
+**This is not hypothetical.** Ernesto folds `source: "persisted"`. Now that a
+compaction appends its summary to the log, that fold re-covers material an
+earlier summary already covers; the fix is `source: "projection"`, which is only
+expressible as a strategy value, which loses the `sessionId` its summaries store
+is keyed by. So it stays on the wrong source.
+
+**Current state.** The two forms are built at two different sites. The shorthand
+is adapted in `TimelineHarness.defaultStrategy()`, which calls
+`this.compactCtx(instructions)` → `deriveOperationCtx(...)` — the full facet
+mint. A strategy value is called with a hand-built object literal in
+`compactBody`. Same call, two constructions, and only one of them is rich.
+
+The session coordinate is NOT missing from the harness: `withTimeline` declares
+`parentScope: { sessionId: installer.hostId }` (`extension.ts:88`), so
+`this.parentScope?.sessionId` is the real one. The trap is that `this.scopeId`
+is `<sessionId>:timeline` and reads like the answer — a mistake the
+`event-scope-authority` conformance gate already catches by name, and did catch
+during this work.
+
+**Done when.** One construction site: the harness derives the ctx once and both
+forms receive it, so `compact: (entries, ctx) => …` is literally
+`run({ entries, ...ctx })`. Adding a facet then lands on both by construction
+rather than by remembering. Plus: an audit of every other ADR-42 dichotomy slot
+for the same split — `hydrate` passes one ctx to both forms and is fine, so this
+is a check, not an assumption.
+
+**Open.** Whether `CompactRun`'s ctx should be `OperationCtx` outright or a
+named subset. Outright is uniform and drags the whole facet surface into a type
+adopters implement; a subset needs a rule for what earns a place.
+
+---
+
+### W36 · Summarize with the SAME model over the SAME context · [both]
+
+> **Done (mechanism) — NOT measured**
+>
+> `session/harness.ts` binds `timeline.generate` to `this.reflect(...)`: _"A
+> compaction strategy that needs a model gets THIS session's — the same one the
+> loop uses, over the context the next tick would send."_ `services.summarize` is
+> no longer required. The re-entrancy wrinkle was solved by binding `generate`
+> rather than having the fold call `project()` itself.
+>
+> **The acceptance bar is half met.** _"Done when a compaction call shows a cache
+> hit on the prefix in the round-trip capture"_ — no such capture has been taken.
+> And there is a live reason to doubt it: `withInstruction` sets `tools: []`
+> deliberately, so a reflection's tools block differs from the tick's. Tools sit
+> in the cached prefix on every provider, so that alone may invalidate it. The
+> measurement is the item now, and it is worth taking before W39's other callers
+> are built on the cache argument.
+
+**Want.** Compaction's summary is produced by the session's own model over the
+session's own compiled context, not by a separate cheap model over a transcript.
+
+**Why (Ryan, 2026-08-03).** Cache. Same model + byte-identical prefix means the
+summarization call is an extra turn on a prompt already in the cache — a cache
+READ for everything above the instruction, full rate only on the instruction and
+the output. A separate cheap model is a COLD prompt: its full rate over the
+entire transcript. Fidelity is the second argument and may be the better one — a
+summarizer that saw the real context cannot drift from what the model believes.
+
+**The pieces exist as of the same day.** `session.project()` returns the
+`LanguageModelInput` — the same prompt, same bytes. Append one trailing
+instruction, hand it to `executor.execute()`, and the prefix is a cache hit.
+`compact(strategy)`'s explicit argument is the in-process override, so a trigger
+can compute the summary and pass a strategy whose `run` returns the fold;
+`useModelBridge` reaches the session's own executor.
+
+**The wrinkle to solve first.** The trigger fires from `useOnTickStart`, and
+`project()` renders the tree — calling it there is RE-ENTRANT. Either the
+compaction call moves just outside the render, or the fold receives the projected
+input rather than fetching it. The second is probably right and is the same shape
+W34's overlay needs, so build them together.
+
+**Done when.** A compaction call shows a cache hit on the prefix in the round-trip
+capture, and `services.summarize` is no longer required for compaction to work.
+
+**Build it as W39's first consumer, not as its own path** — episodic memory,
+thread titling and the enricher all want the identical mechanism.
+
+---
+
+### W39 · The REFLECTION PASS — one primitive, many instructions · [both]
+
+> **Done** — `session.reflect()`, with compaction as its first consumer
+>
+> `packages/session/src/reflect.ts` + `SessionHarness.reflect()`. Shape is as
+> designed: `project()` for the input, the session's own executor, nothing
+> persisted, `ReflectInput { instructions, maxOutputTokens, onDelta, signal }` →
+> `ReflectResult { text, usage, truncated }`. Compaction became its first caller
+> rather than its own path, exactly as sequenced.
+>
+> **Two things this DID decide, and both deserve a second look:**
+>
+> 1. **Tools are withheld** (`tools: []`) — _"a model handed tools will reach for
+>    one instead of answering."_ Sound for prose, but it forecloses the
+>    framework's own tool-shaped structured-output path, and it is the prime
+>    suspect for W36's unmeasured cache hit.
+> 2. **The reply is TEXT.** Callers wanting structure parse it. `rollingSummary`
+>    regexes `<questions>` out of the prose. See W41.
+>
+> Still open from the item: whether several passes share ONE call with a
+> structured schema, and whether `reflect` becomes its own harness once there are
+> several consumers. The learning-loop track (W6/W7/W8) is now unblocked.
+
+**Want.** Ask the session's own model about the conversation it just had, over
+the context it already holds, with a different instruction each time. The answer
+does not become a turn.
+
+**The observation (Ryan, 2026-08-03), and it is the load-bearing one.**
+Compaction and episodic-memory creation are not similar mechanisms — they are the
+SAME mechanism with a different prompt:
+
+| instruction                                                                  | consumer                 |
+| ---------------------------------------------------------------------------- | ------------------------ |
+| "summarize what matters going forward"                                       | compaction (W36)         |
+| "what was this about, what went right, what went wrong, keywords, learnings" | episodic memory          |
+| "title this conversation"                                                    | thread titling           |
+| "what did the user actually get"                                             | the interaction enricher |
+
+Every one is `project()` → append an instruction → `execute()` → do something
+with the text that is NOT appending it to the timeline. Building compaction's
+version as a one-off would mean building the same thing three more times.
+
+**Why it is cheap, and why that is the point.** The prefix is byte-identical to
+what the model was just sent, so every pass after the first is a cache READ on
+everything above the instruction. A reflection pass costs its instruction plus
+its output. That is what makes running four of them post-execution reasonable
+instead of extravagant.
+
+**Shape.** A `reflect(instruction) → string` on the session, over the same three
+rungs `dryRun` exposes: `project()` for the input, the session's own executor for
+the call, nothing persisted. Compaction becomes its first consumer rather than
+its own path; the post-execution passes are the second.
+
+**Open.** Whether it runs post-execution (after the turn settles, so the cache is
+warm and nothing blocks the user) or on demand. Whether several passes share ONE
+call with a structured-output schema — four questions, one round trip — or stay
+separate calls for separable failure. Whether `reflect` is a session method or a
+harness of its own once there are several consumers.
+
+---
 
 ### W38 · Progress signals on slow framework operations · [framework]
 
