@@ -48,4 +48,11 @@ export interface OnSignalOptions {
    * Omit to receive every surface and discriminate on {@link SignalOrigin.surface}.
    */
   readonly surface?: string;
+  /**
+   * Deliver only frames from ONE operation, matched against
+   * {@link ProgressEventPayload.op} (`<surface>:command:<verb>`). Strict — a
+   * frame carrying no `op` stamp does not match. Meaningful for `onProgress`
+   * only; `onLog` ignores it (log payloads carry no operation identity).
+   */
+  readonly op?: string;
 }

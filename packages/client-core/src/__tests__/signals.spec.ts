@@ -180,6 +180,59 @@ describe("telling one surface's progress from another's", () => {
   });
 });
 
+describe("narrowing progress to ONE operation", () => {
+  // Three frames: a compaction, a tool dispatch, and an unstamped one (an
+  // inbound third-party MCP frame carries no `op`).
+  const mixed = () =>
+    streamOf([
+      frame({
+        surface: "timeline",
+        name: progressEventName("timeline"),
+        payload: { token: "op-c", op: "timeline:command:compact", progress: 1 },
+      }),
+      frame(
+        {
+          surface: "tool",
+          name: progressEventName("tool"),
+          payload: { token: "c1", op: "tool:command:dispatch", progress: 2 },
+        },
+        2,
+      ),
+      frame(
+        { surface: "mcp", name: progressEventName("mcp"), payload: { token: "t", progress: 3 } },
+        3,
+      ),
+    ]);
+
+  it("delivers the named operation's frames and skips the other operation's", async () => {
+    const got: ReceivedProgress[] = [];
+    onProgress(fakeClient(mixed(), {}), { kind: "session", id: "s1" }, (e) => got.push(e), {
+      op: "timeline:command:compact",
+    });
+    await tick();
+
+    expect(got.map((e) => e.token)).toEqual(["op-c"]);
+  });
+
+  it("skips an UNSTAMPED frame — no `op` is not a match, it is an unknown", async () => {
+    const got: ReceivedProgress[] = [];
+    onProgress(fakeClient(mixed(), {}), { kind: "session", id: "s1" }, (e) => got.push(e), {
+      op: "mcp:command:call-tool",
+    });
+    await tick();
+
+    expect(got).toEqual([]);
+  });
+
+  it("no filter delivers every frame, stamped or not", async () => {
+    const got: ReceivedProgress[] = [];
+    onProgress(fakeClient(mixed(), {}), { kind: "session", id: "s1" }, (e) => got.push(e));
+    await tick();
+
+    expect(got.map((e) => e.token)).toEqual(["op-c", "c1", "t"]);
+  });
+});
+
 describe("onProgress (ADR 64)", () => {
   it("subscribes with the cross-surface progress query and maps payload + scope", async () => {
     const stream = streamOf([

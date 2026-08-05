@@ -137,6 +137,17 @@ export interface ProgressUpdate {
  */
 export interface ProgressEventPayload extends ProgressUpdate {
   readonly token: ProgressToken;
+  /**
+   * Canonical name of the OWNING operation — `<surface>:command:<verb>`, e.g.
+   * `"timeline:command:compact"`. Identity by CONTRACT rather than by parsing a
+   * token: law 1 makes a frame classifiable alone, and this makes it
+   * attributable alone, which is the same late-joiner argument — a client that
+   * arrives mid-flight can route the frame to the right widget with no stream
+   * state. Absent when the emitter has no operation, and always absent on
+   * inbound third-party MCP frames. The MCP projection deliberately does not
+   * forward it, so the payload's MCP-facing core stays byte-identical.
+   */
+  readonly op?: string;
 }
 
 // ============================================================================

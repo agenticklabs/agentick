@@ -39,6 +39,7 @@ import { mergeLayered, omitUndefined } from "@agentick/utils";
 import { Effect } from "effect";
 import {
   BaseHarness,
+  getContext,
   qualifyNamespaceGuards,
   qualifyNamespaceHooks,
   runHarnessProtocol,
@@ -93,6 +94,7 @@ import {
   CompactStrategyMissing,
   DEFAULT_JOURNALING_POLICY,
   HandlerError,
+  TIMELINE_COMPACT_EVENT_NAME,
   TimelineHydrateFailed,
   TimelineWriteFailed,
 } from "@agentick/spec";
@@ -713,7 +715,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     const op: Operation<CompactStrategy, CompactResult, CompactHandlerFailed> = {
       opId: `timeline:compact:${ulid()}`,
       surface: "timeline",
-      name: "timeline:command:compact",
+      name: TIMELINE_COMPACT_EVENT_NAME,
       scope: {},
       input: strategy,
     };
@@ -731,8 +733,12 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     s: CompactStrategy,
   ): Effect.Effect<CompactResult, CompactHandlerFailed, never> {
     const source: "persisted" | "projection" = s.source ?? "persisted";
-    const token = `timeline:compact:${ulid()}`;
     return Effect.gen(this, function* () {
+      // The compaction runs inside `runOperation`, so the token IS the owning
+      // operation's id — no second correlation id to reconcile. The fallback
+      // covers a direct body call outside a command scope.
+      const ctx = yield* getContext;
+      const token = ctx.opId ?? ulid();
       const sourceEntries = source === "persisted" ? this.log.readPersisted() : this.log.read();
       const before = sourceEntries.length;
       // A compaction strategy's `run` is typically a model call (the
@@ -747,7 +753,14 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
             ...this.compactCtx(s.instructions),
             entries: sourceEntries,
             ...omitUndefined({ generate: this.generate }),
-            progress: (u) => Effect.runFork(this.emitProgress({}, { token, ...u })),
+            progress: (u) =>
+              Effect.runFork(
+                this.emitProgress(
+                  {},
+                  { token, op: TIMELINE_COMPACT_EVENT_NAME, ...u },
+                  omitUndefined({ parentOpId: ctx.opId }),
+                ),
+              ),
           }),
         catch: (cause) => new CompactHandlerFailed({ cause }),
       });

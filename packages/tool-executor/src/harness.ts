@@ -137,6 +137,12 @@ declare module "@agentick/runtime" {
   }
 }
 
+// The emitted op-name for the `tool:dispatch` command — stamped as `op` on
+// every progress frame a handler's `ctx.progress` produces.
+// TODO(wire-constants): belongs on the client-visible surface once tool has one
+// (cf. `TIMELINE_COMPACT_EVENT_NAME` in `@agentick/spec`).
+const TOOL_DISPATCH_EVENT_NAME = "tool:command:dispatch";
+
 interface InFlightEntry {
   readonly controller: AbortController;
   readonly toolName: string;
@@ -951,12 +957,17 @@ export class ToolExecutorHarness
           // one.
           progress: createProgress((token: ProgressToken, p: ProgressUpdate): void => {
             void Effect.runFork(
-              this.emitProgress(dispatchScope, {
-                token,
-                progress: p.progress,
-                ...(p.total !== undefined ? { total: p.total } : {}),
-                ...(p.message !== undefined ? { message: p.message } : {}),
-              }),
+              this.emitProgress(
+                dispatchScope,
+                {
+                  token,
+                  op: TOOL_DISPATCH_EVENT_NAME,
+                  progress: p.progress,
+                  ...(p.total !== undefined ? { total: p.total } : {}),
+                  ...(p.message !== undefined ? { message: p.message } : {}),
+                },
+                { parentOpId: opIdForCausality },
+              ),
             );
           }, input.toolCallId),
         },

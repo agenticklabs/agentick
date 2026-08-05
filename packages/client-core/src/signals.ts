@@ -75,7 +75,12 @@ export function onLog(
 /**
  * Subscribe to `progress` signal events for `scope`. See {@link onLog}.
  *
+ * `opts.op` narrows to ONE operation. Unlike `opts.surface` this filters here
+ * rather than at the bus — `op` rides the payload, which the event query cannot
+ * see — and it is strict: an unstamped frame does not match.
+ *
  * @verifiedBy packages/client/src/__tests__/signals.spec.ts
+ * @verifiedBy packages/client-core/src/__tests__/signals.spec.ts
  */
 export function onProgress(
   client: SignalClient,
@@ -89,7 +94,9 @@ export function onProgress(
     progressEventQuery(opts?.surface),
     opts,
     (payload, origin) => {
-      handler({ ...(payload as ProgressEventPayload), ...origin });
+      const frame = payload as ProgressEventPayload;
+      if (opts?.op !== undefined && frame.op !== opts.op) return;
+      handler({ ...frame, ...origin });
     },
   );
 }

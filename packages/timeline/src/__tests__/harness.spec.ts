@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import type { EventQuery, ProtocolEvent, TimelineEntry } from "@agentick/spec";
+import { progressEventName, TIMELINE_COMPACT_EVENT_NAME } from "@agentick/spec";
 
 import { TimelineHarness } from "../harness.js";
 import { runTimelineHarnessConformance, messageEntry } from "../conformance.js";
@@ -82,6 +83,41 @@ describe("TimelineHarness — Operation envelopes", () => {
     await stop();
     expect(events.some((e) => e.phase === "requested")).toBe(true);
     expect(events.some((e) => e.phase === "terminal")).toBe(true);
+    await harness.close();
+  });
+
+  it("compaction progress frames name their operation and carry its opId", async () => {
+    const { harness, bus } = await makeHarness();
+    await harness.append(messageEntry("e1", "a"));
+    const { events, stop } = await subscribeEnvelopes(bus, { surface: "timeline" });
+    await harness.compact(
+      fromHandler({
+        handler: async ({ entries, progress }) => {
+          progress?.({ progress: 1, total: 2, message: "folding" });
+          return entries;
+        },
+      }),
+    );
+    await settle();
+    await stop();
+
+    const compactOpId = events.find(
+      (e) => e.name === TIMELINE_COMPACT_EVENT_NAME && e.phase === "requested",
+    )?.opId;
+    expect(compactOpId).toBeDefined();
+
+    const frames = events.filter((e) => e.name === progressEventName("timeline"));
+    expect(frames).toHaveLength(1);
+    // The token IS the operation's id, so a consumer needs no second key to
+    // join a frame to the lifecycle it belongs to.
+    expect(frames[0]!.payload).toEqual({
+      token: compactOpId,
+      op: TIMELINE_COMPACT_EVENT_NAME,
+      progress: 1,
+      total: 2,
+      message: "folding",
+    });
+    expect(frames[0]!.parentOpId).toBe(compactOpId);
     await harness.close();
   });
 });

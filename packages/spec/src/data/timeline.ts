@@ -41,6 +41,15 @@ export const TIMELINE_APPEND_VERB = "timeline:append" as const;
 export const TIMELINE_APPEND_EVENT_NAME = "timeline:command:append" as const;
 
 /**
+ * The emitted op-name for the compact command's lifecycle envelopes. Also the
+ * value a compaction's progress frames carry as {@link
+ * import("./signals.js").ProgressEventPayload.op}, so a subscriber can tell a
+ * compaction bar from any other progress by contract rather than by parsing a
+ * token.
+ */
+export const TIMELINE_COMPACT_EVENT_NAME = "timeline:command:compact" as const;
+
+/**
  * Subscriber-side query selecting the append events that carry entries for a
  * session. Narrows to the `requested` phase — the ONLY phase whose
  * `envelope.payload` is the {@link TimelineAppendInput} `{ entries }` (the

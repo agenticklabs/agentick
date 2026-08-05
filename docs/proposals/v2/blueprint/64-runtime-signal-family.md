@@ -86,3 +86,72 @@ scope }` and `ProgressEvent { token, progress, total?, message?, scope }`. Firew
    `Context.log` the tool ctx re-exposes).
 2. Whether `LogEvent`/`ProgressEvent` reuse existing bus event kinds or are new ones.
 3. `ctx.status` — include a thin one now or defer (leaning defer; exec status already surfaces).
+
+---
+
+## Amendment (2026-08-05) — frame identity: `op` on the payload, `parentOpId` on the envelope
+
+**Status:** ACCEPTED (Ryan). Prompted by a real consumer failure: the ernesto compaction
+progress bar, whose only way to answer "is this frame from a compaction?" was to sniff the
+`timeline:compact:` prefix of an opaque token — a convention one emitter happens to follow,
+promised by no type.
+
+### The gap
+
+A progress consumer needs three things from a frame: **who** sent it (which operation), **where**
+the work stands (the numbers), and **when it is over**. The wire answered only the middle one by
+contract. Identity was smuggled inside the token string; closure is deliberately the owning
+operation's job (law 4). So the generic subscription every consumer is steered toward
+(`*:signal:progress`) delivers frames that cannot be classified by operation — and the moment a
+surface emits progress for a second kind of work, every consumer folding "surface = operation"
+breaks silently.
+
+The envelope models the correlation (`opId`/`parentOpId`) but signals never populated it: the
+signal family bypasses the operation runner (`emitSignal`, bus-only by design), and every emit
+site fires from a Promise context through `Effect.runFork`, where the ambient FiberRef op context
+is already gone.
+
+### The decision
+
+1. **`ProgressEventPayload.op?: string`** — the owning operation's canonical name
+   (`<surface>:command:<verb>`, e.g. `"timeline:command:compact"`), stamped by the emitter, which
+   always knows it. Identity becomes a typed field a frame carries **alone** — the same
+   late-joiner reasoning as law 1, extended from determinacy to identity. Absent when the emitter
+   has no operation, and always absent on inbound third-party MCP frames.
+2. **`parentOpId` on signal envelopes** — `emitProgress` accepts it explicitly and `emitSignal`
+   stamps it. Explicit, not ambient: the fork boundary at every emit site makes FiberRef reading
+   a false promise, so the site captures the id where it still exists. This is journal/
+   observability causality, not the client story — a client filtering on it would be back to the
+   join this amendment exists to remove.
+3. **Token law** — the token SHOULD be the owning operation's own `opId` (the tasks precedent, "a
+   task is its own token", generalized). Kills hand-rolled `<prefix>:<ulid>` minting. The token
+   stays what MCP says it is — an opaque correlation key for folding concurrent streams — and
+   `op` is what classifies; consumers classify by `op`, fold by `token`, close by the operation.
+
+### Rejected
+
+- **Per-operation event names** (`timeline:compact:progress`) — collapses the signal domain into
+  the command domain, and converts every generic subscriber (the MCP projection, a progress UI,
+  observability) into a maintainer of an open-ended name list. MCP itself has exactly one
+  `notifications/progress`; the name-vs-token split is its own architecture.
+- **Progress as lifecycle `delta` phases** on the command — the maximalist unification. Signals
+  are bus-only precisely so fifty frames per fold never touch the journal; lifecycle events get
+  no such exemption for free.
+- **Identity via lifecycle join alone** (subscribe `timeline:command:compact`, extract `opId`,
+  join frames on `parentOpId`) — real machinery in every consumer, and it fails the late joiner
+  outright: a UI mounting mid-flight holds frames pointing at a `requested` envelope it never
+  received.
+
+### MCP compatibility
+
+Unchanged in both directions. The projection maps `notifications/progress` params field-by-field
+(`progressToken`, `progress`, `total`, `message`) and deliberately does not forward `op`; inbound
+third-party frames simply lack it. The four laws on `ProgressUpdate` are untouched — `op` rides
+`ProgressEventPayload`, beside the token, not the reporter grammar.
+
+### Client surface
+
+`OnSignalOptions.op` filters `onProgress` frames to one operation, matched against `payload.op`,
+**strict**: an unstamped frame does not match a set filter — a consumer that asked for one
+operation must not be fed frames of unknown provenance. `onLog` ignores it (logs stay anonymous
+until a consumer appears; TODO(signal-identity) marks the seam).

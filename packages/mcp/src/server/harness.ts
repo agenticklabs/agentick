@@ -889,6 +889,9 @@ export class McpServerHarness
           // — the client's when it opted into progress, the synthetic request
           // id otherwise. Either way one bus event per frame, which the
           // progress projection forwards to `notifications/progress`.
+          // TODO(signal-identity): stamp op/parentOpId once the enclosing
+          // request op is threaded here — this ctx is minted before the
+          // crossing declares itself, and is shared across request kinds.
           progress: createProgress((token: ProgressToken, p: ProgressUpdate): void => {
             void Effect.runFork(
               this.emitProgress(connectionScope, {

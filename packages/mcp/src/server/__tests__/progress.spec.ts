@@ -23,12 +23,14 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { ProgressNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import type { ContentBlock, ProgressToken, ToolDeclaration } from "@agentick/spec";
-import { jsonSchema } from "@agentick/spec";
+import { jsonSchema, progressEventName } from "@agentick/spec";
 
 import {
   inMemoryServerTransport,
+  installProgressProjection,
   McpServerHarness,
   type McpServerOptions,
   type ToolHandlerResolver,
@@ -179,5 +181,47 @@ describe("progress projection — client-token correlation (ADR 64 / A1)", () =>
 
     expect(received).toHaveLength(2);
     await cleanup();
+  });
+});
+
+describe("the wire params carry no operation identity", () => {
+  it("an op-stamped bus frame forwards WITHOUT op — the MCP-facing core stays byte-identical", async () => {
+    const bus = new LocalEventBus();
+    const sent: unknown[] = [];
+    const sdkServer = {
+      notification: async (n: unknown) => {
+        sent.push(n);
+      },
+    } as unknown as Parameters<typeof installProgressProjection>[0]["sdkServer"];
+    const scope = { sessionId: "conn-1" };
+    const off = installProgressProjection({ sdkServer, bus, connectionScope: scope });
+
+    await Effect.runPromise(
+      bus.append({
+        id: ulid(),
+        surface: "tool",
+        name: progressEventName("tool"),
+        phase: "terminal",
+        timestamp: Date.now(),
+        parentOpId: "op-parent",
+        scope,
+        payload: {
+          token: "tok-op",
+          op: "tool:command:dispatch",
+          progress: 1,
+          total: 3,
+          message: "step 1",
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 20));
+    off();
+
+    expect(sent).toEqual([
+      {
+        method: "notifications/progress",
+        params: { progressToken: "tok-op", progress: 1, total: 3, message: "step 1" },
+      },
+    ]);
   });
 });

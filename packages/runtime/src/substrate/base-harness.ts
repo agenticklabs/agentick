@@ -1495,6 +1495,8 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     );
   }
 
+  // TODO(signal-identity): logs are as anonymous as progress was — thread
+  // op/parentOpId through here when a consumer appears.
   protected emitLog(
     scope: EventScope,
     level: LogLevel,
@@ -1523,8 +1525,9 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   protected emitProgress(
     scope: EventScope,
     p: ProgressEventPayload,
+    opts?: { readonly parentOpId?: string },
   ): Effect.Effect<void, JournalError, never> {
-    return this.emitSignal(progressEventName(this.surface), scope, p);
+    return this.emitSignal(progressEventName(this.surface), scope, p, opts?.parentOpId);
   }
 
   /**
@@ -1533,11 +1536,16 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * appends the discrete `terminal` envelope directly to the bus —
    * never the journal. Stamps the harness's construction-bound principal
    * like {@link makeEvent} does.
+   *
+   * `parentOpId` is passed rather than read from the ambient FiberRef because
+   * every signal emit site fires from a Promise context via `Effect.runFork`,
+   * where that context is already gone — the site captures it and hands it on.
    */
   private emitSignal(
     name: string,
     scope: EventScope,
     payload: unknown,
+    parentOpId?: string,
   ): Effect.Effect<void, JournalError, never> {
     if (!this.bus.hasSubscriberFor({ surface: this.surface, name, phase: "terminal" })) {
       return Effect.void;
@@ -1548,6 +1556,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       name,
       phase: "terminal",
       timestamp: Date.now(),
+      ...(parentOpId !== undefined ? { parentOpId } : {}),
       // The SAME merge `makeEvent` performs — gap-filling `parentScope`,
       // authoritative `principal`. Duplicated shape, not duplicated policy: the
       // signal family bypasses the operation runner entirely (bus-only, no
