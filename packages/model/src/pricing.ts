@@ -34,21 +34,18 @@ import {
 export type { ModelPricing } from "./model-info.js";
 
 /**
- * provider → modelId PREFIX → pricing. Longest-prefix match, so
- * `"gpt-4o"` covers `"gpt-4o-2024-11-20"` while `"gpt-4o-mini"` wins
- * for minis. A pricing-only projection of {@link ModelRegistry}.
+ * `"<provider>/<modelId-prefix>"` → pricing. Longest-prefix match, so
+ * `"openai/gpt-4o"` covers `gpt-4o-2024-11-20` while `"openai/gpt-4o-mini"`
+ * wins for minis. A pricing-only projection of {@link ModelRegistry}, and it
+ * shares that table's key space exactly.
  */
-export type PricingTable = Readonly<Record<string, Readonly<Record<string, ModelPricing>>>>;
+export type PricingTable = Readonly<Record<string, ModelPricing>>;
 
 /** Project a registry down to its priced rows (drops rows without pricing). */
 function projectPricing(registry: ModelRegistry): PricingTable {
-  const out: Record<string, Record<string, ModelPricing>> = {};
-  for (const [provider, models] of Object.entries(registry)) {
-    const priced: Record<string, ModelPricing> = {};
-    for (const [prefix, info] of Object.entries(models)) {
-      if (info.pricing) priced[prefix] = info.pricing;
-    }
-    if (Object.keys(priced).length > 0) out[provider] = priced;
+  const out: Record<string, ModelPricing> = {};
+  for (const [key, info] of Object.entries(registry)) {
+    if (info.pricing) out[key] = info.pricing;
   }
   return out;
 }
@@ -60,14 +57,9 @@ function projectPricing(registry: ModelRegistry): PricingTable {
  */
 export const SEED_PRICING: PricingTable = projectPricing(SEED_MODELS);
 
-/** Layer adopter rates over a base table (per-provider shallow merge). */
+/** Layer adopter rates over a base table. One flat key space, so one spread. */
 export function mergePricing(base: PricingTable, overrides: PricingTable): PricingTable {
-  const out: Record<string, Record<string, ModelPricing>> = {};
-  const providers = new Set<string>([...Object.keys(base), ...Object.keys(overrides)]);
-  for (const provider of providers) {
-    out[provider] = { ...(base[provider] ?? {}), ...(overrides[provider] ?? {}) };
-  }
-  return out;
+  return { ...base, ...overrides };
 }
 
 /**
@@ -79,13 +71,8 @@ export function resolvePricing(
   target: Pick<ExecutionTarget, "provider" | "modelId">,
   table: PricingTable = SEED_PRICING,
 ): ModelPricing | undefined {
-  const registry: Record<string, Record<string, ModelInfo>> = {};
-  for (const [provider, models] of Object.entries(table)) {
-    registry[provider] = {};
-    for (const [prefix, pricing] of Object.entries(models)) {
-      registry[provider][prefix] = { pricing };
-    }
-  }
+  const registry: Record<string, ModelInfo> = {};
+  for (const [key, pricing] of Object.entries(table)) registry[key] = { pricing };
   return resolveModelInfo(target, registry)?.pricing;
 }
 

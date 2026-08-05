@@ -1,8 +1,8 @@
 /**
  * ModelInfo registry (#204) — ONE per-model reference table folding
  * pricing, context window, output cap, capabilities, and a token
- * estimator. It widens the pricing table's `provider → modelId-prefix →
- * data` shape rather than standing up a parallel registry: the pricing
+ * estimator. Keyed `"<provider>/<modelId-prefix>"` — one flat key space,
+ * the ecosystem's convention (OpenRouter, LiteLLM): the pricing
  * spine (`SEED_PRICING`, `resolvePricing`, `estimateCost`) is now a thin
  * projection over `SEED_MODELS` in `./pricing.ts`, so there is a single
  * source of numbers.
@@ -63,11 +63,18 @@ export interface ModelInfo {
 }
 
 /**
- * provider → modelId PREFIX → info. Longest-prefix match, so
- * `"gpt-4o"` covers `"gpt-4o-2024-11-20"` while `"gpt-4o-mini"` wins for
- * minis. Structurally the pricing table's shape, widened past pricing.
+ * `"<provider>/<modelId-prefix>"` → info. Longest-prefix match on the whole
+ * key, so `"openai/gpt-4o"` covers `gpt-4o-2024-11-20` while
+ * `"openai/gpt-4o-mini"` wins for minis, and the provider segment keeps one
+ * vendor's prefixes from ever reaching another's.
+ *
+ * The provider segment is the SERVING provider — who bills you — not the wire
+ * dialect and not the adapter. Bedrock and Vertex re-serve other authors'
+ * models at their own rates, so each is its own row; and one adapter
+ * (`model-ai-sdk`) serves several providers, so keying by adapter would
+ * collapse rate cards that have to stay apart.
  */
-export type ModelRegistry = Readonly<Record<string, Readonly<Record<string, ModelInfo>>>>;
+export type ModelRegistry = Readonly<Record<string, ModelInfo>>;
 
 /** Capabilities shared by the seeded vision+tools chat models. */
 const VISION_TOOLS: TargetCapabilities = {
@@ -83,114 +90,108 @@ const VISION_TOOLS: TargetCapabilities = {
  * and override via the `registry` parameter for anything sensitive.
  */
 export const SEED_MODELS: ModelRegistry = {
-  openai: {
-    "gpt-4o-mini": {
-      pricing: { inputPerMTok: 0.15, outputPerMTok: 0.6, cachedInputPerMTok: 0.075 },
-      contextWindow: 128000,
-      maxOutputTokens: 16384,
-      capabilities: VISION_TOOLS,
-    },
-    "gpt-4o": {
-      pricing: { inputPerMTok: 2.5, outputPerMTok: 10, cachedInputPerMTok: 1.25 },
-      contextWindow: 128000,
-      maxOutputTokens: 16384,
-      capabilities: VISION_TOOLS,
-    },
+  "openai/gpt-4o-mini": {
+    pricing: { inputPerMTok: 0.15, outputPerMTok: 0.6, cachedInputPerMTok: 0.075 },
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    capabilities: VISION_TOOLS,
   },
-  anthropic: {
-    "claude-haiku": {
-      pricing: {
-        inputPerMTok: 1,
-        outputPerMTok: 5,
-        cachedInputPerMTok: 0.1,
-        cacheWritePerMTok: 1.25,
-      },
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
-      capabilities: VISION_TOOLS,
-    },
-    "claude-sonnet": {
-      pricing: {
-        inputPerMTok: 3,
-        outputPerMTok: 15,
-        cachedInputPerMTok: 0.3,
-        cacheWritePerMTok: 3.75,
-      },
-      contextWindow: 200000,
-      maxOutputTokens: 16384,
-      capabilities: VISION_TOOLS,
-    },
-    "claude-3-5-sonnet": {
-      pricing: {
-        inputPerMTok: 3,
-        outputPerMTok: 15,
-        cachedInputPerMTok: 0.3,
-        cacheWritePerMTok: 3.75,
-      },
-      contextWindow: 200000,
-      maxOutputTokens: 8192,
-      capabilities: VISION_TOOLS,
-    },
-    "claude-opus": {
-      pricing: {
-        inputPerMTok: 5,
-        outputPerMTok: 25,
-        cachedInputPerMTok: 0.5,
-        cacheWritePerMTok: 6.25,
-      },
-      contextWindow: 200000,
-      maxOutputTokens: 32000,
-      capabilities: VISION_TOOLS,
-    },
+  "openai/gpt-4o": {
+    pricing: { inputPerMTok: 2.5, outputPerMTok: 10, cachedInputPerMTok: 1.25 },
+    contextWindow: 128000,
+    maxOutputTokens: 16384,
+    capabilities: VISION_TOOLS,
   },
-  google: {
-    // v1 catalog has no explicit gemini-2.5-flash row; window/limit are
-    // the published Gemini 2.5 Flash numbers (approximate, overridable).
-    "gemini-2.5-flash": {
-      pricing: { inputPerMTok: 0.3, outputPerMTok: 2.5 },
-      contextWindow: 1048576,
-      maxOutputTokens: 65536,
-      capabilities: VISION_TOOLS,
+  "anthropic/claude-haiku": {
+    pricing: {
+      inputPerMTok: 1,
+      outputPerMTok: 5,
+      cachedInputPerMTok: 0.1,
+      cacheWritePerMTok: 1.25,
     },
-    "gemini-2.5-pro": {
-      pricing: { inputPerMTok: 1.25, outputPerMTok: 10 },
-      contextWindow: 1000000,
-      maxOutputTokens: 65536,
-      capabilities: VISION_TOOLS,
-    },
-    // Google's published GLOBAL rates. The non-global endpoints are 10% dearer
-    // ($1.65 / $9.90 for 3.5 Flash); an adopter pinned to a region overrides via
-    // the `registry` parameter rather than this table guessing which they use.
-    // No cache-WRITE surcharge — Google's caching is implicit and charges only
-    // the discounted read, so `cacheWritePerMTok` is deliberately absent.
-    "gemini-3.5-flash": {
-      pricing: { inputPerMTok: 1.5, outputPerMTok: 9, cachedInputPerMTok: 0.15 },
-      contextWindow: 1048576,
-      maxOutputTokens: 65536,
-      capabilities: VISION_TOOLS,
-    },
-    "gemini-3.5-flash-lite": {
-      pricing: { inputPerMTok: 0.3, outputPerMTok: 2.5, cachedInputPerMTok: 0.03 },
-      contextWindow: 1048576,
-      maxOutputTokens: 65536,
-      capabilities: VISION_TOOLS,
-    },
-    // Cheaper per output token than 3.5 Flash AND it emits fewer of them —
-    // Google reports a 17% reduction in output token usage, which compounds
-    // with the 17% lower rate to roughly a third off generation. Reasoning
-    // bills as output, so that lands hardest on a thinking agent.
-    "gemini-3.6-flash": {
-      pricing: { inputPerMTok: 1.5, outputPerMTok: 7.5, cachedInputPerMTok: 0.15 },
-      contextWindow: 1048576,
-      maxOutputTokens: 65536,
-      capabilities: VISION_TOOLS,
-    },
-    // TODO(pricing-tiers): Gemini 3.1 Pro is priced in TWO tiers by input size
-    // ($2/$12 under 200K, $4/$18 over), and `ModelPricing` has one rate per
-    // direction. It is omitted rather than entered at the low tier, which would
-    // under-report every long-context call. `gemini-2.5-pro` above already
-    // carries that inaccuracy. Fixing it means a size-dependent rate.
+    contextWindow: 200000,
+    maxOutputTokens: 8192,
+    capabilities: VISION_TOOLS,
   },
+  "anthropic/claude-sonnet": {
+    pricing: {
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+      cachedInputPerMTok: 0.3,
+      cacheWritePerMTok: 3.75,
+    },
+    contextWindow: 200000,
+    maxOutputTokens: 16384,
+    capabilities: VISION_TOOLS,
+  },
+  "anthropic/claude-3-5-sonnet": {
+    pricing: {
+      inputPerMTok: 3,
+      outputPerMTok: 15,
+      cachedInputPerMTok: 0.3,
+      cacheWritePerMTok: 3.75,
+    },
+    contextWindow: 200000,
+    maxOutputTokens: 8192,
+    capabilities: VISION_TOOLS,
+  },
+  "anthropic/claude-opus": {
+    pricing: {
+      inputPerMTok: 5,
+      outputPerMTok: 25,
+      cachedInputPerMTok: 0.5,
+      cacheWritePerMTok: 6.25,
+    },
+    contextWindow: 200000,
+    maxOutputTokens: 32000,
+    capabilities: VISION_TOOLS,
+  },
+  // v1 catalog has no explicit gemini-2.5-flash row; window/limit are
+  // the published Gemini 2.5 Flash numbers (approximate, overridable).
+  "google/gemini-2.5-flash": {
+    pricing: { inputPerMTok: 0.3, outputPerMTok: 2.5 },
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    capabilities: VISION_TOOLS,
+  },
+  "google/gemini-2.5-pro": {
+    pricing: { inputPerMTok: 1.25, outputPerMTok: 10 },
+    contextWindow: 1000000,
+    maxOutputTokens: 65536,
+    capabilities: VISION_TOOLS,
+  },
+  // Google's published GLOBAL rates. The non-global endpoints are 10% dearer
+  // ($1.65 / $9.90 for 3.5 Flash); an adopter pinned to a region overrides via
+  // the `registry` parameter rather than this table guessing which they use.
+  // No cache-WRITE surcharge — Google's caching is implicit and charges only
+  // the discounted read, so `cacheWritePerMTok` is deliberately absent.
+  "google/gemini-3.5-flash": {
+    pricing: { inputPerMTok: 1.5, outputPerMTok: 9, cachedInputPerMTok: 0.15 },
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    capabilities: VISION_TOOLS,
+  },
+  "google/gemini-3.5-flash-lite": {
+    pricing: { inputPerMTok: 0.3, outputPerMTok: 2.5, cachedInputPerMTok: 0.03 },
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    capabilities: VISION_TOOLS,
+  },
+  // Cheaper per output token than 3.5 Flash AND it emits fewer of them —
+  // Google reports a 17% reduction in output token usage, which compounds with
+  // the 17% lower rate to roughly a third off generation. Reasoning bills as
+  // output, so that lands hardest on a thinking agent.
+  "google/gemini-3.6-flash": {
+    pricing: { inputPerMTok: 1.5, outputPerMTok: 7.5, cachedInputPerMTok: 0.15 },
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    capabilities: VISION_TOOLS,
+  },
+  // TODO(pricing-tiers): Gemini 3.1 Pro is priced in TWO tiers by input size
+  // ($2/$12 under 200K, $4/$18 over), and `ModelPricing` has one rate per
+  // direction. It is omitted rather than entered at the low tier, which would
+  // under-report every long-context call. `gemini-2.5-pro` above already
+  // carries that inaccuracy. Fixing it means a size-dependent rate.
 };
 
 /**
@@ -203,26 +204,19 @@ export function resolveModelInfo(
   registry: ModelRegistry = SEED_MODELS,
 ): ModelInfo | undefined {
   if (!target.provider || !target.modelId) return undefined;
-  const models = registry[target.provider];
-  if (!models) return undefined;
-  const modelId = target.modelId;
+  const key = `${target.provider}/${target.modelId}`;
   let best: { prefix: string; info: ModelInfo } | undefined;
-  for (const [prefix, info] of Object.entries(models)) {
-    if (modelId.startsWith(prefix) && (!best || prefix.length > best.prefix.length)) {
+  for (const [prefix, info] of Object.entries(registry)) {
+    if (key.startsWith(prefix) && (!best || prefix.length > best.prefix.length)) {
       best = { prefix, info };
     }
   }
   return best?.info;
 }
 
-/** Layer adopter rows over a base registry (per-provider shallow merge). */
+/** Layer adopter rows over a base registry. One flat key space, so one spread. */
 export function mergeRegistry(base: ModelRegistry, overrides: ModelRegistry): ModelRegistry {
-  const out: Record<string, Record<string, ModelInfo>> = {};
-  const providers = new Set<string>([...Object.keys(base), ...Object.keys(overrides)]);
-  for (const provider of providers) {
-    out[provider] = { ...(base[provider] ?? {}), ...(overrides[provider] ?? {}) };
-  }
-  return out;
+  return { ...base, ...overrides };
 }
 
 /**

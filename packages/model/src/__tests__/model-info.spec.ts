@@ -65,9 +65,7 @@ describe("resolveModelInfo", () => {
 describe("mergeRegistry", () => {
   it("adopter rows layer over the base per provider", () => {
     const merged = mergeRegistry(SEED_MODELS, {
-      openai: {
-        "gpt-4o": { contextWindow: 999999, pricing: { inputPerMTok: 9, outputPerMTok: 9 } },
-      },
+      "openai/gpt-4o": { contextWindow: 999999, pricing: { inputPerMTok: 9, outputPerMTok: 9 } },
     });
     const info = resolveModelInfo({ provider: "openai", modelId: "gpt-4o" }, merged);
     expect(info?.contextWindow).toBe(999999);
@@ -97,7 +95,7 @@ describe("effectiveModelInfo — precedence: adopter > target self > seed", () =
 
   it("adopter registry overrides both target self and seed", () => {
     const registry: ModelRegistry = {
-      anthropic: { "claude-sonnet": { contextWindow: 500000, maxOutputTokens: 42 } },
+      "anthropic/claude-sonnet": { contextWindow: 500000, maxOutputTokens: 42 },
     };
     const info = effectiveModelInfo(
       {
@@ -173,14 +171,14 @@ describe("estimateTokens", () => {
 
 describe("SEED_PRICING is the pricing projection of SEED_MODELS (single source)", () => {
   it("every priced seed model resolves identically through both surfaces", () => {
-    for (const [provider, models] of Object.entries(SEED_MODELS)) {
-      for (const prefix of Object.keys(models)) {
-        const viaRegistry = resolveModelInfo({ provider, modelId: prefix })?.pricing;
-        const viaPricing = resolvePricing({ provider, modelId: prefix });
-        expect(viaPricing).toEqual(viaRegistry);
-      }
+    for (const key of Object.keys(SEED_MODELS)) {
+      const [provider, ...rest] = key.split("/");
+      const modelId = rest.join("/");
+      const viaRegistry = resolveModelInfo({ provider, modelId })?.pricing;
+      const viaPricing = resolvePricing({ provider, modelId });
+      expect(viaPricing).toEqual(viaRegistry);
     }
-    expect(SEED_PRICING.openai?.["gpt-4o"]?.inputPerMTok).toBe(2.5);
+    expect(SEED_PRICING["openai/gpt-4o"]?.inputPerMTok).toBe(2.5);
   });
 });
 
@@ -189,25 +187,21 @@ describe("indirect providers — same model, different serving-provider specs (#
   // OWN pricing (markup/cut), model-id strings, and sometimes windows.
   // The registry keys on the SERVING provider, so each is a distinct row.
   const indirect: ModelRegistry = {
-    anthropic: {
-      "claude-sonnet-4": {
-        contextWindow: 200_000,
-        pricing: { inputPerMTok: 3, outputPerMTok: 15 },
-      },
+    "anthropic/claude-sonnet-4": {
+      contextWindow: 200_000,
+      pricing: { inputPerMTok: 3, outputPerMTok: 15 },
     },
-    bedrock: {
-      // AWS model-id scheme + markup.
-      "anthropic.claude-sonnet-4": {
-        contextWindow: 200_000,
-        pricing: { inputPerMTok: 3.3, outputPerMTok: 16.5 },
-      },
+    // AWS model-id scheme + markup.
+    "bedrock/anthropic.claude-sonnet-4": {
+      contextWindow: 200_000,
+      pricing: { inputPerMTok: 3.3, outputPerMTok: 16.5 },
     },
-    openrouter: {
-      // OpenRouter's unified scheme + their cut.
-      "anthropic/claude-sonnet-4": {
-        contextWindow: 200_000,
-        pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 },
-      },
+    // OpenRouter's unified scheme + their cut. THREE segments — the modelId
+    // itself contains a slash, so the composed key does too. Nothing special
+    // is needed: the match is on the whole string, not on segments.
+    "openrouter/anthropic/claude-sonnet-4": {
+      contextWindow: 200_000,
+      pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 },
     },
   };
 
@@ -233,11 +227,9 @@ describe("indirect providers — same model, different serving-provider specs (#
 
   it("an adopter layers an indirect-provider table over the seed via mergeRegistry", () => {
     const merged = mergeRegistry(SEED_MODELS, {
-      openrouter: {
-        "openai/gpt-4o": {
-          contextWindow: 128_000,
-          pricing: { inputPerMTok: 2.6, outputPerMTok: 10.4 },
-        },
+      "openrouter/openai/gpt-4o": {
+        contextWindow: 128_000,
+        pricing: { inputPerMTok: 2.6, outputPerMTok: 10.4 },
       },
     });
     // Seed rows (direct openai) survive; the new serving provider resolves independently.

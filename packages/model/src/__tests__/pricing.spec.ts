@@ -48,7 +48,7 @@ describe("estimateCost — subset semantics", () => {
   });
 
   it("defaults cached/write rates to the input rate when unpriced", () => {
-    const table = { p: { m: { inputPerMTok: 10, outputPerMTok: 20 } } };
+    const table = { "p/m": { inputPerMTok: 10, outputPerMTok: 20 } };
     const cost = estimateCost(
       {
         inputTokens: 1_000_000,
@@ -66,8 +66,8 @@ describe("estimateCost — subset semantics", () => {
 describe("mergePricing / mergeUsageStats", () => {
   it("adopter overrides layer over the seed per provider", () => {
     const merged = mergePricing(
-      { openai: { "gpt-4o": { inputPerMTok: 1, outputPerMTok: 2 } } },
-      { openai: { "gpt-4o": { inputPerMTok: 9, outputPerMTok: 9 } } },
+      { openai: { inputPerMTok: 1, outputPerMTok: 2 } },
+      { openai: { inputPerMTok: 9, outputPerMTok: 9 } },
     );
     expect(resolvePricing({ provider: "openai", modelId: "gpt-4o" }, merged)?.inputPerMTok).toBe(9);
   });
@@ -102,7 +102,7 @@ describe("estimateCost — adapter authority (target.pricing)", () => {
     // Self-described wins over SEED (2.50).
     expect(estimateCost(usage, target)!.totalUSD).toBeCloseTo(7);
     // Adopter table wins over self-described.
-    const table = { openai: { "gpt-4o": { inputPerMTok: 1, outputPerMTok: 1 } } };
+    const table = { openai: { inputPerMTok: 1, outputPerMTok: 1 } };
     expect(estimateCost(usage, target, table)!.totalUSD).toBeCloseTo(1);
   });
 });

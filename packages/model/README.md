@@ -366,7 +366,7 @@ Canonical generation knobs stay out of that channel entirely. `buildParameters` 
 
 ## Model registry — window, pricing, cost
 
-One table keyed **serving provider → model-id prefix → `ModelInfo`**, carrying pricing, context window, output cap, capabilities and an optional tokenizer. `SEED_MODELS` ships approximate defaults; layer your own numbers over them.
+One flat table keyed **`"<serving-provider>/<model-id-prefix>"`** → `ModelInfo`, carrying pricing, context window, output cap, capabilities and an optional tokenizer. `SEED_MODELS` ships approximate defaults; layer your own numbers over them.
 
 ```ts
 import {
@@ -379,9 +379,7 @@ import {
 import { openai } from "@agentick/model-openai";
 
 const registry = mergeRegistry(SEED_MODELS, {
-  openai: {
-    "gpt-4o": { contextWindow: 128_000, pricing: { inputPerMTok: 2.5, outputPerMTok: 10 } },
-  },
+  "openai/gpt-4o": { contextWindow: 128_000, pricing: { inputPerMTok: 2.5, outputPerMTok: 10 } },
 });
 
 const adapter = openai("gpt-4o");
@@ -390,27 +388,25 @@ contextUtilization(96_000, info); // 0.75 — or undefined when no window is kno
 estimateTokens("some prompt text", info); // info.tokenEstimator ?? char/4
 ```
 
-Resolution is longest-prefix (`gpt-4o-mini` beats `gpt-4o` for minis), and `effectiveModelInfo` folds per field with a fixed precedence: **adopter registry > the adapter's self-description > seed**. When no layer knows the model the answer is `undefined` — never a fabricated number.
+Resolution is longest-prefix over the whole composed key (`openai/gpt-4o-mini` beats `openai/gpt-4o` for minis, and one vendor's prefixes can never reach another's), and `effectiveModelInfo` folds per field with a fixed precedence: **adopter registry > the adapter's self-description > seed**. When no layer knows the model the answer is `undefined` — never a fabricated number.
 
-### `provider` means the serving provider
+### The provider segment means the SERVING provider
 
-The same underlying model re-served through Bedrock, Vertex, OpenRouter or Azure is different data: different markup, different model-id strings, sometimes a different window. Keying on the serving provider gives each its own row, and they never collide:
+Not the wire dialect, and not the adapter. The same underlying model re-served through Bedrock, Vertex, OpenRouter or Azure is different data: different markup, different model-id strings, sometimes a different window. And one adapter (`model-ai-sdk`) serves several providers, so keying by adapter would collapse rate cards that have to stay apart. Keying on the serving provider gives each its own row, and they never collide:
 
 ```ts
 import { mergeRegistry, resolveModelInfo, SEED_MODELS } from "@agentick/model";
 
 const registry = mergeRegistry(SEED_MODELS, {
-  bedrock: {
-    "anthropic.claude-sonnet-4": {
-      contextWindow: 200_000,
-      pricing: { inputPerMTok: 3.3, outputPerMTok: 16.5 },
-    },
+  "bedrock/anthropic.claude-sonnet-4": {
+    contextWindow: 200_000,
+    pricing: { inputPerMTok: 3.3, outputPerMTok: 16.5 },
   },
-  openrouter: {
-    "anthropic/claude-sonnet-4": {
-      contextWindow: 200_000,
-      pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 },
-    },
+  // Three segments — OpenRouter's model ids contain a slash themselves. The
+  // match is on the whole string, so nothing special is needed.
+  "openrouter/anthropic/claude-sonnet-4": {
+    contextWindow: 200_000,
+    pricing: { inputPerMTok: 3.15, outputPerMTok: 15.75 },
   },
 });
 
