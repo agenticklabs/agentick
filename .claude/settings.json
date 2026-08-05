@@ -29,5 +29,6 @@
   "attribution": {
     "commit": "",
     "pr": ""
-  }
+  },
+  "cleanupPeriodDays": 730
 }
