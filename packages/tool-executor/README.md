@@ -378,23 +378,92 @@ const openFile = createTool({
 
 Importing the subpath self-assembles two handles on the session. `clientToolCalls` is the inbound call feed; `tools` is the registry projection. Different slot, different concern.
 
+A client tool is one object: what the model is told, and what runs when it calls it.
+
 ```ts
-import "@agentick/tool-executor/client";
+import { createClientTool } from "@agentick/tool-executor/client";
+
+const readSelection = createClientTool({
+  name: "read_selection",
+  description: "What the user currently has highlighted on the page",
+  inputSchema: z.object({ includeHtml: z.boolean().optional() }),
+  handler: async ({ includeHtml }) => {
+    const sel = window.getSelection();
+    return includeHtml ? (sel?.anchorNode?.parentElement?.outerHTML ?? "") : String(sel ?? "");
+  },
+});
 
 const calls = client.session(sessionId).clientToolCalls;
 
-// Declare this client's tool set — a whole-slice REPLACE. Reconnect = re-declare.
-await calls.set([openFileDecl, getWeatherDecl]);
-
-// Route inbound calls to handlers and auto-respond.
-const stop = calls.route({
-  open_file: (input) => read((input as { path: string }).path),
-  get_weather: (input) => `sunny in ${(input as { city: string }).city}`,
-});
-
-// Answer confirmation prompts.
-calls.confirm((req) => !req.toolName?.startsWith("rm"));
+await calls.use([readSelection, navigateTo]);
 ```
+
+That is the whole setup. `use` sends the declarations — each projected from the tool object, with the handler stripped — and starts answering calls with them.
+
+**You do not need to tear anything down.** Closing the session closes its tool feed, which stops routing and aborts every handler's `signal`. `use` does return a stop function, but it is for swapping one tool set for another mid-session:
+
+```ts
+const stop = await calls.use(editorTools);
+stop();
+await calls.use(reviewTools);
+```
+
+Tools the model is about to run can be gated on the user's approval — see [Confirmation](#confirmation):
+
+```ts
+calls.confirm((req) => !req.toolName?.startsWith("delete_"));
+```
+
+Why one object and not two: the older `set` + `route` pair joins the declaration and the handler by a bare string, and gets no help if they disagree. A declaration with no handler suspends every call until it times out; a handler with no declaration is never invoked. Both are still there for a caller whose declarations come from somewhere else — `use` simply makes the mismatch unconstructable.
+
+```ts
+await calls.set([openFileDecl, getWeatherDecl]); // whole-slice REPLACE
+calls.route({ open_file: (input) => read(input.path) });
+```
+
+#### When the user has several tabs open
+
+Every attached client receives every tool call. So one `navigate_to` reaches four open tabs, and without a rule, all four navigate.
+
+`accepts` is where a tool says whether **this** client should run the call. The framework does not pick the rule for you, because the right one differs per tool:
+
+```ts
+// The addressed tab — or any tab, when the call names none.
+accepts: ({ target, self }) => target === undefined || target === self,
+
+// The FOCUSED tab, which is not necessarily the addressed one.
+accepts: () => document.hasFocus(),
+
+// Every tab, deliberately.
+accepts: () => true,
+```
+
+A client that declines says **nothing at all** — no response, because another tab is expected to answer. That is different from a call naming a tool this client never declared, which _is_ answered, because nobody has it and an unanswered call hangs until it times out:
+
+```ts
+await calls.use(tools, {
+  notFound: async (input, ctx) => `this client cannot do "${ctx.name}"`,
+});
+```
+
+Keeping those two apart is the point. Four tabs where one accepts should produce three quiet declines and one result — not three warnings about a system working correctly.
+
+> [!NOTE]
+> `ctx.target` is not populated yet — the server does not stamp the originating connection onto a relay. Until it does, a `target === undefined` rule accepts everywhere, which is the current behavior. Write the `accepts` rule now; it starts biting when the stamp lands.
+
+#### What a handler receives
+
+The second argument carries only what the framework alone knows:
+
+| On `ctx`                   |                                                                                                                |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `toolCallId`, `name`       | Which call this is.                                                                                            |
+| `target`                   | The connection it was addressed to, if any.                                                                    |
+| `signal`                   | Aborted when the tools are torn down — honour it in a long `fetch`.                                            |
+| `log`, `trace`, `metrics`  | The same three facets the server handler gets. Always safe to call; no-ops until you wire a telemetry adapter. |
+| `clientId`, `connectionId` | This client and its current connection. Read `connectionId` when you need it — a reconnect mints a new one.    |
+
+Nothing app-shaped: no router, no store, no injector. A browser handler is written inside your app and already closes over all of it, and a ctx that carries app services stops being a framework contract.
 
 A UI that draws its **own** confirmation dialog reads the request off `session.elicitations` with `toolConfirmation(elic)` instead of handing the decision to `confirm(policy)`. It is the same reader `confirm` uses, so a dialog gets every field the gate stamped — including the `confirmationPreview` — and `undefined` narrows away everything that is not a confirmation:
 
@@ -602,7 +671,9 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/tools-handle.spec.ts` — `session.tools`: `ToolInfo` projection, exposure filter, name-then-alias `get`/`has`, canonical-name dispatch binding, and the two subscription shapes.
 - `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
-- `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
+- `src/__tests__/readme-client-tools.spec.ts` — the `readSelection` / `navigateTo` examples on this page, compiled and run against the public `/client` entry with a real zod schema: the handler's input inferred off the schema with no cast, the schema projected to the JSON Schema the wire carries, and the documented `accepts` rule accepting its own connection, declining another, and accepting an unaddressed call.
+- `src/__tests__/create-client-tool.spec.ts` — the declaration projected off a `createClientTool` (handler and `accepts` never reaching the wire), alias resolution, the ctx a handler receives with `connectionId` read LIVE so a reconnect is not stale, a handler throw answered rather than hung, and the two silences kept apart: a declined call returns nothing and does not reach `notFound`, an undeclared one is answered; four tabs where one is addressed produce exactly one answer and three silences, while an unaddressed call reaches every tab.
+- `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), `use` publishing the projected declarations then answering with the same object's handler (with a declined call proven unanswered by ordering it before an accepted one), closing the handle stopping routing and aborting the handlers' signal so the returned stop is genuinely optional, `stop()` freeing the handle for a second `use`, the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.
 - `src/__tests__/ctx-extensions.spec.ts` + `ctx-run.spec.ts` + `ctx-trunk-derivation.spec.ts` + `signals.spec.ts` + `signal-fire-and-forget.spec.ts` — opaque extension slots (freshness, absence, universal-field collision safety); `ctx.run` minting a journaled op parented under the dispatch, hook-observable and guard-vetoable, plus `ctx.runner` as a run-only view; the dispatch ctx carrying the crossing's real work-path ids; and `ctx.log` / `ctx.progress` emit shape, scope, and survival of a dying bus — including `ctx.progress.begin()` reporting on the dispatch's own tool call id, every determinate frame carrying `total`, and an indeterminate one never carrying it.
 - `src/__tests__/middleware-and-hooks.spec.ts` + `command-hooks-augmentation.spec.ts` + `fx-dispatch.spec.ts` — middleware wrapping and compose order, `guardDispatch` verdicts, unsubscribe, the typed hook names agreeing with the runtime derivation, and the `.fx` twins (composable Effects, Promise facades, door → origin preservation, single-fiber nesting, catchable binding mismatch).

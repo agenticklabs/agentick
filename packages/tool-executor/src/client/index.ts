@@ -9,6 +9,9 @@
  *   - `.set(declarations)` — DECLARE the client's full tool set (a whole-slice
  *     replace) over `session/set_client_tools`.
  *   - `.route(handlers, opts?)` — the ergonomic router: dispatch → auto-respond.
+ *   - `.use(tools, opts?)` — declare AND route a set of `createClientTool` tools,
+ *     which cannot drift apart because the declaration is projected from the
+ *     object that carries the handler.
  *   - `.confirm(policy)` — approve/deny/predicate over `tool_confirmation`
  *     elicitations.
  *
@@ -35,6 +38,27 @@ export {
   type RouteClientToolsOptions,
 } from "./client-tool-calls.js";
 export { toolConfirmation, type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
+
+// `createClientTool` — the declaration and the handler as ONE object, so the two
+// halves cannot be authored apart. `session.clientToolCalls.use(tools)` declares
+// and routes them in one call; `dispatchClientToolCall`/`routeClientTools` are
+// the consumer for code driving its own feed.
+export {
+  createClientTool,
+  toClientToolDeclaration,
+  type ClientTool,
+  type ClientToolAcceptCtx,
+  type ClientToolCtx,
+  type ClientToolCtxExtensions,
+  type ClientToolOrigin,
+} from "./create-client-tool.js";
+export {
+  dispatchClientToolCall,
+  routeClientTools,
+  type ClientToolAddressing,
+  type ClientToolCallFeed,
+  type UseClientToolsOptions,
+} from "./use-client-tools.js";
 
 // The confirmation CONTRACT, for a client rendering its own confirm dialog rather
 // than handing the decision to `.confirm(policy)`. `toolConfirmation(elic)` is the

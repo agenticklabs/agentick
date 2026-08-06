@@ -350,6 +350,9 @@ importers:
       '@agentick/client-core':
         specifier: workspace:*
         version: link:../client-core
+      '@agentick/client-extensions':
+        specifier: workspace:*
+        version: link:../client-extensions
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
@@ -1762,6 +1765,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      zod:
+        specifier: ^4.3.6
+        version: 4.3.6
 
   packages/transport:
     dependencies:

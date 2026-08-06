@@ -25,10 +25,12 @@ import type {
   WireMethod,
   WireParams,
 } from "@agentick/spec";
+import { jsonSchema } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
 
 import { TOOL_CALL_CHANNEL_FQN } from "../tool-call-schema.js";
 import { clientToolCallsHandle, type ClientToolCallsClient } from "../client/client-tool-calls.js";
+import { createClientTool } from "../client/create-client-tool.js";
 
 interface PushStream extends SubscriptionStream {
   emit(payload: unknown, correlationId?: string): void;
@@ -211,6 +213,170 @@ describe("clientToolCalls.route — fire-and-forget relays", () => {
     await Promise.resolve();
     expect(seen).toHaveLength(0);
     expect(handle.list()).toHaveLength(0); // fire-and-forget is not pending
+    handle.close();
+  });
+});
+
+describe("clientToolCalls.use — declare and route as one act", () => {
+  it("publishes the projected declarations, then answers a call with the same object's handler", async () => {
+    const stream = pushStream();
+    const { client, seen } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+
+    await handle.use([
+      createClientTool({
+        name: "read_selection",
+        description: "What the user has highlighted",
+        inputSchema: jsonSchema({ type: "object" }),
+        handler: async () => [{ type: "text", text: "highlighted" }],
+      }),
+    ] as never);
+
+    // The declaration is a PROJECTION — the handler never reaches the wire.
+    const declare = seen.find((r) => r.method === "session/set_client_tools");
+    expect(declare).toBeDefined();
+    const declarations = (declare!.params as { declarations: readonly object[] }).declarations;
+    expect(declarations).toEqual([
+      {
+        name: "read_selection",
+        description: "What the user has highlighted",
+        inputSchema: { type: "object" },
+      },
+    ]);
+
+    stream.emit(toolCall("read_selection", {}), "corr:use");
+
+    await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
+    const reply = seen.find((r) => r.method === "session/respond_to_tool_call");
+    expect((reply!.params as { result: unknown }).result).toEqual([
+      { type: "text", text: "highlighted" },
+    ]);
+    handle.close();
+  });
+
+  it("a declined call is left UNANSWERED — another attached client is expected to take it", async () => {
+    const stream = pushStream();
+    const { client, seen } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+
+    await handle.use([
+      createClientTool({
+        name: "navigate_to",
+        description: "d",
+        inputSchema: jsonSchema({ type: "object" }),
+        accepts: () => false,
+        handler: async () => "navigated",
+      }),
+      createClientTool({
+        name: "show_toast",
+        description: "d",
+        inputSchema: jsonSchema({ type: "object" }),
+        handler: async () => "shown",
+      }),
+    ] as never);
+
+    // The decline goes FIRST, then an accepted call. Waiting for the second
+    // reply proves the first had its chance and took it — a bare "nothing was
+    // sent yet" would pass before any dispatch ran at all.
+    stream.emit(toolCall("navigate_to", {}), "corr:decline");
+    stream.emit(toolCall("show_toast", {}), "corr:accept");
+
+    await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
+    const replies = seen.filter((r) => r.method === "session/respond_to_tool_call");
+    expect(replies).toHaveLength(1);
+    expect((replies[0]!.params as { correlationId: string }).correlationId).toBe("corr:accept");
+    handle.close();
+  });
+
+  it("still answers a tool it does not know — silence there would hang the call", async () => {
+    const stream = pushStream();
+    const { client, seen } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+
+    await handle.use([] as never);
+    stream.emit(toolCall("mystery", {}), "corr:unknown");
+
+    await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
+    expect((seen.at(-1)!.params as { result: unknown }).result).toEqual({
+      content: 'no client handler for "mystery"',
+      isError: true,
+    });
+    handle.close();
+  });
+});
+
+describe("clientToolCalls.use — teardown", () => {
+  it("closing the handle stops routing, so the returned stop() is optional", async () => {
+    const stream = pushStream();
+    const { client, seen } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+
+    // Deliberately DISCARD the returned unsubscribe — the common case is tools
+    // that live as long as the page.
+    await handle.use([
+      createClientTool({
+        name: "t",
+        description: "d",
+        inputSchema: jsonSchema({ type: "object" }),
+        handler: async () => "ran",
+      }),
+    ] as never);
+
+    handle.close();
+    stream.emit(toolCall("t", {}), "corr:after-close");
+
+    await waitFor(() => stream.isClosed);
+    expect(seen.some((r) => r.method === "session/respond_to_tool_call")).toBe(false);
+  });
+
+  it("aborts the handlers' signal on close, so a tool mid-await can bail", async () => {
+    const stream = pushStream();
+    const { client } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+
+    let aborted: boolean | undefined;
+    await handle.use([
+      createClientTool({
+        name: "t",
+        description: "d",
+        inputSchema: jsonSchema({ type: "object" }),
+        handler: async (_i, ctx) => {
+          ctx.signal.addEventListener("abort", () => void (aborted = true));
+          return "ran";
+        },
+      }),
+    ] as never);
+
+    stream.emit(toolCall("t", {}), "corr:1");
+    await waitFor(() => handle.list().length === 0);
+    handle.close();
+
+    expect(aborted).toBe(true);
+  });
+
+  it("the returned stop() ends routing while the handle stays open for a new set", async () => {
+    const stream = pushStream();
+    const { client, seen } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+
+    const tool = (text: string) =>
+      createClientTool({
+        name: "t",
+        description: "d",
+        inputSchema: jsonSchema({ type: "object" }),
+        handler: async () => text,
+      });
+
+    const stop = await handle.use([tool("first")] as never);
+    stop();
+    await handle.use([tool("second")] as never);
+
+    stream.emit(toolCall("t", {}), "corr:1");
+
+    await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
+    const replies = seen.filter((r) => r.method === "session/respond_to_tool_call");
+    expect(replies).toHaveLength(1);
+    expect((replies[0]!.params as { result: unknown }).result).toBe("second");
     handle.close();
   });
 });

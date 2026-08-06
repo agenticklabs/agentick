@@ -45,7 +45,9 @@ import {
   type Enumerable,
   type Respondable,
 } from "@agentick/client-core";
+import { NOOP_METRICS, OFF_TRACE, createLog } from "@agentick/spec";
 import type {
+  ClientRuntimeContext,
   ClientToolDeclaration,
   ClientTransport,
   EventEnvelope,
@@ -56,6 +58,8 @@ import type {
 
 import { TOOL_CALL_CHANNEL_FQN, type PendingToolCall } from "../tool-call-schema.js";
 import { confirmClientTools, type ConfirmPolicy } from "./confirm.js";
+import { toClientToolDeclaration, type ClientTool } from "./create-client-tool.js";
+import { routeClientTools, type UseClientToolsOptions } from "./use-client-tools.js";
 
 /**
  * The client surface the handle consumes — a subscribe stream (the fold's input)
@@ -156,6 +160,19 @@ export interface ClientToolCallsHandle
     opts?: RouteClientToolsOptions,
   ): Unsubscribe;
   /**
+   * Declare AND handle a set of {@link ClientTool}s — the whole-tool twin of
+   * `set` + `route`, which cannot be authored out of step because the
+   * declaration is projected from the same object that carries the handler.
+   *
+   * Publishes the projected declarations (a whole-slice replace, like `set`),
+   * then routes inbound calls to them. A tool whose `accepts` returns false is
+   * left UNANSWERED — another attached client is expected to take it.
+   *
+   * Resolves once the declarations are published; the returned
+   * {@link Unsubscribe} stops routing.
+   */
+  use(tools: readonly ClientTool<never>[], opts?: UseClientToolsOptions): Promise<Unsubscribe>;
+  /**
    * Apply a confirmation {@link ConfirmPolicy} to inbound tool-confirmation
    * elicitations (`hints.kind === "tool_confirmation"`): `"approve"` / `"deny"` /
    * a predicate. Non-confirmation elicitations are left untouched. Returns an
@@ -181,7 +198,12 @@ export function clientToolCallsHandle(
   );
 
   const pending = new Map<string, ClientToolCallHandle>();
+  // TODO(per-execution-abort): this aborts when the HANDLE closes, not when the
+  // execution behind a given call dies. A handler mid-fetch on a cancelled turn
+  // still has no signal — that needs the execution id on the relay.
+  const lifetime = new AbortController();
   const store = liveStore<readonly ClientToolCallHandle[], void>([], () => {
+    lifetime.abort();
     void sub.close();
   });
   const notify = (): void => store.set([...pending.values()]);
@@ -271,8 +293,36 @@ export function clientToolCallsHandle(
       };
     },
     confirm: (policy) => confirmClientTools(client, sessionId, policy),
+    use: async (tools, opts) => {
+      await client.transport.request("session/set_client_tools", {
+        sessionId,
+        declarations: tools.map(toClientToolDeclaration),
+      });
+      const runtime = (client as { runtime?: ClientRuntimeContext }).runtime ?? OFF_RUNTIME;
+      return routeClientTools(
+        { onCall: (l) => (callListeners.add(l), () => void callListeners.delete(l)) },
+        tools,
+        { self: runtime.connectionId ?? "" },
+        runtime,
+        lifetime.signal,
+        opts,
+      );
+    },
   };
 }
+
+/**
+ * Stands in when the handle was built over a bare transport rather than a full
+ * client — a handler still gets `ctx.log`/`ctx.trace` that are safe to call.
+ */
+const OFF_RUNTIME: ClientRuntimeContext = {
+  clientId: "",
+  connectionId: undefined,
+  log: createLog(() => {}),
+  trace: OFF_TRACE,
+  metrics: NOOP_METRICS,
+  activeSpan: () => undefined,
+};
 
 /**
  * Reply to a suspended client-handled tool call by `correlationId` — the direct

@@ -88,7 +88,8 @@
     "effect": "^3.22.0"
   },
   "devDependencies": {
-    "@agentick/spec-conformance": "workspace:*"
+    "@agentick/spec-conformance": "workspace:*",
+    "zod": "^4.3.6"
   },
   "engines": {
     "node": ">=20.19"
