@@ -1,6 +1,6 @@
 {
   "name": "@agentick/transport-unix-socket",
-  "version": "1.0.0-next.95",
+  "version": "1.0.0-next.96",
   "description": "Unix-socket transport for agentick — newline-delimited JSON-RPC 2.0 over `net.Server` / `net.Socket`. Required for tentickle-class local-IPC shapes (TUI ↔ same-host daemon). Node-only.",
   "keywords": [
     "agent",
@@ -87,13 +87,13 @@
   },
   "dependencies": {
     "@agentick/spec": "workspace:*",
-    "@agentick/transport": "workspace:*"
+    "@agentick/transport": "workspace:*",
+    "@agentick/utils": "workspace:*"
   },
   "devDependencies": {
     "@agentick/client-core": "workspace:*",
     "@agentick/gateway": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
-    "@agentick/utils": "workspace:*",
     "effect": "^3.22.0",
     "typescript": "^5.7.3",
     "vitest": "^4.0.18"

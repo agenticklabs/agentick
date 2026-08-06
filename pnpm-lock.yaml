@@ -1921,6 +1921,9 @@ importers:
       '@agentick/transport':
         specifier: workspace:*
         version: link:../transport
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       '@agentick/client-core':
         specifier: workspace:*
@@ -1931,9 +1934,6 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@agentick/utils':
-        specifier: workspace:*
-        version: link:../utils
       effect:
         specifier: ^3.22.0
         version: 3.22.0
@@ -1952,6 +1952,9 @@ importers:
       '@agentick/transport':
         specifier: workspace:*
         version: link:../transport
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
       ws:
         specifier: ^8.18.0
         version: 8.19.0
@@ -1974,9 +1977,6 @@ importers:
       '@agentick/transport-http':
         specifier: workspace:*
         version: link:../transport-http
-      '@agentick/utils':
-        specifier: workspace:*
-        version: link:../utils
       '@types/ws':
         specifier: ^8.5.13
         version: 8.18.1
