@@ -53,8 +53,10 @@ export {
   type ClientToolOrigin,
 } from "./create-client-tool.js";
 export {
+  DECLINED,
   dispatchClientToolCall,
   routeClientTools,
+  type ClientToolOutcome,
   type ClientToolSelf,
   type ClientToolCallFeed,
   type UseClientToolsOptions,

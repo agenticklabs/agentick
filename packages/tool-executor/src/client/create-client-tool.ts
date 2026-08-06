@@ -105,11 +105,14 @@ export interface ClientTool<TInput = unknown> {
    * Runs the call. Takes ctx FLAT as the second argument, unlike the server's
    * `(input, { ctx })` — that envelope exists to merge `use()` deps, and the
    * client has no `use()` to merge.
+   *
+   * Declared as a METHOD rather than a property so its parameter is checked
+   * bivariantly: a `ClientTool<{ to: string }>` has to fit in the
+   * `readonly ClientTool[]` that `use` takes, and a property signature makes
+   * that array unassignable under `strictFunctionTypes` — pushing a cast onto
+   * every adopter for a collection that is heterogeneous by design.
    */
-  readonly handler: (
-    input: TInput,
-    ctx: ClientToolCtx,
-  ) => ToolResultInput | Promise<ToolResultInput>;
+  handler(input: TInput, ctx: ClientToolCtx): ToolResultInput | Promise<ToolResultInput>;
 }
 
 export function createClientTool<TInput = unknown>(tool: ClientTool<TInput>): ClientTool<TInput> {
@@ -117,7 +120,7 @@ export function createClientTool<TInput = unknown>(tool: ClientTool<TInput>): Cl
 }
 
 /** The wire declaration for a tool — what the server is told, and nothing more. */
-export function toClientToolDeclaration(tool: ClientTool<never>): ClientToolDeclaration {
+export function toClientToolDeclaration(tool: ClientTool): ClientToolDeclaration {
   return {
     name: tool.name,
     description: tool.description,

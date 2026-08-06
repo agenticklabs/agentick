@@ -38,22 +38,36 @@ export interface UseClientToolsOptions {
 }
 
 /** Resolves a tool by the name (or alias) a call arrived under. */
-function resolve(tools: readonly ClientTool<never>[], name: string): ClientTool<never> | undefined {
+function resolve(tools: readonly ClientTool[], name: string): ClientTool | undefined {
   return tools.find((t) => t.name === name || t.aliases?.includes(name) === true);
 }
 
 /**
+ * Returned by {@link dispatchClientToolCall} when this client declines the call
+ * and must send nothing.
+ *
+ * A distinct sentinel, NOT `undefined`: a handler that returns nothing (easy
+ * from untyped JS, where the return type is not enforced) would otherwise be
+ * indistinguishable from a decline, and the call would hang to timeout — the
+ * exact failure the decline path exists to avoid.
+ */
+export const DECLINED: unique symbol = Symbol("agentick.clientTool.declined");
+
+/** What a dispatch resolves to: a result to send, or {@link DECLINED}. */
+export type ClientToolOutcome = ToolResultInput | typeof DECLINED;
+
+/**
  * Run one inbound call against the tool set. Resolves to the result to send, or
- * `undefined` when this client declines and must stay silent.
+ * {@link DECLINED} when this client is not the one to answer.
  */
 export async function dispatchClientToolCall(
   call: ClientToolCallHandle,
-  tools: readonly ClientTool<never>[],
+  tools: readonly ClientTool[],
   self: ClientToolSelf,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
   opts: UseClientToolsOptions = {},
-): Promise<ToolResultInput | undefined> {
+): Promise<ClientToolOutcome> {
   const tool = resolve(tools, call.name);
 
   if (tool?.accepts !== undefined) {
@@ -63,7 +77,7 @@ export async function dispatchClientToolCall(
       self: self(),
       ...(call.target !== undefined ? { target: call.target } : {}),
     });
-    if (!accepted) return undefined;
+    if (!accepted) return DECLINED;
   }
 
   const ctx: ClientToolCtx = {
@@ -81,10 +95,26 @@ export async function dispatchClientToolCall(
       : () => (opts.notFound ?? unknownTool)(call.input, ctx);
 
   try {
-    return await run();
+    const result = await run();
+    // A handler that answered with nothing is UNKNOWN, not success. Saying so
+    // beats both alternatives: silence hangs the call, and the model's default
+    // reading of a result with no complaint in it is "it worked".
+    return result ?? unreported(call.name);
   } catch (err) {
-    return { content: err instanceof Error ? err.message : String(err), isError: true };
+    return {
+      content: `\`${call.name}\` failed in the browser: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+      isError: true,
+    };
   }
+}
+
+function unreported(name: string): ToolResultInput {
+  return (
+    `\`${name}\` ran in the browser and reported no outcome, so whether it took ` +
+    `effect is unknown. Do not tell the user it succeeded.`
+  );
 }
 
 const unknownTool = (_input: unknown, ctx: ClientToolCtx): ToolResultInput => ({
@@ -103,7 +133,7 @@ export interface ClientToolCallFeed {
  */
 export function routeClientTools(
   feed: ClientToolCallFeed,
-  tools: readonly ClientTool<never>[],
+  tools: readonly ClientTool[],
   self: ClientToolSelf,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
@@ -111,8 +141,8 @@ export function routeClientTools(
 ): Unsubscribe {
   return feed.onCall((call) => {
     void (async () => {
-      const result = await dispatchClientToolCall(call, tools, self, runtime, signal, opts);
-      if (result !== undefined) await call.respond(result);
+      const outcome = await dispatchClientToolCall(call, tools, self, runtime, signal, opts);
+      if (outcome !== DECLINED) await call.respond(outcome);
     })();
   });
 }

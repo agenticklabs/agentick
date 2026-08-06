@@ -47,7 +47,7 @@ describe("the README's examples", () => {
   });
 
   it("projects a zod schema to the JSON Schema the wire carries", () => {
-    const declaration = toClientToolDeclaration(navigateTo as never);
+    const declaration = toClientToolDeclaration(navigateTo);
     expect(declaration.name).toBe("navigate_to");
     expect(declaration.inputSchema).toMatchObject({
       type: "object",

@@ -14,7 +14,7 @@ import { NOOP_METRICS, OFF_TRACE, createLog, jsonSchema } from "@agentick/spec";
 import type { ClientRuntimeContext, ToolResultInput } from "@agentick/spec";
 
 import { createClientTool, toClientToolDeclaration } from "../client/create-client-tool.js";
-import { dispatchClientToolCall } from "../client/use-client-tools.js";
+import { DECLINED, dispatchClientToolCall } from "../client/use-client-tools.js";
 import type { ClientToolCallHandle } from "../client/client-tool-calls.js";
 
 const runtime: ClientRuntimeContext = {
@@ -66,7 +66,7 @@ describe("toClientToolDeclaration", () => {
       handler: async () => "ok",
     });
 
-    const declaration = toClientToolDeclaration(tool as never);
+    const declaration = toClientToolDeclaration(tool);
 
     expect(declaration).toEqual({
       name: "navigate_to",
@@ -171,7 +171,7 @@ describe("dispatch", () => {
       },
     });
     await expect(run(call("t"), [tool], "conn-A")).resolves.toEqual({
-      content: "boom",
+      content: "`t` failed in the browser: boom",
       isError: true,
     });
   });
@@ -190,7 +190,7 @@ describe("the two silences", () => {
 
     const result = await run(call("navigate_to", {}, "conn-B"), [tool], "conn-A");
 
-    expect(result).toBeUndefined();
+    expect(result).toBe(DECLINED);
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -213,7 +213,7 @@ describe("the two silences", () => {
 
     const result = await run(call("navigate_to"), [tool], "conn-A", { notFound });
 
-    expect(result).toBeUndefined();
+    expect(result).toBe(DECLINED);
     expect(notFound).not.toHaveBeenCalled();
   });
 
@@ -237,7 +237,7 @@ describe("the two silences", () => {
     );
 
     expect(ran).toEqual(["conn-C"]);
-    expect(results.filter((r) => r !== undefined)).toEqual(["navigated"]);
+    expect(results.filter((r) => r !== DECLINED)).toEqual(["navigated"]);
   });
 
   it("an unaddressed call reaches every tab — the default is broadcast, not silence", async () => {
@@ -272,9 +272,9 @@ describe("the two silences", () => {
     await expect(run(call("navigate_to", { to: "/reports" }), [tool], "conn-A")).resolves.toBe(
       "navigated",
     );
-    await expect(
-      run(call("navigate_to", { to: "/other" }), [tool], "conn-A"),
-    ).resolves.toBeUndefined();
+    await expect(run(call("navigate_to", { to: "/other" }), [tool], "conn-A")).resolves.toBe(
+      DECLINED,
+    );
   });
 
   it("a custom notFound answers the unknown call", async () => {
@@ -282,5 +282,25 @@ describe("the two silences", () => {
     await expect(run(call("mystery"), [], "conn-A", { notFound })).resolves.toBe(
       "handled elsewhere",
     );
+  });
+});
+
+describe("a handler that answers with nothing", () => {
+  it("is answered as UNKNOWN, not mistaken for a decline", async () => {
+    // Reachable from untyped JS, where the return type is not enforced. Treating
+    // it as a decline would hang the call to timeout; treating it as success
+    // would have the model announce an effect nobody observed.
+    const tool = createClientTool({
+      name: "t",
+      description: "d",
+      inputSchema: schema,
+      handler: (() => undefined) as never,
+    });
+
+    const result = await run(call("t"), [tool], "conn-A");
+
+    expect(result).not.toBe(DECLINED);
+    expect(String(result)).toContain("reported no outcome");
+    expect(String(result)).toContain("Do not tell the user it succeeded");
   });
 });

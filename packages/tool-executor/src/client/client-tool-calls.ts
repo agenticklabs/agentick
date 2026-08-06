@@ -177,7 +177,7 @@ export interface ClientToolCallsHandle
    * Resolves once the declarations are published; the returned
    * {@link Unsubscribe} stops routing.
    */
-  use(tools: readonly ClientTool<never>[], opts?: UseClientToolsOptions): Promise<Unsubscribe>;
+  use(tools: readonly ClientTool[], opts?: UseClientToolsOptions): Promise<Unsubscribe>;
   /**
    * Apply a confirmation {@link ConfirmPolicy} to inbound tool-confirmation
    * elicitations (`hints.kind === "tool_confirmation"`): `"approve"` / `"deny"` /
