@@ -55,12 +55,12 @@ const provider = localProvider({ strategy });
 
 ## Isolation tiers
 
-| Strategy   | Platform | Mechanism                                                                    | What `exec` is confined by                                                                                 |
-| ---------- | -------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `seatbelt` | macOS    | `sandbox-exec` with a compiled SBPL profile                                  | Kernel. Reads deny home, keychains, volumes; writes limited to workspace, mounts, tmp; network denied.     |
-| `bwrap`    | Linux    | `bubblewrap` — `--unshare-all`, read-only system binds, private proc/dev/tmp | Namespaces. Only bound paths exist at all; no network unless `--share-net`.                                |
-| `unshare`  | Linux    | `unshare --mount --pid --fork --user --map-root-user` (+ `--net` on deny)    | Namespaces, lighter. The fallback when `bubblewrap` is absent but user namespaces work.                    |
-| `none`     | any      | bare `bash -c`                                                               | **Nothing.** Path-confined file API and proxied egress only; `exec` runs with the host user's permissions. |
+| Strategy   | Platform | Mechanism                                                                    | What `exec` is confined by                                                                                                                 |
+| ---------- | -------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `seatbelt` | macOS    | `sandbox-exec` with a compiled SBPL profile                                  | Kernel. Reads deny home, keychains, volumes; writes limited to workspace, mounts, tmp; inet denied, AF_UNIX open under workspace + mounts. |
+| `bwrap`    | Linux    | `bubblewrap` — `--unshare-all`, read-only system binds, private proc/dev/tmp | Namespaces. Only bound paths exist at all; no network unless `--share-net`.                                                                |
+| `unshare`  | Linux    | `unshare --mount --pid --fork --user --map-root-user` (+ `--net` on deny)    | Namespaces, lighter. The fallback when `bubblewrap` is absent but user namespaces work.                                                    |
+| `none`     | any      | bare `bash -c`                                                               | **Nothing.** Path-confined file API and proxied egress only; `exec` runs with the host user's permissions.                                 |
 
 > [!WARNING]
 > This provider is the security boundary; the harness above it is not. With a real jail, `exec` is kernel- or namespace-confined. With `isolation: "none"` the spawned command is an ordinary child process holding **the host user's full permissions** — path confinement and the egress proxy are the only limits, and a determined process bypasses both. Read `LocalSandbox.isolation` before trusting `exec` with code you don't control. Tool allowlists and approval prompts one layer up are policy, not containment.
@@ -107,7 +107,7 @@ const provider = localProvider({
 `NetworkProxyServer` is exported if you want to run one standalone: construct it with rules, `start()`, read `proxyUrl`, `getAuditLog()`, `stop()`.
 
 > [!IMPORTANT]
-> The two egress controls are not equally strong. `allow.network: false` is enforced by the jail itself — seatbelt's `deny network*`, or bubblewrap and `unshare` withholding the network namespace — and is unbypassable. Per-domain rules ride on `HTTP(S)_PROXY` environment variables, and a process inside the jail can open a direct socket around them once network is on at all. Treat the boolean deny as hard and per-domain filtering as best-effort.
+> The two egress controls are not equally strong. `allow.network: false` is enforced by the jail itself — seatbelt's `deny network*`, or bubblewrap and `unshare` withholding the network namespace — and is unbypassable. Per-domain rules ride on `HTTP(S)_PROXY` environment variables, and a process inside the jail can open a direct socket around them once network is on at all. Treat the boolean deny as hard and per-domain filtering as best-effort. The hard deny is scoped to the network: filesystem (AF_UNIX) sockets under the workspace and mounts stay connectable on every jail, so a supervisor can speak to jailed code over a workspace socket while egress stays shut.
 
 ## Resource limits, mapped honestly
 

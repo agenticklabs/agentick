@@ -101,6 +101,16 @@ export function compileSeatbeltProfile(options: SpawnOptions): string {
   comment("Network");
   if (options.network === false) {
     deny("network*");
+    // AF_UNIX carve-out (#274): a filesystem socket under the workspace is
+    // supervised IPC, not egress. The subpath filter outranks the blanket deny
+    // (specificity, header note) and cannot match an inet destination, so the
+    // deny stays total for the network.
+    comment("AF_UNIX under workspace + mounts stays open (supervised IPC)");
+    allow("network-outbound", subpath(options.workspacePath));
+    allow("network-bind", subpath(options.workspacePath));
+    for (const mount of options.mounts) {
+      allow("network-outbound", subpath(mount.hostPath));
+    }
   } else {
     // `true` or NetworkRule[] — allow at the seatbelt level. Per-domain
     // NetworkRule enforcement happens in the proxy layer, not seatbelt.

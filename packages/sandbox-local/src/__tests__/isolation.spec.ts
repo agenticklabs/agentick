@@ -25,7 +25,7 @@ import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SandboxHandle } from "@agentick/sandbox";
 import { LocalSandbox } from "../local-sandbox.js";
@@ -62,6 +62,17 @@ function makeFixture() {
       const dir = await mkdtemp(join(tmpdir(), "sbx-escape-"));
       hostDirs.push(dir);
       return join(dir, "escape.txt");
+    },
+    async unixServerAt(socketPath: string): Promise<string> {
+      const server = createServer((s) => {
+        s.on("error", () => {});
+        s.end("hi");
+      });
+      server.on("error", () => {});
+      servers.push(server);
+      server.listen(socketPath);
+      await once(server, "listening");
+      return socketPath;
     },
     async localServerPort(): Promise<number> {
       const server = createServer((s) => {
@@ -157,6 +168,27 @@ describe.skipIf(!seatbeltAvailable)("darwin seatbelt jail — confinement (PROVE
 
     const res = await sb.exec(`bash -c 'echo > /dev/tcp/127.0.0.1/${port}'`);
     expect(res.exitCode).toBe(0);
+  });
+
+  it("ALLOWS an AF_UNIX connect under the workspace while network stays denied (#274)", async () => {
+    const sb = await fx.sandboxNoNet();
+    expect(sb.isolation).toBe("seatbelt");
+    const sock = await fx.unixServerAt(join(sb.workspacePath, "ctl.sock"));
+
+    const res = await sb.exec(`nc -U "${sock}" < /dev/null`);
+    expect(res.exitCode).toBe(0);
+    expect(res.stdout).toContain("hi");
+  });
+
+  it("DENIES an AF_UNIX connect outside the workspace under the same deny (#274)", async () => {
+    const sb = await fx.sandboxNoNet();
+    expect(sb.isolation).toBe("seatbelt");
+    const outsideDir = dirname(await fx.escapeFile());
+    const sock = await fx.unixServerAt(join(outsideDir, "outside.sock"));
+
+    const res = await sb.exec(`nc -U "${sock}" < /dev/null`);
+    expect(res.exitCode).not.toBe(0);
+    expect(res.stdout).not.toContain("hi");
   });
 });
 
