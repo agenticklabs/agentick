@@ -28,11 +28,12 @@ const runtime: ClientRuntimeContext = {
 
 const schema = jsonSchema({ type: "object", properties: { to: { type: "string" } } });
 
-function call(name: string, input: unknown = {}): ClientToolCallHandle {
+function call(name: string, input: unknown = {}, target?: string): ClientToolCallHandle {
   return {
     toolCallId: "tc-1",
     name,
     input,
+    target,
     correlationId: "corr-1",
     receivedAt: 0,
     respond: async () => {},
@@ -42,13 +43,13 @@ function call(name: string, input: unknown = {}): ClientToolCallHandle {
 const run = (
   c: ClientToolCallHandle,
   tools: readonly never[] | readonly unknown[],
-  addressing: { self: string; target?: string },
+  self: string,
   opts?: Parameters<typeof dispatchClientToolCall>[5],
 ) =>
   dispatchClientToolCall(
     c,
     tools as never,
-    addressing,
+    () => self,
     runtime,
     new AbortController().signal,
     opts,
@@ -86,9 +87,7 @@ describe("dispatch", () => {
       inputSchema: schema,
       handler: async () => "highlighted text",
     });
-    await expect(run(call("read_selection"), [tool], { self: "conn-A" })).resolves.toBe(
-      "highlighted text",
-    );
+    await expect(run(call("read_selection"), [tool], "conn-A")).resolves.toBe("highlighted text");
   });
 
   it("resolves a call that arrived under an alias", async () => {
@@ -99,7 +98,7 @@ describe("dispatch", () => {
       aliases: ["goto"],
       handler: async () => "navigated",
     });
-    await expect(run(call("goto"), [tool], { self: "conn-A" })).resolves.toBe("navigated");
+    await expect(run(call("goto"), [tool], "conn-A")).resolves.toBe("navigated");
   });
 
   it("hands the handler a ctx carrying the call and the client's runtime", async () => {
@@ -121,7 +120,7 @@ describe("dispatch", () => {
       },
     });
 
-    await run(call("t"), [tool], { self: "conn-A", target: "conn-B" });
+    await run(call("t", {}, "conn-B"), [tool], "conn-A");
 
     expect(seen).toEqual({
       toolCallId: "tc-1",
@@ -155,7 +154,7 @@ describe("dispatch", () => {
     await dispatchClientToolCall(
       call("t"),
       [tool] as never,
-      { self: "conn-A" },
+      () => "conn-A",
       live,
       new AbortController().signal,
     );
@@ -171,7 +170,7 @@ describe("dispatch", () => {
         throw new Error("boom");
       },
     });
-    await expect(run(call("t"), [tool], { self: "conn-A" })).resolves.toEqual({
+    await expect(run(call("t"), [tool], "conn-A")).resolves.toEqual({
       content: "boom",
       isError: true,
     });
@@ -189,17 +188,14 @@ describe("the two silences", () => {
       handler,
     });
 
-    const result = await run(call("navigate_to"), [tool], {
-      self: "conn-A",
-      target: "conn-B",
-    });
+    const result = await run(call("navigate_to", {}, "conn-B"), [tool], "conn-A");
 
     expect(result).toBeUndefined();
     expect(handler).not.toHaveBeenCalled();
   });
 
   it("an UNKNOWN call is answered — nobody has it, so someone must say so", async () => {
-    await expect(run(call("mystery"), [], { self: "conn-A" })).resolves.toEqual({
+    await expect(run(call("mystery"), [], "conn-A")).resolves.toEqual({
       content: 'no client handler for "mystery"',
       isError: true,
     });
@@ -215,7 +211,7 @@ describe("the two silences", () => {
       handler: async () => "ran",
     });
 
-    const result = await run(call("navigate_to"), [tool], { self: "conn-A" }, { notFound });
+    const result = await run(call("navigate_to"), [tool], "conn-A", { notFound });
 
     expect(result).toBeUndefined();
     expect(notFound).not.toHaveBeenCalled();
@@ -237,7 +233,7 @@ describe("the two silences", () => {
 
     const tabs = ["conn-A", "conn-B", "conn-C", "conn-D"];
     const results = await Promise.all(
-      tabs.map((self) => run(call("navigate_to"), [toolFor(self)], { self, target: "conn-C" })),
+      tabs.map((self) => run(call("navigate_to", {}, "conn-C"), [toolFor(self)], self)),
     );
 
     expect(ran).toEqual(["conn-C"]);
@@ -258,7 +254,7 @@ describe("the two silences", () => {
       });
 
     await Promise.all(
-      ["conn-A", "conn-B"].map((self) => run(call("show_toast"), [toolFor(self)], { self })),
+      ["conn-A", "conn-B"].map((self) => run(call("show_toast"), [toolFor(self)], self)),
     );
 
     expect(ran).toEqual(["conn-A", "conn-B"]);
@@ -273,17 +269,17 @@ describe("the two silences", () => {
       handler: async () => "navigated",
     });
 
+    await expect(run(call("navigate_to", { to: "/reports" }), [tool], "conn-A")).resolves.toBe(
+      "navigated",
+    );
     await expect(
-      run(call("navigate_to", { to: "/reports" }), [tool], { self: "conn-A" }),
-    ).resolves.toBe("navigated");
-    await expect(
-      run(call("navigate_to", { to: "/other" }), [tool], { self: "conn-A" }),
+      run(call("navigate_to", { to: "/other" }), [tool], "conn-A"),
     ).resolves.toBeUndefined();
   });
 
   it("a custom notFound answers the unknown call", async () => {
     const notFound = async (): Promise<ToolResultInput> => "handled elsewhere";
-    await expect(run(call("mystery"), [], { self: "conn-A" }, { notFound })).resolves.toBe(
+    await expect(run(call("mystery"), [], "conn-A", { notFound })).resolves.toBe(
       "handled elsewhere",
     );
   });

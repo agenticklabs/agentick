@@ -97,7 +97,7 @@ export interface ExecutionScope {
   readonly tickId?: string;
   readonly opId?: string;
   readonly parentOpId?: string;
-  readonly correlationId?: string;
+  readonly requestId?: string;
 }
 
 export interface ProjectInput {

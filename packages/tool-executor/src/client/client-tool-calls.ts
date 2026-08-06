@@ -87,6 +87,12 @@ export interface ClientToolCall {
   /** The VALIDATED input from the relay payload (post inputSchema validation). */
   readonly input: unknown;
   /**
+   * The connection this call was addressed to — the one whose request started
+   * the turn. `undefined` means "no particular client", which every attached
+   * client should read as addressed to all of them.
+   */
+  readonly target: string | undefined;
+  /**
    * Correlation key from the wire envelope metadata — required to reply.
    * `undefined` for a fire-and-forget (one-way notify) relay: there is no
    * pending dispatch to resolve, so {@link ClientToolCallHandle.respond} is a
@@ -302,7 +308,7 @@ export function clientToolCallsHandle(
       return routeClientTools(
         { onCall: (l) => (callListeners.add(l), () => void callListeners.delete(l)) },
         tools,
-        { self: runtime.connectionId ?? "" },
+        () => runtime.connectionId ?? "",
         runtime,
         lifetime.signal,
         opts,
@@ -385,13 +391,19 @@ function asSnapshotFrame(
 /** Build a pending call off a snapshot {@link PendingToolCall} (always correlated). */
 function parseSnapshotCall(req: PendingToolCall): ClientToolCall | undefined {
   const p = req.payload as
-    | { readonly toolCallId?: unknown; readonly name?: unknown; readonly input?: unknown }
+    | {
+        readonly toolCallId?: unknown;
+        readonly name?: unknown;
+        readonly input?: unknown;
+        readonly target?: unknown;
+      }
     | undefined;
   if (!p || typeof p.toolCallId !== "string" || typeof p.name !== "string") return undefined;
   return {
     toolCallId: p.toolCallId,
     name: p.name,
     input: p.input,
+    target: typeof p.target === "string" ? p.target : undefined,
     correlationId: req.correlationId,
     receivedAt: Date.now(),
   };
@@ -400,7 +412,12 @@ function parseSnapshotCall(req: PendingToolCall): ClientToolCall | undefined {
 /** Build a call off a live relay envelope (correlationId may be absent). */
 function parseLiveCall(env: EnvelopeWithMetadata): ClientToolCall | undefined {
   const p = env.payload as
-    | { readonly toolCallId?: unknown; readonly name?: unknown; readonly input?: unknown }
+    | {
+        readonly toolCallId?: unknown;
+        readonly name?: unknown;
+        readonly input?: unknown;
+        readonly target?: unknown;
+      }
     | undefined;
   if (!p || typeof p.toolCallId !== "string" || typeof p.name !== "string") return undefined;
   const correlationId = env.metadata?.correlationId;
@@ -408,6 +425,7 @@ function parseLiveCall(env: EnvelopeWithMetadata): ClientToolCall | undefined {
     toolCallId: p.toolCallId,
     name: p.name,
     input: p.input,
+    target: typeof p.target === "string" ? p.target : undefined,
     correlationId: typeof correlationId === "string" ? correlationId : undefined,
     receivedAt: Date.now(),
   };

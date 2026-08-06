@@ -153,7 +153,7 @@ function listApp(
     gateway,
     { jsonrpc: "2.0", id: 1, method: "app/list_sessions", params: { appId, ...params } },
     stubSink(),
-    identity,
+    { identity: identity },
   ).then(resultOf<AppListSessionsResult>);
 }
 
@@ -166,7 +166,7 @@ function listGateway(
     gateway,
     { jsonrpc: "2.0", id: 1, method: "gateway/list_sessions", params },
     stubSink(),
-    identity,
+    { identity: identity },
   ).then(resultOf<GatewayListSessionsResult>);
 }
 

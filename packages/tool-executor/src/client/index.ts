@@ -55,7 +55,7 @@ export {
 export {
   dispatchClientToolCall,
   routeClientTools,
-  type ClientToolAddressing,
+  type ClientToolSelf,
   type ClientToolCallFeed,
   type UseClientToolsOptions,
 } from "./use-client-tools.js";

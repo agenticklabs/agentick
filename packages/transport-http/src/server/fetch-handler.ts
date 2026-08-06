@@ -470,8 +470,7 @@ async function handlePost(
                 ),
               ),
           },
-          identity,
-          SERVER_DESCRIPTOR,
+          { ...(identity !== undefined ? { identity } : {}), server: SERVER_DESCRIPTOR },
         );
         controller.enqueue(encoder.encode(encodeSseFrame(response)));
         controller.close();
@@ -480,13 +479,10 @@ async function handlePost(
     return new Response(stream, { status: 200, headers: respond.sse(sessionId) });
   }
 
-  const response = await dispatchRequest(
-    gateway,
-    request,
-    session.defaultSink(),
-    identity,
-    SERVER_DESCRIPTOR,
-  );
+  const response = await dispatchRequest(gateway, request, session.defaultSink(), {
+    ...(identity !== undefined ? { identity } : {}),
+    server: SERVER_DESCRIPTOR,
+  });
   return respond.json(response, sessionId);
 }
 
@@ -504,13 +500,10 @@ async function dispatchSingle(
     return null;
   }
   if ("id" in frame && "method" in frame) {
-    return dispatchRequest(
-      gateway,
-      frame as JsonRpcRequest,
-      session.defaultSink(),
-      identity,
-      SERVER_DESCRIPTOR,
-    );
+    return dispatchRequest(gateway, frame as JsonRpcRequest, session.defaultSink(), {
+      ...(identity !== undefined ? { identity } : {}),
+      server: SERVER_DESCRIPTOR,
+    });
   }
   return null;
 }

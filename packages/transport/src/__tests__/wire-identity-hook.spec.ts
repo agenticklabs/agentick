@@ -162,7 +162,7 @@ describe("wire hook seam — per-request ingress identity", () => {
       gateway,
       createSessionReq(app.id, { principal: "SMUGGLED-BY-CLIENT" }),
       stubSink(),
-      IDENTITY,
+      { identity: IDENTITY },
     );
 
     const record = await app.getSessionRecord(sessionIdOf(resp));
@@ -231,7 +231,7 @@ describe("wire hook seam — per-request ingress identity", () => {
       gateway,
       { jsonrpc: "2.0", id: 7, method: "idcheck/whoami", params: {} },
       stubSink(),
-      IDENTITY,
+      { identity: IDENTITY },
     );
 
     expect(captured).toBeDefined();
@@ -269,11 +269,109 @@ describe("wire hook seam — per-request ingress identity", () => {
       },
     });
 
-    await dispatchRequest(gateway, createSessionReq(app.id, {}), stubSink(), IDENTITY);
+    await dispatchRequest(gateway, createSessionReq(app.id, {}), stubSink(), {
+      identity: IDENTITY,
+    });
 
     expect(wireHadIdentity).toBe(true); // the seam delivered it at the wire boundary
     expect(innerHadIdentity).toBe(false); // …and it did NOT leak into the inner op
 
+    await gateway.close();
+  });
+});
+
+describe("connection + request coordinates reach the wire ctx", () => {
+  it("a stateful transport's connectionId arrives on the handler's ctx", async () => {
+    let seen: { connectionId?: string; requestId?: string } | undefined;
+    const gateway = await createGateway({
+      wireExtensions: [
+        {
+          name: "coords",
+          namespace: "coords",
+          methods: {
+            "coords/read": (_p: unknown, ctx: unknown) => {
+              const c = ctx as { connectionId?: string; requestId?: string };
+              seen = { connectionId: c.connectionId, requestId: c.requestId };
+              return { ok: true };
+            },
+          },
+        } as never,
+      ],
+    });
+    await gateway.listen();
+
+    await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 1, method: "coords/read", params: {} } as never,
+      stubSink(),
+      { connectionId: "conn-SOCKET-1" },
+    );
+
+    expect(seen?.connectionId).toBe("conn-SOCKET-1");
+    // Always present — every dispatch IS one request, whatever the edge.
+    expect(seen?.requestId).toEqual(expect.any(String));
+    await gateway.close();
+  });
+
+  it("two requests on one connection share the connection and differ by request", async () => {
+    const seen: Array<{ connectionId?: string; requestId?: string }> = [];
+    const gateway = await createGateway({
+      wireExtensions: [
+        {
+          name: "coords",
+          namespace: "coords",
+          methods: {
+            "coords/read": (_p: unknown, ctx: unknown) => {
+              const c = ctx as { connectionId?: string; requestId?: string };
+              seen.push({ connectionId: c.connectionId, requestId: c.requestId });
+              return { ok: true };
+            },
+          },
+        } as never,
+      ],
+    });
+    await gateway.listen();
+
+    for (const id of [1, 2]) {
+      await dispatchRequest(
+        gateway,
+        { jsonrpc: "2.0", id, method: "coords/read", params: {} } as never,
+        stubSink(),
+        { connectionId: "conn-SOCKET-1" },
+      );
+    }
+
+    expect(seen[0]!.connectionId).toBe(seen[1]!.connectionId);
+    // Server-minted, so two clients both sending JSON-RPC id `1` never collide.
+    expect(seen[0]!.requestId).not.toBe(seen[1]!.requestId);
+    await gateway.close();
+  });
+
+  it("a stateless edge leaves connectionId undefined rather than inventing one", async () => {
+    let seen: { connectionId?: string } | undefined;
+    const gateway = await createGateway({
+      wireExtensions: [
+        {
+          name: "coords",
+          namespace: "coords",
+          methods: {
+            "coords/read": (_p: unknown, ctx: unknown) => {
+              seen = { connectionId: (ctx as { connectionId?: string }).connectionId };
+              return { ok: true };
+            },
+          },
+        } as never,
+      ],
+    });
+    await gateway.listen();
+
+    await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 1, method: "coords/read", params: {} } as never,
+      stubSink(),
+    );
+
+    expect(seen?.connectionId).toBeUndefined();
     await gateway.close();
   });
 });

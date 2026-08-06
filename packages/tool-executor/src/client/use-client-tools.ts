@@ -13,14 +13,14 @@
 import type { ClientRuntimeContext, ToolResultInput, Unsubscribe } from "@agentick/spec";
 
 import type { ClientToolCallHandle } from "./client-tool-calls.js";
-import type { ClientTool, ClientToolCtx, ClientToolOrigin } from "./create-client-tool.js";
+import type { ClientTool, ClientToolCtx } from "./create-client-tool.js";
 
-/** What a call carries about who it came from and who it is for. */
-export interface ClientToolAddressing {
-  readonly self: string;
-  readonly target?: string;
-  readonly origin?: ClientToolOrigin;
-}
+/**
+ * This client's own connection id, read at DISPATCH time rather than captured:
+ * a reconnect mints a new one, and a stale `self` makes every `target === self`
+ * rule wrong for the rest of the session.
+ */
+export type ClientToolSelf = () => string;
 
 export interface UseClientToolsOptions {
   /**
@@ -49,7 +49,7 @@ function resolve(tools: readonly ClientTool<never>[], name: string): ClientTool<
 export async function dispatchClientToolCall(
   call: ClientToolCallHandle,
   tools: readonly ClientTool<never>[],
-  addressing: ClientToolAddressing,
+  self: ClientToolSelf,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
   opts: UseClientToolsOptions = {},
@@ -60,9 +60,8 @@ export async function dispatchClientToolCall(
     const accepted = tool.accepts({
       name: call.name,
       input: call.input,
-      self: addressing.self,
-      ...(addressing.target !== undefined ? { target: addressing.target } : {}),
-      ...(addressing.origin !== undefined ? { origin: addressing.origin } : {}),
+      self: self(),
+      ...(call.target !== undefined ? { target: call.target } : {}),
     });
     if (!accepted) return undefined;
   }
@@ -72,8 +71,7 @@ export async function dispatchClientToolCall(
     activeSpan: () => runtime.activeSpan(),
     toolCallId: call.toolCallId,
     name: call.name,
-    ...(addressing.target !== undefined ? { target: addressing.target } : {}),
-    ...(addressing.origin !== undefined ? { origin: addressing.origin } : {}),
+    ...(call.target !== undefined ? { target: call.target } : {}),
     signal,
   };
 
@@ -106,14 +104,14 @@ export interface ClientToolCallFeed {
 export function routeClientTools(
   feed: ClientToolCallFeed,
   tools: readonly ClientTool<never>[],
-  addressing: ClientToolAddressing,
+  self: ClientToolSelf,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
   opts: UseClientToolsOptions = {},
 ): Unsubscribe {
   return feed.onCall((call) => {
     void (async () => {
-      const result = await dispatchClientToolCall(call, tools, addressing, runtime, signal, opts);
+      const result = await dispatchClientToolCall(call, tools, self, runtime, signal, opts);
       if (result !== undefined) await call.respond(result);
     })();
   });

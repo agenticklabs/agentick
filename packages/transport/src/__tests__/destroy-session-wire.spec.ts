@@ -107,7 +107,7 @@ describe("app/destroy_session — wire round-trip", () => {
       gateway,
       { jsonrpc: "2.0", id: 1, method: "app/create_session", params: { appId: app.id } },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const { sessionId } = resultOf<{ sessionId: string }>(created);
     expect(await app.getSessionRecord(sessionId)).toBeDefined();
@@ -121,7 +121,7 @@ describe("app/destroy_session — wire round-trip", () => {
         params: { appId: app.id, sessionId, reason: "user deleted the thread" },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const result = resultOf<DestroySessionResult>(destroyed);
     expect(result).toEqual({
@@ -148,7 +148,7 @@ describe("app/destroy_session — wire round-trip", () => {
         params: { appId: app.id, sessionId },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     expect(resultOf<DestroySessionResult>(again).live.found).toBe(false);
     expect(resultOf<DestroySessionResult>(again).record.existed).toBe(false);
@@ -177,7 +177,7 @@ describe("app/destroy_session — ownership", () => {
         params: { appId: app.id, sessionId: session.id },
       },
       stubSink(),
-      IDENTITY_A,
+      { identity: IDENTITY_A },
     );
     expect("error" in denied && denied.error).toBeTruthy();
     // Denied means NOT destroyed — the session and its record are intact.
@@ -194,7 +194,7 @@ describe("app/destroy_session — ownership", () => {
         params: { appId: app.id, sessionId: session.id },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     expect(resultOf<DestroySessionResult>(allowed).record.existed).toBe(true);
     expect(await app.getSessionRecord(session.id)).toBeUndefined();
@@ -230,7 +230,7 @@ describe("app/destroy_session — ownership", () => {
         params: { appId: app.id, sessionId: "paged-out" },
       },
       stubSink(),
-      IDENTITY_A,
+      { identity: IDENTITY_A },
     );
     expect("error" in denied && denied.error).toBeTruthy();
     expect(await app.getSessionRecord("paged-out")).toBeDefined();
@@ -245,7 +245,7 @@ describe("app/destroy_session — ownership", () => {
         params: { appId: app.id, sessionId: "paged-out" },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const result = resultOf<DestroySessionResult>(allowed);
     expect(result.live.found).toBe(false);
@@ -277,7 +277,7 @@ describe("gateway/destroy_session — app-less addressing", () => {
         params: { sessionId: "target", reason: "user deleted the thread" },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const result = resultOf<GatewayDestroySessionResult>(destroyed);
     expect(result.appId).toBe(second.id);
@@ -318,7 +318,7 @@ describe("gateway/destroy_session — app-less addressing", () => {
         params: { sessionId: "paged-out" },
       },
       stubSink(),
-      IDENTITY_A,
+      { identity: IDENTITY_A },
     );
     expect("error" in denied && denied.error).toBeTruthy();
     expect(await owner.getSessionRecord("paged-out")).toBeDefined();
@@ -333,7 +333,7 @@ describe("gateway/destroy_session — app-less addressing", () => {
         params: { sessionId: "paged-out" },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const result = resultOf<GatewayDestroySessionResult>(allowed);
     expect(result.appId).toBe(owner.id);
@@ -358,7 +358,7 @@ describe("gateway/destroy_session — app-less addressing", () => {
         params: { sessionId: "never-existed" },
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     expect(resultOf<GatewayDestroySessionResult>(resp)).toEqual({
       sessionId: "never-existed",

@@ -278,6 +278,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // SP5 — sub-agent attribution: every tick envelope carries the
         // session's spawn lineage when it is a spawned child.
         ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
+        ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
       }),
       handler: (i) => this.tickBody(i),
     });
@@ -308,6 +309,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // SP5 — every execution envelope from a spawned child carries its
         // spawn lineage so sub-agent work is attributable on the bus/journal.
         ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
+        ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
       }),
       body: (i, sink) => this.runExecutionBody(i, sink),
     });
@@ -493,6 +495,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           sessionId: input.sessionId,
           mountId: input.mountId,
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
+          ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -740,6 +743,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           sessionId: input.sessionId,
           mountId: input.mountId,
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
+          ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -1375,6 +1379,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 sessionId: input.sessionId,
                 executionId,
                 tickId,
+                // Carries to the relay, so a client-handled call is addressed
+                // back to the connection that asked for this turn.
+                ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
               },
               // Structured cancellation (Stage 5) — an in-flight tool
               // handler tears down when abort()/timeout fires (the tool

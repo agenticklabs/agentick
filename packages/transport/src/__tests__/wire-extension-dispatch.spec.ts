@@ -408,13 +408,7 @@ describe("dispatchRequest — initialize", () => {
     server?: WireServerDescriptor,
     params: unknown = clientHello,
   ) {
-    const resp = await dispatchRequest(
-      gw,
-      req("initialize", params),
-      stubSink(),
-      undefined,
-      server,
-    );
+    const resp = await dispatchRequest(gw, req("initialize", params), stubSink(), { server });
     return resp as { result?: InitializeResult; error?: { code: number; data?: unknown } };
   }
 

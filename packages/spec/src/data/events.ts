@@ -111,6 +111,19 @@ export interface EventScope extends EventScopeExtensions {
    */
   readonly principal?: string;
   /**
+   * The client connection this work came in on — a WebSocket, a unix socket.
+   * Minted by the transport that owns the socket and retained for its life.
+   *
+   * `undefined` wherever there is no connection to name, which is not a gap:
+   * a stateless HTTP request, an in-process `session.send`, a cron trigger and
+   * a spawned child all genuinely have none.
+   *
+   * EPHEMERAL. It dies with the socket, so it belongs on scopes and executions
+   * and never in the durable timeline — a connection id in a six-month-old
+   * message routes nothing and only records which tabs someone had open.
+   */
+  readonly connectionId?: string;
+  /**
    * Provenance — the gate through which the operation entered the
    * system (ADR 51). The second core identity dimension, twin of
    * {@link principal}: stamped **at the gates** (the wire resolver

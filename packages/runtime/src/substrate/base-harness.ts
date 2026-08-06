@@ -1206,7 +1206,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       [`${ns}.op_id`]: op.opId,
       [`${ns}.surface`]: op.surface,
       [`${ns}.parent_op_id`]: op.parentOpId,
-      [`${ns}.correlation_id`]: op.correlationId,
+      [`${ns}.request_id`]: op.requestId,
       [`${ns}.session_id`]: scope.sessionId,
       [`${ns}.execution_id`]: scope.executionId,
       [`${ns}.tick_id`]: scope.tickId,
@@ -1943,7 +1943,9 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       return yield* reg
         .run(input, {
           origin: msg.origin ?? "inbox",
-          ...omitUndefined({ parentOpId: msg.parentOpId, correlationId: msg.correlationId }),
+          // An inbox ask's reply key doubles as the bundle id for the work it
+          // triggers: every op under this handler belongs to that one ask.
+          ...omitUndefined({ parentOpId: msg.parentOpId, requestId: msg.correlationId }),
         })
         .pipe(
           Effect.catchAll((cause) =>

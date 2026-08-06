@@ -89,8 +89,7 @@ describe("authorizeDispatch — the fine contextual auth layer (ADR 84 §5)", ()
 
     // Baseline (no hook): the policy denies — Forbidden, no result.
     const denied = await dispatchRequest(gw, req("authz/probe", { echo: "x" }), sink(), {
-      principal: "alice",
-      scopes: [],
+      identity: { principal: "alice", scopes: [] },
     });
     expect("error" in denied && denied.error).toBeTruthy();
     expect("result" in denied).toBe(false);
@@ -111,8 +110,7 @@ describe("authorizeDispatch — the fine contextual auth layer (ADR 84 §5)", ()
     });
 
     const allowed = await dispatchRequest(gw, req("authz/probe", { echo: "x" }), sink(), {
-      principal: "alice",
-      scopes: [],
+      identity: { principal: "alice", scopes: [] },
     });
     // The contextual grant flipped the decision — the handler ran.
     expect("result" in allowed && allowed.result).toEqual({ echoed: "x" });
@@ -149,8 +147,10 @@ describe("authorizeDispatch — the fine contextual auth layer (ADR 84 §5)", ()
       req("authz/probe", { echo: "x", sessionId: "s1" }),
       sink(),
       {
-        principal: "alice",
-        scopes: ["authz:probe"],
+        identity: {
+          principal: "alice",
+          scopes: ["authz:probe"],
+        },
       },
     );
 

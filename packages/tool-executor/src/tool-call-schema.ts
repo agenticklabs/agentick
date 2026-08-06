@@ -39,6 +39,19 @@ export interface ToolCallRequestPayload {
   readonly name: string;
   /** The VALIDATED input (post inputSchema validation + any confirm edits). */
   readonly input: unknown;
+  /**
+   * The connection this call is addressed to — the one the turn was asked from.
+   *
+   * The channel still broadcasts to every attached client; this is what lets
+   * each of them decide. Without it four tabs run `navigate_to` and four tabs
+   * navigate, and the respond race only dedupes the ANSWER — the side effect
+   * already happened four times.
+   *
+   * Absent when the execution had no originating connection (an in-process
+   * send, a cron trigger, a spawned child), which every client should read as
+   * "not addressed to anyone in particular".
+   */
+  readonly target?: string;
 }
 
 /**
@@ -93,6 +106,7 @@ export const TOOL_CALL_REQUEST_SCHEMA: StandardSchemaV1<unknown, ToolCallRequest
       toolCallId: { type: "string" },
       name: { type: "string" },
       input: {},
+      target: { type: "string" },
     },
     required: ["toolCallId", "name", "input"],
     additionalProperties: true,

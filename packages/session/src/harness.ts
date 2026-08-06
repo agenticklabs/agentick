@@ -2914,6 +2914,9 @@ export class SessionHarness<P = unknown>
                 // SP5 — stamp the spawn lineage on the execution scope so every
                 // tick / model / tool envelope is attributable to this sub-agent.
                 ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
+                // The tab that asked, carried for the run's life — a tool call
+                // relayed on tick 6 still knows where the request came from.
+                ...omitUndefined({ connectionId: input.connectionId }),
                 compiler: this.compiler,
                 mountId: this.mountId,
                 modelExecutor: modelExecutorForCall,

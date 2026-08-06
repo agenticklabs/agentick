@@ -34,8 +34,12 @@ export interface Operation<I, R = unknown, E = unknown> {
   /** Causality: parent operation that initiated this one. */
   readonly parentOpId?: string;
 
-  /** Request bundle id, when many operations belong to one user request. */
-  readonly correlationId?: string;
+  /**
+   * The one wire request every op in this bundle descends from. NOT
+   * `correlationId` — that name is taken, throughout, for a request/reply key
+   * (the inbox ask, a suspended tool call's reply-to).
+   */
+  readonly requestId?: string;
 
   /** Surface emitting this operation. */
   readonly surface: EventSurface;

@@ -431,8 +431,11 @@ async function handlePost(
           }
         },
       },
-      identity,
-      SERVER_DESCRIPTOR,
+      {
+        ...(identity !== undefined ? { identity } : {}),
+        ...(sessionIdHeader ? { connectionId: sessionIdHeader } : {}),
+        server: SERVER_DESCRIPTOR,
+      },
     );
     try {
       res.write(encodeSseFrame(response));
@@ -444,13 +447,11 @@ async function handlePost(
   }
 
   // Non-streaming — single JSON response.
-  const response = await dispatchRequest(
-    gateway,
-    request,
-    session.defaultSink(),
-    identity,
-    SERVER_DESCRIPTOR,
-  );
+  const response = await dispatchRequest(gateway, request, session.defaultSink(), {
+    ...(identity !== undefined ? { identity } : {}),
+    ...(sessionIdHeader ? { connectionId: sessionIdHeader } : {}),
+    server: SERVER_DESCRIPTOR,
+  });
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(response));
 }
@@ -475,8 +476,13 @@ async function dispatchSingle(
       gateway,
       frame as JsonRpcRequest,
       session.defaultSink(),
-      identity,
-      SERVER_DESCRIPTOR,
+      // A streamable-HTTP session IS this transport's long-lived connection —
+      // the same thing a socket is to the WS edge.
+      {
+        ...(identity !== undefined ? { identity } : {}),
+        connectionId: session.id,
+        server: SERVER_DESCRIPTOR,
+      },
     );
   }
   return null;

@@ -816,6 +816,7 @@ export class ToolExecutorHarness
         sessionId: input.context.sessionId,
         executionId: input.context.executionId,
         tickId: input.context.tickId,
+        connectionId: input.context.connectionId,
       });
       // Capture the operation runtime IN-FIBER (inside the dispatch op body,
       // so it carries the op span + the ambient RuntimeContext.opId). Shared
@@ -1168,7 +1169,12 @@ export class ToolExecutorHarness
         if (ann?.requiresResponse === true) {
           const respEffect = this.request<ToolCallRequestPayload, ToolResultInput>(
             TOOL_CALL_CHANNEL,
-            { toolCallId: input.toolCallId, name: input.name, input: validated },
+            {
+              toolCallId: input.toolCallId,
+              name: input.name,
+              input: validated,
+              ...omitUndefined({ target: input.context.connectionId }),
+            },
             {
               ...omitUndefined({ timeoutMs: ann.responseTimeoutMs ?? input.responseTimeoutMs }),
               signal: controller.signal,
@@ -1218,7 +1224,12 @@ export class ToolExecutorHarness
           // Fire-and-forget: one-way notification, no correlation/Deferred.
           yield* this.notifyChannel<ToolCallRequestPayload>(
             TOOL_CALL_CHANNEL,
-            { toolCallId: input.toolCallId, name: input.name, input: validated },
+            {
+              toolCallId: input.toolCallId,
+              name: input.name,
+              input: validated,
+              ...omitUndefined({ target: input.context.connectionId }),
+            },
             { scope: dispatchScope },
           );
           // Fire-and-forget resolves with `defaultResult` — static blocks

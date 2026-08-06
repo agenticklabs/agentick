@@ -124,7 +124,7 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
       gateway,
       { jsonrpc: "2.0", id: 1, method: "app/create_session", params: { appId: app.id } },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const sessionId = sessionIdOf(resp);
 
@@ -153,7 +153,7 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
         params: { appId: app.id, principal: "SMUGGLED-BY-CLIENT" } as Record<string, unknown>,
       },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     const sessionId = sessionIdOf(resp);
 
@@ -201,7 +201,7 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
       gateway,
       { jsonrpc: "2.0", id: 1, method: "session/list_tools", params: { sessionId: session.id } },
       stubSink(),
-      IDENTITY_A,
+      { identity: IDENTITY_A },
     );
     expect("error" in denied && denied.error).toBeTruthy();
     expect("result" in denied).toBe(false);
@@ -211,7 +211,7 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
       gateway,
       { jsonrpc: "2.0", id: 2, method: "session/list_tools", params: { sessionId: session.id } },
       stubSink(),
-      IDENTITY_B,
+      { identity: IDENTITY_B },
     );
     expect("result" in allowed).toBe(true);
     expect("error" in allowed && allowed.error).toBeFalsy();

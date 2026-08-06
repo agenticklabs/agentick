@@ -260,6 +260,16 @@ export interface TurnBoundaryEntry {
  * path for v2.
  */
 export interface SendInput<P = unknown, T = unknown> {
+  /**
+   * The client connection this turn was asked from. Stamped by the wire
+   * boundary; absent for an in-process `send`, a cron trigger, or a spawn,
+   * which genuinely have no connection.
+   *
+   * Carried onto the EXECUTION rather than read from ctx at use time, because
+   * the work that needs it — relaying a tool call back to the asking client —
+   * happens deep inside the run, after any particular request has returned.
+   */
+  readonly connectionId?: string;
   readonly messages?: ReadonlyArray<SendMessageInput>;
   readonly props?: P;
   readonly metadata?: Readonly<Record<string, unknown>>;

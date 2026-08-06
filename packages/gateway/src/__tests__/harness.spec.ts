@@ -195,6 +195,7 @@ describe("GatewayHarness — gateway:create-app op (ADR 84 §4)", () => {
 describe("GatewayHarness — gateway:accept op (ADR 84 §4)", () => {
   const connInfo = {
     transportId: "websocket:test",
+    connectionId: "conn-01JTEST",
     identity: { principal: "alice" },
     remoteAddress: "127.0.0.1",
   };

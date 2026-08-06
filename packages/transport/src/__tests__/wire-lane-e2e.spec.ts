@@ -65,12 +65,9 @@ async function rpc(
   params: Record<string, unknown>,
   principal?: string,
 ): Promise<JsonRpcResponse> {
-  return dispatchRequest(
-    gateway as never,
-    { jsonrpc: "2.0", id: ++rpcId, method, params },
-    sink,
-    principal !== undefined ? { principal } : undefined,
-  );
+  return dispatchRequest(gateway as never, { jsonrpc: "2.0", id: ++rpcId, method, params }, sink, {
+    ...(principal !== undefined ? { identity: { principal } } : {}),
+  });
 }
 
 describe("wire lane e2e — real gateway + session, ingress identity, Authorizer", () => {
@@ -218,7 +215,7 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
       host,
       { jsonrpc: "2.0", id: 1, method: "session/send", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice" },
+      { identity: { principal: "alice" } },
     );
     if (!("error" in res) || res.error === undefined) throw new Error("expected error");
     expect(res.error.code).toBe(-32003); // Forbidden
@@ -230,7 +227,7 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
       host,
       { jsonrpc: "2.0", id: 2, method: "session/send", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice" },
+      { identity: { principal: "alice" } },
     );
     expect("result" in res && res.result).toMatchObject({ ok: true });
   });
@@ -241,7 +238,7 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
       host,
       { jsonrpc: "2.0", id: 3, method: "session/send", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice" },
+      { identity: { principal: "alice" } },
     );
     if (!("error" in res) || res.error === undefined) throw new Error("expected error");
     expect(res.error.code).toBe(-32003);
@@ -253,7 +250,7 @@ describe("dispatch choke point — one gate, both lanes (review findings)", () =
       host,
       { jsonrpc: "2.0", id: 4, method: "session/send", params: { sessionId: "s1" } },
       sink,
-      { principal: "bob" },
+      { identity: { principal: "bob" } },
     );
     expect("result" in res && res.result).toMatchObject({ ok: true });
   });
@@ -352,7 +349,7 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
       host,
       { jsonrpc: "2.0", id: 1, method: "timeline/compact", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice", scopes: ["something:else"] },
+      { identity: { principal: "alice", scopes: ["something:else"] } },
     );
     if (!("error" in denied) || denied.error === undefined) throw new Error("expected error");
     expect(denied.error.code).toBe(-32003);
@@ -361,7 +358,7 @@ describe("scope refinement — downscoping (#198) + session ceiling (#199)", () 
       host,
       { jsonrpc: "2.0", id: 2, method: "timeline/compact", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice", scopes: ["kyc:verified"] },
+      { identity: { principal: "alice", scopes: ["kyc:verified"] } },
     );
     expect("result" in allowed && allowed.result).toBeTruthy();
   });
@@ -399,14 +396,14 @@ describe("scope refinement — review-fix coverage (glob semantics, structural c
       host,
       { jsonrpc: "2.0", id: 1, method: "timeline/compact", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice", scopes: ["*"] },
+      { identity: { principal: "alice", scopes: ["*"] } },
     );
     expect("result" in viaStar && viaStar.result).toBeTruthy();
     const viaGlob = await dispatchRequest(
       host,
       { jsonrpc: "2.0", id: 2, method: "timeline/compact", params: { sessionId: "s1" } },
       sink,
-      { principal: "alice", scopes: ["kyc:*"] },
+      { identity: { principal: "alice", scopes: ["kyc:*"] } },
     );
     expect("result" in viaGlob && viaGlob.result).toBeTruthy();
   });

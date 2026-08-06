@@ -29,6 +29,8 @@ import {
   dispatchRequest,
   type DispatchHost,
 } from "@agentick/transport";
+import { ulid } from "@agentick/utils";
+
 import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
 
 /**
@@ -145,8 +147,10 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
     // credential is `none` (host-local trust). Incoming bytes buffer on
     // the paused socket until the ConnectionContext attaches its `data`
     // listener a microtask later, so no frames are lost.
+    // Minted before authn, so a refused crossing names the connection it refused.
+    const connectionId = `conn-${ulid()}`;
     void authenticateIngress(
-      { transportKind: "unix", credential: { kind: "none" } },
+      { transportKind: "unix", connectionId, credential: { kind: "none" } },
       options.authSource,
       {
         // ADR 92 §Family 1.3 — a refused crossing leaves an audit trace. A unix
@@ -165,11 +169,13 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
         // socket meanwhile — dropping it loses nothing.)
         await options.gateway.accept({
           transportId,
+          connectionId,
           ...(ingress.identity !== undefined ? { identity: ingress.identity } : {}),
         });
         const ctx = new ConnectionContext(
           socket,
           options.gateway,
+          connectionId,
           ingress.identity,
           { ...(options.maxLineBytes !== undefined ? { maxLineBytes: options.maxLineBytes } : {}) },
           report,
@@ -244,6 +250,8 @@ class ConnectionContext {
   constructor(
     private readonly socket: Socket,
     private readonly gateway: DispatchHost,
+    /** This connection's id, stable for the socket's life. */
+    private readonly connectionId: string,
     /**
      * Ingress identity for this connection (ADR 61). Undefined = the
      * local pole (the host-local-trust default). Threaded into every
@@ -314,8 +322,11 @@ class ConnectionContext {
             this.inFlight.delete(id);
           },
         },
-        this.identity,
-        SERVER_DESCRIPTOR,
+        {
+          ...(this.identity !== undefined ? { identity: this.identity } : {}),
+          connectionId: this.connectionId,
+          server: SERVER_DESCRIPTOR,
+        },
       );
     }
     return null;

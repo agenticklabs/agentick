@@ -102,7 +102,7 @@ function identifiedClient(gateway: DispatchHost, identity: IngressIdentity) {
         registerInFlight: () => {},
         unregisterInFlight: () => {},
       };
-      return dispatchRequest(gateway, request, sink, identity);
+      return dispatchRequest(gateway, request, sink, { identity: identity });
     },
   });
 }

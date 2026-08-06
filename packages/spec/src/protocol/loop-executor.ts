@@ -157,6 +157,12 @@ export interface RunExecutionInput {
    * attributable to the sub-agent that produced it.
    */
   readonly spawnPath?: readonly string[];
+  /**
+   * The client connection this execution was asked from — stamped onto its
+   * `EventScope`, so a tool call relayed mid-run can be addressed back to the
+   * tab that asked. Absent for a non-wire execution.
+   */
+  readonly connectionId?: string;
 
   /** Compiler harness whose `mountId` the loop will render each tick. */
   readonly compiler: CompilerProtocol;
@@ -576,6 +582,8 @@ export interface TickInput {
   readonly executionId: string;
   readonly sessionId: string;
   readonly mountId: string;
+  /** The client connection this execution serves, inherited from the run. */
+  readonly connectionId?: string;
   /** Spawn lineage of the session (SP5) — forwarded onto the tick's `EventScope`. */
   readonly spawnPath?: readonly string[];
 

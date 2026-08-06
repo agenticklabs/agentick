@@ -47,7 +47,7 @@ import {
   type WireNotificationMethod,
   type WireServerDescriptor,
 } from "@agentick/spec";
-import { omitUndefined } from "@agentick/utils";
+import { omitUndefined, ulid } from "@agentick/utils";
 
 import { projectClientNotification, projectClientResult } from "./client-projection.js";
 
@@ -105,25 +105,43 @@ export interface DispatchSink {
   unregisterInFlight(id: JsonRpcId): void;
 }
 
-export async function dispatchRequest(
-  host: DispatchHost,
-  req: JsonRpcRequest,
-  sink: DispatchSink,
+/**
+ * The per-connection facts the serving transport supplies to every dispatch.
+ *
+ * One bag rather than positional arguments: these arrive together, from the
+ * same edge, and stay fixed for the connection's life.
+ */
+export interface DispatchContext {
   /** Ingress identity established at connection/request time (ADR 34/51). */
-  identity?: IngressIdentity,
+  readonly identity?: IngressIdentity;
+  /**
+   * This connection's id, for transports that have one. Absent on a stateless
+   * edge — an HTTP request is its own connection and there is nothing to name.
+   */
+  readonly connectionId?: string;
   /**
    * What the SERVING transport says about itself — its identity and the wire
    * features it frames. The `initialize` answer is built from it (plus the
    * host's registry); every other method ignores it. Omitted ⇒
    * {@link DISPATCHER_DESCRIPTOR}.
-   *
-   * Per-connection like `identity`, and supplied by the same edge.
-   * TODO(wire-dispatch-context): the two belong in one `DispatchContext` bag
-   * — a third per-connection fact is the point at which positional stops
-   * paying.
    */
-  server?: WireServerDescriptor,
+  readonly server?: WireServerDescriptor;
+}
+
+export async function dispatchRequest(
+  host: DispatchHost,
+  req: JsonRpcRequest,
+  sink: DispatchSink,
+  connection: DispatchContext = {},
 ): Promise<JsonRpcResponse> {
+  const { identity: ingressIdentity, server, connectionId } = connection;
+  // Mutable only for the initialize frame's scope downscope (#198), which the
+  // connection context applies before handing identity over.
+  const identity = ingressIdentity;
+  // One id for this request and every op it spawns. Server-minted: the
+  // JSON-RPC `id` is the CLIENT's, and two connections both sending `1` would
+  // collapse into one bundle.
+  const requestId = ulid();
   // ROADMAP A3 — client tool-output projection, STRICTLY OPT-IN. The gateway
   // configures ONE policy; every transport attached to it inherits it here
   // (no straddle). Bounding is OFF unless the adopter opted in
@@ -197,6 +215,7 @@ export async function dispatchRequest(
           req.params,
           projectedSink,
           identity,
+          { requestId, ...(connectionId !== undefined ? { connectionId } : {}) },
         );
         try {
           // ADR 83 §"Wire dispatch through the seam": route the handler
@@ -558,7 +577,8 @@ function buildWireExtensionContext(
   reqId: JsonRpcId,
   rawParams: unknown,
   sink: DispatchSink,
-  identity?: IngressIdentity,
+  identity: IngressIdentity | undefined,
+  caller: { readonly connectionId?: string; readonly requestId: string },
 ): WireExtensionContext {
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
@@ -599,7 +619,18 @@ function buildWireExtensionContext(
     // handler — and the gateway's before-hooks, into whose op ctx
     // `runWireDispatch` threads it — can read richer identity than the
     // principal string. Both undefined on the unauthenticated local pole.
-    ...omitUndefined({ principal: identity?.principal, identity, app, session }),
+    // The wire coordinates a handler cannot derive: WHICH connection asked
+    // (absent on a stateless edge) and WHICH request this is (always present —
+    // every dispatch is one). Both flow on to the op scope, so an op nested
+    // four deep still knows the socket it serves.
+    ...omitUndefined({
+      principal: identity?.principal,
+      identity,
+      app,
+      session,
+      connectionId: caller.connectionId,
+      requestId: caller.requestId,
+    }),
     // TODO(phase-F): resolve HookBridges from the session's session-extension
     // registry when the mcpControlWireExtension needs `ctx.bridges().mcp`.
     // For Phase B/C, no framework-shipped extension uses bridges — the empty

@@ -333,7 +333,7 @@ class OperationRunnerImpl implements OperationRunner {
         origin: resolvedOp.scope?.origin,
         opId: resolvedOp.opId,
         parentOpId: resolvedOp.parentOpId,
-        correlationId: resolvedOp.correlationId,
+        requestId: resolvedOp.requestId,
         // ADR 83 amendment — the op's command SUFFIX, the same Pascal key the
         // old `hookLayer` map keyed on. An `on<Command>` middleware self-scopes
         // by comparing `ctx.op` to this (see `scopeToCommand`).

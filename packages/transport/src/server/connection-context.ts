@@ -84,6 +84,11 @@ export abstract class BaseConnectionContext {
      * the dispatcher itself.
      */
     protected readonly server?: WireServerDescriptor,
+    /**
+     * This connection's id, minted by the transport that owns the socket and
+     * stable for its life. Absent on a stateless edge.
+     */
+    protected readonly connectionId?: string,
   ) {}
 
   /**
@@ -121,13 +126,11 @@ export abstract class BaseConnectionContext {
       // inline copy that used to live here bypassed the public methods, so
       // `sub/unsubscribe` deleted its registry entry without running the
       // cleanup and the server-side drain loop leaked.
-      return dispatchRequest(
-        this.gateway,
-        frame as JsonRpcRequest,
-        this.defaultSink(),
-        this.identity,
-        this.server,
-      );
+      return dispatchRequest(this.gateway, frame as JsonRpcRequest, this.defaultSink(), {
+        ...(this.identity !== undefined ? { identity: this.identity } : {}),
+        ...(this.connectionId !== undefined ? { connectionId: this.connectionId } : {}),
+        ...(this.server !== undefined ? { server: this.server } : {}),
+      });
     }
     return null;
   }

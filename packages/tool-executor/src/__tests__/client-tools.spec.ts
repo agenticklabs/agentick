@@ -442,3 +442,60 @@ describe("ToolExecutorHarness — discriminator regression guard", () => {
     expect((result.content[0] as { text: string }).text).toContain("denied");
   });
 });
+
+describe("connection targeting — the relay addresses the tab that asked", () => {
+  it("stamps the execution's connection as `target` on a correlated relay", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [clientTool("client_nav", { requiresResponse: true })],
+    });
+
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    void harness.dispatch(
+      dispatchOf(
+        "client_nav",
+        "tc-target",
+        { to: "/reports" },
+        {
+          context: { via: "model", connectionId: "conn-TAB-A" },
+        },
+      ),
+    );
+
+    const env = await reqP;
+    expect((env.payload as { target?: string }).target).toBe("conn-TAB-A");
+  });
+
+  it("stamps it on a fire-and-forget notify too — a toast is still addressed", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [clientTool("client_toast", { defaultResult: [{ type: "text", text: "ack" }] })],
+    });
+
+    const notifyP = nextEnvelope(bus, "session:channel:tool_call");
+    await harness.dispatch(
+      dispatchOf(
+        "client_toast",
+        "tc-fire",
+        { x: 1 },
+        {
+          context: { via: "model", connectionId: "conn-TAB-B" },
+        },
+      ),
+    );
+
+    expect((await notifyP).payload).toMatchObject({ target: "conn-TAB-B" });
+  });
+
+  it("omits `target` when the execution had no connection — a cron run addresses nobody", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [clientTool("client_nav2", { requiresResponse: true })],
+    });
+
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    void harness.dispatch(dispatchOf("client_nav2", "tc-none", { to: "/x" }));
+
+    const payload = (await reqP).payload as Record<string, unknown>;
+    // Absent, not null/"" — every client reads that as "not for anyone in
+    // particular" and the default `accepts` rule lets them all take it.
+    expect("target" in payload).toBe(false);
+  });
+});

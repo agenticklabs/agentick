@@ -120,12 +120,9 @@ function isOk(resp: Awaited<ReturnType<typeof dispatchRequest>>): boolean {
 describe("declarative per-method auth (ADR 46 + ADR 51 §3.3)", () => {
   it("absent auth entry → gated by the verb-derived scope (backward-compatible)", async () => {
     const { authorizer, seen } = recordingAuthorizer(["authX:plain"]);
-    const resp = await dispatchRequest(
-      host(authorizer),
-      req("authX/plain", {}),
-      stubSink(),
-      principal,
-    );
+    const resp = await dispatchRequest(host(authorizer), req("authX/plain", {}), stubSink(), {
+      identity: principal,
+    });
     expect(isOk(resp)).toBe(true);
     expect(seen).toEqual(["authX:plain"]); // verb-derived label
   });
@@ -134,24 +131,18 @@ describe("declarative per-method auth (ADR 46 + ADR 51 §3.3)", () => {
     // An authorizer that grants NOTHING — an open method must still pass, and
     // the authorizer must never be consulted for it.
     const { authorizer, seen } = recordingAuthorizer([]);
-    const resp = await dispatchRequest(
-      host(authorizer),
-      req("authX/open", {}),
-      stubSink(),
-      principal,
-    );
+    const resp = await dispatchRequest(host(authorizer), req("authX/open", {}), stubSink(), {
+      identity: principal,
+    });
     expect(isOk(resp)).toBe(true);
     expect(seen).toEqual([]); // policy skipped — never asked
   });
 
   it("scope → ADDITIVE: requires BOTH the verb scope AND the role", async () => {
     const { authorizer, seen } = recordingAuthorizer(["authX:scoped", "admin"]);
-    const resp = await dispatchRequest(
-      host(authorizer),
-      req("authX/scoped", {}),
-      stubSink(),
-      principal,
-    );
+    const resp = await dispatchRequest(host(authorizer), req("authX/scoped", {}), stubSink(), {
+      identity: principal,
+    });
     expect(isOk(resp)).toBe(true);
     expect(seen).toEqual(["authX:scoped", "admin"]); // both checked, verb first
   });
@@ -160,24 +151,18 @@ describe("declarative per-method auth (ADR 46 + ADR 51 §3.3)", () => {
     // Holds `admin` but NOT `authX:scoped`. A relabel-to-role would let this
     // through; additive semantics deny it (the verb gate is never widened).
     const { authorizer } = recordingAuthorizer(["admin"]);
-    const resp = await dispatchRequest(
-      host(authorizer),
-      req("authX/scoped", {}),
-      stubSink(),
-      principal,
-    );
+    const resp = await dispatchRequest(host(authorizer), req("authX/scoped", {}), stubSink(), {
+      identity: principal,
+    });
     expect(isOk(resp)).toBe(false);
     expect("error" in resp && resp.error?.code).toBe(ErrorCode.Forbidden);
   });
 
   it("additive role is required on top — verb scope alone is not enough", async () => {
     const { authorizer } = recordingAuthorizer(["authX:scoped"]); // missing `admin`
-    const resp = await dispatchRequest(
-      host(authorizer),
-      req("authX/scoped", {}),
-      stubSink(),
-      principal,
-    );
+    const resp = await dispatchRequest(host(authorizer), req("authX/scoped", {}), stubSink(), {
+      identity: principal,
+    });
     expect(isOk(resp)).toBe(false);
     expect("error" in resp && resp.error?.code).toBe(ErrorCode.Forbidden);
   });
@@ -191,7 +176,7 @@ describe("declarative per-method auth (ADR 46 + ADR 51 §3.3)", () => {
       host(authorizer, sessions),
       req("authX/open", { sessionId: "s1" }),
       stubSink(),
-      principal, // scopes: [] — does not cover x:need
+      { identity: principal }, // scopes: [] — does not cover x:need
     );
     expect(isOk(resp)).toBe(false); // ceiling is un-waivable, even for open methods
     expect("error" in resp && resp.error?.code).toBe(ErrorCode.Forbidden);

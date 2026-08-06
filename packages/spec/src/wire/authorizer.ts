@@ -89,6 +89,12 @@ export interface IngressIdentity {
 export interface ConnectionInfo {
   /** Stable id of the transport that accepted the connection (`websocket:8080`, `unix-socket:/run/agentick.sock`). */
   readonly transportId: string;
+  /**
+   * This connection's id, minted by the transport and stable for the socket's
+   * life. Required: only a transport that HAS a connection calls `accept`, and
+   * an edge that cannot name one has nothing to admit.
+   */
+  readonly connectionId: string;
   /** Ingress identity stamped at authn (ADR 61). Undefined = the local pole. */
   readonly identity?: IngressIdentity;
   /** Remote peer address, when the transport exposes one (TCP-backed). */

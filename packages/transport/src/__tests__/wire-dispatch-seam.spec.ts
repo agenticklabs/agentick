@@ -123,7 +123,8 @@ describe("dispatchRequest — wire dispatch through the gateway operation seam",
       gw,
       req("probe/run", { echo: "hi" }),
       stubSink(),
-      { principal: "alice", scopes: [] }, // authenticated → denied by unconfigured policy
+      // authenticated → denied by unconfigured policy
+      { identity: { principal: "alice", scopes: [] } },
     );
 
     // Rejected with a JSON-RPC error (Forbidden), NOT a result.

@@ -46,6 +46,8 @@ import {
   type DispatchHost,
   type WebSecurityOptions,
 } from "@agentick/transport";
+import { ulid } from "@agentick/utils";
+
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
 /**
@@ -153,9 +155,14 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
       socket.destroy();
       return;
     }
+    // Minted BEFORE authn so a refused upgrade names the connection it refused;
+    // retained on the socket for its life, which is what makes it addressable.
+    const connectionId = `conn-${ulid()}`;
     const finishUpgrade = (identity?: IngressIdentity): void => {
       wss.handleUpgrade(req, socket, head, (ws) => {
-        (ws as WSConnection & { identity?: unknown }).identity = identity;
+        const conn = ws as WSConnection & { identity?: unknown; connectionId?: string };
+        conn.identity = identity;
+        conn.connectionId = connectionId;
         wss.emit("connection", ws, req);
       });
     };
@@ -171,6 +178,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     void authenticateIngress(
       {
         transportKind: "websocket",
+        connectionId,
         credential: {
           kind: "bearer",
           ...(token !== undefined ? { token } : {}),
@@ -213,8 +221,12 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
   const liveSockets = new Set<WSConnection>();
 
   wss.on("connection", (ws: WSConnection, req: IncomingMessage) => {
-    const identity = (ws as WSConnection & { identity?: import("@agentick/spec").IngressIdentity })
-      .identity;
+    const conn = ws as WSConnection & {
+      identity?: import("@agentick/spec").IngressIdentity;
+      connectionId?: string;
+    };
+    const identity = conn.identity;
+    const connectionId = conn.connectionId ?? `conn-${ulid()}`;
     // ADR 84 §4 — per-connection admission. Fire `gateway:accept` AFTER
     // ingress-authn (identity is already stamped on the socket) and BEFORE the
     // connection is wired to receive frames. A throwing `onBeforeGatewayAccept`
@@ -225,6 +237,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
       try {
         await options.gateway.accept({
           transportId,
+          connectionId,
           ...(identity !== undefined ? { identity } : {}),
           ...(req.socket.remoteAddress !== undefined
             ? { remoteAddress: req.socket.remoteAddress }
@@ -238,16 +251,17 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
         }
         return;
       }
-      wireConnection(ws, identity);
+      wireConnection(ws, connectionId, identity);
     })();
   });
 
   function wireConnection(
     ws: WSConnection,
+    connectionId: string,
     identity?: import("@agentick/spec").IngressIdentity,
   ): void {
     liveSockets.add(ws);
-    const ctx = new ConnectionContext(ws, options.gateway, identity);
+    const ctx = new ConnectionContext(ws, options.gateway, connectionId, identity);
 
     let alive = true;
     ws.on("pong", () => {
@@ -305,9 +319,10 @@ class ConnectionContext extends BaseConnectionContext {
   constructor(
     private readonly ws: WSConnection,
     gateway: DispatchHost,
+    connectionId: string,
     identity?: import("@agentick/spec").IngressIdentity,
   ) {
-    super(gateway, identity, SERVER_DESCRIPTOR);
+    super(gateway, identity, SERVER_DESCRIPTOR, connectionId);
   }
 
   async handleMessage(raw: unknown): Promise<void> {

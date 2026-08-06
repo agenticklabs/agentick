@@ -111,8 +111,16 @@ export interface RuntimeContext extends EventScope {
 
   // ── Diagnostic ephemera (per-request bundle, OTel trace context) ───
 
-  /** Request bundle id when one user request spawns many ops. */
-  readonly correlationId?: string;
+  /**
+   * The single wire request every op in this bundle descends from — minted at
+   * the wire boundary, so one `session/send` and the dozen ops it spawns share
+   * it.
+   *
+   * NOT `correlationId`: that name is taken, throughout, for a request/reply
+   * key (the cluster inbox's ask, a suspended tool call's reply-to). Grouping
+   * and addressing are different jobs and sharing a word for them reads as one.
+   */
+  readonly requestId?: string;
   /**
    * W3C TraceContext header value when present, and the op's span PARENTS under
    * it. Set only where the trust decision was made — the wire boundary — and

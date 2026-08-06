@@ -98,6 +98,9 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const progressToken = params._meta?.progressToken;
 
       const handle = await sess.send({
+        // The asking connection, straight off the wire ctx — the one fact a
+        // session cannot derive and the tool relay later needs.
+        ...(ctx.connectionId !== undefined ? { connectionId: ctx.connectionId } : {}),
         messages: params.messages,
         props: params.props,
         metadata: params.metadata,
