@@ -253,7 +253,7 @@ export const MyStatefulTool = createTool({
 
 Tool handlers run at **dispatch** time, separate from render. Two ways to reach what they need:
 
-**`ctx` — dispatch-resolved (the default).** Session/app-scoped harnesses are typed slots on the handler `ctx`, resolved fresh at dispatch from the live bridge: `ctx.elicit`, `ctx.tasks`, `ctx.resource`, `ctx.log`, `ctx.progress`, `ctx.sandbox`. Optional slots (sandbox, etc.) are contributed by their packages via module augmentation of `ToolHandlerCtxExtensions` — guard with `?`:
+**`ctx` — dispatch-resolved (the default).** Session/app-scoped harnesses are typed slots on the handler `ctx`, resolved fresh at dispatch from the live bridge: `ctx.elicit`, `ctx.tasks`, `ctx.resource`, `ctx.tools` (dispatch sibling tools — same door and exposure gate as `session.tools`), `ctx.log`, `ctx.progress`, `ctx.sandbox`. Optional slots (sandbox, etc.) are contributed by their packages via module augmentation of `ToolHandlerCtxExtensions` — guard with `?`:
 
 ```typescript
 const ShellTool = createTool({

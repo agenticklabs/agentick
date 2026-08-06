@@ -399,15 +399,15 @@ A tag the deserializing process has never heard of does not throw: it becomes `U
 
 Adopter-visible types carry no `Harness` or `Protocol` in the name. Each harness protocol therefore ships a noun alias next to it, and the alias is what appears in adopter-facing signatures:
 
-| Alias       | Underlying                         | Reached at                           |
-| ----------- | ---------------------------------- | ------------------------------------ |
-| `Tools`     | `ToolExecutorProtocol`             | `app.tools`, tool wiring             |
-| `Tasks`     | `TasksHarnessProtocol`             | `session.tasks`, `ctx.tasks`         |
-| `Skills`    | `SkillsHarnessProtocol`            | `withSkills(...)`, a `skills` slot   |
-| `Prompts`   | `PromptsHarnessProtocol`           | `withPrompts(...)`, a `prompts` slot |
-| `Resources` | `ResourcesHarnessProtocol`         | `ctx.resource`, `session.resources`  |
-| `Live`      | `LiveHarnessProtocol`              | `session.live`                       |
-| `Elicit`    | The sugar surface over elicitation | `ctx.elicit`, `session.elicit`       |
+| Alias       | Underlying                         | Reached at                                                                                 |
+| ----------- | ---------------------------------- | ------------------------------------------------------------------------------------------ |
+| `Tools`     | `ToolExecutorProtocol`             | `app.tools`, tool wiring; the narrower `ToolsHandle` rides `session.tools` and `ctx.tools` |
+| `Tasks`     | `TasksHarnessProtocol`             | `session.tasks`, `ctx.tasks`                                                               |
+| `Skills`    | `SkillsHarnessProtocol`            | `withSkills(...)`, a `skills` slot                                                         |
+| `Prompts`   | `PromptsHarnessProtocol`           | `withPrompts(...)`, a `prompts` slot                                                       |
+| `Resources` | `ResourcesHarnessProtocol`         | `ctx.resource`, `session.resources`                                                        |
+| `Live`      | `LiveHarnessProtocol`              | `session.live`                                                                             |
+| `Elicit`    | The sugar surface over elicitation | `ctx.elicit`, `session.elicit`                                                             |
 
 The alias is strictly nominal — the protocol shape remains exported for power-user access, and `isToolsInstance` / `isTasksInstance` / `isSkillsInstance` / `isPromptsInstance` / `isResourcesInstance` discriminate a live instance from a declarative definition at a slot.
 

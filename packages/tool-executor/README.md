@@ -96,6 +96,8 @@ Subscriptions fire only from registration mutations (`register` / `unregister` /
 
 **Aliases.** `ToolDeclaration.aliases` gives a tool alternate dispatch names. Lookup is exact-name first, then an alias index built at register time, so `dispatch("ls", …)` reaches `list_directory` and an alias can never shadow a real tool.
 
+**On handler ctx.** The same handle rides every dispatch as `ctx.tools` (#273), so a handler composes sibling tools — code-mode executors, orchestrator tools — through the identical journaled door and `"dispatch"` exposure gate as host code. Nothing weaker rides on ctx: a `["model"]`-only tool rejects from a handler exactly as it does from the host. Composition policy (recursion, budgets) belongs to guards at the dispatch seam. A sub-dispatch currently journals as a fresh host-door call; nesting under the calling tool's span is the open half of #273.
+
 ## Handler results — one currency, two failure channels
 
 A handler returns a `string` (sugar for one text block), a `ContentBlock[]`, or an envelope. The three shapes are type-discriminable, so a wrong-shape return is a compile error rather than a silent reinterpretation.

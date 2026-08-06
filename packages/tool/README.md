@@ -180,16 +180,17 @@ export const deploy = createTool({
 });
 ```
 
-| Slot                                      | Notes                                                                   |
-| ----------------------------------------- | ----------------------------------------------------------------------- |
-| `ctx.signal`                              | `AbortSignal` for the dispatch — composes host abort and caller abort   |
-| `ctx.log` / `ctx.trace` / `ctx.metrics`   | Observability; `log` is callable and chainable via `.with(fields)`      |
-| `ctx.progress.begin({ total? })`          | Out-of-band liveness; forwarded to MCP `notifications/progress`         |
-| `ctx.elicit`                              | Ask the user a question mid-handler — `text`, `select`, `confirm`       |
-| `ctx.tasks` / `ctx.resource`              | Raw substrate primitives for long-running work and readable content     |
-| `ctx.setState(key, value)` / `ctx.emit()` | Per-call state and session channel events                               |
-| `ctx.transport`                           | `"in-process"` or `"mcp"` — branch only when behavior genuinely differs |
-| `ctx.mcp`                                 | Wire-level extras (client capabilities, authenticated user); MCP only   |
+| Slot                                      | Notes                                                                            |
+| ----------------------------------------- | -------------------------------------------------------------------------------- |
+| `ctx.signal`                              | `AbortSignal` for the dispatch — composes host abort and caller abort            |
+| `ctx.log` / `ctx.trace` / `ctx.metrics`   | Observability; `log` is callable and chainable via `.with(fields)`               |
+| `ctx.progress.begin({ total? })`          | Out-of-band liveness; forwarded to MCP `notifications/progress`                  |
+| `ctx.elicit`                              | Ask the user a question mid-handler — `text`, `select`, `confirm`                |
+| `ctx.tasks` / `ctx.resource`              | Raw substrate primitives for long-running work and readable content              |
+| `ctx.tools`                               | Dispatch a sibling tool by name — same door and exposure gate as `session.tools` |
+| `ctx.setState(key, value)` / `ctx.emit()` | Per-call state and session channel events                                        |
+| `ctx.transport`                           | `"in-process"` or `"mcp"` — branch only when behavior genuinely differs          |
+| `ctx.mcp`                                 | Wire-level extras (client capabilities, authenticated user); MCP only            |
 
 `ctx.progress` has two doors. `begin(opts?)` is the everyday one: it takes the token from the call, counts and clamps for you, and emits an opening frame so a bar appears the moment work starts. Pass `total` when you know the denominator; omit it when you don't, and never invent one — a spinner that tells the truth beats a bar that lies. The callable form, `ctx.progress(token, frame)`, is the raw door, for echoing a token that came from elsewhere.
 

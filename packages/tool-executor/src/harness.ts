@@ -911,6 +911,12 @@ export class ToolExecutorHarness
           // `session/__tests__/dispatch-scope-inheritance.spec.tsx`.
           elicit: buildSessionElicit({ harness: this.elicitation, runtime: capturedRuntime }),
           ...omitUndefined({ tasks: this.tasks }),
+          // #273 phase 1 — the raw handle. A sub-dispatch journals as a fresh
+          // host-door call, not yet as a child of THIS dispatch's op.
+          // TODO(ctx-tools-scope): bind caller identity into the sub-dispatch
+          // context (the `buildSessionElicit` runtime-binding precedent) so
+          // code-mode tool calls nest under the calling tool's span.
+          tools: this.tools,
           // ADR 62 — the session's read-projection seam. Handlers resolve
           // readable content by URI (`ctx.resource.read(uri)`); the
           // AppHarness wired the single per-session ResourcesHarness here.

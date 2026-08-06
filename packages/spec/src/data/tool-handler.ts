@@ -85,6 +85,9 @@ export interface ToolHandlerCtxExtensions {}
  * - `tasks`: the session's `TasksHarnessProtocol`. Use to spawn
  *   managed long-running work (`ctx.tasks.submit(...)`). Same
  *   "substrate primitive on ctx" rationale as elicitation.
+ * - `tools`: the session's `ToolsHandle`. Dispatch a sibling tool by
+ *   name (`ctx.tools.dispatch(name, input)`) — the same door and
+ *   `"dispatch"` exposure gate as a host-side caller.
  *
  * Substrate-primitive slots vs `use:` slots — the rule:
  * framework-provided harnesses that EVERY session has (elicitation,
@@ -217,6 +220,16 @@ export interface ToolHandlerCtx
    * have one.
    */
   readonly resource?: import("../protocol/resources-harness.js").Resources;
+  /**
+   * The session's tools handle — the one dispatch door, on ctx. A handler
+   * invokes a sibling tool by name (`ctx.tools.dispatch(name, input)`) through
+   * the same journaled path and the same `"dispatch"` exposure gate as a
+   * host-side caller; `list()`/`get()` read the live registry. Composition
+   * policy (recursion, budgets) belongs to guards at the dispatch seam, not
+   * here. Same "substrate primitive on ctx" rationale as {@link tasks}.
+   * `undefined` only on substrate-stripped test fixtures.
+   */
+  readonly tools?: import("../protocol/tool-executor.js").ToolsHandle;
 
   // ── Transport discriminator + extras (NEW — ADR 43) ───────────────
 
