@@ -1,6 +1,6 @@
 {
   "name": "@agentick/mcp",
-  "version": "1.0.0-next.96",
+  "version": "1.0.0-next.97",
   "description": "MCP client harness — connects an agentick session to N Model Context Protocol servers. Per-server McpClientHarness with pluggable Transport / Auth / Protocol / Lifecycle layers. Server discovery → local ToolExecutor registration; inbound elicitation → ElicitationHarness. Targets MCP 'draft' spec going forward; supports 2025-11-25 latest official. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
