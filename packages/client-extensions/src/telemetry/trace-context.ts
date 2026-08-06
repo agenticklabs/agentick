@@ -1,25 +1,20 @@
 /**
- * W3C Trace Context — `traceparent` / `tracestate` header generation
- * and parsing.
- *
- * `traceparent` format: `00-<trace-id-hex-32>-<span-id-hex-16>-<flags-hex-2>`
+ * W3C Trace Context generation. The FORMAT itself lives in `@agentick/spec`
+ * (`formatTraceparent` / `parseTraceparent`), which both wire ends share.
  *
  * @see https://www.w3.org/TR/trace-context/#traceparent-header-field-values
  */
 
+import { formatTraceparent } from "@agentick/spec";
+
 /**
- * Generate a `traceparent` value for a new root trace. Uses
- * `crypto.getRandomValues` when available; falls back to Math.random
- * for environments without WebCrypto.
+ * Generate a `traceparent` for a new root trace.
  *
- * `flags = "01"` sets the `sampled` bit. Adopters who own their own
- * sampler should generate `traceparent` themselves and pass via
- * `recordTraceContext`.
+ * `sampled` must be what is actually true — a downstream that honours the bit
+ * on a span nobody recorded keeps a trace with a hole in it.
  */
-export function generateTraceparent(): string {
-  const traceId = randomHex(32);
-  const spanId = randomHex(16);
-  return `00-${traceId}-${spanId}-01`;
+export function generateTraceparent(sampled = true): string {
+  return formatTraceparent({ traceId: randomHex(32), spanId: randomHex(16), sampled });
 }
 
 /**

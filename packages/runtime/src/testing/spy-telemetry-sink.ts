@@ -84,7 +84,13 @@ class RecordingSpanProcessor implements SpanProcessor {
     const parentSpanId = span.parentSpanContext?.spanId;
     const parent = parentSpanId !== undefined ? this.names.get(parentSpanId) : undefined;
     const attributes = new Map<string, unknown>(Object.entries(span.attributes));
-    this.recorded.push({ name: span.name, parent, attributes });
+    this.recorded.push({
+      name: span.name,
+      parent,
+      attributes,
+      traceId: span.spanContext().traceId,
+      links: span.links.map((l) => l.context.traceId),
+    });
   }
 
   forceFlush(): Promise<void> {

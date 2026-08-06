@@ -37,6 +37,8 @@ import type {
   ClientMiddlewareContext,
   ClientMiddlewareNext,
   ClientRegistrars,
+  ClientRuntimeContext,
+  ClientTelemetryOptions,
   OnSignalOptions,
   ReceivedLog,
   ReceivedProgress,
@@ -60,6 +62,9 @@ import {
 import { computeFullJitterBackoff } from "@agentick/utils";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
+import { clientObservability } from "./observability.js";
+import type { ClientObservability } from "./observability.js";
+import { clientRuntimeContext } from "./runtime-context.js";
 import { createLocalPubSub, createNotifier, type LocalPubSub } from "@agentick/pubsub";
 import { Deferred, Effect, Stream } from "effect";
 import { buildClientCapabilities } from "./capabilities.js";
@@ -139,6 +144,23 @@ export interface CreateClientOptions {
   readonly extensions?: readonly ClientExtension[];
   readonly id?: string;
   /**
+   * The telemetry switch — the twin of `createApp({ telemetry })`.
+   *
+   * THIS package reads `adapter` only, to build `client.runtime`'s facets; it
+   * does not install the wire-span extension, because the lean core does not
+   * depend on it. `@agentick/client` takes the same option and ALSO installs
+   * that extension from the same object, so `sample` / `serviceName` apply
+   * there and the adapter is never passed twice.
+   *
+   * Omitted, `log` is still callable (it reaches nothing) and `trace` runs on
+   * the passthrough path with zero span machinery — instrumented code costs
+   * nothing until an adapter exists.
+   *
+   * Distinct from `onLog` / `onProgress`, which RECEIVE the server's signals.
+   * This is the client speaking, not listening.
+   */
+  readonly telemetry?: ClientTelemetryOptions;
+  /**
    * Client-LOCAL observer of connection-state transitions. Registered
    * for the client's lifetime via {@link ClientProtocol.onStateChange}.
    * Convenience for the common "wire a status indicator at construction"
@@ -192,6 +214,23 @@ class AgentickClient implements ClientProtocol {
   readonly id: string;
   readonly transport: ClientTransport;
   readonly auth: ClientAuthSurface;
+
+  private readonly observability: ClientObservability;
+  private _runtime: ClientRuntimeContext | undefined;
+
+  /**
+   * This client's own `log` / `trace` / `metrics`, with live identity.
+   *
+   * `connectionId` is a getter, not a captured value — a reconnect mints a new
+   * one, and a stale id is how a targeted call reaches a connection that no
+   * longer exists.
+   */
+  get runtime(): ClientRuntimeContext {
+    return (this._runtime ??= clientRuntimeContext(this.observability, {
+      clientId: () => this.id,
+      connectionId: () => this.serverInfo?.connectionId,
+    }));
+  }
 
   private readonly extensions: readonly ClientExtension[];
   private readonly handlerRegistry = new ClientHandlerRegistry();
@@ -254,6 +293,9 @@ class AgentickClient implements ClientProtocol {
     this.id = options.id ?? `client-${++clientCounter}`;
     this.transport = options.transport;
     this.extensions = options.extensions ?? [];
+    // ONE instance for the client's lifetime: span nesting lives on it, so a
+    // fresh one per read would orphan every child span.
+    this.observability = clientObservability(options.telemetry?.adapter);
     this.handshakeRetry = {
       ...DEFAULT_HANDSHAKE_RETRY_POLICY,
       ...(options.handshakeRetry ?? {}),

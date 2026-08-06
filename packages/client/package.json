@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@agentick/client-core": "workspace:*",
+    "@agentick/client-extensions": "workspace:*",
     "@agentick/elicitation": "workspace:*",
     "@agentick/gates": "workspace:*",
     "@agentick/knobs": "workspace:*",

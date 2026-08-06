@@ -298,3 +298,141 @@ export interface Observability {
    */
   readonly metrics: Metrics;
 }
+
+// ============================================================================
+// Off-path singletons
+// ============================================================================
+//
+// Here rather than in `@agentick/runtime` because both sides need them and
+// neither should reach across for a no-op: the server's telemetry-off path
+// and the browser client both hand these out. Frozen and shared, so a ctx
+// that never touches telemetry allocates nothing and referential identity
+// holds across every ctx.
+
+/** No-op span handed to a `trace` callback when telemetry is off. */
+export const NOOP_SPAN: Span = Object.freeze({
+  setAttribute: () => {},
+  setAttributes: () => {},
+  addEvent: () => {},
+  recordException: () => {},
+});
+
+/**
+ * Passthrough `trace` for the telemetry-off path — runs `fn` with the
+ * {@link NOOP_SPAN} and resolves with its value, no span machinery.
+ */
+export const OFF_TRACE: Observability["trace"] = <T>(
+  _name: string,
+  fn: (span: Span) => T | Promise<T>,
+): Promise<T> => Promise.resolve(fn(NOOP_SPAN));
+
+/** No-op metrics for the telemetry-off path. */
+export const NOOP_METRICS: Metrics = Object.freeze({
+  count: () => {},
+  record: () => {},
+  gauge: () => {},
+});
+
+// ============================================================================
+// TelemetryAdapter — the CLIENT's telemetry seam
+// ============================================================================
+//
+// Distinct from `TelemetrySink` (app-harness), which hands OpenTelemetry SDK
+// processors and readers to the server's Effect layer. A browser deliberately
+// does not bundle the OTel SDK, so the client seam is BYO: the adopter wraps
+// whatever tracer they have behind these few methods.
+//
+// ONE object, wired once, consumed twice — `createClient({ telemetry })` builds
+// the ctx facets over it, and `@agentick/client-extensions`' `telemetry()`
+// extension opens its per-RPC spans through the same instance. Because it is
+// the same instance, `currentTraceContext()` naturally reports a span opened by
+// either side, and no bridge between them is needed.
+
+/**
+ * The subset of OpenTelemetry's `Span` a client adapter must expose.
+ * Adopters wrap a real OTel span or supply their own.
+ */
+/**
+ * A span's W3C identity — the triple a child parents under and a `traceparent`
+ * carries. One type for the whole seam: what a span reports, what a caller
+ * propagates, and what a wire header parses to are the same three fields, and
+ * spelling them separately invites them to drift.
+ */
+export interface SpanContext {
+  readonly traceId: string;
+  readonly spanId: string;
+  /** The W3C sampled bit — whether the span was actually recorded. */
+  readonly sampled: boolean;
+}
+
+export interface TelemetrySpan {
+  setAttribute(key: string, value: string | number | boolean): void;
+  /** Set status to "error" with the given message. */
+  setError(message: string): void;
+  end(): void;
+  /**
+   * This span's W3C ids, when the adapter can report them.
+   *
+   * OTel spans have `spanContext()`; an adapter that cannot answer returns
+   * `undefined` and the span simply does not become a parent for propagation.
+   */
+  spanContext?(): SpanContext;
+}
+
+/**
+ * BYO tracer. `startSpan` and `currentTraceContext` are the wire extension's
+ * long-standing contract; `log` and `metrics` are optional additions so the
+ * ctx facets have somewhere to go without a second seam to wire.
+ */
+export interface TelemetryAdapter {
+  startSpan(
+    name: string,
+    attributes: Record<string, string | number | boolean>,
+    /**
+     * Parent for the new span. Supplied by callers that track their own active
+     * span — a browser has no ambient context to infer one from. An adapter
+     * over a runtime that DOES have ambient context may ignore it.
+     */
+    parent?: Pick<SpanContext, "traceId" | "spanId">,
+  ): TelemetrySpan;
+  /** The W3C Trace Context to propagate on the wire. */
+  currentTraceContext(): { traceparent?: string; tracestate?: string };
+  /** Where `ctx.log` goes. Absent, logs are dropped (still never throw). */
+  log?: LogEmit;
+  /** Where `ctx.metrics` goes. Absent, metrics are no-ops. */
+  metrics?: Metrics;
+}
+
+/** No-op adapter — trace context propagation only, no local recording. */
+export const NOOP_TELEMETRY_ADAPTER: TelemetryAdapter = Object.freeze({
+  startSpan: (): TelemetrySpan => ({
+    setAttribute() {},
+    setError() {},
+    end() {},
+  }),
+  currentTraceContext: () => ({}),
+});
+
+/**
+ * `createClient({ telemetry })` — the client's telemetry switch, the twin of
+ * `createApp({ telemetry })`.
+ *
+ * Named `Client…` because spec already has a server-side `TelemetryOptions`
+ * (OTel SDK processors and an Effect layer). Different worlds, so different
+ * names rather than one type that means two things.
+ *
+ * ONE object, wired once. `@agentick/client-core` reads `adapter` to build the
+ * ctx facets; `@agentick/client` additionally installs the wire-span extension
+ * from the SAME object, so `sample` / `serviceName` reach it without the
+ * adopter passing an adapter twice — and the two span trees cannot diverge.
+ */
+export interface ClientTelemetryOptions {
+  readonly adapter: TelemetryAdapter;
+  /**
+   * Per-method sampler for wire spans. Return `false` to skip span creation for
+   * noisy methods; trace context still propagates. Default: sample all.
+   */
+  readonly sample?: (method: string) => boolean;
+  /** Reported as `rpc.service`. Defaults to `agentick`. */
+  readonly serviceName?: string;
+}

@@ -19,6 +19,8 @@ export { composeRequest, composeSubscribe } from "./pipeline.js";
 export { ClientHandlerRegistry } from "./handler-registry.js";
 export { commandForMethod } from "./hook-keys.js";
 export { effectMiddleware, type EffectRequestMiddleware } from "./effect-middleware.js";
+export { clientRuntimeContext } from "./runtime-context.js";
+export { clientObservability, type ClientObservability } from "./observability.js";
 export { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "./handles.js";
 export {
   onLog,

@@ -588,6 +588,84 @@ Three spellings, identical types: the pre-scoped handle method, the generic
 `client.onLog(scope, cb)` for a scope you don't hold a handle for, and the
 tree-shakeable free function `onLog(client, scope, cb)` the other two delegate to.
 
+## Signals the client emits itself
+
+`onLog` above is the client **receiving** the server's signals. This is the other
+direction: the client's own `log` / `trace` / `metrics`, the same
+[`Observability`](../spec/src/data/observability.ts) contract a server-side tool
+handler's `ctx` carries — so an adopter writing both sides reads one shape.
+
+```ts
+const client = await createClient({
+  transport,
+  telemetry: {
+    adapter: {
+      startSpan: (name, attrs, parent) => wrapOtelSpan(name, attrs, parent),
+      currentTraceContext: () => ({ traceparent: currentTraceparent() }),
+      log: (level, data) => logger[level]?.(data),
+      metrics: myMeter,
+    },
+  },
+});
+
+client.runtime.log.info("composer opened");
+
+await client.runtime.trace("read_selection", async (span) => {
+  span.setAttribute("chars", text.length);
+  return read();
+});
+```
+
+**This package reads `adapter` only**, to build the facets above. It does not
+install the per-RPC wire-span extension — the lean core does not depend on
+[`@agentick/client-extensions`](../client-extensions). On
+[`@agentick/client`](../client) the same option ALSO installs that extension,
+with `sample` and `serviceName` applying to it, from the one object. Sharing the
+instance is what makes a span opened in your code the parent of the RPC it
+triggers, rather than two disconnected trees.
+
+Adding it here by hand is one line:
+
+```ts
+extensions: [telemetry({ adapter })]; // @agentick/client-extensions
+```
+
+`log` and `metrics` are optional on the adapter. Omit them and `ctx.log` is still
+callable (it just reaches nothing) and `ctx.metrics` is a no-op. Omit `telemetry`
+entirely and `trace` runs on the passthrough path with zero span machinery — so
+instrumented code costs nothing until an adapter exists.
+
+### Parenting is explicit, deliberately
+
+The active span is passed to `startSpan(name, attrs, parent)`:
+
+```ts
+await client.runtime.trace("outer", async () => {
+  await client.runtime.trace("inner", () => …);      // parent = outer
+  await client.runtime.trace("also-inner", () => …); // a SIBLING, not a chain
+});
+```
+
+The server parents through an ambient fiber (`AsyncLocalStorage`), which browsers
+do not have. A module-level "current span" stack looks equivalent and silently
+misparents as soon as two async handlers interleave — the normal case with
+several tabs open. Misparented spans are worse than flat ones, because they read
+as truth.
+
+An adapter whose spans cannot report `spanContext()` never becomes a parent:
+better than inventing ids for a span nobody holds. Two `clientRuntimeContext`
+instances never cross-parent, so concurrent handlers keep their own trees.
+
+### Identity
+
+```ts
+client.runtime.clientId; // stable for the client's lifetime
+client.runtime.connectionId; // undefined before the first handshake
+```
+
+**Read `connectionId`, do not capture it.** A reconnect mints a new one, and a
+value copied at construction is stale for the rest of the session.
+
 ## The fold kit
 
 Under every read surface is one ground-floor primitive and one fold over it. Reach

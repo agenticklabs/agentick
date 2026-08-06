@@ -60,6 +60,21 @@ const client = await createClient({
 });
 ```
 
+> [!TIP]
+> On [`@agentick/client`](../../../client) you do not wire this by hand — pass
+> the adapter to the top-level `telemetry` namespace and the metapackage
+> installs this extension for you:
+>
+> ```ts
+> const client = await createClient({ transport, telemetry: { adapter, sample } });
+> ```
+>
+> The SAME adapter also builds `client.runtime`'s `log` / `trace` / `metrics`,
+> so a span opened in your own code is the parent of the RPC it triggers instead
+> of rooting a second trace. Reach for the explicit `extensions:` form when you
+> are on the lean `@agentick/client-core`, or when you deliberately want the wire
+> instrumented differently from `ctx.trace`.
+
 For tests / adopters who only want trace context propagation without
 observation, use `noopAdapter`:
 

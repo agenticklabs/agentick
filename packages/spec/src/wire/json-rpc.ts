@@ -11,6 +11,8 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
+import type { SpanContext } from "../data/observability.js";
+
 /**
  * Discriminator literal carried on every JSON-RPC frame.
  */
@@ -106,6 +108,22 @@ export interface RequestMeta {
    * `id`.
    */
   readonly progressToken?: string;
+  /**
+   * W3C Trace Context `traceparent` for the span this request was made inside —
+   * `00-<32 hex trace>-<16 hex span>-<2 hex flags>`.
+   *
+   * On `_meta` rather than as a transport header so it survives every transport
+   * identically: a WebSocket frame and an in-process call have nowhere to put an
+   * HTTP header, and a client in another language has one place to look.
+   *
+   * A server that traces SHOULD parent its operation span under this, which is
+   * what makes one trace span the whole turn instead of leaving a client tree
+   * and a server tree to be aligned on timestamps. Absent means "no span was
+   * active" — never an error, and never a reason to refuse the request.
+   *
+   * @see https://www.w3.org/TR/trace-context/#traceparent-header
+   */
+  readonly traceparent?: string;
 }
 
 // ============================================================================
@@ -130,4 +148,49 @@ export function isJsonRpcSuccess<R>(frame: JsonRpcResponse<R>): frame is JsonRpc
 
 export function isJsonRpcError(frame: JsonRpcResponse): frame is JsonRpcErrorResponse {
   return "error" in frame;
+}
+
+// ============================================================================
+// W3C Trace Context
+// ============================================================================
+
+/** A remote span, parsed from a `traceparent`. */
+export type RemoteSpanContext = SpanContext;
+
+const TRACEPARENT = /^([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/;
+const ALL_ZERO_TRACE = "0".repeat(32);
+const ALL_ZERO_SPAN = "0".repeat(16);
+
+/**
+ * Parse a W3C `traceparent`, or `undefined` when it is malformed.
+ *
+ * Lenient about VERSION and strict about everything else, per the spec: a
+ * future version with extra trailing fields is still readable, so `00` is a
+ * floor rather than an equality check — but `ff` is reserved and invalid.
+ * All-zero ids are rejected because the spec defines them as "no span", and a
+ * server that parented under one would produce a trace nobody can join.
+ *
+ * Total, never throws. This runs on **untrusted input** — a browser's header —
+ * and a malformed value is a fact about the caller, not an error worth failing
+ * their request over.
+ */
+export function parseTraceparent(value: string | undefined): RemoteSpanContext | undefined {
+  if (value === undefined) return undefined;
+  const m = TRACEPARENT.exec(value.trim().toLowerCase());
+  if (m === null) return undefined;
+  const [, version, traceId, spanId, flags] = m as unknown as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  if (version === "ff") return undefined;
+  if (traceId === ALL_ZERO_TRACE || spanId === ALL_ZERO_SPAN) return undefined;
+  return { traceId, spanId, sampled: (parseInt(flags, 16) & 0x01) === 1 };
+}
+
+/** Format a span context as a `traceparent`. The inverse of {@link parseTraceparent}. */
+export function formatTraceparent(ctx: RemoteSpanContext): string {
+  return `00-${ctx.traceId}-${ctx.spanId}-${ctx.sampled ? "01" : "00"}`;
 }

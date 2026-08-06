@@ -35,6 +35,14 @@ export interface RecordedSpan {
   readonly parent: string | undefined;
   /** Live attribute map — reflects `span.setAttribute(...)` calls made after creation. */
   readonly attributes: ReadonlyMap<string, unknown>;
+  /**
+   * The trace this span belongs to. What distinguishes ADOPTING a remote parent
+   * (same trace as the caller) from LINKING to it (a different one) — the two
+   * are otherwise indistinguishable from a span's name and parent alone.
+   */
+  readonly traceId: string;
+  /** Trace ids this span links to. Empty unless the span was opened with links. */
+  readonly links: readonly string[];
 }
 
 /** A recording {@link TelemetryProvider} plus the assertion accessors. */
@@ -61,7 +69,13 @@ export function spyTelemetryProvider(): SpyTelemetryProvider {
       const parentName = Option.isSome(parent)
         ? ((parent.value as { name?: string }).name ?? parent.value.spanId)
         : undefined;
-      spans.push({ name, parent: parentName, attributes });
+      spans.push({
+        name,
+        parent: parentName,
+        attributes,
+        traceId: Option.isSome(parent) ? parent.value.traceId : "spy-trace",
+        links: links.map((l) => l.span.traceId),
+      });
       return {
         _tag: "Span",
         name,

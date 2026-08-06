@@ -44,6 +44,51 @@ import "@agentick/prompts/client";
 import "@agentick/resources/client";
 import "@agentick/state/client";
 
-// Re-export the full client-core surface (createClient, handles, channelView,
-// the sub-handle registry, protocol type re-exports, …).
+import {
+  createClient as coreCreateClient,
+  type Client,
+  type CreateClientOptions,
+} from "@agentick/client-core";
+import { telemetry as telemetryExtension } from "@agentick/client-extensions";
+
+// Re-export the full client-core surface EXCEPT `createClient` — this package
+// wraps it (below) so a top-level config namespace can install the built-in
+// extension it belongs to.
 export * from "@agentick/client-core";
+
+// ── Built-in extensions with config get a TOP-LEVEL namespace ────────────────
+//
+// The sub-handles above self-assemble and need no configuration. An extension
+// that DOES take config (telemetry, so far) gets a named option on
+// `createClient` rather than making the adopter hand-build an `extensions`
+// entry — the same shape `createApp({ telemetry })` already has on the server.
+//
+// Wiring it here rather than in `client-core` is ADR 27 doing its job: the lean
+// core must not depend on the extension package, and bundling built-ins is
+// exactly what a metapackage is for.
+
+/**
+ * Batteries-included `createClient`.
+ *
+ * Identical to `@agentick/client-core`'s, plus: a top-level config namespace
+ * for each built-in extension that takes configuration. Today that is
+ * `telemetry` — the ONE object serves both consumers, so `client.runtime`'s
+ * facets and the per-RPC wire spans share an adapter by construction and their
+ * span trees cannot diverge.
+ *
+ * ```ts
+ * const client = await createClient({
+ *   transport,
+ *   telemetry: { adapter, sample: (m) => m !== "session/snapshot" },
+ * });
+ * ```
+ */
+export async function createClient(options: CreateClientOptions): Promise<Client> {
+  const { telemetry: config } = options;
+  if (config === undefined) return coreCreateClient(options);
+  return coreCreateClient({
+    ...options,
+    // Appended, so an adopter-supplied extension still wraps outside it.
+    extensions: [...(options.extensions ?? []), telemetryExtension(config)],
+  });
+}

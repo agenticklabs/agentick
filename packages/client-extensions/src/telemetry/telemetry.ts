@@ -15,35 +15,20 @@
  * @verifiedBy src/__tests__/telemetry.spec.ts
  */
 
-import type { ClientExtension, RequestMiddleware } from "@agentick/spec";
+import type {
+  ClientExtension,
+  RequestMiddleware,
+  TelemetryAdapter,
+  TelemetrySpan,
+} from "@agentick/spec";
+import { NOOP_TELEMETRY_ADAPTER } from "@agentick/spec";
+
+// The adapter contract moved to `@agentick/spec` so `client-core` can build the
+// ctx facets (`ctx.log` / `ctx.trace` / `ctx.metrics`) over the SAME instance an
+// adopter wires here. One object, wired once, consumed twice — which is what
+// makes a span opened in a tool handler the parent of the RPC it triggers.
+export type { TelemetryAdapter, TelemetrySpan };
 import { generateTraceparent } from "./trace-context.js";
-
-/**
- * Minimal span shape — matches the subset of OpenTelemetry's `Span`
- * interface the middleware actually calls. Adopters wrap a real OTel
- * span here or supply their own observer.
- */
-export interface TelemetrySpan {
-  setAttribute(key: string, value: string | number | boolean): void;
-  /** Set status to "error" with the given message. */
-  setError(message: string): void;
-  end(): void;
-}
-
-/**
- * BYO tracer adapter — adopter typically wraps `@opentelemetry/api`'s
- * `trace.getTracer("@agentick/client-core").startSpan(name, { kind: SpanKind.CLIENT })`.
- *
- * The adapter is also responsible for telling us what
- * `traceparent` / `tracestate` to propagate downstream so the
- * server-side span links to the client's span. If you return
- * `undefined` for `traceparent`, the middleware generates one.
- */
-export interface TelemetryAdapter {
-  startSpan(name: string, attributes: Record<string, string | number | boolean>): TelemetrySpan;
-  /** Return the W3C Trace Context fields to propagate on the wire. */
-  currentTraceContext(): { traceparent?: string; tracestate?: string };
-}
 
 export interface TelemetryOptions {
   readonly adapter: TelemetryAdapter;
@@ -58,36 +43,30 @@ export interface TelemetryOptions {
   readonly serviceName?: string;
 }
 
-/**
- * No-op adapter — useful when you only want trace context propagated
- * (no local span recording).
- */
-export const noopAdapter: TelemetryAdapter = {
-  startSpan: () => ({
-    setAttribute() {},
-    setError() {},
-    end() {},
-  }),
-  currentTraceContext: () => ({}),
-};
+/** No-op adapter — trace context propagation only, no local recording. */
+export const noopAdapter: TelemetryAdapter = NOOP_TELEMETRY_ADAPTER;
 
 export function telemetry(options: TelemetryOptions): ClientExtension {
-  const adapter = options.adapter;
   const sample = options.sample ?? (() => true);
   const serviceName = options.serviceName ?? "agentick";
+
+  const adapter = options.adapter;
 
   const requestMw: RequestMiddleware = async (req, next) => {
     const method = req.method;
 
     // Always propagate trace context — even when we're not opening a
-    // local span — so the server-side span tree is well-formed.
+    // local span — so the server-side span tree is well-formed. The sampled
+    // bit reports whether we ACTUALLY open one: an unsampled method that
+    // claimed `01` would promise a client span that never gets recorded.
+    const sampled = sample(method);
     const tc = adapter.currentTraceContext();
-    const traceparent = tc.traceparent ?? generateTraceparent();
+    const traceparent = tc.traceparent ?? generateTraceparent(sampled);
     const tracestate = tc.tracestate;
 
     const requestWithContext = withTraceContext(req, traceparent, tracestate);
 
-    if (!sample(method)) {
+    if (!sampled) {
       return next(requestWithContext);
     }
 

@@ -58,7 +58,11 @@
 
 import { Effect, Runtime } from "effect";
 import type { Tracer } from "effect";
-import { createLog } from "@agentick/spec";
+import { NOOP_METRICS, NOOP_SPAN, OFF_TRACE, createLog } from "@agentick/spec";
+
+// Defined in spec so the browser client shares them (it must not import this
+// module — Effect, bus, journal). Re-exported to keep runtime's public API.
+export { NOOP_METRICS, NOOP_SPAN, OFF_TRACE } from "@agentick/spec";
 import type { Log, LogLevel, MetricLabels, Metrics, Observability, Span } from "@agentick/spec";
 import type { TelemetryLayer } from "@agentick/spec";
 
@@ -140,35 +144,6 @@ export interface TelemetryProvider {
   /** The metrics sink. When present, `ctx.metrics.*` emit to it. */
   readonly meter?: MetricSink;
 }
-
-// ============================================================================
-// Off-path singletons (condition-3: zero per-op allocation, shared identity)
-// ============================================================================
-
-/** No-op span handed to a `trace` callback when telemetry is off. Frozen, shared. */
-export const NOOP_SPAN: Span = Object.freeze({
-  setAttribute: () => {},
-  setAttributes: () => {},
-  addEvent: () => {},
-  recordException: () => {},
-});
-
-/**
- * Passthrough `trace` for the telemetry-off path — runs `fn` with the
- * {@link NOOP_SPAN} and resolves with its value, no span machinery. Frozen,
- * shared across every ctx (the referential-identity target).
- */
-export const OFF_TRACE: Observability["trace"] = <T>(
-  _name: string,
-  fn: (span: Span) => T | Promise<T>,
-): Promise<T> => Promise.resolve(fn(NOOP_SPAN));
-
-/** No-op metrics for the telemetry-off path. Frozen, shared. */
-export const NOOP_METRICS: Metrics = Object.freeze({
-  count: () => {},
-  record: () => {},
-  gauge: () => {},
-});
 
 // ============================================================================
 // deriveObservability

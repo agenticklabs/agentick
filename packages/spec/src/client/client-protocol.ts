@@ -11,6 +11,7 @@
  * @see docs/proposals/v2/blueprint/33-client-and-transports.md
  */
 
+import type { Observability, SpanContext } from "../data/observability.js";
 import type { Unsubscribe } from "../protocol/inbox.js";
 import type { Cursor } from "../protocol/event-log.js";
 import type { SendInput } from "../protocol/session-harness.js";
@@ -51,7 +52,37 @@ export interface ClientAuthSurface {
  * via `ClientNamespaces` declaration merging — see
  * `@agentick/spec/client/extension.ts`.
  */
+/**
+ * The trunk every client-side context extends.
+ *
+ * Deliberately small: identity only the framework can mint, plus the three
+ * {@link Observability} facets. Anything an adopter's closure already reaches
+ * (a router, an injector, a store) stays out — a ctx that carries app services
+ * stops being a framework contract and becomes a service locator.
+ */
+export interface ClientRuntimeContext extends Observability {
+  /** Stable for the client's lifetime. */
+  readonly clientId: string;
+  /**
+   * The current connection, or `undefined` before the first handshake.
+   *
+   * READ IT, do not capture it: a reconnect mints a new one, so a value copied
+   * at construction is stale for the rest of the session — and a stale
+   * connection id is how a targeted tool call gets addressed to a connection
+   * that no longer exists.
+   */
+  readonly connectionId: string | undefined;
+  /** The innermost span in progress, or `undefined` outside any `trace`. */
+  activeSpan(): SpanContext | undefined;
+}
+
 export interface ClientProtocol {
+  /**
+   * The client's ambient context — identity plus the `log`/`trace`/`metrics`
+   * facets. The same shape the server ctx carries, so an adopter writing both
+   * sides reads one contract.
+   */
+  readonly runtime: ClientRuntimeContext;
   readonly id: string;
   readonly state: ClientState;
   readonly transport: ClientTransport;

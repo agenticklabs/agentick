@@ -102,6 +102,7 @@ import {
   sortSessionRecords,
   toRegistration,
 } from "@agentick/spec";
+import { remoteTrace } from "./remote-trace.js";
 import { createWireExtensionRegistry } from "./wire-registry.js";
 import { unconfiguredAuthorizer } from "./authorizers.js";
 import { createCommandsListHandler, createDynamicCommandResolver } from "./dynamic-commands.js";
@@ -179,6 +180,13 @@ export interface CreateGatewayAppInput<P = unknown> extends Omit<CreateAppInput<
 }
 
 export interface GatewayHarnessOptions extends BaseHarnessOptions {
+  /**
+   * What to do with a caller's `_meta.traceparent`. Default `"link"` — the
+   * caller is untrusted, so the two traces stay joinable without this server
+   * inheriting a sampling decision made by a browser. See
+   * {@link RemoteParentPolicy}.
+   */
+  readonly remoteParent?: import("@agentick/spec").RemoteParentPolicy;
   /**
    * Identity-authorization policy for the dynamic command lane (ADR 51
    * §4). Default: `unconfiguredAuthorizer` — unauthenticated callers
@@ -340,6 +348,8 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    *  boundary (`dispatchRequest`). `undefined` = OFF (opt-in; the boundary
    *  then skips projection — zero overhead). */
   readonly clientProjection?: import("@agentick/spec").ToolOutputBounder;
+  /** ADR 92 — the remote-parent policy, read by `remoteTrace` at wire dispatch. */
+  readonly remoteParent?: import("@agentick/spec").RemoteParentPolicy;
   /**
    * The cross-app session door (the gateway-index pattern). `undefined` = no
    * index, and {@link listSessions} falls back to merging the apps' stores.
@@ -498,6 +508,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // adopter opts in; the wire dispatch boundary reads `this.clientProjection`
     // and skips projection when undefined.
     this.clientProjection = resolveTruncateToolResults(options.truncateToolResults);
+    this.remoteParent = options.remoteParent;
     // The cross-app read door. Nothing to normalize — either an adopter handed
     // one over or the merge fallback stands in for it.
     this.sessionIndex = options.sessionIndex;
@@ -764,7 +775,16 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // it comes from the identity the transport authenticated, never from params.
     // `omitUndefined` keeps the scope clean on the unauthenticated local pole
     // (no identity → the field is absent, non-wire ops are unaffected).
-    const scope = omitUndefined({ gatewayId: this.scopeId, identity: ctx.identity });
+    // The caller's trace context, if it sent one and policy admits it. Decided
+    // HERE because this is where trust is decided — the substrate applies
+    // whichever field this sets and knows nothing about the policy. Set on the
+    // WIRE op's scope only: it is the root of everything this request spawns,
+    // and children nest under it rather than all flattening onto the caller.
+    const scope = omitUndefined({
+      gatewayId: this.scopeId,
+      identity: ctx.identity,
+      ...remoteTrace(params, this.remoteParent),
+    });
     // `wire:` prefix (ADR 83 wire section): the wire op name must NOT
     // collide with the op it delegates to (`session/send` vs `session:send`
     // both Pascalize to `SessionSend`). Prefixed → `WireSessionSend`, so the

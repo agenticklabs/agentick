@@ -182,6 +182,13 @@ export interface GatewaySessionEntry extends SessionEntry {
 /**
  * The runtime-root harness protocol.
  */
+/**
+ * What a gateway does with a caller's `_meta.traceparent`.
+ *
+ * @see {@link GatewayHarnessProtocol.remoteParent}
+ */
+export type RemoteParentPolicy = "ignore" | "link" | "parent";
+
 export interface GatewayHarnessProtocol {
   readonly id: string;
   readonly metadata: Readonly<Record<string, unknown>>;
@@ -308,6 +315,26 @@ export interface GatewayHarnessProtocol {
    * (unlike security defaults, which protect the operator and ship on).
    */
   readonly clientProjection?: import("../data/tool-output-bound.js").ToolOutputBounder;
+  /**
+   * What to do with a `_meta.traceparent` on an inbound request.
+   *
+   * The caller is UNTRUSTED and the header is caller-controlled, so this is a
+   * trust decision and it lives at the wire boundary rather than in the span
+   * machinery:
+   *
+   *   - `"link"` (default) — record the caller's span as a LINK. The two traces
+   *     stay joinable in a backend without adopting the caller's sampling
+   *     choice, which is what stops a browser forcing 100% sampling and driving
+   *     someone else's telemetry bill.
+   *   - `"parent"` — adopt it as the parent. ONE tree end to end, and the right
+   *     answer for a first-party client you control. A deliberate widening, the
+   *     way `web-security` ships closed and is opened explicitly.
+   *   - `"ignore"` — drop it. Two independent trees.
+   *
+   * OTel's own guidance for public endpoints is not to trust a remote parent by
+   * default, which is why `link` is the floor rather than `parent`.
+   */
+  readonly remoteParent?: RemoteParentPolicy;
 
   /**
    * The **fine contextual** authorization layer (ADR 84 §5). Wraps

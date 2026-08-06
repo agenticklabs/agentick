@@ -70,7 +70,7 @@
  * @see docs/proposals/v2/STATUS.md — ROADMAP Tier 2 (createOperationRunner)
  */
 
-import { Effect, type Runtime } from "effect";
+import { Effect, Tracer, type Runtime } from "effect";
 import { omitUndefined } from "@agentick/utils";
 import type {
   CommandOutcome,
@@ -91,6 +91,7 @@ import {
   AgentickError,
   deriveHookNames,
   parseHookKey,
+  parseTraceparent,
   registerAgentickError,
 } from "@agentick/spec";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
@@ -443,7 +444,8 @@ class OperationRunnerImpl implements OperationRunner {
     op: Operation<unknown, unknown, unknown>,
   ): (eff: Effect.Effect<A, E, never>) => Effect.Effect<A, E, never> {
     const attributes = this.spanAttributesFn(op);
-    return (eff) => eff.pipe(Effect.withSpan(op.name, { attributes }));
+    const remote = remoteSpanOptions(op);
+    return (eff) => eff.pipe(Effect.withSpan(op.name, { attributes, ...remote }));
   }
 
   // ──────── event helpers (shared heavy + light path) ────────
@@ -700,3 +702,33 @@ export class OperationOutcomeError extends AgentickError {
 }
 
 registerAgentickError("OperationOutcomeError", OperationOutcomeError);
+
+/**
+ * `parent` / `links` for an op whose scope carries a remote span.
+ *
+ * MECHANISM ONLY — the trust decision was made at the wire boundary, and is
+ * encoded in WHICH field it set. `traceparent` means adopt as parent (one
+ * tree); `traceLink` means record a link (joinable, without inheriting the
+ * caller's sampling choice). Neither means the caller's context was dropped.
+ *
+ * Read from `op.scope` rather than the ambient context deliberately: the
+ * ambient context is inherited by child ops, so reading it there would parent
+ * EVERY op directly under the remote span and flatten the tree. `op.scope`
+ * belongs to the op that was actually created at the boundary.
+ */
+function remoteSpanOptions(op: Operation<unknown, unknown, unknown>): {
+  parent?: Tracer.AnySpan;
+  links?: readonly Tracer.SpanLink[];
+} {
+  const scope = op.scope as { traceparent?: string; traceLink?: string } | undefined;
+  if (scope === undefined) return {};
+
+  const parent = parseTraceparent(scope.traceparent);
+  if (parent !== undefined) return { parent: Tracer.externalSpan(parent) };
+
+  const link = parseTraceparent(scope.traceLink);
+  if (link !== undefined) {
+    return { links: [{ _tag: "SpanLink", span: Tracer.externalSpan(link), attributes: {} }] };
+  }
+  return {};
+}

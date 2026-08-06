@@ -113,8 +113,22 @@ export interface RuntimeContext extends EventScope {
 
   /** Request bundle id when one user request spawns many ops. */
   readonly correlationId?: string;
-  /** W3C TraceContext header value when present. */
+  /**
+   * W3C TraceContext header value when present, and the op's span PARENTS under
+   * it. Set only where the trust decision was made — the wire boundary — and
+   * only on the op that boundary creates, never inherited by children (they
+   * nest under their own caller, which is what keeps the tree a tree).
+   */
   readonly traceparent?: string;
+  /**
+   * A remote span this op LINKS to rather than parents under.
+   *
+   * The safe half of the same decision. A link keeps the two traces joinable in
+   * a backend without adopting the caller's sampling choice — which matters
+   * because the caller may be a browser, and a peer that can force sampling can
+   * drive someone else's telemetry bill.
+   */
+  readonly traceLink?: string;
 
   // ── Adopter extension (typed via module augmentation) ──────────────
 

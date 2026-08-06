@@ -688,6 +688,35 @@ The meter is shared and memoized. An OTel `MetricReader` binds to exactly one `M
 
 The framework adds no proprietary layer between you and OpenTelemetry: `createTelemetry` merges your standard `SpanProcessor` and `MetricReader` sinks and hands the raw objects to the SDK. This package declares no exporter dependency; those live in [@agentick/telemetry-otlp](../telemetry-otlp).
 
+### A client's trace, and whether you trust it
+
+If your browser or mobile client also reports telemetry, it tags every request with the span it was made inside. The tag is a W3C `traceparent` value, carried in the request body as `_meta.traceparent` rather than as an HTTP header — so it works identically over a WebSocket or in-process, where there is no header to put it in.
+
+What the gateway does with that tag is a setting, because the tag comes from a caller you may not control:
+
+```ts
+await createGateway({ telemetry, remoteParent: "parent" });
+```
+
+What you see in your tracing UI:
+
+| Setting              | In your tracing UI                                                                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `"link"` _(default)_ | Two traces — one for the client, one for the server — with a **link** between them. You can click from one to the other, but they are separate timelines. |
+| `"parent"`           | **One** trace. The button click, the request, the model call and the tool call are all one tree you can read top to bottom.                               |
+| `"ignore"`           | Two traces, unconnected.                                                                                                                                  |
+
+`"parent"` is the nicer picture, so why is `"link"` the default?
+
+Because the tag is just a string in a request body — anything that can reach your gateway can send whatever it likes. Part of that string is the **sampled bit**: a flag saying "record this one," which tracing systems use to keep only a fraction of traffic and hold costs down. Adopt a caller's tag as the parent and you adopt that flag too, so a client can switch your sampling off — or pin it on for every request and run up your telemetry bill. A caller can also aim its tag at a trace id it does not own, mixing its requests into someone else's timeline.
+
+None of that matters when the caller is your own first-party app, which is why `"parent"` is a one-line opt-in. It matters a great deal when your gateway is on the public internet, which is why the default is the conservative one. (This is OpenTelemetry's own recommendation for public endpoints.)
+
+Two details worth knowing:
+
+- **Only the outermost server operation is affected.** A caller's tag can attach at `wire:<method>` and nowhere deeper — the operations beneath it always nest under the server's own span.
+- **A malformed tag is ignored, not rejected.** A bad `traceparent` says something about the caller's telemetry setup, not about whether their request should run. It is dropped and the request proceeds normally.
+
 ## Bounding tool output sent to clients
 
 A tool can return a multi-megabyte result. That payload **must** reach the model and **must** land in the durable timeline, but need not be shoved verbatim down a socket to a browser. The gateway is the client projection boundary, so it owns the policy — configured once, applied by the wire dispatch boundary to every client-facing frame, RPC results and notifications alike. There is no path that bounds one while leaking the other.
@@ -849,6 +878,7 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - `src/__tests__/layered-tools.spec.ts` — gateway tools reaching every session of every hosted app, and app- and session-level tools overriding on name collision.
 - `src/__tests__/emit-capabilities-changed.spec.ts` — event shape, per-call ordering, zero-subscriber safety, and scope-query plus child-bus isolation.
 - `src/__tests__/telemetry-inheritance.spec.ts`, `telemetry-multi-app.spec.ts`, `telemetry-wire-ctx.spec.ts` — gateway-operation span export, app inheritance and app override precedence, two apps sharing one `MeterProvider` with metrics distinguished by the `app` label, and a handler's `ctx.trace` parenting under `wire:<method>` with `ctx.metrics` carrying `{ method }`. All against real OTel `SpanProcessor` and `MetricReader`s.
+- `src/__tests__/remote-trace.spec.ts` + `remote-parent-wire.spec.ts` — the three policies mapped from a caller's `_meta.traceparent`, every unusable header (malformed, reserved version `ff`, all-zero ids) ignored rather than refused, and normalisation through the parser. Then the same three end to end through a real gateway against a real OTel `SpanProcessor`, discriminated by `traceId`: `link` leaving the `wire:<method>` span in its OWN trace with the caller's as a link, `parent` putting it IN the caller's trace, and `ignore` doing neither.
 - `src/__tests__/create-gateway-cluster.spec.ts` — the substrate genuinely cluster-wrapped (membership shows the gateway, close removes it), and the factory-plus-cluster combination rejected.
 - `src/wire/__tests__/session-timeline-history.spec.ts` + `subscriptions-channel-snapshot.spec.ts` — the cursored history read paging forward and the tail page carrying no cursor, and a channel subscription opening with a snapshot as its first frame under the client's own subscription id.
 - `src/__tests__/timeline-history-grant.spec.ts` — the granted-read recipe above: the declared read resolving and dispatching with `origin: "wire"`, an unexposed timeline write staying `MethodNotFound` even for a `*` holder, `commands/list` advertising the read, the exact-verb grant working while a sibling-verb grant does not leak it, the read grant conferring no writes, and a `*` grant still losing to the same-principal target rule. The full client-to-store path (25-entry log, two pages, `Forbidden` without a grant, cross-principal denial) is [@agentick/transport-in-process](../transport-in-process)'s `timeline-history-e2e.spec.ts`.
