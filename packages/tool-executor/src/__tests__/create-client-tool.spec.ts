@@ -56,13 +56,12 @@ const run = (
   );
 
 describe("toClientToolDeclaration", () => {
-  it("projects the declaration and drops the halves that cannot cross the wire", () => {
+  it("projects the declaration and drops the half that cannot cross the wire", () => {
     const tool = createClientTool({
       name: "navigate_to",
       description: "Navigate this tab",
       inputSchema: schema,
       aliases: ["goto"],
-      accepts: () => true,
       handler: async () => "ok",
     });
 
@@ -75,7 +74,6 @@ describe("toClientToolDeclaration", () => {
       aliases: ["goto"],
     });
     expect("handler" in declaration).toBe(false);
-    expect("accepts" in declaration).toBe(false);
   });
 });
 
@@ -87,7 +85,7 @@ describe("dispatch", () => {
       inputSchema: schema,
       handler: async () => "highlighted text",
     });
-    await expect(run(call("read_selection"), [tool], "conn-A")).resolves.toBe("highlighted text");
+    await expect(run(call("read_selection"), [tool], "client-A")).resolves.toBe("highlighted text");
   });
 
   it("resolves a call that arrived under an alias", async () => {
@@ -98,7 +96,7 @@ describe("dispatch", () => {
       aliases: ["goto"],
       handler: async () => "navigated",
     });
-    await expect(run(call("goto"), [tool], "conn-A")).resolves.toBe("navigated");
+    await expect(run(call("goto"), [tool], "client-A")).resolves.toBe("navigated");
   });
 
   it("hands the handler a ctx carrying the call and the client's runtime", async () => {
@@ -112,7 +110,6 @@ describe("dispatch", () => {
         seen["name"] = ctx.name;
         seen["target"] = ctx.target;
         seen["clientId"] = ctx.clientId;
-        seen["connectionId"] = ctx.connectionId;
         // Present and safe to call with no adapter wired.
         ctx.log.info({ msg: "hi" });
         await ctx.trace("child", () => {});
@@ -120,45 +117,14 @@ describe("dispatch", () => {
       },
     });
 
-    await run(call("t", {}, "conn-B"), [tool], "conn-A");
+    await run(call("t", {}, "client-A"), [tool], "client-A");
 
     expect(seen).toEqual({
       toolCallId: "tc-1",
       name: "t",
-      target: "conn-B",
+      target: "client-A",
       clientId: "c1",
-      connectionId: "conn-A",
     });
-  });
-
-  it("reads connectionId live, so a reconnect is not stale on a long-lived tool", async () => {
-    let current: string | undefined = "conn-A";
-    const live: ClientRuntimeContext = {
-      ...runtime,
-      get connectionId() {
-        return current;
-      },
-    };
-    let observed: string | undefined;
-    const tool = createClientTool({
-      name: "t",
-      description: "d",
-      inputSchema: schema,
-      handler: async (_i, ctx) => {
-        observed = ctx.connectionId;
-        return "ok";
-      },
-    });
-
-    current = "conn-RECONNECTED";
-    await dispatchClientToolCall(
-      call("t"),
-      [tool] as never,
-      () => "conn-A",
-      live,
-      new AbortController().signal,
-    );
-    expect(observed).toBe("conn-RECONNECTED");
   });
 
   it("answers a handler throw with an error result — a suspended call never hangs", async () => {
@@ -170,125 +136,135 @@ describe("dispatch", () => {
         throw new Error("boom");
       },
     });
-    await expect(run(call("t"), [tool], "conn-A")).resolves.toEqual({
+    await expect(run(call("t"), [tool], "client-A")).resolves.toEqual({
       content: "`t` failed in the browser: boom",
       isError: true,
     });
   });
 });
 
-describe("the two silences", () => {
-  it("a DECLINED call returns nothing — this client must not answer", async () => {
+describe("addressing — every client receives every call", () => {
+  it("runs a call addressed to THIS client", async () => {
+    const tool = createClientTool({
+      name: "navigate_to",
+      description: "d",
+      inputSchema: schema,
+      handler: async () => "navigated",
+    });
+    await expect(run(call("navigate_to", {}, "client-A"), [tool], "client-A")).resolves.toBe(
+      "navigated",
+    );
+  });
+
+  it("stays SILENT on a call addressed to another client", async () => {
     const handler = vi.fn();
     const tool = createClientTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
-      accepts: ({ target, self }) => target === undefined || target === self,
       handler,
     });
 
-    const result = await run(call("navigate_to", {}, "conn-B"), [tool], "conn-A");
+    const result = await run(call("navigate_to", {}, "client-B"), [tool], "client-A");
 
+    // No response at all — the addressed client is the one that answers.
     expect(result).toBe(DECLINED);
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it("an UNKNOWN call is answered — nobody has it, so someone must say so", async () => {
-    await expect(run(call("mystery"), [], "conn-A")).resolves.toEqual({
-      content: 'no client handler for "mystery"',
-      isError: true,
-    });
-  });
-
-  it("declining does NOT reach notFound — it is not the same as not knowing the tool", async () => {
-    const notFound = vi.fn(async (): Promise<ToolResultInput> => "fallback");
+  it("runs an UNADDRESSED call — nobody in particular means everybody", async () => {
     const tool = createClientTool({
-      name: "navigate_to",
+      name: "show_toast",
       description: "d",
       inputSchema: schema,
-      accepts: () => false,
-      handler: async () => "ran",
+      handler: async () => "shown",
     });
-
-    const result = await run(call("navigate_to"), [tool], "conn-A", { notFound });
-
-    expect(result).toBe(DECLINED);
-    expect(notFound).not.toHaveBeenCalled();
+    await expect(run(call("show_toast"), [tool], "client-A")).resolves.toBe("shown");
   });
 
-  it("four tabs, one addressed: exactly one answers and three stay silent", async () => {
+  it("four clients, one addressed: exactly one answers and three stay silent", async () => {
     const ran: string[] = [];
     const toolFor = (self: string) =>
       createClientTool({
         name: "navigate_to",
         description: "d",
         inputSchema: schema,
-        accepts: ({ target }) => target === undefined || target === self,
         handler: async () => {
           ran.push(self);
           return "navigated";
         },
       });
 
-    const tabs = ["conn-A", "conn-B", "conn-C", "conn-D"];
+    const clients = ["client-A", "client-B", "client-C", "client-D"];
     const results = await Promise.all(
-      tabs.map((self) => run(call("navigate_to", {}, "conn-C"), [toolFor(self)], self)),
+      clients.map((self) => run(call("navigate_to", {}, "client-C"), [toolFor(self)], self)),
     );
 
-    expect(ran).toEqual(["conn-C"]);
+    expect(ran).toEqual(["client-C"]);
     expect(results.filter((r) => r !== DECLINED)).toEqual(["navigated"]);
   });
 
-  it("an unaddressed call reaches every tab — the default is broadcast, not silence", async () => {
-    const ran: string[] = [];
-    const toolFor = (self: string) =>
-      createClientTool({
-        name: "show_toast",
-        description: "d",
-        inputSchema: schema,
-        handler: async () => {
-          ran.push(self);
-          return "shown";
-        },
-      });
+  it("reads `self` at dispatch, so a rebound client id is not stale", async () => {
+    // The server BINDS the id at handshake and may answer with one the client
+    // did not claim; a captured `self` would compare against the wrong value.
+    let bound = "client-CLAIMED";
+    const tool = createClientTool({
+      name: "t",
+      description: "d",
+      inputSchema: schema,
+      handler: async () => "ran",
+    });
 
-    await Promise.all(
-      ["conn-A", "conn-B"].map((self) => run(call("show_toast"), [toolFor(self)], self)),
-    );
+    bound = "client-BOUND";
+    await expect(
+      dispatchClientToolCall(
+        call("t", {}, "client-BOUND"),
+        [tool],
+        () => bound,
+        runtime,
+        new AbortController().signal,
+      ),
+    ).resolves.toBe("ran");
+  });
+});
 
-    expect(ran).toEqual(["conn-A", "conn-B"]);
+describe("an unknown tool is still answered", () => {
+  it("answers a call naming a tool this client never declared", async () => {
+    // Distinct from an addressed-elsewhere call, which is silent: nobody has
+    // this one, so silence would hang it until it timed out.
+    await expect(run(call("mystery"), [], "client-A")).resolves.toEqual({
+      content: 'no client handler for "mystery"',
+      isError: true,
+    });
   });
 
-  it("accepts sees the input, so acceptance can depend on the arguments", async () => {
+  it("a custom notFound answers it instead", async () => {
+    const notFound = async (): Promise<ToolResultInput> => "handled elsewhere";
+    await expect(run(call("mystery"), [], "client-A", { notFound })).resolves.toBe(
+      "handled elsewhere",
+    );
+  });
+
+  it("an addressed-elsewhere call does NOT reach notFound", async () => {
+    const notFound = vi.fn(async (): Promise<ToolResultInput> => "fallback");
     const tool = createClientTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
-      accepts: ({ input }) => (input as { to?: string }).to === "/reports",
-      handler: async () => "navigated",
+      handler: async () => "ran",
     });
 
-    await expect(run(call("navigate_to", { to: "/reports" }), [tool], "conn-A")).resolves.toBe(
-      "navigated",
-    );
-    await expect(run(call("navigate_to", { to: "/other" }), [tool], "conn-A")).resolves.toBe(
-      DECLINED,
-    );
-  });
+    const result = await run(call("navigate_to", {}, "client-B"), [tool], "client-A", { notFound });
 
-  it("a custom notFound answers the unknown call", async () => {
-    const notFound = async (): Promise<ToolResultInput> => "handled elsewhere";
-    await expect(run(call("mystery"), [], "conn-A", { notFound })).resolves.toBe(
-      "handled elsewhere",
-    );
+    expect(result).toBe(DECLINED);
+    expect(notFound).not.toHaveBeenCalled();
   });
 });
 
 describe("a handler that answers with nothing", () => {
-  it("is answered as UNKNOWN, not mistaken for a decline", async () => {
-    // Reachable from untyped JS, where the return type is not enforced. Treating
-    // it as a decline would hang the call to timeout; treating it as success
+  it("is answered as UNKNOWN, not mistaken for an addressing decline", async () => {
+    // Reachable from untyped JS, where the return type is not enforced.
+    // Treating it as a decline would hang the call; treating it as success
     // would have the model announce an effect nobody observed.
     const tool = createClientTool({
       name: "t",
@@ -297,7 +273,7 @@ describe("a handler that answers with nothing", () => {
       handler: (() => undefined) as never,
     });
 
-    const result = await run(call("t"), [tool], "conn-A");
+    const result = await run(call("t"), [tool], "client-A");
 
     expect(result).not.toBe(DECLINED);
     expect(String(result)).toContain("reported no outcome");

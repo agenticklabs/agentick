@@ -126,6 +126,17 @@ export interface DispatchContext {
    * {@link DISPATCHER_DESCRIPTOR}.
    */
   readonly server?: WireServerDescriptor;
+  /**
+   * Binds the client id this connection claims at handshake, and holds it for
+   * the connection's life so every later dispatch carries the same value.
+   *
+   * The transport owns it because the transport owns the connection. A caller
+   * that supplies none gets a server-assigned id, so the field is never absent
+   * downstream.
+   */
+  readonly bindClientId?: (requested: string | undefined) => string;
+  /** The bound client id, read on every dispatch after the handshake. */
+  readonly clientId?: string;
 }
 
 export async function dispatchRequest(
@@ -171,7 +182,16 @@ export async function dispatchRequest(
     // is stateless keepalive).
     switch (req.method) {
       case "initialize":
-        return success(req.id, initialize(req.params, host, server ?? DISPATCHER_DESCRIPTOR));
+        return success(
+          req.id,
+          initialize(
+            req.params,
+            host,
+            server ?? DISPATCHER_DESCRIPTOR,
+            connectionId ?? requestId,
+            connection.bindClientId ?? ((requested) => requested ?? `client-${ulid()}`),
+          ),
+        );
       case "ping":
         return success(req.id, {});
       case "_extensions/list": {
@@ -215,7 +235,11 @@ export async function dispatchRequest(
           req.params,
           projectedSink,
           identity,
-          { requestId, ...(connectionId !== undefined ? { connectionId } : {}) },
+          {
+            requestId,
+            ...(connectionId !== undefined ? { connectionId } : {}),
+            ...(connection.clientId !== undefined ? { clientId: connection.clientId } : {}),
+          },
         );
         try {
           // ADR 83 §"Wire dispatch through the seam": route the handler
@@ -423,6 +447,18 @@ function initialize(
   rawParams: unknown,
   host: DispatchHost,
   server: WireServerDescriptor,
+  /**
+   * The id of the connection this handshake arrived on — the SAME value the
+   * server stamps as `target` when it relays a tool call. Minting a fresh one
+   * here gave the client an id nothing else in the system used, so a client
+   * comparing `target` against its own could never match.
+   *
+   * A stateless edge has no connection, so it falls back to this request's id:
+   * unique, and honest that it names one request rather than a socket.
+   */
+  connectionId: string,
+  /** Binds the client's requested id, or assigns one when it asked for none. */
+  bindClientId: (requested: string | undefined) => string,
 ): InitializeResult {
   // Untrusted input: `InitializeParams.protocolVersion` is typed to the one
   // literal, so read it wide and compare, rather than trusting the cast.
@@ -447,7 +483,10 @@ function initialize(
       mcpSurface: serves("tools/call"),
     },
     serverInfo: { name: server.name, version: server.version },
-    connectionId: `conn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    connectionId,
+    clientId: bindClientId(
+      (rawParams as { readonly clientId?: unknown } | undefined)?.clientId as string | undefined,
+    ),
   };
 }
 
@@ -578,7 +617,11 @@ function buildWireExtensionContext(
   rawParams: unknown,
   sink: DispatchSink,
   identity: IngressIdentity | undefined,
-  caller: { readonly connectionId?: string; readonly requestId: string },
+  caller: {
+    readonly connectionId?: string;
+    readonly clientId?: string;
+    readonly requestId: string;
+  },
 ): WireExtensionContext {
   const params = (rawParams ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" ? params.sessionId : undefined;
@@ -629,6 +672,7 @@ function buildWireExtensionContext(
       app,
       session,
       connectionId: caller.connectionId,
+      clientId: caller.clientId,
       requestId: caller.requestId,
     }),
     // TODO(phase-F): resolve HookBridges from the session's session-extension

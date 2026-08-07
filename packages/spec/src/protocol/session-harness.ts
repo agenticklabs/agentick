@@ -270,6 +270,15 @@ export interface SendInput<P = unknown, T = unknown> {
    * happens deep inside the run, after any particular request has returned.
    */
   readonly connectionId?: string;
+  /**
+   * The client this turn was asked from. Stamped by the wire boundary; absent
+   * for an in-process `send`, a cron trigger, or a spawn.
+   *
+   * The CLIENT rather than the connection, because a tool call outstanding
+   * when the socket drops has to still be addressed to the same tab when it
+   * comes back — and the connection id it reconnects with is a new one.
+   */
+  readonly clientId?: string;
   readonly messages?: ReadonlyArray<SendMessageInput>;
   readonly props?: P;
   readonly metadata?: Readonly<Record<string, unknown>>;

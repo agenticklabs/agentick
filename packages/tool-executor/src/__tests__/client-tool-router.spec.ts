@@ -110,6 +110,11 @@ function toolCall(name: string, input: unknown, toolCallId = "tc-1"): unknown {
   return { toolCallId, name, input };
 }
 
+/** A relay ADDRESSED to a specific client. */
+function toolCallFor(name: string, input: unknown, target: string): unknown {
+  return { toolCallId: "tc-1", name, input, target };
+}
+
 describe("clientToolCalls.route — correlated relays", () => {
   it("runs the matching handler and relays its result via session/respond_to_tool_call", async () => {
     const stream = pushStream();
@@ -264,7 +269,6 @@ describe("clientToolCalls.use — declare and route as one act", () => {
         name: "navigate_to",
         description: "d",
         inputSchema: jsonSchema({ type: "object" }),
-        accepts: () => false,
         handler: async () => "navigated",
       }),
       createClientTool({
@@ -278,7 +282,7 @@ describe("clientToolCalls.use — declare and route as one act", () => {
     // The decline goes FIRST, then an accepted call. Waiting for the second
     // reply proves the first had its chance and took it — a bare "nothing was
     // sent yet" would pass before any dispatch ran at all.
-    stream.emit(toolCall("navigate_to", {}), "corr:decline");
+    stream.emit(toolCallFor("navigate_to", {}, "someone-else"), "corr:decline");
     stream.emit(toolCall("show_toast", {}), "corr:accept");
 
     await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));

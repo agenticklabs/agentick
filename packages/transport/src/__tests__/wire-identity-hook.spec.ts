@@ -375,3 +375,69 @@ describe("connection + request coordinates reach the wire ctx", () => {
     await gateway.close();
   });
 });
+
+describe("the connection id a client is told is the one the server addresses it by", () => {
+  it("returns the SAME id at handshake that later dispatches carry", async () => {
+    // The round trip nothing asserted: `initialize` used to mint its own id and
+    // hand the client a value nothing else in the system used, so a client
+    // comparing an addressed `target` against its own id could never match.
+    let dispatched: string | undefined;
+    const gateway = await createGateway({
+      wireExtensions: [
+        {
+          name: "coords",
+          namespace: "coords",
+          methods: {
+            "coords/read": (_p: unknown, ctx: unknown) => {
+              dispatched = (ctx as { connectionId?: string }).connectionId;
+              return { ok: true };
+            },
+          },
+        } as never,
+      ],
+    });
+    await gateway.listen();
+
+    const connection = { connectionId: "conn-SOCKET-1" };
+
+    const handshake = await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "v1" } } as never,
+      stubSink(),
+      connection,
+    );
+    await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 2, method: "coords/read", params: {} } as never,
+      stubSink(),
+      connection,
+    );
+
+    const told = (handshake as { result: { connectionId: string } }).result.connectionId;
+    expect(told).toBe("conn-SOCKET-1");
+    expect(told).toBe(dispatched);
+    await gateway.close();
+  });
+
+  it("a stateless edge is told its request id — unique, and never a socket it does not have", async () => {
+    const gateway = await createGateway();
+    await gateway.listen();
+
+    const first = await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "v1" } } as never,
+      stubSink(),
+    );
+    const second = await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "v1" } } as never,
+      stubSink(),
+    );
+
+    const a = (first as { result: { connectionId: string } }).result.connectionId;
+    const b = (second as { result: { connectionId: string } }).result.connectionId;
+    expect(a).toEqual(expect.any(String));
+    expect(a).not.toBe(b);
+    await gateway.close();
+  });
+});

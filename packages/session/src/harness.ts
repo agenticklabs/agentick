@@ -2916,7 +2916,7 @@ export class SessionHarness<P = unknown>
                 ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
                 // The tab that asked, carried for the run's life — a tool call
                 // relayed on tick 6 still knows where the request came from.
-                ...omitUndefined({ connectionId: input.connectionId }),
+                ...omitUndefined({ connectionId: input.connectionId, clientId: input.clientId }),
                 compiler: this.compiler,
                 mountId: this.mountId,
                 modelExecutor: modelExecutorForCall,

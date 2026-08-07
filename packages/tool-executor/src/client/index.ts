@@ -47,10 +47,8 @@ export {
   createClientTool,
   toClientToolDeclaration,
   type ClientTool,
-  type ClientToolAcceptCtx,
   type ClientToolCtx,
   type ClientToolCtxExtensions,
-  type ClientToolOrigin,
 } from "./create-client-tool.js";
 export {
   DECLINED,

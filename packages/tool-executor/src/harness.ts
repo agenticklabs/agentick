@@ -817,6 +817,7 @@ export class ToolExecutorHarness
         executionId: input.context.executionId,
         tickId: input.context.tickId,
         connectionId: input.context.connectionId,
+        clientId: input.context.clientId,
       });
       // Capture the operation runtime IN-FIBER (inside the dispatch op body,
       // so it carries the op span + the ambient RuntimeContext.opId). Shared
@@ -1173,7 +1174,7 @@ export class ToolExecutorHarness
               toolCallId: input.toolCallId,
               name: input.name,
               input: validated,
-              ...omitUndefined({ target: input.context.connectionId }),
+              ...omitUndefined({ target: input.context.clientId }),
             },
             {
               ...omitUndefined({ timeoutMs: ann.responseTimeoutMs ?? input.responseTimeoutMs }),
@@ -1228,7 +1229,7 @@ export class ToolExecutorHarness
               toolCallId: input.toolCallId,
               name: input.name,
               input: validated,
-              ...omitUndefined({ target: input.context.connectionId }),
+              ...omitUndefined({ target: input.context.clientId }),
             },
             { scope: dispatchScope },
           );

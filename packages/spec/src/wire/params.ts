@@ -694,6 +694,20 @@ export interface InitializeParams extends WireRequestParams {
   readonly capabilities: ClientHandshakeCapabilities;
   readonly clientInfo: { readonly name: string; readonly version: string };
   /**
+   * This client's own id, stable for its lifetime and ACROSS RECONNECTS — the
+   * connection is replaced, the client is not.
+   *
+   * That stability is what it is for. A tool call is addressed to the client
+   * that asked for it, and a call outstanding when the socket drops has to
+   * still be addressed to the same client when it comes back; `connectionId`
+   * changes and cannot carry that.
+   *
+   * A CLAIM, not an identity: the server binds it scoped to the authenticated
+   * principal, so one caller cannot assert another's id and receive its work.
+   * Omitted, the server assigns one and returns it.
+   */
+  readonly clientId?: string;
+  /**
    * Scopes this client intends to use (#198, least privilege). The
    * connection's effective identity scopes become the cover-aware
    * INTERSECTION of the credential's claims and this request — a client
@@ -716,6 +730,14 @@ export interface InitializeResult {
   /** Server-allocated session-level context. Use on subsequent RPCs to
    *  pin to this gateway node (sticky session affinity). */
   readonly connectionId: string;
+  /**
+   * The client id the server BOUND — the requested one when it was accepted,
+   * or a server-assigned one. Echoed rather than assumed: a client that reads
+   * its own request back has no way to learn it was refused or replaced.
+   *
+   * This is the value a tool call's `target` is compared against.
+   */
+  readonly clientId: string;
 }
 
 /**

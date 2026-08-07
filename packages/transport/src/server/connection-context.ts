@@ -27,6 +27,8 @@ import type {
 } from "@agentick/spec";
 import { ErrorCode, intersectScopes, WireRpcError, type IngressIdentity } from "@agentick/spec";
 
+import { ulid } from "@agentick/utils";
+
 import { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
 
 /**
@@ -92,6 +94,12 @@ export abstract class BaseConnectionContext {
   ) {}
 
   /**
+   * The client behind this connection, bound at handshake and held for its
+   * life. `undefined` until `initialize` runs.
+   */
+  protected clientId: string | undefined;
+
+  /**
    * Subclasses call this with every decoded inbound JSON-RPC frame.
    * Returns the response for requests; `null` for notifications.
    * Subclass is responsible for writing the response (if non-null) via
@@ -129,7 +137,11 @@ export abstract class BaseConnectionContext {
       return dispatchRequest(this.gateway, frame as JsonRpcRequest, this.defaultSink(), {
         ...(this.identity !== undefined ? { identity: this.identity } : {}),
         ...(this.connectionId !== undefined ? { connectionId: this.connectionId } : {}),
+        ...(this.clientId !== undefined ? { clientId: this.clientId } : {}),
         ...(this.server !== undefined ? { server: this.server } : {}),
+        // Bound ONCE. A second `initialize` on a live connection cannot
+        // re-point it at another client and inherit that client's work.
+        bindClientId: (requested) => (this.clientId ??= requested ?? `client-${ulid()}`),
       });
     }
     return null;

@@ -63,6 +63,12 @@ export interface ServerInfo {
   readonly protocolVersion: "v1";
   /** Server-allocated connection id — sticky-session affinity key. */
   readonly connectionId: string;
+  /**
+   * The client id the server BOUND for this client — the one it claimed, or
+   * one the server assigned. Stable across reconnect, and the value a tool
+   * call's `target` is compared against.
+   */
+  readonly clientId: string;
 }
 
 /**

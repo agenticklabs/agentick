@@ -59,7 +59,7 @@ import {
   isClientStateFailed,
   parseHookKey,
 } from "@agentick/spec";
-import { computeFullJitterBackoff } from "@agentick/utils";
+import { computeFullJitterBackoff, ulid } from "@agentick/utils";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { clientObservability } from "./observability.js";
@@ -99,8 +99,6 @@ const CLIENT_VERSION = "0.0.0";
 const CLIENT_HANDSHAKE_CAPABILITIES: ClientHandshakeCapabilities = Object.freeze({
   cursorResume: true,
 });
-
-let clientCounter = 0;
 
 /**
  * How a handshake that failed on a LIVE wire is retried.
@@ -227,7 +225,11 @@ class AgentickClient implements ClientProtocol {
    */
   get runtime(): ClientRuntimeContext {
     return (this._runtime ??= clientRuntimeContext(this.observability, {
-      clientId: () => this.id,
+      // The BOUND id once the handshake has answered, the claimed one before
+      // it. Reporting the claim after the server replaced it would hand every
+      // `target === self` comparison a value nobody addresses this client by —
+      // the same mismatch the handshake's connection id had.
+      clientId: () => this.serverInfo?.clientId ?? this.id,
       connectionId: () => this.serverInfo?.connectionId,
     }));
   }
@@ -290,7 +292,10 @@ class AgentickClient implements ClientProtocol {
   private closed = false;
 
   constructor(options: CreateClientOptions) {
-    this.id = options.id ?? `client-${++clientCounter}`;
+    // A per-process counter would give every tab `client-1`. This id is what
+    // the server addresses a tool call to, so two tabs sharing one means each
+    // answering the other's work.
+    this.id = options.id ?? `client-${ulid()}`;
     this.transport = options.transport;
     this.extensions = options.extensions ?? [];
     // ONE instance for the client's lifetime: span nesting lives on it, so a
@@ -606,6 +611,10 @@ class AgentickClient implements ClientProtocol {
         protocolVersion: WIRE_PROTOCOL_VERSION,
         capabilities: CLIENT_HANDSHAKE_CAPABILITIES,
         clientInfo: { name: CLIENT_NAME, version: CLIENT_VERSION },
+        // Claimed at handshake and bound by the server. Sent on every
+        // reconnect UNCHANGED — that is what lets a call outstanding across a
+        // dropped socket still be addressed to the client that asked for it.
+        clientId: this.id,
       });
     } catch (err) {
       if (!isMethodNotFound(err)) throw err;
@@ -648,6 +657,10 @@ class AgentickClient implements ClientProtocol {
         version: initResult.serverInfo.version,
         protocolVersion: initResult.protocolVersion,
         connectionId: initResult.connectionId,
+        // The BOUND id, not the one claimed. A server that refused or replaced
+        // the claim has said so here, and a client that kept using its own
+        // would compare `target` against a value nobody addresses it by.
+        clientId: initResult.clientId,
       };
     }
     this.commitCapabilities(framework, extensions);

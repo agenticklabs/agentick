@@ -279,6 +279,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // session's spawn lineage when it is a spawned child.
         ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
         ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
+        ...(i.clientId !== undefined ? { clientId: i.clientId } : {}),
       }),
       handler: (i) => this.tickBody(i),
     });
@@ -310,6 +311,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         // spawn lineage so sub-agent work is attributable on the bus/journal.
         ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
         ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
+        ...(i.clientId !== undefined ? { clientId: i.clientId } : {}),
       }),
       body: (i, sink) => this.runExecutionBody(i, sink),
     });
@@ -496,6 +498,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           mountId: input.mountId,
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
+          ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -744,6 +747,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           mountId: input.mountId,
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
+          ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -1382,6 +1386,8 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
                 // Carries to the relay, so a client-handled call is addressed
                 // back to the connection that asked for this turn.
                 ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
+                ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
+                ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
               },
               // Structured cancellation (Stage 5) — an in-flight tool
               // handler tears down when abort()/timeout fires (the tool

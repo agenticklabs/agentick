@@ -443,8 +443,8 @@ describe("ToolExecutorHarness — discriminator regression guard", () => {
   });
 });
 
-describe("connection targeting — the relay addresses the tab that asked", () => {
-  it("stamps the execution's connection as `target` on a correlated relay", async () => {
+describe("client targeting — the relay addresses the client that asked", () => {
+  it("stamps the execution's client as `target` on a correlated relay", async () => {
     const { harness, bus } = await createTestHarness({
       tools: [clientTool("client_nav", { requiresResponse: true })],
     });
@@ -456,13 +456,13 @@ describe("connection targeting — the relay addresses the tab that asked", () =
         "tc-target",
         { to: "/reports" },
         {
-          context: { via: "model", connectionId: "conn-TAB-A" },
+          context: { via: "model", clientId: "client-TAB-A" },
         },
       ),
     );
 
     const env = await reqP;
-    expect((env.payload as { target?: string }).target).toBe("conn-TAB-A");
+    expect((env.payload as { target?: string }).target).toBe("client-TAB-A");
   });
 
   it("stamps it on a fire-and-forget notify too — a toast is still addressed", async () => {
@@ -477,15 +477,15 @@ describe("connection targeting — the relay addresses the tab that asked", () =
         "tc-fire",
         { x: 1 },
         {
-          context: { via: "model", connectionId: "conn-TAB-B" },
+          context: { via: "model", clientId: "client-TAB-B" },
         },
       ),
     );
 
-    expect((await notifyP).payload).toMatchObject({ target: "conn-TAB-B" });
+    expect((await notifyP).payload).toMatchObject({ target: "client-TAB-B" });
   });
 
-  it("omits `target` when the execution had no connection — a cron run addresses nobody", async () => {
+  it("omits `target` when the execution had no client — a cron run addresses nobody", async () => {
     const { harness, bus } = await createTestHarness({
       tools: [clientTool("client_nav2", { requiresResponse: true })],
     });

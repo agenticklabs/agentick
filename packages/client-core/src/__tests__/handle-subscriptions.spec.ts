@@ -310,6 +310,7 @@ function initResult(): InitializeResult {
     capabilities: { subscriptions: true, progress: true, cursorResume: true, cancellation: true },
     serverInfo: { name: "@test/gateway", version: "1.0.0" },
     connectionId: "conn-1",
+    clientId: "client-test",
   };
 }
 

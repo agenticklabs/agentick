@@ -124,6 +124,14 @@ export interface EventScope extends EventScopeExtensions {
    */
   readonly connectionId?: string;
   /**
+   * The CLIENT behind the connection — one browser tab, one mobile app.
+   * Survives a reconnect where {@link connectionId} does not.
+   *
+   * Use this to address work back to whoever asked for it; use
+   * `connectionId` for what actually happened on which socket.
+   */
+  readonly clientId?: string;
+  /**
    * Provenance — the gate through which the operation entered the
    * system (ADR 51). The second core identity dimension, twin of
    * {@link principal}: stamped **at the gates** (the wire resolver

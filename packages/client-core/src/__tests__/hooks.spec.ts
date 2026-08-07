@@ -78,6 +78,7 @@ function initResult(): InitializeResult {
     capabilities: {},
     serverInfo: { name: "@test/gateway", version: "0.0.0" },
     connectionId: "conn-1",
+    clientId: "client-test",
   };
 }
 

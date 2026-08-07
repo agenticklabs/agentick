@@ -33,7 +33,7 @@ import type { InProcessGatewayHandler } from "./transport.js";
  * Default `initialize` response used by {@link withHandshake} when
  * the caller doesn't supply one.
  */
-export function buildHandshakeInitializeResult(): InitializeResult {
+export function buildHandshakeInitializeResult(claimedClientId?: string): InitializeResult {
   return {
     protocolVersion: "v1",
     capabilities: {
@@ -48,6 +48,9 @@ export function buildHandshakeInitializeResult(): InitializeResult {
     },
     serverInfo: { name: "@agentick/transport-in-process", version: "0.0.0" },
     connectionId: `conn-inproc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    // Echoed back so a client sees the id it will be addressed by. The stub
+    // binds whatever is claimed; a real server scopes the claim to a principal.
+    clientId: claimedClientId ?? `client-inproc-${Date.now()}`,
   };
 }
 
@@ -75,12 +78,21 @@ export function withHandshake(
   inner: InProcessGatewayHandler,
   overrides?: WithHandshakeOverrides,
 ): InProcessGatewayHandler {
-  const initResult = overrides?.initialize ?? buildHandshakeInitializeResult();
+  const initResult = overrides?.initialize;
   const listResult = overrides?.extensionsList ?? buildHandshakeExtensionsListResult();
 
   return async (req: JsonRpcRequest, sendNotification): Promise<JsonRpcResponse> => {
     if (req.method === "initialize") {
-      return { jsonrpc: "2.0", id: req.id, result: initResult };
+      // Echo the claimed id when there is no override, so a client here sees
+      // the same value it will be addressed by — the stub's own binding.
+      const claimed = (req.params as { clientId?: unknown } | undefined)?.clientId;
+      return {
+        jsonrpc: "2.0",
+        id: req.id,
+        result:
+          initResult ??
+          buildHandshakeInitializeResult(typeof claimed === "string" ? claimed : undefined),
+      };
     }
     if (req.method === "_extensions/list") {
       return { jsonrpc: "2.0", id: req.id, result: listResult };

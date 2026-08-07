@@ -247,6 +247,7 @@ describe("@agentick/spec — wire structural tests", () => {
         capabilities: { cursorResume: true, subscriptions: true, progress: true },
         serverInfo: { name: "test-gateway", version: "0.0.1" },
         connectionId: "conn-1",
+        clientId: "client-1",
       };
       expect(req.params?.protocolVersion).toBe("v1");
       expect(res.connectionId).toBe("conn-1");

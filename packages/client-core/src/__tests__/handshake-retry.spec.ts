@@ -90,6 +90,7 @@ function initResult(connectionId: string): InitializeResult {
     capabilities: { cursorResume: true, subscriptions: true, progress: true, cancellation: true },
     serverInfo: { name: "@test/gateway", version: "1.0.0" },
     connectionId,
+    clientId: "client-test",
   };
 }
 

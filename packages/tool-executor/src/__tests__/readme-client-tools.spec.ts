@@ -30,7 +30,6 @@ const navigateTo = createClientTool({
   name: "navigate_to",
   description: "Navigate this tab to a route",
   inputSchema: z.object({ to: z.string() }),
-  accepts: ({ target, self }) => target === undefined || target === self,
   handler: async ({ to }) => `navigated to ${to}`,
 });
 
@@ -55,14 +54,11 @@ describe("the README's examples", () => {
     });
   });
 
-  it("the documented `accepts` rule declines a call addressed elsewhere", () => {
-    const decide = (self: string, target?: string) =>
-      navigateTo.accepts?.({ name: "navigate_to", input: {}, self, target });
-
-    expect(decide("conn-A", "conn-A")).toBe(true);
-    expect(decide("conn-A", "conn-B")).toBe(false);
-    // Unaddressed — every tab takes it, which is why the stamp matters.
-    expect(decide("conn-A", undefined)).toBe(true);
+  it("carries no routing rule of its own — the framework addresses it", () => {
+    // The README no longer shows an `accepts` predicate, because a rule
+    // evaluated independently by N clients is only ever sound when it compares
+    // against a value the server chose. That comparison is the framework's.
+    expect("accepts" in navigateTo).toBe(false);
   });
 });
 

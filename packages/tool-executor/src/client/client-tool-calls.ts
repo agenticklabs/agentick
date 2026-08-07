@@ -308,7 +308,7 @@ export function clientToolCallsHandle(
       return routeClientTools(
         { onCall: (l) => (callListeners.add(l), () => void callListeners.delete(l)) },
         tools,
-        () => runtime.connectionId ?? "",
+        () => runtime.clientId,
         runtime,
         lifetime.signal,
         opts,

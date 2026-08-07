@@ -100,6 +100,11 @@ export interface DispatchContext {
    * meant for another tab.
    */
   readonly connectionId?: string;
+  /**
+   * The client this execution serves. A client-handled tool relays it as
+   * `target`, and each attached client compares it against its own id.
+   */
+  readonly clientId?: string;
   /** Caller-supplied request context (user, requestId, traceparent, …). */
   readonly request?: Readonly<Record<string, unknown>>;
   /**

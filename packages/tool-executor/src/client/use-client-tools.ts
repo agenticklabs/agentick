@@ -16,9 +16,9 @@ import type { ClientToolCallHandle } from "./client-tool-calls.js";
 import type { ClientTool, ClientToolCtx } from "./create-client-tool.js";
 
 /**
- * This client's own connection id, read at DISPATCH time rather than captured:
- * a reconnect mints a new one, and a stale `self` makes every `target === self`
- * rule wrong for the rest of the session.
+ * This client's own id, read at DISPATCH time rather than captured — the
+ * server BINDS it at handshake and may hand back a different one than was
+ * claimed, so a value captured at construction can be the wrong one.
  */
 export type ClientToolSelf = () => string;
 
@@ -43,13 +43,12 @@ function resolve(tools: readonly ClientTool[], name: string): ClientTool | undef
 }
 
 /**
- * Returned by {@link dispatchClientToolCall} when this client declines the call
- * and must send nothing.
+ * Returned by {@link dispatchClientToolCall} when the call was addressed to a
+ * different client and this one must send nothing.
  *
  * A distinct sentinel, NOT `undefined`: a handler that returns nothing (easy
  * from untyped JS, where the return type is not enforced) would otherwise be
- * indistinguishable from a decline, and the call would hang to timeout — the
- * exact failure the decline path exists to avoid.
+ * indistinguishable from a decline, and the call would hang to timeout.
  */
 export const DECLINED: unique symbol = Symbol("agentick.clientTool.declined");
 
@@ -70,15 +69,16 @@ export async function dispatchClientToolCall(
 ): Promise<ClientToolOutcome> {
   const tool = resolve(tools, call.name);
 
-  if (tool?.accepts !== undefined) {
-    const accepted = tool.accepts({
-      name: call.name,
-      input: call.input,
-      self: self(),
-      ...(call.target !== undefined ? { target: call.target } : {}),
-    });
-    if (!accepted) return DECLINED;
-  }
+  // EVERY attached client receives EVERY call — the channel is a broadcast and
+  // stays one. What differs is what each does with it locally, and this is that
+  // decision: run it if it was addressed to me, or if it was addressed to
+  // nobody in particular.
+  //
+  // Not an adopter predicate. A rule evaluated independently by N clients can
+  // only be sound when it compares against a single value the server chose,
+  // and getting that right is not something to ask every tool author to
+  // rediscover.
+  if (call.target !== undefined && call.target !== self()) return DECLINED;
 
   const ctx: ClientToolCtx = {
     ...runtime,

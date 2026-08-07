@@ -50,6 +50,7 @@ function fakeTransport(handler: Handler): ClientTransport {
     capabilities: { cursorResume: true, subscriptions: true, progress: true, cancellation: true },
     serverInfo: { name: "@test/gateway", version: "0.0.0" },
     connectionId: "conn-1",
+    clientId: "client-test",
   };
   return {
     id: "fake",

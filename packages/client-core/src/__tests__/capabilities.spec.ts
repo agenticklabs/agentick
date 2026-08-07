@@ -91,6 +91,7 @@ function buildInitializeResult(overrides?: Partial<InitializeResult>): Initializ
     },
     serverInfo: { name: "@test/gateway", version: "1.2.3" },
     connectionId: "conn-42",
+    clientId: "client-42",
     ...overrides,
   };
 }
@@ -147,6 +148,7 @@ describe("client capabilities", () => {
       version: "1.2.3",
       protocolVersion: "v1",
       connectionId: "conn-42",
+      clientId: "client-42",
     });
     expect(client.capabilities.framework).toEqual(initResult.capabilities);
     expect(client.capabilities.extensions).toEqual(listResult.extensions);
