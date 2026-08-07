@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model",
-  "version": "1.0.0-next.98",
+  "version": "1.0.0-next.99",
   "description": "The model layer for Agentick v2 (ADR 52) — zero Effect, zero substrate. Owns the LanguageModelAdapter contract, the stream accumulator + delta-transform pipeline, canonical projection, tag routing, and the standalone generate()/generateStream() helpers. Provider adapters (@agentick/model-openai, …) implement this contract; the executor harness consumes it.",
   "keywords": [
     "adapter",
