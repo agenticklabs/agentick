@@ -322,7 +322,7 @@ export class ToolExecutorHarness
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.sync(() => {
-          this.registry.add(i.registration);
+          this.registry.add(i.registration, i.replace === true);
         }),
       ),
     );
@@ -400,8 +400,7 @@ export class ToolExecutorHarness
     return runHarnessProtocol(
       this.runOperation(op, (i) =>
         Effect.sync(() =>
-          // Bulk binding sweep — clears a whole slice (lifecycle close, or the
-          // `set_client_tools` client-slice clear before reinstall).
+          // Bulk binding sweep — clears a whole slice at lifecycle close.
           this.registry.removeWhere((b) => sameBindingKey(b, i.binding)),
         ),
       ),

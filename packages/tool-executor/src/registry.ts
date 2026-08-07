@@ -68,7 +68,7 @@ export class InMemoryToolRegistry {
    * shape to the same binding slot. Adds a sibling entry when the
    * binding slot is new for this name.
    */
-  add(registration: ToolRegistration): void {
+  add(registration: ToolRegistration, replace = false): void {
     const name = registration.declaration.name;
     const list = this.byName.get(name);
     if (!list) {
@@ -82,7 +82,14 @@ export class InMemoryToolRegistry {
       if (areRegistrationsEqual(list[idx]!, registration)) {
         return; // idempotent on identical shape — no topology change, no notify
       }
-      throw new ToolAlreadyRegistered({ toolName: name });
+      if (!replace) throw new ToolAlreadyRegistered({ toolName: name });
+      // Latest declaration wins WITHIN this binding slot. Other slots keep
+      // their entry, so replacing a client's tool never touches the app's
+      // server-side tool of the same name.
+      list[idx] = registration;
+      this.indexAliases(registration);
+      this.notifyChange(name);
+      return;
     }
     list.push(registration);
     this.indexAliases(registration);

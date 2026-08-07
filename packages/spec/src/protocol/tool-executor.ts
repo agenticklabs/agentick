@@ -399,6 +399,16 @@ export function toRegistration(
 
 export interface RegisterToolInput {
   readonly registration: ToolRegistration;
+  /**
+   * Replace an existing registration in the SAME binding slot rather than
+   * refusing it. Off by default: a collision is usually two sources claiming
+   * one name, which should be loud.
+   *
+   * On for a declarative source that owns its slice and re-declares — a client
+   * re-sending its tools after a reconnect, or a second client contributing to
+   * the same slice. Other bindings' registrations are untouched.
+   */
+  readonly replace?: boolean;
   readonly opId?: string;
 }
 

@@ -417,7 +417,7 @@ calls.confirm((req) => !req.toolName?.startsWith("delete_"));
 Why one object and not two: the older `set` + `route` pair joins the declaration and the handler by a bare string, and gets no help if they disagree. A declaration with no handler suspends every call until it times out; a handler with no declaration is never invoked. Both are still there for a caller whose declarations come from somewhere else — `use` simply makes the mismatch unconstructable.
 
 ```ts
-await calls.set([openFileDecl, getWeatherDecl]); // whole-slice REPLACE
+await calls.set([openFileDecl, getWeatherDecl]); // upsert by name
 calls.route({ open_file: (input) => read(input.path) });
 ```
 
@@ -492,18 +492,24 @@ The snapshot fills itself: the handle polls once on construction and fires `subs
 
 The wire methods behind all of this:
 
-| Wire method                    | Params                                 | Effect                                                                                              |
-| ------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `session/list_tools`           | `{ sessionId, exposure?, cursor? }`    | One page of the registry projection: `{ tools, nextCursor? }`. `nextCursor` absent ⇒ last page.     |
-| `session/set_client_tools`     | `{ sessionId, declarations }`          | Clears the `{ scope: "client", sessionId }` slice, then registers the new set. Returns `{ count }`. |
-| `session/respond_to_tool_call` | `{ sessionId, correlationId, result }` | Resumes the suspended dispatch. Idempotent — an unknown or answered id is a silent no-op.           |
+| Wire method                    | Params                                 | Effect                                                                                                               |
+| ------------------------------ | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `session/list_tools`           | `{ sessionId, exposure?, cursor? }`    | One page of the registry projection: `{ tools, nextCursor? }`. `nextCursor` absent ⇒ last page.                      |
+| `session/set_client_tools`     | `{ sessionId, declarations }`          | Upserts each declaration into the `{ scope: "client", sessionId }` slice by name — latest wins. Returns `{ count }`. |
+| `session/respond_to_tool_call` | `{ sessionId, correlationId, result }` | Resumes the suspended dispatch. Idempotent — an unknown or answered id is a silent no-op.                            |
 
 `session.tools.list(query)` in-process is unpaginated — a bounded snapshot. Pagination is a wire concern, so the cursor exists only on the wire read.
 
 The client slice is its own binding, held distinct from `{ scope: "session" }`, so replacing it never clobbers app-declared tools, and session close reaps it.
 
-> [!NOTE]
-> The client slice is keyed by `sessionId`, not by connection — every client on a session shares one slice, so concurrent `set` calls are last-write-wins over the whole set. Coordinating which client owns the tools is the app's concern.
+Declaring is an **upsert by name**, not a whole-slice replace. Several clients share one session's slice, so a declaration that omits a tool is not a claim that the tool is gone — it is a claim about what _this_ client can do. Replacing the slice wholesale meant the second client to declare silently deleted the first one's tools: the model stopped seeing them, and the client that lost them had asked for nothing.
+
+Two consequences worth knowing:
+
+- **The empty set is a no-op.** A client with nothing to offer says nothing about what its peers offer.
+- **A departed client's tools linger** until the session closes and the slice is reaped. A call to one answers with its `defaultResult` when it times out — the same thing a call to any absent client already does.
+
+Re-declaring the same name replaces it within the client slice, so a reconnect that re-declares is free and never collides. An app tool of the same name sits in a different binding slot and is never touched.
 
 ## Presentation and model narration
 
@@ -644,7 +650,8 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - **Callback-executor inbox surface.** `tool:abort` and `tool:dispatch` auto-route on a `defineToolExecutor` executor via the command registry. Any _other_ inbox message type still lands on `HandlerError` — declare it as a command to wire it.
 - **`taskSupport: "supported"` negotiation.** The `"supported"` branch resolves conservatively (Pattern A outside the model-required path). Per-call capability negotiation isn't built.
 - **Custom-registry parity.** `defineToolExecutor` replicates storage callbacks but not the validation pipeline or confirmation gate; those need a subclass.
-- **Per-connection client slices.** The client tool slice is keyed by session, so multiple clients on one session are last-write-wins. Sub-slices keyed by connection are a future extension.
+- **No way to withdraw one client tool.** Declaring is an upsert, so a tool stays until the session closes. Nothing needed it yet; a removal verb is a small addition when something does.
+- **No way to target a client other than the one that asked.** A tool call goes to the client whose request started the turn. If two devices share a session and the asking one disconnects mid-turn, the call falls back to its `defaultResult` on timeout.
 - **Snapshot fold granularity.** The opening `tool_call` snapshot frame carries no top-level `toolCallId`/`name`, so a hand-rolled per-call fold that keys on those skips it; the bundled client handle consumes it correctly.
 
 ## Verified by
@@ -657,6 +664,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
 - `src/__tests__/readme-client-tools.spec.ts` — the `readSelection` / `navigateTo` examples on this page, compiled and run against the public `/client` entry with a real zod schema: the handler's input inferred off the schema with no cast, the schema projected to the JSON Schema the wire carries, and neither example carrying a routing rule of its own.
+- `@agentick/transport-in-process`'s `client-tools-e2e.spec.ts` — declaring over a real gateway: an upsert leaving an earlier client's tools standing ([A,B] then [B,C] ⇒ {A,B,C}), a re-declared name replacing in place with no collision, the empty set changing nothing, and an app tool of the same name surviving in its own binding slot. Plus two clients declaring in turn with neither erased.
 - `src/__tests__/create-client-tool.spec.ts` — the declaration projected off a `createClientTool` (the handler never reaching the wire), alias resolution, the ctx a handler receives, a handler throw answered rather than hung, and the addressing rule: a call for this client runs, one for another client is SILENT, an unaddressed one runs everywhere, four clients with one addressed produce exactly one answer and three silences, and `self` read at dispatch so a server-rebound id is never stale. Plus the two answers kept apart — an addressed-elsewhere call sends nothing and does not reach `notFound`, while an undeclared tool is answered because nobody has it.
 - `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), `use` publishing the projected declarations then answering with the same object's handler (with a declined call proven unanswered by ordering it before an accepted one), closing the handle stopping routing and aborting the handlers' signal so the returned stop is genuinely optional, `stop()` freeing the handle for a second `use`, the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.

@@ -143,7 +143,7 @@ async function compiledTool(session: SessionWithTools, name: string) {
 }
 
 describe("client-tool wire verb — end-to-end (declarative slice-replace)", () => {
-  it("set_client_tools REPLACES the client slice wholesale: [A,B] then [B,C] ⇒ exactly {B,C}", async () => {
+  it("set_client_tools UPSERTS by name: [A,B] then [B,C] ⇒ {A,B,C}", async () => {
     const { client, session, cleanup } = await makeStack();
     try {
       const sess = client.session(session.id);
@@ -152,11 +152,13 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
       expect(ack1).toEqual({ count: 2 });
       expect(await compiledNames(session)).toEqual(["client_a", "client_b"]);
 
-      // Re-declare a DIFFERENT set — A is gone (absent from the new set), C is
-      // added, B persists. This is a whole-slice replace, not an accumulate.
+      // A survives, because SEVERAL clients share this slice and a declaration
+      // that omits a tool is not a claim that the tool is gone — it is a claim
+      // about what THIS client can do. Whole-slice replace made the second
+      // client to declare silently delete the first one's tools.
       const ack2 = await sess.clientToolCalls.set([declB, declC]);
       expect(ack2).toEqual({ count: 2 });
-      expect(await compiledNames(session)).toEqual(["client_b", "client_c"]);
+      expect(await compiledNames(session)).toEqual(["client_a", "client_b", "client_c"]);
     } finally {
       await cleanup();
     }
@@ -169,8 +171,8 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
       await sess.clientToolCalls.set([
         { name: "client_x", description: "v1", inputSchema: schema("a") },
       ]);
-      // Same name, changed schema — the slice clear-then-reinstall means no
-      // collision guard fires.
+      // Same name, changed shape — the upsert replaces within the client slot,
+      // so the collision guard does not fire and the latest declaration wins.
       await sess.clientToolCalls.set([
         { name: "client_x", description: "v2", inputSchema: schema("b") },
       ]);
@@ -184,16 +186,19 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
     }
   });
 
-  it("declaring the empty set clears the client slice", async () => {
+  it("declaring the empty set changes nothing — it is not a claim about other clients", async () => {
     const { client, session, cleanup } = await makeStack();
     try {
       const sess = client.session(session.id);
       await sess.clientToolCalls.set([declA, declB]);
       expect(await compiledNames(session)).toEqual(["client_a", "client_b"]);
 
+      // A client with nothing to offer says nothing about what its peers offer.
+      // Clearing here would let any client wipe the session's whole tool set.
+      // The slice is reaped at session close.
       const ack = await sess.clientToolCalls.set([]);
       expect(ack).toEqual({ count: 0 });
-      expect(await compiledNames(session)).toEqual([]);
+      expect(await compiledNames(session)).toEqual(["client_a", "client_b"]);
     } finally {
       await cleanup();
     }
@@ -206,21 +211,59 @@ describe("client-tool wire verb — end-to-end (declarative slice-replace)", () 
       // The app's session-scoped tool is visible up front.
       expect(await compiledTool(session, "app_tool")).toHaveLength(1);
 
-      // Declare a client set, then replace it with a different one.
       await sess.clientToolCalls.set([declA, declB]);
       expect(await compiledNames(session)).toEqual(["app_tool", "client_a", "client_b"]);
 
+      // The app's session-bound tool is in a different binding slot, so nothing
+      // a client declares reaches it.
       await sess.clientToolCalls.set([declC]);
-      // The client slice was replaced ({A,B} → {C}), but the app's session-bound
-      // tool SURVIVES both replaces — proving `{ scope: "client" }` and
-      // `{ scope: "session" }` are distinct slices.
-      expect(await compiledNames(session)).toEqual(["app_tool", "client_c"]);
-
-      // And clearing the client slice leaves the app tool standing.
-      await sess.clientToolCalls.set([]);
-      expect(await compiledNames(session)).toEqual(["app_tool"]);
+      expect(await compiledNames(session)).toEqual([
+        "app_tool",
+        "client_a",
+        "client_b",
+        "client_c",
+      ]);
     } finally {
       await cleanup();
     }
+  });
+});
+
+describe("two clients on one session", () => {
+  it("a second client's declarations ADD to the first's — neither is erased", async () => {
+    // The whole-slice replace this verb used to do meant the second client to
+    // declare silently deleted the first's tools. The model stopped seeing
+    // them, and the client that lost them had asked for nothing.
+    const { client, session, cleanup } = await makeStack();
+
+    await client.session("ct-session").clientToolCalls.set([declA]);
+    await client.session("ct-session").clientToolCalls.set([declB]);
+
+    expect(await compiledNames(session)).toEqual(["client_a", "client_b"]);
+    await cleanup();
+  });
+
+  it("re-declaring the same name replaces it — latest wins, no collision error", async () => {
+    const { client, session, cleanup } = await makeStack();
+
+    await client.session("ct-session").clientToolCalls.set([declA]);
+    const revised: ClientToolDeclaration = { ...declA, description: "tool A, revised" };
+    await client.session("ct-session").clientToolCalls.set([revised]);
+
+    const [compiled] = await compiledTool(session, "client_a");
+    expect(compiled?.description).toBe("tool A, revised");
+    await cleanup();
+  });
+
+  it("does NOT clobber the app's server-side tool of the same name", async () => {
+    // Different binding slot: replacing within the client slice leaves the
+    // app's `createSession({ tools })` registration alone.
+    const collidingAppTool: ToolDeclaration = { ...appTool, id: "client_a", name: "client_a" };
+    const { client, session, cleanup } = await makeStack([collidingAppTool]);
+
+    await client.session("ct-session").clientToolCalls.set([declA]);
+
+    expect((await compiledTool(session, "client_a")).length).toBeGreaterThan(0);
+    await cleanup();
   });
 });

@@ -101,6 +101,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         // The asking connection, straight off the wire ctx — the one fact a
         // session cannot derive and the tool relay later needs.
         ...(ctx.connectionId !== undefined ? { connectionId: ctx.connectionId } : {}),
+        ...(ctx.clientId !== undefined ? { clientId: ctx.clientId } : {}),
         messages: params.messages,
         props: params.props,
         metadata: params.metadata,
@@ -335,23 +336,24 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
     "session/set_client_tools": async (params, ctx) => {
       const sess = (ctx.session ?? findSession(ctx, params.sessionId)) as SessionWithTools;
       const binding = { scope: "client", sessionId: params.sessionId } as const;
-      // DECLARATIVE whole-slice replace — the wire twin of the compiler's
-      // `replaceCompilerTools`. A client is a declarative tool SOURCE that
-      // owns the `{ scope: "client", sessionId }` slice: it declares its FULL
-      // set, and we replace the slice wholesale. This subsumes register (in the
-      // set), unregister (absent), and idempotency (it's a replace). The client
-      // slice is held DISTINCT from `{ scope: "session" }` — clearing it never
-      // clobbers the app's `createSession({ tools })` slice.
+      // UPSERT by name, latest declaration wins. NOT a whole-slice replace:
+      // several clients share this session's slice, and clearing it before
+      // reinstalling meant the second client to declare silently deleted the
+      // first one's tools — the model stopped seeing them, and the client that
+      // lost them had asked for nothing.
       //
-      // Clear the client slice first, then reinstall the declared set. Each
-      // declaration folds into a CLIENT-HANDLED registration via
+      // Each declaration folds into a CLIENT-HANDLED registration via
       // `toClientToolRegistration` (raw JSON-Schema `inputSchema` wrapped into a
       // validator; `handlerRef` omitted ⇒ client-handled). Session-lifetime:
-      // the session-close cleanup reaps the client slice.
-      await sess.toolExecutor.removeBoundTools({ binding });
+      // the session-close cleanup reaps the whole slice.
+      //
+      // The cost of dropping the clear is that a departed client's tools linger
+      // until the session closes. A call to one answers with its
+      // `defaultResult` on timeout, which is what a call to any absent client
+      // already does — so it is a known shape, not a new failure.
       for (const declaration of params.declarations) {
         const registration = toClientToolRegistration(declaration, binding);
-        await sess.toolExecutor.register({ registration });
+        await sess.toolExecutor.register({ registration, replace: true });
       }
       return { count: params.declarations.length };
     },
