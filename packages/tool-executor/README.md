@@ -400,6 +400,8 @@ await calls.use([readSelection, navigateTo]);
 
 That is the whole setup. `use` sends the declarations — each projected from the tool object, with the handler stripped — and starts answering calls with them.
 
+**What the handler returns is what the model reads.** `createClientTool` asks the server to wait for it (`requiresResponse` defaults on), because the handler is typed to return a result and cannot return nothing. Opt out with `requiresResponse: false` and the relay becomes one-way: the handler still runs, its value is discarded, and the model is told the call succeeded before the handler has finished. That is right for a toast and wrong for anything the model needs to read.
+
 **You do not need to tear anything down.** Closing the session closes its tool feed, which stops routing and aborts every handler's `signal`. `use` does return a stop function, but it is for swapping one tool set for another mid-session:
 
 ```ts

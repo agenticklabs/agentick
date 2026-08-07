@@ -72,6 +72,8 @@ describe("toClientToolDeclaration", () => {
       description: "Navigate this tab",
       inputSchema: { type: "object", properties: { to: { type: "string" } } },
       aliases: ["goto"],
+      // Defaulted on, so the handler's answer is what the model reads.
+      annotations: { requiresResponse: true },
     });
     expect("handler" in declaration).toBe(false);
   });
@@ -278,5 +280,56 @@ describe("a handler that answers with nothing", () => {
     expect(result).not.toBe(DECLINED);
     expect(String(result)).toContain("reported no outcome");
     expect(String(result)).toContain("Do not tell the user it succeeded");
+  });
+});
+
+describe("the handler's answer reaches the model", () => {
+  it("asks for a response by default — the handler's return value is the point", () => {
+    // Without this the relay is one-way: the handler runs, its value is
+    // discarded, and the model is told "executed successfully" before the
+    // handler has even finished. The type forbids returning nothing, so
+    // dropping what it forced you to return is the API disagreeing with itself.
+    const tool = createClientTool({
+      name: "read_table",
+      description: "d",
+      inputSchema: schema,
+      handler: async () => "the table has 4 rows",
+    });
+
+    expect(toClientToolDeclaration(tool).annotations).toMatchObject({
+      requiresResponse: true,
+    });
+  });
+
+  it("takes `requiresResponse: false` as the opt-out", () => {
+    const tool = createClientTool({
+      name: "show_toast",
+      description: "d",
+      inputSchema: schema,
+      annotations: { broadcast: true, requiresResponse: false },
+      handler: async () => "shown",
+    });
+
+    expect(toClientToolDeclaration(tool).annotations).toMatchObject({
+      broadcast: true,
+      requiresResponse: false,
+    });
+  });
+
+  it("keeps every other annotation the author set", () => {
+    const tool = createClientTool({
+      name: "navigate_to",
+      description: "d",
+      inputSchema: schema,
+      annotations: { intent: "action", title: "Navigate", responseTimeoutMs: 5_000 },
+      handler: async () => "navigated",
+    });
+
+    expect(toClientToolDeclaration(tool).annotations).toEqual({
+      intent: "action",
+      title: "Navigate",
+      responseTimeoutMs: 5_000,
+      requiresResponse: true,
+    });
   });
 });

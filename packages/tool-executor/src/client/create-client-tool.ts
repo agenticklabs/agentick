@@ -87,6 +87,17 @@ export function toClientToolDeclaration(tool: ClientTool): ClientToolDeclaration
     description: tool.description,
     inputSchema: toJsonSchema(tool.inputSchema),
     ...(tool.aliases !== undefined ? { aliases: tool.aliases } : {}),
-    ...(tool.annotations !== undefined ? { annotations: tool.annotations } : {}),
+    // `requiresResponse` DEFAULTS ON here, unlike the raw wire declaration.
+    //
+    // A `ClientTool`'s handler is typed to return a `ToolResultInput` and
+    // cannot return `void` — so by construction it produces an answer. Leaving
+    // the relay one-way discarded that answer and told the model "executed
+    // successfully" before the handler had even finished: an API demanding a
+    // value and then dropping it.
+    //
+    // `requiresResponse: false` is the opt-out, and is what a broadcast tool
+    // wants — with several clients answering there is no single authoritative
+    // reply anyway.
+    annotations: { requiresResponse: true, ...tool.annotations },
   };
 }

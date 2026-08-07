@@ -246,6 +246,7 @@ describe("clientToolCalls.use — declare and route as one act", () => {
         name: "read_selection",
         description: "What the user has highlighted",
         inputSchema: { type: "object" },
+        annotations: { requiresResponse: true },
       },
     ]);
 
