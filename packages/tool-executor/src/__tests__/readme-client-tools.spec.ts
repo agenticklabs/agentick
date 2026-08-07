@@ -12,10 +12,10 @@ import { describe, expect, it } from "vitest";
 import { NOOP_METRICS, OFF_TRACE, createLog } from "@agentick/spec";
 import { z } from "zod";
 
-import { createClientTool, toClientToolDeclaration } from "../client/index.js";
+import { createTool, toDeclaration } from "../client/index.js";
 
 // ── README: "A client tool is one object" ───────────────────────────────────
-const readSelection = createClientTool({
+const readSelection = createTool({
   name: "read_selection",
   description: "What the user currently has highlighted on the page",
   inputSchema: z.object({ includeHtml: z.boolean().optional() }),
@@ -26,7 +26,7 @@ const readSelection = createClientTool({
 });
 
 // ── README: "When the user has several tabs open" ───────────────────────────
-const navigateTo = createClientTool({
+const navigateTo = createTool({
   name: "navigate_to",
   description: "Navigate this tab to a route",
   inputSchema: z.object({ to: z.string() }),
@@ -46,7 +46,7 @@ describe("the README's examples", () => {
   });
 
   it("projects a zod schema to the JSON Schema the wire carries", () => {
-    const declaration = toClientToolDeclaration(navigateTo);
+    const declaration = toDeclaration(navigateTo);
     expect(declaration.name).toBe("navigate_to");
     expect(declaration.inputSchema).toMatchObject({
       type: "object",

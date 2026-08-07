@@ -397,14 +397,30 @@ Make `render_table` a client tool and it is addressed to one tab, so only that t
 
 Reaching for a client tool where content would do is a silent mistake: everything works in the one tab you tested, and the addressing, timeouts and reconnect behaviour below all become your problem for a case that never had them.
 
+#### Who declares, who handles
+
+A tool has two halves — the declaration the model reads, and the handler that runs. Either half can live on either side, and the three verbs on `clientToolCalls` are the three combinations worth having:
+
+| You want                                        | Call                | Declared by | Handled by |
+| ----------------------------------------------- | ------------------- | ----------- | ---------- |
+| The browser owns the tool outright              | `use(tools)`        | client      | client     |
+| The tool belongs with your server tools         | `route(handlers)`   | server      | client     |
+| The model to emit structured data, nothing more | `set(declarations)` | client      | nobody     |
+
+`use` is the one to reach for. It takes whole tool objects, so the declaration sent to the server is projected from the same object that carries the handler and the two cannot drift apart.
+
+`route` is for a tool the server declares — the model sees it whether or not a browser is attached, and the client supplies only the missing half.
+
+`set` declares without handling, and that is not a mistake to be corrected. A tool named `render_chart` whose entire purpose is to make the model emit `{ series, axis }` needs no handler at all: the call lands in the timeline and your components draw from its arguments. Pair it with `requiresResponse: false`, or the turn blocks waiting for an answer nobody is going to send.
+
 #### Authoring one
 
 A client tool is one object: what the model is told, and what runs when it calls it.
 
 ```ts
-import { createClientTool } from "@agentick/tool-executor/client";
+import { createTool } from "@agentick/tool-executor/client";
 
-const readSelection = createClientTool({
+const readSelection = createTool({
   name: "read_selection",
   description: "What the user currently has highlighted on the page",
   inputSchema: z.object({ includeHtml: z.boolean().optional() }),
@@ -421,7 +437,7 @@ await calls.use([readSelection, navigateTo]);
 
 That is the whole setup. `use` sends the declarations — each projected from the tool object, with the handler stripped — and starts answering calls with them.
 
-**What the handler returns is what the model reads.** `createClientTool` asks the server to wait for it (`requiresResponse` defaults on), because the handler is typed to return a result and cannot return nothing. Opt out with `requiresResponse: false` and the relay becomes one-way: the handler still runs, its value is discarded, and the model is told the call succeeded before the handler has finished. That is right for a toast and wrong for anything the model needs to read.
+**What the handler returns is what the model reads.** `createTool` asks the server to wait for it (`requiresResponse` defaults on), because the handler is typed to return a result and cannot return nothing. Opt out with `requiresResponse: false` and the relay becomes one-way: the handler still runs, its value is discarded, and the model is told the call succeeded before the handler has finished. That is right for a toast and wrong for anything the model needs to read.
 
 **You do not need to tear anything down.** Closing the session closes its tool feed, which stops routing and aborts every handler's `signal`. `use` does return a stop function, but it is for swapping one tool set for another mid-session:
 
@@ -443,6 +459,8 @@ calls.confirm((req) => !req.toolName?.startsWith("delete_"));
 
 ```ts
 // server — no handler is what makes it client-executed
+import { createTool } from "@agentick/tool";
+
 createTool({
   name: "read_dom",
   description: "…",
@@ -454,9 +472,11 @@ createTool({
 session.clientToolCalls.route({ read_dom: (input, ctx) => readDom(input) });
 ```
 
-The model sees the tool whether or not a client is attached, and the declaration lives with the rest of your server-side tools. `route` handlers get the same `ctx` a `createClientTool` handler does.
+Both sides call the factory `createTool` — the server's from `@agentick/tool`, the browser's from `@agentick/tool-executor/client`. They are the same idea from two sides, and which one you get is the import.
 
-**Say `requiresResponse` here, and mean it.** `createClientTool` can default it on — it has a handler, typed to return a result, so an answer exists by construction. A handler-less server declaration has nothing to infer from and two plausible readings: a tool a client executes (wants the answer) or a rendering instruction the timeline carries (wants an instant ack and no client at all). Asking for a response the second way blocks the turn on a reply nobody sends, until it times out.
+The model sees the tool whether or not a client is attached, and the declaration lives with the rest of your server-side tools. `route` handlers get the same `ctx` a client-side `createTool` handler does.
+
+**Say `requiresResponse` here, and mean it.** The client-side factory can default it on — its tool has a handler, typed to return a result, so an answer exists by construction. A handler-less server declaration has nothing to infer from and two plausible readings: a tool a client executes (wants the answer) or a rendering instruction the timeline carries (wants an instant ack and no client at all). Asking for a response the second way blocks the turn on a reply nobody sends, until it times out.
 
 Why one object and not two: the older `set` + `route` pair joins the declaration and the handler by a bare string, and gets no help if they disagree. A declaration with no handler suspends every call until it times out; a handler with no declaration is never invoked. Both are still there for a caller whose declarations come from somewhere else — `use` simply makes the mismatch unconstructable.
 
@@ -478,7 +498,7 @@ There is no predicate to write and no rule to get wrong. `ctx.target` is there i
 A few tools want the opposite — a toast, a cache invalidation, a grid refresh should reach every open tab. Those say so once, in the declaration, and the server stamps no target:
 
 ```ts
-createClientTool({
+createTool({
   name: "show_toast",
   description: "Tell the user something happened",
   inputSchema: z.object({ text: z.string() }),
@@ -727,7 +747,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `@agentick/transport-in-process`'s `client-tools-e2e.spec.ts` — declaring over a real gateway: an upsert leaving an earlier client's tools standing ([A,B] then [B,C] ⇒ {A,B,C}), a re-declared name replacing in place with no collision, the empty set changing nothing, and an app tool of the same name surviving in its own binding slot. Plus two clients declaring in turn with neither erased.
 - `@agentick/client-core`'s `handshake-retry.spec.ts` — the identity round trip: a reconnect re-presenting the SAME claimed client id and being handed a NEW connection id, and the client reporting the id the server BOUND rather than the one it claimed.
 - `src/__tests__/client-tools.spec.ts` — a `createTool` declared with NO handler surviving `toRegistration` with its `handlerRef` still absent, relaying to the tool-call channel rather than failing `ToolHandlerMissing`, doing so as a correlated request (not the one-way notify that answers before any client has run), and the client's reply reaching the model as `executedBy: "client"`.
-- `src/__tests__/create-client-tool.spec.ts` — the declaration projected off a `createClientTool` (the handler never reaching the wire), alias resolution, the ctx a handler receives, a handler throw answered rather than hung, and the addressing rule: a call for this client runs, one for another client is SILENT, an unaddressed one runs everywhere, four clients with one addressed produce exactly one answer and three silences, and `self` read at dispatch so a server-rebound id is never stale. Plus the two answers kept apart — an addressed-elsewhere call sends nothing and does not reach `notFound`, while an undeclared tool is answered because nobody has it.
+- `src/__tests__/create-tool.spec.ts` — the declaration projected off a `createTool` (the handler never reaching the wire), alias resolution, the ctx a handler receives, a handler throw answered rather than hung, and the addressing rule: a call for this client runs, one for another client is SILENT, an unaddressed one runs everywhere, four clients with one addressed produce exactly one answer and three silences, and `self` read at dispatch so a server-rebound id is never stale. Plus the two answers kept apart — an addressed-elsewhere call sends nothing and does not reach `notFound`, while an undeclared tool is answered because nobody has it.
 - `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), a broadcast-annotated tool relayed with NO target while a sibling call from the same execution keeps one, `route` ignoring a call addressed elsewhere and running one addressed to it, `list()` omitting another client's calls so its `.respond` cannot steal them, a call outstanding across a reconnect listed rather than re-dispatched and answerable by hand, `use` publishing the projected declarations then answering with the same object's handler (with a declined call proven unanswered by ordering it before an accepted one), closing the handle stopping routing and aborting the handlers' signal so the returned stop is genuinely optional, `stop()` freeing the handle for a second `use`, the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.
 - `src/__tests__/ctx-extensions.spec.ts` + `ctx-run.spec.ts` + `ctx-trunk-derivation.spec.ts` + `signals.spec.ts` + `signal-fire-and-forget.spec.ts` — opaque extension slots (freshness, absence, universal-field collision safety); `ctx.run` minting a journaled op parented under the dispatch, hook-observable and guard-vetoable, plus `ctx.runner` as a run-only view; the dispatch ctx carrying the crossing's real work-path ids; and `ctx.log` / `ctx.progress` emit shape, scope, and survival of a dying bus — including `ctx.progress.begin()` reporting on the dispatch's own tool call id, every determinate frame carrying `total`, and an indeterminate one never carrying it.

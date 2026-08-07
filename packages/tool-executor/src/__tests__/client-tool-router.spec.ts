@@ -30,7 +30,7 @@ import { waitFor } from "@agentick/utils/testing";
 
 import { TOOL_CALL_CHANNEL_FQN } from "../tool-call-schema.js";
 import { clientToolCallsHandle, type ClientToolCallsClient } from "../client/client-tool-calls.js";
-import { createClientTool, type ClientToolCtx } from "../client/create-client-tool.js";
+import { createTool, type ToolCtx } from "../client/create-tool.js";
 
 interface PushStream extends SubscriptionStream {
   emit(payload: unknown, correlationId?: string): void;
@@ -138,11 +138,11 @@ describe("clientToolCalls.route — correlated relays", () => {
       correlationId: "corr:1",
       result: [{ type: "text", text: "sunny" }],
     });
-    // The SAME ctx a `createClientTool` handler gets. It used to be a two-field
+    // The SAME ctx a `createTool` handler gets. It used to be a two-field
     // stub, so a handler moved between `route` and `use` silently lost `log`,
     // `trace` and `signal`.
     expect(seenInput[0]!.input).toEqual({ city: "SF" });
-    const ctx = seenInput[0]!.ctx as ClientToolCtx;
+    const ctx = seenInput[0]!.ctx as ToolCtx;
     expect(ctx.toolCallId).toBe("tc-1");
     expect(ctx.name).toBe("get_weather");
     expect(ctx.signal).toBeInstanceOf(AbortSignal);
@@ -236,7 +236,7 @@ describe("clientToolCalls.use — declare and route as one act", () => {
     const handle = clientToolCallsHandle(client, "s1");
 
     await handle.use([
-      createClientTool({
+      createTool({
         name: "read_selection",
         description: "What the user has highlighted",
         inputSchema: jsonSchema({ type: "object" }),
@@ -273,13 +273,13 @@ describe("clientToolCalls.use — declare and route as one act", () => {
     const handle = clientToolCallsHandle(client, "s1");
 
     await handle.use([
-      createClientTool({
+      createTool({
         name: "navigate_to",
         description: "d",
         inputSchema: jsonSchema({ type: "object" }),
         handler: async () => "navigated",
       }),
-      createClientTool({
+      createTool({
         name: "show_toast",
         description: "d",
         inputSchema: jsonSchema({ type: "object" }),
@@ -326,7 +326,7 @@ describe("clientToolCalls.use — teardown", () => {
     // Deliberately DISCARD the returned unsubscribe — the common case is tools
     // that live as long as the page.
     await handle.use([
-      createClientTool({
+      createTool({
         name: "t",
         description: "d",
         inputSchema: jsonSchema({ type: "object" }),
@@ -348,7 +348,7 @@ describe("clientToolCalls.use — teardown", () => {
 
     let aborted: boolean | undefined;
     await handle.use([
-      createClientTool({
+      createTool({
         name: "t",
         description: "d",
         inputSchema: jsonSchema({ type: "object" }),
@@ -372,7 +372,7 @@ describe("clientToolCalls.use — teardown", () => {
     const handle = clientToolCallsHandle(client, "s1");
 
     const tool = (text: string) =>
-      createClientTool({
+      createTool({
         name: "t",
         description: "d",
         inputSchema: jsonSchema({ type: "object" }),

@@ -1,6 +1,18 @@
 # Client tools, and the context they run in
 
-**Status:** proposed
+**Status:** superseded by [`packages/tool-executor/README.md`](../../../packages/tool-executor/README.md#client-handled-tools), which documents what shipped.
+
+Layers 1–3 landed as proposed. **Layer 4 did not.** This document proposes
+`accepts` — a per-tool predicate each client evaluates to decide whether a call
+is its to answer — and that was cut before release. A rule evaluated
+independently by N clients is only sound when it compares against a value the
+server chose, which is not something to ask every tool author to rediscover. It
+was replaced by server-stamped addressing: the server marks each call with the
+`clientId` that asked for the turn, and the client compares. `createClientTool`
+also shipped as `createTool`, from `@agentick/tool-executor/client`.
+
+Read this for the reasoning that produced the design. Read the README for the
+design.
 
 Four layers, discovered top-down and built bottom-up. `createClientTool` is the
 visible defect; fixing it fixes a handler signature, which is the one thing that

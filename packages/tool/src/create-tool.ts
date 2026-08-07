@@ -287,7 +287,8 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
   // declaration stays `handlerRef`-less so the executor relays dispatch
   // to the client) and register no handler / validator.
   if (spec.handler === undefined) {
-    // `requiresResponse` is NOT defaulted here, unlike `createClientTool`.
+    // `requiresResponse` is NOT defaulted here, unlike the client-side
+    // `createTool` in `@agentick/tool-executor/client`.
     //
     // A handler-less declaration is genuinely ambiguous. It may be a tool a
     // client executes — which wants the response — or a rendering instruction
@@ -295,9 +296,9 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
     // involvement at all. Defaulting the wait on makes the second block on a
     // reply nobody will send, and time out.
     //
-    // `createClientTool` can default it because it HAS a handler, typed to
-    // return a result. Here there is nothing to infer from, so the author says
-    // which they meant.
+    // The client-side factory can default it because its tool HAS a handler,
+    // typed to return a result. Here there is nothing to infer from, so the
+    // author says which they meant.
     const declaration: ToolDeclaration = {
       id: spec.name,
       name: spec.name,

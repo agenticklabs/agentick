@@ -1,5 +1,5 @@
 /**
- * `createClientTool` — the joined declaration/handler, and the dispatch rules
+ * `createTool` — the joined declaration/handler, and the dispatch rules
  * that give `accepts` and `notFound` their meaning.
  *
  * The load-bearing claim is the DISTINCTION between two silences: a tool that
@@ -13,7 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NOOP_METRICS, OFF_TRACE, createLog, jsonSchema } from "@agentick/spec";
 import type { ClientRuntimeContext, ToolResultInput } from "@agentick/spec";
 
-import { createClientTool, toClientToolDeclaration } from "../client/create-client-tool.js";
+import { createTool, toDeclaration } from "../client/create-tool.js";
 import { DECLINED, dispatchClientToolCall } from "../client/use-client-tools.js";
 import type { ClientToolCallHandle } from "../client/client-tool-calls.js";
 
@@ -55,9 +55,9 @@ const run = (
     opts,
   );
 
-describe("toClientToolDeclaration", () => {
+describe("toDeclaration", () => {
   it("projects the declaration and drops the half that cannot cross the wire", () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "navigate_to",
       description: "Navigate this tab",
       inputSchema: schema,
@@ -65,7 +65,7 @@ describe("toClientToolDeclaration", () => {
       handler: async () => "ok",
     });
 
-    const declaration = toClientToolDeclaration(tool);
+    const declaration = toDeclaration(tool);
 
     expect(declaration).toEqual({
       name: "navigate_to",
@@ -81,7 +81,7 @@ describe("toClientToolDeclaration", () => {
 
 describe("dispatch", () => {
   it("runs the handler and returns its result", async () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "read_selection",
       description: "d",
       inputSchema: schema,
@@ -91,7 +91,7 @@ describe("dispatch", () => {
   });
 
   it("resolves a call that arrived under an alias", async () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
@@ -103,7 +103,7 @@ describe("dispatch", () => {
 
   it("hands the handler a ctx carrying the call and the client's runtime", async () => {
     const seen: Record<string, unknown> = {};
-    const tool = createClientTool({
+    const tool = createTool({
       name: "t",
       description: "d",
       inputSchema: schema,
@@ -130,7 +130,7 @@ describe("dispatch", () => {
   });
 
   it("answers a handler throw with an error result — a suspended call never hangs", async () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "t",
       description: "d",
       inputSchema: schema,
@@ -147,7 +147,7 @@ describe("dispatch", () => {
 
 describe("addressing — every client receives every call", () => {
   it("runs a call addressed to THIS client", async () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
@@ -160,7 +160,7 @@ describe("addressing — every client receives every call", () => {
 
   it("stays SILENT on a call addressed to another client", async () => {
     const handler = vi.fn();
-    const tool = createClientTool({
+    const tool = createTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
@@ -175,7 +175,7 @@ describe("addressing — every client receives every call", () => {
   });
 
   it("runs an UNADDRESSED call — nobody in particular means everybody", async () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "show_toast",
       description: "d",
       inputSchema: schema,
@@ -187,7 +187,7 @@ describe("addressing — every client receives every call", () => {
   it("four clients, one addressed: exactly one answers and three stay silent", async () => {
     const ran: string[] = [];
     const toolFor = (self: string) =>
-      createClientTool({
+      createTool({
         name: "navigate_to",
         description: "d",
         inputSchema: schema,
@@ -210,7 +210,7 @@ describe("addressing — every client receives every call", () => {
     // The server BINDS the id at handshake and may answer with one the client
     // did not claim; a captured `self` would compare against the wrong value.
     let bound = "client-CLAIMED";
-    const tool = createClientTool({
+    const tool = createTool({
       name: "t",
       description: "d",
       inputSchema: schema,
@@ -249,7 +249,7 @@ describe("an unknown tool is still answered", () => {
 
   it("an addressed-elsewhere call does NOT reach notFound", async () => {
     const notFound = vi.fn(async (): Promise<ToolResultInput> => "fallback");
-    const tool = createClientTool({
+    const tool = createTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
@@ -268,7 +268,7 @@ describe("a handler that answers with nothing", () => {
     // Reachable from untyped JS, where the return type is not enforced.
     // Treating it as a decline would hang the call; treating it as success
     // would have the model announce an effect nobody observed.
-    const tool = createClientTool({
+    const tool = createTool({
       name: "t",
       description: "d",
       inputSchema: schema,
@@ -289,20 +289,20 @@ describe("the handler's answer reaches the model", () => {
     // discarded, and the model is told "executed successfully" before the
     // handler has even finished. The type forbids returning nothing, so
     // dropping what it forced you to return is the API disagreeing with itself.
-    const tool = createClientTool({
+    const tool = createTool({
       name: "read_table",
       description: "d",
       inputSchema: schema,
       handler: async () => "the table has 4 rows",
     });
 
-    expect(toClientToolDeclaration(tool).annotations).toMatchObject({
+    expect(toDeclaration(tool).annotations).toMatchObject({
       requiresResponse: true,
     });
   });
 
   it("takes `requiresResponse: false` as the opt-out", () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "show_toast",
       description: "d",
       inputSchema: schema,
@@ -310,14 +310,14 @@ describe("the handler's answer reaches the model", () => {
       handler: async () => "shown",
     });
 
-    expect(toClientToolDeclaration(tool).annotations).toMatchObject({
+    expect(toDeclaration(tool).annotations).toMatchObject({
       broadcast: true,
       requiresResponse: false,
     });
   });
 
   it("keeps every other annotation the author set", () => {
-    const tool = createClientTool({
+    const tool = createTool({
       name: "navigate_to",
       description: "d",
       inputSchema: schema,
@@ -325,7 +325,7 @@ describe("the handler's answer reaches the model", () => {
       handler: async () => "navigated",
     });
 
-    expect(toClientToolDeclaration(tool).annotations).toEqual({
+    expect(toDeclaration(tool).annotations).toEqual({
       intent: "action",
       title: "Navigate",
       responseTimeoutMs: 5_000,

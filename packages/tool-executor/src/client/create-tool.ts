@@ -1,13 +1,13 @@
 /**
- * `createClientTool` — one object carrying both halves of a client-executed
- * tool, so they cannot be authored apart.
+ * `createTool` — one object carrying both halves of a client-executed tool, so
+ * they cannot be authored apart.
  *
  * The declaration sent to the server is a PROJECTION of this object, never
  * authored: `use` drops the `handler` and runs `inputSchema` through
  * `toJsonSchema`. A declaration with no handler and a handler with no
  * declaration both become unconstructable.
  *
- * @see docs/proposals/v2/client-tools.md §"Layer 4"
+ * @see packages/tool-executor/README.md §"Who declares, who handles"
  */
 
 import {
@@ -21,20 +21,20 @@ import {
 } from "@agentick/spec";
 
 /**
- * Per-harness additions to {@link ClientToolCtx}, following ADR 27 — built-ins
- * are not privileged. A client-side harness package augments this the way a
- * server harness augments `ToolHandlerCtxExtensions`:
+ * Per-harness additions to {@link ToolCtx}, following ADR 27 — built-ins are not
+ * privileged. A client-side harness package augments this the way a server
+ * harness augments `ToolHandlerCtxExtensions`:
  *
  * ```ts
  * declare module "@agentick/tool-executor/client" {
- *   interface ClientToolCtxExtensions { elicit: ClientElicitor }
+ *   interface ToolCtxExtensions { elicit: ClientElicitor }
  * }
  * ```
  */
-export interface ClientToolCtxExtensions {}
+export interface ToolCtxExtensions {}
 
 /**
- * What a client tool's handler receives.
+ * What a tool's handler receives.
  *
  * Deliberately narrow. Server-side `use()` exists because a handler runs at
  * dispatch and cannot reach render-time context; in a browser the handler is
@@ -42,7 +42,7 @@ export interface ClientToolCtxExtensions {}
  * the stores. So this carries only what the framework alone knows — anything an
  * adopter's closure can reach stays out, or ctx becomes a service locator.
  */
-export interface ClientToolCtx extends ClientRuntimeContext, ClientToolCtxExtensions {
+export interface ToolCtx extends ClientRuntimeContext, ToolCtxExtensions {
   readonly toolCallId: string;
   readonly name: string;
   /**
@@ -55,8 +55,8 @@ export interface ClientToolCtx extends ClientRuntimeContext, ClientToolCtxExtens
   readonly progress?: (update: ProgressUpdate) => void;
 }
 
-/** A client tool: the declaration and the handler, joined. */
-export interface ClientTool<TInput = unknown> {
+/** A tool the client executes: the declaration and the handler, joined. */
+export interface Tool<TInput = unknown> {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: StandardSchemaV1<unknown, TInput>;
@@ -68,20 +68,20 @@ export interface ClientTool<TInput = unknown> {
    * client has no `use()` to merge.
    *
    * Declared as a METHOD rather than a property so its parameter is checked
-   * bivariantly: a `ClientTool<{ to: string }>` has to fit in the
-   * `readonly ClientTool[]` that `use` takes, and a property signature makes
-   * that array unassignable under `strictFunctionTypes` — pushing a cast onto
-   * every adopter for a collection that is heterogeneous by design.
+   * bivariantly: a `Tool<{ to: string }>` has to fit in the `readonly Tool[]`
+   * that `use` takes, and a property signature makes that array unassignable
+   * under `strictFunctionTypes` — pushing a cast onto every adopter for a
+   * collection that is heterogeneous by design.
    */
-  handler(input: TInput, ctx: ClientToolCtx): ToolResultInput | Promise<ToolResultInput>;
+  handler(input: TInput, ctx: ToolCtx): ToolResultInput | Promise<ToolResultInput>;
 }
 
-export function createClientTool<TInput = unknown>(tool: ClientTool<TInput>): ClientTool<TInput> {
+export function createTool<TInput = unknown>(tool: Tool<TInput>): Tool<TInput> {
   return tool;
 }
 
 /** The wire declaration for a tool — what the server is told, and nothing more. */
-export function toClientToolDeclaration(tool: ClientTool): ClientToolDeclaration {
+export function toDeclaration(tool: Tool): ClientToolDeclaration {
   return {
     name: tool.name,
     description: tool.description,
@@ -89,9 +89,9 @@ export function toClientToolDeclaration(tool: ClientTool): ClientToolDeclaration
     ...(tool.aliases !== undefined ? { aliases: tool.aliases } : {}),
     // `requiresResponse` DEFAULTS ON here, unlike the raw wire declaration.
     //
-    // A `ClientTool`'s handler is typed to return a `ToolResultInput` and
-    // cannot return `void` — so by construction it produces an answer. Leaving
-    // the relay one-way discarded that answer and told the model "executed
+    // A `Tool`'s handler is typed to return a `ToolResultInput` and cannot
+    // return `void` — so by construction it produces an answer. Leaving the
+    // relay one-way discarded that answer and told the model "executed
     // successfully" before the handler had even finished: an API demanding a
     // value and then dropping it.
     //

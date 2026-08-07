@@ -58,11 +58,7 @@ import type {
 
 import { TOOL_CALL_CHANNEL_FQN, type PendingToolCall } from "../tool-call-schema.js";
 import { confirmClientTools, type ConfirmPolicy } from "./confirm.js";
-import {
-  toClientToolDeclaration,
-  type ClientTool,
-  type ClientToolCtx,
-} from "./create-client-tool.js";
+import { toDeclaration, type Tool, type ToolCtx } from "./create-tool.js";
 import { clientToolCtx, routeClientTools, type UseClientToolsOptions } from "./use-client-tools.js";
 
 /**
@@ -121,12 +117,12 @@ export interface ClientToolCallHandle extends ClientToolCall {
 /**
  * A client-side handler for one client tool.
  *
- * Takes the SAME ctx a `createClientTool` handler does — the call, an
+ * Takes the SAME ctx a `createTool` handler does — the call, an
  * `AbortSignal`, and the client's `log`/`trace`/`metrics`/identity.
  */
 export type ClientToolHandler = (
   input: unknown,
-  ctx: ClientToolCtx,
+  ctx: ToolCtx,
 ) => ToolResultInput | Promise<ToolResultInput>;
 
 /** Options for {@link ClientToolCallsHandle.route}. */
@@ -175,7 +171,7 @@ export interface ClientToolCallsHandle
     opts?: RouteClientToolsOptions,
   ): Unsubscribe;
   /**
-   * Declare AND handle a set of {@link ClientTool}s — the whole-tool twin of
+   * Declare AND handle a set of {@link Tool}s — the whole-tool twin of
    * `set` + `route`, which cannot be authored out of step because the
    * declaration is projected from the same object that carries the handler.
    *
@@ -186,7 +182,7 @@ export interface ClientToolCallsHandle
    * Resolves once the declarations are published; the returned
    * {@link Unsubscribe} stops routing.
    */
-  use(tools: readonly ClientTool[], opts?: UseClientToolsOptions): Promise<Unsubscribe>;
+  use(tools: readonly Tool[], opts?: UseClientToolsOptions): Promise<Unsubscribe>;
   /**
    * Apply a confirmation {@link ConfirmPolicy} to inbound tool-confirmation
    * elicitations (`hints.kind === "tool_confirmation"`): `"approve"` / `"deny"` /
@@ -326,7 +322,7 @@ export function clientToolCallsHandle(
     use: async (tools, opts) => {
       await client.transport.request("session/set_client_tools", {
         sessionId,
-        declarations: tools.map(toClientToolDeclaration),
+        declarations: tools.map(toDeclaration),
       });
       return routeClientTools(
         { onCall: (l) => (callListeners.add(l), () => void callListeners.delete(l)) },

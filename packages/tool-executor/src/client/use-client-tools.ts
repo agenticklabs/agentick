@@ -1,44 +1,41 @@
 /**
- * Dispatch inbound client-tool calls to {@link ClientTool}s — the consumer that
- * gives `handler`, `accepts` and `notFound` their meaning.
+ * Dispatch inbound client-tool calls to {@link Tool}s — the consumer that gives
+ * `handler` and `notFound` their meaning.
  *
  * `route(handlers)` (the older surface) takes a bare name → function map and
  * always answers. This takes whole tools, so the declaration published to the
  * server and the handler that runs are the same object, and it knows how to
  * stay silent.
  *
- * @see docs/proposals/v2/client-tools.md §"Two silences, which must not be confused"
+ * @see packages/tool-executor/README.md §"When the user has several tabs open"
  */
 
 import type { ClientRuntimeContext, ToolResultInput, Unsubscribe } from "@agentick/spec";
 
 import type { ClientToolCallHandle } from "./client-tool-calls.js";
-import type { ClientTool, ClientToolCtx } from "./create-client-tool.js";
+import type { Tool, ToolCtx } from "./create-tool.js";
 
 /**
  * This client's own id, read at DISPATCH time rather than captured — the
  * server BINDS it at handshake and may hand back a different one than was
  * claimed, so a value captured at construction can be the wrong one.
  */
-export type ClientToolSelf = () => string;
+type SelfId = () => string;
 
 export interface UseClientToolsOptions {
   /**
    * Answers a call naming a tool this client did not declare. Default: an error
    * result reading `no client handler for "<name>"`.
    *
-   * NOT reached by a tool whose {@link ClientTool.accepts} returned false — that
-   * is a client declining a tool it has, and reporting it as unknown would turn
-   * three correctly-silent tabs into three warnings about a working system.
+   * NOT reached by a call addressed to a DIFFERENT client — that silence is the
+   * design, and reporting it as unknown would turn three correctly-quiet tabs
+   * into three warnings about a working system.
    */
-  readonly notFound?: (
-    input: unknown,
-    ctx: ClientToolCtx,
-  ) => ToolResultInput | Promise<ToolResultInput>;
+  readonly notFound?: (input: unknown, ctx: ToolCtx) => ToolResultInput | Promise<ToolResultInput>;
 }
 
 /** Resolves a tool by the name (or alias) a call arrived under. */
-function resolve(tools: readonly ClientTool[], name: string): ClientTool | undefined {
+function resolve(tools: readonly Tool[], name: string): Tool | undefined {
   return tools.find((t) => t.name === name || t.aliases?.includes(name) === true);
 }
 
@@ -61,8 +58,8 @@ export type ClientToolOutcome = ToolResultInput | typeof DECLINED;
  */
 export async function dispatchClientToolCall(
   call: ClientToolCallHandle,
-  tools: readonly ClientTool[],
-  self: ClientToolSelf,
+  tools: readonly Tool[],
+  self: SelfId,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
   opts: UseClientToolsOptions = {},
@@ -110,7 +107,7 @@ function unreported(name: string): ToolResultInput {
   );
 }
 
-const unknownTool = (_input: unknown, ctx: ClientToolCtx): ToolResultInput => ({
+const unknownTool = (_input: unknown, ctx: ToolCtx): ToolResultInput => ({
   content: `no client handler for "${ctx.name}"`,
   isError: true,
 });
@@ -127,7 +124,7 @@ export function clientToolCtx(
   call: ClientToolCallHandle,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
-): ClientToolCtx {
+): ToolCtx {
   return {
     ...runtime,
     activeSpan: () => runtime.activeSpan(),
@@ -149,8 +146,8 @@ export interface ClientToolCallFeed {
  */
 export function routeClientTools(
   feed: ClientToolCallFeed,
-  tools: readonly ClientTool[],
-  self: ClientToolSelf,
+  tools: readonly Tool[],
+  self: SelfId,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
   opts: UseClientToolsOptions = {},

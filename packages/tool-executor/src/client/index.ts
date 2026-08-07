@@ -9,7 +9,7 @@
  *   - `.set(declarations)` — DECLARE the client's full tool set (a whole-slice
  *     replace) over `session/set_client_tools`.
  *   - `.route(handlers, opts?)` — the ergonomic router: dispatch → auto-respond.
- *   - `.use(tools, opts?)` — declare AND route a set of `createClientTool` tools,
+ *   - `.use(tools, opts?)` — declare AND route a set of `createTool` tools,
  *     which cannot drift apart because the declaration is projected from the
  *     object that carries the handler.
  *   - `.confirm(policy)` — approve/deny/predicate over `tool_confirmation`
@@ -39,23 +39,22 @@ export {
 } from "./client-tool-calls.js";
 export { toolConfirmation, type ConfirmPolicy, type ConfirmRequest } from "./confirm.js";
 
-// `createClientTool` — the declaration and the handler as ONE object, so the two
+// `createTool` — the declaration and the handler as ONE object, so the two
 // halves cannot be authored apart. `session.clientToolCalls.use(tools)` declares
 // and routes them in one call; `dispatchClientToolCall`/`routeClientTools` are
 // the consumer for code driving its own feed.
 export {
-  createClientTool,
-  toClientToolDeclaration,
-  type ClientTool,
-  type ClientToolCtx,
-  type ClientToolCtxExtensions,
-} from "./create-client-tool.js";
+  createTool,
+  toDeclaration,
+  type Tool,
+  type ToolCtx,
+  type ToolCtxExtensions,
+} from "./create-tool.js";
 export {
   DECLINED,
   dispatchClientToolCall,
   routeClientTools,
   type ClientToolOutcome,
-  type ClientToolSelf,
   type ClientToolCallFeed,
   type UseClientToolsOptions,
 } from "./use-client-tools.js";
