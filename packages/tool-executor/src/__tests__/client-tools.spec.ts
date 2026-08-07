@@ -499,3 +499,53 @@ describe("client targeting — the relay addresses the client that asked", () =>
     expect("target" in payload).toBe(false);
   });
 });
+
+describe("a broadcast tool is addressed to nobody, so every client runs it", () => {
+  it("omits `target` even though the execution knows which client asked", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [
+        clientTool("client_toast", {
+          broadcast: true,
+          defaultResult: [{ type: "text", text: "ack" }],
+        }),
+      ],
+    });
+
+    const notifyP = nextEnvelope(bus, "session:channel:tool_call");
+    await harness.dispatch(
+      dispatchOf(
+        "client_toast",
+        "tc-broadcast",
+        { text: "saved" },
+        {
+          context: { via: "model", clientId: "client-TAB-A" },
+        },
+      ),
+    );
+
+    // The asking client is known and deliberately not stamped: an addressed
+    // toast would reach one tab, which is the opposite of what it is for.
+    const payload = (await notifyP).payload as Record<string, unknown>;
+    expect("target" in payload).toBe(false);
+  });
+
+  it("still addresses a non-broadcast tool from the same execution", async () => {
+    const { harness, bus } = await createTestHarness({
+      tools: [clientTool("client_nav3", { requiresResponse: true })],
+    });
+
+    const reqP = nextEnvelope(bus, "session:channel:tool_call");
+    void harness.dispatch(
+      dispatchOf(
+        "client_nav3",
+        "tc-addressed",
+        {},
+        {
+          context: { via: "model", clientId: "client-TAB-A" },
+        },
+      ),
+    );
+
+    expect((await reqP).payload).toMatchObject({ target: "client-TAB-A" });
+  });
+});

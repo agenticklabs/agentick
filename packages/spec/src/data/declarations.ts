@@ -180,6 +180,20 @@ export interface ToolAnnotations {
    */
   readonly requiresResponse?: boolean;
   /**
+   * Run this in EVERY attached client, not only the one that asked.
+   *
+   * A call carries the client it is for, and normally that is whoever's request
+   * started the turn — right for anything acting on the user's attention, where
+   * a second tab acting too is the bug. A few tools are the opposite: a toast,
+   * a cache invalidation, a grid refresh. Those want everyone, and the server
+   * stamps no target for them.
+   *
+   * Pairs naturally with `requiresResponse: false` — with several clients
+   * answering there is no single authoritative reply, and the first to arrive
+   * wins while the rest are dropped.
+   */
+  readonly broadcast?: boolean;
+  /**
    * Per-tool wait bound (ms) for a CLIENT-HANDLED tool's relayed
    * result (`requiresResponse === true`). Falls back to the caller's
    * `DispatchInput.responseTimeoutMs`. On timeout the executor uses
@@ -396,6 +410,20 @@ export interface ClientToolAnnotations {
    * fire-and-forget (notify + resolve with {@link defaultResult}).
    */
   readonly requiresResponse?: boolean;
+  /**
+   * Run this in EVERY attached client, not only the one that asked.
+   *
+   * A call carries the client it is for, and normally that is whoever's request
+   * started the turn — right for anything acting on the user's attention, where
+   * a second tab acting too is the bug. A few tools are the opposite: a toast,
+   * a cache invalidation, a grid refresh. Those want everyone, and the server
+   * stamps no target for them.
+   *
+   * Pairs naturally with `requiresResponse: false` — with several clients
+   * answering there is no single authoritative reply, and the first to arrive
+   * wins while the rest are dropped.
+   */
+  readonly broadcast?: boolean;
   /** Per-tool wait bound (ms) for the relayed result. */
   readonly responseTimeoutMs?: number;
   /** Per-call timeout (ms). */

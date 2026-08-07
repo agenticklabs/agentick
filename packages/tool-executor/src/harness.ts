@@ -1173,7 +1173,11 @@ export class ToolExecutorHarness
               toolCallId: input.toolCallId,
               name: input.name,
               input: validated,
-              ...omitUndefined({ target: input.context.clientId }),
+              // A broadcast tool is addressed to nobody, which every client
+              // reads as "mine too".
+              ...omitUndefined({
+                target: ann?.broadcast === true ? undefined : input.context.clientId,
+              }),
             },
             {
               ...omitUndefined({ timeoutMs: ann.responseTimeoutMs ?? input.responseTimeoutMs }),
@@ -1228,7 +1232,11 @@ export class ToolExecutorHarness
               toolCallId: input.toolCallId,
               name: input.name,
               input: validated,
-              ...omitUndefined({ target: input.context.clientId }),
+              // A broadcast tool is addressed to nobody, which every client
+              // reads as "mine too".
+              ...omitUndefined({
+                target: ann?.broadcast === true ? undefined : input.context.clientId,
+              }),
             },
             { scope: dispatchScope },
           );

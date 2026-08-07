@@ -340,3 +340,69 @@ describe("handshake retry on a live wire (#263)", () => {
     expect(client.capabilities.extensions).toEqual([]);
   });
 });
+
+describe("identity across a reconnect", () => {
+  /**
+   * A gateway that echoes back the claimed clientId — what a real one does when
+   * it binds the claim — and mints a fresh connectionId per handshake.
+   */
+  function identityGateway() {
+    const claims: (string | undefined)[] = [];
+    let connections = 0;
+    const handler = async (method: string, params: unknown): Promise<unknown> => {
+      if (method === "initialize") {
+        const claimed = (params as { clientId?: string }).clientId;
+        claims.push(claimed);
+        return {
+          ...initResult(`conn-${++connections}`),
+          clientId: claimed ?? "server-assigned",
+        };
+      }
+      if (method === "_extensions/list") return EXTENSIONS;
+      throw new Error(`unexpected ${method}`);
+    };
+    return { claims, handler };
+  }
+
+  it("re-claims the SAME clientId and is given a NEW connectionId", async () => {
+    // The whole reason a tool call outstanding across a dropped socket is still
+    // addressed to the tab that asked for it.
+    const { claims, handler } = identityGateway();
+    const transport = fakeTransport(handler as never);
+    const client = await createClient({ transport });
+    await client.connect();
+    await waitFor(() => client.readiness === "ready");
+
+    const firstClient = client.runtime.clientId;
+    const firstConnection = client.runtime.connectionId;
+
+    // The reconnect path — `closed` is terminal and owes no fresh handshake.
+    transport.setState("reconnecting");
+    transport.setState("open");
+    await waitFor(() => claims.length === 2);
+    await waitFor(() => client.readiness === "ready");
+
+    expect(claims[0]).toBe(claims[1]); // the SAME claim, re-presented
+    expect(client.runtime.clientId).toBe(firstClient);
+    expect(client.runtime.connectionId).not.toBe(firstConnection);
+    await client.close();
+  });
+
+  it("reports the id the server BOUND, not the one it claimed", async () => {
+    // A server may refuse or replace a claim. A client still comparing against
+    // its own would measure against a value nobody addresses it by.
+    const handler = async (method: string): Promise<unknown> => {
+      if (method === "initialize") {
+        return { ...initResult("conn-1"), clientId: "client-ASSIGNED-BY-SERVER" };
+      }
+      if (method === "_extensions/list") return EXTENSIONS;
+      throw new Error(`unexpected ${method}`);
+    };
+    const client = await createClient({ transport: fakeTransport(handler as never) });
+    await client.connect();
+    await waitFor(() => client.readiness === "ready");
+
+    expect(client.runtime.clientId).toBe("client-ASSIGNED-BY-SERVER");
+    await client.close();
+  });
+});
