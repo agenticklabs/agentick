@@ -204,6 +204,9 @@ export function clientToolCallsHandle(
   );
 
   const pending = new Map<string, ClientToolCallHandle>();
+  /** This client's server-BOUND id, read per call: the handle outlives a handshake. */
+  const selfId = (): string =>
+    (client as { runtime?: { clientId: string } }).runtime?.clientId ?? "";
   // TODO(per-execution-abort): this aborts when the HANDLE closes, not when the
   // execution behind a given call dies. A handler mid-fetch on a cancelled turn
   // still has no signal — that needs the execution id on the relay.
@@ -230,7 +233,14 @@ export function clientToolCallsHandle(
       call.correlationId === undefined ? Promise.resolve() : send(call.correlationId, result),
   });
 
+  // ONE gate for every path that offers a call to a handler. `route` and `use`
+  // both listen here, and a third would too — the rule cannot be missed by a
+  // dispatch path that forgets to apply it.
   const ingest = (call: ClientToolCallHandle): void => {
+    // Addressed to another client. Not ours to run, not ours to list, and not
+    // ours to answer — leaving it in `list()` would offer a `.respond` that
+    // steals the addressed client's work.
+    if (call.target !== undefined && call.target !== selfId()) return;
     if (call.correlationId !== undefined) {
       pending.set(call.correlationId, call);
       notify();
@@ -250,11 +260,16 @@ export function clientToolCallsHandle(
       const env = frame.envelope as EnvelopeWithMetadata;
       const snapshot = asSnapshotFrame(env.payload);
       if (snapshot) {
-        // Authoritative pending set — clear then reseed.
+        // Authoritative pending set — clear then reseed. LISTED, not
+        // dispatched: a client that reconnects mid-call sees the outstanding
+        // call and may answer it, but nothing re-runs a handler that may
+        // already have run before the socket dropped.
         pending.clear();
         for (const req of snapshot.requests) {
           const call = parseSnapshotCall(req);
-          if (call) pending.set(req.correlationId, wrap(call));
+          if (call && (call.target === undefined || call.target === selfId())) {
+            pending.set(req.correlationId, wrap(call));
+          }
         }
         notify();
         continue;

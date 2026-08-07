@@ -384,3 +384,117 @@ describe("clientToolCalls.use — teardown", () => {
     handle.close();
   });
 });
+
+describe("addressing is a property of the FEED, not of one dispatch path", () => {
+  /** A client whose bound id the handle will read as its own. */
+  function clientWithId(stream: SubscriptionStream, id: string) {
+    const { client, seen } = stubClient(stream);
+    return { client: { ...client, runtime: { clientId: id } }, seen };
+  }
+
+  it("route() ignores a call addressed to another client", async () => {
+    // `route` predates addressing. Left ungated it reproduces the original
+    // defect exactly — four tabs, four navigations — in a public API.
+    const stream = pushStream();
+    const { client, seen } = clientWithId(stream, "client-A");
+    const handle = clientToolCallsHandle(client as never, "s1");
+    const ran: unknown[] = [];
+
+    handle.route({ navigate_to: (input) => (ran.push(input), "navigated") });
+    stream.emit(toolCallFor("navigate_to", {}, "client-B"), "corr:other");
+    stream.emit(toolCall("ping", {}), "corr:mine");
+
+    await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
+    expect(ran).toHaveLength(0);
+    handle.close();
+  });
+
+  it("route() runs a call addressed to THIS client", async () => {
+    const stream = pushStream();
+    const { client, seen } = clientWithId(stream, "client-A");
+    const handle = clientToolCallsHandle(client as never, "s1");
+
+    handle.route({ navigate_to: () => "navigated" });
+    stream.emit(toolCallFor("navigate_to", {}, "client-A"), "corr:mine");
+
+    await waitFor(() => seen.some((r) => r.method === "session/respond_to_tool_call"));
+    expect((seen.at(-1)!.params as { result: unknown }).result).toBe("navigated");
+    handle.close();
+  });
+
+  it("list() omits a call addressed elsewhere — its .respond would steal the work", async () => {
+    const stream = pushStream();
+    const { client } = clientWithId(stream, "client-A");
+    const handle = clientToolCallsHandle(client as never, "s1");
+
+    stream.emit(toolCallFor("navigate_to", {}, "client-B"), "corr:other");
+    stream.emit(toolCallFor("navigate_to", {}, "client-A"), "corr:mine");
+
+    await waitFor(() => handle.list().length > 0);
+    expect(handle.list().map((c) => c.correlationId)).toEqual(["corr:mine"]);
+    handle.close();
+  });
+});
+
+describe("a call outstanding across a reconnect", () => {
+  it("is LISTED for the client that owns it, not re-dispatched", async () => {
+    // The snapshot exists so a client that reconnects mid-call can see and
+    // answer the call rather than have it hang. It is deliberately not
+    // re-dispatched: the handler may already have run before the socket
+    // dropped, and nothing here can tell. The app decides.
+    const stream = pushStream();
+    const { client, seen } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "s1");
+    const ran: unknown[] = [];
+
+    handle.route({ resume_me: (input) => (ran.push(input), "resumed") });
+    stream.emit({
+      kind: "snapshot",
+      requests: [
+        {
+          correlationId: "corr:outstanding",
+          replyTo: "inbox",
+          payload: { toolCallId: "tc-outstanding", name: "resume_me", input: { x: 1 } },
+        },
+      ],
+    });
+
+    await waitFor(() => handle.list().length === 1);
+    expect(ran).toHaveLength(0);
+    expect(seen.some((r) => r.method === "session/respond_to_tool_call")).toBe(false);
+
+    // …and answering it from the list round-trips like a live one.
+    await handle.list()[0]!.respond("resumed by hand");
+    expect((seen.at(-1)!.params as { result: unknown }).result).toBe("resumed by hand");
+    handle.close();
+  });
+
+  it("omits one addressed to a different client", async () => {
+    const stream = pushStream();
+    const { client } = stubClient(stream);
+    const handle = clientToolCallsHandle(
+      { ...client, runtime: { clientId: "client-A" } } as never,
+      "s1",
+    );
+
+    stream.emit({
+      kind: "snapshot",
+      requests: [
+        {
+          correlationId: "corr:theirs",
+          replyTo: "inbox",
+          payload: { toolCallId: "tc-1", name: "t", input: {}, target: "client-B" },
+        },
+        {
+          correlationId: "corr:mine",
+          replyTo: "inbox",
+          payload: { toolCallId: "tc-2", name: "t", input: {}, target: "client-A" },
+        },
+      ],
+    });
+
+    await waitFor(() => handle.list().length > 0);
+    expect(handle.list().map((c) => c.correlationId)).toEqual(["corr:mine"]);
+    handle.close();
+  });
+});
