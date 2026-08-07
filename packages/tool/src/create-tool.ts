@@ -287,6 +287,15 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
   // declaration stays `handlerRef`-less so the executor relays dispatch
   // to the client) and register no handler / validator.
   if (spec.handler === undefined) {
+    // `requiresResponse` DEFAULTS ON for a relayed tool. Off, the executor
+    // sends a one-way notify and answers the model with a canned success
+    // BEFORE the client's handler has finished — so whatever the handler
+    // computed is discarded and the model reads an outcome nobody produced.
+    //
+    // Harder to spot here than on the client: there is no handler in this file
+    // to suggest a return value exists at all. `requiresResponse: false` is the
+    // opt-out for a tool that genuinely wants fire-and-forget.
+    const relayAnnotations = { requiresResponse: true, ...annotations };
     const declaration: ToolDeclaration = {
       id: spec.name,
       name: spec.name,
@@ -294,10 +303,10 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
       inputSchema: schema,
       ...omitUndefined({ outputSchema: spec.outputSchema }),
       exposure: spec.exposure ?? ["model"],
+      annotations: relayAnnotations,
       ...omitUndefined({
         handlerRef: spec.handlerRef,
         aliases: spec.aliases,
-        annotations,
         metadata: spec.metadata,
         providerOptions: spec.providerOptions,
       }),

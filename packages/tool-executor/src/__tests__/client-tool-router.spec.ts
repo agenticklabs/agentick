@@ -30,7 +30,7 @@ import { waitFor } from "@agentick/utils/testing";
 
 import { TOOL_CALL_CHANNEL_FQN } from "../tool-call-schema.js";
 import { clientToolCallsHandle, type ClientToolCallsClient } from "../client/client-tool-calls.js";
-import { createClientTool } from "../client/create-client-tool.js";
+import { createClientTool, type ClientToolCtx } from "../client/create-client-tool.js";
 
 interface PushStream extends SubscriptionStream {
   emit(payload: unknown, correlationId?: string): void;
@@ -119,7 +119,7 @@ describe("clientToolCalls.route — correlated relays", () => {
   it("runs the matching handler and relays its result via session/respond_to_tool_call", async () => {
     const stream = pushStream();
     const { client, seen } = stubClient(stream);
-    const seenInput: unknown[] = [];
+    const seenInput: { input: unknown; ctx: unknown }[] = [];
 
     const handle = clientToolCallsHandle(client, "s1");
     const unsub = handle.route({
@@ -138,9 +138,16 @@ describe("clientToolCalls.route — correlated relays", () => {
       correlationId: "corr:1",
       result: [{ type: "text", text: "sunny" }],
     });
-    expect(seenInput).toEqual([
-      { input: { city: "SF" }, ctx: { toolCallId: "tc-1", name: "get_weather" } },
-    ]);
+    // The SAME ctx a `createClientTool` handler gets. It used to be a two-field
+    // stub, so a handler moved between `route` and `use` silently lost `log`,
+    // `trace` and `signal`.
+    expect(seenInput[0]!.input).toEqual({ city: "SF" });
+    const ctx = seenInput[0]!.ctx as ClientToolCtx;
+    expect(ctx.toolCallId).toBe("tc-1");
+    expect(ctx.name).toBe("get_weather");
+    expect(ctx.signal).toBeInstanceOf(AbortSignal);
+    expect(typeof ctx.log.info).toBe("function");
+    expect(typeof ctx.trace).toBe("function");
 
     // Routing's Unsubscribe stops dispatch; the handle owns the subscription.
     unsub();

@@ -58,8 +58,12 @@ import type {
 
 import { TOOL_CALL_CHANNEL_FQN, type PendingToolCall } from "../tool-call-schema.js";
 import { confirmClientTools, type ConfirmPolicy } from "./confirm.js";
-import { toClientToolDeclaration, type ClientTool } from "./create-client-tool.js";
-import { routeClientTools, type UseClientToolsOptions } from "./use-client-tools.js";
+import {
+  toClientToolDeclaration,
+  type ClientTool,
+  type ClientToolCtx,
+} from "./create-client-tool.js";
+import { clientToolCtx, routeClientTools, type UseClientToolsOptions } from "./use-client-tools.js";
 
 /**
  * The client surface the handle consumes — a subscribe stream (the fold's input)
@@ -114,10 +118,15 @@ export interface ClientToolCallHandle extends ClientToolCall {
   respond(result: ToolResultInput): Promise<void>;
 }
 
-/** A client-side handler for one client tool. */
+/**
+ * A client-side handler for one client tool.
+ *
+ * Takes the SAME ctx a `createClientTool` handler does — the call, an
+ * `AbortSignal`, and the client's `log`/`trace`/`metrics`/identity.
+ */
 export type ClientToolHandler = (
   input: unknown,
-  ctx: { readonly toolCallId: string; readonly name: string },
+  ctx: ClientToolCtx,
 ) => ToolResultInput | Promise<ToolResultInput>;
 
 /** Options for {@link ClientToolCallsHandle.route}. */
@@ -306,7 +315,7 @@ export function clientToolCallsHandle(
       client.transport.request("session/set_client_tools", { sessionId, declarations }),
     route: (handlers, opts) => {
       const listener = (call: ClientToolCallHandle): void => {
-        void dispatchCall(call, handlers, opts);
+        void dispatchCall(call, handlers, runtimeOf(client), lifetime.signal, opts);
       };
       callListeners.add(listener);
       return () => {
@@ -319,17 +328,21 @@ export function clientToolCallsHandle(
         sessionId,
         declarations: tools.map(toClientToolDeclaration),
       });
-      const runtime = (client as { runtime?: ClientRuntimeContext }).runtime ?? OFF_RUNTIME;
       return routeClientTools(
         { onCall: (l) => (callListeners.add(l), () => void callListeners.delete(l)) },
         tools,
-        () => runtime.clientId,
-        runtime,
+        selfId,
+        runtimeOf(client),
         lifetime.signal,
         opts,
       );
     },
   };
+}
+
+/** The client's runtime, or the off-path stand-in when built over a bare transport. */
+function runtimeOf(client: ClientToolCallsClient): ClientRuntimeContext {
+  return (client as { runtime?: ClientRuntimeContext }).runtime ?? OFF_RUNTIME;
 }
 
 /**
@@ -368,12 +381,14 @@ export async function respondToToolCall(
 async function dispatchCall(
   call: ClientToolCallHandle,
   handlers: Readonly<Record<string, ClientToolHandler>>,
+  runtime: ClientRuntimeContext,
+  signal: AbortSignal,
   opts?: RouteClientToolsOptions,
 ): Promise<void> {
   const handler = handlers[call.name] ?? opts?.onUnknown ?? unknownToolHandler;
   let result: ToolResultInput;
   try {
-    result = await handler(call.input, { toolCallId: call.toolCallId, name: call.name });
+    result = await handler(call.input, clientToolCtx(call, runtime, signal));
   } catch (err) {
     result = errorResult(err instanceof Error ? err.message : String(err));
   }

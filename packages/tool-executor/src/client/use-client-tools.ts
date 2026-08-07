@@ -80,14 +80,7 @@ export async function dispatchClientToolCall(
   // rediscover.
   if (call.target !== undefined && call.target !== self()) return DECLINED;
 
-  const ctx: ClientToolCtx = {
-    ...runtime,
-    activeSpan: () => runtime.activeSpan(),
-    toolCallId: call.toolCallId,
-    name: call.name,
-    ...(call.target !== undefined ? { target: call.target } : {}),
-    signal,
-  };
+  const ctx = clientToolCtx(call, runtime, signal);
 
   const run =
     tool !== undefined
@@ -121,6 +114,29 @@ const unknownTool = (_input: unknown, ctx: ClientToolCtx): ToolResultInput => ({
   content: `no client handler for "${ctx.name}"`,
   isError: true,
 });
+
+/**
+ * The ctx a client-tool handler receives, built from the call and the client's
+ * own runtime.
+ *
+ * Shared by BOTH dispatch paths. `route` used to hand its handlers a two-field
+ * stub while `use` handlers got the real thing — the same handler moved between
+ * them silently lost `log`, `trace`, `signal` and `target`.
+ */
+export function clientToolCtx(
+  call: ClientToolCallHandle,
+  runtime: ClientRuntimeContext,
+  signal: AbortSignal,
+): ClientToolCtx {
+  return {
+    ...runtime,
+    activeSpan: () => runtime.activeSpan(),
+    toolCallId: call.toolCallId,
+    name: call.name,
+    ...(call.target !== undefined ? { target: call.target } : {}),
+    signal,
+  };
+}
 
 /** The tool-call feed this consumer needs — a floor, so the full handle satisfies it. */
 export interface ClientToolCallFeed {
