@@ -1765,6 +1765,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@agentick/tool':
+        specifier: workspace:*
+        version: link:../tool
       zod:
         specifier: ^4.3.6
         version: 4.3.6
