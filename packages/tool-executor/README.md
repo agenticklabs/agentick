@@ -378,6 +378,27 @@ const openFile = createTool({
 
 Importing the subpath self-assembles two handles on the session. `clientToolCalls` is the inbound call feed; `tools` is the registry projection. Different slot, different concern.
 
+#### First: does it need to be a client tool at all?
+
+A **render** tool is not a client tool, even though the drawing happens in a browser. Nothing is relayed and no handler runs there — the model emits `render_table({ rows })`, a server handler acks it immediately, and the call lands in the **timeline**, where every client displaying that conversation draws a component from its arguments.
+
+That is strictly better for anything whose output belongs to the conversation:
+
+|                  | Render tool — content      | Client tool — a call            |
+| ---------------- | -------------------------- | ------------------------------- |
+| What crosses     | content, into the timeline | a call, over a channel          |
+| Who acts         | every viewer, whenever     | one client, once                |
+| Durability       | replays forever            | happens or does not             |
+| Client attached? | not required               | required, or the call times out |
+
+Make `render_table` a client tool and it is addressed to one tab, so only that tab draws it; every other viewer sees nothing, and so does anyone who opens the thread next week.
+
+> **The rule:** if the effect should persist and be visible to whoever reads the thread later, it is **content**. If it acts on a live browser at a moment in time — reading a selection, navigating, measuring the DOM — it is a **client tool**.
+
+Reaching for a client tool where content would do is a silent mistake: everything works in the one tab you tested, and the addressing, timeouts and reconnect behaviour below all become your problem for a case that never had them.
+
+#### Authoring one
+
 A client tool is one object: what the model is told, and what runs when it calls it.
 
 ```ts
