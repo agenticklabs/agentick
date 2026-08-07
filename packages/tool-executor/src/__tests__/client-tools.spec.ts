@@ -24,6 +24,8 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { createTool } from "@agentick/tool";
+import { toRegistration } from "@agentick/spec";
 import { Chunk, Effect, Stream } from "effect";
 import type { LocalEventBus, LocalInbox } from "@agentick/runtime";
 
@@ -547,5 +549,52 @@ describe("a broadcast tool is addressed to nobody, so every client runs it", () 
     );
 
     expect((await reqP).payload).toMatchObject({ target: "client-TAB-A" });
+  });
+});
+
+describe("a tool declared with no handler is CLIENT-HANDLED", () => {
+  it("relays instead of failing ToolHandlerMissing", async () => {
+    // `createTool` leaves `handlerRef` off when given no handler, and an absent
+    // handlerRef is the ONLY signal the executor has. `toRegistration` used to
+    // fill one in from the declaration id, which erased it — so a server-side
+    // declaration meant for client execution failed with `ToolHandlerMissing`
+    // instead of ever reaching the browser that could run it.
+    const { declaration } = createTool({
+      name: "read_dom",
+      description: "Read something only the browser can see",
+      inputSchema: jsonSchema({ type: "object" }),
+      // No handler. That is the whole declaration.
+    });
+    expect(declaration.handlerRef).toBeUndefined();
+
+    const registration = toRegistration(declaration, { scope: "session", sessionId: "s1" });
+    expect(registration.handlerRef).toBeUndefined();
+
+    const { harness, bus } = await createTestHarness({ tools: [] });
+    await harness.register({ registration });
+
+    const relayed = nextEnvelope(bus, "session:channel:tool_call");
+    const result = harness.dispatch({
+      toolCallId: "tc-relay",
+      name: "read_dom",
+      input: {},
+      context: { via: "model" },
+    });
+
+    // It reached the channel rather than a missing server handler.
+    expect((await relayed).payload).toMatchObject({ name: "read_dom" });
+
+    // …and it is a correlated request, because `requiresResponse` defaults on
+    // for a relayed tool — not the one-way notify that answers the model with a
+    // canned success before any client has run anything.
+    expect((await relayed).metadata?.requestType).toBe("request");
+
+    await harness.respondToToolCall({
+      correlationId: (await relayed).metadata?.correlationId as string,
+      result: "the DOM says hello",
+    });
+    const settled = await result;
+    expect((settled.content[0] as { text: string }).text).toBe("the DOM says hello");
+    expect(settled.executedBy).toBe("client");
   });
 });

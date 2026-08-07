@@ -392,7 +392,12 @@ export function toRegistration(
 ): ToolRegistration {
   return {
     declaration,
-    handlerRef: declaration.handlerRef ?? declaration.id,
+    // NOT defaulted to `declaration.id`. An ABSENT `handlerRef` is the only
+    // signal the executor has that a tool is CLIENT-HANDLED — it relays the
+    // call instead of resolving a server handler. Filling one in erased that,
+    // so a `createTool` declared without a handler failed with
+    // `ToolHandlerMissing` rather than reaching the client that could run it.
+    ...(declaration.handlerRef !== undefined ? { handlerRef: declaration.handlerRef } : {}),
     binding,
   };
 }

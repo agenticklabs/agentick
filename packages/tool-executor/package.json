@@ -89,6 +89,7 @@
   },
   "devDependencies": {
     "@agentick/spec-conformance": "workspace:*",
+    "@agentick/tool": "workspace:*",
     "zod": "^4.3.6"
   },
   "engines": {

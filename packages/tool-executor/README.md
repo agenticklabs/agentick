@@ -437,6 +437,20 @@ Tools the model is about to run can be gated on the user's approval — see [Con
 calls.confirm((req) => !req.toolName?.startsWith("delete_"));
 ```
 
+#### When the SERVER declares it
+
+`use` is for a tool the client owns — it declares _and_ handles. A tool the **server** declares is not the client's to re-declare, so the client supplies only the handler:
+
+```ts
+// server — no handler is what makes it client-executed
+createTool({ name: "read_dom", description: "…", inputSchema });
+
+// client
+session.clientToolCalls.route({ read_dom: (input, ctx) => readDom(input) });
+```
+
+The model sees the tool whether or not a client is attached, and the declaration lives with the rest of your server-side tools. `route` handlers get the same `ctx` a `createClientTool` handler does.
+
 Why one object and not two: the older `set` + `route` pair joins the declaration and the handler by a bare string, and gets no help if they disagree. A declaration with no handler suspends every call until it times out; a handler with no declaration is never invoked. Both are still there for a caller whose declarations come from somewhere else — `use` simply makes the mismatch unconstructable.
 
 ```ts
@@ -705,6 +719,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/readme-client-tools.spec.ts` — the `readSelection` / `navigateTo` examples on this page, compiled and run against the public `/client` entry with a real zod schema: the handler's input inferred off the schema with no cast, the schema projected to the JSON Schema the wire carries, and neither example carrying a routing rule of its own.
 - `@agentick/transport-in-process`'s `client-tools-e2e.spec.ts` — declaring over a real gateway: an upsert leaving an earlier client's tools standing ([A,B] then [B,C] ⇒ {A,B,C}), a re-declared name replacing in place with no collision, the empty set changing nothing, and an app tool of the same name surviving in its own binding slot. Plus two clients declaring in turn with neither erased.
 - `@agentick/client-core`'s `handshake-retry.spec.ts` — the identity round trip: a reconnect re-presenting the SAME claimed client id and being handed a NEW connection id, and the client reporting the id the server BOUND rather than the one it claimed.
+- `src/__tests__/client-tools.spec.ts` — a `createTool` declared with NO handler surviving `toRegistration` with its `handlerRef` still absent, relaying to the tool-call channel rather than failing `ToolHandlerMissing`, doing so as a correlated request (not the one-way notify that answers before any client has run), and the client's reply reaching the model as `executedBy: "client"`.
 - `src/__tests__/create-client-tool.spec.ts` — the declaration projected off a `createClientTool` (the handler never reaching the wire), alias resolution, the ctx a handler receives, a handler throw answered rather than hung, and the addressing rule: a call for this client runs, one for another client is SILENT, an unaddressed one runs everywhere, four clients with one addressed produce exactly one answer and three silences, and `self` read at dispatch so a server-rebound id is never stale. Plus the two answers kept apart — an addressed-elsewhere call sends nothing and does not reach `notFound`, while an undeclared tool is answered because nobody has it.
 - `src/__tests__/client-tool-router.spec.ts` + `client-tool-confirm.spec.ts` + `client-tool-calls.conformance.spec.ts` + `src/client/__tests__/tools-handle.spec.ts` + `session-tools.spec.ts` — the router (correlated relay → respond, unknown → error, throw → error, custom `onUnknown`, fire-and-forget → no respond), confirm policies, `toolConfirmation` narrowing (non-confirmation → `undefined`, `preview` surviving the mapping, absent fields omitted), a broadcast-annotated tool relayed with NO target while a sibling call from the same execution keeps one, `route` ignoring a call addressed elsewhere and running one addressed to it, `list()` omitting another client's calls so its `.respond` cannot steal them, a call outstanding across a reconnect listed rather than re-dispatched and answerable by hand, `use` publishing the projected declarations then answering with the same object's handler (with a declined call proven unanswered by ordering it before an accepted one), closing the handle stopping routing and aborting the handlers' signal so the returned stop is genuinely optional, `stop()` freeing the handle for a second `use`, the client handle contract, and the registry projection (eager poll, the seed notifying subscribers so no boot-time `refresh()` is needed and settling empty on a failed poll, `refresh({ exposure })`, `dispatch` wire shape, zero-arg `subscribe`, no slot collision).
 - `src/__tests__/dispatch-task-mode-matrix.spec.ts` + `task-handle.spec.ts` — every cell of the task-mode matrix, `ctx.tasks` wiring, Pattern B continuing after the ref returns, and abort propagation into the in-flight task.
