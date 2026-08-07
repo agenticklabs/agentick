@@ -563,7 +563,10 @@ describe("a tool declared with no handler is CLIENT-HANDLED", () => {
       name: "read_dom",
       description: "Read something only the browser can see",
       inputSchema: jsonSchema({ type: "object" }),
-      // No handler. That is the whole declaration.
+      // No handler — that is what makes it client-executed. `requiresResponse`
+      // is stated rather than inferred: a handler-less declaration may equally
+      // be a rendering instruction that wants an instant ack and no client.
+      annotations: { requiresResponse: true },
     });
     expect(declaration.handlerRef).toBeUndefined();
 
@@ -584,9 +587,7 @@ describe("a tool declared with no handler is CLIENT-HANDLED", () => {
     // It reached the channel rather than a missing server handler.
     expect((await relayed).payload).toMatchObject({ name: "read_dom" });
 
-    // …and it is a correlated request, because `requiresResponse` defaults on
-    // for a relayed tool — not the one-way notify that answers the model with a
-    // canned success before any client has run anything.
+    // …and a correlated request, because the declaration asked for one.
     expect((await relayed).metadata?.requestType).toBe("request");
 
     await harness.respondToToolCall({

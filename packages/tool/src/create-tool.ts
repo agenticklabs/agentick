@@ -287,15 +287,17 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
   // declaration stays `handlerRef`-less so the executor relays dispatch
   // to the client) and register no handler / validator.
   if (spec.handler === undefined) {
-    // `requiresResponse` DEFAULTS ON for a relayed tool. Off, the executor
-    // sends a one-way notify and answers the model with a canned success
-    // BEFORE the client's handler has finished — so whatever the handler
-    // computed is discarded and the model reads an outcome nobody produced.
+    // `requiresResponse` is NOT defaulted here, unlike `createClientTool`.
     //
-    // Harder to spot here than on the client: there is no handler in this file
-    // to suggest a return value exists at all. `requiresResponse: false` is the
-    // opt-out for a tool that genuinely wants fire-and-forget.
-    const relayAnnotations = { requiresResponse: true, ...annotations };
+    // A handler-less declaration is genuinely ambiguous. It may be a tool a
+    // client executes — which wants the response — or a rendering instruction
+    // the timeline carries, which wants an instant ack and no client
+    // involvement at all. Defaulting the wait on makes the second block on a
+    // reply nobody will send, and time out.
+    //
+    // `createClientTool` can default it because it HAS a handler, typed to
+    // return a result. Here there is nothing to infer from, so the author says
+    // which they meant.
     const declaration: ToolDeclaration = {
       id: spec.name,
       name: spec.name,
@@ -303,10 +305,10 @@ export function createTool<TInput = unknown>(spec: ToolSpec<TInput>): CreatedToo
       inputSchema: schema,
       ...omitUndefined({ outputSchema: spec.outputSchema }),
       exposure: spec.exposure ?? ["model"],
-      annotations: relayAnnotations,
       ...omitUndefined({
         handlerRef: spec.handlerRef,
         aliases: spec.aliases,
+        annotations,
         metadata: spec.metadata,
         providerOptions: spec.providerOptions,
       }),

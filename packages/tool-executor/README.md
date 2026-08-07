@@ -443,13 +443,20 @@ calls.confirm((req) => !req.toolName?.startsWith("delete_"));
 
 ```ts
 // server — no handler is what makes it client-executed
-createTool({ name: "read_dom", description: "…", inputSchema });
+createTool({
+  name: "read_dom",
+  description: "…",
+  inputSchema,
+  annotations: { requiresResponse: true },
+});
 
 // client
 session.clientToolCalls.route({ read_dom: (input, ctx) => readDom(input) });
 ```
 
 The model sees the tool whether or not a client is attached, and the declaration lives with the rest of your server-side tools. `route` handlers get the same `ctx` a `createClientTool` handler does.
+
+**Say `requiresResponse` here, and mean it.** `createClientTool` can default it on — it has a handler, typed to return a result, so an answer exists by construction. A handler-less server declaration has nothing to infer from and two plausible readings: a tool a client executes (wants the answer) or a rendering instruction the timeline carries (wants an instant ack and no client at all). Asking for a response the second way blocks the turn on a reply nobody sends, until it times out.
 
 Why one object and not two: the older `set` + `route` pair joins the declaration and the handler by a bare string, and gets no help if they disagree. A declaration with no handler suspends every call until it times out; a handler with no declaration is never invoked. Both are still there for a caller whose declarations come from somewhere else — `use` simply makes the mismatch unconstructable.
 
