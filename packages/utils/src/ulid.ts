@@ -52,11 +52,14 @@ function encodeTime(time: number): string {
 function randomBytes(): Uint8Array {
   const out = new Uint8Array(10);
   const g = globalThis.crypto;
-  if (g?.getRandomValues) {
-    g.getRandomValues(out);
-  } else {
-    for (let i = 0; i < out.length; i++) out[i] = Math.floor(Math.random() * 256);
+  if (g?.getRandomValues === undefined) {
+    throw new Error(
+      "ulid(): globalThis.crypto.getRandomValues is unavailable. Falling back to " +
+        "Math.random() would silently drop collision resistance, and these ids key " +
+        "journal entries and message envelopes.",
+    );
   }
+  g.getRandomValues(out);
   return out;
 }
 
@@ -70,7 +73,11 @@ function bumpRandom(bytes: Uint8Array): Uint8Array {
       return out;
     }
   }
-  return out;
+  // Every byte was 0xff, so the carry ran off the end and `out` is now all
+  // zeros — an id that sorts BEFORE its predecessor. Needs 2^80 same-ms calls,
+  // so this is a guard rather than a real path; a wrong order is worse than a
+  // throw, because nothing downstream re-checks it.
+  throw new Error("ulid(): random suffix overflowed within a single millisecond");
 }
 
 /**
@@ -79,11 +86,16 @@ function bumpRandom(bytes: Uint8Array): Uint8Array {
  */
 export function ulid(): string {
   const now = Date.now();
-  if (now === lastTime) {
-    lastRandom = bumpRandom(lastRandom);
-  } else {
+  // `lastTime` is a monotonic FLOOR, not the raw clock. `Date.now()` steps
+  // backward on NTP correction, VM migration and leap-second smearing; taking
+  // it verbatim would emit a smaller time prefix, and the id would sort before
+  // ids already handed out. The journal's ordering and every cursored read are
+  // exactly that assumption, and neither re-checks it.
+  if (now > lastTime) {
     lastTime = now;
     lastRandom = randomBytes();
+  } else {
+    lastRandom = bumpRandom(lastRandom);
   }
-  return encodeTime(now) + encodeBase32(lastRandom).slice(0, 16);
+  return encodeTime(lastTime) + encodeBase32(lastRandom).slice(0, 16);
 }

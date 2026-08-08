@@ -24,6 +24,16 @@ const TIME_CHARS = 10;
 const RANDOM_CHARS = 16;
 const TOTAL_CHARS = TIME_CHARS + RANDOM_CHARS;
 
+/** Crockford base32, the alphabet `ulid()` encodes with. */
+const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/** The random suffix as an integer, so "advanced by one" is exact across a carry. */
+function decodeSuffix(id: string): bigint {
+  let n = 0n;
+  for (const ch of id.slice(TIME_CHARS)) n = n * 32n + BigInt(ALPHABET.indexOf(ch));
+  return n;
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -68,20 +78,59 @@ describe("ulid — monotonicity within one millisecond", () => {
     }
   });
 
-  it("the random suffix advances by the smallest step (only the tail changes)", () => {
+  it("the random suffix advances by exactly one, carrying when it must", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-27T00:00:01.000Z"));
 
     ulid();
     const a = ulid();
     const b = ulid();
-    // Same time prefix, and the suffixes differ only in their final chars —
-    // an increment, not a reseed.
+    // Same time prefix, and the suffix is the IMMEDIATE successor — an
+    // increment, not a reseed.
+    //
+    // Asserting instead that only the final char changes is wrong 1 run in 32:
+    // when the suffix ends in `Z` (the top of the alphabet) the increment
+    // carries into the next position, which is precisely what it should do.
+    // Decoding is exact and carry-safe. BigInt because 16 base32 chars is
+    // 80 bits, well past Number.MAX_SAFE_INTEGER.
     expect(b.slice(0, TIME_CHARS)).toBe(a.slice(0, TIME_CHARS));
-    expect(b.slice(TIME_CHARS, TOTAL_CHARS - 1)).toBe(a.slice(TIME_CHARS, TOTAL_CHARS - 1));
-    expect(b).not.toBe(a);
+    expect(decodeSuffix(b) - decodeSuffix(a)).toBe(1n);
     expect(b > a).toBe(true);
     expect(a.slice(TIME_CHARS)).toHaveLength(RANDOM_CHARS);
+  });
+});
+
+describe("ulid — a clock that steps backward", () => {
+  it("never emits a smaller id when the clock is corrected BACKWARD", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-27T00:00:05.000Z"));
+    const before = ulid();
+
+    // NTP correction, VM migration, leap-second smear — all real, all silent.
+    // Taking Date.now() verbatim here emitted a smaller time prefix, so the id
+    // sorted BEFORE one already handed out; `lastTime` is a monotonic floor.
+    vi.setSystemTime(new Date("2026-07-27T00:00:03.000Z"));
+    const after = ulid();
+
+    expect(after > before).toBe(true);
+  });
+
+  it("keeps the sequence ordered across a backward step and the recovery", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-27T00:00:05.000Z"));
+    const ids = [ulid(), ulid()];
+
+    vi.setSystemTime(new Date("2026-07-27T00:00:04.000Z"));
+    ids.push(ulid(), ulid());
+
+    // Clock recovers past the floor — normal reseeding resumes.
+    vi.setSystemTime(new Date("2026-07-27T00:00:09.000Z"));
+    ids.push(ulid(), ulid());
+
+    for (let i = 1; i < ids.length; i++) {
+      expect(ids[i]! > ids[i - 1]!).toBe(true);
+    }
+    expect([...ids].sort()).toEqual(ids);
   });
 });
 
@@ -119,13 +168,18 @@ describe("ulid — lexicographic ordering across milliseconds", () => {
 
   it("the time prefix survives a large timestamp (48-bit range, not 32)", () => {
     vi.useFakeTimers();
+    // Ascending, because `lastTime` is a monotonic floor: generating the
+    // far-future id FIRST would pin the floor there, and the 2026 id would
+    // inherit that prefix rather than a smaller one. That is the ordering
+    // guarantee working, not the encoder failing — so the encoder is tested
+    // going forward, which is the only direction a clock is supposed to go.
+    vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
+    const near = ulid();
+
     // Year 2286 — past the 32-bit seconds epoch rollover; the encoder walks 6
     // bytes, so this must still be a plain 10-char prefix.
     vi.setSystemTime(new Date("2286-11-20T17:46:40.000Z"));
     const far = ulid();
-
-    vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
-    const near = ulid();
 
     expect(far).toMatch(CROCKFORD);
     expect(far).toHaveLength(TOTAL_CHARS);
