@@ -314,10 +314,14 @@ The contract is not "returns a unique string". It is **monotonic** — each id s
 Check a candidate before installing it:
 
 ```ts
-import { runIdGeneratorConformance } from "@agentick/utils/testing";
+import { assertIdGeneratorConformance } from "@agentick/utils/testing";
 
-runIdGeneratorConformance("uuidv7", () => uuidv7());
+it("uuidv7 is fit to install", () => {
+  assertIdGeneratorConformance("uuidv7", () => uuidv7());
+});
 ```
+
+It imports no test framework — it throws a plain `Error` naming the claim and the offending pair, and you supply the runner. A conformance suite that hardcoded `vitest` would force every adopter onto vitest to check their own generator, and would put a test-framework import into the barrel that `waitFor` lives in.
 
 Call `setIdGenerator` once and never again. This is a construction-time choice, not a runtime toggle — two generators in one process, or a swap against a store that already holds ids, breaks ordering across the boundary. Ids minted by different encodings do not sort against each other even when both are individually monotonic.
 
@@ -441,12 +445,14 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 
 ### `@agentick/utils/testing`
 
-| Export                    | Purpose                                                                          |
-| ------------------------- | -------------------------------------------------------------------------------- |
-| `waitFor(cond, options?)` | Poll until truthy or the deadline expires; returns the truthy value              |
-| `waitForStable(snapshot)` | Poll until the snapshot stops changing — the "nothing more arrives" case         |
-| `drainRejection(p)`       | Observe a rejection eagerly; resolves with the value or the reason               |
-| `WaitForOptions`          | `timeoutMs` (1000) · `pollMs` (5) · `description`; `stableMs` (50) on the second |
+| Export                                              | Purpose                                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `waitFor(cond, options?)`                           | Poll until truthy or the deadline expires; returns the truthy value              |
+| `waitForStable(snapshot)`                           | Poll until the snapshot stops changing — the "nothing more arrives" case         |
+| `drainRejection(p)`                                 | Observe a rejection eagerly; resolves with the value or the reason               |
+| `WaitForOptions`                                    | `timeoutMs` (1000) · `pollMs` (5) · `description`; `stableMs` (50) on the second |
+| `assertIdGeneratorConformance(name, gen, options?)` | Throw unless a generator is fit for `setIdGenerator`; no test framework          |
+| `IdGeneratorConformanceOptions`                     | `burst` (1000) — ids minted per ordering check                                   |
 
 ### `@agentick/utils/loaders`
 
@@ -493,7 +499,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 - **No `effect`-flavored variants.** Adopters wanting `Equal.symbol` semantics or `Schema`-aware equality reach for `effect/Equal` directly.
 - **`waitFor` / `waitForStable` have no dedicated suite.** They are exercised constantly through the transport and cluster suites that depend on them, but their own timeout, poll-interval, and stability-window behavior isn't pinned in this package.
 - **`matchesAddressFilter` / `matchesEventFilter` are untested here.** Only `matchesScope` and `compileScopeMatcher` have a suite; the address- and event-shaped matchers are covered indirectly, if at all.
-- **A replacement generator is trusted once installed.** `setIdGenerator` does not run `runIdGeneratorConformance` against what it is handed — the suite is opt-in, and a generator that violates monotonicity is accepted silently. Validating at the seam would make the utils package import vitest, so the check stays a test-time tool.
+- **A replacement generator is trusted once installed.** `setIdGenerator` does not run `assertIdGeneratorConformance` against what it is handed — the check is opt-in, and a generator that violates monotonicity is accepted silently. Validating at the seam would mean minting a thousand ids on a startup path to answer a question the adopter can answer once, in a test.
 - **`sourceFromDirectory` does not follow symlinks** — deliberate, and asserted. There is no opt-in for callers who want traversal through a link.
 
 ## Verified by
@@ -505,7 +511,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 - `src/__tests__/effect-lift.spec.ts` — sync / async / already-`Effect` inputs, re-lifting as a no-op, `errorMap` coercion, composition under `yield*`, and that the lift does not fork — plus a child fiber inheriting `FiberRef` and cascading abort.
 - `src/__tests__/json-patch.spec.ts` — object and array ops, `"-"` append, out-of-bounds and missing-key throws, `~0`/`~1` unescaping, whole-document target, op sequencing, `test` mismatch, and the copy-on-write proof that untouched subtrees keep their reference.
 - `src/__tests__/map-concurrent.spec.ts` — input order preserved against out-of-order completion, the in-flight cap never exceeded, `concurrency: 1` sequential, `<= 0` clamped, first rejection propagated.
-- `src/__tests__/id.spec.ts` — the 26-char shape (10-char time prefix + 16-char random suffix), the Crockford base32 alphabet, no collisions across a tight burst, same-millisecond monotonicity with the suffix advancing by exactly one across a carry, cross-millisecond lexicographic ordering, the 48-bit timestamp range, and a clock corrected BACKWARD still producing a greater id. Runs the built-in generator through `runIdGeneratorConformance`, so the default is held to the bar a replacement is.
+- `src/__tests__/id.spec.ts` — the 26-char shape (10-char time prefix + 16-char random suffix), the Crockford base32 alphabet, no collisions across a tight burst, same-millisecond monotonicity with the suffix advancing by exactly one across a carry, cross-millisecond lexicographic ordering, the 48-bit timestamp range, and a clock corrected BACKWARD still producing a greater id. The built-in generator is run through `assertIdGeneratorConformance`, so the default is held to the bar a replacement is — and the checker itself is checked, against a random-uuid generator, an unpadded counter, a repeater, and a clock-only generator, each rejected by the specific claim it violates.
 - `src/__tests__/wait-for.spec.ts` — `waitFor` returning synchronously-true conditions without polling, polling through falsy returns, and both timeout messages; `waitForStable` honoring the quiet period, comparing snapshots by value rather than identity, settling on unserializable snapshots, and rejecting when the snapshot never stops changing.
 - `src/__tests__/abort-signals.spec.ts` — no-signal `undefined`, a lone signal returned unwrapped, an already-aborted source handed back so `.aborted` reads synchronously, and reason propagation from whichever source fires first.
 - `src/__tests__/resolvable.spec.ts` — literal pass-through, thunk invocation with no memoization, errors surfacing at the resolution site, narrow literal types preserved, and the async arms.

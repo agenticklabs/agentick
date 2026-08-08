@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { generateId } from "../id.js";
-import { runIdGeneratorConformance } from "../testing/id-generator-conformance.js";
+import { assertIdGeneratorConformance } from "../testing/id-generator-conformance.js";
 
 /** Crockford base32 — the digits plus letters minus I, L, O, U. */
 const CROCKFORD = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]+$/;
@@ -188,8 +188,63 @@ describe("generateId — lexicographic ordering across milliseconds", () => {
   });
 });
 
-// The default generator is held to the same bar a replacement is. If this ever
-// diverges from `runIdGeneratorConformance`, the suite is wrong — the suite is
-// what adopters check their own generator against, so it has to be the real
-// contract and not a weaker cousin of it.
-runIdGeneratorConformance("the built-in default", generateId, { burst: 500 });
+describe("the built-in generator satisfies the published contract", () => {
+  it("passes assertIdGeneratorConformance", () => {
+    // The bar we hold adopters to is the bar we hold ourselves to. If this ever
+    // diverges, the suite is wrong — it is what adopters check their own
+    // generator against, so it has to be the real contract and not a weaker
+    // cousin of it.
+    expect(() =>
+      assertIdGeneratorConformance("built-in", generateId, { burst: 500 }),
+    ).not.toThrow();
+  });
+});
+
+describe("assertIdGeneratorConformance — it has to REJECT the real mistakes", () => {
+  it("rejects a random-uuid generator (unique, but unordered)", () => {
+    // The mistake the seam invites: uuidv4 is unique and looks like an id, and
+    // it destroys journal ordering the moment it is installed.
+    let n = 0;
+    const uuidLike = (): string =>
+      `${(n = n + 7919) % 9973}`.padStart(4, "0") + "-0000-4000-8000-000000000000";
+    expect(() => assertIdGeneratorConformance("uuid-ish", uuidLike, { burst: 200 })).toThrow(
+      /sorts strictly after/,
+    );
+  });
+
+  it("rejects an UNPADDED counter — increasing as numbers, not as strings", () => {
+    // The classic. Monotonic by `>` on NUMBERS, and broken under the string
+    // sort a cursor actually uses: "9" sorts after "10". The monotonic check
+    // compares as strings, so it catches this at the 9 -> 10 rollover.
+    let n = 0;
+    const counter = (): string => String(++n);
+    expect(() => assertIdGeneratorConformance("counter", counter, { burst: 20 })).toThrow(
+      /sorts strictly after/,
+    );
+  });
+
+  it("rejects a VARYING-WIDTH generator that is otherwise well-ordered", () => {
+    // Isolates the fixed-width claim: these are strictly increasing as strings
+    // AND sort() recovers their order, so only the width check rejects them.
+    // Width matters because a cursor compares against ids it has never seen.
+    let id = "";
+    const growing = (): string => (id += "a");
+    expect(() => assertIdGeneratorConformance("growing", growing, { burst: 10 })).toThrow(
+      /fixed-width/,
+    );
+  });
+
+  it("rejects a generator that repeats", () => {
+    expect(() => assertIdGeneratorConformance("constant", () => "same", { burst: 5 })).toThrow(
+      /collision/,
+    );
+  });
+
+  it("rejects a clock-only generator across a same-millisecond burst", () => {
+    // No suffix to bump, so a burst inside one tick emits equal ids.
+    const clockOnly = (): string => String(1_700_000_000_000).padStart(20, "0");
+    expect(() => assertIdGeneratorConformance("clock-only", clockOnly, { burst: 10 })).toThrow(
+      /collision/,
+    );
+  });
+});

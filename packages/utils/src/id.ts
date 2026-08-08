@@ -13,8 +13,8 @@
  * without pulling in the local-substrate impls.
  *
  * @see {@link setIdGenerator} for the contract a replacement must honour, and
- * `@agentick/utils/testing`'s `runIdGeneratorConformance` for the suite that
- * checks one.
+ * `@agentick/utils/testing`'s `assertIdGeneratorConformance` for the
+ * suite that checks one.
  */
 
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"; // Crockford base32, 32 chars
@@ -103,7 +103,7 @@ let generate: IdGenerator = defaultGenerator;
  * The journal orders entries by id and cursored reads page by it, and neither
  * re-checks. A generator that only guarantees uniqueness — `uuidv4`, a
  * counter formatted without padding — corrupts both, silently. Check a
- * candidate with `runIdGeneratorConformance` from `@agentick/utils/testing`.
+ * candidate with `assertIdGeneratorConformance` from `@agentick/utils/testing`.
  *
  * Call ONCE, at startup, before the first id is minted. This is a
  * construction-time choice, not a runtime toggle: two generators in one
