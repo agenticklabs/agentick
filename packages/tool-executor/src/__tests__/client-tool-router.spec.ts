@@ -25,7 +25,7 @@ import type {
   WireMethod,
   WireParams,
 } from "@agentick/spec";
-import { jsonSchema } from "@agentick/spec";
+import { NOOP_METRICS, OFF_TRACE, createLog, jsonSchema } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
 
 import { TOOL_CALL_CHANNEL_FQN } from "../tool-call-schema.js";
@@ -184,7 +184,13 @@ describe("clientToolCalls.route — correlated relays", () => {
     await waitFor(() => seen.length === 1);
 
     const params = seen[0]!.params as { result: { content: string; isError: boolean } };
-    expect(params.result).toEqual({ content: "kaboom", isError: true });
+    // Names the tool and where it failed. The model reads this result, and a
+    // bare "kaboom" tells it nothing about what to do next. Identical to the
+    // `use()` path's wording — both settle through one function now.
+    expect(params.result).toEqual({
+      content: "`boom` failed in the browser: kaboom",
+      isError: true,
+    });
     handle.close();
   });
 
@@ -503,6 +509,102 @@ describe("a call outstanding across a reconnect", () => {
 
     await waitFor(() => handle.list().length > 0);
     expect(handle.list().map((c) => c.correlationId)).toEqual(["corr:mine"]);
+    handle.close();
+  });
+});
+
+/**
+ * A client-handled tool suspends the server until a reply arrives, so every way
+ * a browser handler can fail has to end in a result on the wire. A handler
+ * failure that produces silence is not a failed tool call — it is a dead
+ * conversation, and the only cure is restarting the process.
+ */
+describe("clientToolCalls.route — a failing handler still answers", () => {
+  const FAILURES: { label: string; handler: () => unknown }[] = [
+    {
+      label: "throws synchronously",
+      handler: () => {
+        throw new Error("boom");
+      },
+    },
+    { label: "rejects asynchronously", handler: () => Promise.reject(new Error("boom")) },
+    {
+      // The dom-map suspicion: walk a deep tree, exhaust the stack. V8 throws a
+      // catchable RangeError, and by the time it propagates the stack has
+      // unwound, so the catch itself has room to run.
+      label: "blows the call stack",
+      handler: () => {
+        const recurse = (n: number): number => recurse(n + 1);
+        return recurse(0);
+      },
+    },
+    {
+      label: "throws a non-Error",
+      handler: () => {
+        throw "just a string";
+      },
+    },
+    {
+      label: "throws undefined",
+      handler: () => {
+        throw undefined;
+      },
+    },
+    { label: "returns nothing at all", handler: () => undefined },
+  ];
+
+  for (const { label, handler } of FAILURES) {
+    it(`${label} — the server still gets a reply`, async () => {
+      const stream = pushStream();
+      const { client, seen } = stubClient(stream);
+
+      const handle = clientToolCallsHandle(client, "s1");
+      const unsub = handle.route({ get_node_content: handler as never });
+
+      stream.emit(toolCall("get_node_content", { node: 7 }), "corr:1");
+      await waitFor(() => seen.length === 1);
+
+      expect(seen[0]!.method).toBe("session/respond_to_tool_call");
+      const params = seen[0]!.params as { result: unknown };
+      // Something real goes back. `undefined` would be sent as a missing field
+      // and leave the executor to normalize nothing.
+      expect(params.result).toBeDefined();
+
+      unsub();
+      handle.close();
+    });
+  }
+
+  it("a reply that cannot be sent is reported, not swallowed", async () => {
+    const stream = pushStream();
+    const logged: unknown[] = [];
+    const { client } = stubClient(stream);
+    const failing = {
+      ...client,
+      transport: {
+        ...client.transport,
+        request: () => Promise.reject(new Error("socket closed")),
+      },
+      runtime: {
+        clientId: "c1",
+        connectionId: "conn-A",
+        log: createLog((level, data) => {
+          if (level === "error") logged.push(data);
+        }),
+        trace: OFF_TRACE,
+        metrics: NOOP_METRICS,
+        activeSpan: () => undefined,
+      },
+    } as unknown as ClientToolCallsClient;
+
+    const handle = clientToolCallsHandle(failing, "s1");
+    const unsub = handle.route({ get_node_content: () => "ok" });
+
+    stream.emit(toolCall("get_node_content", {}), "corr:1");
+    await waitFor(() => logged.length > 0);
+
+    expect(String(JSON.stringify(logged[0]))).toContain("socket closed");
+    unsub();
     handle.close();
   });
 });

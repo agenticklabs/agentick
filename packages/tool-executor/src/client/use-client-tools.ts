@@ -85,20 +85,7 @@ export async function dispatchClientToolCall(
       ? () => tool.handler(call.input as never, ctx)
       : () => (opts.notFound ?? unknownTool)(call.input, ctx);
 
-  try {
-    const result = await run();
-    // A handler that answered with nothing is UNKNOWN, not success. Saying so
-    // beats both alternatives: silence hangs the call, and the model's default
-    // reading of a result with no complaint in it is "it worked".
-    return result ?? unreported(call.name);
-  } catch (err) {
-    return {
-      content: `\`${call.name}\` failed in the browser: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-      isError: true,
-    };
-  }
+  return settleHandler(run, call.name);
 }
 
 function unreported(name: string): ToolResultInput {
@@ -106,6 +93,36 @@ function unreported(name: string): ToolResultInput {
     `\`${name}\` ran in the browser and reported no outcome, so whether it took ` +
     `effect is unknown. Do not tell the user it succeeded.`
   );
+}
+
+/**
+ * Run a handler and turn ANY outcome into something sendable.
+ *
+ * The one place a browser handler's failure becomes a result, shared by both
+ * dispatch paths. They each had their own copy and drifted: `use` coerced a
+ * nothing-return and `route` sent `undefined` on the wire, which is not a
+ * result the executor can normalize — so the reply failed, and a tool that
+ * merely returned nothing hung the whole execution.
+ *
+ * A client-handled call suspends the server until it is answered. Silence here
+ * is not a failed tool call, it is a dead conversation.
+ */
+export async function settleHandler(
+  run: () => ToolResultInput | Promise<ToolResultInput>,
+  name: string,
+): Promise<ToolResultInput> {
+  try {
+    const result = await run();
+    // A handler that answered with nothing is UNKNOWN, not success. Saying so
+    // beats both alternatives: silence hangs the call, and the model's default
+    // reading of a result with no complaint in it is "it worked".
+    return result ?? unreported(name);
+  } catch (cause) {
+    // Everything lands here, including a RangeError from a walker that
+    // exhausted the stack — by the time it propagates the stack has unwound,
+    // so the catch has room to run.
+    return { content: `\`${name}\` failed in the browser: ${reasonOf(cause)}`, isError: true };
+  }
 }
 
 const unknownTool = (_input: unknown, ctx: ToolCtx): ToolResultInput => ({

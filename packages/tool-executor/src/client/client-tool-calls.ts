@@ -46,6 +46,7 @@ import {
   type Respondable,
 } from "@agentick/client-core";
 import { NOOP_METRICS, OFF_TRACE, createLog } from "@agentick/spec";
+import { reasonOf } from "@agentick/utils";
 import type {
   ClientRuntimeContext,
   ClientToolDeclaration,
@@ -59,7 +60,12 @@ import type {
 import { TOOL_CALL_CHANNEL_FQN, type PendingToolCall } from "../tool-call-schema.js";
 import { confirmClientTools, type ConfirmPolicy } from "./confirm.js";
 import { toDeclaration, type Tool, type ToolCtx } from "./create-tool.js";
-import { clientToolCtx, routeClientTools, type UseClientToolsOptions } from "./use-client-tools.js";
+import {
+  clientToolCtx,
+  routeClientTools,
+  settleHandler,
+  type UseClientToolsOptions,
+} from "./use-client-tools.js";
 
 /**
  * The client surface the handle consumes — a subscribe stream (the fold's input)
@@ -310,8 +316,23 @@ export function clientToolCallsHandle(
     set: (declarations) =>
       client.transport.request("session/set_client_tools", { sessionId, declarations }),
     route: (handlers, opts) => {
+      const runtime = runtimeOf(client);
       const listener = (call: ClientToolCallHandle): void => {
-        void dispatchCall(call, handlers, runtimeOf(client), lifetime.signal, opts);
+        void dispatchCall(call, handlers, runtime, lifetime.signal, opts).catch(
+          (cause: unknown) => {
+            // The handler already settled; this is the REPLY failing to reach
+            // the server. Swallowing it leaves the execution suspended with
+            // nothing anywhere saying why. The call stays in `list()` and stays
+            // answerable, which is the recovery path.
+            runtime.log.error({
+              msg: "client tool reply did not reach the server; the call is still pending",
+              tool: call.name,
+              toolCallId: call.toolCallId,
+              correlationId: call.correlationId,
+              reason: reasonOf(cause),
+            });
+          },
+        );
       };
       callListeners.add(listener);
       return () => {
@@ -382,12 +403,12 @@ async function dispatchCall(
   opts?: RouteClientToolsOptions,
 ): Promise<void> {
   const handler = handlers[call.name] ?? opts?.onUnknown ?? unknownToolHandler;
-  let result: ToolResultInput;
-  try {
-    result = await handler(call.input, clientToolCtx(call, runtime, signal));
-  } catch (err) {
-    result = errorResult(err instanceof Error ? err.message : String(err));
-  }
+  const ctx = clientToolCtx(call, runtime, signal);
+  // ONE settle for both dispatch paths. This used to be its own try/catch and
+  // drifted from `use`'s: a handler returning nothing sent `undefined` on the
+  // wire, which the executor cannot normalize — so the reply failed and a tool
+  // that merely forgot to return hung the execution.
+  const result = await settleHandler(() => handler(call.input, ctx), call.name);
   // Fire-and-forget relays carry no correlationId — `.respond` is a no-op there.
   await call.respond(result);
 }
