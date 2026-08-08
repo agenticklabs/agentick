@@ -1,6 +1,6 @@
 {
   "name": "@agentick/transport",
-  "version": "1.0.0-next.102",
+  "version": "1.0.0-next.103",
   "description": "Shared transport plumbing for every @agentick/transport-* package. Ships BaseClientTransport (abstract; concrete transports subclass), MultiplexedStream (subscription / progress fan-out), the transport-agnostic JSON-RPC dispatcher that routes wire frames to GatewayHarnessProtocol methods, and shared DispatchHost / DispatchSink contract types.",
   "keywords": [
     "agent",
