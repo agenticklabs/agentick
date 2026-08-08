@@ -86,6 +86,7 @@ import type {
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
   MessageTimelineEntry,
+  ProtocolEvent,
   TurnBoundaryEntry,
   UsageStats,
 } from "@agentick/spec";
@@ -94,6 +95,7 @@ import {
   CompactStrategyMissing,
   DEFAULT_JOURNALING_POLICY,
   HandlerError,
+  TIMELINE_APPEND_EVENT_NAME,
   TIMELINE_COMPACT_EVENT_NAME,
   TimelineHydrateFailed,
   TimelineWriteFailed,
@@ -741,6 +743,18 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       const token = ctx.opId ?? ulid();
       const sourceEntries = source === "persisted" ? this.log.readPersisted() : this.log.read();
       const before = sourceEntries.length;
+      // The opening frame, from the HARNESS rather than the strategy: a
+      // strategy's own first report typically waits on its model's first token,
+      // which leaves the seconds in between with a fold running and no frame
+      // saying so. No `total` — a subscriber that draws bars renders
+      // indeterminate until the strategy publishes a measured one.
+      yield* Effect.ignore(
+        this.emitProgress(
+          {},
+          { token, op: TIMELINE_COMPACT_EVENT_NAME, progress: 0 },
+          omitUndefined({ parentOpId: ctx.opId }),
+        ),
+      );
       // A compaction strategy's `run` is typically a model call (the
       // contract says so) — its failure is OPERATIONAL (timeout,
       // rate-limit), not a programming defect. Surface it as the typed,
@@ -782,6 +796,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
           }),
         catch: (cause) => new CompactHandlerFailed({ cause }),
       });
+      yield* this.publishProduced(produced, ctx.opId);
       const result: CompactResult = {
         entriesBefore: before,
         entriesAfter: entries.length,
@@ -789,6 +804,45 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       };
       return result;
     });
+  }
+
+  /**
+   * A compaction's produced facts reach live client windows through the SAME
+   * envelope shape an append publishes — `timelineEventQuery()` (name
+   * `timeline:command:append`, phase `requested`, payload `{ entries }`) is the
+   * only thing `timelineView` folds, so a summary that skips it exists only for
+   * clients that reload. Bus-only by construction: `commitCompaction` already
+   * made the entries durable, and a journaled `requested` with no operation
+   * behind it would read as an append that never ran. A bus failure is ignored
+   * for the same reason a forked progress emit's is — the commit has already
+   * succeeded, and the entries reach every client on its next hydration.
+   */
+  private publishProduced(
+    entries: readonly TimelineEntry[],
+    parentOpId?: string,
+  ): Effect.Effect<void, never, never> {
+    if (entries.length === 0) return Effect.void;
+    const key = {
+      surface: this.surface,
+      name: TIMELINE_APPEND_EVENT_NAME,
+      phase: "requested" as const,
+    };
+    if (!this.bus.hasSubscriberFor(key)) return Effect.void;
+    const payload: TimelineAppendInput = { entries };
+    const envelope = {
+      id: ulid(),
+      surface: this.surface,
+      name: TIMELINE_APPEND_EVENT_NAME,
+      phase: "requested",
+      timestamp: Date.now(),
+      ...(parentOpId !== undefined ? { parentOpId } : {}),
+      scope: omitUndefined({
+        ...this.parentScope,
+        ...(this.principal !== undefined ? { principal: this.principal } : {}),
+      }),
+      payload,
+    } as ProtocolEvent;
+    return Effect.ignore(this.bus.append(envelope));
   }
 
   replaceProjection(input: TimelineReplaceProjectionInput): Promise<void> {

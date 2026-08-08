@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
 import type { EventQuery, ProtocolEvent, TimelineEntry } from "@agentick/spec";
-import { progressEventName, TIMELINE_COMPACT_EVENT_NAME } from "@agentick/spec";
+import { progressEventName, timelineEventQuery, TIMELINE_COMPACT_EVENT_NAME } from "@agentick/spec";
 
 import { TimelineHarness } from "../harness.js";
 import { runTimelineHarnessConformance, messageEntry } from "../conformance.js";
@@ -86,6 +86,38 @@ describe("TimelineHarness — Operation envelopes", () => {
     await harness.close();
   });
 
+  it("compact() publishes its produced entries as an append-shaped envelope", async () => {
+    const { harness, bus } = await makeHarness();
+    await harness.append(messageEntry("a", "one"), messageEntry("b", "two"));
+    const { events, stop } = await subscribeEnvelopes(bus, timelineEventQuery());
+    await harness.compact(
+      fromHandler({ handler: async () => [messageEntry("summary", "folded")] }),
+    );
+    await settle();
+    await stop();
+    // Exactly one append-shaped envelope, carrying ONLY the produced summary —
+    // a live window folding `timelineEventQuery()` sees the compaction land
+    // without a reload, and the entries it already holds are not re-sent.
+    expect(events).toHaveLength(1);
+    const payload = events[0].payload as { entries: readonly TimelineEntry[] };
+    expect(payload.entries.map((e) => (e as { message: { id: string } }).message.id)).toEqual([
+      "summary",
+    ]);
+    expect(events[0].parentOpId).toMatch(/^timeline:compact:/);
+    await harness.close();
+  });
+
+  it("compact() that produces no new entries publishes no append-shaped envelope", async () => {
+    const { harness, bus } = await makeHarness();
+    await harness.append(messageEntry("a", "one"), messageEntry("b", "two"));
+    const { events, stop } = await subscribeEnvelopes(bus, timelineEventQuery());
+    await harness.compact(fromHandler({ handler: async ({ entries }) => entries }));
+    await settle();
+    await stop();
+    expect(events).toHaveLength(0);
+    await harness.close();
+  });
+
   it("compaction progress frames name their operation and carry its opId", async () => {
     const { harness, bus } = await makeHarness();
     await harness.append(messageEntry("e1", "a"));
@@ -106,18 +138,44 @@ describe("TimelineHarness — Operation envelopes", () => {
     )?.opId;
     expect(compactOpId).toBeDefined();
 
+    // The harness's own opening frame first, then the strategy's report.
     const frames = events.filter((e) => e.name === progressEventName("timeline"));
-    expect(frames).toHaveLength(1);
+    expect(frames).toHaveLength(2);
+    expect(frames[0]!.payload).toEqual({
+      token: compactOpId,
+      op: TIMELINE_COMPACT_EVENT_NAME,
+      progress: 0,
+    });
     // The token IS the operation's id, so a consumer needs no second key to
     // join a frame to the lifecycle it belongs to.
-    expect(frames[0]!.payload).toEqual({
+    expect(frames[1]!.payload).toEqual({
       token: compactOpId,
       op: TIMELINE_COMPACT_EVENT_NAME,
       progress: 1,
       total: 2,
       message: "folding",
     });
-    expect(frames[0]!.parentOpId).toBe(compactOpId);
+    expect(frames[1]!.parentOpId).toBe(compactOpId);
+    await harness.close();
+  });
+
+  it("a fold whose strategy never reports still announces itself with an opening frame", async () => {
+    const { harness, bus } = await makeHarness();
+    await harness.append(messageEntry("e1", "a"));
+    const { events, stop } = await subscribeEnvelopes(bus, { surface: "timeline" });
+    await harness.compact(fromHandler({ handler: async ({ entries }) => entries }));
+    await settle();
+    await stop();
+
+    const frames = events.filter((e) => e.name === progressEventName("timeline"));
+    expect(frames).toHaveLength(1);
+    // No `total`: the bar a subscriber draws from this is indeterminate until
+    // the strategy publishes a measured one.
+    expect(frames[0]!.payload).toMatchObject({
+      op: TIMELINE_COMPACT_EVENT_NAME,
+      progress: 0,
+    });
+    expect(frames[0]!.payload).not.toHaveProperty("total");
     await harness.close();
   });
 });
