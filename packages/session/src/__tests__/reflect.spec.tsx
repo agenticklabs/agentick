@@ -180,10 +180,21 @@ describe("compaction through a real session", () => {
 
     await rig.session.timeline.compact();
 
-    // The cap is the denominator, so the bar is determinate — and the counts
-    // rise, which is the thing a spinner cannot say.
-    await waitFor(() => seen.length > 1);
-    const updates = seen.map((e) => e.payload as { progress: number; total?: number });
+    // The harness opens with an UNMEASURED frame — it knows the fold started,
+    // not how long it runs; `total` is the strategy's token cap, a denominator
+    // in a unit the harness does not hold. So wait on MEASURED frames: waiting
+    // on the raw count could yield the opener plus one measured frame, and
+    // whether the opener is caught at all is a race against subscriber attach.
+    // Asserting every frame carries a total passed only by LOSING that race.
+    const measured = (): { progress: number; total?: number }[] =>
+      seen
+        .map((e) => e.payload as { progress: number; total?: number })
+        .filter((u) => u.total !== undefined);
+    await waitFor(() => measured().length > 1);
+
+    const updates = measured();
+    // The cap is the denominator, so the bar is determinate once measured — and
+    // the counts rise, which is the thing a spinner cannot say.
     expect(updates.every((u) => u.total === 8192)).toBe(true);
     expect(updates.at(-1)!.progress).toBeGreaterThan(updates[0]!.progress);
     // One token for the whole fold — a bar, not a series of unrelated ticks.
