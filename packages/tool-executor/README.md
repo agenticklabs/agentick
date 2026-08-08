@@ -236,6 +236,29 @@ const transfer = createTool({
 
 The wire envelope is an ordinary elicitation with `hints.kind === "tool_confirmation"`. Approval requires `accepted` **and** `reply.approved === true`; every other outcome — declined, cancelled, aborted, schema violation, accepted-with-`approved: false` — becomes a denial-shaped result (`isError: true`, `executedBy: "agentick"` because the tool never ran). `reply.always` marks the tool session-allowed so later calls skip the gate; `reply.modifiedArguments` is re-validated before the handler runs. A wait past the bound is `ToolConfirmationTimeoutError`.
 
+### Deployment-wide policy
+
+`confirmationPolicy` (a harness option, reachable through `createApp({ toolExecutor })`) is the executor-level counterpart to the per-tool seam: ONE function consulted for **every** dispatch, with the final say on whether the gate asks. It receives the tool's own resolved verdict, so it composes rather than replaces:
+
+```ts
+createApp(root, {
+  toolExecutor: {
+    confirmationPolicy: async ({ declaration, input, ctx, toolVerdict }) => {
+      if (await grants.allowed(ctx.sessionId, declaration.name)) return false; // standing grant
+      if (toolVerdict) return true; // the tool asked
+      const a = declaration.annotations as Record<string, unknown> | undefined;
+      const viaMcp =
+        typeof a?.["executedBy"] === "string" && (a["executedBy"] as string).startsWith("mcp:");
+      return viaMcp && a?.["readOnlyHint"] !== true; // MCP writes confirm
+    },
+  },
+});
+```
+
+- Return `toolVerdict` to defer, `true` to force an ask the tool did not request, `false` to suppress one a standing grant covers. Async, so a grant lookup can hit a store.
+- MCP advisory hints (`readOnlyHint`, `destructiveHint`, …) arrive on `declaration.annotations` verbatim (`withMCP` spreads them), so annotation-driven defaults are policy code here — the framework ships the seam, never the policy.
+- Session-scoped `reply.always` grants still short-circuit after the policy says ask. Absent a policy, the tool's own verdict stands, exactly as before.
+
 > [!WARNING]
 > **Not a security boundary.** `requiresConfirmation`, `guardDispatch`, and `exposure` are policy seams — they shape what the model is offered and when a human approves. A call that clears the gate runs with the host process's full permissions, and inspecting command strings inside a predicate is advisory UX, not containment (pipes, base64, and heredocs defeat textual filtering). The confinement boundary is OS-level and lives in the sandbox provider.
 

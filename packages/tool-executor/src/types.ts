@@ -20,6 +20,7 @@ import type {
   ElicitationHarnessProtocol,
   Resources,
   TasksHarnessProtocol,
+  ToolConfirmationPolicy,
   ToolHandler,
   ToolRegistration,
   Validator,
@@ -98,6 +99,15 @@ export interface ToolExecutorHarnessOptions {
    * ElicitationHarness's own `defaultTimeoutMs` (5 minutes).
    */
   readonly defaultConfirmationTimeoutMs?: number;
+
+  /**
+   * Deployment-wide confirmation policy — the final say on whether the
+   * confirmation gate asks, for EVERY dispatch. Receives the tool's own
+   * resolved `requiresConfirmation` as `toolVerdict` and composes with it
+   * (defer / force / suppress). See {@link ToolConfirmationPolicy}. Absent:
+   * the tool's own verdict stands, exactly as before.
+   */
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
 
   /**
    * Elicitation harness used by the confirmation gate. Required:

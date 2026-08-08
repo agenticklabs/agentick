@@ -58,6 +58,7 @@ import type {
   SubstrateError,
   TaskHandle,
   TasksHarnessProtocol,
+  ToolConfirmationPolicy,
   ToolDeclaration,
   ToolExecutorErrorChannel,
   ToolExecutorFx,
@@ -160,6 +161,7 @@ export class ToolExecutorHarness
   private readonly stateStore = new Map<string, unknown>();
   private readonly defaultTimeoutMs?: number;
   private readonly defaultConfirmationTimeoutMs?: number;
+  private readonly confirmationPolicy?: ToolConfirmationPolicy;
   private readonly channelPublisher?: ChannelPublisher;
   private readonly elicitation: ElicitationHarnessProtocol;
   private readonly tasks: TasksHarnessProtocol | undefined;
@@ -218,6 +220,7 @@ export class ToolExecutorHarness
     this.handlerResolver = options.handlerResolver;
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
+    this.confirmationPolicy = options.confirmationPolicy;
     this.channelPublisher = options.channelPublisher;
     this.elicitation = options.elicitation;
     this.tasks = options.tasks;
@@ -994,10 +997,22 @@ export class ToolExecutorHarness
       // the response is validated against TOOL_CONFIRMATION_REPLY_SCHEMA.
       // Applies to client-handled tools too — they gate BEFORE relaying.
       const requiresConfirmation = reg.declaration.annotations?.requiresConfirmation;
-      const needsConfirmation =
+      const toolVerdict =
         typeof requiresConfirmation === "function"
           ? yield* Effect.promise(() => Promise.resolve(requiresConfirmation(validated, ctx)))
           : requiresConfirmation === true;
+      // The deployment-wide policy gets the FINAL say, with the tool's own
+      // verdict in hand — force, suppress, or defer. Session-scoped `always`
+      // grants (a user's confirmation reply) still short-circuit below.
+      const policy = this.confirmationPolicy;
+      const needsConfirmation =
+        policy !== undefined
+          ? yield* Effect.promise(() =>
+              Promise.resolve(
+                policy({ declaration: reg.declaration, input: validated, ctx, toolVerdict }),
+              ),
+            )
+          : toolVerdict;
       if (needsConfirmation && !this.alwaysAllowed.has(input.name)) {
         const confirmationTimeoutMs =
           reg.declaration.annotations?.confirmationTimeoutMs ??

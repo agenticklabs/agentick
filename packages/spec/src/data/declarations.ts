@@ -129,6 +129,44 @@ export type ToolConfirmationPredicate = (
   ctx: ToolHandlerCtx,
 ) => boolean | Promise<boolean>;
 
+/**
+ * What the executor-level confirmation policy is handed for one dispatch —
+ * everything the gate knows at the moment it must decide whether to ask.
+ *
+ * `toolVerdict` is the tool's OWN answer ({@link
+ * ToolAnnotations.requiresConfirmation}, resolved), so a policy composes with
+ * per-tool judgment rather than replacing it: return it to defer, `true` to
+ * force an ask the tool did not request (e.g. every MCP tool not marked
+ * `readOnlyHint: true`), `false` to suppress one a standing grant already
+ * covers (e.g. a per-user "always allow" record).
+ */
+export interface ToolConfirmationDecision {
+  /** The dispatched tool's declaration — annotations included, so MCP advisory hints are readable here. */
+  readonly declaration: ToolDeclaration;
+  /** The validated input, exactly what the handler would receive. */
+  readonly input: unknown;
+  /** The live dispatch ctx — session identity, principal, surfaces. */
+  readonly ctx: ToolHandlerCtx;
+  /** The tool's own `requiresConfirmation`, resolved for this call. */
+  readonly toolVerdict: boolean;
+}
+
+/**
+ * Executor-level confirmation policy — ONE function, configured on the tool
+ * executor, consulted for EVERY dispatch. The final say on whether the
+ * confirmation gate asks: the framework provides this seam and nothing else,
+ * so what a deployment confirms (annotation defaults, privileged servers,
+ * durable per-user grants) is app code, not framework policy.
+ *
+ * A runtime value like {@link ToolConfirmationPredicate}: never serialized,
+ * evaluated in-process only. Async so a grant lookup can hit a store. The
+ * session-scoped "always allow" a user grants THROUGH a confirmation reply
+ * still applies after this returns `true`.
+ */
+export type ToolConfirmationPolicy = (
+  decision: ToolConfirmationDecision,
+) => boolean | Promise<boolean>;
+
 export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";
