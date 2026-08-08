@@ -1202,7 +1202,12 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   ): Readonly<Record<string, unknown>> {
     const scope = op.scope ?? {};
     const ns = this.telemetryNamespace;
-    return {
+    // OTel rejects an `undefined` attribute value, and most of these are absent
+    // on most ops — a root op has no parent, an off-wire op no requestId, an
+    // app-scoped op no session. Emitting the keys anyway costs a per-span
+    // validation warning in every exporter and puts holes in whatever the
+    // collector writes.
+    return omitUndefined({
       [`${ns}.op_id`]: op.opId,
       [`${ns}.surface`]: op.surface,
       [`${ns}.parent_op_id`]: op.parentOpId,
@@ -1210,7 +1215,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       [`${ns}.session_id`]: scope.sessionId,
       [`${ns}.execution_id`]: scope.executionId,
       [`${ns}.tick_id`]: scope.tickId,
-    };
+    });
   }
 
   // ──────── ⑤ Events (light path) ────────

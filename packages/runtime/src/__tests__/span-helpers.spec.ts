@@ -174,3 +174,37 @@ describe("Telemetry rung 3 — span-annotation helpers", () => {
     await runtime.dispose();
   });
 });
+
+describe("Default operation span attributes", () => {
+  it("omits the keys it has no value for, rather than sending undefined", async () => {
+    const { layer, spans } = collectingTracer();
+    const runtime = ManagedRuntime.make(layer);
+    const h = new SpanHarness();
+
+    // `opFx` runs with `scope: {}` and no parent/request — so every optional
+    // attribute is absent. This is the ordinary case, not an edge one.
+    await runtime.runPromise(h.opFx(1));
+
+    const span = spans.find((s) => s.name === "tool:command:op");
+    expect(span).toBeDefined();
+
+    // OTel rejects an undefined attribute value: the SDK drops the key and
+    // warns per span, and a collector writing rows gets holes.
+    const undefinedKeys = [...span!.attributes.entries()]
+      .filter(([, value]) => value === undefined)
+      .map(([key]) => key);
+    expect(undefinedKeys).toEqual([]);
+
+    // Absent, not present-and-empty.
+    expect(span!.attributes.has("agentick.session_id")).toBe(false);
+    expect(span!.attributes.has("agentick.parent_op_id")).toBe(false);
+    expect(span!.attributes.has("agentick.request_id")).toBe(false);
+
+    // What IS known still lands.
+    expect(span!.attributes.get("agentick.op_id")).toBe("tool:op:1");
+    expect(span!.attributes.get("agentick.surface")).toBe("tool");
+
+    await h.close();
+    await runtime.dispose();
+  });
+});
