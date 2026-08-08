@@ -395,7 +395,7 @@ When implementing a feature in one package, **don't treat code in other packages
 Before writing ANY utility function, **always check `@agentick/utils` first**
 (and its `/testing` subpath for test helpers). It is the canonical home for
 cross-package utilities: `waitFor`, `waitForStable`, `isEqual`, `mergeLayered`,
-`omitUndefined`, `ulid`, `resolveSync`, etc.
+`omitUndefined`, `generateId`, `resolveSync`, etc.
 
 - **Before creating**: grep `packages/utils/src/` for the function name
 - **Shared code belongs there**: if a utility will be used across multiple

@@ -576,7 +576,7 @@ export interface TickInfo {
  * settled {@link TickResult}.
  */
 export interface TickInput {
-  /** Stable id for this tick (`tick-<ulid>`) — the hook's clean identity. */
+  /** Stable id for this tick (`tick-<id>`) — the hook's clean identity. */
   readonly tickId: string;
   /** 1-based index of this tick within the execution. */
   readonly tickIndex: number;

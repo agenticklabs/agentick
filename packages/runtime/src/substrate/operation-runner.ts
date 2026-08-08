@@ -95,7 +95,7 @@ import {
   registerAgentickError,
 } from "@agentick/spec";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
-import { ulid } from "./ulid.js";
+import { generateId } from "@agentick/utils";
 import {
   composeMiddleware,
   getCallMiddleware,
@@ -457,7 +457,7 @@ class OperationRunnerImpl implements OperationRunner {
     extra?: { payload?: unknown; outcome?: CommandOutcome; error?: ProtocolEvent["error"] },
   ): ProtocolEvent {
     return {
-      id: ulid(),
+      id: generateId(),
       opId: op.opId,
       parentOpId: op.parentOpId,
       surface: op.surface ?? this.surface,

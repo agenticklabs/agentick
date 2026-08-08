@@ -19,7 +19,7 @@
 import type { WebSocket as WSConnection } from "ws";
 
 import type { Connection, ConnectionCloseReason } from "@agentick/cluster-broker";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 export interface WsConnectionOptions {
   /** Optional connection id; defaults to a fresh ULID. */
@@ -31,7 +31,7 @@ export interface WsConnectionOptions {
 }
 
 export function wsToConnection(ws: WSConnection, opts: WsConnectionOptions = {}): Connection {
-  const id = opts.id ?? `ws-${ulid()}`;
+  const id = opts.id ?? `ws-${generateId()}`;
   const remote = opts.remote;
   const onDiagnostic = opts.onDiagnostic ?? (() => {});
 

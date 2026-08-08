@@ -509,7 +509,7 @@ export {
 export interface AppHarnessProtocol<P = unknown> {
   /**
    * Stable app identifier. Set at construction (from
-   * `AppHarnessOptions.appId` or generated as `app:${ulid()}`); never
+   * `AppHarnessOptions.appId` or generated as `app:${generateId()}`); never
    * changes. Adopters use this to discriminate apps in cross-app
    * observation, route gateway-level calls, and persist app-scoped
    * data.

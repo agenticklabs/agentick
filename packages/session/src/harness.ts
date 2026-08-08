@@ -19,7 +19,7 @@ import {
   type Middleware,
   runHarnessProtocol,
   spanAttributes,
-  ulid,
+  generateId,
   withCallMiddleware,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
@@ -2131,7 +2131,7 @@ export class SessionHarness<P = unknown>
       name,
       publish: async (payload: T, metadata?: Readonly<Record<string, unknown>>) => {
         const ev: ProtocolEvent = {
-          id: ulid(),
+          id: generateId(),
           surface: "session",
           name: fullName,
           phase: "delta",
@@ -2243,7 +2243,7 @@ export class SessionHarness<P = unknown>
     if (provider === undefined) return undefined;
     const payload = provider.channelSnapshotPayload();
     return {
-      id: ulid(),
+      id: generateId(),
       surface: "session",
       name: channelEventName(channel),
       phase: "delta",
@@ -2528,7 +2528,7 @@ export class SessionHarness<P = unknown>
    * fires the ADR-83 interceptor seam (guards / `.use()` middleware / command
    * hooks) and the full phase contract (`requested` → `before` → terminal),
    * exactly as every other harness command does. Mints a fresh `opId` per call
-   * (`session:<verb>:<ulid>`) — session verbs carry no caller-supplied
+   * (`session:<verb>:<id>`) — session verbs carry no caller-supplied
    * idempotency key, so no replay: each invocation is its own operation. The
    * op `name` follows the executor's convention (`<surface>:command:<verb>`),
    * which {@link deriveHookNames} strips to the `session:<verb>` CommandRegistry
@@ -2546,7 +2546,7 @@ export class SessionHarness<P = unknown>
     body: (i: I) => Effect.Effect<R, E, never>,
   ): Effect.Effect<R, E | SubstrateError, never> {
     const op: Operation<I, R, E> = {
-      opId: `session:${verb}:${ulid()}`,
+      opId: `session:${verb}:${generateId()}`,
       surface: "session",
       name: `session:command:${verb}`,
       scope: {},
@@ -2751,7 +2751,7 @@ export class SessionHarness<P = unknown>
     this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
     this._executionRollup = undefined;
 
-    const executionId = `exec:${ulid()}`;
+    const executionId = `exec:${generateId()}`;
     // E11 accounting: bump the execution count + set the in-flight id BEFORE
     // `setStatus("running")`. The count / id updates are cache-only on the
     // runtime's view; the `setStatus` write-through then persists ONE record
@@ -3560,7 +3560,7 @@ export class SessionHarness<P = unknown>
     readonly tags?: readonly string[];
     readonly metadata?: Readonly<Record<string, unknown>>;
   }): Effect.Effect<string, TimelineWriteFailed | SubstrateError, never> {
-    const messageId = `m_${ulid()}`;
+    const messageId = `m_${generateId()}`;
     const message: import("@agentick/spec").SessionMessage = {
       id: messageId,
       role: input.role,

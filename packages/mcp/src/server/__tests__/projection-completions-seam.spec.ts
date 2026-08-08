@@ -28,7 +28,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   CompletionCtx,
   McpAuthenticatedUser,
@@ -71,7 +71,7 @@ function substrate(): [MemoryJournal, LocalEventBus, LocalInbox] {
 }
 
 async function makePrompts(declarations: readonly PromptDeclaration[]): Promise<PromptsHarness> {
-  const harness = new PromptsHarness(`prompts:${ulid()}`, ...substrate());
+  const harness = new PromptsHarness(`prompts:${generateId()}`, ...substrate());
   await harness.ready;
   for (const declaration of declarations) await harness.register({ declaration });
   return harness;
@@ -80,7 +80,7 @@ async function makePrompts(declarations: readonly PromptDeclaration[]): Promise<
 async function makeCompletions(
   sources: Readonly<Record<string, (value: string, ctx: CompletionCtx) => readonly string[]>>,
 ): Promise<CompletionsHarness> {
-  const harness = new CompletionsHarness(`completions:${ulid()}`, ...substrate());
+  const harness = new CompletionsHarness(`completions:${generateId()}`, ...substrate());
   await harness.ready;
   for (const [name, resolver] of Object.entries(sources)) harness.register(name, resolver);
   return harness;
@@ -97,7 +97,7 @@ async function connected(options: {
   readonly completions?: McpServerOptions["completions"];
 }): Promise<{ readonly client: McpClient; readonly cleanup: () => Promise<void> }> {
   const transport = inMemoryServerTransport();
-  const harness = new McpServerHarness(`srv:${ulid()}`, ...substrate(), {
+  const harness = new McpServerHarness(`srv:${generateId()}`, ...substrate(), {
     name: "seam",
     serverInfo: { name: "seam", version: "0.0.0" },
     transports: [transport],
@@ -389,7 +389,7 @@ describe("completions capability — earned by the prompts surface", () => {
       },
     ]);
     const transport = inMemoryServerTransport();
-    const harness = new McpServerHarness(`srv:${ulid()}`, ...substrate(), {
+    const harness = new McpServerHarness(`srv:${generateId()}`, ...substrate(), {
       name: "seam-optout",
       serverInfo: { name: "seam-optout", version: "0.0.0" },
       transports: [transport],

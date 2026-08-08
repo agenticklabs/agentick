@@ -22,7 +22,7 @@
 import type { EventId, EventStore } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import { McpServerHarness } from "../../index.js";
 import { DEFAULT_MAX_EVENTS, inMemoryEventStore } from "../event-store.js";
@@ -138,7 +138,7 @@ async function serveHttp(eventStore?: EventStore): Promise<{
 }> {
   const transport = httpTransport(eventStore ? { port: 0, eventStore } : { port: 0 });
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 256 }),
     new LocalEventBus(),
     new LocalInbox(),

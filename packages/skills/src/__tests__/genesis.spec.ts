@@ -23,7 +23,7 @@ import {
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
-  ulid,
+  generateId,
   type Middleware,
 } from "@agentick/runtime";
 import { SkillsHydrateFailed } from "@agentick/spec";
@@ -36,7 +36,7 @@ import { InMemorySkillStore } from "../store.js";
 
 async function harness(options: SkillsHarnessOptions = {}): Promise<SkillsHarness> {
   const h = new SkillsHarness(
-    `skills-genesis-${ulid()}`,
+    `skills-genesis-${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -249,7 +249,7 @@ describe("genesis — the ctx.store facet (ADR 91/93)", () => {
   it("exposes `principal` — the tiered-catalog seam", async () => {
     const seen: (string | undefined)[] = [];
     const h = new SkillsHarness(
-      `skills-genesis-${ulid()}`,
+      `skills-genesis-${generateId()}`,
       new MemoryJournal(),
       new LocalEventBus(),
       new LocalInbox(),

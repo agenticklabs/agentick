@@ -11,7 +11,7 @@
  * the broker a `Connection` and the broker drives the handshake.
  */
 
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import type { Connection, Connector, Listener } from "../connection.js";
 import { createInMemoryConnectionPair } from "./in-memory-pair.js";
@@ -64,7 +64,7 @@ export function createInMemoryClusterPair(): InMemoryClusterPair {
       async connect(): Promise<Connection> {
         if (!started) throw new Error("cluster-broker test: listener not started");
         if (closed) throw new Error("cluster-broker test: listener closed");
-        const id = ulid();
+        const id = generateId();
         const [clientSide, brokerSide] = createInMemoryConnectionPair({
           idA: `mem-${id}-client`,
           idB: `mem-${id}-broker`,

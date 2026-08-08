@@ -12,7 +12,7 @@
  *
  * ```ts
  * const myCompiler = defineCompiler({
- *   mount: async (input) => ({ mountId: ulid() }),
+ *   mount: async (input) => ({ mountId: generateId() }),
  *   unmount: async () => {},
  *   renderTree: async (input) => ({
  *     mountId: input.mountId,
@@ -44,7 +44,7 @@ import {
   LocalInbox,
   MemoryJournal,
   runHarnessProtocol,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type {
   EventBus,
@@ -91,7 +91,7 @@ export interface DefineCompilerInput {
 
 export function defineCompiler(spec: DefineCompilerInput): CompilerFactory {
   const factory = (deps?: CompilerFactoryDeps): CompilerProtocol => {
-    const scopeId = deps?.scopeId ?? `define-compiler:${ulid()}`;
+    const scopeId = deps?.scopeId ?? `define-compiler:${generateId()}`;
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
@@ -124,7 +124,7 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
 
   mount(input: MountInput): Promise<MountResult> {
     const op: Operation<MountInput, MountResult> = {
-      opId: `compiler:mount:${ulid()}`,
+      opId: `compiler:mount:${generateId()}`,
       surface: "compiler",
       name: "compiler:command:mount",
       scope: {},
@@ -138,7 +138,7 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
   rerender(input: RerenderInput): Promise<void> {
     if (!this.spec.rerender) return Promise.resolve();
     const op: Operation<RerenderInput, void> = {
-      opId: `compiler:rerender:${ulid()}`,
+      opId: `compiler:rerender:${generateId()}`,
       surface: "compiler",
       name: "compiler:command:rerender",
       scope: {},
@@ -174,7 +174,7 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
     input: RenderTreeInput,
   ): Effect.Effect<RenderTreeResult, SubstrateError, never> {
     const op: Operation<RenderTreeInput, RenderTreeResult, never> = {
-      opId: `compiler:render-tree:${ulid()}`,
+      opId: `compiler:render-tree:${generateId()}`,
       surface: "compiler",
       name: "compiler:command:render-tree",
       scope: {},
@@ -196,7 +196,7 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
 
   unmount(input: UnmountInput): Promise<void> {
     const op: Operation<UnmountInput, void> = {
-      opId: `compiler:unmount:${ulid()}`,
+      opId: `compiler:unmount:${generateId()}`,
       surface: "compiler",
       name: "compiler:command:unmount",
       scope: {},

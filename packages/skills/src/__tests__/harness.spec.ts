@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ProtocolEvent } from "@agentick/spec";
 
 import { SkillsHarness } from "../harness.js";
@@ -15,7 +15,7 @@ describe("SkillsHarness — conformance", () => {
   runSkillsHarnessConformance({
     make: async () => {
       const harness = new SkillsHarness(
-        `conformance:${ulid()}`,
+        `conformance:${generateId()}`,
         new MemoryJournal({ capacity: 1024 }),
         new LocalEventBus(),
         new LocalInbox(),
@@ -40,7 +40,7 @@ describe("SkillsHarness — impl-specific", () => {
     const journal = new MemoryJournal({ capacity: 1024 });
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const harness = new SkillsHarness(`obs:${ulid()}`, journal, bus, inbox);
+    const harness = new SkillsHarness(`obs:${generateId()}`, journal, bus, inbox);
     await harness.ready;
 
     const observed: ProtocolEvent[] = [];
@@ -81,7 +81,7 @@ describe("SkillsHarness — impl-specific", () => {
 describe("SkillsHarness — declared version rides the record", () => {
   const mk = async (): Promise<SkillsHarness> => {
     const h = new SkillsHarness(
-      `ver:${ulid()}`,
+      `ver:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

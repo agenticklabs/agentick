@@ -37,7 +37,7 @@ import {
   type ToolSet,
 } from "ai";
 
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 import { createSourceInterner, defineLanguageModelAdapter } from "@agentick/model";
 import type { LanguageModelAdapter, SourceInterner, StreamAccumulatorView } from "@agentick/model";
 import type {
@@ -287,7 +287,7 @@ export function aisdk(
           const callId =
             (part.toolCallId as string | undefined) ??
             (part.id as string | undefined) ??
-            `tc_${ulid()}`;
+            `tc_${generateId()}`;
           const name = (part.toolName as string | undefined) ?? "";
           state.toolCallNameByCallId.set(callId, name);
           out.push({

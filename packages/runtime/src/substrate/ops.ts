@@ -38,7 +38,7 @@ import type {
   SubstrateError,
 } from "@agentick/spec";
 import { annotateOperationSpan } from "./middleware.js";
-import { ulid } from "./ulid.js";
+import { generateId } from "@agentick/utils";
 
 /** The bound `runOperation` capability (the harness's Tier-2 primitive). */
 export type RunOperationFn = <I, R, E>(
@@ -76,7 +76,7 @@ export function deriveOps(deps: DeriveOpsDeps): Ops {
     const fn = (typeof optsOrFn === "function" ? optsOrFn : maybeFn) as () => T | Promise<T>;
 
     const op: Operation<unknown, T, unknown> = {
-      opId: ulid(),
+      opId: generateId(),
       surface: deps.surface,
       name: `${deps.surface}:run:${name}`,
       scope: deps.scope,

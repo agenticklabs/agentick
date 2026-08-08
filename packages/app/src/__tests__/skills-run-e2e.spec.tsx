@@ -34,7 +34,7 @@ import {
   FakeLanguageModelExecutor,
   type FakeLanguageModelExecutorOptions,
 } from "@agentick/model-executor";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { waitFor } from "@agentick/utils/testing";
 import type {
   ExecutionTarget,
@@ -88,7 +88,7 @@ function fakeExecutor(
   scripted: FakeLanguageModelExecutorOptions["scripted"],
 ): FakeLanguageModelExecutor {
   return new FakeLanguageModelExecutor(
-    `fake-${ulid()}`,
+    `fake-${generateId()}`,
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),

@@ -23,7 +23,7 @@ import {
   MemoryJournal,
   namespaceSlotExtensions,
   registeredNamespaceSlots,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type {
   CollectionMutation,
@@ -41,7 +41,7 @@ import "../augment.js";
 
 async function liveHarness(): Promise<PromptsHarness> {
   const h = new PromptsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 64 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -132,7 +132,7 @@ describe("the store-option asymmetry is over (ADR 93 rendered-moot #4)", () => {
     expect(definition.store).toBe(store);
     // And it reaches the harness through the one options shape.
     const h = new PromptsHarness(
-      `test:${ulid()}`,
+      `test:${generateId()}`,
       new MemoryJournal({ capacity: 64 }),
       new LocalEventBus(),
       new LocalInbox(),

@@ -29,7 +29,7 @@ import {
   dispatchRequest,
   type DispatchHost,
 } from "@agentick/transport";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { NdjsonDecoder, encodeNdjson, type NdjsonDecoderOptions } from "../shared/ndjson.js";
 
@@ -148,7 +148,7 @@ export function unixSocketServer(options: UnixSocketServerOptions): UnixSocketSe
     // the paused socket until the ConnectionContext attaches its `data`
     // listener a microtask later, so no frames are lost.
     // Minted before authn, so a refused crossing names the connection it refused.
-    const connectionId = `conn-${ulid()}`;
+    const connectionId = `conn-${generateId()}`;
     void authenticateIngress(
       { transportKind: "unix", connectionId, credential: { kind: "none" } },
       options.authSource,

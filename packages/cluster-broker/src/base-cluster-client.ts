@@ -32,7 +32,7 @@ import type {
   NodeId,
 } from "@agentick/cluster";
 import type { EventEnvelope, MessageEnvelope } from "@agentick/spec";
-import { matchesAddressFilter, matchesEventFilter, ulid } from "@agentick/utils";
+import { matchesAddressFilter, matchesEventFilter, generateId } from "@agentick/utils";
 
 import { adaptClusterCodec, type BrokerCodec } from "./broker-codec.js";
 import type { Connection, Connector } from "./connection.js";
@@ -288,7 +288,7 @@ export class BaseClusterClient implements ClusterTransport {
     // synchronously (preserving the ergonomic ClusterTransport
     // contract); adopters that need ordering call `transport.flush()`
     // before issuing work that should land on the subscriber.
-    const subId = ulid();
+    const subId = generateId();
     const sub: InboxSubscription = { subId, filter, handler: onMessage };
     this.inboxSubs.set(subId, sub);
     this.trackPendingAck(subId);
@@ -306,7 +306,7 @@ export class BaseClusterClient implements ClusterTransport {
 
   subscribeBus(filter: EventFilter, onEvent: (env: EventEnvelope) => void): () => Promise<void> {
     // Same subscribe-ack mechanism as subscribeInbox.
-    const subId = ulid();
+    const subId = generateId();
     const sub: BusSubscription = { subId, filter, handler: onEvent };
     this.busSubs.set(subId, sub);
     this.trackPendingAck(subId);

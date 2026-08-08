@@ -19,7 +19,7 @@
  */
 
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Middleware } from "@agentick/runtime";
+import { BaseHarness, runHarnessProtocol, generateId, type Middleware } from "@agentick/runtime";
 import { mergeLayered, omitUndefined } from "@agentick/utils";
 import type {
   EventBus,
@@ -192,7 +192,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
   // stream birth is guardable only at the wire (`live/start`), not in process.
   // Do NOT wrap this in `runOperation` without resolving that first.
   start(streamId?: string): MediaSessionRef {
-    const sid = streamId ?? `live:${ulid()}`;
+    const sid = streamId ?? `live:${generateId()}`;
     // NOT AN EVENT SCOPE — a data ref. This harness's `scopeId` IS its session id.
     const ref: MediaSessionRef = { sessionId: this.scopeId, streamId: sid };
     const existing = this.streams.get(sid);
@@ -332,7 +332,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
     body: (input: I) => Effect.Effect<R, unknown, never>,
   ): Effect.Effect<R, unknown, never> {
     const op: Operation<I, R, unknown> = {
-      opId: `live:${verb}:${ulid()}`,
+      opId: `live:${verb}:${generateId()}`,
       surface: "live",
       name: `live:command:${verb}`,
       // `parentScope` gap-fills the session; this op names only its own dims.
@@ -439,7 +439,7 @@ export class LiveHarness extends BaseHarness<"live"> implements LiveHarnessProto
   private publishOnChannel(channel: string, payload: unknown): void {
     void Effect.runPromise(
       this.bus.append({
-        id: ulid(),
+        id: generateId(),
         surface: "session",
         name: `session:channel:${channel}`,
         phase: "delta",

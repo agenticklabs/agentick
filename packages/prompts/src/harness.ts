@@ -95,7 +95,7 @@ import {
   PromptsHydrateFailed,
 } from "@agentick/spec";
 import { View } from "@agentick/store";
-import { omitUndefined, paginate, ulid } from "@agentick/utils";
+import { omitUndefined, paginate, generateId } from "@agentick/utils";
 
 import type { PromptMessageSource } from "./message-source.js";
 import {
@@ -1207,7 +1207,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
               await timeline.append({
                 kind: "message",
                 message: {
-                  id: `m_${ulid()}`,
+                  id: `m_${generateId()}`,
                   role: msg.role,
                   content: msg.content,
                   ts,

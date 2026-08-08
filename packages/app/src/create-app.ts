@@ -31,7 +31,7 @@
  */
 
 import type { ClusterFactory, ClusterParent } from "@agentick/cluster";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { AppHarness, type AppHarnessOptions } from "./harness.js";
 
@@ -124,7 +124,7 @@ export async function createApp<P = unknown>(
     const closeHandlers: Array<() => Promise<void> | void> = [];
     const { LocalEventBus, LocalInbox, MemoryJournal } = await import("@agentick/runtime");
     const parent: ClusterParent = {
-      id: rest.appId ?? `app:${ulid()}:cluster-parent`,
+      id: rest.appId ?? `app:${generateId()}:cluster-parent`,
       bus: localBus ?? new LocalEventBus(),
       inbox: localInbox ?? new LocalInbox(),
       journal: localJournal ?? new MemoryJournal({ capacity: 10_000 }),

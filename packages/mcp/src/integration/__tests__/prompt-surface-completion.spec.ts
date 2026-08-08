@@ -21,7 +21,7 @@ import {
   ListPromptsRequestSchema,
   type ServerCapabilities,
 } from "@modelcontextprotocol/sdk/types.js";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { PromptsHarness } from "@agentick/prompts";
 
 import { InMemoryMcpTransport } from "../../transport/in-memory.js";
@@ -104,7 +104,7 @@ async function wire(spec: ServerSpec = {}): Promise<Wired> {
   await server.connect(serverTransport);
 
   const client = new McpClientHarness(
-    `mcp:${ulid()}`,
+    `mcp:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -199,7 +199,7 @@ describe("re-exposed over our own MCP server, the completion takes two hops", ()
     const { prompts } = await wire();
     const transport = inMemoryServerTransport();
     const relay = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

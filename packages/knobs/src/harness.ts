@@ -75,7 +75,7 @@ import type {
 } from "@agentick/spec";
 import { HandlerError } from "@agentick/spec";
 import { changeKind, type ChangeEvent } from "@agentick/pubsub";
-import { ulid, type JsonPatchOp } from "@agentick/utils";
+import { generateId, type JsonPatchOp } from "@agentick/utils";
 import { View } from "@agentick/store";
 import type { ChannelSnapshotProvider } from "@agentick/spec";
 import {
@@ -458,7 +458,7 @@ export class KnobsHarness
   private publishStateFrame(frame: KnobsStateFrame): void {
     void Effect.runPromise(
       this.bus.append({
-        id: ulid(),
+        id: generateId(),
         surface: "session",
         name: KNOBS_STATE_CHANNEL_FQN,
         phase: "delta",

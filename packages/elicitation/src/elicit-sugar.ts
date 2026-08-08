@@ -39,7 +39,7 @@ import {
   UrlElicitationRequired,
   jsonSchema,
 } from "@agentick/spec";
-import { ulid } from "@agentick/runtime";
+import { generateId } from "@agentick/runtime";
 
 import {
   booleanProp,
@@ -376,7 +376,7 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
 
     // ─────────── URL mode ───────────
     async url(spec) {
-      const elicitationId = `el-${ulid()}`;
+      const elicitationId = `el-${generateId()}`;
       const result = await sendUrl(spec, elicitationId);
       const outcome = asUrlOutcome(result);
       switch (outcome.status) {
@@ -396,7 +396,7 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
     requireUrls(specs) {
       const elicitations: readonly UrlElicitationSpec[] = specs.map((spec) => ({
         mode: "url" as const,
-        elicitationId: `el-required-${ulid()}`,
+        elicitationId: `el-required-${generateId()}`,
         url: spec.url,
         message: spec.message,
       }));
@@ -423,7 +423,7 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
       return asOutcome(await form(message, booleanSchema(opts), opts?.timeoutMs));
     },
     async tryUrl(spec) {
-      const elicitationId = `el-${ulid()}`;
+      const elicitationId = `el-${generateId()}`;
       return asUrlOutcome(await sendUrl(spec, elicitationId));
     },
 

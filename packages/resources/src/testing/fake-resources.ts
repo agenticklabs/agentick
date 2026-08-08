@@ -11,7 +11,7 @@
  * calls (each registers on `resources:<harnessId>`).
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { ResourcesHarness, type ResourcesHarnessOptions } from "../harness.js";
 
 export interface FakeResourcesOptions extends ResourcesHarnessOptions {
@@ -30,7 +30,7 @@ export interface FakeResourcesBundle {
 export async function fakeResources(
   options: FakeResourcesOptions = {},
 ): Promise<FakeResourcesBundle> {
-  const { harnessId = `fake-resources-${ulid()}`, ...rest } = options;
+  const { harnessId = `fake-resources-${generateId()}`, ...rest } = options;
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();

@@ -24,7 +24,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   ContentBlock,
   McpAuthenticatedUser,
@@ -166,7 +166,7 @@ async function rig(
   const bus = new LocalEventBus();
   const journal = new MemoryJournal({ capacity: 4096 });
   const transport = preGatedInMemoryTransport();
-  const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+  const harness = new McpServerHarness(`srv:${generateId()}`, journal, bus, new LocalInbox(), {
     name: "redaction-test",
     serverInfo: { name: "redaction-test", version: "0.0.0" },
     transports: [transport],
@@ -424,7 +424,7 @@ describe("in-process identity — connect({ authenticatedUser })", () => {
     const bus = new LocalEventBus();
     const journal = new MemoryJournal({ capacity: 4096 });
     const transport = inMemoryServerTransport();
-    const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+    const harness = new McpServerHarness(`srv:${generateId()}`, journal, bus, new LocalInbox(), {
       name: "inproc-test",
       serverInfo: { name: "inproc-test", version: "0.0.0" },
       transports: [transport],
@@ -530,7 +530,7 @@ describe("in-process identity — connect({ authenticatedUser })", () => {
     const journal = new MemoryJournal({ capacity: 1024 });
     const transport = inMemoryServerTransport();
     let seen: McpRequestContext | undefined;
-    const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+    const harness = new McpServerHarness(`srv:${generateId()}`, journal, bus, new LocalInbox(), {
       name: "anon-test",
       serverInfo: { name: "anon-test", version: "0.0.0" },
       transports: [transport],

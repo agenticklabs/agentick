@@ -46,7 +46,13 @@
  */
 
 import type { CompilerFactory, CompilerFactoryDeps } from "@agentick/spec";
-import { LocalEventBus, LocalInbox, MemoryJournal, inheritedFrom, ulid } from "@agentick/runtime";
+import {
+  LocalEventBus,
+  LocalInbox,
+  MemoryJournal,
+  inheritedFrom,
+  generateId,
+} from "@agentick/runtime";
 import { CompilerHarness, type CompilerHarnessOptions } from "./harness/compiler-harness.js";
 
 export function reactCompiler(options: CompilerHarnessOptions = {}): CompilerFactory {
@@ -56,7 +62,7 @@ export function reactCompiler(options: CompilerHarnessOptions = {}): CompilerFac
   // `defineCompiler` in `@agentick/compiler`.
   const factory = (deps?: CompilerFactoryDeps) =>
     new CompilerHarness(
-      deps?.scopeId ?? `react-compiler:${ulid()}`,
+      deps?.scopeId ?? `react-compiler:${generateId()}`,
       deps?.journal ?? new MemoryJournal(),
       deps?.bus ?? new LocalEventBus(),
       deps?.inbox ?? new LocalInbox(),

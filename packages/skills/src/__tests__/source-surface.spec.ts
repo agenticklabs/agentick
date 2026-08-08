@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { SkillsRegisterInput } from "@agentick/spec";
 import { SkillNotFound } from "@agentick/spec";
 
@@ -23,7 +23,7 @@ import { composeHydrators, hydrateFrom } from "../hydrators.js";
 
 async function makeHarness(): Promise<SkillsHarness> {
   const harness = new SkillsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -217,7 +217,7 @@ describe("reload is an OP, genesis is a seed", () => {
       },
     };
     const seeded = new SkillsHarness(
-      `test:${ulid()}`,
+      `test:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

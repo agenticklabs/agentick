@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { stubStoreCtx } from "@agentick/store";
 
 import { SkillsHarness } from "../harness.js";
@@ -26,7 +26,7 @@ runSkillStoreConformance({
 
 function makeHarness(store: InMemorySkillStore): SkillsHarness {
   return new SkillsHarness(
-    `store-backing:${ulid()}`,
+    `store-backing:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -148,7 +148,7 @@ describe("SkillsHarness — store backing", () => {
     // A resumed harness asks for the store read explicitly — skills names no
     // default hydrator, so `hydrateFromStore()` is the opt-in (ADR 93).
     const h2 = new SkillsHarness(
-      `store-backing:${ulid()}`,
+      `store-backing:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

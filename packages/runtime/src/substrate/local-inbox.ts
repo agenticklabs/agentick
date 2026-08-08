@@ -36,7 +36,7 @@ import type { AskOptions, MessageInbox, Unsubscribe } from "@agentick/spec";
 export interface LocalInboxFactoryParent {
   onClose(handler: () => void | Promise<void>): void;
 }
-import { ulid } from "./ulid.js";
+import { generateId } from "@agentick/utils";
 import { omitUndefined } from "@agentick/utils";
 
 /**
@@ -48,7 +48,7 @@ function stampEnvelope<T>(address: string, input: MessageEnvelopeInput<T>): Mess
   return {
     addressedTo: address,
     type: input.type,
-    messageId: input.messageId ?? ulid(),
+    messageId: input.messageId ?? generateId(),
     timestamp: Date.now(),
     ...omitUndefined({
       from: input.from,

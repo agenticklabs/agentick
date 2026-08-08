@@ -19,7 +19,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ExecutionTarget, LanguageModelExecutionResult } from "@agentick/spec";
 import { SPEC_VERSION } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
@@ -43,7 +43,7 @@ const textResult = (text: string): LanguageModelExecutionResult => ({
 
 function fakeExecutor(scripts: readonly LanguageModelExecutionResult[]): FakeLanguageModelExecutor {
   return new FakeLanguageModelExecutor(
-    `fake-${ulid()}`,
+    `fake-${generateId()}`,
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),

@@ -35,7 +35,7 @@ import {
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
-  ulid,
+  generateId,
   withBoundaryFacets,
 } from "@agentick/runtime";
 import type { Elicit, PromptDeclaration, TimelineEntry } from "@agentick/spec";
@@ -93,7 +93,7 @@ async function makeHarness(
   elicit?: ElicitSource,
   timeline?: TimelineAppendCapability,
 ): Promise<PromptsHarness> {
-  const id = `elicit:${ulid()}`;
+  const id = `elicit:${generateId()}`;
   const h = new PromptsHarness(
     id,
     new MemoryJournal({ capacity: 1024 }),

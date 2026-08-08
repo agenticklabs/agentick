@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import { PromptsHarness } from "../harness.js";
 import { InMemoryPromptStore } from "../store.js";
@@ -168,7 +168,7 @@ describe("hydrateFromStore — the store-read source", () => {
     const store = new InMemoryPromptStore();
     await store.mutate({ put: { name: "durable", description: "d" } }, {} as never);
     const h = new PromptsHarness(
-      `test:${ulid()}`,
+      `test:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -187,7 +187,7 @@ describe("hydrateFromStore — the store-read source", () => {
     const store = new InMemoryPromptStore();
     await store.mutate({ put: { name: "durable", description: "d" } }, {} as never);
     const h = new PromptsHarness(
-      `test:${ulid()}`,
+      `test:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

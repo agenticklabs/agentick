@@ -21,7 +21,7 @@ import {
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
-  ulid,
+  generateId,
   type Middleware,
 } from "@agentick/runtime";
 import { PromptsHydrateFailed } from "@agentick/spec";
@@ -39,7 +39,7 @@ import { InMemoryPromptStore } from "../store.js";
 
 async function harness(options: PromptsHarnessOptions = {}): Promise<PromptsHarness> {
   const h = new PromptsHarness(
-    `prompts-genesis-${ulid()}`,
+    `prompts-genesis-${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

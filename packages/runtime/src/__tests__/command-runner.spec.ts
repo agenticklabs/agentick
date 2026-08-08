@@ -96,7 +96,7 @@ describe("CommandRunner — declaration rules", () => {
 });
 
 describe("CommandRunner — Operation manufacture", () => {
-  it("derives the canonical op name + a fresh ulid opId, stamps origin: host", async () => {
+  it("derives the canonical op name + a fresh opId, stamps origin: host", async () => {
     const { runner, ops } = fixture();
     const echo = runner.command<EchoInput, string, never>({
       name: "tool:echo",

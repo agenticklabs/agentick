@@ -21,7 +21,7 @@ import {
   MemoryJournal,
   namespaceSlotExtensions,
   registeredNamespaceSlots,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type { Skill, SkillStoreQuery, Store, CollectionMutation } from "@agentick/spec";
 
@@ -34,7 +34,7 @@ import "../augment.js";
 
 async function liveHarness(): Promise<SkillsHarness> {
   const h = new SkillsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 64 }),
     new LocalEventBus(),
     new LocalInbox(),

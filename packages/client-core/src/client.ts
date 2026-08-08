@@ -59,7 +59,7 @@ import {
   isClientStateFailed,
   parseHookKey,
 } from "@agentick/spec";
-import { computeFullJitterBackoff, ulid } from "@agentick/utils";
+import { computeFullJitterBackoff, generateId } from "@agentick/utils";
 import { onLog as onLogSignal, onProgress as onProgressSignal } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { clientObservability } from "./observability.js";
@@ -295,7 +295,7 @@ class AgentickClient implements ClientProtocol {
     // A per-process counter would give every tab `client-1`. This id is what
     // the server addresses a tool call to, so two tabs sharing one means each
     // answering the other's work.
-    this.id = options.id ?? `client-${ulid()}`;
+    this.id = options.id ?? `client-${generateId()}`;
     this.transport = options.transport;
     this.extensions = options.extensions ?? [];
     // ONE instance for the client's lifetime: span nesting lives on it, so a

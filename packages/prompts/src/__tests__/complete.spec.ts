@@ -23,7 +23,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import {
   completeDependent,
   completeFromAsync,
@@ -43,7 +43,7 @@ const NAME = "tm_change_order_actual_cost";
 
 function makeHarness(sessionId = "sess-complete"): PromptsHarness {
   return new PromptsHarness(
-    `complete:${ulid()}`,
+    `complete:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -314,7 +314,7 @@ describe("PromptsHarness.complete — a keystroke is not an event", () => {
   it("writes nothing to the journal across a whole typed word", async () => {
     const journal = new MemoryJournal({ capacity: 1024 });
     const h = new PromptsHarness(
-      `complete:${ulid()}`,
+      `complete:${generateId()}`,
       journal,
       new LocalEventBus(),
       new LocalInbox(),

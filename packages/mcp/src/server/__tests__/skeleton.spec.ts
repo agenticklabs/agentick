@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { McpServerConnectionInfo } from "@agentick/spec";
 
 import { inMemoryServerTransport, McpServerHarness, validateOptions, toHandle } from "../index.js";
@@ -24,7 +24,7 @@ function makeOptions(overrides: Partial<McpServerOptions> = {}): McpServerOption
 
 async function makeHarness(options: McpServerOptions = makeOptions()): Promise<McpServerHarness> {
   const harness = new McpServerHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

@@ -15,7 +15,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { McpRequestContext } from "@agentick/spec";
 
 import {
@@ -36,7 +36,7 @@ async function connectInMemory(
 ): Promise<{ client: McpClient; cleanup: () => Promise<void> }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -125,7 +125,7 @@ describe("instructions — identity-visible over an authenticated HTTP crossing"
       return `Hello ${userId} — server ready.`;
     };
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -177,7 +177,7 @@ describe("instructions — identity-visible over an authenticated HTTP crossing"
     const fn: McpServerInstructions = (ctx) =>
       `Hello ${ctx.mcp.user?.id ?? "anonymous"} — server ready.`;
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

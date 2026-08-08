@@ -53,7 +53,7 @@ import {
   BaseHarness,
   type BaseHarnessOptions,
   type Middleware,
-  ulid,
+  generateId,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
   SESSION_TASK_WAKE_MESSAGE_TYPE,
@@ -480,7 +480,7 @@ export class TasksHarness
       throw new TaskHandlerRefRequiredError({ kind: executorKind });
     }
 
-    const taskId = `task:${ulid()}`;
+    const taskId = `task:${generateId()}`;
     const now = Date.now();
     const record: TaskRecord = {
       taskId,
@@ -1214,7 +1214,7 @@ export class TasksHarness
 
   private publishOnChannel(channel: string, payload: unknown): Effect.Effect<void, unknown, never> {
     return this.bus.append({
-      id: ulid(),
+      id: generateId(),
       surface: "session",
       name: `session:channel:${channel}`,
       phase: "delta",

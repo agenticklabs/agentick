@@ -26,7 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { Resources, SessionInstaller, Skills, SkillsRegisterInput } from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 
@@ -204,7 +204,7 @@ describe("hydrateFromDirectory — references as resources (E2)", () => {
     await writeFile(join(skillDir, "references", "deep", "notes.txt"), "deep notes");
 
     const resources = new ResourcesHarness(
-      `res:${ulid()}`,
+      `res:${generateId()}`,
       new MemoryJournal(),
       new LocalEventBus(),
       new LocalInbox(),
@@ -260,7 +260,7 @@ describe("hydrateFromDirectory — C2 allowed-tools loop closure", () => {
     );
 
     const harness = new SkillsHarness(
-      `skills:${ulid()}`,
+      `skills:${generateId()}`,
       new MemoryJournal(),
       new LocalEventBus(),
       new LocalInbox(),

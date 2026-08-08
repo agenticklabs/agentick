@@ -132,7 +132,11 @@ export {
 } from "./substrate/namespace-slots.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
-export { ulid } from "./substrate/ulid.js";
+// Convenience re-export for harness authors, who mint opIds constantly. The
+// SEAM (`setIdGenerator`) is deliberately not re-exported — installing a
+// generator is a process-wide startup decision, and it should be reached for
+// at its own address rather than found incidentally on the runtime barrel.
+export { generateId } from "@agentick/utils";
 export {
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,

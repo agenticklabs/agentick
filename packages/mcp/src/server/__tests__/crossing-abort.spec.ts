@@ -21,7 +21,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { McpRequestContext, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
@@ -55,7 +55,7 @@ async function rig(): Promise<Rig> {
   const transport = inMemoryServerTransport();
   const state: { seen: AbortSignal | undefined } = { seen: undefined };
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 256 }),
     new LocalEventBus(),
     new LocalInbox(),

@@ -20,7 +20,7 @@
 import { Effect, Ref } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import { TasksHarness } from "../harness.js";
 import { TASKS_CANCEL_MESSAGE_TYPE, TASKS_GET_MESSAGE_TYPE } from "../inbox-protocol.js";
@@ -200,8 +200,8 @@ describe("TasksHarness — cluster-friendly inbox protocol", () => {
     // Construct a "client" mailbox to receive the reply. We could
     // use a second harness, but a bare inbox subscription is the
     // simplest demonstration that the reply lands at `replyTo`.
-    const replyAddress = `test:client:${ulid()}`;
-    const correlationId = `req:${ulid()}`;
+    const replyAddress = `test:client:${generateId()}`;
+    const correlationId = `req:${generateId()}`;
     let receivedReply: unknown;
     const unsubscribe = Effect.runSync(
       inbox.register(replyAddress, (msg) => {
@@ -247,7 +247,7 @@ describe("TasksHarness — cluster-friendly inbox protocol", () => {
     const harness = new TasksHarness("A3", journal, bus, inbox);
     await harness.ready;
 
-    const replyAddress = `test:client:${ulid()}`;
+    const replyAddress = `test:client:${generateId()}`;
     let received: unknown = Symbol("not-set");
     const unsubscribe = Effect.runSync(
       inbox.register(replyAddress, (msg) => {
@@ -263,7 +263,7 @@ describe("TasksHarness — cluster-friendly inbox protocol", () => {
           payload: {
             taskId: "task:nope",
             replyTo: replyAddress,
-            correlationId: `req:${ulid()}`,
+            correlationId: `req:${generateId()}`,
           },
         }),
       );

@@ -1,5 +1,5 @@
 /**
- * `ulid()` — the id generator every journal / envelope / mount id rides.
+ * `generateId()` — the id generator every journal / envelope / mount id rides.
  *
  * The three properties the rest of the framework leans on, none of which were
  * pinned before this file: the ENCODING is a fixed-width Crockford base32
@@ -8,13 +8,14 @@
  * LEXICOGRAPHICALLY sortable across milliseconds (so `sort()` on ids equals
  * generation order — what cursored reads assume).
  *
- * `ulid()` carries module-level state (`lastTime` / `lastRandom`), so these
+ * `generateId()` carries module-level state (`lastTime` / `lastRandom`), so these
  * tests only ever compare ids WITHIN their own sequence.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ulid } from "../ulid.js";
+import { generateId } from "../id.js";
+import { runIdGeneratorConformance } from "../testing/id-generator-conformance.js";
 
 /** Crockford base32 — the digits plus letters minus I, L, O, U. */
 const CROCKFORD = /^[0123456789ABCDEFGHJKMNPQRSTVWXYZ]+$/;
@@ -24,7 +25,7 @@ const TIME_CHARS = 10;
 const RANDOM_CHARS = 16;
 const TOTAL_CHARS = TIME_CHARS + RANDOM_CHARS;
 
-/** Crockford base32, the alphabet `ulid()` encodes with. */
+/** Crockford base32, the alphabet `generateId()` encodes with. */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** The random suffix as an integer, so "advanced by one" is exact across a carry. */
@@ -38,16 +39,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("ulid — encoding", () => {
+describe("generateId — encoding", () => {
   it("is 26 chars: a 10-char time prefix + a 16-char random suffix", () => {
     for (let i = 0; i < 100; i++) {
-      const id = ulid();
+      const id = generateId();
       expect(id).toHaveLength(TOTAL_CHARS);
     }
   });
 
   it("uses only the Crockford base32 alphabet (no I, L, O, U)", () => {
-    const ids = Array.from({ length: 200 }, () => ulid());
+    const ids = Array.from({ length: 200 }, () => generateId());
     for (const id of ids) {
       expect(id).toMatch(CROCKFORD);
     }
@@ -55,20 +56,20 @@ describe("ulid — encoding", () => {
   });
 
   it("never collides across a tight burst", () => {
-    const ids = Array.from({ length: 5_000 }, () => ulid());
+    const ids = Array.from({ length: 5_000 }, () => generateId());
     expect(new Set(ids).size).toBe(ids.length);
   });
 });
 
-describe("ulid — monotonicity within one millisecond", () => {
+describe("generateId — monotonicity within one millisecond", () => {
   it("ids from a frozen clock share the time prefix and strictly increase", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
 
     // The FIRST id after a clock change reseeds the random suffix; from the
     // second on, the suffix is bumped, which is what makes the burst ordered.
-    ulid();
-    const ids = Array.from({ length: 500 }, () => ulid());
+    generateId();
+    const ids = Array.from({ length: 500 }, () => generateId());
 
     const prefixes = new Set(ids.map((id) => id.slice(0, TIME_CHARS)));
     expect(prefixes.size).toBe(1);
@@ -82,9 +83,9 @@ describe("ulid — monotonicity within one millisecond", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-27T00:00:01.000Z"));
 
-    ulid();
-    const a = ulid();
-    const b = ulid();
+    generateId();
+    const a = generateId();
+    const b = generateId();
     // Same time prefix, and the suffix is the IMMEDIATE successor — an
     // increment, not a reseed.
     //
@@ -100,17 +101,17 @@ describe("ulid — monotonicity within one millisecond", () => {
   });
 });
 
-describe("ulid — a clock that steps backward", () => {
+describe("generateId — a clock that steps backward", () => {
   it("never emits a smaller id when the clock is corrected BACKWARD", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-27T00:00:05.000Z"));
-    const before = ulid();
+    const before = generateId();
 
     // NTP correction, VM migration, leap-second smear — all real, all silent.
     // Taking Date.now() verbatim here emitted a smaller time prefix, so the id
     // sorted BEFORE one already handed out; `lastTime` is a monotonic floor.
     vi.setSystemTime(new Date("2026-07-27T00:00:03.000Z"));
-    const after = ulid();
+    const after = generateId();
 
     expect(after > before).toBe(true);
   });
@@ -118,14 +119,14 @@ describe("ulid — a clock that steps backward", () => {
   it("keeps the sequence ordered across a backward step and the recovery", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-27T00:00:05.000Z"));
-    const ids = [ulid(), ulid()];
+    const ids = [generateId(), generateId()];
 
     vi.setSystemTime(new Date("2026-07-27T00:00:04.000Z"));
-    ids.push(ulid(), ulid());
+    ids.push(generateId(), generateId());
 
     // Clock recovers past the floor — normal reseeding resumes.
     vi.setSystemTime(new Date("2026-07-27T00:00:09.000Z"));
-    ids.push(ulid(), ulid());
+    ids.push(generateId(), generateId());
 
     for (let i = 1; i < ids.length; i++) {
       expect(ids[i]! > ids[i - 1]!).toBe(true);
@@ -134,14 +135,14 @@ describe("ulid — a clock that steps backward", () => {
   });
 });
 
-describe("ulid — lexicographic ordering across milliseconds", () => {
+describe("generateId — lexicographic ordering across milliseconds", () => {
   it("a later millisecond always produces a greater id", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
 
     const ids: string[] = [];
     for (let ms = 0; ms < 50; ms++) {
-      ids.push(ulid());
+      ids.push(generateId());
       vi.advanceTimersByTime(1);
     }
 
@@ -158,7 +159,7 @@ describe("ulid — lexicographic ordering across milliseconds", () => {
     for (let ms = 0; ms < 40; ms++) {
       // Two per millisecond — exercises BOTH the time prefix and the
       // same-ms suffix bump in one ordering claim.
-      ids.push(ulid(), ulid());
+      ids.push(generateId(), generateId());
       vi.advanceTimersByTime(1);
     }
 
@@ -174,15 +175,21 @@ describe("ulid — lexicographic ordering across milliseconds", () => {
     // guarantee working, not the encoder failing — so the encoder is tested
     // going forward, which is the only direction a clock is supposed to go.
     vi.setSystemTime(new Date("2026-07-27T00:00:00.000Z"));
-    const near = ulid();
+    const near = generateId();
 
     // Year 2286 — past the 32-bit seconds epoch rollover; the encoder walks 6
     // bytes, so this must still be a plain 10-char prefix.
     vi.setSystemTime(new Date("2286-11-20T17:46:40.000Z"));
-    const far = ulid();
+    const far = generateId();
 
     expect(far).toMatch(CROCKFORD);
     expect(far).toHaveLength(TOTAL_CHARS);
     expect(far.slice(0, TIME_CHARS) > near.slice(0, TIME_CHARS)).toBe(true);
   });
 });
+
+// The default generator is held to the same bar a replacement is. If this ever
+// diverges from `runIdGeneratorConformance`, the suite is wrong — the suite is
+// what adopters check their own generator against, so it has to be the real
+// contract and not a weaker cousin of it.
+runIdGeneratorConformance("the built-in default", generateId, { burst: 500 });

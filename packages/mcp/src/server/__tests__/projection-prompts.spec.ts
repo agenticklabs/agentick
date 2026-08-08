@@ -18,7 +18,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { PromptListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { MessageEntry } from "@agentick/spec";
 import { PromptsHarness } from "@agentick/prompts";
 
@@ -30,7 +30,7 @@ function makeMessageEntries(text: string): readonly MessageEntry[] {
 
 async function makePromptsHarness(): Promise<PromptsHarness> {
   const h = new PromptsHarness(
-    `prompts:${ulid()}`,
+    `prompts:${generateId()}`,
     new MemoryJournal({ capacity: 256 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -50,7 +50,7 @@ async function makeServer(
 }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -324,7 +324,7 @@ describe("prompts projection — declarative shorthand", () => {
   it("array shorthand: server constructs Prompts internally + registers declarations", async () => {
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -374,7 +374,7 @@ describe("prompts projection — declarative shorthand", () => {
   it("config form with declarations + filter", async () => {
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -414,7 +414,7 @@ describe("prompts projection — declarative shorthand", () => {
     // Internally-owned: harness.close() must close the source.
     const transport1 = inMemoryServerTransport();
     const internalHarness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

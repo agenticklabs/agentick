@@ -22,7 +22,7 @@ import React, { type ReactNode } from "react";
 import { omitUndefined } from "@agentick/utils";
 
 import { Effect } from "effect";
-import { runHarnessProtocol, ulid } from "@agentick/runtime";
+import { runHarnessProtocol, generateId } from "@agentick/runtime";
 import type {
   CollectTreeInterceptorsInput,
   DispatchLifecycleInput,
@@ -236,7 +236,7 @@ export class CompilerHarness
     // HAND-BUILT by doctrine (ADR 51 §1.2): MountInput carries a live
     // React element + the HookBridges bag — non-serializable input can
     // never be a declared command. Also preserves the deterministic
-    // mountId-keyed idempotency opId the registry (ulid-minted) can't.
+    // mountId-keyed idempotency opId the registry (id-minted) can't.
     const op: Operation<MountInput, MountResult> = {
       opId: input.opId ?? `compiler:mount:${input.mountId}`,
       surface: "compiler",
@@ -315,13 +315,13 @@ export class CompilerHarness
       // by registry shape: per-input scope (mountId →
       // state.bridges.session.id + input.executionId) vs the nullary
       // command-scope fn; caller-supplied `input.opId` idempotency vs
-      // registry-minted `${verb}:${ulid()}`; and the existing
+      // registry-minted `${verb}:${generateId()}`; and the existing
       // "compiler:render:" opId prefix can't coexist with the
       // derived "compiler:command:render-tree" op name (the registry
       // derives both from one verb string). See the ADR-51 note above
       // handleMessage.
       const op: Operation<RenderTreeInput, RenderTreeResult, ReconcileErrorChannel> = {
-        opId: input.opId ?? `compiler:render:${input.mountId}:${ulid()}`,
+        opId: input.opId ?? `compiler:render:${input.mountId}:${generateId()}`,
         surface: "compiler",
         name: "compiler:command:render-tree",
         scope: {
@@ -361,7 +361,7 @@ export class CompilerHarness
         // sessionId, caller-supplied `input.opId` would be dropped,
         // NotMounted must fail before an Operation exists).
         const op: Operation<RenderToStringInput, RenderToStringResult> = {
-          opId: input.opId ?? `compiler:render-to-string:${input.mountId}:${ulid()}`,
+          opId: input.opId ?? `compiler:render-to-string:${input.mountId}:${generateId()}`,
           surface: "compiler",
           name: "compiler:command:render-to-string",
           scope: { sessionId: state.bridges.session.id },
@@ -469,7 +469,7 @@ export class CompilerHarness
   //    state/timeline/knobs migrations cannot reproduce it. (b) The
   //    MountScopedInput caller-supplied `opId` idempotency contract
   //    would be silently dropped — the registry always mints
-  //    `${verb}:${ulid()}`. (c) NotMounted resolves BEFORE the Operation
+  //    `${verb}:${generateId()}`. (c) NotMounted resolves BEFORE the Operation
   //    is built (a missing mount journals no envelopes); the registry
   //    path would journal requested → failed pairs.
   //  - recompile / unmount / invalidate (this switch): the spec-frozen

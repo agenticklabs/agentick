@@ -27,7 +27,7 @@ import type {
 } from "@agentick/spec";
 import { ChannelPublisherClosed, ChannelSequenceOverflow } from "@agentick/spec";
 
-import { ulid } from "./ulid.js";
+import { generateId } from "@agentick/utils";
 import { omitUndefined } from "@agentick/utils";
 
 export interface LocalChannelPublisherOptions {
@@ -102,7 +102,7 @@ export class LocalChannelPublisher implements ChannelPublisher {
   ): ChannelEvent<T> {
     const scope: EventScope = { ...this.defaultScope, ...(seed.scope ?? {}) };
     const envelope: ChannelEvent<T> = {
-      id: ulid(),
+      id: generateId(),
       surface: "session",
       name,
       phase: "terminal",

@@ -31,7 +31,7 @@ import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -137,7 +137,7 @@ async function standUp(opts: {
 }> {
   const mcp = httpMiddlewareTransport(opts.oauth ? { oauth: { metadata: OAUTH_METADATA } } : {});
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -331,7 +331,7 @@ describe("httpMiddlewareTransport — RFC 9728 metadata serving", () => {
     // host routes discovery through the same entry point.
     const mcp = httpMiddlewareTransport({ oauth: { metadata: OAUTH_METADATA } });
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

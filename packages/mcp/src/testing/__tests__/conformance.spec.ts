@@ -16,7 +16,7 @@
  * @see ../conformance.ts for the section-by-section contract.
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { ResourcesHarness } from "@agentick/resources";
 import { PromptsHarness } from "@agentick/prompts";
 import { ElicitationHarness } from "@agentick/elicitation";
@@ -26,7 +26,7 @@ import { runMcpConformance } from "../index.js";
 runMcpConformance({
   async makeResources() {
     const h = new ResourcesHarness(
-      `resources:${ulid()}`,
+      `resources:${generateId()}`,
       new MemoryJournal({ capacity: 256 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -36,7 +36,7 @@ runMcpConformance({
   },
   async makePrompts() {
     const h = new PromptsHarness(
-      `prompts:${ulid()}`,
+      `prompts:${generateId()}`,
       new MemoryJournal({ capacity: 256 }),
       new LocalEventBus(),
       new LocalInbox(),

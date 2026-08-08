@@ -16,7 +16,7 @@ import {
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
-  ulid,
+  generateId,
   type CommandHooks,
 } from "@agentick/runtime";
 import { ElicitationHarness, type ElicitationHarnessOptions } from "../harness.js";
@@ -44,7 +44,7 @@ export interface FakeElicitationBundle {
 export async function fakeElicitation(
   options: FakeElicitationOptions = {},
 ): Promise<FakeElicitationBundle> {
-  const { harnessId = `fake-elicitation-${ulid()}`, hooks, ...rest } = options;
+  const { harnessId = `fake-elicitation-${generateId()}`, hooks, ...rest } = options;
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();

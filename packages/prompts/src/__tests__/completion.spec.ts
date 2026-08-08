@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { stubStoreCtx } from "@agentick/store";
 import {
   completeDependent,
@@ -60,7 +60,7 @@ function referencePrompt(): PromptDeclaration {
 
 function makeHarness(store: InMemoryPromptStore = new InMemoryPromptStore()): PromptsHarness {
   return new PromptsHarness(
-    `completion:${ulid()}`,
+    `completion:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -266,7 +266,7 @@ describe("PromptsHarness — the split stays in step", () => {
   it("genesis seeds the sidecar the same way register does", async () => {
     const store = new InMemoryPromptStore();
     const h = new PromptsHarness(
-      `completion:${ulid()}`,
+      `completion:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

@@ -47,7 +47,7 @@ import {
   type WireNotificationMethod,
   type WireServerDescriptor,
 } from "@agentick/spec";
-import { omitUndefined, ulid } from "@agentick/utils";
+import { omitUndefined, generateId } from "@agentick/utils";
 
 import { projectClientNotification, projectClientResult } from "./client-projection.js";
 
@@ -152,7 +152,7 @@ export async function dispatchRequest(
   // One id for this request and every op it spawns. Server-minted: the
   // JSON-RPC `id` is the CLIENT's, and two connections both sending `1` would
   // collapse into one bundle.
-  const requestId = ulid();
+  const requestId = generateId();
   // ROADMAP A3 — client tool-output projection, STRICTLY OPT-IN. The gateway
   // configures ONE policy; every transport attached to it inherits it here
   // (no straddle). Bounding is OFF unless the adopter opted in
@@ -189,7 +189,7 @@ export async function dispatchRequest(
             host,
             server ?? DISPATCHER_DESCRIPTOR,
             connectionId ?? requestId,
-            connection.bindClientId ?? ((requested) => requested ?? `client-${ulid()}`),
+            connection.bindClientId ?? ((requested) => requested ?? `client-${generateId()}`),
           ),
         );
       case "ping":

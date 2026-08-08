@@ -17,7 +17,7 @@
  * is active throws.
  */
 
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import type { Connection, ConnectionCloseReason } from "../connection.js";
 
@@ -30,8 +30,8 @@ export function createInMemoryConnectionPair(opts?: {
   readonly idA?: string;
   readonly idB?: string;
 }): readonly [Connection, Connection] {
-  const idA = opts?.idA ?? `mem-${ulid()}-a`;
-  const idB = opts?.idB ?? `mem-${ulid()}-b`;
+  const idA = opts?.idA ?? `mem-${generateId()}-a`;
+  const idB = opts?.idB ?? `mem-${generateId()}-b`;
 
   const a = createSide(idA);
   const b = createSide(idB);

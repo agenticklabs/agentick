@@ -18,7 +18,7 @@
  * @see docs/proposals/v2/blueprint/40-mcp-server-harness.md §10
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import type { McpServerOptions } from "./config.js";
 import { McpServerHarness } from "./harness.js";
@@ -27,7 +27,7 @@ import { McpServerHarness } from "./harness.js";
  * Input to {@link spawnStandaloneMcpServer}. A superset of
  * `McpServerOptions` with one optional override:
  *
- *  - `scopeId` overrides the default `srv:<ulid>` for tests + custom
+ *  - `scopeId` overrides the default `srv:<id>` for tests + custom
  *    naming.
  *
  * The `tools` field accepts the same trichotomic
@@ -61,7 +61,7 @@ export async function spawnStandaloneMcpServer(
   const journal = new MemoryJournal({ capacity: 4096 });
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const scopeId = options.scopeId ?? `srv:${ulid()}`;
+  const scopeId = options.scopeId ?? `srv:${generateId()}`;
 
   const { scopeId: _drop, ...harnessOptions } = options;
   void _drop;

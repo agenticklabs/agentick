@@ -36,7 +36,7 @@ import { Effect, Either } from "effect";
 import {
   BaseHarness,
   runHarnessProtocol,
-  ulid,
+  generateId,
   type BaseHarnessOptions,
   type Middleware,
 } from "@agentick/runtime";
@@ -216,7 +216,7 @@ export class ElicitationHarness
    * Wrap an elicit round-trip in {@link BaseHarness.runOperation} so it fires
    * the ADR-83 interceptor seam and the full phase contract (`requested` →
    * `before` → terminal), exactly as every other harness command does. Mints a
-   * fresh `opId` per call (`elicitation:elicit:<ulid>`) — an elicit carries no
+   * fresh `opId` per call (`elicitation:elicit:<id>`) — an elicit carries no
    * caller-supplied idempotency key, so each invocation is its own operation
    * (no journal replay). The op `name` follows the executor convention
    * (`<surface>:command:<verb>`), which {@link deriveHookNames} strips to the
@@ -266,7 +266,7 @@ export class ElicitationHarness
     run: (request: ElicitationRequest) => Promise<R>,
   ): Effect.Effect<R, unknown, never> {
     const op: Operation<ElicitationRequest, R> = {
-      opId: `elicitation:elicit:${ulid()}`,
+      opId: `elicitation:elicit:${generateId()}`,
       surface: "elicitation",
       name: "elicitation:command:elicit",
       scope: this.parentScope ?? {},

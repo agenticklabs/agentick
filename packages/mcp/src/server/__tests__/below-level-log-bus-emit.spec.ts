@@ -23,7 +23,7 @@ import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, LogEventPayload, ProtocolEvent, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema, logEventName, logEventQuery } from "@agentick/spec";
 
@@ -58,7 +58,7 @@ describe("below-level log still emits on the bus (ADR 64)", () => {
     const bus = new LocalEventBus();
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       bus,
       new LocalInbox(),

@@ -26,7 +26,7 @@ import {
   ProgressNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -74,7 +74,7 @@ describe("cross-connection signal isolation (ADR 64 — multi-tenant guarantee)"
     // ONE server, TWO connections.
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

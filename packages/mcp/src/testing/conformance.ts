@@ -53,7 +53,7 @@ import {
   ResourceUpdatedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   ContentBlock,
   ElicitationHarnessProtocol,
@@ -279,7 +279,7 @@ async function makeCanonicalServer(
 
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -383,10 +383,10 @@ async function makeLoopback(
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
 
-  const elicit = await factories.makeElicitation(`elicit:${ulid()}`, journal, bus, inbox);
+  const elicit = await factories.makeElicitation(`elicit:${generateId()}`, journal, bus, inbox);
   const stopResponder = startElicitResponder(bus, elicit);
 
-  const client = new McpClientHarness(`mcp:${ulid()}`, journal, bus, inbox, {
+  const client = new McpClientHarness(`mcp:${generateId()}`, journal, bus, inbox, {
     serverId: "loopback",
     transport: clientTransport,
     auth: new NoneAuth(),
@@ -645,7 +645,7 @@ async function makeTaskLoopback(): Promise<{
 }> {
   const transport = inMemoryServerTransport();
   const server = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -660,7 +660,7 @@ async function makeTaskLoopback(): Promise<{
   await server.start();
   const clientTransport = await transport.connect();
   const client = new McpClientHarness(
-    `mcp:${ulid()}`,
+    `mcp:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -910,16 +910,16 @@ function samplingSection(enabled: boolean): void {
  * import { ResourcesHarness } from "@agentick/resources";
  * import { PromptsHarness } from "@agentick/prompts";
  * import { ElicitationHarness } from "@agentick/elicitation";
- * import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+ * import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
  *
  * runMcpConformance({
  *   async makeResources() {
- *     const h = new ResourcesHarness(`res:${ulid()}`, new MemoryJournal(), new LocalEventBus(), new LocalInbox());
+ *     const h = new ResourcesHarness(`res:${generateId()}`, new MemoryJournal(), new LocalEventBus(), new LocalInbox());
  *     await h.ready;
  *     return h;
  *   },
  *   async makePrompts() {
- *     const h = new PromptsHarness(`pr:${ulid()}`, new MemoryJournal(), new LocalEventBus(), new LocalInbox());
+ *     const h = new PromptsHarness(`pr:${generateId()}`, new MemoryJournal(), new LocalEventBus(), new LocalInbox());
  *     await h.ready;
  *     return h;
  *   },

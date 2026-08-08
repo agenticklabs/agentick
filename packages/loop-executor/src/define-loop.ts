@@ -54,7 +54,7 @@ import {
   LocalInbox,
   MemoryJournal,
   runHarnessProtocol,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type {
   EventBus,
@@ -109,7 +109,7 @@ export interface DefineLoopInput {
  */
 export function defineLoop(spec: DefineLoopInput): LoopExecutorFactory {
   const factory = (deps?: LoopExecutorFactoryDeps): LoopExecutorProtocol => {
-    const scopeId = deps?.scopeId ?? `define-loop:${ulid()}`;
+    const scopeId = deps?.scopeId ?? `define-loop:${generateId()}`;
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();

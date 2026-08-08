@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Stream, Fiber } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import {
   isToolExecutorFactory,
   jsonSchema,
@@ -202,7 +202,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
     await new Promise((r) => setImmediate(r));
     await Effect.runPromise(
       inbox.send(`tool:${scopeId}`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "tool:abort",
         payload: { toolCallId: callId, reason: "inbox cancel" },
       }),
@@ -265,7 +265,7 @@ describe("defineToolExecutor — abort + envelopes", () => {
 
     const result = await Effect.runPromise(
       inbox.ask<DispatchInput, { toolCallId: string; content: unknown }>(`tool:${scopeId}`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "tool:dispatch",
         payload: {
           toolCallId: "inbox-cb-1",

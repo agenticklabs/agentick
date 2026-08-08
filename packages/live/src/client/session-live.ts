@@ -15,7 +15,7 @@
  * @verifiedBy packages/live/src/client/__tests__/live-session-handle.spec.ts
  */
 
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 import type { ClientTransport, MediaTransport } from "@agentick/spec";
 
 import {
@@ -79,7 +79,7 @@ export function sessionLive(client: LiveFacetClient, sessionId: string): Session
         );
       }
 
-      const requestedId = streamId ?? `live:${ulid()}`;
+      const requestedId = streamId ?? `live:${generateId()}`;
       const commandClient: LiveCommandClient = { transport: client.transport };
       // The server may mint / normalize the id — bind to what it returns.
       const opened = await client.transport.request("live/start", {

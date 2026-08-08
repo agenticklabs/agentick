@@ -56,7 +56,7 @@ import type {
   StandardSchemaV1,
 } from "@agentick/spec";
 import { ELICIT_REQUEST_MESSAGE_TYPE } from "@agentick/elicitation";
-import { ulid } from "@agentick/runtime";
+import { generateId } from "@agentick/runtime";
 import type { RequestResponseRegistry } from "@agentick/runtime";
 
 import type {
@@ -122,7 +122,7 @@ export function makeElicitRequestHandler(
       return { action: "cancel" };
     }
 
-    const correlationId = `req:${ulid()}`;
+    const correlationId = `req:${generateId()}`;
     const registered = deps.requests.register({
       correlationId,
       timeoutMs: deps.defaultTimeoutMs,
@@ -201,7 +201,7 @@ function emitRoutingWarning(
   // clean.
   void Effect.runPromise(
     deps.bus.append({
-      id: ulid(),
+      id: generateId(),
       surface: "mcp",
       name: `mcp:warning:routing-dropped`,
       phase: "delta",

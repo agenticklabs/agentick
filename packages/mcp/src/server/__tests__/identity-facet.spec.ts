@@ -25,7 +25,7 @@ import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   ContentBlock,
   McpAuthenticatedUser,
@@ -111,7 +111,7 @@ async function rig(
   const bus = new LocalEventBus();
   const journal = new MemoryJournal({ capacity: 4096 });
   const transport = inMemoryServerTransport();
-  const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+  const harness = new McpServerHarness(`srv:${generateId()}`, journal, bus, new LocalInbox(), {
     name: "facet-test",
     serverInfo: { name: "facet-test", version: "0.0.0" },
     transports: [transport],

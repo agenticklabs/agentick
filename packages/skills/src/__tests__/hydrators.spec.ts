@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { Skill } from "@agentick/spec";
 
 import { SkillsHarness } from "../harness.js";
@@ -38,7 +38,7 @@ async function harness(
   options: ConstructorParameters<typeof SkillsHarness>[4] = {},
 ): Promise<SkillsHarness> {
   const h = new SkillsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

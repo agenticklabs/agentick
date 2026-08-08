@@ -52,7 +52,7 @@ import { Effect } from "effect";
 import {
   BaseHarness,
   runHarnessProtocol,
-  ulid,
+  generateId,
   type BaseHarnessOptions,
   type Middleware,
 } from "@agentick/runtime";
@@ -300,7 +300,7 @@ export class CredentialsHarness
     body: () => Effect.Effect<R, unknown, never>,
   ): Effect.Effect<R, unknown, never> {
     const op: Operation<CredentialsMutationInput, R, unknown> = {
-      opId: `credentials:${verb}:${ulid()}`,
+      opId: `credentials:${verb}:${generateId()}`,
       surface: "credentials",
       name: `credentials:command:${verb}`,
       scope: { credentialNamespace: input.namespace, credentialKey: input.key },

@@ -37,7 +37,7 @@ export interface Connection {
    * TODO(phase-4b): formalize id allocation convention across wire
    * impls. Currently each wire picks its own scheme — risk of
    * collision if multiple listeners share a process. Candidates:
-   * `${wireType}:${remote}:${monotonic}` or just `ulid()`. Decide
+   * `${wireType}:${remote}:${monotonic}` or just `generateId()`. Decide
    * once TCP + Unix-socket impls both exist.
    */
   readonly id: string;

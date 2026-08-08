@@ -41,7 +41,7 @@ import type {
 } from "@agentick/spec";
 import { CommandDeclarationError, deriveChunkHookName } from "@agentick/spec";
 import { getContext, type RuntimeContext } from "./runtime-context.js";
-import { ulid } from "./ulid.js";
+import { generateId } from "@agentick/utils";
 import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
 import type { RunOperation } from "./operation-runner.js";
 
@@ -121,7 +121,7 @@ export interface CommandDef<I, R, E> {
   readonly scope?: (input: I) => EventScope;
   /**
    * Deterministic opId derivation (ADR 51 idempotency). By default a fresh
-   * `${name}:${ulid()}` opId per invocation; supply a pure function of the input
+   * `${name}:${generateId()}` opId per invocation; supply a pure function of the input
    * for a re-invocation that must replay the cached terminal.
    */
   readonly opId?: (input: I) => string;
@@ -577,7 +577,7 @@ class CommandRunnerImpl implements CommandRunner {
     return (input, opts) =>
       this.runOperation<I, R, E>(
         {
-          opId: def.opId?.(input) ?? `${name}:${ulid()}`,
+          opId: def.opId?.(input) ?? `${name}:${generateId()}`,
           surface: this.surface,
           name: opName,
           ...omitUndefined({ parentOpId: opts.parentOpId, correlationId: opts.correlationId }),

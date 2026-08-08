@@ -31,7 +31,7 @@ import type {
 import { omitUndefined } from "@agentick/utils";
 
 import { MemoryTimelineStore, type TimelineDefinition } from "@agentick/timeline";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { createApp, type CreateAppOptions } from "./create-app.js";
 
@@ -87,7 +87,7 @@ export function run<P = unknown>(rootElement: unknown, options: RunOptions<P>): 
 
   const handlePromise = (async (): Promise<SessionExecutionHandle> => {
     let finalOptions = appOptions as CreateAppOptions<P>;
-    const sessionId = `run:${ulid()}`;
+    const sessionId = `run:${generateId()}`;
     if (history !== undefined && history.length > 0) {
       // Pre-populate a store under the run's session id and hand it to
       // the ADR 49 hydration path — seeding IS resuming.

@@ -30,7 +30,7 @@ import type { OAuthProtectedResourceMetadata } from "@modelcontextprotocol/sdk/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   ContentBlock,
   ProtocolEvent,
@@ -93,7 +93,7 @@ async function makeHttpServer(): Promise<{
 }> {
   const transport = httpTransport({ port: 0 });
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -115,7 +115,7 @@ async function makeHttpServer(): Promise<{
 /** Build a client harness over a real StreamableHTTP transport. */
 async function makeHttpClient(transport: Transport, serverId: string): Promise<McpClientHarness> {
   const client = new McpClientHarness(
-    `${serverId}:${ulid()}`,
+    `${serverId}:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -248,7 +248,7 @@ async function startHarnessOn(
   bus: LocalEventBus = new LocalEventBus(),
 ): Promise<McpServerHarness> {
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     bus,
     new LocalInbox(),

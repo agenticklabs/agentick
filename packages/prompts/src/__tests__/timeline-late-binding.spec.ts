@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { logEventName } from "@agentick/spec";
 import type { LogEventPayload, ProtocolEvent, TimelineEntry } from "@agentick/spec";
 
@@ -49,7 +49,7 @@ async function makeHarness(
   timeline?: TimelineAppendSource,
   bus: LocalEventBus = new LocalEventBus(),
 ): Promise<PromptsHarness> {
-  const id = `late:${ulid()}`;
+  const id = `late:${generateId()}`;
   const h = new PromptsHarness(id, new MemoryJournal({ capacity: 1024 }), bus, new LocalInbox(), {
     parentScope: { sessionId: id },
     ...(timeline ? { timeline } : {}),

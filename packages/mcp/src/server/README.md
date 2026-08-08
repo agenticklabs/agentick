@@ -951,7 +951,7 @@ const handle = await spawnStandaloneMcpServer({
   tools: [
     /* CreatedTool[] */
   ],
-  scopeId: "srv:custom", // optional; defaults to srv:<ulid>
+  scopeId: "srv:custom", // optional; defaults to srv:<id>
 });
 // ... process runs ...
 await handle.close(); // idempotent

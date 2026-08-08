@@ -15,7 +15,7 @@
  */
 
 import { Effect } from "effect";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { consistentHashPartitioning } from "./builtins/consistent-hash-partitioning.js";
 import { jsonCodec } from "./builtins/json-codec.js";
@@ -336,7 +336,7 @@ export type { Cluster };
 
 /** ULID-shaped id for membership diagnostic events. */
 function membershipDiagId(): string {
-  return ulid();
+  return generateId();
 }
 
 // ============================================================================

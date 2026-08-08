@@ -12,7 +12,7 @@
  */
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { CredentialsHarness, type CredentialsHarnessOptions } from "../harness.js";
 import { inMemoryCredentialsStore } from "../stores/in-memory.js";
@@ -36,7 +36,7 @@ export interface FakeCredentialsBundle {
 export function fakeCredentialsHarness(
   options: FakeCredentialsOptions = {},
 ): FakeCredentialsBundle {
-  const { harnessId = `fake-credentials-${ulid()}`, store } = options;
+  const { harnessId = `fake-credentials-${generateId()}`, store } = options;
   const resolvedStore = store ?? inMemoryCredentialsStore();
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();

@@ -38,7 +38,7 @@
  */
 
 import { Effect } from "effect";
-import { reasonOf, ulid } from "@agentick/utils";
+import { reasonOf, generateId } from "@agentick/utils";
 import type {
   Elicit,
   ProgressUpdate,
@@ -123,7 +123,7 @@ function buildIpcElicit(deps: {
         ),
       );
     }
-    const requestId = ulid();
+    const requestId = generateId();
     return new Promise<unknown>((resolve, reject) => {
       pending.set(requestId, { resolve, reject });
       void send({ t: "elicit-request", requestId, method, args });

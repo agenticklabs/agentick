@@ -124,7 +124,7 @@ export interface SessionRecord {
   readonly principal?: string;
 
   // ─── runtime accounting (framework-owned), hierarchy-aware ───
-  /** The in-flight execution's id (`exec:${ulid()}`), or absent when idle. */
+  /** The in-flight execution's id (`exec:${generateId()}`), or absent when idle. */
   readonly currentExecutionId?: string;
   /** Number of executions started against this session. */
   readonly executionCount: number;

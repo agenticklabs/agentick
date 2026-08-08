@@ -19,7 +19,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { MessageEntry, MessageSource, TimelineEntry } from "@agentick/spec";
 
 import { PromptsHarness, type TimelineAppendCapability } from "../harness.js";
@@ -46,7 +46,7 @@ function captureTimeline(): {
 }
 
 async function makeHarness(timeline?: TimelineAppendCapability): Promise<PromptsHarness> {
-  const id = `prov:${ulid()}`;
+  const id = `prov:${generateId()}`;
   const h = new PromptsHarness(
     id,
     new MemoryJournal({ capacity: 1024 }),

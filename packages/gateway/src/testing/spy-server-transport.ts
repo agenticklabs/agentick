@@ -19,7 +19,7 @@
  * @see docs/proposals/v2/blueprint/84-gateway-lifecycle-and-transports.md §2
  */
 
-import { ulid } from "@agentick/runtime";
+import { generateId } from "@agentick/runtime";
 import type { GatewayHarnessProtocol, ServerTransport } from "@agentick/spec";
 
 export interface ServerTransportSpy extends ServerTransport {
@@ -33,7 +33,9 @@ export interface ServerTransportSpy extends ServerTransport {
   reset(): void;
 }
 
-export function spyServerTransport(id = `spy-server-transport:${ulid()}`): ServerTransportSpy {
+export function spyServerTransport(
+  id = `spy-server-transport:${generateId()}`,
+): ServerTransportSpy {
   const hosts: GatewayHarnessProtocol[] = [];
   let closeCount = 0;
 

@@ -84,7 +84,7 @@ import {
   MessageHandlerError,
   RoutingFailed,
 } from "@agentick/spec";
-import { ulid, omitUndefined } from "@agentick/utils";
+import { generateId, omitUndefined } from "@agentick/utils";
 
 import type { ClusterPartitioning } from "../partitioning.js";
 import type { ClusterTransport } from "../transport.js";
@@ -308,7 +308,7 @@ export class ClusterInbox implements MessageInbox {
     input: MessageEnvelopeInput<T>,
     options?: AskOptions,
   ): Effect.Effect<R, InboxError | MessageHandlerError, never> {
-    const correlationId = ulid();
+    const correlationId = generateId();
     const timeoutMs = options?.timeoutMs ?? 30_000;
 
     const askPayload: ClusterAskRequestPayload<T> = {
@@ -324,7 +324,7 @@ export class ClusterInbox implements MessageInbox {
     const env: MessageEnvelope<ClusterAskRequestPayload<T>> = {
       addressedTo: address,
       type: CLUSTER_ASK_TYPE,
-      messageId: input.messageId ?? ulid(),
+      messageId: input.messageId ?? generateId(),
       timestamp: Date.now(),
       from: clusterReplyAddress(this.currentNode),
       correlationId,
@@ -592,7 +592,7 @@ export class ClusterInbox implements MessageInbox {
       const response: MessageEnvelope<ClusterAskResponsePayload> = {
         addressedTo: askerReplyAddress,
         type: CLUSTER_ASK_RESPONSE_TYPE,
-        messageId: ulid(),
+        messageId: generateId(),
         timestamp: Date.now(),
         correlationId: request.correlationId,
         from: clusterReplyAddress(this.currentNode),
@@ -629,7 +629,7 @@ function stampEnvelope<T>(
   return {
     addressedTo: address,
     type: input.type,
-    messageId: input.messageId ?? ulid(),
+    messageId: input.messageId ?? generateId(),
     timestamp: Date.now(),
     from: input.from ?? `node:${currentNode}`,
     ...omitUndefined({

@@ -8,7 +8,7 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { SkillsRegisterInput } from "@agentick/spec";
 
 import { SkillsHarness } from "../harness.js";
@@ -23,7 +23,7 @@ export async function stubSkillsHarness(
   initial: readonly SkillsRegisterInput[] = [],
 ): Promise<SkillsHarness> {
   const harness = new SkillsHarness(
-    `stub:${ulid()}`,
+    `stub:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

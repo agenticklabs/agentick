@@ -27,7 +27,7 @@ import type {
 } from "@agentick/spec";
 import { ErrorCode, intersectScopes, WireRpcError, type IngressIdentity } from "@agentick/spec";
 
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { dispatchRequest, type DispatchHost, type DispatchSink } from "./dispatch.js";
 
@@ -141,7 +141,7 @@ export abstract class BaseConnectionContext {
         ...(this.server !== undefined ? { server: this.server } : {}),
         // Bound ONCE. A second `initialize` on a live connection cannot
         // re-point it at another client and inherit that client's work.
-        bindClientId: (requested) => (this.clientId ??= requested ?? `client-${ulid()}`),
+        bindClientId: (requested) => (this.clientId ??= requested ?? `client-${generateId()}`),
       });
     }
     return null;

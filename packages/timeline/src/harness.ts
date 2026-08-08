@@ -43,7 +43,7 @@ import {
   qualifyNamespaceGuards,
   qualifyNamespaceHooks,
   runHarnessProtocol,
-  ulid,
+  generateId,
   type BaseHarnessOptions,
   type Unsubscribe,
 } from "@agentick/runtime";
@@ -715,7 +715,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     // function (the strategy), so it can never be a declared command
     // (ADR 51 §1.2: executable configuration is unaddressable).
     const op: Operation<CompactStrategy, CompactResult, CompactHandlerFailed> = {
-      opId: `timeline:compact:${ulid()}`,
+      opId: `timeline:compact:${generateId()}`,
       surface: "timeline",
       name: TIMELINE_COMPACT_EVENT_NAME,
       scope: {},
@@ -740,7 +740,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
       // operation's id — no second correlation id to reconcile. The fallback
       // covers a direct body call outside a command scope.
       const ctx = yield* getContext;
-      const token = ctx.opId ?? ulid();
+      const token = ctx.opId ?? generateId();
       const sourceEntries = source === "persisted" ? this.log.readPersisted() : this.log.read();
       const before = sourceEntries.length;
       // The opening frame, from the HARNESS rather than the strategy: a
@@ -830,7 +830,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     if (!this.bus.hasSubscriberFor(key)) return Effect.void;
     const payload: TimelineAppendInput = { entries };
     const envelope = {
-      id: ulid(),
+      id: generateId(),
       surface: this.surface,
       name: TIMELINE_APPEND_EVENT_NAME,
       phase: "requested",

@@ -7,7 +7,7 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import { StateHarness } from "../harness.js";
 
@@ -17,7 +17,7 @@ import { StateHarness } from "../harness.js";
  */
 export function stubStateHarness(initial: Readonly<Record<string, unknown>> = {}): StateHarness {
   const harness = new StateHarness(
-    `stub:${ulid()}`,
+    `stub:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

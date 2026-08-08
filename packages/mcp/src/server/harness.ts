@@ -24,7 +24,7 @@ import {
   runHarnessProtocol,
   runHarnessProtocolOn,
   withBoundaryFacets,
-  ulid,
+  generateId,
   withCallMiddleware,
   type Unsubscribe,
 } from "@agentick/runtime";
@@ -651,7 +651,7 @@ export class McpServerHarness
       return;
     }
 
-    const connectionId = `conn:${ulid()}`;
+    const connectionId = `conn:${generateId()}`;
     const identity = toIngressIdentity(info.authenticatedUser, this.identityProjection);
     const scope: EventScope = omitUndefined({
       mcpServerId: this.scopeId,
@@ -661,7 +661,7 @@ export class McpServerHarness
       origin: "wire" as const,
     });
     const op: Operation<McpCrossingInput, void, unknown> = {
-      opId: `${crossingOpName("initialize")}:${ulid()}`,
+      opId: `${crossingOpName("initialize")}:${generateId()}`,
       surface: SURFACE,
       name: crossingOpName("initialize"),
       scope,
@@ -847,7 +847,7 @@ export class McpServerHarness
       // provider, off-path until the in-fiber re-attach.
       // One id for this request, reused as the ctx's `toolCallId` and as the
       // `progress.begin()` token when the client did not supply one.
-      const requestToolCallId = `mcp:req:${ulid()}`;
+      const requestToolCallId = `mcp:req:${generateId()}`;
       const built = deriveContext(
         requestScope,
         {
@@ -1020,7 +1020,7 @@ export class McpServerHarness
         origin: "wire" as const,
       });
       const op: Operation<McpCrossingInput, R, unknown> = {
-        opId: `${opName}:${ulid()}`,
+        opId: `${opName}:${generateId()}`,
         surface: SURFACE,
         name: opName,
         scope,
@@ -1262,7 +1262,7 @@ export class McpServerHarness
         runOperation: this.runOperation.bind(this),
       },
       {
-        toolCallId: `mcp:${label}:${ulid()}`,
+        toolCallId: `mcp:${label}:${generateId()}`,
         // No SDK request behind an off-connection crossing (the HTTP
         // pre-gate / instructions resolution run before the SDK sees one),
         // so there is no caller cancellation to carry.
@@ -1276,13 +1276,13 @@ export class McpServerHarness
         // No progress token before the SDK sees the request — frames go
         // nowhere, but the surface keeps its shape so handler code that reaches
         // for `.begin()` does not have to branch on which ctx it got.
-        progress: createProgress(() => {}, `mcp:preconnect:${ulid()}`),
+        progress: createProgress(() => {}, `mcp:preconnect:${generateId()}`),
         task: "auto" as const,
         transport: "mcp" as const,
         tasks: this.serverTasks,
         mcp: {
           serverId: this.scopeId,
-          connectionId: `conn:${label}:${ulid()}`,
+          connectionId: `conn:${label}:${generateId()}`,
           transportKind: info.transportKind,
           connectedAt: Date.now(),
           user: info.authenticatedUser ?? null,

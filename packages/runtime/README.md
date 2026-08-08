@@ -619,7 +619,7 @@ A sink is just a bag of standard OTel objects, so a raw literal is a valid one: 
 | `RequestResponseRegistry`                                                      | Correlated request/response bookkeeping behind `harness.request`                      |
 | `busAsyncIterator` · `forkBusSubscription`                                     | Bus → `AsyncIterator` / callback, with per-event error isolation                      |
 | `matchesQuery` · `compileQuery`                                                | The `EventQuery` predicate, interpreted or pre-compiled                               |
-| `resolveSyncSubstrateSlot` · `ulid`                                            | Slot resolution (instance \| factory) and the id generator                            |
+| `resolveSyncSubstrateSlot` · `generateId`                                      | Slot resolution (instance \| factory) and the id generator                            |
 | `SESSION_ESCALATION_MESSAGE_TYPE` · `SESSION_TASK_WAKE_MESSAGE_TYPE`           | Substrate wire constants for escalation and task-wake                                 |
 
 Key types: `Middleware` · `AsyncMiddleware` · `InterceptorKind` · `CommandRegistry` · `CommandHooks` · `CommandGuards` · `NamespaceHooks` · `NamespaceGuards` · `HookRegistrars` · `ChunkInterceptor` · `ChunkObserver` · `ChunkTransform` · `GuardDecider` · `RuntimeContext` · `RuntimeContextUser` · `AsyncStream` · `TelemetryProvider` · `MetricSink` · `BaseHarnessOptions` · `HarnessShell` · `HarnessFx` · `OperationRunner` · `CommandRunner` · `CommandDef` · `StreamCommandDef` · `Unsubscribe`.

@@ -322,7 +322,7 @@ Add an export to `packages/spec/src/protocol/index.ts` and re-export from `packa
 
 ```ts
 import { Effect } from "effect";
-import { BaseHarness, runHarnessProtocol, ulid, type Unsubscribe } from "@agentick/runtime";
+import { BaseHarness, runHarnessProtocol, generateId, type Unsubscribe } from "@agentick/runtime";
 import type {
   ContentBlock,
   EventBus,
@@ -391,7 +391,7 @@ export class MyThingHarness extends BaseHarness<"my-thing"> implements MyThingHa
 
   set(input: MyThingSetInput): Promise<void> {
     const op: Operation<MyThingSetInput, void, never> = {
-      opId: `my-thing:set:${ulid()}`,
+      opId: `my-thing:set:${generateId()}`,
       surface: "my-thing",
       name: "my-thing:command:set",
       scope: { sessionId: this.scopeId },
@@ -408,7 +408,7 @@ export class MyThingHarness extends BaseHarness<"my-thing"> implements MyThingHa
 
   reset(input: { readonly id: string }): Promise<readonly ContentBlock[]> {
     const op: Operation<{ readonly id: string }, readonly ContentBlock[], never> = {
-      opId: `my-thing:reset:${ulid()}`,
+      opId: `my-thing:reset:${generateId()}`,
       surface: "my-thing",
       name: "my-thing:command:reset",
       scope: { sessionId: this.scopeId },
@@ -760,12 +760,12 @@ export function useMyThing(id: string): readonly [string | undefined, (value: st
 `src/testing/index.ts`:
 
 ```ts
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { MyThingHarness } from "../harness.js";
 
 export function stubMyThingHarness(initial: Readonly<Record<string, string>> = {}): MyThingHarness {
   const harness = new MyThingHarness(
-    `stub:${ulid()}`,
+    `stub:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

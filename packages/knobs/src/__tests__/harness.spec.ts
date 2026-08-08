@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { EventQuery, ProtocolEvent } from "@agentick/spec";
 
 import { KnobsHarness } from "../harness.js";
@@ -111,7 +111,7 @@ describe("KnobsHarness — inbox addressability", () => {
     const address = `knobs:s_xyz`;
     await Effect.runPromise(
       inbox.send(address, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "knobs:set",
         payload: { id: "verbose", value: true },
       }),
@@ -125,7 +125,7 @@ describe("KnobsHarness — inbox addressability", () => {
     const { harness, inbox } = await makeHarness("s_abc");
     await Effect.runPromise(
       inbox.send(`knobs:s_abc`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "knobs:register",
         payload: {
           id: "limit",
@@ -154,7 +154,7 @@ describe("KnobsHarness — inbox addressability", () => {
     });
     await Effect.runPromise(
       inbox.send(`knobs:s_disp`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "knobs:dispatch",
         payload: { name: "mood", value: "playful" },
       }),
@@ -299,8 +299,8 @@ describe("KnobsHarness — layered resolution over a parent", () => {
     const journal = new MemoryJournal({ capacity: 10_000 });
     const bus = new LocalEventBus();
     const inbox = new LocalInbox();
-    const parent = new KnobsHarness(`parent-${ulid()}`, journal, bus, inbox);
-    const child = new KnobsHarness(`child-${ulid()}`, journal, bus, inbox, parent);
+    const parent = new KnobsHarness(`parent-${generateId()}`, journal, bus, inbox);
+    const child = new KnobsHarness(`child-${generateId()}`, journal, bus, inbox, parent);
     await Promise.all([parent.ready, child.ready]);
     return { parent, child };
   }
@@ -388,7 +388,7 @@ describe("KnobsHarness — layered resolution over a parent", () => {
 
 runKnobsHarnessConformance({
   make: async () => {
-    const { harness } = await makeHarness(`conformance-${ulid()}`);
+    const { harness } = await makeHarness(`conformance-${generateId()}`);
     return harness;
   },
 });

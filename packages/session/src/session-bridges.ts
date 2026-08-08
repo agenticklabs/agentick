@@ -26,7 +26,7 @@ import { TasksHarness } from "@agentick/tasks";
 import { ResourcesHarness } from "@agentick/resources";
 import { GatesController, GatesHarness, type GateOverrideAudit } from "@agentick/gates";
 import { TimelineHarness, type TimelineDefinition } from "@agentick/timeline";
-import { type BaseHarness, type Middleware, ulid } from "@agentick/runtime";
+import { type BaseHarness, type Middleware, generateId } from "@agentick/runtime";
 import type {
   ElicitationHarnessProtocol,
   EventBus,
@@ -378,7 +378,7 @@ export function buildSessionBridges(
 function makeGateAudit(bus: EventBus, sessionId: string): (event: GateOverrideAudit) => void {
   return (event) => {
     const envelope: ProtocolEvent = {
-      id: ulid(),
+      id: generateId(),
       surface: "session",
       name: "session:gate:override",
       phase: "terminal",

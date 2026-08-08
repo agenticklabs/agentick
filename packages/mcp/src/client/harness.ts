@@ -43,7 +43,7 @@
  */
 
 import { Effect, Stream } from "effect";
-import { BaseHarness, ulid } from "@agentick/runtime";
+import { BaseHarness, generateId } from "@agentick/runtime";
 import type {
   CompletionResult,
   EventBus,
@@ -1651,7 +1651,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     this.logNotifier.notify(message);
     void Effect.runPromise(
       this.bus.append({
-        id: ulid(),
+        id: generateId(),
         surface: "mcp",
         name: `mcp:${this.scopeId}:log`,
         phase: "delta",
@@ -1695,7 +1695,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     // `{ surface: "mcp", name: { exact: "mcp:<scopeId>:state" } }`.
     void Effect.runPromise(
       this.bus.append({
-        id: ulid(),
+        id: generateId(),
         surface: "mcp",
         name: `mcp:${this.scopeId}:state`,
         phase: "delta",

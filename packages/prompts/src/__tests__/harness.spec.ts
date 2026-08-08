@@ -14,14 +14,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import { PromptsHarness } from "../harness.js";
 import type { PromptRenderer } from "../renderer.js";
 
 async function makeHarness(renderers: PromptRenderer[] = []): Promise<PromptsHarness> {
   const harness = new PromptsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

@@ -7,7 +7,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ProtocolEvent, ResourceContents } from "@agentick/spec";
 
 import { ResourcesHarness } from "../harness.js";
@@ -15,7 +15,7 @@ import { compileUriTemplate, matchesTemplate } from "../uri-template.js";
 
 async function makeHarness(pageSize?: number): Promise<ResourcesHarness> {
   const harness = new ResourcesHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -52,7 +52,7 @@ describe("ResourcesHarness — registry", () => {
     await h.close();
 
     const h2 = new ResourcesHarness(
-      `t:${ulid()}`,
+      `t:${generateId()}`,
       new MemoryJournal(),
       new LocalEventBus(),
       new LocalInbox(),
@@ -114,7 +114,7 @@ describe("ResourcesHarness — declared-command journaling", () => {
   it("read emits requested + terminal envelopes on the resources surface", async () => {
     const bus = new LocalEventBus();
     const harness = new ResourcesHarness(
-      `test:${ulid()}`,
+      `test:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       bus,
       new LocalInbox(),

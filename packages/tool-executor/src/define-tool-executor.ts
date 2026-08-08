@@ -52,7 +52,7 @@ import {
   LocalInbox,
   MemoryJournal,
   runHarnessProtocol,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type {
   AbortInput,
@@ -167,7 +167,7 @@ export interface DefineToolExecutorInput {
  */
 export function defineToolExecutor(spec: DefineToolExecutorInput): ToolExecutorFactory {
   const factory = (deps?: ToolExecutorFactoryDeps): ToolExecutorProtocol => {
-    const scopeId = deps?.scopeId ?? `define-tool-executor:${ulid()}`;
+    const scopeId = deps?.scopeId ?? `define-tool-executor:${generateId()}`;
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
@@ -259,7 +259,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
 
   register(input: RegisterToolInput): Promise<void> {
     const op: Operation<RegisterToolInput, void> = {
-      opId: input.opId ?? `tool:register:${input.registration.declaration.name}:${ulid()}`,
+      opId: input.opId ?? `tool:register:${input.registration.declaration.name}:${generateId()}`,
       surface: "tool",
       name: "tool:command:register",
       scope: {},
@@ -316,7 +316,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
 
   unregister(input: UnregisterToolInput): Promise<void> {
     const op: Operation<UnregisterToolInput, void> = {
-      opId: input.opId ?? `tool:unregister:${input.name}:${ulid()}`,
+      opId: input.opId ?? `tool:unregister:${input.name}:${generateId()}`,
       surface: "tool",
       name: "tool:command:unregister",
       scope: {},
@@ -346,7 +346,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
 
   removeBoundTools(input: RemoveBoundToolsInput): Promise<number> {
     const op: Operation<RemoveBoundToolsInput, number> = {
-      opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${ulid()}`,
+      opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${generateId()}`,
       surface: "tool",
       name: "tool:command:remove-bound-tools",
       scope: {},
@@ -381,7 +381,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     input: ReplaceCompilerToolsInput,
   ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never> {
     const op: Operation<ReplaceCompilerToolsInput, void, ToolExecutorErrorChannel> = {
-      opId: input.opId ?? `tool:replace-compiler:${input.mountId}:${ulid()}`,
+      opId: input.opId ?? `tool:replace-compiler:${input.mountId}:${generateId()}`,
       surface: "tool",
       name: "tool:command:replace-compiler-tools",
       scope: {},
@@ -480,7 +480,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
     opts?: DispatchOptions,
   ): Promise<readonly ContentBlock[]> {
     const result = await this.dispatch({
-      toolCallId: `host:${ulid()}`,
+      toolCallId: `host:${generateId()}`,
       name,
       input,
       // NOT AN EVENT SCOPE — the call's data context. `scopeId` IS the session id here.

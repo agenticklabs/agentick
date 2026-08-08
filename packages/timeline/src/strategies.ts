@@ -25,7 +25,7 @@ import type {
   TimelineEntry,
 } from "@agentick/spec";
 import { toolSpanEnd } from "@agentick/spec";
-import { omitUndefined, ulid } from "@agentick/utils";
+import { omitUndefined, generateId } from "@agentick/utils";
 
 export interface FromHandlerOptions {
   readonly handler: CompactRun;
@@ -410,7 +410,7 @@ function summaryEntry(
   return {
     kind: "message",
     message: {
-      id: ulid(),
+      id: generateId(),
       ts: Date.now(),
       role: "event",
       content: [

@@ -75,7 +75,7 @@ import {
   type Middleware,
   type StreamCommand,
   runHarnessProtocol,
-  ulid,
+  generateId,
   withContext,
 } from "@agentick/runtime";
 import type {
@@ -480,7 +480,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           break;
         }
 
-        const tickId = `tick-${ulid()}`;
+        const tickId = `tick-${generateId()}`;
         acc.ticks += 1;
         const tickIndex = acc.ticks;
         const tickStartedAt = Date.now();
@@ -737,7 +737,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             new StructuredOutputIncomplete({ toolName: terminalToolName, reason: "max_ticks" }),
           );
         }
-        const wrapTickId = `tick-${ulid()}`;
+        const wrapTickId = `tick-${generateId()}`;
         acc.ticks += 1;
         const wrapInput: TickInput = {
           tickId: wrapTickId,

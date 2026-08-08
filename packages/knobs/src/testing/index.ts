@@ -9,7 +9,7 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { KnobPrimitive } from "@agentick/spec";
 
 import { KnobsHarness } from "../harness.js";
@@ -23,7 +23,7 @@ export function stubKnobsHarness(
   initial: Readonly<Record<string, KnobPrimitive>> = {},
 ): KnobsHarness {
   const harness = new KnobsHarness(
-    `stub:${ulid()}`,
+    `stub:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

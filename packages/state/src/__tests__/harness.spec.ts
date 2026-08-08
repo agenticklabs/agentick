@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { EventQuery, ProtocolEvent } from "@agentick/spec";
 
 import { StateHarness } from "../harness.js";
@@ -86,7 +86,7 @@ describe("StateHarness — inbox addressability", () => {
     const { harness, inbox } = await makeHarness("s_xyz");
     await Effect.runPromise(
       inbox.send(`state:s_xyz`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "state:set",
         payload: { key: "remote", value: "value" },
       }),
@@ -101,7 +101,7 @@ describe("StateHarness — inbox addressability", () => {
     await harness.set({ key: "to-remove", value: "x" });
     await Effect.runPromise(
       inbox.send(`state:s_del`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "state:delete",
         payload: { key: "to-remove" },
       }),
@@ -135,7 +135,7 @@ describe("StateHarness — snapshot round-trip", () => {
 
 runStateHarnessConformance({
   make: async () => {
-    const { harness } = await makeHarness(`conformance-${ulid()}`);
+    const { harness } = await makeHarness(`conformance-${generateId()}`);
     return harness;
   },
 });

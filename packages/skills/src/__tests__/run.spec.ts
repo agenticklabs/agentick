@@ -25,7 +25,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { waitFor } from "@agentick/utils/testing";
 import type {
   MessageSource,
@@ -84,7 +84,7 @@ function stubRunner(opts: { readonly result?: SendResult; readonly reject?: unkn
 
 async function mkHarness(options: SkillsHarnessOptions = {}): Promise<SkillsHarness> {
   const h = new SkillsHarness(
-    `run:${ulid()}`,
+    `run:${generateId()}`,
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),
@@ -157,7 +157,7 @@ describe("skills.run — composeRun seam", () => {
       messages: [{ role: "user", content: `custom:${skill.name}:${JSON.stringify(opts.args)}` }],
     });
     const h = new SkillsHarness(
-      `run:${ulid()}`,
+      `run:${generateId()}`,
       new MemoryJournal(),
       new LocalEventBus(),
       new LocalInbox(),
@@ -464,7 +464,7 @@ describe("skills:run — the op is the record", () => {
 
   it("mints requested → terminal envelopes for the run", async () => {
     const bus = new LocalEventBus();
-    const h = new SkillsHarness(`op:${ulid()}`, new MemoryJournal(), bus, new LocalInbox());
+    const h = new SkillsHarness(`op:${generateId()}`, new MemoryJournal(), bus, new LocalInbox());
     await h.ready;
     const observed = await watch(bus);
 
@@ -484,7 +484,7 @@ describe("skills:run — the op is the record", () => {
 
   it("a FAILED run is journaled too — the record is not success-only", async () => {
     const bus = new LocalEventBus();
-    const h = new SkillsHarness(`op:${ulid()}`, new MemoryJournal(), bus, new LocalInbox());
+    const h = new SkillsHarness(`op:${generateId()}`, new MemoryJournal(), bus, new LocalInbox());
     await h.ready;
     const observed = await watch(bus);
 
@@ -524,7 +524,7 @@ describe("skills:run — the op is the record", () => {
 
   it("the stamp's opId IS the run op's id — an entry navigates back to the journal", async () => {
     const bus = new LocalEventBus();
-    const h = new SkillsHarness(`op:${ulid()}`, new MemoryJournal(), bus, new LocalInbox());
+    const h = new SkillsHarness(`op:${generateId()}`, new MemoryJournal(), bus, new LocalInbox());
     await h.ready;
     const observed = await watch(bus);
 

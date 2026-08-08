@@ -44,7 +44,7 @@ import type { SubstrateError } from "@agentick/spec";
 import { MemoryJournal } from "../substrate/memory-journal.js";
 import { LocalEventBus } from "../substrate/local-event-bus.js";
 import { LocalInbox } from "../substrate/local-inbox.js";
-import { ulid } from "../substrate/ulid.js";
+import { generateId } from "@agentick/utils";
 
 // ============================================================================
 // Toy harnesses
@@ -81,7 +81,7 @@ class ToyKnobsHarness extends BaseHarness<"tool"> {
   // ─── Async Operation ───
   set(input: { id: string; value: string | number | boolean; sessionId?: string }): Promise<void> {
     const op: Operation<typeof input, void, never> = {
-      opId: `knobs:set:${ulid()}`,
+      opId: `knobs:set:${generateId()}`,
       surface: "tool",
       name: "tool:knobs:set",
       scope: input.sessionId !== undefined ? { sessionId: input.sessionId } : {},
@@ -160,7 +160,7 @@ class ToyParentHarness extends BaseHarness<"session"> {
    */
   flipKnob(input: { id: string; value: string | number | boolean }): Promise<void> {
     const op: Operation<typeof input, void, never> = {
-      opId: `session:flip-knob:${ulid()}`,
+      opId: `session:flip-knob:${generateId()}`,
       surface: "session",
       name: "session:flip-knob",
       scope: { sessionId: this.scopeId },
@@ -279,7 +279,7 @@ describe("harness plumbing — addressed inbox messages", () => {
   it("external actor's inbox message reaches the harness's Operation", async () => {
     const { knobs, inbox } = await makeKnobsHarness("session-7");
     const address = `tool:session-7`;
-    const messageId = ulid();
+    const messageId = generateId();
     const ack = await Effect.runPromise(
       inbox.send(address, {
         messageId,
@@ -313,7 +313,7 @@ describe("harness plumbing — addressed inbox messages", () => {
 
   it("inbox message to unknown type emits a HandlerError without crashing the harness", async () => {
     const { knobs, inbox } = await makeKnobsHarness("session-9");
-    const messageId = ulid();
+    const messageId = generateId();
     const ack = await Effect.runPromise(
       inbox.send(`tool:session-9`, {
         messageId,
@@ -460,7 +460,7 @@ describe("harness plumbing — parent/child Operation composition", () => {
       }
       outerEffect(): Effect.Effect<string, SubstrateError, never> {
         const outer: Operation<{}, string, never> = {
-          opId: `tool:outer:${ulid()}`,
+          opId: `tool:outer:${generateId()}`,
           surface: "tool",
           name: "tool:outer",
           input: {},
@@ -469,7 +469,7 @@ describe("harness plumbing — parent/child Operation composition", () => {
         return this.runOperation(outer, () =>
           Effect.gen(this, function* () {
             const inner: Operation<{}, string, never> = {
-              opId: `tool:inner:${ulid()}`,
+              opId: `tool:inner:${generateId()}`,
               surface: "tool",
               name: "tool:inner",
               input: {},
@@ -535,7 +535,7 @@ describe("harness plumbing — sender identity in envelopes", () => {
     // This test documents the current shape so the ADR can land on
     // whether richer sender metadata needs further promotion.
     const { inbox } = await makeKnobsHarness("test-reply");
-    const messageId = ulid();
+    const messageId = generateId();
     const ack = await Effect.runPromise(
       inbox.send(`tool:test-reply`, {
         messageId,

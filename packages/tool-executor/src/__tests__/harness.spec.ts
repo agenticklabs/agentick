@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
-import { ulid } from "@agentick/runtime";
+import { generateId } from "@agentick/runtime";
 import type {
   DispatchInput,
   DispatchResult,
@@ -294,7 +294,7 @@ describe("ToolExecutorHarness — abort", () => {
     await new Promise((r) => setTimeout(r, 10));
     await Effect.runPromise(
       inbox.send(harness.address, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "tool:abort",
         payload: { toolCallId: callId, reason: "inbox cancel" },
       }),
@@ -487,7 +487,7 @@ describe("ToolExecutorHarness — inbox dispatch-by-name (declared command)", ()
 
     const result = await Effect.runPromise(
       inbox.ask<DispatchInput, DispatchResult>(harness.address, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "tool:dispatch",
         payload,
       }),

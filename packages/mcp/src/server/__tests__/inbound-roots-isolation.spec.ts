@@ -19,7 +19,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, McpRoot, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -96,7 +96,7 @@ describe("inbound client-roots isolation (ADR 65 — per-connection)", () => {
 
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -147,7 +147,7 @@ describe("inbound client-roots isolation (ADR 65 — per-connection)", () => {
   it("a client that does NOT advertise roots leaves clientRoots undefined", async () => {
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

@@ -24,7 +24,7 @@ import {
   ResourceUpdatedNotificationSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ResourceContents } from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 
@@ -37,7 +37,7 @@ function text(uri: string, body: string): ResourceContents {
 
 async function makeResourcesHarness(): Promise<ResourcesHarness> {
   const h = new ResourcesHarness(
-    `resources:${ulid()}`,
+    `resources:${generateId()}`,
     new MemoryJournal({ capacity: 256 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -55,7 +55,7 @@ async function makeServer(
 }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

@@ -21,7 +21,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolResultSchema, ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -69,7 +69,7 @@ async function makeElicitServer(
     return async (input, ctx) => ({ kind: "inline", content: await handler(input, ctx) });
   };
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -193,7 +193,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
     let elicitPresent: boolean | null = null;
     const transport = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),
@@ -230,7 +230,7 @@ describe("elicitation projection — ctx.elicit presence", () => {
 
     const transport = inMemoryServerTransport();
     const optedOut = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

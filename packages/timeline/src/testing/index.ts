@@ -9,7 +9,7 @@
  * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { TimelineEntry } from "@agentick/spec";
 
 import { TimelineHarness, type TimelineHarnessOptions } from "../harness.js";
@@ -31,7 +31,7 @@ export function stubTimelineHarness(
   options: TimelineHarnessOptions = {},
 ): TimelineHarness {
   const harness = new TimelineHarness(
-    `stub:${ulid()}`,
+    `stub:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

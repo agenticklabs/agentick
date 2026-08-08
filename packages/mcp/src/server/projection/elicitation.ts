@@ -41,7 +41,7 @@ import {
   type UrlElicitSpec,
   type UrlElicitationSpec,
 } from "@agentick/spec";
-import { ulid } from "@agentick/runtime";
+import { generateId } from "@agentick/runtime";
 import { omitUndefined } from "@agentick/utils";
 // Shape vocabulary is shared with the in-process sugar so one question asked
 // two ways describes itself identically. The MCP-specific parts stay here: the
@@ -259,7 +259,7 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     // ─────────── URL mode ───────────
     async url(spec) {
       ensureUrlMode();
-      const elicitationId = `el-${ulid()}`;
+      const elicitationId = `el-${generateId()}`;
       const outcome = await sendUrlElicit(options.sdkServer, spec, elicitationId, spec.timeoutMs);
       switch (outcome.status) {
         case "accept":
@@ -274,7 +274,7 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     requireUrls(specs) {
       const elicitations: readonly UrlElicitationSpec[] = specs.map((spec) => ({
         mode: "url" as const,
-        elicitationId: `el-required-${ulid()}`,
+        elicitationId: `el-required-${generateId()}`,
         url: spec.url,
         message: spec.message,
       }));
@@ -318,7 +318,7 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     },
     async tryUrl(spec) {
       ensureUrlMode();
-      const elicitationId = `el-${ulid()}`;
+      const elicitationId = `el-${generateId()}`;
       return sendUrlElicit(options.sdkServer, spec, elicitationId, spec.timeoutMs);
     },
 

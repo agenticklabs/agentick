@@ -19,7 +19,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { createTool, type CreatedTool } from "@agentick/tool";
 
 import {
@@ -37,7 +37,7 @@ async function makeServer(tools: readonly CreatedTool[]): Promise<{
 }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

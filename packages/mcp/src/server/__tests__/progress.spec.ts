@@ -24,7 +24,7 @@ import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { ProgressNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ProgressToken, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema, progressEventName } from "@agentick/spec";
 
@@ -42,7 +42,7 @@ async function makeConnectedClient(options: Omit<McpServerOptions, "transports">
 }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -198,7 +198,7 @@ describe("the wire params carry no operation identity", () => {
 
     await Effect.runPromise(
       bus.append({
-        id: ulid(),
+        id: generateId(),
         surface: "tool",
         name: progressEventName("tool"),
         phase: "terminal",

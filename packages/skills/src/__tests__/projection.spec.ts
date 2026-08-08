@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { Resources, SessionInstaller, Skills } from "@agentick/spec";
 import { ResourcesHarness } from "@agentick/resources";
 
@@ -62,7 +62,7 @@ function fakeInstaller(resources: Resources | undefined): {
 
 function newResources(): ResourcesHarness {
   return new ResourcesHarness(
-    `res:${ulid()}`,
+    `res:${generateId()}`,
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),

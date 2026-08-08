@@ -39,7 +39,7 @@ import {
   type StreamCommand,
   runHarnessProtocol,
   runHarnessStream,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type {
   AbortExecutorInput,
@@ -631,7 +631,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     input: ProjectInput,
   ): Effect.Effect<LanguageModelInput, ProjectionError | SubstrateError, never> {
     const op: Operation<ProjectInput, LanguageModelInput, ProjectionError> = {
-      opId: `model:project:${ulid()}`,
+      opId: `model:project:${generateId()}`,
       surface: "model",
       name: "model:command:project",
       scope: input.scope ?? {},
@@ -654,7 +654,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     // Edge facade over the `model:generate` command. Pin `executionId` into the
     // input scope so the command's Operation and `generateBody`'s in-flight
     // bookkeeping agree.
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const executionId = input.scope?.executionId ?? `exec:${generateId()}`;
     return this.modelGenerate({ ...input, scope: { ...(input.scope ?? {}), executionId } });
   }
 
@@ -677,7 +677,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     // streaming-edge policy (queueCapacity / isCancellation / onStart / onAbort,
     // declared in the constructor). `executionId` is pinned into the input so
     // the command's Operation and the in-flight bookkeeping agree.
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const executionId = input.scope?.executionId ?? `exec:${generateId()}`;
     return this.modelGenerateStream.stream({
       ...input,
       scope: { ...(input.scope ?? {}), executionId },
@@ -694,7 +694,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     input: NormalizeInput<unknown>,
   ): Effect.Effect<LanguageModelExecutionResult, NormalizeError | SubstrateError, never> {
     const op: Operation<NormalizeInput<unknown>, LanguageModelExecutionResult, NormalizeError> = {
-      opId: `model:normalize:${ulid()}`,
+      opId: `model:normalize:${generateId()}`,
       surface: "model",
       name: "model:command:normalize",
       scope: input.scope ?? {},
@@ -759,7 +759,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         }),
       );
     }
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const executionId = input.scope?.executionId ?? `exec:${generateId()}`;
     return this.modelGenerateStream.fx(
       { ...input, scope: { ...(input.scope ?? {}), executionId } },
       sink,
@@ -778,12 +778,12 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
     ExecutorError | SubstrateError,
     never
   > {
-    const executionId = input.scope?.executionId ?? `exec:${ulid()}`;
+    const executionId = input.scope?.executionId ?? `exec:${generateId()}`;
     const tickId = input.scope?.tickId;
     const opId =
       tickId !== undefined
         ? `model:run:${executionId}:${tickId}`
-        : `model:run:${executionId}:${ulid()}`;
+        : `model:run:${executionId}:${generateId()}`;
     const op: Operation<RunInput, ExecutorTerminal<LanguageModelExecutionResult>, ExecutorError> = {
       opId,
       surface: "model",
@@ -832,7 +832,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       const ctx = yield* getContext;
       const opName = sink !== null ? "model:command:generate_stream" : "model:command:generate";
       const op: Operation<unknown, unknown> = {
-        opId: ctx.opId ?? `${opName}:${ulid()}`,
+        opId: ctx.opId ?? `${opName}:${generateId()}`,
         surface: "model",
         name: opName,
         ...(ctx.parentOpId !== undefined ? { parentOpId: ctx.parentOpId } : {}),
@@ -927,7 +927,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       const input = call.execInput;
       const sink = call.deltaSink;
       const op = call.op;
-      const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${ulid()}`;
+      const executionId = input.scope?.executionId ?? ctx.executionId ?? `exec:${generateId()}`;
 
       if (this.lifecycle.isAborted(executionId)) {
         return yield* Effect.fail<ExecuteErrorChannel>(

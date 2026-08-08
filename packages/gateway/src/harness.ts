@@ -31,7 +31,7 @@ import {
   scopeToCommand,
   signalFromVerdict,
   tagInterceptor,
-  ulid,
+  generateId,
   withCallMiddleware,
   type AsyncMiddleware,
   type BaseHarnessOptions,
@@ -217,7 +217,7 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions {
    *     still delegates to the default).
    */
   readonly truncateToolResults?: import("@agentick/spec").TruncateToolResultsSetting;
-  /** Stable gateway id; defaults to `gateway:${ulid()}`. */
+  /** Stable gateway id; defaults to `gateway:${generateId()}`. */
   readonly gatewayId?: string;
   /**
    * A single door onto every mounted app's sessions — the scale answer for
@@ -449,7 +449,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   }
 
   constructor(options: GatewayHarnessOptions = {}) {
-    const gatewayId = options.gatewayId ?? `gateway:${ulid()}`;
+    const gatewayId = options.gatewayId ?? `gateway:${generateId()}`;
     const journal =
       options.journal instanceof Function
         ? undefined
@@ -751,7 +751,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * the inner `session:send` op's `onBeforeSessionSend` (ADR 83 wire
    * section, `wire:` prefix): the wire boundary and the session op are
    * separate seams, one fire each, no collision. A FRESH unique `opId`
-   * (`wire:<method>:<ulid>`) guarantees the idempotency replay never
+   * (`wire:<method>:<id>`) guarantees the idempotency replay never
    * triggers — the pre-seam wire path had no opId at all.
    *
    * Error propagation is byte-identical to the direct call: a handler
@@ -793,7 +793,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // gateway and fires once at the session).
     const opName = `wire:${method}`;
     const op: Operation<unknown, R, unknown> = {
-      opId: `${opName}:${ulid()}`,
+      opId: `${opName}:${generateId()}`,
       surface: SURFACE,
       name: opName,
       scope,
@@ -928,7 +928,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   emitCapabilitiesChanged(): void {
     void Effect.runPromise(
       this.bus.append({
-        id: `evt_${ulid()}`,
+        id: `evt_${generateId()}`,
         surface: SURFACE,
         name: GATEWAY_CAPABILITIES_CHANGED,
         phase: "terminal",
@@ -954,7 +954,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   emitAdmissionFailure(failure: IngressAdmissionFailure): void {
     void Effect.runPromise(
       this.bus.append({
-        id: `evt_${ulid()}`,
+        id: `evt_${generateId()}`,
         surface: SURFACE,
         name: GATEWAY_ADMISSION_FAILED,
         phase: "terminal",
@@ -1106,7 +1106,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // possibly-transformed input; the after-hook (`onAfterGatewayCreateApp`)
     // observes the mounted `AppHarnessProtocol`.
     const op: Operation<CreateGatewayAppInput<P>, AppHarnessProtocol<P>, GatewayError> = {
-      opId: `gateway:create-app:${ulid()}`,
+      opId: `gateway:create-app:${generateId()}`,
       surface: SURFACE,
       name: "gateway:command:create-app",
       scope: { gatewayId: this.scopeId },
@@ -1137,7 +1137,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * {@link createApp} (before the op fires).
    */
   private async createAppBody<P>(input: CreateGatewayAppInput<P>): Promise<AppHarnessProtocol<P>> {
-    const appId = input.appId ?? `app:${ulid()}`;
+    const appId = input.appId ?? `app:${generateId()}`;
     if (this._apps.has(appId)) {
       throw new AppAlreadyExistsError({ appId });
     }
@@ -1205,7 +1205,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // Surface app construction on the gateway bus for observers.
     void Effect.runPromise(
       this.bus.append({
-        id: `evt_${ulid()}`,
+        id: `evt_${generateId()}`,
         surface: SURFACE,
         name: "gateway:app:created",
         phase: "terminal",
@@ -1240,7 +1240,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     }
     this.gatewayStarted = true;
     const op: Operation<undefined, void, never> = {
-      opId: `gateway:start:${ulid()}`,
+      opId: `gateway:start:${generateId()}`,
       surface: SURFACE,
       name: "gateway:command:start",
       scope: { gatewayId: this.scopeId },
@@ -1275,7 +1275,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // command candidate; exposure is a verb-matrix decision (remote
     // gateway shutdown) deferred with slice 5.
     const op: Operation<undefined, void, never> = {
-      opId: `gateway:close:${ulid()}`,
+      opId: `gateway:close:${generateId()}`,
       surface: SURFACE,
       name: "gateway:command:close",
       scope: { gatewayId: this.scopeId },
@@ -1319,7 +1319,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    */
   authorize(input: AuthorizeInput): Promise<AuthorizeResult> {
     const op: Operation<AuthorizeInput, AuthorizeResult, never> = {
-      opId: `authorizer:authorize:${ulid()}`,
+      opId: `authorizer:authorize:${generateId()}`,
       surface: SURFACE,
       name: "authorizer:command:authorize",
       scope: { gatewayId: this.scopeId },
@@ -1354,7 +1354,7 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    */
   accept(info: ConnectionInfo): Promise<void> {
     const op: Operation<ConnectionInfo, void, never> = {
-      opId: `gateway:accept:${ulid()}`,
+      opId: `gateway:accept:${generateId()}`,
       surface: SURFACE,
       name: "gateway:command:accept",
       scope: { gatewayId: this.scopeId },

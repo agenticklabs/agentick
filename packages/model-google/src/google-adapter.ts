@@ -34,7 +34,7 @@ import {
   type FunctionDeclaration,
 } from "@google/genai";
 
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 import type {
   Citation,
   ContentBlock,
@@ -420,7 +420,7 @@ export function google(
         if (part.functionCall) {
           closeActive();
           const fc = part.functionCall;
-          const callId = fc.id ?? `call_${ulid()}`;
+          const callId = fc.id ?? `call_${generateId()}`;
           const name = fc.name ?? "";
           const args = (fc.args ?? {}) as Record<string, unknown>;
           const signature = (part as { thoughtSignature?: string }).thoughtSignature;
@@ -1247,7 +1247,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       }
       if (part.functionCall) {
         const fc = part.functionCall;
-        const id = fc.id ?? `call_${ulid()}`;
+        const id = fc.id ?? `call_${generateId()}`;
         const name = fc.name ?? "";
         const args = (fc.args ?? {}) as Record<string, unknown>;
         const signature = (part as { thoughtSignature?: string }).thoughtSignature;

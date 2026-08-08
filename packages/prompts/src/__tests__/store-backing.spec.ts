@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { stubStoreCtx } from "@agentick/store";
 
 import { PromptsHarness } from "../harness.js";
@@ -30,7 +30,7 @@ runPromptStoreConformance({
 
 function makeHarness(store: InMemoryPromptStore): PromptsHarness {
   return new PromptsHarness(
-    `store-backing:${ulid()}`,
+    `store-backing:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -166,7 +166,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     // A resumed harness asks for the store read explicitly — prompts names no
     // default hydrator, so `hydrateFromStore()` is the opt-in (ADR 93).
     const h2 = new PromptsHarness(
-      `store-backing:${ulid()}`,
+      `store-backing:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

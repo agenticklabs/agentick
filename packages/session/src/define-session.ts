@@ -48,7 +48,7 @@ import {
   LocalInbox,
   MemoryJournal,
   runHarnessProtocol,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import type {
   AppendEntryInput,
@@ -187,7 +187,7 @@ export interface DefineSessionInput<P = unknown> {
 
 export function defineSession<P = unknown>(spec: DefineSessionInput<P>): SessionHarnessFactory<P> {
   const factory = (deps?: SessionHarnessFactoryDeps): SessionHarnessProtocol<P> => {
-    const scopeId = deps?.scopeId ?? `define-session:${ulid()}`;
+    const scopeId = deps?.scopeId ?? `define-session:${generateId()}`;
     const journal = deps?.journal ?? new MemoryJournal();
     const bus = deps?.bus ?? new LocalEventBus();
     const inbox = deps?.inbox ?? new LocalInbox();
@@ -269,7 +269,7 @@ class CallbackSessionHarness<P = unknown>
 
   send<T = unknown>(input: SendInput<P, T>): Promise<SessionExecutionHandle<T>> {
     const op: Operation<SendInput<P>, SessionExecutionHandle> = {
-      opId: `session:send:${ulid()}`,
+      opId: `session:send:${generateId()}`,
       surface: "session",
       name: "session:command:send",
       scope: {},

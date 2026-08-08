@@ -24,7 +24,7 @@
 
 import { Effect } from "effect";
 import type { EventBus, EventPhase, ProtocolEvent } from "@agentick/spec";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import type { NodeId } from "../types.js";
 
@@ -60,7 +60,7 @@ export class DiagnosticEmitter {
    */
   emit(name: string, payload?: unknown, phase: EventPhase = "terminal"): void {
     const event: ProtocolEvent = {
-      id: ulid(),
+      id: generateId(),
       surface: "cluster",
       name,
       phase,

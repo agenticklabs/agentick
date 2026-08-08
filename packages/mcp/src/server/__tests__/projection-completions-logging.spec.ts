@@ -32,7 +32,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { LoggingMessageNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -59,7 +59,7 @@ async function makeConnectedClient(options: Omit<McpServerOptions, "transports">
 }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
@@ -489,7 +489,7 @@ describe("logging projection — ctx.log round-trip + level filter", () => {
     const transportA = inMemoryServerTransport();
     const transportB = inMemoryServerTransport();
     const harness = new McpServerHarness(
-      `srv:${ulid()}`,
+      `srv:${generateId()}`,
       new MemoryJournal({ capacity: 1024 }),
       new LocalEventBus(),
       new LocalInbox(),

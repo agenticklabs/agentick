@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ResourceContents, ResourceStore } from "@agentick/spec";
 import { stubStoreCtx } from "@agentick/store";
 
@@ -36,7 +36,7 @@ function text(uri: string, body: string): ResourceContents {
 
 function makeHarness(store: ResourceStore): ResourcesHarness {
   return new ResourcesHarness(
-    `store-backing:${ulid()}`,
+    `store-backing:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

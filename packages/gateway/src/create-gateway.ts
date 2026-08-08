@@ -20,7 +20,7 @@
  */
 
 import type { ClusterFactory, ClusterParent } from "@agentick/cluster";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { GatewayHarness, type GatewayHarnessOptions } from "./harness.js";
 
@@ -73,7 +73,7 @@ export async function createGateway(options: CreateGatewayOptions = {}): Promise
     const closeHandlers: Array<() => Promise<void> | void> = [];
     const { LocalEventBus, LocalInbox, MemoryJournal } = await import("@agentick/runtime");
     const parent: ClusterParent = {
-      id: rest.gatewayId ?? `gateway:${ulid()}:cluster-parent`,
+      id: rest.gatewayId ?? `gateway:${generateId()}:cluster-parent`,
       bus: localBus ?? new LocalEventBus(),
       inbox: localInbox ?? new LocalInbox(),
       journal: localJournal ?? new MemoryJournal({ capacity: 10_000 }),

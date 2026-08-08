@@ -24,7 +24,7 @@ import { omitUndefined } from "@agentick/utils";
 import { buildSessionElicit } from "@agentick/elicitation";
 
 import { Cause, Effect, Exit, Option } from "effect";
-import { deriveContext, getContext, runHarnessProtocol, ulid } from "@agentick/runtime";
+import { deriveContext, getContext, runHarnessProtocol, generateId } from "@agentick/runtime";
 import {
   BaseHarness,
   type GuardDecider,
@@ -301,7 +301,7 @@ export class ToolExecutorHarness
     opts?: import("@agentick/spec").DispatchOptions,
   ): Promise<readonly ContentBlock[]> {
     const result = await this.dispatch({
-      toolCallId: `host:${ulid()}`,
+      toolCallId: `host:${generateId()}`,
       name,
       input,
       // NOT AN EVENT SCOPE — the call's data context. `scopeId` IS the session id here.
@@ -316,7 +316,7 @@ export class ToolExecutorHarness
   register(input: RegisterToolInput): Promise<void> {
     const name = input.registration.declaration.name;
     const op: Operation<RegisterToolInput, void> = {
-      opId: input.opId ?? `tool:register:${name}:${ulid()}`,
+      opId: input.opId ?? `tool:register:${name}:${generateId()}`,
       surface: "tool",
       name: "tool:command:register",
       scope: {},
@@ -333,7 +333,7 @@ export class ToolExecutorHarness
 
   unregister(input: UnregisterToolInput): Promise<void> {
     const op: Operation<UnregisterToolInput, void> = {
-      opId: input.opId ?? `tool:unregister:${input.name}:${ulid()}`,
+      opId: input.opId ?? `tool:unregister:${input.name}:${generateId()}`,
       surface: "tool",
       name: "tool:command:unregister",
       scope: {},
@@ -394,7 +394,7 @@ export class ToolExecutorHarness
 
   removeBoundTools(input: RemoveBoundToolsInput): Promise<number> {
     const op: Operation<RemoveBoundToolsInput, number> = {
-      opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${ulid()}`,
+      opId: input.opId ?? `tool:remove-bound:${input.binding.scope}:${generateId()}`,
       surface: "tool",
       name: "tool:command:remove-bound-tools",
       scope: {},
@@ -428,7 +428,7 @@ export class ToolExecutorHarness
     input: ReplaceCompilerToolsInput,
   ): Effect.Effect<void, ToolExecutorErrorChannel | SubstrateError, never> {
     const op: Operation<ReplaceCompilerToolsInput, void, ToolExecutorErrorChannel> = {
-      opId: input.opId ?? `tool:replace-compiler:${input.mountId}:${ulid()}`,
+      opId: input.opId ?? `tool:replace-compiler:${input.mountId}:${generateId()}`,
       surface: "tool",
       name: "tool:command:replace-compiler-tools",
       scope: {},

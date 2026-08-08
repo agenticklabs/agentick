@@ -30,7 +30,7 @@ import type { Socket } from "node:net";
 
 import type { Connection, ConnectionCloseReason } from "@agentick/cluster-broker";
 import { createLengthPrefixedDecoder, encodeLengthPrefixed } from "@agentick/cluster-broker";
-import { ulid, omitUndefined } from "@agentick/utils";
+import { generateId, omitUndefined } from "@agentick/utils";
 
 export interface SocketConnectionOptions {
   /** Optional id; defaults to a fresh ULID. Used by BaseBroker for routing. */
@@ -47,7 +47,7 @@ export interface SocketConnectionOptions {
 }
 
 export function socketToConnection(socket: Socket, opts: SocketConnectionOptions = {}): Connection {
-  const id = opts.id ?? `tcp-${ulid()}`;
+  const id = opts.id ?? `tcp-${generateId()}`;
   const remote = describeRemote(socket);
   const decoder = createLengthPrefixedDecoder({
     ...omitUndefined({ maxFrameBytes: opts.maxFrameBytes }),

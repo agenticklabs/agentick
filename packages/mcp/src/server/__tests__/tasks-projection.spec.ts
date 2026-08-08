@@ -25,7 +25,7 @@ import {
   ListTasksResultSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { waitFor } from "@agentick/utils/testing";
 import type { ContentBlock } from "@agentick/spec";
 import { createTool } from "@agentick/tool";
@@ -39,7 +39,7 @@ async function makeServerWith(tools: ReturnType<typeof createTool>[]): Promise<{
 }> {
   const transport = inMemoryServerTransport();
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

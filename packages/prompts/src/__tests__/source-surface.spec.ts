@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { PromptsRegisterInput } from "@agentick/spec";
 import { PromptNotFound } from "@agentick/spec";
 
@@ -20,7 +20,7 @@ import { hydrateFrom } from "../hydrators.js";
 
 async function makeHarness(): Promise<PromptsHarness> {
   const harness = new PromptsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

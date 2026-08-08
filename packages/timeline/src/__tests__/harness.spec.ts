@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { EventQuery, ProtocolEvent, TimelineEntry } from "@agentick/spec";
 import { progressEventName, timelineEventQuery, TIMELINE_COMPACT_EVENT_NAME } from "@agentick/spec";
 
@@ -186,7 +186,7 @@ describe("TimelineHarness — inbox addressability", () => {
     const entry: TimelineEntry = messageEntry("from-inbox", "via inbox");
     await Effect.runPromise(
       inbox.send(`timeline:s_inbox`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "timeline:append",
         payload: { entries: [entry] },
       }),
@@ -202,7 +202,7 @@ describe("TimelineHarness — inbox addressability", () => {
     const replacement = [messageEntry("r1", "replaced")];
     await Effect.runPromise(
       inbox.send(`timeline:s_replace`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "timeline:replaceProjection",
         payload: { entries: replacement },
       }),
@@ -222,7 +222,7 @@ describe("TimelineHarness — inbox addressability", () => {
     expect(harness.read().entries).toEqual([]);
     await Effect.runPromise(
       inbox.send(`timeline:s_reset`, {
-        messageId: ulid(),
+        messageId: generateId(),
         type: "timeline:resetProjection",
       }),
     );
@@ -262,13 +262,13 @@ describe("TimelineHarness — snapshot round-trip across instances", () => {
 
 runTimelineHarnessConformance({
   make: async () => {
-    const { harness } = await makeHarness(`conformance-${ulid()}`);
+    const { harness } = await makeHarness(`conformance-${generateId()}`);
     return harness;
   },
   // ADR 93 — lights up the GENESIS section (the seed law, the typed hydrate
   // failure). The definition IS the harness's options, so this is a pass-through.
   makeFromDefinition: async (definition) => {
-    const { harness } = await makeHarness(`conformance-genesis-${ulid()}`, definition);
+    const { harness } = await makeHarness(`conformance-genesis-${generateId()}`, definition);
     return harness;
   },
 });

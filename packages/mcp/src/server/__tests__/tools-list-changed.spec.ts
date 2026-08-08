@@ -17,7 +17,7 @@
 import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 import { createToolCatalog } from "@agentick/tool";
@@ -60,7 +60,7 @@ async function makeServer(
     ? (registry as ReturnType<typeof createToolCatalog>)
     : (registry as readonly ToolDeclaration[]);
   const harness = new McpServerHarness(
-    `srv:${ulid()}`,
+    `srv:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

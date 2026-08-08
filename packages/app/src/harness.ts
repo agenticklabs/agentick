@@ -35,7 +35,7 @@ import {
   MemoryJournal,
   runHarnessProtocol,
   type TelemetryProvider,
-  ulid,
+  generateId,
 } from "@agentick/runtime";
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation";
 import { TasksHarness, InMemoryTaskStore } from "@agentick/tasks";
@@ -273,7 +273,7 @@ export type ToolExecutorDefaults = Omit<
 >;
 
 export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
-  /** Stable app id; defaults to `app:${ulid()}`. */
+  /** Stable app id; defaults to `app:${generateId()}`. */
   readonly appId?: string;
   /**
    * Display label — what a person reads, where `appId` is what a client routes on.
@@ -1062,7 +1062,7 @@ export class AppHarness<P = unknown>
   private readonly extensionsReady: Promise<void>;
 
   constructor(options: AppHarnessOptions<P>) {
-    const appId = options.appId ?? `app:${ulid()}`;
+    const appId = options.appId ?? `app:${generateId()}`;
 
     // Substrate slot resolution is owned by BaseHarness (ADR 31). The
     // positional substrate args below are the App's DEFAULTS — used
@@ -1182,7 +1182,7 @@ export class AppHarness<P = unknown>
       options.modelExecutor === undefined
         ? (adapter: LanguageModelAdapter): RegisteredModel => {
             const modelExecutor = new TheLanguageModelExecutor(
-              `${appId}:executor:${ulid()}`,
+              `${appId}:executor:${generateId()}`,
               this.journal,
               this.bus,
               this.inbox,
@@ -1664,7 +1664,7 @@ export class AppHarness<P = unknown>
     // command candidate; its exposure is a verb-matrix decision
     // (remote shutdown is powerful) — deferred with slice 5.
     const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
-      opId: `app:create-session:${ulid()}`,
+      opId: `app:create-session:${generateId()}`,
       surface: "app",
       name: "app:command:create-session",
       scope: {
@@ -1684,7 +1684,7 @@ export class AppHarness<P = unknown>
 
   runOnce(input: RunOnceInput<P>): Promise<RunOnceResult> {
     const op: Operation<RunOnceInput<P>, RunOnceResult> = {
-      opId: `app:run-once:${ulid()}`,
+      opId: `app:run-once:${generateId()}`,
       surface: "app",
       name: "app:command:run-once",
       scope: {
@@ -1724,7 +1724,7 @@ export class AppHarness<P = unknown>
   destroySession(sessionId: string, opts?: DestroySessionInput): Promise<DestroySessionResult> {
     const input = { sessionId, ...omitUndefined({ reason: opts?.reason }) };
     const op: Operation<typeof input, DestroySessionResult> = {
-      opId: `app:destroy-session:${ulid()}`,
+      opId: `app:destroy-session:${generateId()}`,
       surface: "app",
       name: "app:command:destroy-session",
       scope: { sessionId },
@@ -1762,7 +1762,7 @@ export class AppHarness<P = unknown>
   ): Promise<AbortExecutionTreeResult> {
     const input = { executionId, ...omitUndefined({ reason: opts?.reason }) };
     const op: Operation<typeof input, AbortExecutionTreeResult> = {
-      opId: `app:abort-execution-tree:${ulid()}`,
+      opId: `app:abort-execution-tree:${generateId()}`,
       surface: "app",
       name: "app:command:abort-execution-tree",
       scope: { executionId },
@@ -1881,7 +1881,7 @@ export class AppHarness<P = unknown>
 
   async closeApp(): Promise<void> {
     const op: Operation<void, void> = {
-      opId: `app:close-app:${ulid()}`,
+      opId: `app:close-app:${generateId()}`,
       surface: "app",
       name: "app:command:close-app",
       scope: {},
@@ -2114,7 +2114,7 @@ export class AppHarness<P = unknown>
       input = verdict;
     }
 
-    const sessionId = input.sessionId ?? `session:${ulid()}`;
+    const sessionId = input.sessionId ?? `session:${generateId()}`;
     // Idempotent open-or-rehydrate (ADR 49 §Hydration): createSession
     // with an id that's already live returns the existing session — the
     // same call is create AND resume, which is what stateless-replica
@@ -2711,7 +2711,7 @@ export class AppHarness<P = unknown>
     // the operation scope below can name the session it is about. Same shape
     // and same fallback the body would have applied — it sees a concrete id and
     // takes its normal path.
-    const sessionId = input.sessionId ?? `session:${ulid()}`;
+    const sessionId = input.sessionId ?? `session:${generateId()}`;
     const createInput: CreateSessionInput<P> = {
       sessionId,
       ...omitUndefined({
@@ -2725,7 +2725,7 @@ export class AppHarness<P = unknown>
       }),
     };
     const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
-      opId: `app:create-child-session:${ulid()}`,
+      opId: `app:create-child-session:${generateId()}`,
       surface: "app",
       name: "app:command:create-child-session",
       // The lineage IS the scope: the child (`sessionId`), its parent
@@ -2795,7 +2795,7 @@ export class AppHarness<P = unknown>
 
   private async runOnceBody(input: RunOnceInput<P>): Promise<RunOnceResult> {
     this.assertOpen();
-    const sessionId = input.sessionId ?? `runonce:${ulid()}`;
+    const sessionId = input.sessionId ?? `runonce:${generateId()}`;
     const createInput: CreateSessionInput<P> = {
       sessionId,
       ...omitUndefined({

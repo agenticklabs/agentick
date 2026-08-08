@@ -46,7 +46,7 @@ import {
   type DispatchHost,
   type WebSecurityOptions,
 } from "@agentick/transport";
-import { ulid } from "@agentick/utils";
+import { generateId } from "@agentick/utils";
 
 import { AGENTICK_SUBPROTOCOL, decodeFrame, encodeFrame } from "../shared/codec.js";
 
@@ -157,7 +157,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
     }
     // Minted BEFORE authn so a refused upgrade names the connection it refused;
     // retained on the socket for its life, which is what makes it addressable.
-    const connectionId = `conn-${ulid()}`;
+    const connectionId = `conn-${generateId()}`;
     const finishUpgrade = (identity?: IngressIdentity): void => {
       wss.handleUpgrade(req, socket, head, (ws) => {
         const conn = ws as WSConnection & { identity?: unknown; connectionId?: string };
@@ -226,7 +226,7 @@ export function websocketServer(options: WebSocketServerOptions): WebSocketServe
       connectionId?: string;
     };
     const identity = conn.identity;
-    const connectionId = conn.connectionId ?? `conn-${ulid()}`;
+    const connectionId = conn.connectionId ?? `conn-${generateId()}`;
     // ADR 84 §4 — per-connection admission. Fire `gateway:accept` AFTER
     // ingress-authn (identity is already stamped on the socket) and BEFORE the
     // connection is wired to receive frames. A throwing `onBeforeGatewayAccept`

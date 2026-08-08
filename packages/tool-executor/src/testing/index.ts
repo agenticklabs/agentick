@@ -9,7 +9,7 @@
  * impl without spelling out substrate boilerplate.
  */
 
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   ElicitationHarnessProtocol,
   TasksHarnessProtocol,
@@ -122,7 +122,7 @@ export async function createTestHarness(
     resolver.register(h.handlerRef, h.handler, h.validator);
   }
 
-  const scopeId = options.scopeId ?? `t_${ulid()}`;
+  const scopeId = options.scopeId ?? `t_${generateId()}`;
 
   let elicitation: ElicitationHarnessProtocol;
   if (options.elicitation !== undefined) {

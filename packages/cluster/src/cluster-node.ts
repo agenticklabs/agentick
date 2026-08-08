@@ -29,7 +29,7 @@
  */
 
 import type { EventEnvelope, EventPhase, EventSurface } from "@agentick/spec";
-import { omitUndefined, ulid } from "@agentick/utils";
+import { omitUndefined, generateId } from "@agentick/utils";
 
 import type { ClusterParent } from "./cluster.js";
 import type { ClusterMembershipFactory, ClusterTransportFactory } from "./factories.js";
@@ -104,7 +104,7 @@ function makeBusFacade(
     },
     async broadcast(name, payload, opts) {
       const env: EventEnvelope = {
-        id: ulid(),
+        id: generateId(),
         surface: opts?.surface ?? deriveSurface(name),
         name,
         phase: opts?.phase ?? "terminal",

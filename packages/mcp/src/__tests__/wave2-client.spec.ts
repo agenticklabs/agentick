@@ -28,7 +28,7 @@ import {
   type CreateMessageRequest,
   type LoggingLevel,
 } from "@modelcontextprotocol/sdk/types.js";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { isResourceBlock } from "@agentick/spec";
 
 import { InMemoryMcpTransport } from "../transport/in-memory.js";
@@ -145,7 +145,7 @@ async function wire(options?: {
   await server.connect(serverTransport);
 
   const harness = new McpClientHarness(
-    `mcp:${ulid()}`,
+    `mcp:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

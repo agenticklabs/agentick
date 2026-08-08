@@ -85,7 +85,7 @@ export interface GatewaySubstrateParent {
  * level fields (id, metadata, substrate) and routes the rest opaquely.
  */
 export interface CreateAppInput<P = unknown> {
-  /** Stable app id within this Gateway. Defaults to `app:${ulid()}`. */
+  /** Stable app id within this Gateway. Defaults to `app:${generateId()}`. */
   readonly appId?: string;
   /** Per-app metadata bag. Surfaces to App-level substrate factories. */
   readonly metadata?: Readonly<Record<string, unknown>>;

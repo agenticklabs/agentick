@@ -72,7 +72,7 @@ import {
   MessageHandlerError,
 } from "@agentick/spec";
 import { resolveSyncSubstrateSlot } from "./resolve-slot.js";
-import { ulid } from "./ulid.js";
+import { generateId } from "@agentick/utils";
 import { getBoundaryFacets, getContext, type RuntimeContext } from "./runtime-context.js";
 import { runHarnessProtocol, runHarnessStream } from "./harness-protocol.js";
 import {
@@ -1235,7 +1235,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   ): Effect.Effect<void, JournalError, never> {
     const envelope: ProtocolEvent = {
       ...args,
-      id: args.id ?? ulid(),
+      id: args.id ?? generateId(),
       timestamp: Date.now(),
       surface: this.surface,
     };
@@ -1556,7 +1556,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       return Effect.void;
     }
     const envelope: ProtocolEvent = {
-      id: ulid(),
+      id: generateId(),
       surface: this.surface,
       name,
       phase: "terminal",
@@ -1671,7 +1671,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * (via `:` → `/`) the wire method name.
    *
    * Returns the public method: it manufactures the same Operation the
-   * hand-written pattern builds (`opId: \`${verb}:${ulid()}\``,
+   * hand-written pattern builds (`opId: \`${verb}:${generateId()}\``,
    * `name: \`${surface}:command:${rest}\``) and runs it through
    * {@link runOperation} unchanged — phase contract, journaling,
    * idempotency, middleware all apply.
@@ -1710,7 +1710,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     readonly scope?: (input: I) => EventScope;
     /**
      * Deterministic opId derivation (ADR 51 idempotency). By default the
-     * command manufactures a fresh `${name}:${ulid()}` opId per invocation.
+     * command manufactures a fresh `${name}:${generateId()}` opId per invocation.
      * A command whose re-invocation must be idempotent (e.g. tool dispatch,
      * keyed by the model's stable `toolCallId`) supplies a pure function of
      * the input so a repeat invocation hits the same opId and
@@ -2037,7 +2037,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       readonly scope?: EventScope;
     } = {},
   ): Effect.Effect<TResp, RequestError, never> {
-    const correlationId = `req:${ulid()}`;
+    const correlationId = `req:${generateId()}`;
     const replyTo = this.address;
     // Register WITH a projectable snapshot (§6.1). Retained for the request's
     // lifetime, evicted with the Deferred; `pendingRequests(channel)` reads it
@@ -2062,7 +2062,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     // matches `ChannelHandle.publish` — `session:channel:<channel>`.
     const fullName = `session:channel:${channel}`;
     const envelope: ProtocolEvent = {
-      id: ulid(),
+      id: generateId(),
       surface: "session",
       name: fullName,
       phase: "delta",
@@ -2110,7 +2110,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     const scope: EventScope = opts.scope ?? {};
     const fullName = `session:channel:${channel}`;
     const envelope: ProtocolEvent = {
-      id: ulid(),
+      id: generateId(),
       surface: "session",
       name: fullName,
       phase: "delta",

@@ -31,7 +31,7 @@ import { Client as McpClient } from "@modelcontextprotocol/sdk/client/index.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type {
   ContentBlock,
   McpRequestContext,
@@ -98,7 +98,7 @@ async function rig(
   const bus = new LocalEventBus();
   const journal = new MemoryJournal({ capacity: 4096 });
   const transport = inMemoryServerTransport();
-  const harness = new McpServerHarness(`srv:${ulid()}`, journal, bus, new LocalInbox(), {
+  const harness = new McpServerHarness(`srv:${generateId()}`, journal, bus, new LocalInbox(), {
     name: "crossing-test",
     serverInfo: { name: "crossing-test", version: "0.0.0" },
     transports: [transport],

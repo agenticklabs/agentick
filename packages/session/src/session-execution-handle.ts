@@ -21,7 +21,7 @@
  * minus those fields.
  */
 
-import { ulid } from "@agentick/runtime";
+import { generateId } from "@agentick/runtime";
 import type { SendResult, SessionExecutionHandle, StreamEvent } from "@agentick/spec";
 
 /**
@@ -95,7 +95,7 @@ export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): 
     sequence += 1;
     const full = {
       ...event,
-      id: ulid(),
+      id: generateId(),
       sequence,
       timestamp: new Date().toISOString(),
       sessionId,

@@ -506,7 +506,7 @@ await app.closeApp(); // closes the cluster too
 | `telemetryNamespace`        | `string`                                               | Prefix on framework attribute keys; defaults to `"agentick"`                             |
 | `name`                      | `string`                                               | Logical app name — the telemetry identity dimension and default `functionId`             |
 | `metadata`                  | `Record<string, unknown>`                              | Adopter bag carried on the instance                                                      |
-| `appId`                     | `string`                                               | Defaults to `app:${ulid()}`                                                              |
+| `appId`                     | `string`                                               | Defaults to `app:${generateId()}`                                                        |
 | `title`                     | `string`                                               | Display label — what a person reads. Distinct from `name`; see below                     |
 | `description`               | `string`                                               | One line for a picker or catalog                                                         |
 | `costResolver`              | `(input) => RateCard \| Cost \| undefined`             | Pricing seam; wins over a model's declared `rates`. See below                            |

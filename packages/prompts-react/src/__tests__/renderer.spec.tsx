@@ -12,14 +12,14 @@
 
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal, ulid } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { PromptsHarness } from "@agentick/prompts";
 
 import { reactPromptRenderer, createReactPromptRenderer } from "../renderer.js";
 
 async function makeHarness(): Promise<PromptsHarness> {
   const harness = new PromptsHarness(
-    `test:${ulid()}`,
+    `test:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),

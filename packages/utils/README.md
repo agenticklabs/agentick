@@ -18,7 +18,7 @@ That is the package's job, and it is the rule that matters more than any single 
 | per-field config resolvers across gateway → app → session            | `mergeLayered(...layers)`              |
 | `typeof v === "function" ? v() : v`                                  | `resolveSync(v)`                       |
 | `err instanceof Error ? err.message : String(err)`                   | `reasonOf(err)`                        |
-| `Date.now().toString(36) + Math.random().toString(36)`               | `ulid()`                               |
+| `Date.now().toString(36) + Math.random().toString(36)`               | `generateId()`                         |
 | a semaphore loop to cap in-flight work                               | `mapConcurrent(items, n, fn)`          |
 | `all.slice(offset, offset + size)` + a hand-rolled cursor string     | `paginate(all, cursor, pageSize?)`     |
 | an `AbortController` wired to listen to two other signals            | `mergeAbortSignals(a, b)`              |
@@ -285,9 +285,9 @@ const mine = events.filter((e) => matches(e.scope));
 ## Ids, chunking, sweeps
 
 ```ts
-import { cartesian, splitMessage, ulid } from "@agentick/utils";
+import { cartesian, splitMessage, generateId } from "@agentick/utils";
 
-ulid(); // lexicographically sortable, monotonic within a millisecond
+generateId(); // lexicographically sortable, monotonic within a millisecond
 
 // Chat surfaces impose hard per-message caps. Prefers a semantic boundary
 // (paragraph → line → sentence → word) and hard-breaks only when there is
@@ -299,7 +299,27 @@ cartesian({ model: ["gpt-5", "opus-5"], temperature: [0, 0.7] });
 // → [{ model: "gpt-5", temperature: 0 }, { model: "gpt-5", temperature: 0.7 }, …]
 ```
 
-`ulid()` is a Crockford-base32 encoding of `timestamp(48) + random(80)` — not the canonical algorithm, deliberately, because what the framework needs is a sortable collision-resistant id that survives a JSON round-trip. Nothing may depend on the encoding.
+`generateId()` is a Crockford-base32 encoding of `timestamp(48) + random(80)` — not the canonical ULID algorithm, deliberately, because what the framework needs is a sortable collision-resistant id that survives a JSON round-trip. Nothing may depend on the encoding.
+
+### Replacing the generator
+
+```ts
+import { setIdGenerator } from "@agentick/utils";
+
+setIdGenerator(uuidv7); // once, at startup, before the first id is minted
+```
+
+The contract is not "returns a unique string". It is **monotonic** — each id sorts strictly after the one before it — and **lexicographically sortable**, so plain string `<` equals generation order. The journal orders entries by id and cursored reads page by it, and neither re-checks: a generator that guarantees only uniqueness (`uuidv4`, an unpadded counter) corrupts both silently.
+
+Check a candidate before installing it:
+
+```ts
+import { runIdGeneratorConformance } from "@agentick/utils/testing";
+
+runIdGeneratorConformance("uuidv7", () => uuidv7());
+```
+
+Call `setIdGenerator` once and never again. This is a construction-time choice, not a runtime toggle — two generators in one process, or a swap against a store that already holds ids, breaks ordering across the boundary. Ids minted by different encodings do not sort against each other even when both are individually monotonic.
 
 ## Loaders — `/loaders` and `/loaders/node`
 
@@ -414,7 +434,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 | `compileScopeMatcher<S>(filter)`                                                            | function  | the same match, filter keys pre-extracted for hot paths      |
 | `matchesAddressFilter` · `matchesEventFilter`                                               | function  | address- and event-shaped routing predicates                 |
 | `AddressFilterShape` · `EventFilterShape` · `EventLike`                                     | type      | the structural filter shapes those two take                  |
-| `ulid()`                                                                                    | function  | lexicographically sortable, monotonic-within-ms id           |
+| `generateId()`                                                                              | function  | lexicographically sortable, monotonic-within-ms id           |
 | `splitMessage(text, options)` · `SplitOptions`                                              | function  | chunk text to a hard cap on semantic boundaries              |
 | `cartesian(axes)`                                                                           | function  | full product of axis values, one record per cell             |
 | `paginate(all, cursor, pageSize?)` · `Page<T>` · `DEFAULT_PAGE_SIZE`                        | function  | one page of a list + the cursor that follows it              |
@@ -473,7 +493,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 - **No `effect`-flavored variants.** Adopters wanting `Equal.symbol` semantics or `Schema`-aware equality reach for `effect/Equal` directly.
 - **`waitFor` / `waitForStable` have no dedicated suite.** They are exercised constantly through the transport and cluster suites that depend on them, but their own timeout, poll-interval, and stability-window behavior isn't pinned in this package.
 - **`matchesAddressFilter` / `matchesEventFilter` are untested here.** Only `matchesScope` and `compileScopeMatcher` have a suite; the address- and event-shaped matchers are covered indirectly, if at all.
-- **`ulid` has no dedicated suite.** Sortability and within-millisecond monotonicity are load-bearing claims and are currently unpinned.
+- **A replacement generator is trusted once installed.** `setIdGenerator` does not run `runIdGeneratorConformance` against what it is handed — the suite is opt-in, and a generator that violates monotonicity is accepted silently. Validating at the seam would make the utils package import vitest, so the check stays a test-time tool.
 - **`sourceFromDirectory` does not follow symlinks** — deliberate, and asserted. There is no opt-in for callers who want traversal through a link.
 
 ## Verified by
@@ -485,7 +505,7 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 - `src/__tests__/effect-lift.spec.ts` — sync / async / already-`Effect` inputs, re-lifting as a no-op, `errorMap` coercion, composition under `yield*`, and that the lift does not fork — plus a child fiber inheriting `FiberRef` and cascading abort.
 - `src/__tests__/json-patch.spec.ts` — object and array ops, `"-"` append, out-of-bounds and missing-key throws, `~0`/`~1` unescaping, whole-document target, op sequencing, `test` mismatch, and the copy-on-write proof that untouched subtrees keep their reference.
 - `src/__tests__/map-concurrent.spec.ts` — input order preserved against out-of-order completion, the in-flight cap never exceeded, `concurrency: 1` sequential, `<= 0` clamped, first rejection propagated.
-- `src/__tests__/ulid.spec.ts` — the 26-char shape (10-char time prefix + 16-char random suffix), the Crockford base32 alphabet, no collisions across a tight burst, same-millisecond monotonicity, cross-millisecond lexicographic ordering, and the 48-bit timestamp range.
+- `src/__tests__/id.spec.ts` — the 26-char shape (10-char time prefix + 16-char random suffix), the Crockford base32 alphabet, no collisions across a tight burst, same-millisecond monotonicity with the suffix advancing by exactly one across a carry, cross-millisecond lexicographic ordering, the 48-bit timestamp range, and a clock corrected BACKWARD still producing a greater id. Runs the built-in generator through `runIdGeneratorConformance`, so the default is held to the bar a replacement is.
 - `src/__tests__/wait-for.spec.ts` — `waitFor` returning synchronously-true conditions without polling, polling through falsy returns, and both timeout messages; `waitForStable` honoring the quiet period, comparing snapshots by value rather than identity, settling on unserializable snapshots, and rejecting when the snapshot never stops changing.
 - `src/__tests__/abort-signals.spec.ts` — no-signal `undefined`, a lone signal returned unwrapped, an already-aborted source handed back so `.aborted` reads synchronously, and reason propagation from whichever source fires first.
 - `src/__tests__/resolvable.spec.ts` — literal pass-through, thunk invocation with no memoization, errors surfacing at the resolution site, narrow literal types preserved, and the async arms.
