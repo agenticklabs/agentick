@@ -10,11 +10,12 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { waitFor } from "@agentick/utils/testing";
 import { NOOP_METRICS, OFF_TRACE, createLog, jsonSchema } from "@agentick/spec";
 import type { ClientRuntimeContext, ToolResultInput } from "@agentick/spec";
 
 import { createTool, toDeclaration } from "../client/create-tool.js";
-import { DECLINED, dispatchClientToolCall } from "../client/use-client-tools.js";
+import { DECLINED, dispatchClientToolCall, routeClientTools } from "../client/use-client-tools.js";
 import type { ClientToolCallHandle } from "../client/client-tool-calls.js";
 
 const runtime: ClientRuntimeContext = {
@@ -331,5 +332,66 @@ describe("the handler's answer reaches the model", () => {
       responseTimeoutMs: 5_000,
       requiresResponse: true,
     });
+  });
+});
+
+describe("routeClientTools — a reply that never reaches the server", () => {
+  // The handler ran and the browser rendered its result, but the respond did
+  // not land. That used to vanish into a `void`ed async IIFE, which is how a
+  // one-second transport hiccup became an execution suspended forever with
+  // nothing anywhere saying why.
+  function feedOf(call: ClientToolCallHandle) {
+    return {
+      onCall(listener: (c: ClientToolCallHandle) => void) {
+        listener(call);
+        return () => {};
+      },
+    };
+  }
+
+  const echo = createTool({
+    name: "read_dom",
+    description: "",
+    inputSchema: schema,
+    handler: () => "outline",
+  });
+
+  it("reports the failure instead of swallowing it", async () => {
+    const logged: { level: string; data: unknown }[] = [];
+    const rt: ClientRuntimeContext = {
+      ...runtime,
+      log: createLog((level, data) => logged.push({ level, data })),
+    };
+
+    const failing: ClientToolCallHandle = {
+      ...call("read_dom"),
+      respond: () => Promise.reject(new Error("socket closed")),
+    };
+
+    routeClientTools(feedOf(failing), [echo], () => "c1", rt, new AbortController().signal);
+    await waitFor(() => logged.length > 0);
+
+    const entry = logged[0]!;
+    expect(entry.level).toBe("error");
+    const data = entry.data as Record<string, unknown>;
+    expect(data["tool"]).toBe("read_dom");
+    expect(data["correlationId"]).toBe("corr-1");
+    // The reason survives, so the log names the transport failure rather than
+    // reporting a bare "something went wrong".
+    expect(String(data["reason"])).toContain("socket closed");
+  });
+
+  it("does not reject the caller — routing one bad call keeps the feed alive", async () => {
+    const rt: ClientRuntimeContext = { ...runtime, log: createLog(() => {}) };
+    const failing: ClientToolCallHandle = {
+      ...call("read_dom"),
+      respond: () => Promise.reject(new Error("socket closed")),
+    };
+
+    expect(() =>
+      routeClientTools(feedOf(failing), [echo], () => "c1", rt, new AbortController().signal),
+    ).not.toThrow();
+    // Settle the rejection so an unhandled-rejection guard cannot fire late.
+    await waitFor(() => true);
   });
 });

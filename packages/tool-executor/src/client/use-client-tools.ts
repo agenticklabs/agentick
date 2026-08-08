@@ -11,6 +11,7 @@
  */
 
 import type { ClientRuntimeContext, ToolResultInput, Unsubscribe } from "@agentick/spec";
+import { reasonOf } from "@agentick/utils";
 
 import type { ClientToolCallHandle } from "./client-tool-calls.js";
 import type { Tool, ToolCtx } from "./create-tool.js";
@@ -156,6 +157,26 @@ export function routeClientTools(
     void (async () => {
       const outcome = await dispatchClientToolCall(call, tools, self, runtime, signal, opts);
       if (outcome !== DECLINED) await call.respond(outcome);
-    })();
+    })().catch((cause: unknown) => {
+      // A handler THROW never lands here — `dispatchClientToolCall` turns that
+      // into an error result. This is the reply itself failing to reach the
+      // server: a socket mid-reconnect, a gateway blip.
+      //
+      // It used to vanish into the `void`, and that is how a one-second
+      // transport hiccup became a session that never answers again — the
+      // handler ran, the browser showed its result, and the execution stayed
+      // suspended with nothing anywhere saying why.
+      //
+      // The call is NOT dropped from `list()`: it is still correlated and still
+      // answerable, so a client that reconnects can retry it. Losing it here
+      // would remove the only recovery path.
+      runtime.log.error({
+        msg: "client tool reply did not reach the server; the call is still pending",
+        tool: call.name,
+        toolCallId: call.toolCallId,
+        correlationId: call.correlationId,
+        reason: reasonOf(cause),
+      });
+    });
   });
 }
