@@ -118,6 +118,7 @@ import {
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   SessionClosedError,
+  SnapshotSlotOccupied,
   SnapshotVersionMismatch,
   SpawnDepthExceededError,
   SPEC_VERSION,
@@ -588,6 +589,9 @@ export interface SessionHarnessOptions<P = unknown> {
  * `ctx.metrics` prefixes each name with the harness's telemetry namespace, so
  * these land as `agentick.session.tick.*` unless the app whitelabels it.
  */
+/** The snapshot slot the session-owned tool executor folds under. */
+const TOOL_EXECUTOR_SNAPSHOT_SLOT = "toolExecutor";
+
 const TICK_COST_METRIC = "session.tick.cost_micros";
 const TICK_TOKENS_METRIC = "session.tick.tokens";
 const TICK_UNPRICED_METRIC = "session.tick.unpriced";
@@ -1596,7 +1600,10 @@ export class SessionHarness<P = unknown>
     // `onPersist` parity) fire around the sync capture.
     return runHarnessProtocol(
       this.sessionOp("snapshot", {} as CaptureSnapshotInput, () =>
-        Effect.sync((): SessionSnapshot => this.captureSnapshot()),
+        Effect.try({
+          try: (): SessionSnapshot => this.captureSnapshot(),
+          catch: (cause): SessionError => coerceSessionError(cause),
+        }),
       ),
     );
   }
@@ -1608,9 +1615,17 @@ export class SessionHarness<P = unknown>
    * `bridges` (the `tools` slot is the render-time handler-resolver adapter,
    * not the executor), and it holds state a restore must not drop. One list,
    * so capture and restore can never disagree on what participates.
+   *
+   * `HookBridges` is a namespace extensions augment, so the executor's slot
+   * could be claimed from outside. It fails closed — an overwrite here would
+   * lose a bridge's state on capture and feed it a foreign shape on restore.
    */
   private snapshotCandidates(): ReadonlyArray<readonly [string, unknown]> {
-    return [...Object.entries(this.bridges), ["toolExecutor", this.toolExecutor] as const];
+    const bridges = Object.entries(this.bridges);
+    if (bridges.some(([name]) => name === TOOL_EXECUTOR_SNAPSHOT_SLOT)) {
+      throw new SnapshotSlotOccupied({ slot: TOOL_EXECUTOR_SNAPSHOT_SLOT });
+    }
+    return [...bridges, [TOOL_EXECUTOR_SNAPSHOT_SLOT, this.toolExecutor] as const];
   }
 
   /**

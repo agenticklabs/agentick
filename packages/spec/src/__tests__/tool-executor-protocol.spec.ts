@@ -14,7 +14,6 @@ import type {
   DispatchInput,
   DispatchResult,
   RegisterToolInput,
-  ToolConfirmationRequest,
   ToolConfirmationResolution,
   ToolDeclaration,
   ToolDispatchTerminal,
@@ -142,16 +141,6 @@ describe("@agentick/spec — tool executor protocol", () => {
   });
 
   describe("Confirmation flow", () => {
-    it("ToolConfirmationRequest shape carries arguments + optional UI metadata", () => {
-      const req: ToolConfirmationRequest = {
-        toolUseId: "tu_1",
-        name: "fs.delete",
-        arguments: { path: "/tmp/foo" },
-        message: "Delete /tmp/foo?",
-      };
-      expect(req.name).toBe("fs.delete");
-    });
-
     it("ToolConfirmationResolution tells an unanswered ask apart from a denied one", () => {
       const granted: ToolConfirmationResolution = {
         toolUseId: "tu_1",
@@ -177,10 +166,18 @@ describe("@agentick/spec — tool executor protocol", () => {
         outcome: "timeout",
         arguments: { path: "/tmp/foo" },
       };
-      expect([granted.outcome, denied.outcome, expired.outcome]).toEqual([
+      const abandoned: ToolConfirmationResolution = {
+        toolUseId: "tu_4",
+        toolName: "fs.delete",
+        sessionId: "s_1",
+        outcome: "aborted",
+        arguments: { path: "/tmp/foo" },
+      };
+      expect([granted.outcome, denied.outcome, expired.outcome, abandoned.outcome]).toEqual([
         "approved",
         "denied",
         "timeout",
+        "aborted",
       ]);
       expect(granted.always).toBe(true);
     });

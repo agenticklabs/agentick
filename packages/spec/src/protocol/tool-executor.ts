@@ -553,39 +553,27 @@ export interface ToolListFilter {
 // ============================================================================
 
 /**
- * Telemetry shape — describes a confirmation request the harness is
- * about to send for a tool annotated `requiresConfirmation`. Surfaced
- * on the {@link ToolConfirmationRequested} lifecycle event for
- * observability + audit. NOT a wire payload anymore: the actual wire
- * format is an elicitation request on `session:channel:elicitation`
- * (carrying `hints.kind === "tool_confirmation"` and these fields
- * inside `metadata`).
- */
-export interface ToolConfirmationRequest {
-  readonly toolUseId: string;
-  readonly name: string;
-  readonly arguments: Readonly<Record<string, unknown>>;
-  readonly message?: string;
-  /** May carry `DiffPreviewMetadata` and similar UI hints. */
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-/**
- * How one confirmation ask ended. Covers the un-answered case too, so the
- * outcome is a three-arm discriminator rather than the host's `approved`
- * boolean: a `timeout` is nobody deciding, not a denial.
+ * How one confirmation ask ended. Covers both un-answered cases, so the
+ * outcome is a four-arm discriminator rather than the host's `approved`
+ * boolean: a `timeout` is nobody deciding and an `aborted` is nobody being
+ * asked any more — neither is a denial. A `declined` reply IS one.
  *
- * Surfaced on the {@link ToolConfirmationResolved} lifecycle event and
- * handed to {@link ToolConfirmationObserver}. NOT a wire payload: an
- * answer arrives as an `ElicitationResponse` carrying `approved` /
- * `always` / `modifiedArguments` inside `value`.
+ * Handed to {@link ToolConfirmationObserver}, the only path a settled ask
+ * reaches. NOT a wire payload: an answer arrives as an
+ * `ElicitationResponse` carrying `approved` / `always` /
+ * `modifiedArguments` inside `value`.
  */
 export interface ToolConfirmationResolution {
   readonly toolUseId: string;
+  /**
+   * The CANONICAL tool name — the declaration's own `name`, never the alias
+   * a caller happened to dispatch by. A grant store keyed on an alias grants
+   * nothing when the next call comes in under the real name.
+   */
   readonly toolName: string;
   /** The session whose gate asked — the scope any grant written from this belongs to. */
   readonly sessionId: string;
-  readonly outcome: "approved" | "denied" | "timeout";
+  readonly outcome: "approved" | "denied" | "timeout" | "aborted";
   /** The validated arguments the ask carried, before any host edit. */
   readonly arguments: Readonly<Record<string, unknown>>;
   /**
@@ -627,8 +615,6 @@ export type ToolConfirmationObserver = (
 export type ToolLifecycleEvent =
   | ToolDispatchRequested
   | ToolValidationFailed
-  | ToolConfirmationRequested
-  | ToolConfirmationResolved
   | ToolHandlerStarted
   | ToolHandlerCompleted
   | ToolHandlerErrored
@@ -649,18 +635,6 @@ export interface ToolValidationFailed {
   readonly toolCallId: string;
   readonly name: string;
   readonly issues: readonly StandardSchemaIssue[];
-}
-
-export interface ToolConfirmationRequested {
-  readonly kind: "tool-confirmation-requested";
-  readonly toolCallId: string;
-  readonly request: ToolConfirmationRequest;
-}
-
-export interface ToolConfirmationResolved {
-  readonly kind: "tool-confirmation-resolved";
-  readonly toolCallId: string;
-  readonly resolution: ToolConfirmationResolution;
 }
 
 export interface ToolHandlerStarted {

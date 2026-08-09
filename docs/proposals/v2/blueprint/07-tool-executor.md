@@ -186,7 +186,7 @@ The tool executor accepts inbound messages at address
 | Message type            | Payload                                   | Effect                                  |
 | ----------------------- | ----------------------------------------- | --------------------------------------- |
 | `abort`                 | `{ toolCallId: string; reason?: string }` | Aborts an in-flight tool dispatch.      |
-| `confirmation-response` | `ToolConfirmationResponse`                | Resolves a pending confirmation prompt. |
+| `confirmation-response` | `ToolConfirmationReply`                   | Resolves a pending confirmation prompt. |
 
 The `confirmation-response` message is how the gateway / external client
 delivers the user's approval/denial for a tool requiring confirmation.
@@ -271,7 +271,7 @@ interface ToolConfirmationTimeoutError {
      - replace { approved: false } → ToolConfirmationDeniedError
    Else: prompt user via session:tool_confirmation channel
    Wait (with tool.timeout fallback)
-   Receive ToolConfirmationResponse
+   Receive ToolConfirmationReply
      - approved: true → continue
      - approved: false → ToolConfirmationDeniedError → terminal { failed }
    Emit tool:confirmation:resolved
@@ -300,20 +300,27 @@ interface ToolConfirmationTimeoutError {
 The framework channel `session:tool_confirmation` is unchanged
 (`[SOURCE: shared/src/protocol.ts]`):
 
+The ask carries no type of its own — it is the `metadata` on an elicitation
+request (`hints.kind === "tool_confirmation"`), holding `toolUseId` /
+`toolName` / `arguments` and an optional `preview` (including
+`DiffPreviewMetadata`). The host's answer is validated against
+`TOOL_CONFIRMATION_REPLY_SCHEMA`; what the executor reports afterwards is
+`ToolConfirmationResolution`:
+
 ```ts
-interface ToolConfirmationRequest {
-  toolUseId: string;
-  name: string;
-  arguments: Record<string, unknown>;
-  message?: string;
-  metadata?: Record<string, unknown>; // including DiffPreviewMetadata
+interface ToolConfirmationReply {
+  approved: boolean;
+  always?: boolean;
+  reason?: string;
+  modifiedArguments?: Record<string, unknown>;
 }
 
 interface ToolConfirmationResolution {
   toolUseId: string;
+  /** Canonical — the declaration's own name, never the alias dispatched by. */
   toolName: string;
   sessionId: string;
-  outcome: "approved" | "denied" | "timeout";
+  outcome: "approved" | "denied" | "timeout" | "aborted";
   arguments: Record<string, unknown>;
   reason?: string;
   always?: boolean;

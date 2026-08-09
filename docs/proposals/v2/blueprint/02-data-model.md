@@ -840,7 +840,7 @@ session:messages          → SessionMessagePayload
 session:events            → ProtocolEvent
 session:control           → SessionRenderPayload | SessionAbortPayload
 session:result            → SessionResultPayload
-session:tool_confirmation → ToolConfirmationRequest | ToolConfirmationResponse
+session:tool_confirmation → elicit metadata | ToolConfirmationReply
 session:context           → SessionContextPayload
 ```
 

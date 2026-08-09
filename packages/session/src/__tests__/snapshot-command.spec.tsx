@@ -80,6 +80,8 @@ class FakeCounterBridge implements SnapshotCapable<{ count: number }> {
 interface MkOpts {
   readonly migrateSnapshot?: SnapshotMigration;
   readonly ext?: FakeCounterBridge;
+  /** Bridge-bag key for `ext` — override to collide with a session-owned slot. */
+  readonly extSlot?: string;
 }
 
 async function mkSession(id: string, opts: MkOpts = {}) {
@@ -105,7 +107,9 @@ async function mkSession(id: string, opts: MkOpts = {}) {
     toolExecutor: tools,
     target,
     ...(opts.migrateSnapshot ? { migrateSnapshot: opts.migrateSnapshot } : {}),
-    ...(opts.ext ? { extensionBridges: new Map<string, unknown>([["counter", opts.ext]]) } : {}),
+    ...(opts.ext
+      ? { extensionBridges: new Map<string, unknown>([[opts.extSlot ?? "counter", opts.ext]]) }
+      : {}),
   });
   await session.ready;
   await session.mountReady;
@@ -239,6 +243,32 @@ describe("SessionHarness — snapshot/restore commands (recovery pass #1)", () =
     expect(destExt.count).toBe(42); // migrated legacyCount → count → applied
     await dest.close();
     await t2.close();
+  });
+
+  it("a bridge claiming the toolExecutor slot fails capture AND restore, never overwrites", async () => {
+    const { session: clean, tools: t1 } = await mkSession("slot-clean");
+    const snap = await clean.snapshot();
+    await clean.close();
+    await t1.close();
+
+    const { session, tools } = await mkSession("slot-collision", {
+      ext: new FakeCounterBridge(),
+      extSlot: "toolExecutor",
+    });
+
+    await expect(session.snapshot()).rejects.toMatchObject({
+      _tag: "SnapshotSlotOccupied",
+      slot: "toolExecutor",
+    });
+    await expect(
+      session.restore({ snapshot: { ...snap, id: "slot-collision" } }),
+    ).rejects.toMatchObject({
+      _tag: "SnapshotSlotOccupied",
+      slot: "toolExecutor",
+    });
+
+    await session.close();
+    await tools.close();
   });
 
   it("migration seam: a version mismatch with NO migrateSnapshot throws SnapshotVersionMismatch (fail-closed)", async () => {

@@ -342,6 +342,28 @@ export class SnapshotVersionMismatch extends SessionError {
 }
 registerAgentickError("SnapshotVersionMismatch", SnapshotVersionMismatch);
 
+/**
+ * A snapshot fold found two candidates claiming the same slot name. The
+ * session folds its bridges by their `SessionBridges` key PLUS the
+ * session-owned tool executor under `toolExecutor` — a namespace third
+ * parties augment. An extension that claims an occupied name would have its
+ * state silently overwritten on capture and its restore fed a foreign shape,
+ * so the fold fails closed instead. Rename the extension's bridge slot.
+ */
+export class SnapshotSlotOccupied extends SessionError {
+  readonly _tag = "SnapshotSlotOccupied" as const;
+  readonly slot: string;
+  constructor(args: { readonly slot: string; readonly cause?: unknown }) {
+    super(
+      `snapshot slot "${args.slot}" is claimed by two candidates — a bridge of ` +
+        `that name and a session-owned harness. Rename the bridge slot.`,
+      { cause: args.cause },
+    );
+    this.slot = args.slot;
+  }
+}
+registerAgentickError("SnapshotSlotOccupied", SnapshotSlotOccupied);
+
 export type SessionErrorChannel =
   | SessionClosedError
   | SessionBusyError
@@ -350,7 +372,8 @@ export type SessionErrorChannel =
   | ChannelError
   | ExecutionFailed
   | NoModelForExecutionError
-  | SnapshotVersionMismatch;
+  | SnapshotVersionMismatch
+  | SnapshotSlotOccupied;
 
 // ============================================================================
 // StateApplyError — state-restore failures (composite union)

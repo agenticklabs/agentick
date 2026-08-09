@@ -677,14 +677,41 @@ export class ToolExecutorHarness
   // ──────────────────────── internals ────────────────────────
 
   /**
-   * Hand a settled confirmation to the adopter's observer. Forked, never
-   * awaited, errors ignored: an observer writing a grant to a store must not
-   * be able to fail — or delay — the dispatch it is reporting on.
+   * Hand a settled confirmation to the adopter's observer. Forked and never
+   * awaited: an observer writing a grant to a store must not be able to fail
+   * — or delay — the dispatch it is reporting on. A throwing observer is a
+   * grant that was never persisted, so it reaches the harness log surface
+   * rather than disappearing.
    */
-  private notifyConfirmationResolved(resolution: ToolConfirmationResolution): void {
+  private notifyConfirmationResolved(
+    scope: EventScope,
+    resolution: ToolConfirmationResolution,
+  ): void {
     const observe = this.onConfirmationResolved;
     if (observe === undefined) return;
-    void Effect.runFork(Effect.ignore(Effect.tryPromise(async () => observe(resolution))));
+    void Effect.runFork(
+      Effect.catchAll(
+        Effect.tryPromise({
+          try: async () => observe(resolution),
+          catch: (cause: unknown) => cause,
+        }),
+        (cause) =>
+          Effect.ignore(
+            this.emitLog(
+              scope,
+              "warning",
+              {
+                message: "onConfirmationResolved observer failed",
+                toolUseId: resolution.toolUseId,
+                toolName: resolution.toolName,
+                outcome: resolution.outcome,
+                cause: String(cause),
+              },
+              "tool-executor.confirmation",
+            ),
+          ),
+      ),
+    );
   }
 
   /**
@@ -1048,10 +1075,14 @@ export class ToolExecutorHarness
               ),
             )
           : toolVerdict;
-      if (needsConfirmation && !this.alwaysAllowed.has(input.name)) {
+      // A grant is keyed by the declaration's own name: `input.name` may be an
+      // alias the registry resolved, and a grant issued under one name must
+      // cover every other name the same tool answers to.
+      const canonicalName = reg.declaration.name;
+      if (needsConfirmation && !this.alwaysAllowed.has(canonicalName)) {
         const asked = {
           toolUseId: input.toolCallId,
-          toolName: input.name,
+          toolName: canonicalName,
           sessionId: input.context.sessionId ?? this.scopeId,
           arguments: validated as Record<string, unknown>,
         } as const;
@@ -1072,7 +1103,7 @@ export class ToolExecutorHarness
         const message =
           (typeof confirmationMessage === "function"
             ? yield* Effect.promise(() => Promise.resolve(confirmationMessage(validated, ctx)))
-            : confirmationMessage) ?? `Approve tool "${input.name}"?`;
+            : confirmationMessage) ?? `Approve tool "${canonicalName}"?`;
         const confirmationPreview = confirmationAnnotations?.confirmationPreview;
         const preview =
           confirmationPreview !== undefined
@@ -1089,7 +1120,7 @@ export class ToolExecutorHarness
             hints: { kind: TOOL_CONFIRMATION_KIND },
             metadata: {
               toolUseId: input.toolCallId,
-              toolName: input.name,
+              toolName: canonicalName,
               arguments: validated as Record<string, unknown>,
               ...(preview !== undefined ? { preview } : {}),
             },
@@ -1109,7 +1140,7 @@ export class ToolExecutorHarness
         // Timeout → caller error so the loop sees it via
         // ToolConfirmationTimeoutError (existing contract).
         if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
-          this.notifyConfirmationResolved({ ...asked, outcome: "timeout" });
+          this.notifyConfirmationResolved(dispatchScope, { ...asked, outcome: "timeout" });
           return yield* Effect.fail(
             new ToolConfirmationTimeoutError({
               toolName: input.name,
@@ -1121,7 +1152,8 @@ export class ToolExecutorHarness
         // Approval requires accepted + reply.approved === true. Every
         // other path — declined, cancelled, failed.aborted,
         // failed.schema_violation, or accepted-with-approved-false —
-        // is a denial.
+        // refuses the dispatch. Only the ANSWERED refusals are reported as
+        // denials: an ask torn down by an abort was never decided.
         const reply = extractReply(elicitResult);
         const approved = reply?.approved === true;
 
@@ -1129,9 +1161,9 @@ export class ToolExecutorHarness
           callerSignal?.removeEventListener("abort", onCallerAbort);
           this.inFlight.delete(input.toolCallId);
           const denyReason = denialReason(elicitResult, reply);
-          this.notifyConfirmationResolved({
+          this.notifyConfirmationResolved(dispatchScope, {
             ...asked,
-            outcome: "denied",
+            outcome: wasAborted(elicitResult) ? "aborted" : "denied",
             ...omitUndefined({ reason: denyReason }),
           });
           const denialResult: DispatchResult = {
@@ -1158,18 +1190,10 @@ export class ToolExecutorHarness
           return denialResult;
         }
 
-        if (reply!.always === true) this.alwaysAllowed.add(input.name);
-        this.notifyConfirmationResolved({
-          ...asked,
-          outcome: "approved",
-          ...omitUndefined({
-            always: reply!.always,
-            modifiedArguments: reply!.modifiedArguments,
-          }),
-        });
-
         // Re-validate when the host returns modifiedArguments — the
-        // user may have edited the call before approving.
+        // user may have edited the call before approving. An edit that fails
+        // validation rejects the dispatch, so neither the grant nor the
+        // approval record below is written: the approved call never ran.
         if (reply!.modifiedArguments !== undefined) {
           const revalidated = yield* Effect.tryPromise({
             try: async () => validator.validate(reply!.modifiedArguments),
@@ -1185,6 +1209,16 @@ export class ToolExecutorHarness
           }
           validated = revalidated.value;
         }
+
+        if (reply!.always === true) this.alwaysAllowed.add(canonicalName);
+        this.notifyConfirmationResolved(dispatchScope, {
+          ...asked,
+          outcome: "approved",
+          ...omitUndefined({
+            always: reply!.always,
+            modifiedArguments: reply!.modifiedArguments,
+          }),
+        });
       }
 
       // ─── Tool-call presentation (Pass B) ────────────────────────────
@@ -1673,21 +1707,33 @@ function isTaggedToolError(value: unknown): value is { readonly _tag: string } {
   );
 }
 
+type ConfirmationElicitResult =
+  | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
+  | { readonly outcome: "declined"; readonly reason?: string }
+  | { readonly outcome: "cancelled"; readonly reason?: string }
+  | {
+      readonly outcome: "failed";
+      readonly failure: { readonly kind: string; readonly reason?: string };
+    };
+
 /**
  * Pull the validated reply out of an `accepted` elicitation result.
  * Returns `undefined` for any other outcome.
  */
-function extractReply(
-  result:
-    | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
-    | { readonly outcome: "declined"; readonly reason?: string }
-    | { readonly outcome: "cancelled"; readonly reason?: string }
-    | {
-        readonly outcome: "failed";
-        readonly failure: { readonly kind: string; readonly reason?: string };
-      },
-): ToolConfirmationReply | undefined {
+function extractReply(result: ConfirmationElicitResult): ToolConfirmationReply | undefined {
   return result.outcome === "accepted" ? result.value : undefined;
+}
+
+/**
+ * The ask was torn down rather than answered — the caller's signal aborted
+ * or the host cancelled the prompt. Distinct from a decline, which IS an
+ * answer.
+ */
+function wasAborted(result: ConfirmationElicitResult): boolean {
+  return (
+    result.outcome === "cancelled" ||
+    (result.outcome === "failed" && result.failure.kind === "aborted")
+  );
 }
 
 /**
@@ -1696,14 +1742,7 @@ function extractReply(
  * failure-kind label.
  */
 function denialReason(
-  result:
-    | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
-    | { readonly outcome: "declined"; readonly reason?: string }
-    | { readonly outcome: "cancelled"; readonly reason?: string }
-    | {
-        readonly outcome: "failed";
-        readonly failure: { readonly kind: string; readonly reason?: string };
-      },
+  result: ConfirmationElicitResult,
   reply: ToolConfirmationReply | undefined,
 ): string | undefined {
   if (reply !== undefined) return reply.reason;

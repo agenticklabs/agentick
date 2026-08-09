@@ -121,7 +121,7 @@ sequenceDiagram
       alt requiresConfirmation
         tool->>sess: tool:confirmation:requested
         Note over sess: client/host responds
-        sess-->>tool: ToolConfirmationResponse
+        sess-->>tool: ToolConfirmationReply
       end
       tool->>tool: invoke handler with use deps
       tool-->>lex: ToolResult_1

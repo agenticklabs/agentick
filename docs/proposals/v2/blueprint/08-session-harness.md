@@ -745,7 +745,7 @@ interface SessionExecutionHandle {
 
   // Mid-execution interaction
   queueMessage(message: Message): void;
-  submitToolResult(toolUseId: string, response: ToolConfirmationResponse): void;
+  submitToolResult(toolUseId: string, response: ToolConfirmationReply): void;
   abort(reason?: string): void;
 }
 
