@@ -1,6 +1,6 @@
 {
   "name": "@agentick/tasks-store-postgres",
-  "version": "1.0.0-next.103",
+  "version": "1.0.0-next.104",
   "description": "postgresTaskStore — Postgres TaskStore adapter (ADR 68 pg tier). Durable task records across app-process restart, real interrupted-on-restart orphan accounting, terminal adoption across a fresh harness (the flexible cloud pole). BYO pg.Pool; jsonb payloads; full schema escape hatches.",
   "keywords": [
     "agent",
