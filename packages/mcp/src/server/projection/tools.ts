@@ -389,6 +389,9 @@ export function toWireTool(decl: ToolDeclaration): McpWireTool {
     wire.icons = icons as McpWireTool["icons"];
   }
   // 3b-0b-B — MCP declaration extensions carried under `metadata.mcp`.
+  // TODO(hints): the four hints are typed on `ToolAnnotations` now, so
+  // `createTool({ annotations: { readOnlyHint } })` should project here too —
+  // `metadata.mcp.annotations` overriding, as `title` already does above.
   const mcpExt = readMcpToolExtensions(meta);
   if (mcpExt?.meta !== undefined) {
     wire._meta = mcpExt.meta as McpWireTool["_meta"];

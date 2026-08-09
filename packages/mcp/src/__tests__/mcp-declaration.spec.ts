@@ -1,5 +1,6 @@
 /**
- * `mcpDeclaration` — provenance stamping (Pass B).
+ * `mcpDeclaration` — annotation mapping: the server's advertised hints plus
+ * provenance stamping (Pass B).
  *
  * Every MCP-discovered tool is dispatched THROUGH the MCP harness to its
  * `serverId`, so the declaration must carry `annotations.executedBy:
@@ -20,6 +21,45 @@ const tool: McpToolDescriptor = {
   description: "search the corpus",
   inputSchema: { type: "object", properties: { q: { type: "string" } } },
 };
+
+describe("mcpDeclaration — advertised annotations", () => {
+  it("lands the four advisory hints, typed, on the declaration", () => {
+    const hinted: McpToolDescriptor = {
+      ...tool,
+      annotations: {
+        title: "Search",
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    };
+    const decl = mcpDeclaration("sess-1", "linear", hinted, "linear__search", undefined);
+    const readOnly: boolean | undefined = decl.annotations?.readOnlyHint;
+    expect(readOnly).toBe(true);
+    expect(decl.annotations?.destructiveHint).toBe(false);
+    expect(decl.annotations?.idempotentHint).toBe(true);
+    expect(decl.annotations?.openWorldHint).toBe(false);
+    expect(decl.annotations?.title).toBe("Search");
+    expect(decl.annotations?.executedBy).toBe("mcp:linear");
+  });
+
+  it("omits a hint the server never advertised", () => {
+    const hinted: McpToolDescriptor = { ...tool, annotations: { readOnlyHint: true } };
+    const decl = mcpDeclaration("sess-1", "linear", hinted, "linear__search", undefined);
+    expect(decl.annotations).toEqual({ readOnlyHint: true, executedBy: "mcp:linear" });
+  });
+
+  it("drops a hint the server sent with the wrong type rather than lying about it", () => {
+    const lying: McpToolDescriptor = {
+      ...tool,
+      annotations: { readOnlyHint: "yes", openWorldHint: true },
+    };
+    const decl = mcpDeclaration("sess-1", "linear", lying, "linear__search", undefined);
+    expect(decl.annotations?.readOnlyHint).toBeUndefined();
+    expect(decl.annotations?.openWorldHint).toBe(true);
+  });
+});
 
 describe("mcpDeclaration — executedBy provenance", () => {
   it("stamps executedBy: mcp:<serverId>", () => {

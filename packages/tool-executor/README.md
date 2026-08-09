@@ -246,17 +246,16 @@ createApp(root, {
     confirmationPolicy: async ({ declaration, input, ctx, toolVerdict }) => {
       if (await grants.allowed(ctx.sessionId, declaration.name)) return false; // standing grant
       if (toolVerdict) return true; // the tool asked
-      const a = declaration.annotations as Record<string, unknown> | undefined;
-      const viaMcp =
-        typeof a?.["executedBy"] === "string" && (a["executedBy"] as string).startsWith("mcp:");
-      return viaMcp && a?.["readOnlyHint"] !== true; // MCP writes confirm
+      const a = declaration.annotations;
+      const viaMcp = a?.executedBy?.startsWith("mcp:") ?? false;
+      return viaMcp && a?.readOnlyHint !== true; // MCP writes confirm
     },
   },
 });
 ```
 
 - Return `toolVerdict` to defer, `true` to force an ask the tool did not request, `false` to suppress one a standing grant covers. Async, so a grant lookup can hit a store.
-- MCP advisory hints (`readOnlyHint`, `destructiveHint`, …) arrive on `declaration.annotations` verbatim (`withMCP` spreads them), so annotation-driven defaults are policy code here — the framework ships the seam, never the policy.
+- MCP advisory hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are typed members of `ToolAnnotations`; `withMCP` projects them from the server's advertisement, dropping wrong-typed values rather than trusting them. Annotation-driven defaults are policy code here — the framework ships the seam, never the policy.
 - Session-scoped `reply.always` grants still short-circuit after the policy says ask. Absent a policy, the tool's own verdict stands, exactly as before.
 
 > [!WARNING]

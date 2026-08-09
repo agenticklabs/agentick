@@ -86,6 +86,7 @@ import type {
 } from "@agentick/spec";
 import type {
   ContentBlock,
+  ToolAnnotations,
   ToolDeclaration,
   ToolHandler,
   ToolResultEnvelope,
@@ -383,16 +384,6 @@ export function mcpDeclaration(
   // enum: supported|required|unsupported (matches earlier framework
   // shape predating the SDK revision).
   const mappedTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
-  const withTask: Readonly<Record<string, unknown>> | undefined =
-    mappedTaskSupport !== undefined
-      ? { ...(tool.annotations ?? {}), taskSupport: mappedTaskSupport }
-      : tool.annotations;
-  // Model-narration opt-out (`withMCP({ narrate: false })` / per-server
-  // override). MCP tools narrate by default like any other tool; only an
-  // explicit `false` stamps `annotations.narrate: false` so the projector
-  // skips injecting `_summary` — `undefined` leaves the default (ON) intact.
-  const withNarrate: Readonly<Record<string, unknown>> | undefined =
-    narrate === false ? { ...(withTask ?? {}), narrate: false } : withTask;
   // Execution provenance (declaration-level): every MCP-discovered tool is
   // dispatched THROUGH the MCP harness to `serverId`, so its server-handled
   // result must carry `executedBy: "mcp:<serverId>"` rather than the default
@@ -401,8 +392,16 @@ export function mcpDeclaration(
   // server-side, in-process stamp; `executedBy` is absent from
   // `ClientToolAnnotations`, so no wire client can spoof it (see
   // `ToolAnnotations.executedBy`).
-  const annotations: Readonly<Record<string, unknown>> = {
-    ...(withNarrate ?? {}),
+  //
+  // `narrate: false` is stamped only on an explicit opt-out
+  // (`withMCP({ narrate: false })` / per-server override) so the projector
+  // skips injecting `_summary`; `undefined` leaves the default (ON) intact.
+  const annotations: ToolAnnotations = {
+    ...advertisedAnnotations(tool.annotations),
+    ...omitUndefined({
+      taskSupport: mappedTaskSupport,
+      narrate: narrate === false ? false : undefined,
+    }),
     executedBy: `mcp:${serverId}`,
   };
   return {
@@ -413,8 +412,29 @@ export function mcpDeclaration(
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     exposure: ["model", "dispatch"],
     handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
-    annotations: annotations as ToolDeclaration["annotations"],
+    annotations,
   };
+}
+
+/**
+ * The SDK's `ToolAnnotationsSchema` strips a server's annotation bag to
+ * `title` plus the four advisory hints, so those are the only keys that can
+ * arrive. Read them by type rather than by cast: a server answering
+ * `readOnlyHint: "yes"` must not become a `boolean` a confirmation policy
+ * later trusts.
+ */
+function advertisedAnnotations(
+  raw: Readonly<Record<string, unknown>> | undefined,
+): ToolAnnotations {
+  if (raw === undefined) return {};
+  const { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint } = raw;
+  return omitUndefined({
+    title: typeof title === "string" ? title : undefined,
+    readOnlyHint: typeof readOnlyHint === "boolean" ? readOnlyHint : undefined,
+    destructiveHint: typeof destructiveHint === "boolean" ? destructiveHint : undefined,
+    idempotentHint: typeof idempotentHint === "boolean" ? idempotentHint : undefined,
+    openWorldHint: typeof openWorldHint === "boolean" ? openWorldHint : undefined,
+  });
 }
 
 /**
