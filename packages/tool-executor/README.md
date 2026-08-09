@@ -258,6 +258,28 @@ createApp(root, {
 - MCP advisory hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are typed members of `ToolAnnotations`; `withMCP` projects them from the server's advertisement, dropping wrong-typed values rather than trusting them. Annotation-driven defaults are policy code here — the framework ships the seam, never the policy.
 - Session-scoped `reply.always` grants still short-circuit after the policy says ask. Absent a policy, the tool's own verdict stands, exactly as before.
 
+### Standing grants
+
+The policy above reads a grants store. `onConfirmationResolved` is what writes it — the executor reports every ask that settles, so the deployment that decides `always: true` should outlive the session can act on it:
+
+```ts
+createApp(root, {
+  toolExecutor: {
+    onConfirmationResolved: async (r) => {
+      if (r.outcome === "approved" && r.always) await grants.record(r.sessionId, r.toolName);
+    },
+    confirmationPolicy: async ({ declaration, ctx, toolVerdict }) =>
+      (await grants.allowed(ctx.sessionId, declaration.name)) ? false : toolVerdict,
+  },
+});
+```
+
+- `outcome` is `"approved" | "denied" | "timeout"` — an expired ask is nobody deciding, not a denial, and the two are worth telling apart in an audit log. The record also carries `toolUseId`, `toolName`, `sessionId`, the `arguments` that were asked about, and `reason` / `modifiedArguments` when the host supplied them.
+- Fired only when the gate actually asked. A call that a standing grant already covers resolves nothing.
+- Fire-and-forget: the executor does not wait on it, and a throw or rejection never fails the dispatch it reports on.
+
+Without any of that, a grant is still session state rather than tick state: the executor is `SnapshotCapable`, so its grant set rides `session.snapshot()` under `bridges.toolExecutor` and comes back on `session.restore(...)`. A rehydrated session — or a `fork()`, which is a spawn plus a restore — does not re-ask for what the user already blessed. Crossing to a _different_ session, or to the next process, is what the observer/policy pair above is for.
+
 > [!WARNING]
 > **Not a security boundary.** `requiresConfirmation`, `guardDispatch`, and `exposure` are policy seams — they shape what the model is offered and when a human approves. A call that clears the gate runs with the host process's full permissions, and inspecting command strings inside a predicate is advisory UX, not containment (pipes, base64, and heredocs defeat textual filtering). The confinement boundary is OS-level and lives in the sandbox provider.
 
@@ -763,6 +785,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/tool-result-currency.spec.ts` — string / array / envelope currency, `isError` (soft, resolves) vs throw (hard, rejects), `structuredContent` × `outputSchema` validation, and that a smuggled `executedBy`/`durationMs` is ignored top-level and inside `metadata`.
 - `src/__tests__/registry.spec.ts` + `layered-tools.spec.ts` — multi-binding storage, idempotency and shape-conflict, every precedence rung, filter-before-precedence, `replaceCompilerSlice`, `removeWhere`, and the execution-tail serialization guarantee.
 - `src/__tests__/tools-handle.spec.ts` — `session.tools`: `ToolInfo` projection, exposure filter, name-then-alias `get`/`has`, canonical-name dispatch binding, and the two subscription shapes.
+- `src/__tests__/confirmation-grants.spec.ts` + `@agentick/app`'s `confirmation-grant-durability.spec.tsx` — the resolution record's shape on an always-approval, a one-off approval (no `always`, the pre-edit `arguments` alongside `modifiedArguments`), a denial and a timeout told apart by `outcome`, silence when a held grant means no ask happened, a throwing and a rejecting observer each leaving the dispatch intact, the grant set surviving export → import (and `importSnapshot` replacing rather than merging), and — through `createApp` / `createSession` — a grant approved before `session.snapshot()` still covering a dispatch after `session.restore()` and after a `fork()`, plus an observer-written grant that a `confirmationPolicy` reads back in a session that never asked.
 - `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
 - `src/__tests__/readme-client-tools.spec.ts` — the `readSelection` / `navigateTo` examples on this page, compiled and run against the public `/client` entry with a real zod schema: the handler's input inferred off the schema with no cast, the schema projected to the JSON Schema the wire carries, and neither example carrying a routing rule of its own.

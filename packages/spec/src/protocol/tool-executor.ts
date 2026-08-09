@@ -571,20 +571,46 @@ export interface ToolConfirmationRequest {
 }
 
 /**
- * Telemetry shape — describes a host's response to a confirmation
- * request. Surfaced on the {@link ToolConfirmationResolved} lifecycle
- * event. `always: true` is a session-scoped allow-list the harness
- * remembers; `modifiedArguments` triggers a re-validation pass before
- * the handler runs. NOT a wire payload: the actual wire format is an
- * `ElicitationResponse` carrying these fields inside `value`.
+ * How one confirmation ask ended. Covers the un-answered case too, so the
+ * outcome is a three-arm discriminator rather than the host's `approved`
+ * boolean: a `timeout` is nobody deciding, not a denial.
+ *
+ * Surfaced on the {@link ToolConfirmationResolved} lifecycle event and
+ * handed to {@link ToolConfirmationObserver}. NOT a wire payload: an
+ * answer arrives as an `ElicitationResponse` carrying `approved` /
+ * `always` / `modifiedArguments` inside `value`.
  */
-export interface ToolConfirmationResponse {
+export interface ToolConfirmationResolution {
   readonly toolUseId: string;
-  readonly approved: boolean;
-  readonly reason?: string;
+  readonly toolName: string;
+  /** The session whose gate asked — the scope any grant written from this belongs to. */
+  readonly sessionId: string;
+  readonly outcome: "approved" | "denied" | "timeout";
+  /** The validated arguments the ask carried, before any host edit. */
+  readonly arguments: Readonly<Record<string, unknown>>;
+  /**
+   * The host asked for a standing grant. The executor honors it for the rest
+   * of the session; making it outlive the session is the observer's job.
+   */
   readonly always?: boolean;
+  readonly reason?: string;
+  /** The host edited the call before approving; re-validated before the handler ran. */
   readonly modifiedArguments?: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * Notified after every confirmation ask resolves — the write side of the
+ * seam {@link ToolConfirmationPolicy} reads. A deployment that wants
+ * `always: true` to survive a restart persists it from here and consults
+ * the same record from its policy.
+ *
+ * Invoked fire-and-forget: the executor never waits on it and a throw (or
+ * rejection) never fails the dispatch. A runtime value like the policy —
+ * never serialized, in-process only.
+ */
+export type ToolConfirmationObserver = (
+  resolution: ToolConfirmationResolution,
+) => void | Promise<void>;
 
 // ============================================================================
 // Lifecycle events
@@ -634,7 +660,7 @@ export interface ToolConfirmationRequested {
 export interface ToolConfirmationResolved {
   readonly kind: "tool-confirmation-resolved";
   readonly toolCallId: string;
-  readonly response: ToolConfirmationResponse;
+  readonly resolution: ToolConfirmationResolution;
 }
 
 export interface ToolHandlerStarted {

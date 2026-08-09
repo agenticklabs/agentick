@@ -55,10 +55,13 @@ import type {
   RespondToToolCallInput,
   Resources,
   ReplaceCompilerToolsInput,
+  SnapshotCapable,
   SubstrateError,
   TaskHandle,
   TasksHarnessProtocol,
+  ToolConfirmationObserver,
   ToolConfirmationPolicy,
+  ToolConfirmationResolution,
   ToolDeclaration,
   ToolExecutorErrorChannel,
   ToolExecutorFx,
@@ -105,6 +108,7 @@ import type {
   HandlerResolver,
   HandlerChannelSeed,
   ToolExecutorHarnessOptions,
+  ToolExecutorSnapshot,
   ToolHandlerCtx,
   Validator,
   ValidatorResult,
@@ -151,7 +155,7 @@ interface InFlightEntry {
 
 export class ToolExecutorHarness
   extends BaseHarness<"tool">
-  implements ToolExecutorProtocol, ChannelSnapshotProvider
+  implements ToolExecutorProtocol, ChannelSnapshotProvider, SnapshotCapable<ToolExecutorSnapshot>
 {
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
@@ -162,6 +166,7 @@ export class ToolExecutorHarness
   private readonly defaultTimeoutMs?: number;
   private readonly defaultConfirmationTimeoutMs?: number;
   private readonly confirmationPolicy?: ToolConfirmationPolicy;
+  private readonly onConfirmationResolved?: ToolConfirmationObserver;
   private readonly channelPublisher?: ChannelPublisher;
   private readonly elicitation: ElicitationHarnessProtocol;
   private readonly tasks: TasksHarnessProtocol | undefined;
@@ -221,6 +226,7 @@ export class ToolExecutorHarness
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
     this.confirmationPolicy = options.confirmationPolicy;
+    this.onConfirmationResolved = options.onConfirmationResolved;
     this.channelPublisher = options.channelPublisher;
     this.elicitation = options.elicitation;
     this.tasks = options.tasks;
@@ -650,7 +656,36 @@ export class ToolExecutorHarness
     };
   }
 
+  // ──────────── session snapshot (SnapshotCapable) ────────────
+
+  /**
+   * {@link SnapshotCapable} — the standing confirmation grants this session
+   * has accumulated. Discovered by feature detection like every other
+   * snapshot participant (ADR 27); the executor reaches the fold as a named
+   * candidate alongside the bridge bag, exactly as it does for
+   * {@link channelSnapshotPayload}.
+   */
+  exportSnapshot(): ToolExecutorSnapshot {
+    return { alwaysAllowed: [...this.alwaysAllowed] };
+  }
+
+  importSnapshot(snapshot: ToolExecutorSnapshot): void {
+    this.alwaysAllowed.clear();
+    for (const name of snapshot.alwaysAllowed) this.alwaysAllowed.add(name);
+  }
+
   // ──────────────────────── internals ────────────────────────
+
+  /**
+   * Hand a settled confirmation to the adopter's observer. Forked, never
+   * awaited, errors ignored: an observer writing a grant to a store must not
+   * be able to fail — or delay — the dispatch it is reporting on.
+   */
+  private notifyConfirmationResolved(resolution: ToolConfirmationResolution): void {
+    const observe = this.onConfirmationResolved;
+    if (observe === undefined) return;
+    void Effect.runFork(Effect.ignore(Effect.tryPromise(async () => observe(resolution))));
+  }
 
   /**
    * Effect-shaped body. Runs inside `runOperation`'s FiberRef scope so
@@ -1014,6 +1049,12 @@ export class ToolExecutorHarness
             )
           : toolVerdict;
       if (needsConfirmation && !this.alwaysAllowed.has(input.name)) {
+        const asked = {
+          toolUseId: input.toolCallId,
+          toolName: input.name,
+          sessionId: input.context.sessionId ?? this.scopeId,
+          arguments: validated as Record<string, unknown>,
+        } as const;
         const confirmationTimeoutMs =
           reg.declaration.annotations?.confirmationTimeoutMs ??
           input.confirmationTimeoutMs ??
@@ -1068,6 +1109,7 @@ export class ToolExecutorHarness
         // Timeout → caller error so the loop sees it via
         // ToolConfirmationTimeoutError (existing contract).
         if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
+          this.notifyConfirmationResolved({ ...asked, outcome: "timeout" });
           return yield* Effect.fail(
             new ToolConfirmationTimeoutError({
               toolName: input.name,
@@ -1087,6 +1129,11 @@ export class ToolExecutorHarness
           callerSignal?.removeEventListener("abort", onCallerAbort);
           this.inFlight.delete(input.toolCallId);
           const denyReason = denialReason(elicitResult, reply);
+          this.notifyConfirmationResolved({
+            ...asked,
+            outcome: "denied",
+            ...omitUndefined({ reason: denyReason }),
+          });
           const denialResult: DispatchResult = {
             toolCallId: input.toolCallId,
             name: input.name,
@@ -1112,6 +1159,14 @@ export class ToolExecutorHarness
         }
 
         if (reply!.always === true) this.alwaysAllowed.add(input.name);
+        this.notifyConfirmationResolved({
+          ...asked,
+          outcome: "approved",
+          ...omitUndefined({
+            always: reply!.always,
+            modifiedArguments: reply!.modifiedArguments,
+          }),
+        });
 
         // Re-validate when the host returns modifiedArguments — the
         // user may have edited the call before approving.

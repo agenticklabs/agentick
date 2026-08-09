@@ -20,6 +20,7 @@ import type {
   ElicitationHarnessProtocol,
   Resources,
   TasksHarnessProtocol,
+  ToolConfirmationObserver,
   ToolConfirmationPolicy,
   ToolHandler,
   ToolRegistration,
@@ -108,6 +109,15 @@ export interface ToolExecutorHarnessOptions {
    * the tool's own verdict stands, exactly as before.
    */
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+
+  /**
+   * Notified after every confirmation ask resolves — approved, denied, or
+   * timed out. The write side of {@link confirmationPolicy}'s read: an
+   * adopter persists `always: true` here and consults the same record from
+   * the policy, which is the only way a grant outlives its session.
+   * Fire-and-forget; a throw never fails the dispatch.
+   */
+  readonly onConfirmationResolved?: ToolConfirmationObserver;
 
   /**
    * Elicitation harness used by the confirmation gate. Required:
@@ -213,4 +223,21 @@ export interface ToolExecutorHarnessOptions {
    * construction snapshot. Forwarded to {@link BaseHarness}.
    */
   readonly interceptorParent?: BaseHarness;
+}
+
+// ============================================================================
+// Snapshot
+// ============================================================================
+
+/**
+ * What the executor contributes to a `SessionSnapshot`, under
+ * `bridges.toolExecutor`. The standing grants a host issued by replying
+ * `always: true` are session state like any other: a restore that dropped
+ * them would re-ask for a call the user already blessed.
+ *
+ * Handler state (`ctx.setState`) is deliberately absent — it holds arbitrary
+ * live values, not a serializable record.
+ */
+export interface ToolExecutorSnapshot {
+  readonly alwaysAllowed: readonly string[];
 }

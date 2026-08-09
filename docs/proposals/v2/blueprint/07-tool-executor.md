@@ -309,8 +309,12 @@ interface ToolConfirmationRequest {
   metadata?: Record<string, unknown>; // including DiffPreviewMetadata
 }
 
-interface ToolConfirmationResponse {
-  approved: boolean;
+interface ToolConfirmationResolution {
+  toolUseId: string;
+  toolName: string;
+  sessionId: string;
+  outcome: "approved" | "denied" | "timeout";
+  arguments: Record<string, unknown>;
   reason?: string;
   always?: boolean;
   modifiedArguments?: Record<string, unknown>;
@@ -318,7 +322,10 @@ interface ToolConfirmationResponse {
 ```
 
 `always: true` is a session-scoped allow-list that the tool executor
-remembers. `modifiedArguments` causes a re-validation pass before handler
+remembers; it rides the session snapshot (the executor is `SnapshotCapable`
+under `bridges.toolExecutor`), and the `onConfirmationResolved` construction
+option reports every resolution so an adopter can persist a grant beyond the
+session. `modifiedArguments` causes a re-validation pass before handler
 invocation.
 
 `DiffPreviewMetadata` (file edit tools) is `[V1-INHERITED]`.

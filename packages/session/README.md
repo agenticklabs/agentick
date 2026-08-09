@@ -371,12 +371,13 @@ const snap = await session.snapshot();
 snap.bridges.timeline; // persisted log + projection
 snap.bridges.knobs; // knob values
 snap.bridges.state; // K/V state
+snap.bridges.toolExecutor; // standing confirmation grants
 // …plus any installed extension that can snapshot — zero session change
 
 await session.restore({ snapshot: snap });
 ```
 
-Add a snapshot-capable extension (sandbox, subscriptions, your own) and it round-trips automatically. One authoritative payload per layer, so nothing can diverge from a denormalized copy.
+Add a snapshot-capable extension (sandbox, subscriptions, your own) and it round-trips automatically. One authoritative payload per layer, so nothing can diverge from a denormalized copy. The tool executor is the one participant the session names rather than finds — it is session-owned but sits outside the bridge bag (the `tools` bridge is the render-time handler-resolver adapter) — and even it is folded by the same feature detection.
 
 Both are commands, so the hook quartet falls out for free: `onAfterSessionSnapshot` transforms the captured snapshot on its way out (the redaction seam), `onBeforeSessionSnapshot` can veto the capture, and the restore pair mirrors them.
 
