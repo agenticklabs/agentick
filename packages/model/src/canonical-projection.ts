@@ -93,6 +93,7 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
     stopSequences?: ReadonlyArray<string>;
     responseFormat?: {
       type: "text" | "json" | "json_schema";
+      name?: string;
       schema?: Record<string, unknown>;
     };
     toolChoice?: "auto" | "none" | "required" | { tool: string };
@@ -107,6 +108,7 @@ export function buildParameters(tree: RenderedTree): LanguageModelParameters | u
     if (cfg.responseFormat.type === "json_schema") {
       params.responseFormat = {
         type: "json_schema",
+        ...(cfg.responseFormat.name !== undefined ? { name: cfg.responseFormat.name } : {}),
         schema: cfg.responseFormat.schema as Record<string, unknown>,
       };
     } else {

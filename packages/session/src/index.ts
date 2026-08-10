@@ -9,6 +9,7 @@
 
 export { SessionHarness, type SessionDryRun, type SessionHarnessOptions } from "./harness.js";
 export { SessionRuntime } from "./session-state.js";
+export type { ReflectInput, ReflectResult } from "./reflect.js";
 // ADR 89 §2 — the `session.model` selection / swap facade. The facade
 // impl + its handle type ship here; the `SessionHarnessProtocol.model`
 // slot is module-augmented onto spec by `./model-facade.js` (loaded via

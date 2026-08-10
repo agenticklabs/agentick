@@ -20,15 +20,21 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness, System } from "@agentick/compiler-react";
 import { rollingSummary } from "@agentick/timeline/strategies";
 import {
+  ResponseValidationError,
+  SPEC_VERSION,
+  StructuredOutputIncomplete,
+  jsonSchema,
   progressEventName,
   type AdapterDelta,
   type ExecutionTarget,
+  type LanguageModelExecutionResult,
   type ProtocolEvent,
+  type StandardSchemaV1,
 } from "@agentick/spec";
 import { waitFor } from "@agentick/utils/testing";
 
 import { SessionHarness } from "../harness.js";
-import { withInstruction } from "../reflect.js";
+import { reflectionRequest, withInstruction } from "../reflect.js";
 
 const target: ExecutionTarget = {
   kind: "language-model",
@@ -77,7 +83,13 @@ function summarizingExecutor() {
   );
 }
 
-async function makeSession(keepVerbatim: number) {
+async function makeSession(
+  keepVerbatim: number,
+  over: {
+    readonly executor?: FakeLanguageModelExecutor;
+    readonly target?: ExecutionTarget;
+  } = {},
+) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -88,7 +100,7 @@ async function makeSession(keepVerbatim: number) {
     handlerResolver: new InMemoryHandlerResolver(),
     elicitation,
   });
-  const executor = summarizingExecutor();
+  const executor = over.executor ?? summarizingExecutor();
   await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
 
   const session = new SessionHarness(journal, bus, inbox, {
@@ -98,7 +110,7 @@ async function makeSession(keepVerbatim: number) {
     loop,
     modelExecutor: executor,
     toolExecutor: tools,
-    target,
+    target: over.target ?? target,
     timeline: { compact: rollingSummary({ keepVerbatim }) },
   });
   await session.ready;
@@ -119,6 +131,7 @@ async function makeSession(keepVerbatim: number) {
   return {
     session,
     bus,
+    executor,
     close: async () => {
       await session.close();
       await tools.close();
@@ -221,12 +234,212 @@ describe("withInstruction", () => {
     });
   });
 
-  it("withholds the tools — a model handed one reaches for it instead of answering", () => {
-    expect(withInstruction(input as never, "summarize").tools).toEqual([]);
+  it("leaves the projected tools alone — the pass decided them before projecting", () => {
+    expect(withInstruction(input as never, "summarize").tools).toBe(input.tools);
   });
 
-  it("sets the cap only when one was asked for", () => {
-    expect(withInstruction(input as never, "s", 500).parameters?.maxOutputTokens).toBe(500);
+  it("overlays only the parameters it was given", () => {
+    expect(
+      withInstruction(input as never, "s", { maxOutputTokens: 500 }).parameters?.maxOutputTokens,
+    ).toBe(500);
     expect(withInstruction(input as never, "s").parameters).toBeUndefined();
+    expect(withInstruction(input as never, "s", {}).parameters).toBeUndefined();
+  });
+
+  it("an absent overlay value leaves the projected one standing", () => {
+    const capped = { ...input, parameters: { maxOutputTokens: 4096, temperature: 0.2 } };
+
+    const out = withInstruction(capped as never, "s", { maxOutputTokens: undefined });
+
+    expect(out.parameters?.maxOutputTokens).toBe(4096);
+    expect(out.parameters?.temperature).toBe(0.2);
+  });
+});
+
+// ============================================================================
+// W41 — a reflection can be asked for a SHAPE
+// ============================================================================
+
+/** `{ summary, questions }` — the fold `parseQuestions` used to regex out. */
+const foldSchema: StandardSchemaV1<unknown, { summary: string; questions: string[] }> = jsonSchema<{
+  summary: string;
+  questions: string[];
+}>(
+  {
+    type: "object",
+    properties: { summary: { type: "string" }, questions: { type: "array" } },
+    required: ["summary", "questions"],
+  },
+  {
+    validator: (v) => {
+      const c = v as { summary?: unknown; questions?: unknown };
+      return typeof c?.summary === "string" && Array.isArray(c?.questions)
+        ? { value: c as { summary: string; questions: string[] } }
+        : { issues: [{ message: "summary must be a string and questions an array" }] };
+    },
+  },
+);
+
+const FOLD = { summary: SUMMARY, questions: ["what changed?"] };
+
+/** Native structured decoding — the responseFormat strategy's home. */
+const jsonSchemaTarget: ExecutionTarget = {
+  kind: "language-model",
+  provider: "mock",
+  modelId: "reflect-json",
+  capabilities: { supportsTools: true, supportsStreaming: true, supportsJsonSchema: true },
+};
+
+function scriptedExecutor(result: LanguageModelExecutionResult, on = target) {
+  return new FakeLanguageModelExecutor(
+    `reflect-struct-${Math.random()}`,
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    { target: on, scripted: { result } },
+  );
+}
+
+const terminalCall = (input: Record<string, unknown>): LanguageModelExecutionResult => ({
+  specVersion: SPEC_VERSION,
+  output: [{ type: "tool_use", toolUseId: "tc-1", name: "submit_result", input }],
+  stopReason: "tool_use",
+  usage: USAGE,
+  toolCalls: [{ id: "tc-1", name: "submit_result", input }],
+});
+
+const textReply = (text: string): LanguageModelExecutionResult => ({
+  specVersion: SPEC_VERSION,
+  output: [{ type: "text", text }],
+  stopReason: "end",
+  usage: USAGE,
+});
+
+describe("a reflection asked for a shape", () => {
+  it("returns the validated object, so nothing downstream parses prose", async () => {
+    const rig = await makeSession(2, { executor: scriptedExecutor(terminalCall(FOLD)) });
+
+    const result = await rig.session.reflect({ instructions: "fold it", output: foldSchema });
+
+    expect(result.data).toEqual(FOLD);
+    await rig.close();
+  });
+
+  it("advertises the terminal tool — `tools: []` would foreclose the one cross-provider path", async () => {
+    const rig = await makeSession(2, { executor: scriptedExecutor(terminalCall(FOLD)) });
+
+    await rig.session.reflect({ instructions: "fold it", output: foldSchema });
+
+    expect(rig.executor.seenRuns.at(-1)!.tools.map((t) => t.name)).toEqual(["submit_result"]);
+    await rig.close();
+  });
+
+  it("forces the choice — one shot is the whole budget, so there is no wrap-up tick to spend", () => {
+    const { spec, parameters } = reflectionRequest({ output: foldSchema }, target);
+
+    expect(spec?.strategy).toBe("tool");
+    expect(parameters.toolChoice).toEqual({ tool: "submit_result" });
+  });
+
+  it("takes the native directive when the target decodes a schema itself", async () => {
+    const rig = await makeSession(2, {
+      target: jsonSchemaTarget,
+      executor: scriptedExecutor(textReply(JSON.stringify(FOLD)), jsonSchemaTarget),
+    });
+
+    const result = await rig.session.reflect({ instructions: "fold it", output: foldSchema });
+
+    expect(result.data).toEqual(FOLD);
+    expect(rig.executor.seenRuns.at(-1)!.tools).toEqual([]);
+    await rig.close();
+  });
+
+  it("raises the error a structured send raises when the reply violates the schema", async () => {
+    const rig = await makeSession(2, { executor: scriptedExecutor(terminalCall({ summary: 7 })) });
+
+    await expect(
+      rig.session.reflect({ instructions: "fold it", output: foldSchema }),
+    ).rejects.toBeInstanceOf(ResponseValidationError);
+    await rig.close();
+  });
+
+  it("reports a reply that never called the terminal tool rather than answering empty", async () => {
+    const rig = await makeSession(2, { executor: scriptedExecutor(textReply("I'd rather not")) });
+
+    await expect(
+      rig.session.reflect({ instructions: "fold it", output: foldSchema }),
+    ).rejects.toBeInstanceOf(StructuredOutputIncomplete);
+    await rig.close();
+  });
+
+  it("streams the shape home — the terminal call survives the delta path", async () => {
+    const seen: number[] = [];
+    const executor = new FakeLanguageModelExecutor(
+      `reflect-stream-${Math.random()}`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        target,
+        scripted: {
+          result: terminalCall(FOLD),
+          deltas: [
+            { type: "message-start", role: "assistant" },
+            { type: "tool-call-start", callId: "tc-1", name: "submit_result", blockIndex: 0 },
+            { type: "tool-call-delta", callId: "tc-1", delta: JSON.stringify(FOLD) },
+            { type: "tool-call-end", callId: "tc-1" },
+            { type: "message-end", stopReason: "tool_use", usage: USAGE },
+          ],
+        },
+      },
+    );
+    const rig = await makeSession(2, { executor });
+
+    const result = await rig.session.reflect({
+      instructions: "fold it",
+      output: foldSchema,
+      onDelta: (d) => seen.push(d.outputTokens),
+    });
+
+    expect(result.data).toEqual(FOLD);
+    // The bar moved: a structured pass streams tool-call deltas, not text, and
+    // the progress a caller reports has to come from somewhere.
+    expect(seen.length).toBeGreaterThan(0);
+    await rig.close();
+  });
+
+  it("reports a capped reply as truncated, keeping the usage it was billed for", async () => {
+    const rig = await makeSession(2, {
+      executor: scriptedExecutor({
+        specVersion: SPEC_VERSION,
+        output: [{ type: "text", text: "the fold so f" }],
+        stopReason: "max_tokens",
+        usage: USAGE,
+      }),
+    });
+
+    const result = await rig.session.reflect({
+      instructions: "fold it",
+      output: foldSchema,
+      maxOutputTokens: 8,
+    });
+
+    expect(result.truncated).toBe(true);
+    expect(result.usage).toEqual(USAGE);
+    // Half a terminal call is not an answer — and it is not a missing one either.
+    expect(result.data).toBeUndefined();
+    await rig.close();
+  });
+
+  it("leaves a text-mode reflection with no tools and no directive", async () => {
+    const rig = await makeSession(2);
+
+    const result = await rig.session.reflect({ instructions: "summarize" });
+
+    expect(result.data).toBeUndefined();
+    expect(result.text).toBe(SUMMARY);
+    expect(rig.executor.seenRuns.at(-1)!.tools).toEqual([]);
+    expect(reflectionRequest({}, target).parameters).toEqual({});
+    await rig.close();
   });
 });

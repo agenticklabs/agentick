@@ -10,60 +10,145 @@
  * instead of charging for it again.
  *
  * That also makes the pass as rich as a real turn rather than a stripped
- * transcript: the model sees the system prompt, the tools, the grounding and
- * the whole conversation, because it IS the turn it would otherwise have taken.
+ * transcript: the model sees the system prompt, the grounding and the whole
+ * conversation, because it IS the turn it would otherwise have taken. It does
+ * NOT see the agent's tools — a model handed one reaches for it instead of
+ * answering — and the terminal tool of a structured pass is the only exception.
  */
 
 import type {
   ContentBlock,
+  ExecutionTarget,
   ExecutorStream,
+  LanguageModelExecutionResult,
   LanguageModelInput,
   LanguageModelMessage,
+  LanguageModelParameters,
+  OutputSpec,
+  StandardSchemaV1,
+  StructuredOutputCapture,
+  ToolDeclaration,
   UsageStats,
 } from "@agentick/spec";
+import {
+  DEFAULT_TERMINAL_TOOL_NAME,
+  StructuredOutputIncomplete,
+  resolveAutoStrategy,
+  responseFormatDirective,
+  terminalToolDeclaration,
+  validateStructuredOutput,
+} from "@agentick/spec";
 import { estimateTokens } from "@agentick/model";
+import { omitUndefined } from "@agentick/utils";
 
-export interface ReflectInput {
+export interface ReflectInput<T = unknown> {
   /** What to think about. Appended after everything the next tick would send. */
   readonly instructions: string | readonly ContentBlock[];
   /** Ceiling on the reply. Also the denominator of any progress a caller reports. */
   readonly maxOutputTokens?: number;
   readonly onDelta?: (d: { readonly text: string; readonly outputTokens: number }) => void;
   readonly signal?: AbortSignal;
+  /**
+   * The shape the answer must take — `SendInput.output`, same field, same
+   * semantics. Validated onto {@link ReflectResult.data}; a schema that was
+   * asked for and not met throws.
+   */
+  readonly output?: StandardSchemaV1<unknown, T>;
 }
 
-export interface ReflectResult {
+export interface ReflectResult<T = unknown> {
   readonly text: string;
   /** What the call cost. Absent when the provider reports none. */
   readonly usage?: UsageStats;
-  /** The cap was hit — the text stops mid-thought and should not be persisted. */
+  /**
+   * The cap was hit — the text stops mid-thought and should not be persisted.
+   * {@link data} is absent even when a shape was asked for: half a terminal call
+   * is not an answer.
+   */
   readonly truncated: boolean;
+  /**
+   * The validated answer — `SendResult.data`, same field. Under the
+   * terminal-tool strategy the answer IS the tool's arguments, so `text` is
+   * routinely empty.
+   */
+  readonly data?: T;
 }
 
 const asBlocks = (instructions: string | readonly ContentBlock[]): readonly ContentBlock[] =>
   typeof instructions === "string" ? [{ type: "text", text: instructions }] : instructions;
 
 /**
- * Append the instruction as a final user turn. A model answers an instruction in
- * the generation seat; the same text in a system position competes with the
- * agent's own standing rules for authority.
+ * Append the instruction as a final user turn, overlaying the pass's generation
+ * parameters. A model answers an instruction in the generation seat; the same
+ * text in a system position competes with the agent's own standing rules for
+ * authority. The tool list is {@link reflectionRequest}'s call, not this one's.
  */
 export function withInstruction(
   input: LanguageModelInput,
   instructions: string | readonly ContentBlock[],
-  maxOutputTokens?: number,
+  parameters?: Partial<LanguageModelParameters>,
 ): LanguageModelInput {
   const turn = { role: "user", content: asBlocks(instructions) } as LanguageModelMessage;
+  const overlay = omitUndefined(parameters ?? {});
   return {
     ...input,
     messages: [...input.messages, turn],
-    // Tools are withheld: a reflection asks for prose, and a model handed tools
-    // will reach for one instead of answering.
-    tools: [],
-    ...(maxOutputTokens !== undefined
-      ? { parameters: { ...input.parameters, maxOutputTokens } }
-      : {}),
+    ...(Object.keys(overlay).length > 0 ? { parameters: { ...input.parameters, ...overlay } } : {}),
   };
+}
+
+/**
+ * What a reflection shows the model and asks of it. Passing `0` tools to
+ * `resolveAutoStrategy` is the literal truth — a reflection advertises none —
+ * and the choice is forced on the only tick there is, where the loop would have
+ * spent a second one on a wrap-up.
+ */
+export function reflectionRequest(
+  input: Pick<ReflectInput, "maxOutputTokens" | "output">,
+  target: ExecutionTarget,
+): {
+  readonly spec?: OutputSpec;
+  readonly tools: readonly ToolDeclaration[];
+  readonly parameters: Partial<LanguageModelParameters>;
+} {
+  const spec: OutputSpec | undefined =
+    input.output === undefined
+      ? undefined
+      : {
+          toolName: DEFAULT_TERMINAL_TOOL_NAME,
+          schema: input.output,
+          strategy: resolveAutoStrategy(0, target.capabilities),
+        };
+  return {
+    ...(spec !== undefined ? { spec } : {}),
+    tools: spec?.strategy === "tool" ? [terminalToolDeclaration(spec)] : [],
+    parameters: omitUndefined({
+      maxOutputTokens: input.maxOutputTokens,
+      responseFormat:
+        spec?.strategy === "responseFormat" ? responseFormatDirective(spec) : undefined,
+      toolChoice: spec?.strategy === "tool" ? ({ tool: spec.toolName } as const) : undefined,
+    }),
+  };
+}
+
+/** The validated answer, or the same two errors a structured `send` raises. */
+export async function reflectionData(
+  spec: OutputSpec,
+  result: LanguageModelExecutionResult,
+): Promise<unknown> {
+  let capture: StructuredOutputCapture;
+  if (spec.strategy === "tool") {
+    const call = result.toolCalls?.find((c) => c.name === spec.toolName);
+    if (call === undefined) {
+      throw new StructuredOutputIncomplete({ toolName: spec.toolName, reason: "no_terminal_call" });
+    }
+    capture = { strategy: "tool", input: call.input };
+  } else {
+    capture = { strategy: "responseFormat", text: textOf(result.output) };
+  }
+  const validated = await validateStructuredOutput(spec.schema, capture);
+  if ("error" in validated) throw validated.error;
+  return validated.value;
 }
 
 export function textOf(blocks: readonly ContentBlock[]): string {

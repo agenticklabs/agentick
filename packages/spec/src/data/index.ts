@@ -46,6 +46,7 @@ export * from "./formatter.js";
 export * from "./entries.js";
 export * from "./message-source.js";
 export * from "./declarations.js";
+export * from "./structured-output.js";
 export * from "./rendered-tree.js";
 export * from "./execution-result.js";
 export * from "./execution-target.js";

@@ -453,6 +453,60 @@ that produced it lives.
 > Authentication scopes it to the caller's own sessions; a deployment that treats
 > prompt contents as privileged should gate the verbs beyond that.
 
+## Asking the conversation about itself — `reflect()`
+
+`reflect()` is one more turn of this session with an extra instruction on the
+end. Compaction, episodic memory, thread titling and post-mortem critique are
+that one operation under different instructions.
+
+```ts
+const { text, usage } = await session.reflect({
+  instructions: "In three sentences, what is this conversation about?",
+});
+```
+
+**Appending at the END is the whole trick.** The prefix stays byte-identical to
+the next tick's, so the provider reads it from cache instead of charging for it
+again — and the model sees the system prompt, the grounding and the whole
+conversation, because it _is_ the turn it would otherwise have taken. Nothing is
+appended to the timeline: a reflection is a question about the conversation, not
+a move within it.
+
+What the model does **not** see is the agent's tools. A reflection wants an
+answer, and a model handed a tool reaches for it instead of answering.
+
+**Ask for a shape and you get one.** `output` and `data` are the same fields
+`send` uses, with the same semantics — a reflection is not a second structured-output
+dialect:
+
+```ts
+const Fold = z.object({ summary: z.string(), questions: z.array(z.string()) });
+
+const { data } = await session.reflect({
+  instructions: "Summarize the conversation and name the questions it answers.",
+  output: Fold,
+});
+
+data?.questions; // typed + validated — no regex over the prose
+```
+
+The one exception to the no-tools rule is how that answer arrives. The delivery
+strategy resolves exactly as it does for a send: a target with native
+`json_schema` decoding gets a `responseFormat` directive, and every other target
+gets the synthetic terminal tool — which is therefore the only tool a reflection
+ever advertises, with `toolChoice` pinned to it from the start. A send can spend
+a second tick forcing a wrap-up; a reflection has one shot, so it forces the
+choice immediately. A reply that never calls the tool raises
+`StructuredOutputIncomplete`, and a reply that calls it with the wrong shape
+raises `ResponseValidationError` — the same two errors a structured send raises.
+
+> [!NOTE]
+> `send` carries a serializable `responseFormat` twin because a send crosses the
+> wire and a live validator cannot. A reflection is in-process by construction —
+> it takes an `AbortSignal` and an `onDelta` callback — so there is nothing for
+> that twin to buy, and `output` is strictly better on every provider. `reflect`
+> takes `output` only.
+
 ## The render ↔ runtime feedback loop
 
 A session is the per-render fact producer for the loop. Each send hands the loop two resolvers it calls per tick, which is how the tree renders _for the model it is about to call_, _within the window it has left_:
@@ -716,6 +770,7 @@ const session = factory({
 | `send(input)`                   | `Promise<SessionExecutionHandle>` — `.result` + `.events()`    |
 | `spawn(input)`                  | A child session, or its handle when `send` is supplied         |
 | `fork(input?)`                  | An unbound same-image child with the parent's state copied     |
+| `reflect(input)`                | One more turn with an appended instruction; `output` → `data`  |
 | `snapshot()` / `restore(input)` | Capture / reapply every snapshot-capable layer                 |
 | `close(opts?)`                  | Teardown; `{ reason: "evicted" }` is paging, not an end        |
 | `channel(name)`                 | Per-channel publish/subscribe plus correlated request/response |
@@ -755,6 +810,7 @@ const session = factory({
 
 - `@agentick/app` `src/__tests__/dry-run.spec.tsx` — the tree and the model input reach the caller, two dry runs leave `snapshot()` byte-identical, and `compile()` is the rung that needs no model.
 
+- `src/__tests__/reflect.spec.tsx` — compaction folding through a real `timeline: { compact: rollingSummary(…) }` with its usage and progress frames, and the structured half: an `output` schema returning a validated object, the terminal tool being the only thing a reflection advertises and its choice forced, the native-`json_schema` target taking the directive with no tool at all, `ResponseValidationError` on a violating reply, `StructuredOutputIncomplete` on a reply that never calls the tool, and text-mode carrying neither tools nor directive.
 - `src/__tests__/conformance.spec.ts` — the protocol conformance suite against a real journal, bus and inbox.
 - `src/__tests__/extended-surface.spec.ts` — host-door `dispatch` including `ToolPermissionError`, the tool registry read surface, timeline append and `trailingInput`, channel publish/subscribe plus correlated request/response and its timeout, the knob handle, `spawn` routing through a spawn context and defaulting to the parent's own agent, the **spawn boundary pair** on the parent's stream (`spawn-start` carrying the child's session and execution ids plus the origin tool `callId` off the dispatch ctx, `spawn-end` carrying `isError`, both attributed to the parent's `executionId`; the unbound spawn form emits neither), **steering** (the join returns the in-flight handle and the loop answers the new input), two un-awaited sends collapsing to one execution, a send after settle running fresh rather than joining a dead handle, provenance and per-generation usage stamps, and `onBusy` steer-vs-queue including an aborted execution dropping an undrained steer; cancellation parity — `abort()` on an in-flight execution and a pre-aborted send `signal` both RESOLVE with `stopReason: "aborted"` rather than rejecting.
 - `src/__tests__/streaming-handle.spec.tsx` — event order, dense monotonic sequence from 1, id/session/execution stamping, the streaming and non-streaming paths, and `.events()` yielding while `.result` resolves independently.

@@ -99,6 +99,7 @@ import type {
   TokenKind,
   LanguageModelInput,
   RenderedTree,
+  ToolDeclaration,
   ToolExecutorProtocol,
   ToolsHandle,
   TreeInterceptionSource,
@@ -109,6 +110,7 @@ import type {
 import {
   channelEventName,
   DEFAULT_JOURNALING_POLICY,
+  DEFAULT_TERMINAL_TOOL_NAME,
   ExecutionFailed,
   foldUsageRollup,
   HandlerError,
@@ -147,6 +149,8 @@ import {
 import { SessionRuntime } from "./session-state.js";
 import {
   forwardDeltas,
+  reflectionData,
+  reflectionRequest,
   withInstruction,
   textOf,
   type ReflectInput,
@@ -1520,17 +1524,18 @@ export class SessionHarness<P = unknown>
    * Nothing is appended to the timeline: a reflection is a question ABOUT the
    * conversation, not a move within it.
    */
-  async reflect(input: ReflectInput): Promise<ReflectResult> {
+  async reflect<T = unknown>(input: ReflectInput<T>): Promise<ReflectResult<T>> {
     const model = this.modelFacade.current;
     if (!model) throw new NoModelForExecutionError();
     const executor = model.modelExecutor;
     const scope = { sessionId: this.id };
+    const { spec, tools, parameters } = reflectionRequest(input, model.target);
     // The executor's own three phases, run by hand. `run` projects internally,
     // so it has no seam to append an instruction through — which is the one
     // thing this needs.
-    const projected = await this.project();
+    const projected = await this.project(undefined, tools);
     const executeInput = {
-      targetInput: withInstruction(projected, input.instructions, input.maxOutputTokens),
+      targetInput: withInstruction(projected, input.instructions, parameters),
       target: model.target,
       scope,
       ...omitUndefined({ signal: input.signal }),
@@ -1542,11 +1547,19 @@ export class SessionHarness<P = unknown>
         ? await forwardDeltas(executor.executeStream(executeInput), input.onDelta)
         : await executor.execute(executeInput);
     const result = await executor.normalize({ targetOutput, target: model.target, scope });
+    // A cap hit mid-answer is truncation, not a model that declined to answer:
+    // validating the fragment would raise `StructuredOutputIncomplete` and throw
+    // away the usage the caller is billed for. `truncated` says what happened
+    // and `data` stays absent, which is what "should not be persisted" means.
+    const truncated = result.stopReason === "max_tokens";
+    const data =
+      spec !== undefined && !truncated ? ((await reflectionData(spec, result)) as T) : undefined;
     return omitUndefined({
       text: textOf(result.output),
       usage: result.usage,
-      truncated: result.stopReason === "max_tokens",
-    }) as ReflectResult;
+      truncated,
+      data,
+    }) as ReflectResult<T>;
   }
 
   /** Rung 1 — render the tree to IR. Needs no model. */
@@ -1562,20 +1575,26 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Rung 2 — IR to the canonical input the model sees. Tools come from the
+   * Rung 2 — IR to the canonical input the model sees. Tools default to the
    * same `compileForTick({ exposure: "model" })` the loop uses, so the
    * projected tool list is the precedence-resolved one, not the compiler slice.
+   * Pass `tools` to project a different list — what {@link reflect} does, since
+   * a reflection advertises its own (usually none). The parameter is on the
+   * class only, deliberately: `SessionProtocol` describes what a session does
+   * for a client, and no wire caller supplies a tool list.
    */
-  async project(tree?: RenderedTree): Promise<LanguageModelInput> {
+  async project(
+    tree?: RenderedTree,
+    tools?: readonly ToolDeclaration[],
+  ): Promise<LanguageModelInput> {
     const model = this.modelFacade.current;
     if (!model) throw new NoModelForExecutionError();
     const compiled = tree ?? (await this.compile());
-    const tools = await this.toolExecutor.compileForTick({ exposure: "model" });
     return model.modelExecutor.project({
       compiled,
       target: model.target,
       scope: { sessionId: this.id },
-      tools,
+      tools: tools ?? (await this.toolExecutor.compileForTick({ exposure: "model" })),
     }) as Promise<LanguageModelInput>;
   }
 
@@ -2633,7 +2652,7 @@ export class SessionHarness<P = unknown>
     // wins here.
     const outputSpec: OutputSpec | undefined =
       input.output !== undefined
-        ? { toolName: "submit_result", schema: input.output, strategy: "auto" }
+        ? { toolName: DEFAULT_TERMINAL_TOOL_NAME, schema: input.output, strategy: "auto" }
         : undefined;
 
     // Busy-send behavior (ADR 53 §5). `"steer"` = join the in-flight turn;
