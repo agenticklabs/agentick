@@ -12,6 +12,8 @@ export interface MountSeed {
   readonly leaves: Readonly<Record<string, string>>;
   /** internal directory prefix → its children. */
   readonly children: Readonly<Record<string, readonly Child[]>>;
+  /** internal directory prefix → the cursor its first page reports. */
+  readonly cursors?: Readonly<Record<string, string>>;
 }
 
 export function fakeMountStore(seed: MountSeed): MountStore {
@@ -20,8 +22,10 @@ export function fakeMountStore(seed: MountSeed): MountStore {
       const text = seed.leaves[key];
       return text === undefined ? undefined : [{ uri: key, mimeType: "text/markdown", text }];
     },
-    async listChildren(prefix): Promise<Page<Child>> {
-      return { entries: seed.children[prefix] ?? [] };
+    async listChildren({ prefix, cursor }): Promise<Page<Child>> {
+      const entries = seed.children[prefix] ?? [];
+      const next = cursor === undefined ? seed.cursors?.[prefix] : undefined;
+      return next === undefined ? { entries } : { entries, cursor: next };
     },
   };
 }

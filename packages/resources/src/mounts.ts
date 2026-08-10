@@ -13,9 +13,13 @@
  * and browsable (`listChildren`) — distinct from spec's `ResourceStore`, the
  * durable declaration-record port.
  *
+ * The projection rewrites ADDRESSES, never content: a leaf body that names an
+ * internal id is the store's to scrub, not this seam's.
+ *
  * @see packages/resources/README.md §Mounting stores as a resource tree
  */
 
+import { ResourceNotFound } from "@agentick/spec";
 import type {
   OperationCtx,
   ResourceContents,
@@ -27,17 +31,31 @@ import type {
 
 export interface MountStore {
   get(key: string, ctx?: OperationCtx): Promise<readonly ResourceContents[] | undefined>;
-  listChildren(prefix: string, ctx?: OperationCtx, cursor?: string): Promise<Page<Child>>;
+  listChildren(query: MountListQuery, ctx?: OperationCtx): Promise<Page<Child>>;
+}
+
+export interface MountListQuery {
+  readonly prefix: string;
+  /** The `cursor` from the previous page. */
+  readonly cursor?: string;
+  /** Page size; omitted takes the store's own default. */
+  readonly limit?: number;
 }
 
 export interface Child {
   readonly name: string;
   readonly kind: "directory" | "leaf";
-  readonly meta?: ResourceMeta;
+  /** `name` is the path segment, and an alias is a registry concern. */
+  readonly meta?: Omit<ResourceMeta, "name" | "aliases">;
 }
 
 export interface Page<T> {
   readonly entries: readonly T[];
+  /**
+   * Model-facing: it is embedded verbatim in the listing's `nextPage` address,
+   * so it must carry no isolation id. The relative child name is the canonical
+   * choice — a store keying its cursor on an internal record id leaks it.
+   */
   readonly cursor?: string;
 }
 
@@ -52,6 +70,13 @@ export interface Mount {
 }
 
 export type MountTree = Record<string, Mount>;
+
+export type MountTreeSource = MountTree | ((ctx?: OperationCtx) => MountTree | Promise<MountTree>);
+
+export interface MountOptions {
+  /** Page size requested of `listChildren`; omitted takes the store's default. */
+  readonly limit?: number;
+}
 
 const CURSOR = "?cursor=";
 
@@ -73,20 +98,41 @@ function joinKey(prefix: string, name: string): string {
   return prefix === "" ? name : `${prefix}/${name}`;
 }
 
-export function storeResolver(store: MountStore, projection?: MountProjection): ResourceResolver {
+/**
+ * A path is addressable only in canonical form, so `toHome`'s round-trip cannot
+ * be fooled by a traversal a normalizing store would collapse (`a/../b`).
+ */
+function canonicalHome(path: string): string | undefined {
+  const trimmed = path.endsWith("/") ? path.slice(0, -1) : path;
+  if (trimmed === "") return "";
+  const traversal = trimmed.split("/").some((seg) => seg === "" || seg === "." || seg === "..");
+  return traversal ? undefined : trimmed;
+}
+
+export function storeResolver(
+  store: MountStore,
+  projection?: MountProjection,
+  options?: MountOptions,
+): ResourceResolver {
   const toInternal = (home: string) => (projection ? projection.toInternal(home) : home);
   const toHome = (key: string): string | undefined => (projection ? projection.toHome(key) : key);
   return async (uri, ctx) => {
     const { scheme, path: raw } = splitUri(uri);
-    const { path, cursor } = takeCursor(raw);
+    const { path: requested, cursor } = takeCursor(raw);
+    const path = canonicalHome(requested);
+    if (path === undefined) throw new ResourceNotFound({ uri });
     const internal = toInternal(path);
+    const home = toHome(internal);
+    if (home === undefined) throw new ResourceNotFound({ uri });
     const content = await store.get(internal, ctx);
     if (content !== undefined) {
-      const home = scheme + path;
-      return content.map((c) => ({ ...c, uri: home }));
+      const address = scheme + home;
+      return content.map((c) => ({ ...c, uri: address }));
     }
-    const page = await store.listChildren(internal, ctx, cursor);
-    return [directoryListing(scheme, path, internal, page, toHome)];
+    // No directory rows: a prefix with no children reads the same as one that
+    // was never there. Telling them apart needs a tri-state `listChildren`.
+    const page = await store.listChildren({ prefix: internal, cursor, limit: options?.limit }, ctx);
+    return [directoryListing(scheme, home, internal, page, toHome)];
   };
 }
 
@@ -102,10 +148,10 @@ function directoryListing(
     const home = toHome(joinKey(internalPrefix, child.name));
     if (home === undefined) continue;
     children.push({
+      ...child.meta,
       uri: scheme + home,
       name: child.name,
       kind: child.kind,
-      description: child.meta?.description,
     });
   }
   const listing: Record<string, unknown> = { uri: scheme + homePath, children };
@@ -119,27 +165,23 @@ export function mount(resolver: ResourceResolver, meta?: ResourceMeta): Mount {
   return meta === undefined ? { resolver } : { resolver, meta };
 }
 
-export function createTree(
-  tree: MountTree | ((ctx: OperationCtx) => MountTree | Promise<MountTree>),
-): ResourceResolver {
+/**
+ * The computed form runs on EVERY read. There is no reliable per-principal key
+ * to memoize under — `ctx.sessionId` is optional, and one shared entry under a
+ * missing key serves one principal's tree to the next — so an expensive
+ * membership or attribution lookup inside `tree` is the adopter's to cache.
+ */
+export function createTree(tree: MountTreeSource): ResourceResolver {
   const resolve = typeof tree === "function" ? tree : () => tree;
-  const memo = new Map<string, Promise<MountTree>>();
-  const treeFor = (ctx?: OperationCtx): Promise<MountTree> => {
-    const key = ctx?.sessionId ?? "";
-    let t = memo.get(key);
-    if (t === undefined) {
-      t = Promise.resolve(resolve(ctx as OperationCtx));
-      memo.set(key, t);
-    }
-    return t;
-  };
   return async (uri, ctx) => {
-    const mounts = await treeFor(ctx);
+    const mounts = await resolve(ctx);
     const { scheme, path } = splitUri(uri);
-    const { path: clean } = takeCursor(path);
+    const { path: requested } = takeCursor(path);
+    const clean = canonicalHome(requested);
+    if (clean === undefined) throw new ResourceNotFound({ uri });
     if (clean === "") return [rootListing(scheme, mounts)];
     const prefix = longestMount(clean, mounts);
-    if (prefix === undefined) throw new Error(`resources: no mount for "${clean}"`);
+    if (prefix === undefined) throw new ResourceNotFound({ uri });
     return mounts[prefix].resolver(uri, ctx);
   };
 }
@@ -170,7 +212,7 @@ function rootListing(scheme: string, mounts: MountTree): ResourceContents {
 export function registerTree(
   resources: Pick<Resources, "register" | "registerTemplate">,
   scheme: string,
-  tree: MountTree | ((ctx: OperationCtx) => MountTree | Promise<MountTree>),
+  tree: MountTreeSource,
   meta?: ResourceMeta,
 ): Unsubscribe {
   const resolver = createTree(tree);

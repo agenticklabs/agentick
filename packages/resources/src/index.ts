@@ -39,11 +39,14 @@ export {
   createTree,
   registerTree,
   type MountStore,
+  type MountListQuery,
+  type MountOptions,
   type Child,
   type Page,
   type MountProjection,
   type Mount,
   type MountTree,
+  type MountTreeSource,
 } from "./mounts.js";
 
 // ── Durable backing (data-layer plan §6-C, Phase 5 run #9) ──

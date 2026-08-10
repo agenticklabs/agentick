@@ -172,19 +172,27 @@ resources.notifyUpdated("config://app.json"); // a provider signals its backing 
 
 A keyed store — anything with `get` and `listChildren` — can be exposed as a browsable tree and have its addresses rewritten at a single boundary on the way to the model. Three composable functions over the resolver primitive, none a harness method:
 
-| Function                            | Does                                                                          |
-| ----------------------------------- | ----------------------------------------------------------------------------- |
-| `storeResolver(store, projection?)` | a `{ get, listChildren }` store → a resolver, optionally through a projection |
-| `mount(resolver, meta?)`            | a resolver at a prefix, with a name + description                             |
-| `createTree(tree)`                  | many mounts → one resolver; `tree` is static or `(ctx) => tree`               |
+| Function                                      | Does                                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------------------- |
+| `storeResolver(store, projection?, options?)` | a `{ get, listChildren }` store → a resolver, optionally through a projection |
+| `mount(resolver, meta?)`                      | a resolver at a prefix, with a name + description                             |
+| `createTree(tree)`                            | many mounts → one resolver; `tree` is static or `(ctx) => tree`               |
+
+A projection is yours to write — this package ships the seam, not a library of scopes. `userScope` below is adopter code: a `{ toInternal, toHome }` pair closing over whatever the ctx says about the caller.
 
 ```ts
+const userScope = (owner: string): MountProjection => ({
+  toInternal: (home) => `users/${owner}/${home}`,
+  toHome: (key) =>
+    key.startsWith(`users/${owner}/`) ? key.slice(`users/${owner}/`.length) : undefined,
+});
+
 const tree = createTree((ctx) => ({
-  notes: mount(storeResolver(collection, principalScoped(ownerOf(ctx))), {
+  notes: mount(storeResolver(collection, userScope(ownerOf(ctx))), {
     name: "Notes",
     description: "Personal notes and preferences",
   }),
-  clients: mount(storeResolver(collection, tenantScoped(ownerOf(ctx))), {
+  clients: mount(storeResolver(collection, tenantScope(ownerOf(ctx)), { limit: 50 }), {
     name: "Clients",
     description: "What the business knows about each client",
   }),
@@ -199,15 +207,23 @@ registerTree(session.resources, "knowledge://", tree);
 
 The model reads `knowledge://` and gets a listing of those directories, each with its description; reads `knowledge://notes/afman.md` and gets a document; reads `knowledge://clients` and gets that subtree. It never sees the internal keys the store is organized under — that is the projection's job.
 
-`MountStore` is content-shaped (its `get` returns rendered `ResourceContents`) and browsable (`listChildren` returns `Child` entries) — distinct from the durable declaration `ResourceStore` below. `storeResolver` decides leaf vs directory **structurally**: `get` returns content for a leaf and `undefined` for a directory, at which point it lists children. No extension sniffing — what is a leaf is the store's answer, not the router's guess.
+`MountStore` is content-shaped (its `get` returns rendered `ResourceContents`) and browsable (`listChildren` returns `Child` entries) — distinct from the durable declaration `ResourceStore` below. `storeResolver` decides leaf vs directory **structurally**: `get` returns content for a leaf and `undefined` for a directory, at which point it lists children. No extension sniffing — what is a leaf is the store's answer, not the router's guess. Because a store holds no directory rows, an empty prefix and a nonexistent one read alike; a store that needs to tell them apart needs a tri-state `listChildren`, which this port does not have.
 
 ### The projection is one boundary
 
-A `MountProjection` is a stateless `{ toInternal, toHome }` pair. `toHome` is the **only** place a store key becomes a model-facing address, and it runs in exactly one spot: `storeResolver`'s outbound pass, which rewrites every emitted uri and **drops** any child whose key does not project (`toHome` → `undefined`). Fail-closed by construction — an address is emitted only if it maps back, so an id-bearing key cannot leak and a dead link cannot form. Omitting the projection serves the store's keys verbatim, which is what `global/`, skills, and prompts want.
+A `MountProjection` is a stateless `{ toInternal, toHome }` pair. `toHome` is the **only** place a store key becomes a model-facing **address**, and it runs in exactly one spot: `storeResolver`'s outbound pass. Every address is minted from it — the requested path itself, each child, and a leaf's own uri — so a path that does not project back is not-found on a direct read, not just absent from a listing. Fail-closed by construction: an address is emitted only if it maps back, so an id-bearing key cannot leak and a dead link cannot form. A path only reaches `toInternal` in canonical form (no `.`, `..`, or empty segment; a trailing slash is dropped), which is what keeps `tenants/42/../43` from round-tripping through a normalizing store. Omitting the projection serves the store's keys verbatim, which is what `global/`, skills, and prompts want.
+
+The boundary governs addresses and nothing else. A leaf's **content** passes through untouched — the framework cannot scrub a body it does not know the format of, so a document whose frontmatter renders an internal id leaks it. Emitting a safe body is the store's job (an adapter's metadata allowlist), not this seam's.
+
+### Paging
+
+`Page.cursor` is model-facing: `storeResolver` embeds it verbatim in the listing's `nextPage` address, and the model reads that address back. So **a cursor must carry no isolation id** — the relative child name is the canonical choice. A store keying its cursor on an internal record id publishes that id, and no projection is positioned to catch it. `storeResolver(store, projection, { limit })` requests a page size; omitted, the store's own default applies.
 
 ### Routing and the root
 
-`createTree` routes an incoming path by **longest-prefix** match (segment-aware — `clients/jo` is not under `clients/johnson/`) and delegates to that mount's resolver. Reading the empty path merges a root listing carrying each mount's `meta.description` — the same one line that feeds the `resource_list` catalog and the system-prompt workspace legend, generated from the tree so it cannot drift. The computed form `(ctx) => tree` is resolved **once per session and memoized by `ctx.sessionId`**, never per read, so a per-principal membership lookup never lands on the hot path. `registerTree` is the convenience that wires the root `register` plus the `{+path}` descent template in one call.
+`createTree` routes an incoming path by **longest-prefix** match (segment-aware — `clients/jo` is not under `clients/johnson/`) and delegates to that mount's resolver; a path matching no mount is `ResourceNotFound`, the same typed error a missing resource gets. Reading the empty path merges a root listing carrying each mount's `meta.description` — the same one line that feeds the `resource_list` catalog and the system-prompt workspace legend, generated from the tree so it cannot drift. `registerTree` is the convenience that wires the root `register` plus the `{+path}` descent template in one call.
+
+The computed form `(ctx) => tree` is invoked **on every read**, and deliberately not memoized: `ctx.sessionId` is optional, so a cache keyed on it collapses every ctx that lacks one into a single entry and serves one principal's tree to the next. Building a handful of mount objects is cheap; an expensive attribution or membership lookup inside `tree` is **yours to cache**, in your attribution port, which is the only layer holding a principal identity it can trust.
 
 ## Durable backing
 
@@ -275,6 +291,7 @@ One more `resources/*` row is reachable without any handle code: `await resource
 | `storeResolver` / `mount` / `createTree`             | Compose a `MountStore` into a browsable, projected resolver  |
 | `registerTree(resources, scheme, tree, meta?)`       | Wire a tree's root + `{+path}` descent template in one call  |
 | `MountStore` / `MountProjection` / `Mount` (types)   | The store port, the address seam, the resolver-with-meta     |
+| `MountListQuery` / `MountOptions` (types)            | The `listChildren` query, and the mount's page-size request  |
 | `InMemoryResourceStore` / `matchesResourceQuery`     | The bundled default store and its query matcher              |
 | `fromArray` / `fromModule`                           | Loader factories for the durable source                      |
 | `compileUriTemplate` / `matchesTemplate`             | The URI-template matcher                                     |
@@ -322,14 +339,14 @@ Errors: `ResourceNotFound`, `ResourceAlreadyRegistered`, `ResourceResolverFailed
 
 ### `@agentick/resources/testing`
 
-| Export                                 | Purpose                                                        |
-| -------------------------------------- | -------------------------------------------------------------- |
-| `fakeResources(options?)`              | A real instance on an in-memory substrate — the default choice |
-| `stubResources({ contents })`          | Canned-answer double, no substrate round-trip                  |
-| `runResourcesHarnessConformance(...)`  | Certify an alternate registry implementation                   |
-| `runResourceStoreConformance(...)`     | Certify a durable store adapter                                |
-| `fakeMountStore({ leaves, children })` | A working in-memory `MountStore` for mount tests               |
-| `runResourceMountConformance(...)`     | Certify a `MountStore` through the mount machinery             |
+| Export                                           | Purpose                                                        |
+| ------------------------------------------------ | -------------------------------------------------------------- |
+| `fakeResources(options?)`                        | A real instance on an in-memory substrate — the default choice |
+| `stubResources({ contents })`                    | Canned-answer double, no substrate round-trip                  |
+| `runResourcesHarnessConformance(...)`            | Certify an alternate registry implementation                   |
+| `runResourceStoreConformance(...)`               | Certify a durable store adapter                                |
+| `fakeMountStore({ leaves, children, cursors? })` | A working in-memory `MountStore` for mount tests               |
+| `runResourceMountConformance(...)`               | Certify a `MountStore` through the mount machinery             |
 
 ## Patterns
 
@@ -365,6 +382,8 @@ The resolver lives with the sandbox because it depends on the sandbox handle. Th
 - **The MCP `filter` gates fixed resources only.** A templated read carries no fixed descriptor, so it bypasses the filter.
 - **No delta channel for the client handle.** The browser snapshot is poll-seeded; a live mirror waits on the generic client channel-consumer work, so `list()` is only as fresh as the last poll or mutation.
 - **Templates only appear on the first page of `resource_list`.** They have their own cursor space; full template pagination means calling `listTemplates` directly.
+- **A mount projects addresses, not content.** A leaf body that names an internal id still names it; scrubbing one belongs to the store or its adapter, which is the only layer that knows the format.
+- **A mount cannot distinguish an empty directory from a missing one.** A `MountStore` holds no directory rows, so both list as empty. Telling them apart needs a tri-state `listChildren`, which is not built.
 
 ## Verified by
 
@@ -375,6 +394,6 @@ The resolver lives with the sandbox because it depends on the sandbox handle. Th
 - `src/__tests__/tools.spec.ts` — `resource_list` enumerating fixed resources and templates, `resource_read` returning first-class resource blocks, a typed error surfaced rather than swallowed, honest degradation with no registry present, and `withResources` registering both tools by default and suppressing them under `registerModelTools: false`.
 - `src/react/__tests__/resource.spec.tsx` — `<Resource>` registering and reading through all three content sources, a template resolving the concrete matched uri, unmount unregistering, and the catalog projection folding a tagged section, contributing nothing when empty, and yielding to a `<Project>` override.
 - `src/client/__tests__/resources-handle.spec.ts` and `session-resources.spec.ts` — the eager seed notifying subscribers when it lands, a failed seed settling empty and recovering on `refresh()`, `list()` / `get()` reflecting the poll, `read` and `listTemplates` as pure RPC with no follow-up list, the zero-argument `subscribe` contract, and importing `/client` self-assembling `session.resources` over a transport.
-- `src/__tests__/mount.spec.ts` — the mount machinery through a real `ResourcesHarness`: `registerTree` wiring the root plus `{+path}` descent, a leaf and a directory reading back under home addresses, and no internal key surviving into the read. It also runs `runResourceMountConformance` (`src/mount-conformance.ts`) against `fakeMountStore`: get / list round-trip, the fail-closed drop of a non-projecting child, id-elision (no internal-key substring in the whole serialized response), longest-prefix routing with segment-aware boundary correctness, per-session memoization of a computed tree, and the root merge listing each mount's description.
+- `src/__tests__/mount.spec.ts` — the mount machinery through a real `ResourcesHarness`: `registerTree` wiring the root plus `{+path}` descent, a leaf and a directory reading back under home addresses, and no internal key surviving into the read. Then the address boundary directly: a parent traversal, a `.` segment, and an empty leading or interior segment each rejected as `ResourceNotFound` before the store is asked for a key; a trailing slash naming the same directory rather than an empty one; an unroutable path failing typed rather than as a bare crash; and a mount's `limit` plus a listing's own `nextPage` cursor both arriving at `listChildren` as a query. It also runs `runResourceMountConformance` (`src/mount-conformance.ts`) against `fakeMountStore`: get / list round-trip with a child's whole `meta` carried, the fail-closed drop of a non-projecting child **and** not-found on reading that child directly, id-elision over the whole serialized response including a `nextPage` built from a real cursor, longest-prefix routing with segment-aware boundary correctness, a computed tree rebuilt per read so no ctx serves another's tree, and the root merge listing each mount's description.
 - Alias behavior is covered where its motivating consumer lives, in [@agentick/mcp](../mcp): a documented upstream uri staying readable without doubling the catalog, `has` answering for registered uris only, two claimants refusing to guess (asserted on the `ResourceAliasAmbiguous` tag and its `candidates`, not the message), an alias becoming unambiguous when one claimant goes away, and an adversarial test that an impostor's self-reported name cannot shadow another server's namespace.
 - [@agentick/app](../app) proves the single construction site: `installer.resources` is `session.resources`, and `resource_read` reaches that same instance through `ctx.resource` over a real dispatch round-trip.
