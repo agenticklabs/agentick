@@ -31,6 +31,38 @@ framework by being well-worn in the application first.
 
 ### W41 · A reflection's COST and its STRUCTURE both stop at the boundary · [framework]
 
+> **Structure: done** — `reflect({ output })` → validated `ReflectResult.data`
+>
+> Landed on `feat/reflect-structured-output`. `ReflectInput` gained `output`
+> (live schema) and `responseFormat` (declarative twin) — the SAME field names
+> `SendInput` carries — and `ReflectResult` gained `data`, mirroring
+> `SendResult.data`. Failure semantics are `send`'s, not a third set:
+> `ResponseValidationError` on a violating reply, `StructuredOutputIncomplete`
+> on a reply that never calls the terminal tool.
+>
+> **The `tools: []` question resolved differently than expected.** The worry was
+> that an explicit empty `tools` array bypassed the `allowedTools` terminal-tool
+> exemption. It does not, because `reflect` never enters the loop at all — it
+> runs `project → execute → normalize` on the model executor directly, so the
+> loop's §B2 injection was structurally unreachable, not filtered out. The
+> withholding also sat in the wrong place: `withInstruction` cleared a tool list
+> the projection had just built. The decision moved to where the projection is
+> requested (`session.project(tree?, tools?)`), so one site says what a
+> reflection advertises: nothing, or the terminal tool.
+>
+> **The mechanism is now shared, not mirrored.** `terminalToolDeclaration`,
+> `resolveOutputStrategy` and `validateStructuredOutput` moved out of the loop
+> into `@agentick/spec`'s `data/structured-output.ts`; the loop and the
+> reflection pass both call them, so the two paths cannot drift. Two things fell
+> out: the terminal tool now carries `annotations: { narrate: false }` — the
+> projected `_summary` property was landing in the arguments that ARE the answer
+> — and `"submit_result"` is one constant instead of three literals.
+>
+> **Deliberately NOT done.** `rollingSummary` still regexes `<questions>` out of
+> the prose. Converting it is the item's own open question ("whether structured
+> output makes summaries WORSE"), and it wants a measurement, not a refactor;
+> the capability it needs now exists. The USAGE half below is untouched.
+
 **Want.** Two gaps with one cause — the reflection pass returns rich data and the
 callers receive a narrowed shape.
 
@@ -63,19 +95,25 @@ seam being lossy. A `reflect()` that could return a typed object would carry
   `inputSchema` is the output schema, filtered out of dispatch, with a synthesized
   `tool_result` to keep the span closed. That is the mechanism that works
   everywhere.
-- `withInstruction` sets `tools: []`, which forecloses exactly that mechanism.
+- ~~`withInstruction` sets `tools: []`, which forecloses exactly that mechanism.~~
+  Fixed — see the done note above; the cause was that `reflect` bypasses the
+  loop, not the empty array.
 
 **Done when.** `compact()` returns what the fold cost; and a reflection can be
-asked for a typed object without a regex, on every provider.
+asked for a typed object without a regex, on every provider — the second clause
+is met.
 
 **Open — and worth deciding together, not one at a time.**
 
 - How usage crosses: `CompactRun` returns `{ entries, usage }`, or the ctx gains a
   `report(usage)` sink symmetric with the `progress` one it already has. The sink
   composes better with multi-call strategies.
-- Whether `reflect({ schema })` uses `responseFormat` (simple, silently degrades
-  on Claude) or the terminal-tool strategy (cross-provider, and it means
-  `tools: []` becomes `tools: [terminal]` with forced choice).
+- ~~Whether `reflect({ schema })` uses `responseFormat` or the terminal-tool
+  strategy.~~ **Decided: both, chosen by capability** — the same
+  `resolveOutputStrategy(0, capabilities)` a tick with no tools mounted uses. A
+  target with native `json_schema` decoding gets the directive; every other
+  target gets the terminal tool with `toolChoice` pinned from the START, since a
+  reflection has one shot and no wrap-up tick to spend.
 - **Whether structured output makes summaries WORSE.** A summary written into a
   JSON string field is not obviously as good as free prose, and the `<questions>`
   tag trick — ugly as it is — keeps the body as raw generation. Measure before
@@ -976,9 +1014,10 @@ Rough order, cheapest-and-most-certain first. **W40, W38, W36 and W39 are done**
 1. **W36's measurement** — take the round-trip capture the item asks for. It is
    the cheapest thing on this list and four other items lean on the claim it
    would prove. If `tools: []` costs the prefix, several arguments change.
-2. **W41** (usage + structure at the reflection boundary) — small, and W6 will
-   want the structured half immediately, so decide it before there are two
-   callers parsing prose instead of one.
+2. **W41** (usage + structure at the reflection boundary) — the STRUCTURE half is
+   done (`reflect({ output })` → validated `data`), so W6 can be written typed
+   from the start. What remains is the usage half: `CompactRun` returning what
+   the fold cost, or a `report(usage)` sink on the ctx.
 3. **W16** (drop the CoT dock tenant) — minutes; one template block.
 4. **W28** (agent todo lists) — a collection store plus a stateful tool. The
    app-owned-table question W27 raised is now answered by the `tasks` migration.
@@ -987,9 +1026,9 @@ Rough order, cheapest-and-most-certain first. **W40, W38, W36 and W39 are done**
 6. **W26** (feedback controls) — moved UP, ahead of the learning loop. It is the
    only ground-truth signal on this list, and its own item argues a negative
    rating is the right trigger for W7 rather than reflecting on every turn.
-7. **W6 → W8 → W7** — the learning loop. No longer blocked: `reflect()` exists,
-   so W6 is app work over a framework primitive that is already there. Build W41
-   first so the memories come back typed.
+7. **W6 → W8 → W7** — the learning loop. No longer blocked: `reflect()` exists
+   and now answers with a shape, so W6 is app work over a framework primitive
+   that is already there, and the memories come back typed.
 8. **W9, W10, W12, W11** — product-surface tools, independently shippable. W9
    first: it is also the delivery channel for W7.
 9. **W14** (media summaries at ingest) — the supply side for W4 and W5.

@@ -213,6 +213,9 @@ describe("structured output — injection", () => {
     expect(names).toContain("submit_result");
     // Terminal is LAST (after the cache-stable prefix).
     expect(names[names.length - 1]).toBe("submit_result");
+    // Narration off: `_summary` would be projected into the terminal tool's
+    // arguments, and those arguments ARE the answer.
+    expect(executor.seenRuns[0]!.tools.at(-1)!.annotations?.narrate).toBe(false);
     await dispose();
   });
 

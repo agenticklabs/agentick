@@ -101,6 +101,7 @@ import type {
   RunExecutionInput,
   StopCause,
   SpecConfig,
+  StructuredOutputCapture,
   TickInput,
   TickResult,
   ToolCall,
@@ -118,11 +119,14 @@ import {
   ResponseValidationError,
   StructuredOutputIncomplete,
   TerminalToolNameCollision,
+  DEFAULT_TERMINAL_TOOL_NAME,
   foldUsageRollup,
-  parseJsonWithSchema,
+  resolveAutoStrategy,
   resolveTickCost,
+  terminalToolDeclaration,
   toJsonSchema,
   toRegistration,
+  validateStructuredOutput,
 } from "@agentick/spec";
 import { mergeAbortSignals, omitUndefined } from "@agentick/utils";
 
@@ -801,51 +805,29 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       // §B3 fix #3 — the LOOP is the structured-output validation authority.
       // The resolved schema (send-level `input.outputSpec` OR the tree-resolved
       // `<Output>`, lifted from the ticks) is always in loop scope, so validate
-      // HERE — this closes the former tree-data gap: a tree-only `<Output>`
-      // now produces a validated `data`, not just an enforced completion.
-      //   - tool strategy: validate the terminal tool's raw captured input.
-      //   - responseFormat strategy: parse + validate the final assistant text
-      //     (the concatenated `output` — identical to the string the session
-      //     built before). Only when an output directive exists; a bare
-      //     `responseFormat` send WITHOUT `output`/tree-`<Output>` keeps its
-      //     no-validation behavior (no `outputSchema` was lifted).
-      // A supplied schema that isn't met fails the execution with the typed
-      // `ResponseValidationError` (errors over nulls) — same error type + raw +
-      // issues the session raised before, now surfaced loop-side.
+      // HERE — this closes the former tree-data gap: a tree-only `<Output>` now
+      // produces a validated `data`, not just an enforced completion. A bare
+      // `responseFormat` send WITHOUT `output`/tree-`<Output>` lifted no schema
+      // and so keeps its no-validation behavior.
+      const capture: StructuredOutputCapture | undefined =
+        terminalCapture !== undefined
+          ? { strategy: "tool", input: terminalCapture.input }
+          : terminalStrategy === "responseFormat"
+            ? {
+                strategy: "responseFormat",
+                text: acc.output
+                  .filter((b): b is { type: "text"; text: string } => b.type === "text")
+                  .map((b) => b.text)
+                  .join(""),
+              }
+            : undefined;
       let data: { readonly value: unknown } | undefined;
-      if (outputSchema !== undefined) {
-        if (terminalCapture !== undefined) {
-          const validated = yield* Effect.promise(() =>
-            Promise.resolve(outputSchema!["~standard"].validate(terminalCapture!.input)),
-          );
-          if (validated.issues !== undefined) {
-            return yield* Effect.fail(
-              new ResponseValidationError({
-                raw: terminalCapture.input,
-                issues: validated.issues,
-              }),
-            );
-          }
-          data = { value: validated.value };
-        } else if (terminalStrategy === "responseFormat") {
-          const finalText = acc.output
-            .filter((b): b is { type: "text"; text: string } => b.type === "text")
-            .map((b) => b.text)
-            .join("");
-          const parsed = yield* Effect.promise(() => parseJsonWithSchema(finalText, outputSchema!));
-          if (!parsed.ok) {
-            return yield* Effect.fail(
-              new ResponseValidationError({
-                raw: parsed.text,
-                issues: parsed.issues,
-                ...(parsed.reason === "invalid-json"
-                  ? { message: "structured output is not valid JSON" }
-                  : {}),
-              }),
-            );
-          }
-          data = { value: parsed.value };
-        }
+      if (outputSchema !== undefined && capture !== undefined) {
+        const validated = yield* Effect.promise(() =>
+          validateStructuredOutput(outputSchema!, capture),
+        );
+        if ("error" in validated) return yield* Effect.fail(validated.error);
+        data = { value: validated.value };
       }
 
       const runResult: ExecutionRunResult = {
@@ -1601,17 +1583,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
 // ============================================================================
 
 /**
- * Default terminal-tool instruction (§B2). The tool IS the instruction — its
- * presence in the tick's tool list is the "when the task is complete, call
- * this with the final answer" context (per-execution because the binding is
- * per-execution). Overridable on the output spec (`description`).
- */
-const DEFAULT_TERMINAL_DESCRIPTION =
-  "When the task is complete, call this tool with the final result. Its " +
-  "arguments ARE the required answer shape — provide the final answer here " +
-  "rather than as prose.";
-
-/**
  * Synthesized content for the terminal tool's `tool_result` (§B2). The call is
  * the completion event; there is no handler to run, so the result is a fixed
  * acknowledgement that pairs the tool_use in the persisted timeline.
@@ -1619,68 +1590,6 @@ const DEFAULT_TERMINAL_DESCRIPTION =
 const TERMINAL_RESULT_CONTENT: readonly ContentBlock[] = [
   { type: "text", text: "Result recorded." },
 ];
-
-/**
- * The synthetic structured-output terminal tool (§B2). Its `inputSchema` IS
- * the output schema. NEVER registered (no `handlerRef` — the spec firewall,
- * and dispatch of an unregistered handler is a ToolHandlerMissing error): the
- * LOOP appends it to the model-facing tools list and filters its call out of
- * the dispatch set.
- */
-function terminalToolDeclaration(spec: OutputSpec): ToolDeclaration {
-  return {
-    id: spec.toolName,
-    name: spec.toolName,
-    description: spec.description ?? DEFAULT_TERMINAL_DESCRIPTION,
-    inputSchema: spec.schema,
-    exposure: ["model"],
-  };
-}
-
-/**
- * Resolve the `"auto"` structured-output strategy against the tick's tool
- * count + the target's capabilities (three-audiences-plan §B3 fix #1). The
- * pre-B3 policy keyed ONLY on `modelTools > 0`, so a bare `output` send to a
- * target WITHOUT native `json_schema` (e.g. Anthropic — its adapter drops
- * `responseFormat`) resolved to `responseFormat` and reliably failed
- * validation. The terminal-tool strategy is provider-agnostic (tool arguments
- * are constrained natively by every provider), so it is the correct default
- * whenever native structured decoding is absent.
- *
- * Truth table (auto only — an explicit `strategy` on the OutputSpec bypasses
- * this):
- *
- * | tools mounted | supportsJsonSchema | supportsTools | → strategy       |
- * | ------------- | ------------------ | ------------- | ---------------- |
- * | yes           | any                | not false     | tool             |
- * | no            | true               | any           | responseFormat   |
- * | no            | false / unset      | not false     | tool             |
- * | any (wanted tool) | —              | false         | responseFormat † |
- *
- * † The DOUBLE-GAP fallback: the target supports NEITHER native json_schema
- * NOR tools (a text-only model). A tool strategy the provider cannot honor is
- * strictly worse than `responseFormat` (validation still catches
- * non-adherence downstream), so fall back. `supportsTools` and
- * `supportsJsonSchema` both default to their SAFE assumption when unset:
- * tools default present (`!== false`), json_schema default ABSENT (`?? false`)
- * — an unset target is treated as the common tool-capable / no-native-schema
- * provider, which the terminal tool serves.
- *
- * TODO(loop-log): emit a `ctx.log` warning naming the double-gap once the log
- * facet is threaded into the loop tick body (the loop has no `ctx.log` yet —
- * the interceptor-ctx log facet is currently tool-executor + session only).
- */
-function resolveAutoStrategy(
-  modelToolCount: number,
-  capabilities: import("@agentick/spec").TargetCapabilities | undefined,
-): "tool" | "responseFormat" {
-  const supportsJsonSchema = capabilities?.supportsJsonSchema ?? false;
-  const supportsTools = capabilities?.supportsTools;
-  const wantsTool = modelToolCount > 0 || !supportsJsonSchema;
-  if (!wantsTool) return "responseFormat";
-  // Double gap — wants a tool strategy but the target cannot do tools at all.
-  return supportsTools === false ? "responseFormat" : "tool";
-}
 
 /**
  * Derive an {@link OutputSpec} from the tree-level `<Output>` declaration
@@ -1694,7 +1603,7 @@ function outputSpecFromTree(
   const decl = outputs[0];
   if (decl?.schema === undefined) return undefined;
   return {
-    toolName: decl.name ?? "submit_result",
+    toolName: decl.name ?? DEFAULT_TERMINAL_TOOL_NAME,
     ...(decl.description !== undefined ? { description: decl.description } : {}),
     schema: decl.schema,
     strategy: decl.strategy ?? "auto",
