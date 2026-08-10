@@ -58,7 +58,9 @@ import type {
   SubstrateError,
   TaskHandle,
   TasksHarnessProtocol,
+  ToolAnnotations,
   ToolConfirmationPolicy,
+  ToolConfirmationResolution,
   ToolDeclaration,
   ToolExecutorErrorChannel,
   ToolExecutorFx,
@@ -156,8 +158,6 @@ export class ToolExecutorHarness
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
   private readonly inFlight = new Map<string, InFlightEntry>();
-  /** Tool names the host has marked `always` for this session. */
-  private readonly alwaysAllowed = new Set<string>();
   private readonly stateStore = new Map<string, unknown>();
   private readonly defaultTimeoutMs?: number;
   private readonly defaultConfirmationTimeoutMs?: number;
@@ -998,9 +998,11 @@ export class ToolExecutorHarness
       // Applies to client-handled tools too — they gate BEFORE relaying.
       const requiresConfirmation = reg.declaration.annotations?.requiresConfirmation;
       const toolVerdict =
-        typeof requiresConfirmation === "function"
-          ? yield* Effect.promise(() => Promise.resolve(requiresConfirmation(validated, ctx)))
-          : requiresConfirmation === true;
+        requiresConfirmation === undefined
+          ? hintedConfirmationVerdict(reg.declaration.annotations)
+          : typeof requiresConfirmation === "function"
+            ? yield* Effect.promise(() => Promise.resolve(requiresConfirmation(validated, ctx)))
+            : requiresConfirmation === true;
       // The deployment-wide policy gets the FINAL say, with the tool's own
       // verdict in hand — force, suppress, or defer. Session-scoped `always`
       // grants (a user's confirmation reply) still short-circuit below.
@@ -1013,7 +1015,18 @@ export class ToolExecutorHarness
               ),
             )
           : toolVerdict;
-      if (needsConfirmation && !this.alwaysAllowed.has(input.name)) {
+      // A decision is keyed by the declaration's own name: `input.name` may be
+      // an alias the registry resolved, and a store keyed on the alias
+      // recognizes nothing when the next call arrives under the real name.
+      const canonicalName = reg.declaration.name;
+      let confirmation: ToolConfirmationResolution | undefined;
+      if (needsConfirmation) {
+        const asked = {
+          toolUseId: input.toolCallId,
+          toolName: canonicalName,
+          sessionId: input.context.sessionId ?? this.scopeId,
+          arguments: validated as Record<string, unknown>,
+        } as const;
         const confirmationTimeoutMs =
           reg.declaration.annotations?.confirmationTimeoutMs ??
           input.confirmationTimeoutMs ??
@@ -1031,7 +1044,7 @@ export class ToolExecutorHarness
         const message =
           (typeof confirmationMessage === "function"
             ? yield* Effect.promise(() => Promise.resolve(confirmationMessage(validated, ctx)))
-            : confirmationMessage) ?? `Approve tool "${input.name}"?`;
+            : confirmationMessage) ?? `Approve tool "${canonicalName}"?`;
         const confirmationPreview = confirmationAnnotations?.confirmationPreview;
         const preview =
           confirmationPreview !== undefined
@@ -1048,7 +1061,7 @@ export class ToolExecutorHarness
             hints: { kind: TOOL_CONFIRMATION_KIND },
             metadata: {
               toolUseId: input.toolCallId,
-              toolName: input.name,
+              toolName: canonicalName,
               arguments: validated as Record<string, unknown>,
               ...(preview !== undefined ? { preview } : {}),
             },
@@ -1072,6 +1085,7 @@ export class ToolExecutorHarness
             new ToolConfirmationTimeoutError({
               toolName: input.name,
               ms: confirmationTimeoutMs ?? 0,
+              confirmation: { ...asked, outcome: "timeout" },
             }),
           );
         }
@@ -1079,7 +1093,8 @@ export class ToolExecutorHarness
         // Approval requires accepted + reply.approved === true. Every
         // other path — declined, cancelled, failed.aborted,
         // failed.schema_violation, or accepted-with-approved-false —
-        // is a denial.
+        // refuses the dispatch. Only the ANSWERED refusals are reported as
+        // denials: an ask torn down by an abort was never decided.
         const reply = extractReply(elicitResult);
         const approved = reply?.approved === true;
 
@@ -1107,14 +1122,19 @@ export class ToolExecutorHarness
             // means "who ran the tool"; on a denial that is the framework.
             executedBy: "agentick",
             durationMs: 0,
+            confirmation: {
+              ...asked,
+              outcome: wasAborted(elicitResult) ? "aborted" : "denied",
+              ...omitUndefined({ reason: denyReason }),
+            },
           };
           return denialResult;
         }
 
-        if (reply!.always === true) this.alwaysAllowed.add(input.name);
-
         // Re-validate when the host returns modifiedArguments — the
-        // user may have edited the call before approving.
+        // user may have edited the call before approving. An edit that fails
+        // validation rejects the dispatch, so the approval record below is
+        // never written: the approved call never ran.
         if (reply!.modifiedArguments !== undefined) {
           const revalidated = yield* Effect.tryPromise({
             try: async () => validator.validate(reply!.modifiedArguments),
@@ -1130,6 +1150,15 @@ export class ToolExecutorHarness
           }
           validated = revalidated.value;
         }
+
+        confirmation = {
+          ...asked,
+          outcome: "approved",
+          ...omitUndefined({
+            always: reply!.always,
+            modifiedArguments: reply!.modifiedArguments,
+          }),
+        };
       }
 
       // ─── Tool-call presentation (Pass B) ────────────────────────────
@@ -1283,6 +1312,7 @@ export class ToolExecutorHarness
           executedBy: "client",
           durationMs: Date.now() - started,
           presentation,
+          ...(confirmation !== undefined ? { confirmation } : {}),
         };
         return clientResult;
       }
@@ -1519,6 +1549,7 @@ export class ToolExecutorHarness
           executedBy: reg.declaration.annotations?.executedBy ?? "agentick",
           durationMs: Date.now() - started,
           presentation,
+          ...(confirmation !== undefined ? { confirmation } : {}),
         };
         return dispatchResult;
       }
@@ -1618,21 +1649,43 @@ function isTaggedToolError(value: unknown): value is { readonly _tag: string } {
   );
 }
 
+type ConfirmationElicitResult =
+  | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
+  | { readonly outcome: "declined"; readonly reason?: string }
+  | { readonly outcome: "cancelled"; readonly reason?: string }
+  | {
+      readonly outcome: "failed";
+      readonly failure: { readonly kind: string; readonly reason?: string };
+    };
+
 /**
  * Pull the validated reply out of an `accepted` elicitation result.
  * Returns `undefined` for any other outcome.
  */
-function extractReply(
-  result:
-    | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
-    | { readonly outcome: "declined"; readonly reason?: string }
-    | { readonly outcome: "cancelled"; readonly reason?: string }
-    | {
-        readonly outcome: "failed";
-        readonly failure: { readonly kind: string; readonly reason?: string };
-      },
-): ToolConfirmationReply | undefined {
+function extractReply(result: ConfirmationElicitResult): ToolConfirmationReply | undefined {
   return result.outcome === "accepted" ? result.value : undefined;
+}
+
+/**
+ * The verdict for a tool that declared none of its own. Read-only wins over
+ * destructive because MCP defines `destructiveHint` as meaningful only when
+ * `readOnlyHint` is false — a server may advertise both.
+ */
+function hintedConfirmationVerdict(annotations: ToolAnnotations | undefined): boolean {
+  if (annotations?.readOnlyHint === true) return false;
+  return annotations?.destructiveHint === true;
+}
+
+/**
+ * The ask was torn down rather than answered — the caller's signal aborted
+ * or the host cancelled the prompt. Distinct from a decline, which IS an
+ * answer.
+ */
+function wasAborted(result: ConfirmationElicitResult): boolean {
+  return (
+    result.outcome === "cancelled" ||
+    (result.outcome === "failed" && result.failure.kind === "aborted")
+  );
 }
 
 /**
@@ -1641,14 +1694,7 @@ function extractReply(
  * failure-kind label.
  */
 function denialReason(
-  result:
-    | { readonly outcome: "accepted"; readonly value: ToolConfirmationReply }
-    | { readonly outcome: "declined"; readonly reason?: string }
-    | { readonly outcome: "cancelled"; readonly reason?: string }
-    | {
-        readonly outcome: "failed";
-        readonly failure: { readonly kind: string; readonly reason?: string };
-      },
+  result: ConfirmationElicitResult,
   reply: ToolConfirmationReply | undefined,
 ): string | undefined {
   if (reply !== undefined) return reply.reason;

@@ -236,6 +236,14 @@ export interface DispatchResult {
    * before the resolution point (e.g. a confirmation denial).
    */
   readonly presentation?: ToolPresentation;
+  /**
+   * How the confirmation gate settled, when the gate asked at all. Absent
+   * for a dispatch nobody was asked about. The framework publishes the
+   * decision and forgets it — an interceptor reading this is how a `reply.
+   * always` grant becomes durable (see {@link ToolConfirmationResolution}).
+   * A `timeout` rejects instead, carrying the same record on the error.
+   */
+  readonly confirmation?: ToolConfirmationResolution;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -553,36 +561,38 @@ export interface ToolListFilter {
 // ============================================================================
 
 /**
- * Telemetry shape — describes a confirmation request the harness is
- * about to send for a tool annotated `requiresConfirmation`. Surfaced
- * on the {@link ToolConfirmationRequested} lifecycle event for
- * observability + audit. NOT a wire payload anymore: the actual wire
- * format is an elicitation request on `session:channel:elicitation`
- * (carrying `hints.kind === "tool_confirmation"` and these fields
- * inside `metadata`).
+ * How one confirmation ask ended. Covers both un-answered cases, so the
+ * outcome is a four-arm discriminator rather than the host's `approved`
+ * boolean: a `timeout` is nobody deciding and an `aborted` is nobody being
+ * asked any more — neither is a denial. A `declined` reply IS one.
+ *
+ * Published on {@link DispatchResult.confirmation} for the three arms that
+ * resolve, and on `ToolConfirmationTimeoutError.confirmation` for the one
+ * that rejects — so an interceptor around the dispatch sees every decision.
+ * NOT a wire payload: an answer arrives as an `ElicitationResponse` carrying
+ * `approved` / `always` / `modifiedArguments` inside `value`.
  */
-export interface ToolConfirmationRequest {
+export interface ToolConfirmationResolution {
   readonly toolUseId: string;
-  readonly name: string;
+  /**
+   * The CANONICAL tool name — the declaration's own `name`, never the alias
+   * a caller happened to dispatch by. A grant store keyed on an alias grants
+   * nothing when the next call comes in under the real name.
+   */
+  readonly toolName: string;
+  /** The session whose gate asked — the scope any grant written from this belongs to. */
+  readonly sessionId: string;
+  readonly outcome: "approved" | "denied" | "timeout" | "aborted";
+  /** The validated arguments the ask carried, before any host edit. */
   readonly arguments: Readonly<Record<string, unknown>>;
-  readonly message?: string;
-  /** May carry `DiffPreviewMetadata` and similar UI hints. */
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-/**
- * Telemetry shape — describes a host's response to a confirmation
- * request. Surfaced on the {@link ToolConfirmationResolved} lifecycle
- * event. `always: true` is a session-scoped allow-list the harness
- * remembers; `modifiedArguments` triggers a re-validation pass before
- * the handler runs. NOT a wire payload: the actual wire format is an
- * `ElicitationResponse` carrying these fields inside `value`.
- */
-export interface ToolConfirmationResponse {
-  readonly toolUseId: string;
-  readonly approved: boolean;
-  readonly reason?: string;
+  /**
+   * The host asked for a standing grant. The framework RELAYS it and forgets
+   * it — remembering a decision is application policy, written from this
+   * record and read back through {@link ToolConfirmationPolicy}.
+   */
   readonly always?: boolean;
+  readonly reason?: string;
+  /** The host edited the call before approving; re-validated before the handler ran. */
   readonly modifiedArguments?: Readonly<Record<string, unknown>>;
 }
 
@@ -601,8 +611,6 @@ export interface ToolConfirmationResponse {
 export type ToolLifecycleEvent =
   | ToolDispatchRequested
   | ToolValidationFailed
-  | ToolConfirmationRequested
-  | ToolConfirmationResolved
   | ToolHandlerStarted
   | ToolHandlerCompleted
   | ToolHandlerErrored
@@ -623,18 +631,6 @@ export interface ToolValidationFailed {
   readonly toolCallId: string;
   readonly name: string;
   readonly issues: readonly StandardSchemaIssue[];
-}
-
-export interface ToolConfirmationRequested {
-  readonly kind: "tool-confirmation-requested";
-  readonly toolCallId: string;
-  readonly request: ToolConfirmationRequest;
-}
-
-export interface ToolConfirmationResolved {
-  readonly kind: "tool-confirmation-resolved";
-  readonly toolCallId: string;
-  readonly response: ToolConfirmationResponse;
 }
 
 export interface ToolHandlerStarted {

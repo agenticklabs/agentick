@@ -86,6 +86,7 @@ import type {
 } from "@agentick/spec";
 import type {
   ContentBlock,
+  ToolAnnotations,
   ToolDeclaration,
   ToolHandler,
   ToolResultEnvelope,
@@ -383,16 +384,6 @@ export function mcpDeclaration(
   // enum: supported|required|unsupported (matches earlier framework
   // shape predating the SDK revision).
   const mappedTaskSupport = mapMcpTaskSupport(tool.execution?.taskSupport);
-  const withTask: Readonly<Record<string, unknown>> | undefined =
-    mappedTaskSupport !== undefined
-      ? { ...(tool.annotations ?? {}), taskSupport: mappedTaskSupport }
-      : tool.annotations;
-  // Model-narration opt-out (`withMCP({ narrate: false })` / per-server
-  // override). MCP tools narrate by default like any other tool; only an
-  // explicit `false` stamps `annotations.narrate: false` so the projector
-  // skips injecting `_summary` — `undefined` leaves the default (ON) intact.
-  const withNarrate: Readonly<Record<string, unknown>> | undefined =
-    narrate === false ? { ...(withTask ?? {}), narrate: false } : withTask;
   // Execution provenance (declaration-level): every MCP-discovered tool is
   // dispatched THROUGH the MCP harness to `serverId`, so its server-handled
   // result must carry `executedBy: "mcp:<serverId>"` rather than the default
@@ -401,8 +392,16 @@ export function mcpDeclaration(
   // server-side, in-process stamp; `executedBy` is absent from
   // `ClientToolAnnotations`, so no wire client can spoof it (see
   // `ToolAnnotations.executedBy`).
-  const annotations: Readonly<Record<string, unknown>> = {
-    ...(withNarrate ?? {}),
+  //
+  // `narrate: false` is stamped only on an explicit opt-out
+  // (`withMCP({ narrate: false })` / per-server override) so the projector
+  // skips injecting `_summary`; `undefined` leaves the default (ON) intact.
+  const annotations: ToolAnnotations = {
+    ...advertisedAnnotations(tool.annotations),
+    ...omitUndefined({
+      taskSupport: mappedTaskSupport,
+      narrate: narrate === false ? false : undefined,
+    }),
     executedBy: `mcp:${serverId}`,
   };
   return {
@@ -413,7 +412,40 @@ export function mcpDeclaration(
     ...(outputSchema !== undefined ? { outputSchema } : {}),
     exposure: ["model", "dispatch"],
     handlerRef: mcpHandlerRef(sessionId, serverId, tool.name),
-    annotations: annotations as ToolDeclaration["annotations"],
+    annotations,
+  };
+}
+
+/**
+ * The four advisory hints, each falling back to the default the MCP spec
+ * assigns an omitted one — a server that annotates nothing is describing a
+ * destructive, open-world tool, and leaving the hint absent instead would
+ * silently read as the safe end of every scale.
+ *
+ * Read by type, never by cast: a server answering `readOnlyHint: "yes"` must
+ * not become a `boolean` a confirmation gate later trusts. `title` gets no
+ * default; the SDK's `ToolAnnotationsSchema` strips the bag to it plus the
+ * four, so nothing else can arrive.
+ */
+function advertisedAnnotations(
+  raw: Readonly<Record<string, unknown>> | undefined,
+): ToolAnnotations {
+  const { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint } = raw ?? {};
+  const readOnly = typeof readOnlyHint === "boolean" ? readOnlyHint : false;
+  // MCP scopes `destructiveHint` to non-read-only tools, so the default must
+  // not manufacture a read-only-yet-destructive bag; a server that ADVERTISES
+  // the contradiction is relayed as its own claim.
+  // TODO(mcp-trust): materialization erases advertised-vs-defaulted, so a
+  // policy cannot say "trust server X's silence, still confirm its explicit
+  // destructives". If a deployment needs that, the knob is per-server on the
+  // withMCP config — never on the executor.
+  const destructiveDefault = !readOnly;
+  return {
+    ...omitUndefined({ title: typeof title === "string" ? title : undefined }),
+    readOnlyHint: readOnly,
+    destructiveHint: typeof destructiveHint === "boolean" ? destructiveHint : destructiveDefault,
+    idempotentHint: typeof idempotentHint === "boolean" ? idempotentHint : false,
+    openWorldHint: typeof openWorldHint === "boolean" ? openWorldHint : true,
   };
 }
 

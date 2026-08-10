@@ -19,6 +19,7 @@
  */
 
 import React from "react";
+import { Chunk, Effect, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "@agentick/app/react";
@@ -79,16 +80,19 @@ async function mkMcpServer(): Promise<{
           properties: { message: { type: "string" } },
           required: ["message"],
         },
+        annotations: { readOnlyHint: true },
       },
       {
         name: "render_widget",
         description: "returns a result carrying an MCP-Apps ui descriptor",
         inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
       },
       {
         name: "fail_soft",
         description: "returns a domain error",
         inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
       },
       {
         name: "add",
@@ -101,6 +105,7 @@ async function mkMcpServer(): Promise<{
           },
           required: ["a", "b"],
         },
+        annotations: { readOnlyHint: true },
       },
     ],
   }));
@@ -163,6 +168,7 @@ async function mkPagedMcpServer(): Promise<{
     name,
     description: name,
     inputSchema: { type: "object" as const, properties: {} },
+    annotations: { readOnlyHint: true },
   });
 
   server.setRequestHandler(ListToolsRequestSchema, async (req) => {
@@ -411,6 +417,105 @@ describe("withMCP — end-to-end", () => {
     // dispatches would fail. We don't assert a specific failure mode
     // here — just that closeApp resolves without hanging on the
     // harness teardown.
+    await server.close();
+  });
+});
+
+/**
+ * A server that advertises one annotated tool and one bare one — the shape
+ * the MCP spec's absence-defaults are written for.
+ */
+async function mkPartlyAnnotatedMcpServer(): Promise<{
+  readonly server: Server;
+  readonly clientTransport: InMemoryMcpTransport;
+}> {
+  const [clientTransport, serverTransport] = InMemoryMcpTransport.createLinkedPair();
+  const server = new Server(
+    { name: "unannotated-mcp-server", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [
+      {
+        name: "wipe",
+        description: "says nothing about what it does",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "peek",
+        description: "says it only reads",
+        inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
+      },
+    ],
+  }));
+  server.setRequestHandler(CallToolRequestSchema, async (req) => ({
+    content: [{ type: "text", text: `ran ${req.params.name}` }],
+  }));
+
+  await server.connect(serverTransport);
+  return { server, clientTransport };
+}
+
+function nextElicitationCorrelationId(bus: LocalEventBus): Promise<string> {
+  return Effect.runPromise(
+    Stream.runCollect(
+      Stream.take(
+        bus.subscribe({
+          surface: "session",
+          name: { exact: "session:channel:elicitation" },
+        }) as Stream.Stream<
+          { readonly metadata?: Readonly<{ readonly correlationId?: string }> },
+          unknown,
+          never
+        >,
+        1,
+      ),
+    ),
+  ).then((chunk) => {
+    const id = Array.from(Chunk.toReadonlyArray(chunk))[0]!.metadata?.correlationId;
+    if (typeof id !== "string") throw new Error("expected correlationId");
+    return id;
+  });
+}
+
+describe("withMCP — a server's silence about a tool", () => {
+  it("an unannotated tool is confirmed, a self-declared read-only one is not", async () => {
+    const bus = new LocalEventBus();
+    const { server, clientTransport } = await mkPartlyAnnotatedMcpServer();
+
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      bus,
+      journal: new MemoryJournal(),
+      inbox: new LocalInbox(),
+      extensions: [
+        withMCP({
+          servers: [{ serverId: "quiet", transport: clientTransport, auth: new NoneAuth() }],
+        }),
+      ],
+    });
+    const session = await app.createSession();
+
+    // No confirmationPolicy anywhere: the MCP spec's default for an omitted
+    // `destructiveHint` is what raises this ask.
+    const correlationIdP = nextElicitationCorrelationId(bus);
+    const dispatchP = session.tools.dispatch("quiet__wipe", {});
+    await session.elicitation.respond({
+      correlationId: await correlationIdP,
+      outcome: "accepted",
+      value: { approved: true },
+    });
+    expect(await dispatchP).toEqual([{ type: "text", text: "ran wipe" }]);
+
+    // Nobody answers a second ask, so this dispatch resolving IS the claim.
+    expect(await session.tools.dispatch("quiet__peek", {})).toEqual([
+      { type: "text", text: "ran peek" },
+    ]);
+
+    await session.close();
+    await app.closeApp();
     await server.close();
   });
 });

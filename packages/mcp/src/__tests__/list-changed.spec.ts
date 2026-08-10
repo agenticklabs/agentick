@@ -101,12 +101,14 @@ const initialTool: Tool = {
   name: "before",
   description: "the initial tool",
   inputSchema: { type: "object", properties: {} },
+  annotations: { readOnlyHint: true },
 };
 
 const replacementTool: Tool = {
   name: "after",
   description: "the tool that appears after the server pushes list_changed",
   inputSchema: { type: "object", properties: {} },
+  annotations: { readOnlyHint: true },
 };
 
 // ---------------------------------------------------------------------------

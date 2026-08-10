@@ -141,6 +141,7 @@ async function mkFakeMcpServer(opts: {
           type: "object",
           properties: { label: { type: "string" } },
         },
+        annotations: { readOnlyHint: true },
         // MCP 2025-11-25: taskSupport lives on `execution`, not
         // `annotations`. SDK ToolSchema strict-strips unknown
         // annotation keys; execution.taskSupport is the canonical

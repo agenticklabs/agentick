@@ -171,6 +171,18 @@ export interface ToolAnnotations {
   /** `[V1-INHERITED]` Tool intent hint. */
   readonly intent?: "render" | "action" | "compute";
   /**
+   * MCP-aligned advisory hint: the tool does not mutate its environment.
+   * All four hints are a tool's SELF-DESCRIPTION — advisory, never enforced
+   * by the framework, and never trustworthy from an untrusted server.
+   */
+  readonly readOnlyHint?: boolean;
+  /** Advisory: the tool may perform destructive updates (meaningful when not read-only). */
+  readonly destructiveHint?: boolean;
+  /** Advisory: repeat calls with the same arguments have no additional effect. */
+  readonly idempotentHint?: boolean;
+  /** Advisory: the tool interacts with external entities rather than a closed domain. */
+  readonly openWorldHint?: boolean;
+  /**
    * Humanized display name for a tool call ("Write file" vs
    * `write_file`). Presentation ONLY — surfaced on the tool-start
    * lifecycle event and in the resolved {@link ToolPresentation}; never

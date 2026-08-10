@@ -7,7 +7,7 @@
  * topology) with a spy dispatch closure.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { ContentBlock, ToolRegistration } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 import { InMemoryToolRegistry } from "../registry.js";
@@ -132,5 +132,28 @@ describe("createToolsHandle (server session.tools)", () => {
     expect(seen).toHaveBeenCalledTimes(1);
     r.clear(); // bulk (undefined) — fires
     expect(seen).toHaveBeenCalledTimes(2);
+  });
+
+  it("carries the MCP advisory hints through the ToolInfo projection", () => {
+    const r = new InMemoryToolRegistry();
+    r.add(
+      reg("delete_file", {
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          idempotentHint: false,
+          openWorldHint: true,
+        },
+      }),
+    );
+    const { handle } = harnessOverRegistry(r);
+
+    const info = handle.get("delete_file")!.info;
+    expectTypeOf(info.annotations?.readOnlyHint).toEqualTypeOf<boolean | undefined>();
+    expect(info.annotations?.readOnlyHint).toBe(false);
+    expect(info.annotations?.destructiveHint).toBe(true);
+    expect(info.annotations?.idempotentHint).toBe(false);
+    expect(info.annotations?.openWorldHint).toBe(true);
+    expect(handle.list()[0]!.annotations?.destructiveHint).toBe(true);
   });
 });

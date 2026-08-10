@@ -71,8 +71,8 @@ export interface ClientElicitation<TValue = unknown> {
   readonly hints?: Readonly<Record<string, unknown>>;
   /**
    * Domain metadata stamped onto the envelope by the requesting
-   * harness — telemetry shapes like `ToolConfirmationRequest` /
-   * `SandboxPermissionRequest` live here.
+   * harness — the tool-confirmation ask's `toolUseId` / `toolName` /
+   * `arguments`, a `SandboxPermissionRequest`, and the like live here.
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
   /** Client-stamped receive time (`Date.now()`). */

@@ -234,7 +234,13 @@ const transfer = createTool({
 - **`confirmationMessage`** — static string or a per-call function (sync or async) over the validated input + ctx. Becomes the elicitation `message`; unset falls back to `Approve tool "<name>"?`.
 - **`confirmationPreview`** — awaited at the gate and merged under `metadata.preview`, leaving `toolUseId` / `toolName` / `arguments` intact, so a client renders a diff or a cost breakdown without a bespoke channel.
 
-The wire envelope is an ordinary elicitation with `hints.kind === "tool_confirmation"`. Approval requires `accepted` **and** `reply.approved === true`; every other outcome — declined, cancelled, aborted, schema violation, accepted-with-`approved: false` — becomes a denial-shaped result (`isError: true`, `executedBy: "agentick"` because the tool never ran). `reply.always` marks the tool session-allowed so later calls skip the gate; `reply.modifiedArguments` is re-validated before the handler runs. A wait past the bound is `ToolConfirmationTimeoutError`.
+The wire envelope is an ordinary elicitation with `hints.kind === "tool_confirmation"`. Approval requires `accepted` **and** `reply.approved === true`; every other outcome — declined, cancelled, aborted, schema violation, accepted-with-`approved: false` — becomes a denial-shaped result (`isError: true`, `executedBy: "agentick"` because the tool never ran). `reply.modifiedArguments` is re-validated before the handler runs. A wait past the bound is `ToolConfirmationTimeoutError`.
+
+### When a tool declares no verdict
+
+A tool with no `requiresConfirmation` of its own gets one from its advisory hints: `destructiveHint: true` asks, `readOnlyHint: true` never does (MCP scopes the destructive hint to writes, so read-only wins when a server sends both), and a tool that says neither is not gated. An explicit `requiresConfirmation` outranks the hints; the policy below outranks everything.
+
+This is what makes `withMCP` safe by default. The MCP spec's default for an omitted `destructiveHint` is `true`, `withMCP` materializes that default rather than dropping it, and so **an MCP tool whose server annotated nothing is confirmed** — no policy required. A server that declares `readOnlyHint: true` opts its tool out.
 
 ### Deployment-wide policy
 
@@ -243,21 +249,48 @@ The wire envelope is an ordinary elicitation with `hints.kind === "tool_confirma
 ```ts
 createApp(root, {
   toolExecutor: {
-    confirmationPolicy: async ({ declaration, input, ctx, toolVerdict }) => {
+    confirmationPolicy: async ({ declaration, ctx, toolVerdict }) => {
       if (await grants.allowed(ctx.sessionId, declaration.name)) return false; // standing grant
-      if (toolVerdict) return true; // the tool asked
-      const a = declaration.annotations as Record<string, unknown> | undefined;
-      const viaMcp =
-        typeof a?.["executedBy"] === "string" && (a["executedBy"] as string).startsWith("mcp:");
-      return viaMcp && a?.["readOnlyHint"] !== true; // MCP writes confirm
+      return toolVerdict; // otherwise the tool's own word stands
     },
   },
 });
 ```
 
 - Return `toolVerdict` to defer, `true` to force an ask the tool did not request, `false` to suppress one a standing grant covers. Async, so a grant lookup can hit a store.
-- MCP advisory hints (`readOnlyHint`, `destructiveHint`, …) arrive on `declaration.annotations` verbatim (`withMCP` spreads them), so annotation-driven defaults are policy code here — the framework ships the seam, never the policy.
-- Session-scoped `reply.always` grants still short-circuit after the policy says ask. Absent a policy, the tool's own verdict stands, exactly as before.
+- `toolVerdict` already folds in the hint-derived default above — declarations and hints are handled before your policy runs, so policy code is only ever about what the _deployment_ knows: grants, principals, environments.
+- The hints (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) are typed members of `ToolAnnotations` if a policy wants to read them directly; `withMCP` projects them from the server's advertisement, dropping wrong-typed values rather than trusting them.
+
+### Standing grants — an application feature
+
+The framework respects what a tool declares and publishes what a host decided. It does **not** remember the decision: `reply.always` is relayed on the record and nothing more, so the second call is asked about exactly like the first unless your policy says otherwise. Memory is yours, and it takes two pieces you already have.
+
+Every dispatch the gate asked about carries a `ToolConfirmationResolution` on `result.confirmation`. Read it from the house interceptor plane and write whatever store the policy reads:
+
+```ts
+createApp(root, {
+  hooks: {
+    onAfterToolDispatch: (result) => {
+      const decision = result.confirmation;
+      if (decision?.outcome === "approved" && decision.always) {
+        void grants.record(decision.sessionId, decision.toolName);
+      }
+      return result;
+    },
+  },
+  toolExecutor: {
+    confirmationPolicy: async ({ declaration, ctx, toolVerdict }) =>
+      (await grants.allowed(ctx.sessionId, declaration.name)) ? false : toolVerdict,
+  },
+});
+```
+
+- `outcome` is `"approved" | "denied" | "timeout" | "aborted"` — an expired ask and a torn-down one are nobody deciding, not denials, and an audit log that cannot tell them apart is lying. The record also carries `toolUseId`, `toolName`, `sessionId`, the `arguments` that were asked about, and `reason` / `modifiedArguments` when the host supplied them.
+- `toolName` is the CANONICAL name — the declaration's own, never the alias the call was dispatched by. Key a grants store on it and a later call under any of the tool's names is covered.
+- The `timeout` arm rejects rather than resolving, so it has no `DispatchResult` to ride: it arrives as `ToolConfirmationTimeoutError.confirmation` instead.
+- Present only when the gate actually asked. A dispatch the policy waved through leaves `result.confirmation` undefined.
+- Present only for an approval that will actually run: if the host's `modifiedArguments` fail re-validation, the dispatch rejects and nothing claims an approval.
+- Scope is your call. The example keys grants by session; keying by user or workspace, expiring them, or persisting them across processes are all the same two pieces with a different store behind them.
 
 > [!WARNING]
 > **Not a security boundary.** `requiresConfirmation`, `guardDispatch`, and `exposure` are policy seams — they shape what the model is offered and when a human approves. A call that clears the gate runs with the host process's full permissions, and inspecting command strings inside a predicate is advisory UX, not containment (pipes, base64, and heredocs defeat textual filtering). The confinement boundary is OS-level and lives in the sandbox provider.
@@ -764,6 +797,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/tool-result-currency.spec.ts` — string / array / envelope currency, `isError` (soft, resolves) vs throw (hard, rejects), `structuredContent` × `outputSchema` validation, and that a smuggled `executedBy`/`durationMs` is ignored top-level and inside `metadata`.
 - `src/__tests__/registry.spec.ts` + `layered-tools.spec.ts` — multi-binding storage, idempotency and shape-conflict, every precedence rung, filter-before-precedence, `replaceCompilerSlice`, `removeWhere`, and the execution-tail serialization guarantee.
 - `src/__tests__/tools-handle.spec.ts` — `session.tools`: `ToolInfo` projection, exposure filter, name-then-alias `get`/`has`, canonical-name dispatch binding, and the two subscription shapes.
+- `src/__tests__/confirmation-resolution.spec.ts` + `@agentick/app`'s `confirmation-grant-policy.spec.tsx` — the record stamped on `result.confirmation` for an approval (canonically named, carrying the pre-edit `arguments` beside the host's `modifiedArguments`), a denial with its reason, and a caller-abort told apart from a denial by `outcome`; the timeout arm rejecting and carrying the same record on the error; a dispatch nobody was asked about leaving `result.confirmation` undefined; an alias dispatch asked about and reported under the declaration's own name; `always: true` relayed but NOT remembered, so the next call is asked about again; an approval whose `modifiedArguments` fail validation rejecting with nothing claiming approval and the handler never running; the hint-derived default verdict in all five of its arms (destructive asks, read-only never does, read-only beating destructive, an unhinted tool ungated, an explicit `requiresConfirmation: false` beating a destructive hint, and a policy forcing an ask on a read-only tool); and — through `createApp` — the whole standing-grant pattern as an adopter writes it: an `onAfterToolDispatch` hook recording `result.confirmation` into a store a `confirmationPolicy` reads back, asked once and never again, with the same app minus the policy re-asking until it times out.
 - `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
 - `src/__tests__/readme-client-tools.spec.ts` — the `readSelection` / `navigateTo` examples on this page, compiled and run against the public `/client` entry with a real zod schema: the handler's input inferred off the schema with no cast, the schema projected to the JSON Schema the wire carries, and neither example carrying a routing rule of its own.

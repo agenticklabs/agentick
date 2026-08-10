@@ -18,6 +18,7 @@ import type { LocalEventBus } from "@agentick/runtime";
 import type {
   DispatchInput,
   ProtocolEvent,
+  ToolAnnotations,
   ToolConfirmationDecision,
   ToolRegistration,
 } from "@agentick/spec";
@@ -25,7 +26,7 @@ import { jsonSchema } from "@agentick/spec";
 
 import { createTestHarness } from "../testing/index.js";
 
-function tool(name: string, annotations: Readonly<Record<string, unknown>> = {}): ToolRegistration {
+function tool(name: string, annotations: ToolAnnotations = {}): ToolRegistration {
   return {
     declaration: {
       id: name,
@@ -33,11 +34,26 @@ function tool(name: string, annotations: Readonly<Record<string, unknown>> = {})
       description: "test tool",
       inputSchema: jsonSchema({ type: "object" }),
       exposure: ["model"],
-      annotations: annotations as ToolRegistration["declaration"]["annotations"],
+      annotations,
     },
     handlerRef: `h.${name}`,
     binding: { scope: "runtime" },
   };
+}
+
+/**
+ * The shape a real deployment's policy is written in — the hints and the
+ * provenance stamp are typed members, so no cast reaches them.
+ */
+function confirmsUnlessReadOnlyMcpTool({
+  declaration,
+  toolVerdict,
+}: ToolConfirmationDecision): boolean {
+  if (toolVerdict) return true;
+  const annotations = declaration.annotations;
+  return annotations?.executedBy?.startsWith("mcp:") === true
+    ? annotations.readOnlyHint !== true
+    : false;
 }
 
 const okHandler = (ran: { count: number }) => ({
@@ -84,12 +100,7 @@ describe("ToolExecutorHarness — deployment-wide confirmation policy", () => {
       handlers: [{ ...okHandler(ran), handlerRef: "h.create_todo" }],
       confirmationPolicy: (decision) => {
         seen.push(decision);
-        if (decision.toolVerdict) return true;
-        const a = decision.declaration.annotations as Record<string, unknown> | undefined;
-        const executedBy = a?.["executedBy"];
-        return typeof executedBy === "string" && executedBy.startsWith("mcp:")
-          ? a?.["readOnlyHint"] !== true
-          : false;
+        return confirmsUnlessReadOnlyMcpTool(decision);
       },
     });
 
@@ -108,9 +119,7 @@ describe("ToolExecutorHarness — deployment-wide confirmation policy", () => {
     // The policy saw the tool's own (false) verdict and the annotations bag.
     const decision = seen[0]!;
     expect(decision.toolVerdict).toBe(false);
-    expect((decision.declaration.annotations as Record<string, unknown>)["executedBy"]).toBe(
-      "mcp:knowify",
-    );
+    expect(decision.declaration.annotations?.executedBy).toBe("mcp:knowify");
   });
 
   it("a read-only MCP tool passes the same policy without confirming", async () => {
@@ -118,14 +127,7 @@ describe("ToolExecutorHarness — deployment-wide confirmation policy", () => {
     const { harness } = await createTestHarness({
       tools: [tool("list_todos", { executedBy: "mcp:knowify", readOnlyHint: true })],
       handlers: [{ ...okHandler(ran), handlerRef: "h.list_todos" }],
-      confirmationPolicy: ({ declaration, toolVerdict }) => {
-        if (toolVerdict) return true;
-        const a = declaration.annotations as Record<string, unknown> | undefined;
-        const executedBy = a?.["executedBy"];
-        return typeof executedBy === "string" && executedBy.startsWith("mcp:")
-          ? a?.["readOnlyHint"] !== true
-          : false;
-      },
+      confirmationPolicy: confirmsUnlessReadOnlyMcpTool,
     });
 
     const result = await harness.dispatch(dispatchOf("list_todos", "tc-2"));

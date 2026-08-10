@@ -14,8 +14,7 @@ import type {
   DispatchInput,
   DispatchResult,
   RegisterToolInput,
-  ToolConfirmationRequest,
-  ToolConfirmationResponse,
+  ToolConfirmationResolution,
   ToolDeclaration,
   ToolDispatchTerminal,
   ToolExecutorError,
@@ -142,29 +141,45 @@ describe("@agentick/spec — tool executor protocol", () => {
   });
 
   describe("Confirmation flow", () => {
-    it("ToolConfirmationRequest shape carries arguments + optional UI metadata", () => {
-      const req: ToolConfirmationRequest = {
+    it("ToolConfirmationResolution tells an unanswered ask apart from a denied one", () => {
+      const granted: ToolConfirmationResolution = {
         toolUseId: "tu_1",
-        name: "fs.delete",
+        toolName: "fs.delete",
+        sessionId: "s_1",
+        outcome: "approved",
         arguments: { path: "/tmp/foo" },
-        message: "Delete /tmp/foo?",
-      };
-      expect(req.name).toBe("fs.delete");
-    });
-
-    it("ToolConfirmationResponse supports approved/denied + modifiedArguments", () => {
-      const ok: ToolConfirmationResponse = {
-        toolUseId: "tu_1",
-        approved: true,
+        always: true,
         modifiedArguments: { path: "/tmp/foo-renamed" },
       };
-      const no: ToolConfirmationResponse = {
-        toolUseId: "tu_1",
-        approved: false,
+      const denied: ToolConfirmationResolution = {
+        toolUseId: "tu_2",
+        toolName: "fs.delete",
+        sessionId: "s_1",
+        outcome: "denied",
+        arguments: { path: "/tmp/foo" },
         reason: "policy denies fs.delete",
       };
-      expect(ok.approved).toBe(true);
-      expect(no.approved).toBe(false);
+      const expired: ToolConfirmationResolution = {
+        toolUseId: "tu_3",
+        toolName: "fs.delete",
+        sessionId: "s_1",
+        outcome: "timeout",
+        arguments: { path: "/tmp/foo" },
+      };
+      const abandoned: ToolConfirmationResolution = {
+        toolUseId: "tu_4",
+        toolName: "fs.delete",
+        sessionId: "s_1",
+        outcome: "aborted",
+        arguments: { path: "/tmp/foo" },
+      };
+      expect([granted.outcome, denied.outcome, expired.outcome, abandoned.outcome]).toEqual([
+        "approved",
+        "denied",
+        "timeout",
+        "aborted",
+      ]);
+      expect(granted.always).toBe(true);
     });
   });
 

@@ -85,6 +85,7 @@ async function mkElicitingServer(): Promise<{
         name: "ask_name",
         description: "asks the user for a name and greets them",
         inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
       },
     ],
   }));
@@ -294,6 +295,7 @@ async function mkUrlElicitingServer(): Promise<{
         name: "start_oauth",
         description: "starts an OAuth flow via a URL-mode elicitation",
         inputSchema: { type: "object", properties: {} },
+        annotations: { readOnlyHint: true },
       },
     ],
   }));
@@ -364,6 +366,7 @@ describe("ElicitationBridge — capability + concurrency (#149)", () => {
             properties: { q: { type: "string" } },
             required: ["q"],
           },
+          annotations: { readOnlyHint: true },
         },
       ],
     }));
@@ -461,7 +464,13 @@ describe("ElicitationBridge — related-task routing (#173)", () => {
       { capabilities: { tools: {} } },
     );
     server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [{ name: "ask_with_task", inputSchema: { type: "object", properties: {} } }],
+      tools: [
+        {
+          name: "ask_with_task",
+          inputSchema: { type: "object", properties: {} },
+          annotations: { readOnlyHint: true },
+        },
+      ],
     }));
     server.setRequestHandler(CallToolRequestSchema, async () => {
       const r = await server.elicitInput({

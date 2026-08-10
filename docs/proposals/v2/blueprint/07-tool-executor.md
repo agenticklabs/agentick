@@ -186,7 +186,7 @@ The tool executor accepts inbound messages at address
 | Message type            | Payload                                   | Effect                                  |
 | ----------------------- | ----------------------------------------- | --------------------------------------- |
 | `abort`                 | `{ toolCallId: string; reason?: string }` | Aborts an in-flight tool dispatch.      |
-| `confirmation-response` | `ToolConfirmationResponse`                | Resolves a pending confirmation prompt. |
+| `confirmation-response` | `ToolConfirmationReply`                   | Resolves a pending confirmation prompt. |
 
 The `confirmation-response` message is how the gateway / external client
 delivers the user's approval/denial for a tool requiring confirmation.
@@ -271,7 +271,7 @@ interface ToolConfirmationTimeoutError {
      - replace { approved: false } → ToolConfirmationDeniedError
    Else: prompt user via session:tool_confirmation channel
    Wait (with tool.timeout fallback)
-   Receive ToolConfirmationResponse
+   Receive ToolConfirmationReply
      - approved: true → continue
      - approved: false → ToolConfirmationDeniedError → terminal { failed }
    Emit tool:confirmation:resolved
@@ -300,26 +300,50 @@ interface ToolConfirmationTimeoutError {
 The framework channel `session:tool_confirmation` is unchanged
 (`[SOURCE: shared/src/protocol.ts]`):
 
+The ask carries no type of its own — it is the `metadata` on an elicitation
+request (`hints.kind === "tool_confirmation"`), holding `toolUseId` /
+`toolName` / `arguments` and an optional `preview` (including
+`DiffPreviewMetadata`). The host's answer is validated against
+`TOOL_CONFIRMATION_REPLY_SCHEMA`; what the executor reports afterwards is
+`ToolConfirmationResolution`:
+
 ```ts
-interface ToolConfirmationRequest {
-  toolUseId: string;
-  name: string;
-  arguments: Record<string, unknown>;
-  message?: string;
-  metadata?: Record<string, unknown>; // including DiffPreviewMetadata
+interface ToolConfirmationReply {
+  approved: boolean;
+  always?: boolean;
+  reason?: string;
+  modifiedArguments?: Record<string, unknown>;
 }
 
-interface ToolConfirmationResponse {
-  approved: boolean;
+interface ToolConfirmationResolution {
+  toolUseId: string;
+  /** Canonical — the declaration's own name, never the alias dispatched by. */
+  toolName: string;
+  sessionId: string;
+  outcome: "approved" | "denied" | "timeout" | "aborted";
+  arguments: Record<string, unknown>;
   reason?: string;
   always?: boolean;
   modifiedArguments?: Record<string, unknown>;
 }
 ```
 
-`always: true` is a session-scoped allow-list that the tool executor
-remembers. `modifiedArguments` causes a re-validation pass before handler
-invocation.
+The resolution is PUBLISHED, not remembered. It rides
+`DispatchResult.confirmation` for the three arms that resolve and
+`ToolConfirmationTimeoutError.confirmation` for the one that rejects, so an
+`onAfterToolDispatch` hook sees every decision. `always: true` is relayed on
+that record and nothing more — the executor holds no allow-list, and a
+deployment that wants a standing grant writes one from the hook and reads it
+back through `confirmationPolicy`. `modifiedArguments` causes a re-validation
+pass before handler invocation; an edit that fails it rejects the dispatch, so
+no record claims an approval that never ran.
+
+A tool that declares no `requiresConfirmation` gets a verdict derived from its
+advisory hints — `destructiveHint: true` asks, `readOnlyHint: true` never does
+(read-only wins when both are set, per MCP's own scoping). `withMCP`
+materializes the MCP spec's absence-defaults, so a server that annotated
+nothing yields a destructive tool and its calls are confirmed with no adopter
+policy in the path.
 
 `DiffPreviewMetadata` (file edit tools) is `[V1-INHERITED]`.
 

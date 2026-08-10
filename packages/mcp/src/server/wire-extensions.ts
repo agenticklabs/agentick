@@ -50,6 +50,8 @@
  *   result-side `_meta` producer (RFC 6750 step-up challenge).
  */
 
+import type { ToolAnnotations } from "@agentick/spec";
+
 /**
  * The single namespaced key under a `metadata` bag holding MCP wire
  * extensions. One key, shared by the declaration and result carriage
@@ -59,30 +61,20 @@
 export const MCP_METADATA_KEY = "mcp" as const;
 
 /**
- * MCP advisory annotation hints, projected onto the wire `Tool.annotations`.
- * These are ADVISORY: clients render them (a read-only badge, a
- * destructive-action confirm) but the MCP spec does not require servers to
- * enforce them. Mirrors the MCP `ToolAnnotations` boolean hints (v1 parity).
+ * The four advisory hints of {@link ToolAnnotations}, projected onto the wire
+ * `Tool.annotations`. Clients render them (a read-only badge, a
+ * destructive-action confirm); the MCP spec does not require servers to
+ * enforce them.
  *
- *   - `readOnlyHint`     — the tool does not mutate its environment.
- *   - `destructiveHint`  — the tool may perform destructive updates (only
- *     meaningful when `readOnlyHint` is false/absent).
- *   - `idempotentHint`   — repeated calls with the same args have no
- *     additional effect (only meaningful when not read-only).
- *   - `openWorldHint`    — the tool interacts with an open/unbounded world
- *     (web search, external APIs) vs. a closed domain (memory, math).
- *
- * `title` is deliberately NOT modeled here: the wire `Tool.title` is
- * carried by the established `metadata.title` convention (see
- * `toWireTool`); duplicating it inside `annotations.title` would create
- * two sources of truth for the same wire field.
+ * `title` is deliberately NOT picked: the wire `Tool.title` is carried by the
+ * established `metadata.title` convention (see `toWireTool`); duplicating it
+ * inside `annotations.title` would create two sources of truth for the same
+ * wire field.
  */
-export interface McpToolAnnotationHints {
-  readonly readOnlyHint?: boolean;
-  readonly destructiveHint?: boolean;
-  readonly idempotentHint?: boolean;
-  readonly openWorldHint?: boolean;
-}
+export type McpToolAnnotationHints = Pick<
+  ToolAnnotations,
+  "readOnlyHint" | "destructiveHint" | "idempotentHint" | "openWorldHint"
+>;
 
 /**
  * Declaration-side MCP extensions carried under

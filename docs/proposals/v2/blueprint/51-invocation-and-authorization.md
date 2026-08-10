@@ -307,9 +307,9 @@ the two authorization subjects cleanly.
 
 ### 6.1 One choke point, one port
 
-Every model action flows through `ToolExecutor.dispatch`. The existing
-hardcoded gate (`requiresConfirmation` + `alwaysAllowed` + elicitation
-confirmation) generalizes in place into the `DispatchPolicy` port:
+Every model action flows through `ToolExecutor.dispatch`. The existing gate
+(`requiresConfirmation` + the hint-derived default + `confirmationPolicy` +
+elicitation confirmation) generalizes in place into the `DispatchPolicy` port:
 
 ```ts
 interface DispatchPolicy {

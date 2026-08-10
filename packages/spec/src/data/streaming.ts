@@ -344,14 +344,6 @@ export type ToolConfirmationRequiredEvent = {
   readonly metadata?: Readonly<Record<string, unknown>>;
 } & StreamEventBase;
 
-export type ToolConfirmationResolvedEvent = {
-  readonly type: "tool-confirmation-resolved";
-  readonly callId: string;
-  readonly approved: boolean;
-  readonly reason?: string;
-  readonly always?: boolean;
-} & StreamEventBase;
-
 /**
  * Child-execution boundary, emitted on the PARENT's stream (never the
  * child's). The pair brackets one `session.spawn({ send })` — the
@@ -446,7 +438,6 @@ export type OrchestrationStreamEvent =
   | ToolDispatchEndEvent
   | ToolDispatchEvent
   | ToolConfirmationRequiredEvent
-  | ToolConfirmationResolvedEvent
   | SpawnStartEvent
   | SpawnEndEvent
   | TickStartEvent
@@ -464,7 +455,6 @@ export const ORCHESTRATION_EVENT_TYPES = [
   "tool-dispatch-end",
   "tool-dispatch",
   "tool-confirmation-required",
-  "tool-confirmation-resolved",
   "spawn-start",
   "spawn-end",
   "tick-start",

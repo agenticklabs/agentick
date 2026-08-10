@@ -211,38 +211,6 @@ describe("ToolExecutorHarness — confirmation flow (via ElicitationHarness)", (
     expect(receivedInput).toEqual({ path: "/tmp/safe" });
   });
 
-  it("always: subsequent dispatches of the same tool skip the gate", async () => {
-    let handlerRan = 0;
-    const { harness, bus, elicitation } = await createTestHarness({
-      tools: [confirmTool()],
-      handlers: [
-        {
-          handlerRef: "h.delete-file",
-          handler: async () => {
-            handlerRan++;
-            return [{ type: "text", text: "ok" }];
-          },
-        },
-      ],
-    });
-
-    const idP = nextElicitationCorrelationId(bus);
-    const first = harness.dispatch(dispatchOf("delete-file", "tc-4"));
-    const correlationId = await idP;
-    await elicitation.respond({
-      correlationId,
-      outcome: "accepted",
-      value: { approved: true, always: true },
-    });
-    await first;
-    expect(handlerRan).toBe(1);
-
-    // No elicit response delivered for the second call — gate skipped.
-    const second = await harness.dispatch(dispatchOf("delete-file", "tc-5"));
-    expect(second.isError ?? false).toBe(false);
-    expect(handlerRan).toBe(2);
-  });
-
   it("abort during wait: dispatch resolves as denial-shaped result", async () => {
     const { harness } = await createTestHarness({
       tools: [confirmTool()],
