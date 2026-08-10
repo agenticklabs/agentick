@@ -32,6 +32,20 @@ export {
 } from "./tools.js";
 export { compileUriTemplate, matchesTemplate } from "./uri-template.js";
 
+// ── Mounting a keyed store as a browsable resource tree ──
+export {
+  storeResolver,
+  mount,
+  createTree,
+  registerTree,
+  type MountStore,
+  type Child,
+  type Page,
+  type MountProjection,
+  type Mount,
+  type MountTree,
+} from "./mounts.js";
+
 // ── Durable backing (data-layer plan §6-C, Phase 5 run #9) ──
 export { InMemoryResourceStore, matchesResourceQuery } from "./store.js";
 export {

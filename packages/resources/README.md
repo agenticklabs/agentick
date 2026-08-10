@@ -168,6 +168,47 @@ resources.notifyUpdated("config://app.json"); // a provider signals its backing 
 
 `<Resource>` renders no host intrinsic. Instead the compiler folds the registry into a compact catalog section during the render pass — uris, names, and descriptions, never content, because resources are pulled on demand. It reads the bridge structurally, contributes nothing when the registry is empty, and a `<Project projectionKey="resources">` suppresses it entirely.
 
+## Mounting stores as a resource tree
+
+A keyed store — anything with `get` and `listChildren` — can be exposed as a browsable tree and have its addresses rewritten at a single boundary on the way to the model. Three composable functions over the resolver primitive, none a harness method:
+
+| Function                            | Does                                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| `storeResolver(store, projection?)` | a `{ get, listChildren }` store → a resolver, optionally through a projection |
+| `mount(resolver, meta?)`            | a resolver at a prefix, with a name + description                             |
+| `createTree(tree)`                  | many mounts → one resolver; `tree` is static or `(ctx) => tree`               |
+
+```ts
+const tree = createTree((ctx) => ({
+  notes: mount(storeResolver(collection, principalScoped(ownerOf(ctx))), {
+    name: "Notes",
+    description: "Personal notes and preferences",
+  }),
+  clients: mount(storeResolver(collection, tenantScoped(ownerOf(ctx))), {
+    name: "Clients",
+    description: "What the business knows about each client",
+  }),
+  global: mount(
+    storeResolver(collection), // no projection — nothing to strip
+    { name: "Platform", description: "Curated platform knowledge, read-only" },
+  ),
+}));
+
+registerTree(session.resources, "knowledge://", tree);
+```
+
+The model reads `knowledge://` and gets a listing of those directories, each with its description; reads `knowledge://notes/afman.md` and gets a document; reads `knowledge://clients` and gets that subtree. It never sees the internal keys the store is organized under — that is the projection's job.
+
+`MountStore` is content-shaped (its `get` returns rendered `ResourceContents`) and browsable (`listChildren` returns `Child` entries) — distinct from the durable declaration `ResourceStore` below. `storeResolver` decides leaf vs directory **structurally**: `get` returns content for a leaf and `undefined` for a directory, at which point it lists children. No extension sniffing — what is a leaf is the store's answer, not the router's guess.
+
+### The projection is one boundary
+
+A `MountProjection` is a stateless `{ toInternal, toHome }` pair. `toHome` is the **only** place a store key becomes a model-facing address, and it runs in exactly one spot: `storeResolver`'s outbound pass, which rewrites every emitted uri and **drops** any child whose key does not project (`toHome` → `undefined`). Fail-closed by construction — an address is emitted only if it maps back, so an id-bearing key cannot leak and a dead link cannot form. Omitting the projection serves the store's keys verbatim, which is what `global/`, skills, and prompts want.
+
+### Routing and the root
+
+`createTree` routes an incoming path by **longest-prefix** match (segment-aware — `clients/jo` is not under `clients/johnson/`) and delegates to that mount's resolver. Reading the empty path merges a root listing carrying each mount's `meta.description` — the same one line that feeds the `resource_list` catalog and the system-prompt workspace legend, generated from the tree so it cannot drift. The computed form `(ctx) => tree` is resolved **once per session and memoized by `ctx.sessionId`**, never per read, so a per-principal membership lookup never lands on the hot path. `registerTree` is the convenience that wires the root `register` plus the `{+path}` descent template in one call.
+
 ## Durable backing
 
 The registry's state lives in three structures, and the split is the interesting part:
@@ -231,6 +272,9 @@ One more `resources/*` row is reachable without any handle code: `await resource
 | ---------------------------------------------------- | ------------------------------------------------------------ |
 | `ResourcesHarness`                                   | The implementation, for direct construction                  |
 | `withResources(options?)`                            | Session extension — registers the model tools                |
+| `storeResolver` / `mount` / `createTree`             | Compose a `MountStore` into a browsable, projected resolver  |
+| `registerTree(resources, scheme, tree, meta?)`       | Wire a tree's root + `{+path}` descent template in one call  |
+| `MountStore` / `MountProjection` / `Mount` (types)   | The store port, the address seam, the resolver-with-meta     |
 | `InMemoryResourceStore` / `matchesResourceQuery`     | The bundled default store and its query matcher              |
 | `fromArray` / `fromModule`                           | Loader factories for the durable source                      |
 | `compileUriTemplate` / `matchesTemplate`             | The URI-template matcher                                     |
@@ -278,12 +322,14 @@ Errors: `ResourceNotFound`, `ResourceAlreadyRegistered`, `ResourceResolverFailed
 
 ### `@agentick/resources/testing`
 
-| Export                                | Purpose                                                        |
-| ------------------------------------- | -------------------------------------------------------------- |
-| `fakeResources(options?)`             | A real instance on an in-memory substrate — the default choice |
-| `stubResources({ contents })`         | Canned-answer double, no substrate round-trip                  |
-| `runResourcesHarnessConformance(...)` | Certify an alternate registry implementation                   |
-| `runResourceStoreConformance(...)`    | Certify a durable store adapter                                |
+| Export                                 | Purpose                                                        |
+| -------------------------------------- | -------------------------------------------------------------- |
+| `fakeResources(options?)`              | A real instance on an in-memory substrate — the default choice |
+| `stubResources({ contents })`          | Canned-answer double, no substrate round-trip                  |
+| `runResourcesHarnessConformance(...)`  | Certify an alternate registry implementation                   |
+| `runResourceStoreConformance(...)`     | Certify a durable store adapter                                |
+| `fakeMountStore({ leaves, children })` | A working in-memory `MountStore` for mount tests               |
+| `runResourceMountConformance(...)`     | Certify a `MountStore` through the mount machinery             |
 
 ## Patterns
 
@@ -329,5 +375,6 @@ The resolver lives with the sandbox because it depends on the sandbox handle. Th
 - `src/__tests__/tools.spec.ts` — `resource_list` enumerating fixed resources and templates, `resource_read` returning first-class resource blocks, a typed error surfaced rather than swallowed, honest degradation with no registry present, and `withResources` registering both tools by default and suppressing them under `registerModelTools: false`.
 - `src/react/__tests__/resource.spec.tsx` — `<Resource>` registering and reading through all three content sources, a template resolving the concrete matched uri, unmount unregistering, and the catalog projection folding a tagged section, contributing nothing when empty, and yielding to a `<Project>` override.
 - `src/client/__tests__/resources-handle.spec.ts` and `session-resources.spec.ts` — the eager seed notifying subscribers when it lands, a failed seed settling empty and recovering on `refresh()`, `list()` / `get()` reflecting the poll, `read` and `listTemplates` as pure RPC with no follow-up list, the zero-argument `subscribe` contract, and importing `/client` self-assembling `session.resources` over a transport.
+- `src/__tests__/mount.spec.ts` — the mount machinery through a real `ResourcesHarness`: `registerTree` wiring the root plus `{+path}` descent, a leaf and a directory reading back under home addresses, and no internal key surviving into the read. It also runs `runResourceMountConformance` (`src/mount-conformance.ts`) against `fakeMountStore`: get / list round-trip, the fail-closed drop of a non-projecting child, id-elision (no internal-key substring in the whole serialized response), longest-prefix routing with segment-aware boundary correctness, per-session memoization of a computed tree, and the root merge listing each mount's description.
 - Alias behavior is covered where its motivating consumer lives, in [@agentick/mcp](../mcp): a documented upstream uri staying readable without doubling the catalog, `has` answering for registered uris only, two claimants refusing to guess (asserted on the `ResourceAliasAmbiguous` tag and its `candidates`, not the message), an alias becoming unambiguous when one claimant goes away, and an adversarial test that an impostor's self-reported name cannot shadow another server's namespace.
 - [@agentick/app](../app) proves the single construction site: `installer.resources` is `session.resources`, and `resource_read` reaches that same instance through `ctx.resource` over a real dispatch round-trip.
