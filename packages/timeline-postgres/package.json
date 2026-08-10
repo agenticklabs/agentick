@@ -1,6 +1,6 @@
 {
   "name": "@agentick/timeline-postgres",
-  "version": "1.0.0-next.106",
+  "version": "1.0.0-next.107",
   "description": "postgresTimelineStore — Postgres TimelineStore adapter (ADR 49). The shared source of truth across stateless replicas (the cloud pole). BYO pg.Pool; DB-assigned IDENTITY seq; jsonb payloads; full schema escape hatches.",
   "keywords": [
     "agent",
