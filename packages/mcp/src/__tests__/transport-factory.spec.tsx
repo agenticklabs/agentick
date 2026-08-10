@@ -80,6 +80,7 @@ async function mkEchoServer(): Promise<{
           properties: { message: { type: "string" } },
           required: ["message"],
         },
+        annotations: { readOnlyHint: true },
       },
     ],
   }));

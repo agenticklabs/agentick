@@ -371,13 +371,12 @@ const snap = await session.snapshot();
 snap.bridges.timeline; // persisted log + projection
 snap.bridges.knobs; // knob values
 snap.bridges.state; // K/V state
-snap.bridges.toolExecutor; // standing confirmation grants
 // …plus any installed extension that can snapshot — zero session change
 
 await session.restore({ snapshot: snap });
 ```
 
-Add a snapshot-capable extension (sandbox, subscriptions, your own) and it round-trips automatically. One authoritative payload per layer, so nothing can diverge from a denormalized copy. The tool executor is the one participant the session names rather than finds — it is session-owned but sits outside the bridge bag (the `tools` bridge is the render-time handler-resolver adapter) — and even it is folded by the same feature detection. A bridge that claims the `toolExecutor` key fails the fold with `SnapshotSlotOccupied` rather than being silently overwritten.
+Add a snapshot-capable extension (sandbox, subscriptions, your own) and it round-trips automatically. One authoritative payload per layer, so nothing can diverge from a denormalized copy.
 
 Both are commands, so the hook quartet falls out for free: `onAfterSessionSnapshot` transforms the captured snapshot on its way out (the redaction seam), `onBeforeSessionSnapshot` can veto the capture, and the restore pair mirrors them.
 
@@ -764,7 +763,7 @@ const session = factory({
 - `src/__tests__/tool-restriction.spec.ts` — only allowlisted tools reach the model, the unrestricted control, the dispatch door unaffected, additivity with `tools`, the terminal tool's exemption, and an empty allowlist resolving strategy as if no tools were mounted.
 - `src/__tests__/model-facade.spec.ts` — `setModel` swapping the default (the next send uses the new executor), `setTarget` swapping only the target, `onBeforeSessionSetModel` vetoing, a `use` transform and a `guard` veto registered once still applying across an executor swap, the adapter overload via the injected builder, `ModelExecutorBuilderMissingError` without one, identical veto input for both overload forms, and per-send override precedence.
 - `src/__tests__/session-hooks.spec.ts` — hook-name derivation agreement, `onBeforeSessionSend` and `onBeforeSessionAppend` firing on their verbs, and `onAfterSessionSend` seeing the handle.
-- `src/__tests__/snapshot-command.spec.tsx` — the hook quartet, after-snapshot redaction, before-snapshot veto, the generic fold picking up a fake snapshot-capable extension and restoring it with zero session change, a bridge claiming the `toolExecutor` slot failing both capture and restore with `SnapshotSlotOccupied`, and the migration seam — applied on a version skew, `SnapshotVersionMismatch` without one.
+- `src/__tests__/snapshot-command.spec.tsx` — the hook quartet, after-snapshot redaction, before-snapshot veto, the generic fold picking up a fake snapshot-capable extension and restoring it with zero session change, and the migration seam — applied on a version skew, `SnapshotVersionMismatch` without one.
 - `src/__tests__/snapshot-restore.spec.tsx` — the compiler-level bridge fold: data cache, knob and state round-trip, rehydration onto a fresh mount, and survival of a JSON round-trip.
 - `src/__tests__/timeline-durability.spec.ts` — hydration from an injected store before the first render, the flush barrier at execution end, and a buffered write failure rejecting the send with `TimelineWriteFailed` and landing `status: "failed"`.
 - `src/__tests__/kill-resume.spec.ts` + `src/testing/kill-resume-acceptance.tsx` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings, which also proves a `snapshot()` → `restore()` transplant into a fresh storeless session.

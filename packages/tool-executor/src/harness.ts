@@ -55,11 +55,10 @@ import type {
   RespondToToolCallInput,
   Resources,
   ReplaceCompilerToolsInput,
-  SnapshotCapable,
   SubstrateError,
   TaskHandle,
   TasksHarnessProtocol,
-  ToolConfirmationObserver,
+  ToolAnnotations,
   ToolConfirmationPolicy,
   ToolConfirmationResolution,
   ToolDeclaration,
@@ -108,7 +107,6 @@ import type {
   HandlerResolver,
   HandlerChannelSeed,
   ToolExecutorHarnessOptions,
-  ToolExecutorSnapshot,
   ToolHandlerCtx,
   Validator,
   ValidatorResult,
@@ -155,18 +153,15 @@ interface InFlightEntry {
 
 export class ToolExecutorHarness
   extends BaseHarness<"tool">
-  implements ToolExecutorProtocol, ChannelSnapshotProvider, SnapshotCapable<ToolExecutorSnapshot>
+  implements ToolExecutorProtocol, ChannelSnapshotProvider
 {
   private readonly registry = new InMemoryToolRegistry();
   private readonly handlerResolver: HandlerResolver;
   private readonly inFlight = new Map<string, InFlightEntry>();
-  /** Tool names the host has marked `always` for this session. */
-  private readonly alwaysAllowed = new Set<string>();
   private readonly stateStore = new Map<string, unknown>();
   private readonly defaultTimeoutMs?: number;
   private readonly defaultConfirmationTimeoutMs?: number;
   private readonly confirmationPolicy?: ToolConfirmationPolicy;
-  private readonly onConfirmationResolved?: ToolConfirmationObserver;
   private readonly channelPublisher?: ChannelPublisher;
   private readonly elicitation: ElicitationHarnessProtocol;
   private readonly tasks: TasksHarnessProtocol | undefined;
@@ -226,7 +221,6 @@ export class ToolExecutorHarness
     this.defaultTimeoutMs = options.defaultTimeoutMs;
     this.defaultConfirmationTimeoutMs = options.defaultConfirmationTimeoutMs;
     this.confirmationPolicy = options.confirmationPolicy;
-    this.onConfirmationResolved = options.onConfirmationResolved;
     this.channelPublisher = options.channelPublisher;
     this.elicitation = options.elicitation;
     this.tasks = options.tasks;
@@ -656,63 +650,7 @@ export class ToolExecutorHarness
     };
   }
 
-  // ──────────── session snapshot (SnapshotCapable) ────────────
-
-  /**
-   * {@link SnapshotCapable} — the standing confirmation grants this session
-   * has accumulated. Discovered by feature detection like every other
-   * snapshot participant (ADR 27); the executor reaches the fold as a named
-   * candidate alongside the bridge bag, exactly as it does for
-   * {@link channelSnapshotPayload}.
-   */
-  exportSnapshot(): ToolExecutorSnapshot {
-    return { alwaysAllowed: [...this.alwaysAllowed] };
-  }
-
-  importSnapshot(snapshot: ToolExecutorSnapshot): void {
-    this.alwaysAllowed.clear();
-    for (const name of snapshot.alwaysAllowed) this.alwaysAllowed.add(name);
-  }
-
   // ──────────────────────── internals ────────────────────────
-
-  /**
-   * Hand a settled confirmation to the adopter's observer. Forked and never
-   * awaited: an observer writing a grant to a store must not be able to fail
-   * — or delay — the dispatch it is reporting on. A throwing observer is a
-   * grant that was never persisted, so it reaches the harness log surface
-   * rather than disappearing.
-   */
-  private notifyConfirmationResolved(
-    scope: EventScope,
-    resolution: ToolConfirmationResolution,
-  ): void {
-    const observe = this.onConfirmationResolved;
-    if (observe === undefined) return;
-    void Effect.runFork(
-      Effect.catchAll(
-        Effect.tryPromise({
-          try: async () => observe(resolution),
-          catch: (cause: unknown) => cause,
-        }),
-        (cause) =>
-          Effect.ignore(
-            this.emitLog(
-              scope,
-              "warning",
-              {
-                message: "onConfirmationResolved observer failed",
-                toolUseId: resolution.toolUseId,
-                toolName: resolution.toolName,
-                outcome: resolution.outcome,
-                cause: String(cause),
-              },
-              "tool-executor.confirmation",
-            ),
-          ),
-      ),
-    );
-  }
 
   /**
    * Effect-shaped body. Runs inside `runOperation`'s FiberRef scope so
@@ -1060,9 +998,11 @@ export class ToolExecutorHarness
       // Applies to client-handled tools too — they gate BEFORE relaying.
       const requiresConfirmation = reg.declaration.annotations?.requiresConfirmation;
       const toolVerdict =
-        typeof requiresConfirmation === "function"
-          ? yield* Effect.promise(() => Promise.resolve(requiresConfirmation(validated, ctx)))
-          : requiresConfirmation === true;
+        requiresConfirmation === undefined
+          ? hintedConfirmationVerdict(reg.declaration.annotations)
+          : typeof requiresConfirmation === "function"
+            ? yield* Effect.promise(() => Promise.resolve(requiresConfirmation(validated, ctx)))
+            : requiresConfirmation === true;
       // The deployment-wide policy gets the FINAL say, with the tool's own
       // verdict in hand — force, suppress, or defer. Session-scoped `always`
       // grants (a user's confirmation reply) still short-circuit below.
@@ -1075,11 +1015,12 @@ export class ToolExecutorHarness
               ),
             )
           : toolVerdict;
-      // A grant is keyed by the declaration's own name: `input.name` may be an
-      // alias the registry resolved, and a grant issued under one name must
-      // cover every other name the same tool answers to.
+      // A decision is keyed by the declaration's own name: `input.name` may be
+      // an alias the registry resolved, and a store keyed on the alias
+      // recognizes nothing when the next call arrives under the real name.
       const canonicalName = reg.declaration.name;
-      if (needsConfirmation && !this.alwaysAllowed.has(canonicalName)) {
+      let confirmation: ToolConfirmationResolution | undefined;
+      if (needsConfirmation) {
         const asked = {
           toolUseId: input.toolCallId,
           toolName: canonicalName,
@@ -1140,11 +1081,11 @@ export class ToolExecutorHarness
         // Timeout → caller error so the loop sees it via
         // ToolConfirmationTimeoutError (existing contract).
         if (elicitResult.outcome === "failed" && elicitResult.failure.kind === "timeout") {
-          this.notifyConfirmationResolved(dispatchScope, { ...asked, outcome: "timeout" });
           return yield* Effect.fail(
             new ToolConfirmationTimeoutError({
               toolName: input.name,
               ms: confirmationTimeoutMs ?? 0,
+              confirmation: { ...asked, outcome: "timeout" },
             }),
           );
         }
@@ -1161,11 +1102,6 @@ export class ToolExecutorHarness
           callerSignal?.removeEventListener("abort", onCallerAbort);
           this.inFlight.delete(input.toolCallId);
           const denyReason = denialReason(elicitResult, reply);
-          this.notifyConfirmationResolved(dispatchScope, {
-            ...asked,
-            outcome: wasAborted(elicitResult) ? "aborted" : "denied",
-            ...omitUndefined({ reason: denyReason }),
-          });
           const denialResult: DispatchResult = {
             toolCallId: input.toolCallId,
             name: input.name,
@@ -1186,14 +1122,19 @@ export class ToolExecutorHarness
             // means "who ran the tool"; on a denial that is the framework.
             executedBy: "agentick",
             durationMs: 0,
+            confirmation: {
+              ...asked,
+              outcome: wasAborted(elicitResult) ? "aborted" : "denied",
+              ...omitUndefined({ reason: denyReason }),
+            },
           };
           return denialResult;
         }
 
         // Re-validate when the host returns modifiedArguments — the
         // user may have edited the call before approving. An edit that fails
-        // validation rejects the dispatch, so neither the grant nor the
-        // approval record below is written: the approved call never ran.
+        // validation rejects the dispatch, so the approval record below is
+        // never written: the approved call never ran.
         if (reply!.modifiedArguments !== undefined) {
           const revalidated = yield* Effect.tryPromise({
             try: async () => validator.validate(reply!.modifiedArguments),
@@ -1210,15 +1151,14 @@ export class ToolExecutorHarness
           validated = revalidated.value;
         }
 
-        if (reply!.always === true) this.alwaysAllowed.add(canonicalName);
-        this.notifyConfirmationResolved(dispatchScope, {
+        confirmation = {
           ...asked,
           outcome: "approved",
           ...omitUndefined({
             always: reply!.always,
             modifiedArguments: reply!.modifiedArguments,
           }),
-        });
+        };
       }
 
       // ─── Tool-call presentation (Pass B) ────────────────────────────
@@ -1372,6 +1312,7 @@ export class ToolExecutorHarness
           executedBy: "client",
           durationMs: Date.now() - started,
           presentation,
+          ...(confirmation !== undefined ? { confirmation } : {}),
         };
         return clientResult;
       }
@@ -1608,6 +1549,7 @@ export class ToolExecutorHarness
           executedBy: reg.declaration.annotations?.executedBy ?? "agentick",
           durationMs: Date.now() - started,
           presentation,
+          ...(confirmation !== undefined ? { confirmation } : {}),
         };
         return dispatchResult;
       }
@@ -1722,6 +1664,16 @@ type ConfirmationElicitResult =
  */
 function extractReply(result: ConfirmationElicitResult): ToolConfirmationReply | undefined {
   return result.outcome === "accepted" ? result.value : undefined;
+}
+
+/**
+ * The verdict for a tool that declared none of its own. Read-only wins over
+ * destructive because MCP defines `destructiveHint` as meaningful only when
+ * `readOnlyHint` is false — a server may advertise both.
+ */
+function hintedConfirmationVerdict(annotations: ToolAnnotations | undefined): boolean {
+  if (annotations?.readOnlyHint === true) return false;
+  return annotations?.destructiveHint === true;
 }
 
 /**

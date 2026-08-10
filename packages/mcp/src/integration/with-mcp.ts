@@ -417,24 +417,32 @@ export function mcpDeclaration(
 }
 
 /**
- * The SDK's `ToolAnnotationsSchema` strips a server's annotation bag to
- * `title` plus the four advisory hints, so those are the only keys that can
- * arrive. Read them by type rather than by cast: a server answering
- * `readOnlyHint: "yes"` must not become a `boolean` a confirmation policy
- * later trusts.
+ * The four advisory hints, each falling back to the default the MCP spec
+ * assigns an omitted one — a server that annotates nothing is describing a
+ * destructive, open-world tool, and leaving the hint absent instead would
+ * silently read as the safe end of every scale.
+ *
+ * Read by type, never by cast: a server answering `readOnlyHint: "yes"` must
+ * not become a `boolean` a confirmation gate later trusts. `title` gets no
+ * default; the SDK's `ToolAnnotationsSchema` strips the bag to it plus the
+ * four, so nothing else can arrive.
  */
 function advertisedAnnotations(
   raw: Readonly<Record<string, unknown>> | undefined,
 ): ToolAnnotations {
-  if (raw === undefined) return {};
-  const { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint } = raw;
-  return omitUndefined({
-    title: typeof title === "string" ? title : undefined,
-    readOnlyHint: typeof readOnlyHint === "boolean" ? readOnlyHint : undefined,
-    destructiveHint: typeof destructiveHint === "boolean" ? destructiveHint : undefined,
-    idempotentHint: typeof idempotentHint === "boolean" ? idempotentHint : undefined,
-    openWorldHint: typeof openWorldHint === "boolean" ? openWorldHint : undefined,
-  });
+  const { title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint } = raw ?? {};
+  const readOnly = typeof readOnlyHint === "boolean" ? readOnlyHint : false;
+  // MCP scopes `destructiveHint` to non-read-only tools, so the default must
+  // not manufacture a read-only-yet-destructive bag; a server that ADVERTISES
+  // the contradiction is relayed as its own claim.
+  const destructiveDefault = !readOnly;
+  return {
+    ...omitUndefined({ title: typeof title === "string" ? title : undefined }),
+    readOnlyHint: readOnly,
+    destructiveHint: typeof destructiveHint === "boolean" ? destructiveHint : destructiveDefault,
+    idempotentHint: typeof idempotentHint === "boolean" ? idempotentHint : false,
+    openWorldHint: typeof openWorldHint === "boolean" ? openWorldHint : true,
+  };
 }
 
 /**

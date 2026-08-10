@@ -60,7 +60,6 @@ export type {
   HandlerResolver,
   HandlerChannelSeed,
   ToolExecutorHarnessOptions,
-  ToolExecutorSnapshot,
   ToolHandler,
   ToolHandlerCtx,
   Validator,

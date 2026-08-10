@@ -236,6 +236,14 @@ export interface DispatchResult {
    * before the resolution point (e.g. a confirmation denial).
    */
   readonly presentation?: ToolPresentation;
+  /**
+   * How the confirmation gate settled, when the gate asked at all. Absent
+   * for a dispatch nobody was asked about. The framework publishes the
+   * decision and forgets it — an interceptor reading this is how a `reply.
+   * always` grant becomes durable (see {@link ToolConfirmationResolution}).
+   * A `timeout` rejects instead, carrying the same record on the error.
+   */
+  readonly confirmation?: ToolConfirmationResolution;
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -558,10 +566,11 @@ export interface ToolListFilter {
  * boolean: a `timeout` is nobody deciding and an `aborted` is nobody being
  * asked any more — neither is a denial. A `declined` reply IS one.
  *
- * Handed to {@link ToolConfirmationObserver}, the only path a settled ask
- * reaches. NOT a wire payload: an answer arrives as an
- * `ElicitationResponse` carrying `approved` / `always` /
- * `modifiedArguments` inside `value`.
+ * Published on {@link DispatchResult.confirmation} for the three arms that
+ * resolve, and on `ToolConfirmationTimeoutError.confirmation` for the one
+ * that rejects — so an interceptor around the dispatch sees every decision.
+ * NOT a wire payload: an answer arrives as an `ElicitationResponse` carrying
+ * `approved` / `always` / `modifiedArguments` inside `value`.
  */
 export interface ToolConfirmationResolution {
   readonly toolUseId: string;
@@ -577,28 +586,15 @@ export interface ToolConfirmationResolution {
   /** The validated arguments the ask carried, before any host edit. */
   readonly arguments: Readonly<Record<string, unknown>>;
   /**
-   * The host asked for a standing grant. The executor honors it for the rest
-   * of the session; making it outlive the session is the observer's job.
+   * The host asked for a standing grant. The framework RELAYS it and forgets
+   * it — remembering a decision is application policy, written from this
+   * record and read back through {@link ToolConfirmationPolicy}.
    */
   readonly always?: boolean;
   readonly reason?: string;
   /** The host edited the call before approving; re-validated before the handler ran. */
   readonly modifiedArguments?: Readonly<Record<string, unknown>>;
 }
-
-/**
- * Notified after every confirmation ask resolves — the write side of the
- * seam {@link ToolConfirmationPolicy} reads. A deployment that wants
- * `always: true` to survive a restart persists it from here and consults
- * the same record from its policy.
- *
- * Invoked fire-and-forget: the executor never waits on it and a throw (or
- * rejection) never fails the dispatch. A runtime value like the policy —
- * never serialized, in-process only.
- */
-export type ToolConfirmationObserver = (
-  resolution: ToolConfirmationResolution,
-) => void | Promise<void>;
 
 // ============================================================================
 // Lifecycle events

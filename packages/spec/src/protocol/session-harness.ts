@@ -733,7 +733,6 @@ export interface SessionDryRunResult {
  *     the durable log, `.projection` the compacted view)
  *   - `bridges.knobs`    → the knob value map
  *   - `bridges.state`    → the K/V state map
- *   - `bridges.toolExecutor` → the session's standing confirmation grants
  *   - `bridges.<ext>`    → any installed SnapshotCapable extension
  *
  * The single authoritative source per bridge avoids the divergence bug a

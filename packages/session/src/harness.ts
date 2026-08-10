@@ -118,7 +118,6 @@ import {
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   SessionClosedError,
-  SnapshotSlotOccupied,
   SnapshotVersionMismatch,
   SpawnDepthExceededError,
   SPEC_VERSION,
@@ -589,9 +588,6 @@ export interface SessionHarnessOptions<P = unknown> {
  * `ctx.metrics` prefixes each name with the harness's telemetry namespace, so
  * these land as `agentick.session.tick.*` unless the app whitelabels it.
  */
-/** The snapshot slot the session-owned tool executor folds under. */
-const TOOL_EXECUTOR_SNAPSHOT_SLOT = "toolExecutor";
-
 const TICK_COST_METRIC = "session.tick.cost_micros";
 const TICK_TOKENS_METRIC = "session.tick.tokens";
 const TICK_UNPRICED_METRIC = "session.tick.unpriced";
@@ -1600,37 +1596,14 @@ export class SessionHarness<P = unknown>
     // `onPersist` parity) fire around the sync capture.
     return runHarnessProtocol(
       this.sessionOp("snapshot", {} as CaptureSnapshotInput, () =>
-        Effect.try({
-          try: (): SessionSnapshot => this.captureSnapshot(),
-          catch: (cause): SessionError => coerceSessionError(cause),
-        }),
+        Effect.sync((): SessionSnapshot => this.captureSnapshot()),
       ),
     );
   }
 
   /**
-   * The named things a snapshot may fold: every bridge, plus the tool
-   * executor under `toolExecutor`. Same asymmetry {@link snapshotProviders}
-   * documents — the executor is a session-owned harness held OUTSIDE
-   * `bridges` (the `tools` slot is the render-time handler-resolver adapter,
-   * not the executor), and it holds state a restore must not drop. One list,
-   * so capture and restore can never disagree on what participates.
-   *
-   * `HookBridges` is a namespace extensions augment, so the executor's slot
-   * could be claimed from outside. It fails closed — an overwrite here would
-   * lose a bridge's state on capture and feed it a foreign shape on restore.
-   */
-  private snapshotCandidates(): ReadonlyArray<readonly [string, unknown]> {
-    const bridges = Object.entries(this.bridges);
-    if (bridges.some(([name]) => name === TOOL_EXECUTOR_SNAPSHOT_SLOT)) {
-      throw new SnapshotSlotOccupied({ slot: TOOL_EXECUTOR_SNAPSHOT_SLOT });
-    }
-    return [...bridges, [TOOL_EXECUTOR_SNAPSHOT_SLOT, this.toolExecutor] as const];
-  }
-
-  /**
    * Step 6 (ADR 27) — the generic per-harness fold. Composes the session
-   * shape from every {@link SnapshotCapable} candidate's `exportSnapshot()`,
+   * shape from every {@link SnapshotCapable} bridge's `exportSnapshot()`,
    * feature-detected (no hardcoded slot names), exactly mirroring the
    * channel {@link snapshotProviders} scan and the compiler's
    * `captureBridgeSnapshots`. A new SnapshotCapable extension bridge is
@@ -1638,8 +1611,8 @@ export class SessionHarness<P = unknown>
    */
   private captureSnapshot(): SessionSnapshot {
     const bridges: Record<string, unknown> = {};
-    for (const [name, candidate] of this.snapshotCandidates()) {
-      if (isSnapshotCapable(candidate)) bridges[name] = candidate.exportSnapshot();
+    for (const [name, bridge] of Object.entries(this.bridges)) {
+      if (isSnapshotCapable(bridge)) bridges[name] = bridge.exportSnapshot();
     }
     return {
       specVersion: SPEC_VERSION,
@@ -1679,10 +1652,9 @@ export class SessionHarness<P = unknown>
    *   1. migration seam — if `snapshot.specVersion` ≠ `SPEC_VERSION`, run
    *      the construction-bound `migrateSnapshot` callback (or throw
    *      `SnapshotVersionMismatch` when none is set — fail-closed).
-   *   2. bridge fan-out — for every entry in `snapshot.bridges`, if the live
-   *      {@link snapshotCandidates} entry by that name is
-   *      {@link SnapshotCapable}, `importSnapshot` it. Async-aware
-   *      (timeline's import is a Promise); awaited together.
+   *   2. bridge fan-out — for every entry in `snapshot.bridges`, if the
+   *      live bridge by that name is {@link SnapshotCapable}, `importSnapshot`
+   *      it. Async-aware (timeline's import is a Promise); awaited together.
    *   3. accounting — restore the execution-local tick + the aggregate
    *      usage / per-model breakdown / cost rollup.
    */
@@ -1701,13 +1673,13 @@ export class SessionHarness<P = unknown>
     }
 
     // Generic fan-out — feature-detected, no hardcoded slot names.
-    const bag = new Map(this.snapshotCandidates());
+    const bag = this.bridges as unknown as Record<string, unknown>;
     const pending: Promise<unknown>[] = [];
     for (const [name, value] of Object.entries(snap.bridges)) {
       if (value === undefined) continue;
-      const candidate = bag.get(name);
-      if (isSnapshotCapable(candidate)) {
-        const result = candidate.importSnapshot(value);
+      const bridge = bag[name];
+      if (isSnapshotCapable(bridge)) {
+        const result = bridge.importSnapshot(value);
         if (result instanceof Promise) pending.push(result);
       }
     }
@@ -2287,16 +2259,18 @@ export class SessionHarness<P = unknown>
    * No hardcoded slot list — any harness that conforms is discovered
    * generically (mirrors the SnapshotCapable feature-detection pattern).
    *
-   * The candidate set is {@link snapshotCandidates} — every bridge value PLUS
-   * `this.toolExecutor`, which OWNS the `tool_call` request channel and
-   * provides its pending-call snapshot (§6.1). Feature-detection still keeps
-   * the scan slot-agnostic — the executor is just another candidate,
-   * discovered by shape.
+   * The candidate set is every bridge value PLUS `this.toolExecutor`: the tool
+   * executor is a session-owned harness held OUTSIDE `bridges` (the `tools`
+   * bridge slot is a render-time handler-resolver adapter, not the executor),
+   * yet it OWNS the `tool_call` request channel and provides its pending-call
+   * snapshot (§6.1). Feature-detection still keeps the scan slot-agnostic — the
+   * executor is just another candidate, discovered by shape.
    */
   private snapshotProviders(): Map<string, ChannelSnapshotProvider> {
     if (this._snapshotProviders === null) {
       const map = new Map<string, ChannelSnapshotProvider>();
-      for (const [, value] of this.snapshotCandidates()) {
+      const candidates: readonly unknown[] = [...Object.values(this.bridges), this.toolExecutor];
+      for (const value of candidates) {
         if (isChannelSnapshotProvider(value)) map.set(value.snapshotChannel, value);
       }
       this._snapshotProviders = map;

@@ -14,7 +14,6 @@ import type {
   ElicitationHarnessProtocol,
   TasksHarnessProtocol,
   ToolBinding,
-  ToolConfirmationObserver,
   ToolConfirmationPolicy,
   ToolDeclaration,
   ToolRegistration,
@@ -66,8 +65,6 @@ export interface TestHarnessOptions {
   readonly defaultConfirmationTimeoutMs?: number;
   /** Deployment-wide confirmation policy — see {@link ToolConfirmationPolicy}. */
   readonly confirmationPolicy?: ToolConfirmationPolicy;
-  /** Observer notified after every confirmation ask settles. */
-  readonly onConfirmationResolved?: ToolConfirmationObserver;
   /** Scope ID; defaults to a random ULID-ish string. */
   readonly scopeId?: string;
   /**
@@ -154,7 +151,6 @@ export async function createTestHarness(
       defaultTimeoutMs: options.defaultTimeoutMs,
       defaultConfirmationTimeoutMs: options.defaultConfirmationTimeoutMs,
       confirmationPolicy: options.confirmationPolicy,
-      onConfirmationResolved: options.onConfirmationResolved,
       ctxExtensions: options.ctxExtensions,
     }),
   };

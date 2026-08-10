@@ -83,7 +83,6 @@ export {
   type SessionErrorChannel,
   SessionNotFoundError,
   SessionTimelineError,
-  SnapshotSlotOccupied,
   SnapshotVersionMismatch,
   SpawnDepthExceededError,
   type StateApplyError,

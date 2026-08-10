@@ -12,6 +12,7 @@
 import { AgentickError } from "./base.js";
 import { registerAgentickError } from "./registry.js";
 import { JournalError } from "./substrate.js";
+import type { ToolConfirmationResolution } from "../protocol/tool-executor.js";
 
 // ============================================================================
 // LoopExecutorError — loop orchestration failures
@@ -630,14 +631,27 @@ export class ToolConfirmationDeniedError extends ToolExecutorError {
 }
 registerAgentickError("ToolConfirmationDeniedError", ToolConfirmationDeniedError);
 
+/**
+ * Nobody answered the ask before its deadline. The one confirmation outcome
+ * that REJECTS, so it carries the {@link ToolConfirmationResolution} the
+ * other three publish on `DispatchResult.confirmation` — an interceptor
+ * watching decisions must not have to infer this arm from an absence.
+ */
 export class ToolConfirmationTimeoutError extends ToolExecutorError {
   readonly _tag = "ToolConfirmationTimeoutError" as const;
   readonly toolName: string;
   readonly ms: number;
-  constructor(args: { readonly toolName: string; readonly ms: number; readonly cause?: unknown }) {
+  readonly confirmation?: ToolConfirmationResolution;
+  constructor(args: {
+    readonly toolName: string;
+    readonly ms: number;
+    readonly confirmation?: ToolConfirmationResolution;
+    readonly cause?: unknown;
+  }) {
     super(`tool ${args.toolName} confirmation timed out after ${args.ms}ms`, { cause: args.cause });
     this.toolName = args.toolName;
     this.ms = args.ms;
+    if (args.confirmation !== undefined) this.confirmation = args.confirmation;
   }
 }
 registerAgentickError("ToolConfirmationTimeoutError", ToolConfirmationTimeoutError);

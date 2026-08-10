@@ -328,12 +328,22 @@ interface ToolConfirmationResolution {
 }
 ```
 
-`always: true` is a session-scoped allow-list that the tool executor
-remembers; it rides the session snapshot (the executor is `SnapshotCapable`
-under `bridges.toolExecutor`), and the `onConfirmationResolved` construction
-option reports every resolution so an adopter can persist a grant beyond the
-session. `modifiedArguments` causes a re-validation pass before handler
-invocation.
+The resolution is PUBLISHED, not remembered. It rides
+`DispatchResult.confirmation` for the three arms that resolve and
+`ToolConfirmationTimeoutError.confirmation` for the one that rejects, so an
+`onAfterToolDispatch` hook sees every decision. `always: true` is relayed on
+that record and nothing more — the executor holds no allow-list, and a
+deployment that wants a standing grant writes one from the hook and reads it
+back through `confirmationPolicy`. `modifiedArguments` causes a re-validation
+pass before handler invocation; an edit that fails it rejects the dispatch, so
+no record claims an approval that never ran.
+
+A tool that declares no `requiresConfirmation` gets a verdict derived from its
+advisory hints — `destructiveHint: true` asks, `readOnlyHint: true` never does
+(read-only wins when both are set, per MCP's own scoping). `withMCP`
+materializes the MCP spec's absence-defaults, so a server that annotated
+nothing yields a destructive tool and its calls are confirmed with no adopter
+policy in the path.
 
 `DiffPreviewMetadata` (file edit tools) is `[V1-INHERITED]`.
 

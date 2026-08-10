@@ -44,20 +44,49 @@ describe("mcpDeclaration — advertised annotations", () => {
     expect(decl.annotations?.executedBy).toBe("mcp:linear");
   });
 
-  it("omits a hint the server never advertised", () => {
+  it("fills a hint the server never advertised with the MCP spec's default", () => {
     const hinted: McpToolDescriptor = { ...tool, annotations: { readOnlyHint: true } };
     const decl = mcpDeclaration("sess-1", "linear", hinted, "linear__search", undefined);
-    expect(decl.annotations).toEqual({ readOnlyHint: true, executedBy: "mcp:linear" });
+    expect(decl.annotations).toEqual({
+      readOnlyHint: true,
+      // destructiveHint is scoped to non-read-only tools; defaulting must not
+      // manufacture a read-only-yet-destructive bag.
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+      executedBy: "mcp:linear",
+    });
   });
 
-  it("drops a hint the server sent with the wrong type rather than lying about it", () => {
+  it("relays an ADVERTISED read-only-yet-destructive contradiction as the server's own claim", () => {
+    const contradictory: McpToolDescriptor = {
+      ...tool,
+      annotations: { readOnlyHint: true, destructiveHint: true },
+    };
+    const decl = mcpDeclaration("sess-1", "linear", contradictory, "linear__search", undefined);
+    expect(decl.annotations?.readOnlyHint).toBe(true);
+    expect(decl.annotations?.destructiveHint).toBe(true);
+  });
+
+  it("a server that annotates nothing describes a destructive, open-world tool", () => {
+    const decl = mcpDeclaration("sess-1", "linear", tool, "linear__search", undefined);
+    expect(decl.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+      executedBy: "mcp:linear",
+    });
+  });
+
+  it("drops a hint the server sent with the wrong type, then defaults it", () => {
     const lying: McpToolDescriptor = {
       ...tool,
-      annotations: { readOnlyHint: "yes", openWorldHint: true },
+      annotations: { readOnlyHint: "yes", openWorldHint: false },
     };
     const decl = mcpDeclaration("sess-1", "linear", lying, "linear__search", undefined);
-    expect(decl.annotations?.readOnlyHint).toBeUndefined();
-    expect(decl.annotations?.openWorldHint).toBe(true);
+    expect(decl.annotations?.readOnlyHint).toBe(false);
+    expect(decl.annotations?.openWorldHint).toBe(false);
   });
 });
 
