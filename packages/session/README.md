@@ -500,8 +500,12 @@ choice immediately. A reply that never calls the tool raises
 `StructuredOutputIncomplete`, and a reply that calls it with the wrong shape
 raises `ResponseValidationError` — the same two errors a structured send raises.
 
-`responseFormat` is available too, as the unvalidated declarative twin. Nothing
-parses it, and the providers that drop `response_format` still drop it here.
+> [!NOTE]
+> `send` carries a serializable `responseFormat` twin because a send crosses the
+> wire and a live validator cannot. A reflection is in-process by construction —
+> it takes an `AbortSignal` and an `onDelta` callback — so there is nothing for
+> that twin to buy, and `output` is strictly better on every provider. `reflect`
+> takes `output` only.
 
 ## The render ↔ runtime feedback loop
 
@@ -806,7 +810,7 @@ const session = factory({
 
 - `@agentick/app` `src/__tests__/dry-run.spec.tsx` — the tree and the model input reach the caller, two dry runs leave `snapshot()` byte-identical, and `compile()` is the rung that needs no model.
 
-- `src/__tests__/reflect.spec.tsx` — compaction folding through a real `timeline: { compact: rollingSummary(…) }` with its usage and progress frames, and the structured half: an `output` schema returning a validated object, the terminal tool being the only thing a reflection advertises, the native-`json_schema` target taking the directive instead, `ResponseValidationError` on a violating reply, `StructuredOutputIncomplete` on a reply that never calls the tool, and text-mode carrying neither tools nor directive.
+- `src/__tests__/reflect.spec.tsx` — compaction folding through a real `timeline: { compact: rollingSummary(…) }` with its usage and progress frames, and the structured half: an `output` schema returning a validated object, the terminal tool being the only thing a reflection advertises and its choice forced, the native-`json_schema` target taking the directive with no tool at all, `ResponseValidationError` on a violating reply, `StructuredOutputIncomplete` on a reply that never calls the tool, and text-mode carrying neither tools nor directive.
 - `src/__tests__/conformance.spec.ts` — the protocol conformance suite against a real journal, bus and inbox.
 - `src/__tests__/extended-surface.spec.ts` — host-door `dispatch` including `ToolPermissionError`, the tool registry read surface, timeline append and `trailingInput`, channel publish/subscribe plus correlated request/response and its timeout, the knob handle, `spawn` routing through a spawn context and defaulting to the parent's own agent, the **spawn boundary pair** on the parent's stream (`spawn-start` carrying the child's session and execution ids plus the origin tool `callId` off the dispatch ctx, `spawn-end` carrying `isError`, both attributed to the parent's `executionId`; the unbound spawn form emits neither), **steering** (the join returns the in-flight handle and the loop answers the new input), two un-awaited sends collapsing to one execution, a send after settle running fresh rather than joining a dead handle, provenance and per-generation usage stamps, and `onBusy` steer-vs-queue including an aborted execution dropping an undrained steer; cancellation parity — `abort()` on an in-flight execution and a pre-aborted send `signal` both RESOLVE with `stopReason: "aborted"` rather than rejecting.
 - `src/__tests__/streaming-handle.spec.tsx` — event order, dense monotonic sequence from 1, id/session/execution stamping, the streaming and non-streaming paths, and `.events()` yielding while `.result` resolves independently.

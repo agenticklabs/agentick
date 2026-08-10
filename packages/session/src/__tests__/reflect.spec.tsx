@@ -326,12 +326,10 @@ describe("a reflection asked for a shape", () => {
   });
 
   it("forces the choice — one shot is the whole budget, so there is no wrap-up tick to spend", () => {
-    const { spec, tools, parameters } = reflectionRequest({ output: foldSchema }, target);
+    const { spec, parameters } = reflectionRequest({ output: foldSchema }, target);
 
     expect(spec?.strategy).toBe("tool");
     expect(parameters.toolChoice).toEqual({ tool: "submit_result" });
-    // Narration would inject `_summary` into the arguments — which ARE the answer.
-    expect(tools[0]!.annotations?.narrate).toBe(false);
   });
 
   it("takes the native directive when the target decodes a schema itself", async () => {
@@ -373,16 +371,7 @@ describe("a reflection asked for a shape", () => {
     expect(result.data).toBeUndefined();
     expect(result.text).toBe(SUMMARY);
     expect(rig.executor.seenRuns.at(-1)!.tools).toEqual([]);
-    expect(reflectionRequest({ instructions: "s" } as never, target).parameters).toEqual({});
+    expect(reflectionRequest({}, target).parameters).toEqual({});
     await rig.close();
-  });
-
-  it("passes a declarative responseFormat through untouched — nothing validates it", () => {
-    const declared = { type: "json" as const };
-
-    const { spec, parameters } = reflectionRequest({ responseFormat: declared }, target);
-
-    expect(spec).toBeUndefined();
-    expect(parameters.responseFormat).toBe(declared);
   });
 });

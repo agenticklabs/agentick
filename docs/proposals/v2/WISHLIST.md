@@ -34,11 +34,13 @@ framework by being well-worn in the application first.
 > **Structure: done** — `reflect({ output })` → validated `ReflectResult.data`
 >
 > Landed on `feat/reflect-structured-output`. `ReflectInput` gained `output`
-> (live schema) and `responseFormat` (declarative twin) — the SAME field names
-> `SendInput` carries — and `ReflectResult` gained `data`, mirroring
-> `SendResult.data`. Failure semantics are `send`'s, not a third set:
+> and `ReflectResult` gained `data` — the SAME field names `SendInput` /
+> `SendResult` carry. Failure semantics are `send`'s, not a third set:
 > `ResponseValidationError` on a violating reply, `StructuredOutputIncomplete`
-> on a reply that never calls the terminal tool.
+> on a reply that never calls the terminal tool. `responseFormat` was NOT
+> mirrored: a send needs a serializable twin because it crosses the wire, and a
+> reflection is in-process by construction, so the twin buys it nothing and is
+> strictly worse than `output`.
 >
 > **The `tools: []` question resolved differently than expected.** The worry was
 > that an explicit empty `tools` array bypassed the `allowedTools` terminal-tool
@@ -51,7 +53,7 @@ framework by being well-worn in the application first.
 > reflection advertises: nothing, or the terminal tool.
 >
 > **The mechanism is now shared, not mirrored.** `terminalToolDeclaration`,
-> `resolveOutputStrategy` and `validateStructuredOutput` moved out of the loop
+> `resolveAutoStrategy` and `validateStructuredOutput` moved out of the loop
 > into `@agentick/spec`'s `data/structured-output.ts`; the loop and the
 > reflection pass both call them, so the two paths cannot drift. Two things fell
 > out: the terminal tool now carries `annotations: { narrate: false }` — the
@@ -110,7 +112,7 @@ is met.
   composes better with multi-call strategies.
 - ~~Whether `reflect({ schema })` uses `responseFormat` or the terminal-tool
   strategy.~~ **Decided: both, chosen by capability** — the same
-  `resolveOutputStrategy(0, capabilities)` a tick with no tools mounted uses. A
+  `resolveAutoStrategy(0, capabilities)` a tick with no tools mounted uses. A
   target with native `json_schema` decoding gets the directive; every other
   target gets the terminal tool with `toolChoice` pinned from the START, since a
   reflection has one shot and no wrap-up tick to spend.

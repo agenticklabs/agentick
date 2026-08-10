@@ -11,10 +11,9 @@
  *
  * That also makes the pass as rich as a real turn rather than a stripped
  * transcript: the model sees the system prompt, the grounding and the whole
- * conversation, because it IS the turn it would otherwise have taken. What it
- * does NOT see is the agent's tools — a reflection wants an answer, and a model
- * handed a tool reaches for it instead. The one exception is the terminal tool
- * a structured reflection delivers through.
+ * conversation, because it IS the turn it would otherwise have taken. It does
+ * NOT see the agent's tools — a model handed one reaches for it instead of
+ * answering — and the terminal tool of a structured pass is the only exception.
  */
 
 import type {
@@ -26,7 +25,6 @@ import type {
   LanguageModelMessage,
   LanguageModelParameters,
   OutputSpec,
-  ResponseFormat,
   StandardSchemaV1,
   StructuredOutputCapture,
   ToolDeclaration,
@@ -51,21 +49,9 @@ export interface ReflectInput<T = unknown> {
   readonly onDelta?: (d: { readonly text: string; readonly outputTokens: number }) => void;
   readonly signal?: AbortSignal;
   /**
-   * Structured answer — declarative form, the same field
-   * {@link import("@agentick/spec").SendInput.responseFormat} carries. A
-   * generation-time provider directive only: nothing parses or validates it,
-   * and providers that drop `response_format` (Anthropic) ignore it. For a
-   * validated value use {@link output}.
-   */
-  readonly responseFormat?: ResponseFormat;
-  /**
-   * Structured answer — LIVE-schema sugar, the same field
-   * {@link import("@agentick/spec").SendInput.output} carries. The reflection
-   * delivers through the synthetic terminal tool when the target cannot decode
-   * a schema natively, and the validated value lands on
-   * {@link ReflectResult.data}. A schema that was asked for and not met throws
-   * `ResponseValidationError` — the same semantics `send` has, not a second
-   * set.
+   * The shape the answer must take — `SendInput.output`, same field, same
+   * semantics. Validated onto {@link ReflectResult.data}; a schema that was
+   * asked for and not met throws.
    */
   readonly output?: StandardSchemaV1<unknown, T>;
 }
@@ -77,9 +63,9 @@ export interface ReflectResult<T = unknown> {
   /** The cap was hit — the text stops mid-thought and should not be persisted. */
   readonly truncated: boolean;
   /**
-   * The validated structured answer. Present only when {@link ReflectInput.output}
-   * was supplied — mirrors `SendResult.data`. Under the terminal-tool strategy
-   * the answer IS the tool's arguments, so `text` is routinely empty.
+   * The validated answer — `SendResult.data`, same field. Under the
+   * terminal-tool strategy the answer IS the tool's arguments, so `text` is
+   * routinely empty.
    */
   readonly data?: T;
 }
@@ -88,14 +74,10 @@ const asBlocks = (instructions: string | readonly ContentBlock[]): readonly Cont
   typeof instructions === "string" ? [{ type: "text", text: instructions }] : instructions;
 
 /**
- * Append the instruction as a final user turn, overlaying any generation
- * parameters the pass asked for. A model answers an instruction in the
- * generation seat; the same text in a system position competes with the
- * agent's own standing rules for authority.
- *
- * The tool list is NOT touched here — what a reflection advertises is decided
- * in {@link reflectionRequest}, so one place says which tools a reflection
- * carries.
+ * Append the instruction as a final user turn, overlaying the pass's generation
+ * parameters. A model answers an instruction in the generation seat; the same
+ * text in a system position competes with the agent's own standing rules for
+ * authority. The tool list is {@link reflectionRequest}'s call, not this one's.
  */
 export function withInstruction(
   input: LanguageModelInput,
@@ -103,7 +85,7 @@ export function withInstruction(
   parameters?: Partial<LanguageModelParameters>,
 ): LanguageModelInput {
   const turn = { role: "user", content: asBlocks(instructions) } as LanguageModelMessage;
-  const overlay = omitUndefined(parameters ?? {});
+  const overlay = parameters ?? {};
   return {
     ...input,
     messages: [...input.messages, turn],
@@ -112,18 +94,13 @@ export function withInstruction(
 }
 
 /**
- * Everything a structured reflection decides BEFORE the call: the resolved
- * output directive, what the model is shown, and the generation overlay.
- *
- * A reflection advertises no tools, so the strategy turns purely on whether the
- * target decodes a schema natively — `resolveAutoStrategy(0, …)`, the same
- * call the loop makes for a tick with nothing mounted. Under the terminal-tool
- * strategy the tool IS what the model is shown, and the choice is forced from
- * the start: the loop can spend a second tick on a wrap-up, a reflection has
- * only the one shot.
+ * What a reflection shows the model and asks of it. Passing `0` tools to
+ * `resolveAutoStrategy` is the literal truth — a reflection advertises none —
+ * and the choice is forced on the only tick there is, where the loop would have
+ * spent a second one on a wrap-up.
  */
 export function reflectionRequest(
-  input: Pick<ReflectInput, "maxOutputTokens" | "output" | "responseFormat">,
+  input: Pick<ReflectInput, "maxOutputTokens" | "output">,
   target: ExecutionTarget,
 ): {
   readonly spec?: OutputSpec;
@@ -146,18 +123,13 @@ export function reflectionRequest(
       responseFormat:
         spec?.strategy === "responseFormat"
           ? { type: "json_schema" as const, name: spec.toolName, schema: toJsonSchema(spec.schema) }
-          : input.responseFormat,
+          : undefined,
       toolChoice: spec?.strategy === "tool" ? ({ tool: spec.toolName } as const) : undefined,
     }),
   };
 }
 
-/**
- * The validated answer. Under the terminal strategy a reply that never called
- * the tool is the honest failure the loop names the same way — one forced shot
- * was the whole budget — and a reply that called it with the wrong shape raises
- * the same `ResponseValidationError` a structured `send` raises.
- */
+/** The validated answer, or the same two errors a structured `send` raises. */
 export async function reflectionData(
   spec: OutputSpec,
   result: LanguageModelExecutionResult,
