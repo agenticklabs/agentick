@@ -435,6 +435,10 @@ function advertisedAnnotations(
   // MCP scopes `destructiveHint` to non-read-only tools, so the default must
   // not manufacture a read-only-yet-destructive bag; a server that ADVERTISES
   // the contradiction is relayed as its own claim.
+  // TODO(mcp-trust): materialization erases advertised-vs-defaulted, so a
+  // policy cannot say "trust server X's silence, still confirm its explicit
+  // destructives". If a deployment needs that, the knob is per-server on the
+  // withMCP config — never on the executor.
   const destructiveDefault = !readOnly;
   return {
     ...omitUndefined({ title: typeof title === "string" ? title : undefined }),
