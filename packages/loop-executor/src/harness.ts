@@ -123,8 +123,8 @@ import {
   foldUsageRollup,
   resolveAutoStrategy,
   resolveTickCost,
+  responseFormatDirective,
   terminalToolDeclaration,
-  toJsonSchema,
   toRegistration,
   validateStructuredOutput,
 } from "@agentick/spec";
@@ -1092,11 +1092,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           }
           modelToolsForRun = [...modelTools, terminalToolDeclaration(outputSpec)];
         } else {
-          structuredResponseFormat = {
-            type: "json_schema",
-            name: outputSpec.toolName,
-            schema: toJsonSchema(outputSpec.schema) as Record<string, unknown>,
-          };
+          structuredResponseFormat = responseFormatDirective(outputSpec);
         }
       }
 

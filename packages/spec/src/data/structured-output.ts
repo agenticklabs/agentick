@@ -8,7 +8,8 @@
 
 import type { OutputSpec, ToolDeclaration } from "./declarations.js";
 import type { TargetCapabilities } from "./execution-target.js";
-import { parseJsonWithSchema, type StandardSchemaV1 } from "./standard-schema.js";
+import type { ResponseFormat } from "./rendered-tree.js";
+import { parseJsonWithSchema, toJsonSchema, type StandardSchemaV1 } from "./standard-schema.js";
 import { ResponseValidationError } from "../errors/remaining.js";
 
 /** Terminal-tool name when neither the send nor the tree names one. */
@@ -42,6 +43,22 @@ export function terminalToolDeclaration(spec: OutputSpec): ToolDeclaration {
     inputSchema: spec.schema,
     exposure: ["model"],
     annotations: { narrate: false },
+  };
+}
+
+/**
+ * The `responseFormat`-strategy twin of {@link terminalToolDeclaration} — the
+ * same spec, expressed as a generation directive instead of a tool. The loop
+ * folds it into the tick's `SpecConfig`; the reflection pass overlays it onto
+ * the call's parameters. One function, so the two paths emit one wire shape.
+ */
+export function responseFormatDirective(
+  spec: OutputSpec,
+): Extract<ResponseFormat, { type: "json_schema" }> {
+  return {
+    type: "json_schema",
+    name: spec.toolName,
+    schema: toJsonSchema(spec.schema) as Record<string, unknown>,
   };
 }
 

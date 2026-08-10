@@ -96,6 +96,12 @@ registerAgentickError("TerminalToolNameCollision", TerminalToolNameCollision);
  * wrap-up tick (`toolChoice: { tool }`) fail to elicit the terminal call —
  * the honest-failure sliver the guarantees chain documents. Loop-side: the
  * loop owns terminal detection + the wrap-up rung.
+ *
+ * `session.reflect()` raises it too, with `reason: "no_terminal_call"` — a
+ * reflection has one tick, so it has no wrap-up rung to reach `"max_ticks"`.
+ * It stays a `LoopExecutorError` rather than being re-homed: the taxonomy names
+ * where the semantics were defined, and a second class for the same failure
+ * would be the drift this error exists to report.
  */
 export class StructuredOutputIncomplete extends LoopExecutorError {
   readonly _tag = "StructuredOutputIncomplete" as const;

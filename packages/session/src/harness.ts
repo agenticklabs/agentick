@@ -1547,11 +1547,17 @@ export class SessionHarness<P = unknown>
         ? await forwardDeltas(executor.executeStream(executeInput), input.onDelta)
         : await executor.execute(executeInput);
     const result = await executor.normalize({ targetOutput, target: model.target, scope });
-    const data = spec !== undefined ? ((await reflectionData(spec, result)) as T) : undefined;
+    // A cap hit mid-answer is truncation, not a model that declined to answer:
+    // validating the fragment would raise `StructuredOutputIncomplete` and throw
+    // away the usage the caller is billed for. `truncated` says what happened
+    // and `data` stays absent, which is what "should not be persisted" means.
+    const truncated = result.stopReason === "max_tokens";
+    const data =
+      spec !== undefined && !truncated ? ((await reflectionData(spec, result)) as T) : undefined;
     return omitUndefined({
       text: textOf(result.output),
       usage: result.usage,
-      truncated: result.stopReason === "max_tokens",
+      truncated,
       data,
     }) as ReflectResult<T>;
   }
@@ -1573,7 +1579,9 @@ export class SessionHarness<P = unknown>
    * same `compileForTick({ exposure: "model" })` the loop uses, so the
    * projected tool list is the precedence-resolved one, not the compiler slice.
    * Pass `tools` to project a different list — what {@link reflect} does, since
-   * a reflection advertises its own (usually none).
+   * a reflection advertises its own (usually none). The parameter is on the
+   * class only, deliberately: `SessionProtocol` describes what a session does
+   * for a client, and no wire caller supplies a tool list.
    */
   async project(
     tree?: RenderedTree,

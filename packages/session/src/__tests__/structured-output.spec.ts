@@ -40,6 +40,7 @@ import { CompilerHarness } from "@agentick/compiler-react";
 import type {
   ExecutionTarget,
   LanguageModelExecutionResult,
+  LanguageModelInput,
   RenderedTree,
   StandardSchemaV1,
   ToolChoice,
@@ -275,6 +276,37 @@ describe("structured output — capability-aware strategy auto (§B3 fix #1)", (
     expect(seenResponseFormatName(executor.seenRuns[0]!.compiled)).toBeDefined();
     expect(r.data).toEqual({ answer: "text" });
     expect(r.stopReason).toBe("end");
+    await dispose();
+  });
+});
+
+describe("structured output — one directive, both paths", () => {
+  it("a send and a reflection asking the same shape put the same json_schema on the wire", async () => {
+    // The fake's native request IS the projected `LanguageModelInput`, so the
+    // provider-request hook reads what an adapter would translate — past the
+    // `SpecConfig` the send folds into and past the projection that used to
+    // drop the directive's `name` on the way through.
+    const { session, executor, dispose } = await mkSession({
+      target: openaiTarget,
+      scripts: [textResult('{"answer":"send"}'), textResult('{"answer":"reflect"}')],
+    });
+    const onWire: ({ type: string; name?: string; schema?: unknown } | undefined)[] = [];
+    const off = executor.hook({
+      onBeforeModelProviderRequest: (request) => {
+        onWire.push((request as LanguageModelInput).parameters?.responseFormat);
+      },
+    });
+
+    await (
+      await session.send({ messages: [{ role: "user", content: "hi" }], output: answerSchema })
+    ).result;
+    await session.reflect({ instructions: "again", output: answerSchema });
+
+    expect(onWire).toHaveLength(2);
+    expect(onWire[0]?.name).toBe("submit_result");
+    expect(onWire[0]).toEqual(onWire[1]);
+
+    off();
     await dispose();
   });
 });

@@ -34,8 +34,8 @@ import {
   DEFAULT_TERMINAL_TOOL_NAME,
   StructuredOutputIncomplete,
   resolveAutoStrategy,
+  responseFormatDirective,
   terminalToolDeclaration,
-  toJsonSchema,
   validateStructuredOutput,
 } from "@agentick/spec";
 import { estimateTokens } from "@agentick/model";
@@ -60,7 +60,11 @@ export interface ReflectResult<T = unknown> {
   readonly text: string;
   /** What the call cost. Absent when the provider reports none. */
   readonly usage?: UsageStats;
-  /** The cap was hit — the text stops mid-thought and should not be persisted. */
+  /**
+   * The cap was hit — the text stops mid-thought and should not be persisted.
+   * {@link data} is absent even when a shape was asked for: half a terminal call
+   * is not an answer.
+   */
   readonly truncated: boolean;
   /**
    * The validated answer — `SendResult.data`, same field. Under the
@@ -85,7 +89,7 @@ export function withInstruction(
   parameters?: Partial<LanguageModelParameters>,
 ): LanguageModelInput {
   const turn = { role: "user", content: asBlocks(instructions) } as LanguageModelMessage;
-  const overlay = parameters ?? {};
+  const overlay = omitUndefined(parameters ?? {});
   return {
     ...input,
     messages: [...input.messages, turn],
@@ -121,9 +125,7 @@ export function reflectionRequest(
     parameters: omitUndefined({
       maxOutputTokens: input.maxOutputTokens,
       responseFormat:
-        spec?.strategy === "responseFormat"
-          ? { type: "json_schema" as const, name: spec.toolName, schema: toJsonSchema(spec.schema) }
-          : undefined,
+        spec?.strategy === "responseFormat" ? responseFormatDirective(spec) : undefined,
       toolChoice: spec?.strategy === "tool" ? ({ tool: spec.toolName } as const) : undefined,
     }),
   };

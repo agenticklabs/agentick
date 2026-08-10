@@ -245,6 +245,15 @@ describe("withInstruction", () => {
     expect(withInstruction(input as never, "s").parameters).toBeUndefined();
     expect(withInstruction(input as never, "s", {}).parameters).toBeUndefined();
   });
+
+  it("an absent overlay value leaves the projected one standing", () => {
+    const capped = { ...input, parameters: { maxOutputTokens: 4096, temperature: 0.2 } };
+
+    const out = withInstruction(capped as never, "s", { maxOutputTokens: undefined });
+
+    expect(out.parameters?.maxOutputTokens).toBe(4096);
+    expect(out.parameters?.temperature).toBe(0.2);
+  });
 });
 
 // ============================================================================
@@ -360,6 +369,65 @@ describe("a reflection asked for a shape", () => {
     await expect(
       rig.session.reflect({ instructions: "fold it", output: foldSchema }),
     ).rejects.toBeInstanceOf(StructuredOutputIncomplete);
+    await rig.close();
+  });
+
+  it("streams the shape home — the terminal call survives the delta path", async () => {
+    const seen: number[] = [];
+    const executor = new FakeLanguageModelExecutor(
+      `reflect-stream-${Math.random()}`,
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      {
+        target,
+        scripted: {
+          result: terminalCall(FOLD),
+          deltas: [
+            { type: "message-start", role: "assistant" },
+            { type: "tool-call-start", callId: "tc-1", name: "submit_result", blockIndex: 0 },
+            { type: "tool-call-delta", callId: "tc-1", delta: JSON.stringify(FOLD) },
+            { type: "tool-call-end", callId: "tc-1" },
+            { type: "message-end", stopReason: "tool_use", usage: USAGE },
+          ],
+        },
+      },
+    );
+    const rig = await makeSession(2, { executor });
+
+    const result = await rig.session.reflect({
+      instructions: "fold it",
+      output: foldSchema,
+      onDelta: (d) => seen.push(d.outputTokens),
+    });
+
+    expect(result.data).toEqual(FOLD);
+    // The bar moved: a structured pass streams tool-call deltas, not text, and
+    // the progress a caller reports has to come from somewhere.
+    expect(seen.length).toBeGreaterThan(0);
+    await rig.close();
+  });
+
+  it("reports a capped reply as truncated, keeping the usage it was billed for", async () => {
+    const rig = await makeSession(2, {
+      executor: scriptedExecutor({
+        specVersion: SPEC_VERSION,
+        output: [{ type: "text", text: "the fold so f" }],
+        stopReason: "max_tokens",
+        usage: USAGE,
+      }),
+    });
+
+    const result = await rig.session.reflect({
+      instructions: "fold it",
+      output: foldSchema,
+      maxOutputTokens: 8,
+    });
+
+    expect(result.truncated).toBe(true);
+    expect(result.usage).toEqual(USAGE);
+    // Half a terminal call is not an answer — and it is not a missing one either.
+    expect(result.data).toBeUndefined();
     await rig.close();
   });
 
