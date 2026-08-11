@@ -20,8 +20,9 @@
  * ever veto.
  *
  * `code:execute` is `exposure: "internal"`: reachable in-process, never
- * addressable from the inbox or the wire. The same reasoning that refuses an
- * implicit default provider refuses a remotely-addressable eval verb.
+ * addressable from the inbox or the wire. A default RUNTIME is fine — it runs
+ * with the trust the host process already has — where a remotely-addressable
+ * eval verb would hand that trust to whoever reaches the wire.
  *
  * @see docs/proposals/v2/code.md
  * @see ./contract.ts
@@ -43,8 +44,9 @@ import type {
   OperationJournal,
 } from "@agentick/spec";
 import { HandlerError } from "@agentick/spec";
-import { mergeAbortSignals, omitUndefined } from "@agentick/utils";
+import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
 
+import { bindingNames } from "./bindings.js";
 import { sha256Hex } from "./code-hash.js";
 import { CODE_BUDGET_KEYS } from "./contract.js";
 import type {
@@ -58,13 +60,12 @@ import type {
   CodeExecuteRequest,
   CodeExecuteResult,
   CodeFx,
+  CodeRunInput,
   CodeRuntimeContext,
   Runtime,
 } from "./contract.js";
 import {
   CodeAborted,
-  CodeBindingNameConflict,
-  CodeBindingNameInvalid,
   CodeBudgetUnsupported,
   CodeContextDisposed,
   CodeHarnessClosed,
@@ -77,10 +78,24 @@ import {
 
 const SURFACE = "code" as const;
 
-/** Ambient names a provider injects: plain identifiers only. */
-const SAFE_BINDING_NAME = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
-const RESERVED_BINDING_NAMES = new Set(["__proto__", "constructor", "prototype"]);
+/**
+ * One config layer over another, absent layers passed through untouched.
+ * `mergeLayered` alone would turn "neither was set" into `{}`, and an empty
+ * budget bag is a different audit record from no budget bag at all.
+ */
+function layered<T extends object>(base: T | undefined, over: T | undefined): T | undefined {
+  if (base === undefined) return over;
+  if (over === undefined) return base;
+  return mergeLayered<T>(base, over);
+}
+
 const DISPOSE_ABORT_REASON = "the code context was disposed";
+
+/**
+ * A middleware changed the program between the request and the execution. The
+ * journal names both digests and carries the source that actually ran.
+ */
+export const CODE_EXECUTE_REWRITTEN = "code:execute:rewritten";
 
 // ADR 80/83 — typing the verb mints `onBeforeCodeExecute` / `onAfterCodeExecute`
 // on the derived hooks surface. Generics are the declaration site's.
@@ -97,6 +112,10 @@ export interface CodeHarnessOptions extends BaseHarnessOptions {
    * adopter can bind late via {@link CodeHarness.bindRuntime}.
    */
   readonly runtime?: Runtime;
+  /** The BASE context every program on this harness gets. */
+  readonly bindings?: CodeBindings;
+  /** Base ceilings, overridden per key at `createContext`. */
+  readonly budgets?: CodeBudgets;
 }
 
 /**
@@ -123,6 +142,8 @@ interface OpenContext {
 
 export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
   private runtime: Runtime | undefined;
+  private readonly baseBindings: CodeBindings | undefined;
+  private readonly baseBudgets: CodeBudgets | undefined;
   private closed = false;
   private readonly contexts = new Map<string, OpenContext>();
 
@@ -141,6 +162,8 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
   ) {
     super(SURFACE, scopeId, journal, bus, inbox, options);
     this.runtime = options.runtime;
+    this.baseBindings = options.bindings;
+    this.baseBudgets = options.budgets;
     this.executeCommand = this.command({
       name: "code:execute",
       exposure: "internal",
@@ -224,13 +247,23 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
   async createContext(options: CodeContextOptions = {}): Promise<CodeContext> {
     if (this.closed) throw new CodeHarnessClosed({ harnessId: this.scopeId });
     const runtime = this.requireRuntime();
-    this.assertBudgetsEnforceable(runtime, options.budgets);
+    // The definition's layer is the BASE and this context's is the override,
+    // so everything downstream — the ceiling check, the audit names, the
+    // provider — sees one merged context rather than two half-configs.
+    const settings: CodeContextOptions = {
+      ...options,
+      ...omitUndefined({
+        bindings: layered(this.baseBindings, options.bindings),
+        budgets: layered(this.baseBudgets, options.budgets),
+      }),
+    };
+    this.assertBudgetsEnforceable(runtime, settings.budgets);
     // Names are validated BEFORE the provider is touched: a rejected binding
     // must not leave a live context behind.
-    const names = this.checkedBindingNames(options.bindings);
+    const names = bindingNames(settings.bindings);
 
     const id = `code-ctx-${generateId()}`;
-    const runtimeContext = await this.openRuntimeContext(runtime, options);
+    const runtimeContext = await this.openRuntimeContext(runtime, settings);
     const abort = new AbortController();
     this.contexts.set(id, {
       runtimeContext,
@@ -240,7 +273,7 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
       signal: mergeAbortSignals(options.signal, abort.signal) ?? abort.signal,
       queue: Promise.resolve(),
       disposed: false,
-      ...omitUndefined({ budgets: options.budgets }),
+      ...omitUndefined({ budgets: settings.budgets }),
     });
     return {
       id,
@@ -258,7 +291,8 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
    * value, and the provider's disposal trouble is an operational fact reported
    * on the log, loudly, rather than a reason to discard it.
    */
-  async run(source: string, options: CodeContextOptions = {}): Promise<CodeExecuteResult> {
+  async run(input: CodeRunInput): Promise<CodeExecuteResult> {
+    const { source, ...options } = input;
     const context = await this.createContext(options);
     let answered = false;
     try {
@@ -300,6 +334,45 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
    * honors both through one parameter.
    */
   private applyExecute(
+    input: CodeExecuteInput,
+  ): Effect.Effect<CodeExecuteResult, CodeErrorChannel, never> {
+    return Effect.gen(this, function* () {
+      yield* this.recordRewrite(input);
+      return yield* this.dispatchExecute(input);
+    });
+  }
+
+  /**
+   * The digest of what will ACTUALLY run.
+   *
+   * `requested` is published before the interceptor cascade, so its payload is
+   * the program as ASKED FOR — which is the right meaning for that phase and
+   * the wrong one for an auditor once a middleware rewrites `source` (a lint
+   * autofix, a transform). This is the only place that sees the final string,
+   * so it is the only place that can tell the truth about it: a rewrite emits
+   * its own event carrying the executed source and both digests. No event means
+   * the requested envelope IS what ran, and that absence is the guarantee.
+   */
+  private recordRewrite(input: CodeExecuteInput): Effect.Effect<void, never, never> {
+    return Effect.gen(this, function* () {
+      const executed = yield* Effect.promise(() => sha256Hex(input.source));
+      if (executed === input.codeHash) return;
+      yield* this.emit({
+        name: CODE_EXECUTE_REWRITTEN,
+        phase: "terminal",
+        outcome: "succeeded",
+        scope: { ...(this.parentScope ?? {}), codeContextId: input.contextId },
+        payload: {
+          contextId: input.contextId,
+          requestedHash: input.codeHash,
+          executedHash: executed,
+          source: input.source,
+        },
+      }).pipe(Effect.orDie);
+    });
+  }
+
+  private dispatchExecute(
     input: CodeExecuteInput,
   ): Effect.Effect<CodeExecuteResult, CodeErrorChannel, never> {
     return Effect.suspend(() => {
@@ -508,50 +581,6 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
 
   private providerName(): string {
     return this.runtime?.capabilities.name ?? "unbound";
-  }
-
-  /**
-   * Every binding name, checked and de-duplicated — the boundary that sees all
-   * of them before any engine does.
-   *
-   * Two refusals, both because a provider turns these into AMBIENT names.
-   * A name in two groups has no defensible winner and would appear twice in
-   * the audit record; a name like `__proto__` or one that is not an identifier
-   * is a prototype-pollution primitive being handed to model-authored code.
-   */
-  private checkedBindingNames(bindings: CodeBindings | undefined): readonly string[] {
-    const groups = [
-      ["tools", bindings?.tools],
-      ["fs", bindings?.fs],
-      ["values", bindings?.values],
-    ] as const;
-    const claimedBy = new Map<string, string>();
-    for (const [group, bag] of groups) {
-      for (const name of Object.keys(bag ?? {})) {
-        this.assertUsableBindingName(name);
-        const prior = claimedBy.get(name);
-        if (prior !== undefined) {
-          throw new CodeBindingNameConflict({ bindingName: name, groups: [prior, group] });
-        }
-        claimedBy.set(name, group);
-      }
-    }
-    return [...claimedBy.keys()].sort();
-  }
-
-  private assertUsableBindingName(name: string): void {
-    if (!SAFE_BINDING_NAME.test(name)) {
-      throw new CodeBindingNameInvalid({
-        bindingName: name,
-        reason: "not a plain identifier",
-      });
-    }
-    if (RESERVED_BINDING_NAMES.has(name)) {
-      throw new CodeBindingNameInvalid({
-        bindingName: name,
-        reason: "collides with a prototype member",
-      });
-    }
   }
 
   private assertBudgetsEnforceable(runtime: Runtime, budgets: CodeBudgets | undefined): void {

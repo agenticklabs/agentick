@@ -41,6 +41,7 @@ versioning:
       - "@agentick/cluster-redis"
       - "@agentick/cluster-ws"
       - "@agentick/code"
+      - "@agentick/code-host"
       - "@agentick/compiler"
       - "@agentick/compiler-react"
       - "@agentick/connector"
@@ -103,6 +104,7 @@ versioning:
     "@agentick/cluster-redis": next
     "@agentick/cluster-ws": next
     "@agentick/code": next
+    "@agentick/code-host": next
     "@agentick/compiler": next
     "@agentick/compiler-react": next
     "@agentick/connector": next

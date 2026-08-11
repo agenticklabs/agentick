@@ -42,10 +42,25 @@ export interface CodeSourceVocabulary {
   noValue(): string;
   /** Raises with `message`. */
   throws(message: string): string;
-  /** Calls binding `name` with `input` and returns its answer. */
+  /**
+   * Calls binding `name` with `input` and returns its answer. `name` may be a
+   * DOTTED PATH (`"tools.search"`), because bindings are a context tree and a
+   * nested one is reached through its namespace.
+   */
   callsBinding(name: string, input: unknown): string;
-  /** Returns the value binding `name`. */
+  /** Returns the value binding `name`, which may be a dotted path. */
   readsValue(name: string): string;
+  /**
+   * Tries to REPLACE the binding at `name`, ignoring whatever the attempt
+   * raises, then calls it and returns its answer. A namespace is frozen, so the
+   * original must answer.
+   *
+   * The attempt's own failure is swallowed on purpose: an engine that refuses
+   * loudly and one that refuses silently are both conformant, and a pin that
+   * could tell them apart would be testing the engine's strictness rather than
+   * the guarantee.
+   */
+  swapsBinding(name: string): string;
   /** Writes `text` to `stream` and returns `done`. */
   writes(stream: CodeStream, text: string): string;
   /**
@@ -97,7 +112,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("run() is a one-shot context — used once, disposed", async () => {
       const { harness, close } = await open();
-      const result = await harness.run(source.returns("one-shot"));
+      const result = await harness.run({ source: source.returns("one-shot") });
       expect(result.outcome).toBe("returned");
       if (result.outcome === "returned") expect(result.value).toBe("one-shot");
       await close();
@@ -105,14 +120,14 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a completion with no value reports no-value, not a null value", async () => {
       const { harness, close } = await open();
-      const result = await harness.run(source.noValue());
+      const result = await harness.run({ source: source.noValue() });
       expect(result.outcome).toBe("no-value");
       await close();
     });
 
     it("a program that raises is a result, not a rejection", async () => {
       const { harness, close } = await open();
-      const result = await harness.run(source.throws("boom"));
+      const result = await harness.run({ source: source.throws("boom") });
       expect(result.outcome).toBe("threw");
       if (result.outcome === "threw") expect(result.error.message).toContain("boom");
       await close();
@@ -121,13 +136,12 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
     it("a function binding is reachable by name and its answer comes back", async () => {
       const { harness, close } = await open();
       const seen: unknown[] = [];
-      const result = await harness.run(source.callsBinding("recall", { q: "ping" }), {
+      const result = await harness.run({
+        source: source.callsBinding("recall", { q: "ping" }),
         bindings: {
-          tools: {
-            recall: async (input) => {
-              seen.push(input);
-              return { hits: 1 };
-            },
+          recall: async (input) => {
+            seen.push(input);
+            return { hits: 1 };
           },
         },
       });
@@ -137,10 +151,38 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       await close();
     });
 
+    it("a nested binding is reachable through its namespace", async () => {
+      const { harness, close } = await open();
+      const result = await harness.run({
+        source: source.callsBinding("tools.search", { q: "nested" }),
+        bindings: {
+          tools: { search: async (input: unknown) => ({ echoed: input }) },
+          tenantId: "acme",
+        },
+      });
+      expect(result.outcome).toBe("returned");
+      if (result.outcome === "returned") {
+        expect(result.value).toEqual({ echoed: { q: "nested" } });
+      }
+      await close();
+    });
+
+    it("a namespace cannot be swapped out from under the program", async () => {
+      const { harness, close } = await open();
+      const result = await harness.run({
+        source: source.swapsBinding("tools.search"),
+        bindings: { tools: { search: async () => "the original" } },
+      });
+      expect(result.outcome).toBe("returned");
+      if (result.outcome === "returned") expect(result.value).toBe("the original");
+      await close();
+    });
+
     it("a value binding is reachable by name", async () => {
       const { harness, close } = await open();
-      const result = await harness.run(source.readsValue("sessionId"), {
-        bindings: { values: { sessionId: "s-1" } },
+      const result = await harness.run({
+        source: source.readsValue("sessionId"),
+        bindings: { sessionId: "s-1" },
       });
       expect(result.outcome).toBe("returned");
       if (result.outcome === "returned") expect(result.value).toBe("s-1");
@@ -149,7 +191,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("stdout is a side channel — narration does not become the answer", async () => {
       const { harness, close } = await open();
-      const result = await harness.run(source.writes("stdout", "narration"));
+      const result = await harness.run({ source: source.writes("stdout", "narration") });
       expect(result.stdout).toContain("narration");
       expect(result.outcome).toBe("returned");
       if (result.outcome === "returned") expect(result.value).not.toBe("narration");
@@ -176,7 +218,8 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       for (const budget of enforced) {
         const exceeds = required(source.exceeds, `exceeds() for the declared budget "${budget}"`);
         const limit = budget === "outputBytes" ? 8 : 10;
-        const result = await harness.run(exceeds(budget, limit), {
+        const result = await harness.run({
+          source: exceeds(budget, limit),
           budgets: { [budget]: limit },
         });
         if (budget === "outputBytes") {
@@ -241,14 +284,13 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       // program is given a binding it reaches only if it kept going, and the
       // suite fails if that binding was ever called.
       let ranToCompletion = false;
-      const running = harness.run(source.blocks(), {
+      const running = harness.run({
+        source: source.blocks(),
         signal: controller.signal,
         bindings: {
-          tools: {
-            sentinel: async () => {
-              ranToCompletion = true;
-              return null;
-            },
+          sentinel: async () => {
+            ranToCompletion = true;
+            return null;
           },
         },
       });
@@ -268,11 +310,12 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("the REQUESTED envelope names bindings without carrying their values", async () => {
       const { harness, journal, close } = await open();
-      const program = source.callsBinding("recall", { q: "audit" });
-      await harness.run(program, {
+      const program = source.callsBinding("tools.recall", { q: "audit" });
+      await harness.run({
+        source: program,
         bindings: {
           tools: { recall: async () => "ok" },
-          values: { apiKey: "sk-do-not-journal-me" },
+          apiKey: "sk-do-not-journal-me",
         },
       });
 
@@ -285,7 +328,9 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       const input = inputOf(requested[0]!);
       expect(input.source).toBe(program);
       expect(input.codeHash).toMatch(/^[0-9a-f]{64}$/);
-      expect(input.bindings).toEqual(["apiKey", "recall"]);
+      // DOTTED LEAF PATHS: what a guard vetoes on is exactly what was in scope,
+      // down to the namespace it sat in.
+      expect(input.bindings).toEqual(["apiKey", "tools.recall"]);
       // Scoped to the REQUESTED envelope on purpose. This is the claim the
       // harness can actually keep: it never copies a binding's value into the
       // record it writes. It is NOT a claim that a secret cannot reach the
@@ -296,8 +341,9 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a program that RETURNS a binding value publishes it — the boundary, stated", async () => {
       const { harness, journal, close } = await open();
-      await harness.run(source.readsValue("apiKey"), {
-        bindings: { values: { apiKey: "sk-returned-on-purpose" } },
+      await harness.run({
+        source: source.readsValue("apiKey"),
+        bindings: { apiKey: "sk-returned-on-purpose" },
       });
 
       const events = await collect(journal);

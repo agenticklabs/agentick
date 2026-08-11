@@ -38,36 +38,60 @@ import type { CodeErrorChannel } from "./errors.js";
  */
 export type CodeBinding = (input: unknown) => Promise<unknown>;
 
+/** Data a binding can carry. JSON-shaped, because every placement is a membrane. */
+export type CodeBindingScalar = string | number | boolean | null;
+
 /**
- * What a context puts in scope. Providers inject these as ambient names; the
- * harness never interprets them, which is what keeps it usable for scoring
- * functions and adopter plugins as well as for tool-calling code.
+ * One entry: a callable, a nested record, or data.
  *
- * The `tools` / `fs` split is the caller's grouping for legibility (and what
- * the journal's binding names are drawn from); a provider that flattens both
- * into one ambient namespace is conformant, because the harness guarantees the
- * groups do not collide: **one name may appear in only one group**, and a
- * duplicate is `CodeBindingNameConflict` at `createContext` rather than a
- * precedence rule nobody can read off the audit record. Names must also be
- * plain identifiers and may not be `__proto__` / `constructor` / `prototype`
- * (`CodeBindingNameInvalid`) — these become ambient names in an engine, so the
- * boundary that sees every one of them is the place to refuse a hostile one.
+ * There is deliberately no separate type for a data OBJECT — a plain record is
+ * a namespace whether it holds functions or numbers, which is the same thing
+ * the runtime rule says.
+ *
+ * A function NESTED in a namespace needs its parameter annotated
+ * (`async (input: unknown) => …`), where a top-level one infers. TypeScript
+ * declines to carry a contextual parameter type through a union member's index
+ * signature, and "an entry is a callable OR a record" is that union.
+ */
+export type CodeBindingEntry =
+  | CodeBinding
+  | CodeBindings
+  | readonly CodeBindingEntry[]
+  | CodeBindingScalar;
+
+/**
+ * The context a program runs in — the `vm.createContext` model, not a schema.
+ *
+ * Every key is injected VERBATIM as an ambient name: a function becomes a
+ * callable, a nested record becomes a frozen namespace of the same rule applied
+ * again, anything else is a value. There are no reserved groups, because the
+ * shape of what a program should reach is the caller's design, not the
+ * framework's.
+ *
+ * ```ts
+ * bindings: {
+ *   tools: { search, fetch },   // tools.search(…)
+ *   fs: { readFile },           // fs.readFile(…)
+ *   tenantId,                   // tenantId
+ * }
+ * ```
+ *
+ * `tools` and `fs` are CONVENTIONS worth keeping — a model has strong priors
+ * about what `tools.search(...)` and `fs.readFile(...)` do, and spending them
+ * is free — but they are idioms in this sentence and nowhere in the types. Flat
+ * is right where flat reads better.
+ *
+ * A nested record is a namespace whether you meant it as an API or as data, and
+ * a program cannot tell the two apart; arrays and non-plain objects are always
+ * values. Names must be plain identifiers and may not be `__proto__` /
+ * `constructor` / `prototype`, **at every depth** (`CodeBindingNameInvalid`) —
+ * these become ambient names and property paths in an engine, so the boundary
+ * that sees all of them is the place to refuse a hostile one. That rule is also
+ * what makes the audit record's dotted paths unambiguous: a key can never
+ * contain the separator.
  */
 export interface CodeBindings {
-  readonly tools?: Readonly<Record<string, CodeBinding>>;
-  readonly fs?: Readonly<Record<string, CodeBinding>>;
-  /** Plain data in scope — a session id, a deadline, a fixture. */
-  readonly values?: Readonly<Record<string, unknown>>;
-}
-
-/** Every binding name a {@link CodeBindings} puts in scope, sorted. */
-export function bindingNames(bindings: CodeBindings | undefined): readonly string[] {
-  if (bindings === undefined) return [];
-  return [
-    ...Object.keys(bindings.tools ?? {}),
-    ...Object.keys(bindings.fs ?? {}),
-    ...Object.keys(bindings.values ?? {}),
-  ].sort();
+  readonly [name: string]: CodeBindingEntry;
 }
 
 // ============================================================================
@@ -238,6 +262,22 @@ export interface CodeContext {
 }
 
 /**
+ * What `run` takes: a program, plus exactly the bag `createContext` takes.
+ *
+ * ONE object, because a program passed positionally beside its options is the
+ * odd verb out — every hook, guard and middleware in the house handles a single
+ * input shape, and `run` was the one that made them special-case it. The field
+ * is `source` and not `script` for the same reason: one vocabulary from `run`
+ * through the command, the guard and the journal.
+ *
+ * It EXTENDS the context options rather than restating them, so the equivalence
+ * stays literal — `run` is a context used once, and the type says so.
+ */
+export interface CodeRunInput extends CodeContextOptions {
+  readonly source: string;
+}
+
+/**
  * What a caller may ASK for: a context and a program. Everything else in the
  * audit record is derived by the harness.
  */
@@ -294,7 +334,7 @@ export interface Code {
    */
   createContext(options?: CodeContextOptions): Promise<CodeContext>;
   /** One-shot: a context opened, used once, and disposed. */
-  run(source: string, options?: CodeContextOptions): Promise<CodeExecuteResult>;
+  run(input: CodeRunInput): Promise<CodeExecuteResult>;
 }
 
 /**

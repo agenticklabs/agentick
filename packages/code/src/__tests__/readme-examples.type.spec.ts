@@ -28,6 +28,7 @@ import type { EventBus, MessageInbox, OperationJournal } from "@agentick/spec";
 declare const session: {
   readonly code?: Code;
   readonly tools: { dispatch(name: string, input: unknown): Promise<unknown> };
+  readonly resources?: { read(uri: string): Promise<unknown> };
 };
 declare const source: string;
 declare const tenantId: string;
@@ -35,16 +36,38 @@ declare const MAX_PROGRAM_BYTES: number;
 declare const existingCodeHarness: Code;
 
 // ── Quick start
+declare const model: unknown;
+declare function createApp(agent: unknown, options: Record<string, unknown>): Promise<unknown>;
+declare const hostRuntime: (config?: { readonly cwd?: string }) => Runtime;
+declare const recall: (input: unknown) => Promise<unknown>;
+
+async function mountingForms(): Promise<void> {
+  await createApp(null, { model, code: {} });
+  await createApp(null, {
+    model,
+    code: defineCode({ runtime: hostRuntime({ cwd: "/srv/scratch" }) }),
+  });
+  await createApp(null, {
+    model,
+    code: defineCode({
+      bindings: { tools: { recall }, tenantId },
+      budgets: { timeMs: 5_000, outputBytes: 64_000 },
+    }),
+  });
+  defineCode();
+  withCode();
+}
 defineCode({ runtime: fakeCode() });
 
 async function quickStart(): Promise<void> {
   const code = session.code;
   if (!code) throw new Error("no code runtime is mounted");
 
-  const result = await code.run(source, {
+  const result = await code.run({
+    source,
     bindings: {
-      tools: { recall: (input) => session.tools.dispatch("recall", input) },
-      values: { tenantId },
+      tools: { recall: (input: unknown) => session.tools.dispatch("recall", input) },
+      tenantId,
     },
     budgets: { timeMs: 5_000, outputBytes: 64_000 },
   });
@@ -82,16 +105,44 @@ async function quickStart(): Promise<void> {
 
   // ── Stopping a program
   const controller = new AbortController();
-  const running = code.run(source, { signal: controller.signal });
+  const running = code.run({ source, signal: controller.signal });
   controller.abort("the user navigated away");
   await running;
 }
+
+// ── Bindings are the program's context
+async function bindingsAreContext(): Promise<void> {
+  const code = session.code!;
+  await code.run({
+    source: `
+      const hits = await tools.recall({ q: "invoices", tenantId });
+      const notes = await fs.readFile("/notes/latest.md");
+      return { hits: hits.length, notes };
+    `,
+    bindings: {
+      tools: { recall: (input: unknown) => session.tools.dispatch("recall", input) },
+      fs: { readFile: (path: unknown) => session.resources!.read(String(path)) },
+      tenantId,
+      today: new Date().toISOString(),
+    },
+  });
+}
+
+declare function lint(source: string): readonly { readonly message: string }[];
 
 // ── Policy runs before the program does
 function policy(): void {
   const codeHarness = session.code as CodeHarness;
   codeHarness.guardCodeExecute((input) => {
-    if (input.bindings.includes("deleteAll")) {
+    const findings = lint(input.source);
+    return Effect.succeed(
+      findings.length > 0
+        ? { kind: "veto", reason: `lint: ${findings[0]!.message}` }
+        : { kind: "proceed" },
+    );
+  });
+  codeHarness.guardCodeExecute((input) => {
+    if (input.bindings.includes("tools.deleteAll")) {
       return Effect.succeed({ kind: "veto", reason: "destructive binding in scope" });
     }
     if (input.source.length > MAX_PROGRAM_BYTES) {
@@ -158,6 +209,7 @@ const readmeProbe: CodeConformanceProbe = {
     throws: (message) => `throw new Error(${JSON.stringify(message)})`,
     callsBinding: (name, input) => `return await ${name}(${JSON.stringify(input)})`,
     readsValue: (name) => `return ${name}`,
+    swapsBinding: (name) => `try { ${name} = null } catch {} return await ${name}({})`,
     writes: (stream, text) =>
       `console.${stream === "stdout" ? "log" : "error"}(${JSON.stringify(text)}); return "done"`,
     blocks: () => `await new Promise(() => {})`,
@@ -165,6 +217,8 @@ const readmeProbe: CodeConformanceProbe = {
   },
 };
 
+void bindingsAreContext;
+void mountingForms;
 void mounting;
 void presence;
 void readmeProbe;
