@@ -45,7 +45,7 @@ function mkCompiler(config?: SpecConfig, model?: ModelDeclaration): CompilerProt
   });
   const render = () => ({ tree: mkTree(), diagnostics: [], iterations: 1 });
   return {
-    fx: { use: () => () => {}, renderTree: () => Effect.succeed(render()) },
+    fx: { use: () => () => {}, guard: () => () => {}, renderTree: () => Effect.succeed(render()) },
     mount: async () => ({ mountId: "rf-mount", restoredFromSnapshot: false }),
     rerender: async () => undefined,
     renderTree: async () => render(),
@@ -175,6 +175,7 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: () => Effect.succeed({ toolCallId: "x", name: "x", content: [], durationMs: 0 }),

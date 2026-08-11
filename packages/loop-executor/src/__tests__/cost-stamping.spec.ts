@@ -126,6 +126,7 @@ function mkStubCompiler(modelRefs: readonly (string | undefined)[] = []): Compil
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       renderTree: () => Effect.sync(() => ({ tree: treeFor(), diagnostics: [], iterations: 1 })),
     },
     mount: async () => ({ mountId: "cost-mount", restoredFromSnapshot: false }),
@@ -187,6 +188,7 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { name: string; toolCallId: string }) =>

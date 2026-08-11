@@ -35,6 +35,7 @@
  */
 
 import type { Effect } from "effect";
+import type { HarnessFx } from "./middleware.js";
 
 /**
  * Map an Effect-canonical surface to its Promise-typed edge view.
@@ -95,7 +96,7 @@ export type PromiseView<T> = {
  *
  * @see ./knobs-harness.ts — the first adopter.
  */
-export type HarnessEdge<F> = PromiseView<Omit<F, "use">> & {
+export type HarnessEdge<F> = PromiseView<Omit<F, keyof HarnessFx>> & {
   /**
    * The Effect-canonical twin. Compose this (`yield* h.fx.set(...)`) from
    * anywhere already inside a fiber; the sibling Promise methods are the

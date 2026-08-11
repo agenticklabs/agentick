@@ -286,6 +286,21 @@ export type NamespaceHooks<NS extends string> = NamespaceHooksOf<
 >;
 
 /**
+ * The interceptor half of every harness's construction options (ADR 96) — the
+ * two drop-layer bags, derived from the surface. {@link BaseHarnessOptions}
+ * extends this, so a harness accepts and registers both by naming its surface;
+ * a `defineX` definition extends it for the same fields on the adopter side.
+ *
+ * Lives here rather than in spec because both fields resolve through
+ * {@link CommandRegistry}, which is runtime-owned — spec owns the registry-free
+ * generics ({@link NamespaceHooksOf}) it is built from.
+ */
+export interface HarnessInterceptors<S extends string> {
+  readonly hooks?: NamespaceHooks<S>;
+  readonly guards?: NamespaceGuards<S>;
+}
+
+/**
  * Build ONE op-scoped `guard`-kind interceptor from a decider (ADR 93) — the
  * shared core of `BaseHarness.guard({...})` (own chain) and
  * {@link guardsToMiddlewares} (the declarative app/gateway config fold).

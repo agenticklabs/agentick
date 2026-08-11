@@ -25,13 +25,7 @@
  */
 
 import { Effect } from "effect";
-import {
-  BaseHarness,
-  qualifyNamespaceGuards,
-  qualifyNamespaceHooks,
-  type BaseHarnessOptions,
-  type Unsubscribe,
-} from "@agentick/runtime";
+import { BaseHarness, type BaseHarnessOptions, type Unsubscribe } from "@agentick/runtime";
 import type {
   CollectionMutation,
   EventBus,
@@ -190,7 +184,8 @@ declare module "@agentick/runtime" {
  * `inheritedFrom(installer)` in on top so the app/session interceptor cascade
  * reaches this harness (ADR 93 landmine 11).
  */
-export interface SkillsHarnessOptions extends BaseHarnessOptions, SkillsDefinition {}
+export interface SkillsHarnessOptions
+  extends BaseHarnessOptions<unknown, "skills">, SkillsDefinition {}
 
 export class SkillsHarness
   extends BaseHarness<SkillsSurface>
@@ -389,21 +384,6 @@ export class SkillsHarness
       exposure: "wire",
       handler: (i: SkillsSearchInput) => Effect.sync(() => this.search(i)),
     });
-
-    // ─── The definition's `hooks:` / `guards:` bags (ADR 93) ───
-    //
-    // DROP-LAYER keys (`onBeforeRegister`, `guards: { register }`) requalify onto
-    // the discriminated commands (`onBeforeSkillsRegister`, `SkillsRegister`) and
-    // register on this harness's OWN chain — deliberately NARROWER than the
-    // `inheritedInterceptors` an app/session hands down. That is the cascade law:
-    // broader scope wraps narrower, so app before-hooks run first and app guards
-    // veto before a definition guard is consulted.
-    if (options.hooks !== undefined) {
-      this.hook(qualifyNamespaceHooks("skills", options.hooks as Record<string, unknown>));
-    }
-    if (options.guards !== undefined) {
-      this.guard(qualifyNamespaceGuards("skills", options.guards as Record<string, unknown>));
-    }
   }
 
   /**

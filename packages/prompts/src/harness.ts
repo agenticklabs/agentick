@@ -43,8 +43,6 @@ import { Effect } from "effect";
 import {
   BaseHarness,
   getBoundaryFacets,
-  qualifyNamespaceGuards,
-  qualifyNamespaceHooks,
   type BaseHarnessOptions,
   type Unsubscribe,
 } from "@agentick/runtime";
@@ -214,7 +212,8 @@ export type ElicitSource = Elicit | (() => Elicit | undefined);
  * There is ONE options shape: `withPrompts(...)`, `createApp({ prompts })`, and
  * this constructor all take the same definition.
  */
-export interface PromptsHarnessOptions extends BaseHarnessOptions, PromptsDefinition {
+export interface PromptsHarnessOptions
+  extends BaseHarnessOptions<unknown, "prompts">, PromptsDefinition {
   /**
    * Source of the session's `bridges.timeline` for `invoke()` append. Injected at
    * construction by the extension installer, NOT part of the adopter-facing
@@ -438,21 +437,6 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
           return { prompts: page, ...omitUndefined({ nextCursor }) };
         }),
     });
-
-    // ─── The definition's `hooks:` / `guards:` bags (ADR 93) ───
-    //
-    // DROP-LAYER keys (`onBeforeInvoke`, `guards: { invoke }`) requalify onto the
-    // discriminated commands (`onBeforePromptsInvoke`, `PromptsInvoke`) and
-    // register on this harness's OWN chain — deliberately NARROWER than the
-    // `inheritedInterceptors` an app/session hands down. That is the cascade law:
-    // broader scope wraps narrower, so app before-hooks run first and app guards
-    // veto before a definition guard is consulted.
-    if (options.hooks !== undefined) {
-      this.hook(qualifyNamespaceHooks("prompts", options.hooks as Record<string, unknown>));
-    }
-    if (options.guards !== undefined) {
-      this.guard(qualifyNamespaceGuards("prompts", options.guards as Record<string, unknown>));
-    }
   }
 
   /**

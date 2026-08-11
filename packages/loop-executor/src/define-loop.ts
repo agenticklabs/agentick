@@ -147,7 +147,7 @@ class CallbackLoopExecutor extends BaseHarness<"loop"> implements LoopExecutorPr
 
   get fx(): LoopExecutorFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       // A callback loop is Promise-shaped (`spec.runExecution` returns a
       // terminal, no event stream), so the run-execution event `sink` has
       // nothing to drain — it is accepted to satisfy the streaming-command

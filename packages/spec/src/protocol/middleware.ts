@@ -19,6 +19,8 @@
  */
 
 import type { Effect } from "effect";
+import type { HandlerVerdict } from "../data/outcomes.js";
+import type { RuntimeContext } from "../data/runtime-context.js";
 import type { Unsubscribe } from "./inbox.js";
 
 /**
@@ -40,11 +42,28 @@ export type Middleware<I = unknown, R = unknown, E = unknown> = (
 // Spec owns only the Effect-native `Middleware` (the `fx.use` contract).
 
 /**
- * The base of every harness's `.fx` surface: the Effect-native middleware
- * register (`harness.fx.use`). Each concrete `XFx` (`ExecutorFx`, `LoopExecutorFx`,
- * `KnobsFx`, `ToolExecutorFx`, `CompilerFx`) extends this, so `fx.use` is a
- * universal member alongside the harness's operation twins. The Promise-facade
- * twin is `harness.use` (the {@link AsyncMiddleware} form).
+ * Effect-native guard decider (ADR 83) — the Effect twin of the plain
+ * `harness.guard` sugar's decider: receives the command's input plus the op's
+ * {@link RuntimeContext} and returns a {@link HandlerVerdict} (or `void` ≡
+ * `proceed`) on the success channel. Registered via `harness.fx.guard`;
+ * desugared to a `guard`-kind interceptor by `BaseHarness.guardEffect`.
+ */
+export type GuardDecider<I = unknown, R = unknown, E = never> = (
+  input: I,
+  ctx: RuntimeContext,
+) => Effect.Effect<HandlerVerdict<R> | void, E, never>;
+
+/**
+ * The base of every harness's `.fx` surface: the Effect-native **primitives**
+ * (ADR 96) — `fx.use` (middleware) and `fx.guard` (admission). Each concrete
+ * `XFx` (`ExecutorFx`, `LoopExecutorFx`, `KnobsFx`, `ToolExecutorFx`,
+ * `CompilerFx`) extends this, so both are universal members alongside the
+ * harness's operation twins. The Promise-facade twins are `harness.use` (the
+ * `AsyncMiddleware` form) and `harness.guard`.
+ *
+ * Sugar derived from the command registry (`hook`, `hooks.on*`) lives on the
+ * harness surface only: `.fx` carries primitives, and an in-fiber hook is a
+ * composition over `fx.use` (ADR 96 §4).
  */
 export interface HarnessFx {
   /**
@@ -53,4 +72,11 @@ export interface HarnessFx {
    * call-scoped (tier 4) middleware see ADR 76.
    */
   use<I = unknown, R = unknown, E = unknown>(mw: Middleware<I, R, E>): Unsubscribe;
+  /**
+   * Register an Effect-native {@link GuardDecider} on this harness's ops — the
+   * in-fiber twin of `harness.guard(decider)`. Guards compose OUTERMOST of
+   * every transform, so this decides before any hook runs. Returns an
+   * `Unsubscribe`.
+   */
+  guard<I = unknown, R = unknown, E = never>(decide: GuardDecider<I, R, E>): Unsubscribe;
 }

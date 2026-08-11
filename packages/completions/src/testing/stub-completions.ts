@@ -50,6 +50,7 @@ export function stubCompletions(options: StubCompletionsOptions = {}): Completio
       () => {
         /* a stub runs no ops, so there is nothing to wrap */
       },
+    guard: (): SpecUnsubscribe => () => {},
     resolve: (name, input) =>
       Effect.tryPromise({
         try: () => stub.resolve(name, input),

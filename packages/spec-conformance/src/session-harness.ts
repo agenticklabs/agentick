@@ -58,6 +58,8 @@ import type {
 } from "@agentick/spec";
 import { SPEC_VERSION, SessionClosedError } from "@agentick/spec";
 
+import { stubHarnessFx } from "./harness.js";
+
 /**
  * The durable persisted timeline log from a snapshot. Post-Step-6 (ADR 27)
  * the timeline lives under the generic `bridges.timeline` fold — a
@@ -126,7 +128,7 @@ function mkTree(): RenderedTree {
 function stubCompiler(): CompilerProtocol {
   return {
     fx: {
-      use: () => () => {},
+      ...stubHarnessFx(),
       renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
@@ -192,7 +194,7 @@ function stubLoop(text: string): LoopExecutorProtocol {
     };
   };
   return {
-    fx: { use: () => () => {}, runExecution: (input, _sink) => Effect.promise(() => run(input)) },
+    fx: { ...stubHarnessFx(), runExecution: (input, _sink) => Effect.promise(() => run(input)) },
     runExecution: run,
     abort: async () => undefined,
   };
@@ -208,7 +210,7 @@ function stubExecutor(): ExecutorProtocol<unknown, unknown, LanguageModelExecuti
     Effect.succeed({ outcome: "succeeded", result });
   return {
     fx: {
-      use: () => () => {},
+      ...stubHarnessFx(),
       run: runFx,
       project: () => Effect.succeed({ messages: [] }),
       normalize: () => Effect.succeed(result),
@@ -235,7 +237,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     });
   return {
     fx: {
-      use: () => () => {},
+      ...stubHarnessFx(),
       dispatch: (input) => dispatchFx(input),
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),

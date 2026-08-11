@@ -290,7 +290,7 @@ export class CompilerHarness
    */
   get fx(): CompilerFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       renderTree: (input) => this.renderTreeFx(input),
     };
   }
@@ -795,7 +795,7 @@ export class CompilerHarness
       if (pinned !== undefined) return pinned;
       const resolution = resolveFormatterFromMap(this.formatters, ref, this.defaultFormatterId);
       if (resolution.match === "fallback") {
-        const key = `${ref.id} ${ref.format ?? ""}`;
+        const key = `${ref.id}\0${ref.format ?? ""}`;
         if (!reported.has(key)) {
           reported.add(key);
           diagnostics.push(unresolvedFormatterDiagnostic(ref, resolution.formatter));

@@ -132,7 +132,7 @@ interface TemplateResolverEntry {
  * silently dropped every base option a caller passed, and the next thing the base
  * gains would be dropped the same way.
  */
-export interface ResourcesHarnessOptions extends BaseHarnessOptions {
+export interface ResourcesHarnessOptions extends BaseHarnessOptions<unknown, ResourcesSurface> {
   /**
    * Page size for `list` / `listTemplates`. Defaults to
    * {@link DEFAULT_PAGE_SIZE}. Small values let tests exercise the

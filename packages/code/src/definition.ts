@@ -20,12 +20,14 @@
  * @see docs/proposals/v2/blueprint/93-namespace-definitions.md
  */
 
+import type { HarnessInterceptors } from "@agentick/runtime";
+
 import type { Code, CodeBindings, CodeBudgets, Runtime } from "./contract.js";
 
 /** Symbol-keyed and non-enumerable, so it stays out of spread-visible shape. */
 const CODE_DEFINITION: unique symbol = Symbol("agentick.codeDefinition");
 
-export interface CodeDefinition {
+export interface CodeDefinition extends HarnessInterceptors<"code"> {
   /**
    * The provider. Omitted, the install resolves `@agentick/code-host`; absent
    * that, the namespace mounts INERT and every use fails `CodeProviderMissing`.

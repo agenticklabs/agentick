@@ -56,7 +56,7 @@ import type {
   SkillsRegisterInput,
   Store,
 } from "@agentick/spec";
-import type { NamespaceGuards, NamespaceHooks } from "@agentick/runtime";
+import type { HarnessInterceptors } from "@agentick/runtime";
 
 import type { SkillRunCompose } from "./handle.js";
 
@@ -142,7 +142,9 @@ export type SkillsHydrator<TStore extends SkillsStore = SkillsStore> = (
  * This same type is what `withSkills(...)` and `createApp({ skills })` accept
  * inline — `defineSkills` adds identity + the brand, not a new shape.
  */
-export interface SkillsDefinition<TStore extends SkillsStore = SkillsStore> {
+export interface SkillsDefinition<
+  TStore extends SkillsStore = SkillsStore,
+> extends HarnessInterceptors<"skills"> {
   /**
    * Durable backing for skill records — the durability/query port. Defaults to a
    * fresh per-session in-memory `InMemorySkillStore` (lost on exit). Inject a
@@ -194,21 +196,6 @@ export interface SkillsDefinition<TStore extends SkillsStore = SkillsStore> {
    * skills off the resources surface.
    */
   readonly exposeAsResources?: boolean;
-  /**
-   * Namespace-local command hooks (ADR 93) — DROP-LAYER keys
-   * (`onBeforeRegister`, not `onBeforeSkillsRegister`). Pure colocation sugar:
-   * each entry desugars to the same op-scoped interceptor the app-level
-   * discriminated bag produces. App-level hooks wrap these (broader scope
-   * outermost).
-   */
-  readonly hooks?: NamespaceHooks<"skills">;
-  /**
-   * Namespace-local guards (ADR 93) — DROP-LAYER keys (`{ register }`, not
-   * `{ skillsRegister }`). A distinct KIND from hooks: the verdict seam
-   * (`proceed` / `veto` / `replace` / `defer`), floated OUTERMOST of every
-   * transform. App-level guards outrank these — governance before local policy.
-   */
-  readonly guards?: NamespaceGuards<"skills">;
 }
 
 /** A {@link SkillsDefinition} carrying the {@link defineSkills} brand. */

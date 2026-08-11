@@ -78,6 +78,7 @@ function mkCompiler(tools: readonly ToolDeclaration[]): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
@@ -334,7 +335,11 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
       return { tree, diagnostics: [], iterations: 1 };
     };
     const compiler: CompilerProtocol = {
-      fx: { use: () => () => {}, renderTree: () => Effect.succeed(renderResult()) },
+      fx: {
+        use: () => () => {},
+        guard: () => () => {},
+        renderTree: () => Effect.succeed(renderResult()),
+      },
       mount: async () => ({ mountId: "m_5", restoredFromSnapshot: false }),
       rerender: async () => undefined,
       renderTree: async () => renderResult(),

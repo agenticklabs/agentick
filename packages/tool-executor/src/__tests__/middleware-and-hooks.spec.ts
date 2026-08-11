@@ -1,11 +1,13 @@
 /**
- * Tool executor middleware + lifecycle hook exposure (4a.6).
+ * Tool executor middleware + admission, on the REAL dispatch path (4a.6).
  *
- * `.use(middleware)` and `.guardDispatch(handler)` are thin typed
- * wrappers over `BaseHarness.middleware.use` and (ADR 83)
- * `BaseHarness.guardEffect(...)` — one composed interceptor seam. The base
- * composes both into every operation; these tests verify the typed
- * surfaces work as advertised.
+ * `.use` and `.fx.guard` are the base's own surfaces — this harness adds no
+ * wrapper for either (ADR 96 retired `guardDispatch`, the tool-typed alias for
+ * `guardEffect`). What these pin is therefore not the surfaces' existence but
+ * their effect HERE: a guard on `tool:dispatch` decides before the tool
+ * HANDLER runs, and a veto reaches the caller as the dispatch terminal. The
+ * base-level semantics live in
+ * `runtime/src/__tests__/definition-interceptors.spec.ts`.
  */
 
 import { describe, expect, it } from "vitest";
@@ -125,7 +127,7 @@ describe("ToolExecutorHarness — .fx.use(middleware)", () => {
   });
 });
 
-describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
+describe("ToolExecutorHarness — .fx.guard(decider)", () => {
   it("proceed verdict (or void) lets dispatch run normally", async () => {
     let ran = 0;
     const { harness } = await createTestHarness({
@@ -140,7 +142,7 @@ describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
         },
       ],
     });
-    harness.guardDispatch(() => Effect.succeed(undefined));
+    harness.fx.guard(() => Effect.succeed(undefined));
     const result = await harness.dispatch(dispatchOf("echo", "c-h-1"));
     expect(result.isError ?? false).toBe(false);
     expect(ran).toBe(1);
@@ -160,7 +162,7 @@ describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
         },
       ],
     });
-    harness.guardDispatch(() => Effect.succeed({ kind: "veto", reason: "policy block" } as const));
+    harness.fx.guard(() => Effect.succeed({ kind: "veto", reason: "policy block" } as const));
     // Veto path: BaseHarness's terminate emits terminal:vetoed and
     // replayTerminal causes the caller to receive an
     // OperationOutcomeError (Promise reject).
@@ -182,7 +184,7 @@ describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
         },
       ],
     });
-    const unsub = harness.guardDispatch(() => {
+    const unsub = harness.fx.guard(() => {
       vetoes++;
       return Effect.succeed({ kind: "veto", reason: "no" } as const);
     });

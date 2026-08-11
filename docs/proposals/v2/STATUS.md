@@ -2206,6 +2206,39 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-11 — the interceptor surface collapses into BaseHarness (ADR 96)
+
+`blueprint/96-interceptor-surface-collapse.md`. A harness now owns only its
+`CommandRegistry` augmentation and its handlers; the `hooks:` / `guards:`
+drop-layer bags ride `BaseHarnessOptions<I, Surface>` and the base constructor
+registers them for every harness. The three hand-rolled halves (timeline,
+prompts, skills) are gone and their suites pass **unmodified** — which is the
+whole behavioral argument. Twelve harnesses that had no sugar gained it for one
+type argument each; `defineCode({ guards: { execute } })` now vetoes a
+model-authored program.
+
+`HarnessFx` gained `guard` (the Effect-native primitive), so
+`ToolExecutorHarness.guardDispatch` is deleted and its tests run on
+`fx.guard`. The 9 hand-written `get fx()` literals now spread `...super.fx`, so
+the next universal `.fx` member costs zero per-harness edits.
+
+Two things the change surfaced. (1) Three protocol types spelled the
+Promise-facade exclusion by hand (`PromiseView<Omit<XFx, "use">>`) and would
+have projected `guard` as a bogus operation; the exclusion is now derived
+(`Omit<F, keyof HarnessFx>`). A hand-maintained list of primitives fails OPEN.
+(2) `compiler-react/src/harness/compiler-harness.ts` carried a literal NUL byte
+in a template-string delimiter (`${ref.id}\x00${ref.format}`), which made the
+whole file invisible to `grep` — that is how its `get fx()` escaped the first
+sweep. Replaced with the `\0` escape. Byte-scan changed files; a `Bin` in
+`diff --stat` is an alarm.
+
+Measured: production source **−47 lines**; the counterfactual (hand-writing the
+bags for the twelve harnesses) **≈360 lines** never written. Tier 2 — an
+Effect-native hook register on `.fx` — is PROPOSED-DEFERRED with the honest
+asymmetry argument in ADR 96 §4: `.fx` carries primitives, the harness surface
+carries the derived sugar, and an in-fiber hook is composable over `fx.use`
+while an in-fiber guard has no other expression.
+
 ### 2026-07-31 — usage → cost vertical (`docs/proposals/v2/usage-cost.md`)
 
 Cost became a first-class, durable record. Contract in

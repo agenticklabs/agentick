@@ -99,7 +99,7 @@ declare module "@agentick/runtime" {
   }
 }
 
-export interface CodeHarnessOptions extends BaseHarnessOptions {
+export interface CodeHarnessOptions extends BaseHarnessOptions<unknown, "code"> {
   /**
    * The provider. Optional: the harness is always present and INERT until a
    * runtime is bound, so a session can carry `code` at zero cost and an

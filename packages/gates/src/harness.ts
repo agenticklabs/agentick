@@ -67,7 +67,8 @@ const SURFACE = "gates" as const;
  * builds. The harness is a thin front-end: it owns no state of its own beyond
  * the controller, so its deps ARE the controller's.
  */
-export interface GatesHarnessDeps extends GatesControllerDeps, BaseHarnessOptions {}
+export interface GatesHarnessDeps
+  extends GatesControllerDeps, BaseHarnessOptions<unknown, "gates"> {}
 
 /** Wire input for `gates:clear`. */
 export interface GatesClearInput {

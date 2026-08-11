@@ -47,7 +47,7 @@ import type {
   TimelineEntry,
   TimelineStore,
 } from "@agentick/spec";
-import type { NamespaceGuards, NamespaceHooks } from "@agentick/runtime";
+import type { HarnessInterceptors } from "@agentick/runtime";
 
 /**
  * The brand `defineTimeline` stamps. Symbol-keyed so it never collides with an
@@ -135,7 +135,9 @@ export type TimelineCompactor = (
  * This same type is what `withTimeline(...)` and `createApp({ timeline })`
  * accept inline — `defineTimeline` adds identity + the brand, not a new shape.
  */
-export interface TimelineDefinition<TStore extends TimelineStore = TimelineStore> {
+export interface TimelineDefinition<
+  TStore extends TimelineStore = TimelineStore,
+> extends HarnessInterceptors<"timeline"> {
   /**
    * Durable backing for the log — the durability/query port (ADR 49). Defaults
    * to a bundled `MemoryTimelineStore` (`:memory:`, lost on exit). Inject a
@@ -179,21 +181,6 @@ export interface TimelineDefinition<TStore extends TimelineStore = TimelineStore
    * set false to keep boundary rows out of the store.
    */
   readonly turnBoundaries?: boolean;
-  /**
-   * Namespace-local command hooks (ADR 93) — DROP-LAYER keys
-   * (`onBeforeAppend`, not `onBeforeTimelineAppend`). Pure colocation sugar:
-   * each entry desugars to the same op-scoped `transform` interceptor the
-   * app-level discriminated bag produces. App-level hooks wrap these (broader
-   * scope outermost).
-   */
-  readonly hooks?: NamespaceHooks<"timeline">;
-  /**
-   * Namespace-local guards (ADR 93) — DROP-LAYER keys (`{ append }`, not
-   * `{ timelineAppend }`). A distinct KIND from hooks: the verdict seam
-   * (`proceed` / `veto` / `replace` / `defer`), floated OUTERMOST of every
-   * transform. App-level guards outrank these — governance before local policy.
-   */
-  readonly guards?: NamespaceGuards<"timeline">;
 }
 
 /** A {@link TimelineDefinition} carrying the {@link defineTimeline} brand. */

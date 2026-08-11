@@ -67,7 +67,12 @@ export function withCode(config: CodeConfig = {}): SessionExtension {
           // and the error names the install when someone actually runs a
           // program.
           runtime: config.runtime ?? (await resolveDefaultRuntime()),
-          ...omitUndefined({ bindings: config.bindings, budgets: config.budgets }),
+          ...omitUndefined({
+            bindings: config.bindings,
+            budgets: config.budgets,
+            hooks: config.hooks,
+            guards: config.guards,
+          }),
         },
       );
       await harness.ready;

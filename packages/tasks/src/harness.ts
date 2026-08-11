@@ -211,7 +211,7 @@ function makeDeferred<T>(): Deferred<T> {
  * interface silently dropped every base option a caller passed, and each one had to
  * be rediscovered the next time something needed it.
  */
-export interface TasksHarnessOptions extends BaseHarnessOptions {
+export interface TasksHarnessOptions extends BaseHarnessOptions<unknown, "tasks"> {
   /**
    * Scope stamped on every published task envelope AND on every
    * {@link TaskRecord} (the store's scope-filter key). Session-scoped

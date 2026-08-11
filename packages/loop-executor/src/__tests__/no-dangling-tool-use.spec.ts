@@ -58,6 +58,7 @@ function mkEmptyCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "nd-mount", restoredFromSnapshot: false }),

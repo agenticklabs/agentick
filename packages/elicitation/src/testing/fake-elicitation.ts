@@ -12,24 +12,11 @@
  * `elicitation:<harnessId>`; duplicates fail at inbox-registration).
  */
 
-import {
-  LocalEventBus,
-  LocalInbox,
-  MemoryJournal,
-  generateId,
-  type CommandHooks,
-} from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import { ElicitationHarness, type ElicitationHarnessOptions } from "../harness.js";
 
 export interface FakeElicitationOptions extends ElicitationHarnessOptions {
   readonly harnessId?: string;
-  /**
-   * Declarative command hooks (ADR 83) registered on the harness after
-   * construction via `harness.hook(...)` — the runtime twin of the app/session
-   * `hooks` config. `onBeforeElicitationElicit` / `onAfterElicitationElicit` /
-   * `onElicitationElicit` wrap the elicit round-trip op.
-   */
-  readonly hooks?: CommandHooks;
 }
 
 export interface FakeElicitationBundle {
@@ -44,12 +31,11 @@ export interface FakeElicitationBundle {
 export async function fakeElicitation(
   options: FakeElicitationOptions = {},
 ): Promise<FakeElicitationBundle> {
-  const { harnessId = `fake-elicitation-${generateId()}`, hooks, ...rest } = options;
+  const { harnessId = `fake-elicitation-${generateId()}`, ...rest } = options;
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
   const harness = new ElicitationHarness(harnessId, journal, bus, inbox, rest);
-  if (hooks) harness.hook(hooks);
   await harness.ready;
   return {
     harness,

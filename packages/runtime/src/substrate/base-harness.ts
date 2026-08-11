@@ -40,6 +40,7 @@ import type {
   EventPhase,
   EventScope,
   EventSurface,
+  GuardDecider,
   HandlerVerdict,
   HarnessFx,
   InboxError,
@@ -154,23 +155,12 @@ export {
   type CommandInvokeOpts,
 } from "./command-runner.js";
 
-/**
- * Effect-native guard decider (ADR 83). The Effect twin of the
- * {@link BaseHarness.guard} sugar's decider: receives the command's input plus
- * the op's {@link RuntimeContext}, returns a {@link HandlerVerdict} (or `void`
- * ≡ `proceed`) on the Effect success channel. Desugared to a `guard`-kind
- * interceptor by {@link BaseHarness.guardEffect}.
- */
-export type GuardDecider<I = unknown, R = unknown, E = never> = (
-  input: I,
-  ctx: RuntimeContext,
-) => Effect.Effect<HandlerVerdict<R> | void, E, never>;
-
-// `Middleware` (Effect-native, `fx.use`) + `HarnessFx` are defined in
-// `@agentick/spec` (so the `XFx` protocols can type `fx.use`) and
-// re-exported here. `AsyncMiddleware` (pure-JS, `use`) lives in `middleware.ts`
-// — it carries `RuntimeContext`, a runtime concern.
-export type { Middleware, HarnessFx } from "@agentick/spec";
+// `Middleware` (Effect-native, `fx.use`), `HarnessFx` and `GuardDecider` (the
+// `fx.guard` contract) are defined in `@agentick/spec` — so the `XFx` protocols
+// can type both primitives — and re-exported here. `AsyncMiddleware` (pure-JS,
+// `use`) lives in `middleware.ts`: it carries `RuntimeContext` explicitly, a
+// runtime concern.
+export type { Middleware, HarnessFx, GuardDecider } from "@agentick/spec";
 
 // The middleware COMPOSITION primitives (chain, compose, lift, hook-desugaring,
 // tier-4 call-scoped FiberRef) + the typed command-hook derivation were
@@ -183,10 +173,13 @@ import {
   liftMiddleware,
   commandHookMiddleware,
   guardsToMiddlewares,
+  qualifyNamespaceGuards,
+  qualifyNamespaceHooks,
   readChunkCarrier,
   type AsyncMiddleware,
   type CommandGuards,
   type CommandHooks,
+  type HarnessInterceptors,
   type HookRegistrars,
   type InterceptorCtx,
 } from "./middleware.js";
@@ -198,8 +191,6 @@ export {
   hooksToMiddlewares,
   guardsToMiddlewares,
   commandGuardMiddleware,
-  qualifyNamespaceGuards,
-  qualifyNamespaceHooks,
   withCallMiddleware,
   annotateOperationSpan,
   spanAttributes,
@@ -213,6 +204,7 @@ export {
   type CommandHooks,
   type CommandMiddlewares,
   type CommandRegistry,
+  type HarnessInterceptors,
   type HookRegistrars,
   type InterceptorCtx,
   type NamespaceGuards,
@@ -276,7 +268,16 @@ export interface HarnessShell {
   onClose(handler: () => void | Promise<void>): void;
 }
 
-export interface BaseHarnessOptions<I = unknown> {
+/**
+ * Every harness's construction options. `S` is the harness's surface — name it
+ * (`BaseHarnessOptions<unknown, "timeline">`) and the inherited `hooks:` /
+ * `guards:` bags (ADR 96) key by THIS namespace's verbs; leave it and they key
+ * by every registered verb.
+ */
+export interface BaseHarnessOptions<
+  I = unknown,
+  S extends string = EventSurface,
+> extends HarnessInterceptors<S> {
   readonly policy?: JournalingPolicy;
   /**
    * Auto-register on the inbox at construction. Set false for harnesses
@@ -724,14 +725,17 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   }
 
   /**
-   * The harness's `.fx` surface — the Effect-native operations twin PLUS
-   * `fx.use` (register an Effect-native {@link Middleware}, in-fiber). Concrete
-   * op-harnesses OVERRIDE this to add their operation twins (`fx.run`, …); this
-   * base provides the middleware register for harnesses without op twins (app,
-   * gateway) and is the type all `XFx` extend via {@link HarnessFx}.
+   * The harness's `.fx` surface — the Effect-native operation twins PLUS the two
+   * universal primitives, `fx.use` ({@link Middleware}) and `fx.guard`
+   * ({@link GuardDecider}), both in-fiber (ADR 96). Concrete op-harnesses
+   * OVERRIDE this to add their twins and spread `...super.fx` for the
+   * primitives, so a member added here reaches every surface.
    */
   get fx(): HarnessFx {
-    return { use: (mw) => this.registerEffectMiddleware(mw) };
+    return {
+      use: (mw) => this.registerEffectMiddleware(mw),
+      guard: (decide) => this.guardEffect(decide),
+    };
   }
 
   /**
@@ -984,7 +988,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     defaultJournal: OperationJournal,
     defaultBus: EventBus,
     defaultInbox: MessageInbox,
-    options: BaseHarnessOptions<Input> = {},
+    options: BaseHarnessOptions<Input, Surface> = {},
   ) {
     this.address = `${surface}:${scopeId}`;
     this.policy = options.policy ?? DEFAULT_JOURNALING_POLICY;
@@ -1070,6 +1074,20 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     // half of the seed needed no such deferral, which is why the seed loop
     // stays where it is: it must precede `attachInterceptorChild`.)
     for (const mw of this.inherited.snapshot()) this.absorbChunkCarrier(mw);
+
+    // ADR 96 — the definition's drop-layer `hooks:` / `guards:` bags, for EVERY
+    // harness. Requalified onto this surface's discriminated commands and
+    // registered on this harness's OWN chain: deliberately narrower than the
+    // inherited layer, which is the cascade law (broader scope wraps narrower,
+    // so an app guard vetoes before a definition guard is consulted). Placed
+    // after the command runner for the same reason the carrier drain is: a
+    // drop-layer `on<Verb>Chunk` key registers ON it.
+    if (options.hooks !== undefined) {
+      this.hook(qualifyNamespaceHooks(surface, options.hooks as Record<string, unknown>));
+    }
+    if (options.guards !== undefined) {
+      this.guard(qualifyNamespaceGuards(surface, options.guards as Record<string, unknown>));
+    }
 
     if (options.autoRegisterInbox !== false) {
       // Register is async — cluster impls may negotiate across nodes.
@@ -1888,10 +1906,12 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     return new Proxy(Object.create(null) as Record<string, never>, {
       get: (_t, action): unknown => {
         if (typeof action !== "string") return undefined;
-        // `fx.use` — the Effect-native middleware register (HarnessFx),
-        // universal across all `.fx` surfaces including the fxProxy-based ones.
+        // The two HarnessFx primitives — universal across all `.fx` surfaces
+        // including the fxProxy-based ones, so they shadow any derived action.
         if (action === "use")
           return (mw: Middleware<unknown, unknown, unknown>) => this.registerEffectMiddleware(mw);
+        if (action === "guard")
+          return (decide: GuardDecider<unknown, unknown, unknown>) => this.guardEffect(decide);
         const hand = extras?.[action];
         if (hand !== undefined) return hand;
         return (input: unknown, opts?: { readonly origin?: OperationOrigin }) =>

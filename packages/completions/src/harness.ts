@@ -68,7 +68,7 @@ type CompletionsSurface = typeof SURFACE;
  * re-declared and re-forwarded by hand. The harness adds no options of its own:
  * a registry has nothing to configure.
  */
-export type CompletionsHarnessOptions = BaseHarnessOptions;
+export type CompletionsHarnessOptions = BaseHarnessOptions<unknown, CompletionsSurface>;
 
 export class CompletionsHarness
   extends BaseHarness<CompletionsSurface>
