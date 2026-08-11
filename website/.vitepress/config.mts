@@ -100,6 +100,7 @@ const PACKAGE_GROUPS: Array<{ label: string; packages: string[] }> = [
       "@agentick/formatters",
       "@agentick/subscriptions",
       "@agentick/spec-conformance",
+      "@agentick/code",
       "@agentick/sandbox",
       "@agentick/sandbox-local",
       "@agentick/sandbox-docker",

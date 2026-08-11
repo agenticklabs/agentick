@@ -326,6 +326,9 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
     devDependencies:
+      '@agentick/code':
+        specifier: workspace:*
+        version: link:../code
       '@agentick/compiler':
         specifier: workspace:*
         version: link:../compiler
@@ -560,6 +563,21 @@ importers:
       '@types/ws':
         specifier: ^8.5.10
         version: 8.18.1
+
+  packages/code:
+    dependencies:
+      '@agentick/runtime':
+        specifier: workspace:*
+        version: link:../runtime
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      '@agentick/utils':
+        specifier: workspace:*
+        version: link:../utils
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
 
   packages/compiler:
     dependencies:
