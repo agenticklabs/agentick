@@ -52,7 +52,7 @@ import type {
   PromptsRegisterInput,
   Store,
 } from "@agentick/spec";
-import type { NamespaceGuards, NamespaceHooks } from "@agentick/runtime";
+import type { HarnessInterceptors } from "@agentick/runtime";
 
 import type { PromptRenderer } from "./renderer.js";
 
@@ -132,7 +132,9 @@ export type PromptsHydrator<TStore extends PromptsStore = PromptsStore> = (
  * This same type is what `withPrompts(...)` and `createApp({ prompts })` accept
  * inline — `definePrompts` adds identity + the brand, not a new shape.
  */
-export interface PromptsDefinition<TStore extends PromptsStore = PromptsStore> {
+export interface PromptsDefinition<
+  TStore extends PromptsStore = PromptsStore,
+> extends HarnessInterceptors<"prompts"> {
   /**
    * Durable backing for the prompt DECLARATION slice — the durability/query port,
    * and the end of the withPrompts-lacks-a-store asymmetry (ADR 93 rendered-moot
@@ -174,19 +176,6 @@ export interface PromptsDefinition<TStore extends PromptsStore = PromptsStore> {
    * faked. Set `false` to keep prompts off the resources surface.
    */
   readonly exposeAsResources?: boolean;
-  /**
-   * Namespace-local command hooks (ADR 93) — DROP-LAYER keys
-   * (`onBeforeRegister`, not `onBeforePromptsRegister`). Pure colocation sugar:
-   * each entry desugars to the same op-scoped interceptor the app-level
-   * discriminated bag produces. App-level hooks wrap these.
-   */
-  readonly hooks?: NamespaceHooks<"prompts">;
-  /**
-   * Namespace-local guards (ADR 93) — DROP-LAYER keys (`{ invoke }`, not
-   * `{ promptsInvoke }`). A distinct KIND from hooks: the verdict seam, floated
-   * OUTERMOST of every transform. App-level guards outrank these.
-   */
-  readonly guards?: NamespaceGuards<"prompts">;
 }
 
 /** A {@link PromptsDefinition} carrying the {@link definePrompts} brand. */

@@ -13,6 +13,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 
 const EXT = /\.(?:[cm]?[jt]sx?|json|md)$/;
 
@@ -23,6 +24,25 @@ const staged = execFileSync("git", ["diff", "--cached", "--name-only", "--diff-f
   .filter((f) => f !== "" && EXT.test(f));
 
 if (staged.length === 0) process.exit(0);
+
+// A literal control byte (agents type 0x00 where `\0` was meant) flips the file
+// to binary for diff/grep — it vanishes from every text sweep. Three escapes in
+// the repo's history; refuse the fourth at the door. Tab/LF/CR stay legal.
+const hasControlByte = (text) => {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 9 || c === 11 || c === 12 || (c > 13 && c < 32)) return true;
+  }
+  return false;
+};
+for (const f of staged) {
+  if (hasControlByte(readFileSync(f, "latin1"))) {
+    console.error(
+      `pre-commit: literal control byte in ${f} — use the escape ("\\0"), not the byte`,
+    );
+    process.exit(1);
+  }
+}
 
 // oxlint reads source only; handing it .json/.md is an error, not a no-op.
 const lintable = staged.filter((f) => /\.[cm]?[jt]sx?$/.test(f));

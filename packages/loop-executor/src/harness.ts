@@ -333,7 +333,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
    */
   get fx(): LoopExecutorFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       runExecution: (input, sink) => this.runExecutionCmd.fx(input, sink),
     };
   }

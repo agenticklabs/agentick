@@ -65,6 +65,7 @@ export function stubResources(options: StubResourcesOptions = {}): ResourcesHarn
    */
   const fx: ResourcesFx = {
     use: () => () => {},
+    guard: () => () => {},
     read: (input) =>
       Effect.tryPromise({
         try: () => read(input.uri),

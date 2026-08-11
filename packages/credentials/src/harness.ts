@@ -118,7 +118,7 @@ export interface CredentialsMutationInput {
  * silently dropped every base option a caller passed, and the next thing the base
  * gains would be dropped the same way.
  */
-export interface CredentialsHarnessOptions extends BaseHarnessOptions {
+export interface CredentialsHarnessOptions extends BaseHarnessOptions<unknown, "credentials"> {
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83) — the installing
    * host's interceptors, folded in at construction so app-scope guards wrap

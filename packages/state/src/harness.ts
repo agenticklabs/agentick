@@ -61,7 +61,7 @@ import { createStateStore, type StateEntry, type StateStoreQuery } from "./store
  * Construction options for {@link StateHarness}. Minimal — state takes its
  * substrate positionally; this carries only the durable store override.
  */
-export interface StateHarnessOptions extends BaseHarnessOptions {
+export interface StateHarnessOptions extends BaseHarnessOptions<unknown, "state"> {
   /**
    * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createStateStore}. The store holds

@@ -81,7 +81,7 @@ export type McpSpecEra = "2024-11-05" | "2025-11-25" | "2026-07-28";
  * MCP harness emitted events scoped to its own doubly-composed key
  * (`<sessionId>:mcp:<serverId>`) that no session subscription could match.
  */
-export interface McpClientHarnessOptions extends BaseHarnessOptions {
+export interface McpClientHarnessOptions extends BaseHarnessOptions<unknown, "mcp"> {
   /**
    * Server id surfaced as the harness's scope (`mcp:<serverId>`).
    * Used for envelope routing + tool-registration keys downstream.

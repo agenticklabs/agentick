@@ -45,6 +45,7 @@ const stubCompiler = (): CompilerProtocol =>
   ({
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "chunk-mount", restoredFromSnapshot: false }),
@@ -57,6 +58,7 @@ const stubToolExecutor = (): ToolExecutorProtocol =>
   ({
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: () => Effect.succeed({ toolCallId: "t", name: "n", content: [], isError: false }),

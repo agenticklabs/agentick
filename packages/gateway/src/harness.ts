@@ -179,7 +179,7 @@ export interface CreateGatewayAppInput<P = unknown> extends Omit<CreateAppInput<
   readonly options: Omit<AppHarnessOptions<P>, "rootElement" | "appId">;
 }
 
-export interface GatewayHarnessOptions extends BaseHarnessOptions {
+export interface GatewayHarnessOptions extends BaseHarnessOptions<unknown, "gateway"> {
   /**
    * What to do with a caller's `_meta.traceparent`. Default `"link"` — the
    * caller is untrusted, so the two traces stay joinable without this server

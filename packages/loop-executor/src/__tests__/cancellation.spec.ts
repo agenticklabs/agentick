@@ -52,6 +52,7 @@ function stubCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "c-mount", restoredFromSnapshot: false }),
@@ -84,6 +85,7 @@ function stubToolExecutor(
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { toolCallId: string; name: string; signal?: AbortSignal }) =>
@@ -105,6 +107,7 @@ function hangingExecutor(onStart: () => void): LanguageModelExecutor {
     ready: Promise.resolve(),
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       run: (input: RunInput) =>
         Effect.async<ExecutorTerminal<LanguageModelExecutionResult>>((resume) => {
           const signal = input.signal;
@@ -191,6 +194,7 @@ describe("LoopExecutorHarness — structured cancellation (Stage 5)", () => {
       ready: Promise.resolve(),
       fx: {
         use: () => () => {},
+        guard: () => () => {},
         run: () =>
           Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
             outcome: "succeeded",
@@ -253,6 +257,7 @@ function multiToolExec(toolCalls: readonly { id: string; name: string }[]): Lang
     ready: Promise.resolve(),
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       run: () =>
         Effect.sync(() => {
           call += 1;

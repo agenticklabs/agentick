@@ -728,7 +728,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    */
   get fx(): ExecutorFx<LanguageModelInput, TRaw, LanguageModelExecutionResult> {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       run: (input) => this.runFx(input),
       project: (input) => this.projectFx(input),
       normalize: (input) => this.normalizeFx(input),

@@ -782,7 +782,7 @@ export interface ToolExecutorFx extends HarnessFx {
   compileForTick(filter?: ToolListFilter): Effect.Effect<readonly ToolDeclaration[], never, never>;
 }
 
-export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, "use">> {
+export interface ToolExecutorProtocol extends PromiseView<Omit<ToolExecutorFx, keyof HarnessFx>> {
   /**
    * The Effect-canonical composable surface (ADR 77) — `fx.dispatch` for
    * in-fiber composition by the loop. On the protocol so a protocol-typed

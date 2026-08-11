@@ -82,6 +82,7 @@ export {
   type HookRegistrars,
   type CommandRegistry,
   type GuardDecider,
+  type HarnessInterceptors,
   type NamespaceGuards,
   type NamespaceHooks,
   type HarnessFx,

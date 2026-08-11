@@ -49,6 +49,7 @@ function mkStubCompiler(): CompilerProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "tc-mount", restoredFromSnapshot: false }),
@@ -94,6 +95,7 @@ function mkFakeToolExecutor(): ToolExecutorProtocol {
   return {
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),
       dispatch: (i: { name: string; toolCallId: string }) =>

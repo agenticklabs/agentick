@@ -445,7 +445,7 @@ class CallbackToolExecutor extends BaseHarness<"tool"> implements ToolExecutorPr
    */
   get fx(): ToolExecutorFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       dispatch: (input) => this.dispatchFx(input),
       replaceCompilerTools: (input) => this.replaceCompilerToolsFx(input),
       compileForTick: (filter) => this.compileForTickFx(filter),

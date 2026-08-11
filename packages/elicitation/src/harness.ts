@@ -113,7 +113,7 @@ const DEFAULT_TIMEOUT_MS = 5 * 60_000;
  * interface silently dropped every base option a caller passed, and each one had to
  * be rediscovered the next time something needed it.
  */
-export interface ElicitationHarnessOptions extends BaseHarnessOptions {
+export interface ElicitationHarnessOptions extends BaseHarnessOptions<unknown, "elicitation"> {
   /**
    * Default wait bound applied when the caller does not pass
    * `timeoutMs`. Defaults to 5 minutes — long enough for a human in

@@ -1,3 +1,5 @@
+import type { HarnessFx } from "@agentick/spec";
+
 /**
  * Conformance suite for BaseHarness implementations.
  *
@@ -33,4 +35,20 @@ export function runHarnessConformance(
   // TODO(phase-3): implement after BaseHarness lands in @agentick/runtime
   // and one concrete harness (tool executor) is implemented to drive the suite.
   throw new Error("runHarnessConformance: not yet implemented (Phase 3)");
+}
+
+/**
+ * The inert `HarnessFx` primitives (ADR 96) — every `.fx` surface carries
+ * `use` and `guard`, and a protocol stub that only needs its operation twins
+ * spreads these rather than restating them:
+ *
+ * ```ts
+ * fx: { ...stubHarnessFx(), renderTree: () => Effect.succeed(tree) }
+ * ```
+ *
+ * Both registers succeed and return an `Unsubscribe` that removes nothing —
+ * the stub has no chain to register on.
+ */
+export function stubHarnessFx(): HarnessFx {
+  return { use: () => () => {}, guard: () => () => {} };
 }

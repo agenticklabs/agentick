@@ -112,6 +112,7 @@ export function fakeTimelineHarness(
     // which is the whole reason the twin exists.
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       append: (entries: readonly TimelineEntry[]) =>
         Effect.promise(async () => {
           await appendEntries(entries);
@@ -231,6 +232,7 @@ export function fakeKnobsHarness(
     subscribeAll: (l) => notifier.subscribeAll(l),
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       set: (input) => Effect.sync(() => setValue(input)),
       register: (input) => Effect.sync(() => registerKnob(input)),
       dispatch: (input) => Effect.sync(() => dispatchKnob(input)),
@@ -295,6 +297,7 @@ export function mockStateHarness(
     subscribeAll: (l) => notifier.subscribeAll(l),
     fx: {
       use: () => () => {},
+      guard: () => () => {},
       set: (input) => Effect.sync(() => setValue(input)),
       delete: (input) => Effect.sync(() => deleteKey(input)),
     },

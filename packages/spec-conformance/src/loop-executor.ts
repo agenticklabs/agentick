@@ -27,6 +27,8 @@ import type {
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
+import { stubHarnessFx } from "./harness.js";
+
 // ============================================================================
 // Factory contract
 // ============================================================================
@@ -68,7 +70,7 @@ function mkTarget(): ExecutionTarget {
 function stubCompiler(tree: RenderedTree): CompilerProtocol {
   return {
     fx: {
-      use: () => () => {},
+      ...stubHarnessFx(),
       renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }),
     },
     mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
@@ -107,7 +109,7 @@ function stubExecutor(
     });
   return {
     fx: {
-      use: () => () => {},
+      ...stubHarnessFx(),
       run: runFx,
       project: () => Effect.succeed({ messages: [] }),
       normalize: (input) => Effect.succeed(input.targetOutput as LanguageModelExecutionResult),
@@ -135,7 +137,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
     });
   return {
     fx: {
-      use: () => () => {},
+      ...stubHarnessFx(),
       dispatch: (input) => dispatchFx(input),
       replaceCompilerTools: () => Effect.void,
       compileForTick: () => Effect.succeed([]),

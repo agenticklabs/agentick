@@ -40,8 +40,6 @@ import { Effect } from "effect";
 import {
   BaseHarness,
   getContext,
-  qualifyNamespaceGuards,
-  qualifyNamespaceHooks,
   runHarnessProtocol,
   generateId,
   type BaseHarnessOptions,
@@ -170,7 +168,8 @@ type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Pro
  * consume the same definition; the only thing the constructor adds is what the
  * runtime — never the adopter — supplies.
  */
-export interface TimelineHarnessOptions extends BaseHarnessOptions, TimelineDefinition {}
+export interface TimelineHarnessOptions
+  extends BaseHarnessOptions<unknown, "timeline">, TimelineDefinition {}
 
 /**
  * Payload schema for the `timeline:compact` **signal form** (ADR 51):
@@ -413,22 +412,6 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
           catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
         }),
     });
-
-    // ─── The definition's `hooks:` / `guards:` bags (ADR 93) ───
-    //
-    // DROP-LAYER keys (`onBeforeAppend`, `guards: { append }`) requalify onto
-    // the discriminated commands (`onBeforeTimelineAppend`, `TimelineAppend`)
-    // and register on this harness's OWN chain — deliberately NARROWER than the
-    // `inheritedInterceptors` an app/session hands down. That is the cascade
-    // law: broader scope wraps narrower, so app before-hooks run first and app
-    // guards veto before a definition guard is consulted (the runner's stable
-    // guard-outermost sort preserves tier order within the guard kind).
-    if (options.hooks !== undefined) {
-      this.hook(qualifyNamespaceHooks("timeline", options.hooks as Record<string, unknown>));
-    }
-    if (options.guards !== undefined) {
-      this.guard(qualifyNamespaceGuards("timeline", options.guards as Record<string, unknown>));
-    }
   }
 
   /**
@@ -602,7 +585,7 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    */
   get fx(): TimelineHarnessFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       append: (entries) => this.appendFx(entries),
     };
   }

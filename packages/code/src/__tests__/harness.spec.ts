@@ -338,6 +338,51 @@ describe("defineCode", () => {
     expect(Object.keys(definition)).toEqual(["runtime"]);
     expect(isCodeDefinition({ runtime })).toBe(false);
   });
+
+  // ADR 96 — the drop-layer bags arrive from BaseHarnessOptions. This package
+  // writes no registration code for them; `code:execute` in the registry is the
+  // whole declaration.
+  it("carries the drop-layer guards bag, and the guard vetoes an execution", async () => {
+    const definition = defineCode({
+      runtime: fakeCode(),
+      guards: {
+        execute: (input) => (input.bindings.includes("tenant") ? undefined : { kind: "veto" }),
+      },
+    });
+    const { harness, close } = await fakeCodeHarness(definition);
+    await expect(harness.execute({ source: fakeCodeSource.returns("nope") })).rejects.toThrow(
+      "operation outcome: vetoed",
+    );
+    const allowed = await harness.execute({
+      source: fakeCodeSource.returns("allowed"),
+      bindings: { tenant: "acme" },
+    });
+    expect(allowed).toMatchObject({ outcome: "returned", value: "allowed" });
+    await close();
+  });
+
+  it("carries the drop-layer hooks bag under the SHORT verb name", async () => {
+    const seen: string[] = [];
+    const { harness, close } = await fakeCodeHarness(
+      defineCode({
+        runtime: fakeCode(),
+        hooks: {
+          onBeforeExecute: (input) => {
+            seen.push(`before:${input.bindings.join(",")}`);
+          },
+          onAfterExecute: (output) => {
+            seen.push(`after:${output.outcome}`);
+          },
+        },
+      }),
+    );
+    await harness.execute({
+      source: fakeCodeSource.returns("short-names"),
+      bindings: { tenant: "acme" },
+    });
+    expect(seen).toEqual(["before:tenant", "after:returned"]);
+    await close();
+  });
 });
 
 describe("CodeHarness — the pins that are the HARNESS's, not a provider's", () => {

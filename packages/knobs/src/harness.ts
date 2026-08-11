@@ -105,7 +105,7 @@ import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js
  * dropped every base option a caller passed, and the next thing the base gains would
  * be dropped the same way.
  */
-export interface KnobsHarnessOptions extends BaseHarnessOptions {
+export interface KnobsHarnessOptions extends BaseHarnessOptions<unknown, "knobs"> {
   /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * session's resolved interceptors (guards, `.use` transforms, AND declarative

@@ -25,12 +25,7 @@ import { buildSessionElicit } from "@agentick/elicitation";
 
 import { Cause, Effect, Exit, Option } from "effect";
 import { deriveContext, getContext, runHarnessProtocol, generateId } from "@agentick/runtime";
-import {
-  BaseHarness,
-  type GuardDecider,
-  type TelemetryRuntime,
-  type Unsubscribe,
-} from "@agentick/runtime";
+import { BaseHarness, type TelemetryRuntime } from "@agentick/runtime";
 import type {
   AbortInput,
   ChannelPublisher,
@@ -501,7 +496,7 @@ export class ToolExecutorHarness
    */
   get fx(): ToolExecutorFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       dispatch: (input) => this.dispatchFx(input),
       replaceCompilerTools: (input) => this.replaceCompilerToolsFx(input),
       compileForTick: (filter) => this.compileForTickFx(filter),
@@ -574,31 +569,6 @@ export class ToolExecutorHarness
   // call sites pass generics:
   //
   //   tools.use<DispatchInput, DispatchResult>((input, next) => ...);
-
-  /**
-   * Register a GUARD on dispatch — a decider that runs BEFORE every
-   * dispatch's body and admits or rejects it (ADR 83). Returns a
-   * `HandlerVerdict` to influence execution:
-   *
-   *   - `{ kind: "proceed" }` (or void) — continue normally
-   *   - `{ kind: "veto", reason? }` — abort dispatch, terminal:vetoed
-   *   - `{ kind: "replace", result, reason? }` — short-circuit with
-   *     the supplied result, terminal:replaced
-   *   - `{ kind: "defer", retryAfter? }` — terminal:deferred (caller
-   *     responsibility to retry)
-   *
-   * Returns `Unsubscribe`. Multiple guards compose by COMPOSE-ORDER (the
-   * outermost decides first) — ADR 83 replaced the old order-independent
-   * priority-merge (`veto > replace > defer`) with the composed guard seam.
-   *
-   * The tool-typed name for the universal `BaseHarness.guardEffect(...)`
-   * seam. The handler stays Effect-native (in-fiber verdict). Distinct
-   * from the `gate` package (loop continuation) — this is op admission:
-   * guard : operation :: gate : loop.
-   */
-  guardDispatch(handler: GuardDecider<DispatchInput, DispatchResult, unknown>): Unsubscribe {
-    return this.guardEffect<DispatchInput, DispatchResult>(handler);
-  }
 
   // ──────────────────────── inbox dispatch ────────────────────────
 

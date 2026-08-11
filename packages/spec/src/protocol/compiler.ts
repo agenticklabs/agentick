@@ -616,7 +616,7 @@ export interface CompilerFx extends HarnessFx {
   ): Effect.Effect<RenderTreeResult, ReconcileErrorChannel | SubstrateError, never>;
 }
 
-export interface CompilerProtocol extends PromiseView<Omit<CompilerFx, "use">> {
+export interface CompilerProtocol extends PromiseView<Omit<CompilerFx, keyof HarnessFx>> {
   /**
    * The Effect-canonical composable surface (ADR 77) — `fx.renderTree` for
    * in-fiber composition by the loop. On the protocol so a protocol-typed

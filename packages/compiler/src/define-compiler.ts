@@ -158,7 +158,7 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
    */
   get fx(): CompilerFx {
     return {
-      use: (mw) => this.registerEffectMiddleware(mw),
+      ...super.fx,
       renderTree: (input) => this.renderTreeFx(input),
     };
   }

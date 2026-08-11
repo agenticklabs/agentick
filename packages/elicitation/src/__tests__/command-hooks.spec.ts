@@ -86,11 +86,10 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
 
   it("onBefore observes the outbound request before it is published", async () => {
     let seenMessage: string | undefined;
-    bundle = await fakeElicitation({
-      hooks: {
-        onBeforeElicitationElicit: (req) => {
-          seenMessage = req.message;
-        },
+    bundle = await fakeElicitation();
+    bundle.harness.hook({
+      onBeforeElicitationElicit: (req) => {
+        seenMessage = req.message;
       },
     });
     const envP = nextRequestEnvelope(bundle.bus);
@@ -108,10 +107,9 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
   });
 
   it("onBefore transforms the request — the reshaped prompt is what goes on the wire", async () => {
-    bundle = await fakeElicitation({
-      hooks: {
-        onBeforeElicitationElicit: (req) => ({ ...req, message: "TRANSFORMED" }),
-      },
+    bundle = await fakeElicitation();
+    bundle.harness.hook({
+      onBeforeElicitationElicit: (req) => ({ ...req, message: "TRANSFORMED" }),
     });
     const envP = nextRequestEnvelope(bundle.bus);
     const pending = bundle.harness.elicit(
@@ -130,10 +128,9 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
   });
 
   it("onAfter transforms the terminal ElicitationResult", async () => {
-    bundle = await fakeElicitation({
-      hooks: {
-        onAfterElicitationElicit: () => ({ outcome: "declined", reason: "hooked" }),
-      },
+    bundle = await fakeElicitation();
+    bundle.harness.hook({
+      onAfterElicitationElicit: () => ({ outcome: "declined", reason: "hooked" }),
     });
     const envP = nextRequestEnvelope(bundle.bus);
     const pending = bundle.harness.elicit(
@@ -153,11 +150,10 @@ describe("ElicitationHarness — elicit is hookable (round-trip)", () => {
   });
 
   it("a throw in onBefore vetoes — no request is published and elicit rejects", async () => {
-    bundle = await fakeElicitation({
-      hooks: {
-        onBeforeElicitationElicit: () => {
-          throw new Error("elicit blocked");
-        },
+    bundle = await fakeElicitation();
+    bundle.harness.hook({
+      onBeforeElicitationElicit: () => {
+        throw new Error("elicit blocked");
       },
     });
     let published = 0;

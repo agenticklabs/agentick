@@ -1,7 +1,7 @@
 /**
  * Tool executor middleware + lifecycle hook exposure (4a.6).
  *
- * `.use(middleware)` and `.guardDispatch(handler)` are thin typed
+ * `.use(middleware)` and `.fx.guard(decider)` are thin typed
  * wrappers over `BaseHarness.middleware.use` and (ADR 83)
  * `BaseHarness.guardEffect(...)` — one composed interceptor seam. The base
  * composes both into every operation; these tests verify the typed
@@ -125,7 +125,7 @@ describe("ToolExecutorHarness — .fx.use(middleware)", () => {
   });
 });
 
-describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
+describe("ToolExecutorHarness — .fx.guard(decider)", () => {
   it("proceed verdict (or void) lets dispatch run normally", async () => {
     let ran = 0;
     const { harness } = await createTestHarness({
@@ -140,7 +140,7 @@ describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
         },
       ],
     });
-    harness.guardDispatch(() => Effect.succeed(undefined));
+    harness.fx.guard(() => Effect.succeed(undefined));
     const result = await harness.dispatch(dispatchOf("echo", "c-h-1"));
     expect(result.isError ?? false).toBe(false);
     expect(ran).toBe(1);
@@ -160,7 +160,7 @@ describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
         },
       ],
     });
-    harness.guardDispatch(() => Effect.succeed({ kind: "veto", reason: "policy block" } as const));
+    harness.fx.guard(() => Effect.succeed({ kind: "veto", reason: "policy block" } as const));
     // Veto path: BaseHarness's terminate emits terminal:vetoed and
     // replayTerminal causes the caller to receive an
     // OperationOutcomeError (Promise reject).
@@ -182,7 +182,7 @@ describe("ToolExecutorHarness — .guardDispatch(handler)", () => {
         },
       ],
     });
-    const unsub = harness.guardDispatch(() => {
+    const unsub = harness.fx.guard(() => {
       vetoes++;
       return Effect.succeed({ kind: "veto", reason: "no" } as const);
     });

@@ -70,7 +70,7 @@ declare module "@agentick/runtime" {
  * silently dropped every base option a caller passed, and the next thing the base
  * gains would be dropped the same way.
  */
-export interface SubscriptionsHarnessOptions extends BaseHarnessOptions {
+export interface SubscriptionsHarnessOptions extends BaseHarnessOptions<unknown, "subscriptions"> {
   /**
    * CONSTRUCTION-BOUND lookup into the live subscription registry — in
    * practice `(id) => bridge.invoker(id)`. The seam that keeps the declared
