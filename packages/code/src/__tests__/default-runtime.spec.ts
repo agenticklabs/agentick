@@ -35,7 +35,7 @@ describe("the default runtime", () => {
     const { harness, close } = await fakeCodeHarness();
 
     expect(harness.hasRuntime()).toBe(false);
-    await expect(harness.run({ source: "anything" })).rejects.toMatchObject({
+    await expect(harness.execute({ source: "anything" })).rejects.toMatchObject({
       _tag: "CodeProviderMissing",
       message: expect.stringContaining(DEFAULT_RUNTIME_PACKAGE),
     });

@@ -7,7 +7,6 @@
  */
 
 import { describe, it } from "vitest";
-import { Effect } from "effect";
 import {
   defineCode,
   withCode,
@@ -63,7 +62,7 @@ async function quickStart(): Promise<void> {
   const code = session.code;
   if (!code) throw new Error("no code runtime is mounted");
 
-  const result = await code.run({
+  const result = await code.execute({
     source,
     bindings: {
       tools: { recall: (input: unknown) => session.tools.dispatch("recall", input) },
@@ -105,7 +104,7 @@ async function quickStart(): Promise<void> {
 
   // ── Stopping a program
   const controller = new AbortController();
-  const running = code.run({ source, signal: controller.signal });
+  const running = code.execute({ source, signal: controller.signal });
   controller.abort("the user navigated away");
   await running;
 }
@@ -113,7 +112,7 @@ async function quickStart(): Promise<void> {
 // ── Bindings are the program's context
 async function bindingsAreContext(): Promise<void> {
   const code = session.code!;
-  await code.run({
+  await code.execute({
     source: `
       const hits = await tools.recall({ q: "invoices", tenantId });
       const notes = await fs.readFile("/notes/latest.md");
@@ -128,27 +127,88 @@ async function bindingsAreContext(): Promise<void> {
   });
 }
 
-declare function lint(source: string): readonly { readonly message: string }[];
+// ── Running TypeScript
+declare const hostRuntimeTs: (config: { readonly language: "typescript" }) => Runtime;
 
-// ── Policy runs before the program does
-function policy(): void {
-  const codeHarness = session.code as CodeHarness;
-  codeHarness.guardCodeExecute((input) => {
-    const findings = lint(input.source);
-    return Effect.succeed(
-      findings.length > 0
-        ? { kind: "veto", reason: `lint: ${findings[0]!.message}` }
-        : { kind: "proceed" },
-    );
+async function runningTypescript(): Promise<void> {
+  createApp(null, { code: defineCode({ runtime: hostRuntimeTs({ language: "typescript" }) }) });
+
+  const code = session.code!;
+  await code.execute({
+    source: `
+      interface Order { id: string; dueAt: string; shippedAt: string }
+      const rows = (await tools.query({ table: "orders" })) as Order[];
+      const late: Order[] = rows.filter((row) => row.shippedAt > row.dueAt);
+      return { late: late.length };
+    `,
   });
-  codeHarness.guardCodeExecute((input) => {
-    if (input.bindings.includes("tools.deleteAll")) {
-      return Effect.succeed({ kind: "veto", reason: "destructive binding in scope" });
-    }
-    if (input.source.length > MAX_PROGRAM_BYTES) {
-      return Effect.succeed({ kind: "veto", reason: "program too large to review" });
-    }
-    return Effect.succeed({ kind: "proceed" });
+  void code.capabilities().name;
+}
+
+declare function lint(source: string): readonly { readonly message: string }[];
+declare function lintFix(source: string): Promise<string>;
+declare function format(source: string): Promise<string>;
+declare function instrument(source: string): string;
+
+// ── Pre-run pipelines
+function pipelines(): void {
+  const codeHarness = session.code as CodeHarness;
+
+  codeHarness.hook({
+    onBeforeCodeExecute: async (input) => {
+      const fixed = await lintFix(input.source);
+      return { ...input, source: fixed };
+    },
+  });
+
+  codeHarness.hook({
+    onBeforeCodeExecute: async (input) => ({ ...input, source: await format(input.source) }),
+  });
+  codeHarness.hook({
+    onBeforeCodeExecute: async (input) => ({ ...input, source: instrument(input.source) }),
+  });
+
+  codeHarness.hook({
+    onBeforeCodeExecute: (input, ctx) => {
+      const findings = lint(input.source);
+      if (findings.length > 0) ctx.log.warn({ msg: "lint findings", count: findings.length });
+    },
+  });
+
+  codeHarness.hook({
+    onCodeExecute: async (input, next, ctx) => {
+      const startedAt = Date.now();
+      try {
+        return await next(input);
+      } finally {
+        ctx.log.info({ msg: "program finished", ms: Date.now() - startedAt });
+      }
+    },
+  });
+
+  codeHarness.guard({
+    codeExecute: (input) =>
+      input.source.includes("child_process")
+        ? { kind: "veto", reason: "no subprocess spawning" }
+        : { kind: "proceed" },
+  });
+
+  codeHarness.guard({
+    codeExecute: (input) => {
+      if (input.bindings.includes("tools.deleteAll")) {
+        return { kind: "veto", reason: "destructive binding in scope" };
+      }
+      if (input.source.length > MAX_PROGRAM_BYTES) {
+        return { kind: "veto", reason: "program too large to review" };
+      }
+    },
+  });
+
+  codeHarness.guard({
+    codeExecute: (input) => {
+      const findings = lint(input.source);
+      if (findings.length > 0) return { kind: "veto", reason: `lint: ${findings[0]!.message}` };
+    },
   });
 }
 
@@ -224,7 +284,8 @@ void presence;
 void readmeProbe;
 void runCodeConformance;
 void myRuntime;
-void policy;
+void pipelines;
+void runningTypescript;
 void quickStart;
 void fakeCodeSource;
 

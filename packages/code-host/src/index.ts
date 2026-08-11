@@ -16,6 +16,7 @@
 
 export { hostRuntime, type HostRuntimeConfig } from "./host-runtime.js";
 export { detectEngine, hostCapabilities, type HostEngine } from "./engine.js";
+export { transpiler, type HostLanguage, type Transpiled } from "./language.js";
 export {
   childProcessPort,
   type HostProcess,

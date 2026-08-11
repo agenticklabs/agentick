@@ -104,6 +104,6 @@ function adopted(instance: Code): Code {
     hasRuntime: () => instance.hasRuntime(),
     capabilities: () => instance.capabilities(),
     createContext: (options) => instance.createContext(options),
-    run: (input) => instance.run(input),
+    execute: (input) => instance.execute(input),
   };
 }

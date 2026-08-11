@@ -50,7 +50,7 @@ Could this stay app code? Three consumers say no:
 Could it be an adapter family like `model → model-anthropic`? No — executing
 model-written code is a **privileged act that wants the operation envelope**:
 journaling (an audit trail of every program the model ran, with its bindings
-named), derived hooks, and above all **`guardCodeExecute`** — the seam where
+named), derived hooks, and above all **`guard({ codeExecute })`** — the seam where
 deployment policy vetoes, rewrites, or budget-caps code _before it runs_.
 Adapters project I/O; harnesses own operations. This is an operation.
 
@@ -79,7 +79,7 @@ memory/CPU ceilings, permission drivers — because that is the same for every
 execution in the session. `bindings` (which tools/fs/values are in scope) and
 `budgets` (the time/output ceiling for THIS code) change per call, so they sit
 on `createContext`, not in the factory. Config-binding is also what lets
-`ctx.code.run(...)` reach the runtime ambiently: a per-call runtime argument
+`ctx.code.execute(...)` reach the runtime ambiently: a per-call runtime argument
 would force every caller to know the engine.
 
 ```ts
@@ -113,7 +113,7 @@ matching stubs, so it always knows the language).
 `createContext`/`execute` are async because at least one placement (a jail
 over a socket) cannot answer synchronously — the contract is async or it lies
 about a placement. A one-shot is a context used once (sugar:
-`session.code.run(code)`). The context is the REPL axis — persistent state
+`session.code.execute(...)`). The context is the REPL axis — persistent state
 across executions in one session — which every mature code surface grows into;
 the interface costs one method now and forecloses nothing.
 

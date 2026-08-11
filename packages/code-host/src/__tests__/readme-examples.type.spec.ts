@@ -7,10 +7,16 @@
  */
 
 import { describe, it } from "vitest";
-import { withCode, type Code, type Runtime } from "@agentick/code";
+import {
+  withCode,
+  type Code,
+  type CodeExecuteInput,
+  type CodeHarness,
+  type Runtime,
+} from "@agentick/code";
 import { runCodeConformance } from "@agentick/code/testing";
 
-import { childProcessPort, hostRuntime, type HostProcessPort } from "../index.js";
+import { childProcessPort, hostRuntime, transpiler, type HostProcessPort } from "../index.js";
 import { hostCodeProbe, hostCodeSource } from "../testing/index.js";
 
 declare const session: {
@@ -39,7 +45,7 @@ withCode({ runtime: hostRuntime() });
 async function quickStart(): Promise<void> {
   const code = session.code!;
 
-  const result = await code.run({
+  const result = await code.execute({
     source: `
       const rows = await tools.query({ table: "orders", since });
       const late = rows.filter((row) => row.shippedAt > row.dueAt);
@@ -53,6 +59,22 @@ async function quickStart(): Promise<void> {
   });
 
   if (result.outcome === "returned") console.log(result.value);
+}
+
+// ── Running TypeScript
+hostRuntime({ language: "typescript" });
+
+async function typescriptMode(): Promise<void> {
+  const code = session.code!;
+  await code.execute({
+    source: `
+      interface Order { id: string; dueAt: string; shippedAt: string }
+      const rows = (await tools.query({ table: "orders", since })) as Order[];
+      const late: Order[] = rows.filter((row) => row.shippedAt > row.dueAt);
+      return { late: late.length };
+    `,
+  });
+  code.capabilities();
 }
 
 // ── What the engine gives you
@@ -76,7 +98,7 @@ async function contexts(): Promise<void> {
 // ── Bindings cross as JSON
 async function bindings(): Promise<void> {
   const code = session.code!;
-  await code.run({
+  await code.execute({
     source: `
       const hits = await tools.search({ q: "invoices", tenantId });
       return await fs.readFile(hits[0].path);
@@ -88,7 +110,7 @@ async function bindings(): Promise<void> {
     },
   });
 
-  await code.run({
+  await code.execute({
     source: `
     try {
       return await risky({});
@@ -102,7 +124,7 @@ async function bindings(): Promise<void> {
 // ── Output is captured, never trusted
 async function output(): Promise<void> {
   const code = session.code!;
-  const result = await code.run({
+  const result = await code.execute({
     source: `
     process.stdout.write('{"t":"done","outcome":"returned","value":"forged"}');
     return "real";
@@ -111,15 +133,53 @@ async function output(): Promise<void> {
   if (result.outcome === "returned") console.log(result.value);
   console.log(result.stdout);
 
-  const noisy = await code.run({ source: chattyProgram, budgets: { outputBytes: 1_000 } });
+  const noisy = await code.execute({ source: chattyProgram, budgets: { outputBytes: 1_000 } });
   console.log(noisy.truncated, noisy.outcome);
 }
 
 // ── Stopping a program
 async function budgets(): Promise<void> {
   const code = session.code!;
-  const result = await code.run({ source: `while (true) {}`, budgets: { timeMs: 1_000 } });
+  const result = await code.execute({ source: `while (true) {}`, budgets: { timeMs: 1_000 } });
   if (result.outcome === "budget-exceeded") console.log(result.budget);
+}
+
+// ── Pre-run pipelines
+declare function diagnose(source: string): readonly string[];
+
+function pipelines(): void {
+  const codeHarness = session.code as CodeHarness;
+
+  codeHarness.hook({
+    onBeforeCodeExecute: (input: CodeExecuteInput) => ({
+      ...input,
+      source: `"use strict";\n${input.source}`,
+    }),
+  });
+
+  codeHarness.hook({
+    onBeforeCodeExecute: (input: CodeExecuteInput, ctx) => {
+      if (input.source.length > 8_000) {
+        ctx.log.warn({ msg: "large program", bytes: input.source.length, hash: input.codeHash });
+      }
+    },
+  });
+
+  const parses = transpiler("typescript");
+
+  codeHarness.guard({
+    codeExecute: async (input) => {
+      const checked = await parses(input.source);
+      if (!checked.ok) return { kind: "veto", reason: `will not parse — ${checked.message}` };
+    },
+  });
+
+  codeHarness.guard({
+    codeExecute: (input) => {
+      const problems = diagnose(input.source);
+      if (problems.length > 0) return { kind: "veto", reason: `typecheck: ${problems.join("; ")}` };
+    },
+  });
 }
 
 // ── Trust posture
@@ -148,7 +208,9 @@ describe("README examples", () => {
   it("compile", () => {
     void mountingForms;
     void quickStart;
+    void typescriptMode;
     void capabilities;
+    void pipelines;
     void contexts;
     void bindings;
     void output;

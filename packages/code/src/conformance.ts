@@ -110,9 +110,9 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       await close();
     });
 
-    it("run() is a one-shot context — used once, disposed", async () => {
+    it("the one-shot execute() is a context used once, then disposed", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({ source: source.returns("one-shot") });
+      const result = await harness.execute({ source: source.returns("one-shot") });
       expect(result.outcome).toBe("returned");
       if (result.outcome === "returned") expect(result.value).toBe("one-shot");
       await close();
@@ -120,14 +120,14 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a completion with no value reports no-value, not a null value", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({ source: source.noValue() });
+      const result = await harness.execute({ source: source.noValue() });
       expect(result.outcome).toBe("no-value");
       await close();
     });
 
     it("a program that raises is a result, not a rejection", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({ source: source.throws("boom") });
+      const result = await harness.execute({ source: source.throws("boom") });
       expect(result.outcome).toBe("threw");
       if (result.outcome === "threw") expect(result.error.message).toContain("boom");
       await close();
@@ -136,7 +136,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
     it("a function binding is reachable by name and its answer comes back", async () => {
       const { harness, close } = await open();
       const seen: unknown[] = [];
-      const result = await harness.run({
+      const result = await harness.execute({
         source: source.callsBinding("recall", { q: "ping" }),
         bindings: {
           recall: async (input) => {
@@ -153,7 +153,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a nested binding is reachable through its namespace", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({
+      const result = await harness.execute({
         source: source.callsBinding("tools.search", { q: "nested" }),
         bindings: {
           tools: { search: async (input: unknown) => ({ echoed: input }) },
@@ -169,7 +169,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a namespace cannot be swapped out from under the program", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({
+      const result = await harness.execute({
         source: source.swapsBinding("tools.search"),
         bindings: { tools: { search: async () => "the original" } },
       });
@@ -180,7 +180,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a value binding is reachable by name", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({
+      const result = await harness.execute({
         source: source.readsValue("sessionId"),
         bindings: { sessionId: "s-1" },
       });
@@ -191,7 +191,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("stdout is a side channel — narration does not become the answer", async () => {
       const { harness, close } = await open();
-      const result = await harness.run({ source: source.writes("stdout", "narration") });
+      const result = await harness.execute({ source: source.writes("stdout", "narration") });
       expect(result.stdout).toContain("narration");
       expect(result.outcome).toBe("returned");
       if (result.outcome === "returned") expect(result.value).not.toBe("narration");
@@ -218,7 +218,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       for (const budget of enforced) {
         const exceeds = required(source.exceeds, `exceeds() for the declared budget "${budget}"`);
         const limit = budget === "outputBytes" ? 8 : 10;
-        const result = await harness.run({
+        const result = await harness.execute({
           source: exceeds(budget, limit),
           budgets: { [budget]: limit },
         });
@@ -284,7 +284,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       // program is given a binding it reaches only if it kept going, and the
       // suite fails if that binding was ever called.
       let ranToCompletion = false;
-      const running = harness.run({
+      const running = harness.execute({
         source: source.blocks(),
         signal: controller.signal,
         bindings: {
@@ -311,7 +311,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
     it("the REQUESTED envelope names bindings without carrying their values", async () => {
       const { harness, journal, close } = await open();
       const program = source.callsBinding("tools.recall", { q: "audit" });
-      await harness.run({
+      await harness.execute({
         source: program,
         bindings: {
           tools: { recall: async () => "ok" },
@@ -341,7 +341,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
 
     it("a program that RETURNS a binding value publishes it — the boundary, stated", async () => {
       const { harness, journal, close } = await open();
-      await harness.run({
+      await harness.execute({
         source: source.readsValue("apiKey"),
         bindings: { apiKey: "sk-returned-on-purpose" },
       });
@@ -351,7 +351,7 @@ export function runCodeConformance(probe: CodeConformanceProbe): void {
       // the program answered. A program that returns a secret has published
       // it; so has one that prints it. The harness withholds what IT knows,
       // not what the program chooses to say — redaction of results is the
-      // adopter's policy layer, and `guardCodeExecute` is where a binding too
+      // adopter's policy layer, and a `guard({ codeExecute })` is where a binding too
       // sensitive to risk gets refused in the first place.
       expect(JSON.stringify(events)).toContain("sk-returned-on-purpose");
       await close();

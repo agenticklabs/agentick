@@ -56,8 +56,9 @@ export const hostCodeSource: CodeSourceVocabulary = {
 };
 
 export function hostCodeProbe(config: HostRuntimeConfig = {}): CodeConformanceProbe {
+  const engine = process.versions.bun === undefined ? "node" : "bun";
   return {
-    label: `hostRuntime (${process.versions.bun === undefined ? "node" : "bun"})`,
+    label: `hostRuntime (${engine}, ${config.language ?? "javascript"})`,
     makeRuntime: () => hostRuntime(config),
     source: hostCodeSource,
   };

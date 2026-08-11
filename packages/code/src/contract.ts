@@ -212,17 +212,17 @@ export interface CodeExecuteInput {
 // Handles — the harness side
 // ============================================================================
 
-/** What `createContext` / `run` accept. Both are per-context, not per-provider. */
+/** What `createContext` / the one-shot `code.execute` accept. Per-context, not per-provider. */
 export interface CodeContextOptions {
   readonly bindings?: CodeBindings;
   readonly budgets?: CodeBudgets;
   /**
    * Cancels this context's work. Aborting stops the in-flight program and
-   * fails it `CodeAborted`; because `run` is a context used once, a signal
-   * passed there bounds exactly one execution.
+   * fails it `CodeAborted`; because the one-shot is a context used once, a
+   * signal passed there bounds exactly one execution.
    *
-   * It sits on the CONTEXT rather than on `execute` because that is where the
-   * other non-serializable per-context things already live, and because the
+   * It sits on the CONTEXT rather than on `CodeContext.execute` because that is
+   * where the other non-serializable per-context things live, and because the
    * alternative — a per-call signal — would have to reach the provider through
    * a hidden channel: `code:execute`'s input is the audit record, and a live
    * `AbortSignal` has no business in it.
@@ -262,18 +262,21 @@ export interface CodeContext {
 }
 
 /**
- * What `run` takes: a program, plus exactly the bag `createContext` takes.
+ * What the one-shot `Code.execute` takes: a program, plus exactly the bag
+ * `createContext` takes. It EXTENDS the context options rather than restating
+ * them, so "a context used once" stays literal in the type.
  *
  * ONE object, because a program passed positionally beside its options is the
  * odd verb out — every hook, guard and middleware in the house handles a single
- * input shape, and `run` was the one that made them special-case it. The field
- * is `source` and not `script` for the same reason: one vocabulary from `run`
- * through the command, the guard and the journal.
+ * input shape. The field is `source` for the same reason: one vocabulary from
+ * the door through the command, the guard and the journal.
  *
- * It EXTENDS the context options rather than restating them, so the equivalence
- * stays literal — `run` is a context used once, and the type says so.
+ * Named for the SHAPE and not the verb, because `CodeExecuteInput` is already
+ * the command's input (the audit record the harness derives) and
+ * `CodeExecuteRequest` is already the `fx` door's. Three inputs reach one verb
+ * and none of them may share a name.
  */
-export interface CodeRunInput extends CodeContextOptions {
+export interface CodeOneShotInput extends CodeContextOptions {
   readonly source: string;
 }
 
@@ -296,7 +299,7 @@ export interface CodeExecuteRequest {
  * lands in the journal, and the difference is the whole point. The audit record
  * carries the digest of the source and the names in scope; if a caller could
  * supply those, the record would describe whatever program the caller said it
- * ran, and `guardCodeExecute` — which decides on exactly those fields — could
+ * ran, and a `guard({ codeExecute })` — deciding on exactly those fields — could
  * be handed an empty binding list and waved through. Both doors onto the
  * command derive them from the open context instead, and the command itself is
  * `exposure: "internal"`, so there is no third door.
@@ -334,7 +337,7 @@ export interface Code {
    */
   createContext(options?: CodeContextOptions): Promise<CodeContext>;
   /** One-shot: a context opened, used once, and disposed. */
-  run(input: CodeRunInput): Promise<CodeExecuteResult>;
+  execute(input: CodeOneShotInput): Promise<CodeExecuteResult>;
 }
 
 /**
@@ -349,7 +352,7 @@ export function isCodeInstance(v: unknown): v is Code {
     typeof obj.hasRuntime === "function" &&
     typeof obj.capabilities === "function" &&
     typeof obj.createContext === "function" &&
-    typeof obj.run === "function"
+    typeof obj.execute === "function"
   );
 }
 
@@ -364,7 +367,7 @@ export function isCodeInstance(v: unknown): v is Code {
  * placement, permission drivers): the same for every execution in a session.
  * Per-execution concerns — which bindings are in scope, which ceilings apply —
  * sit on {@link createContext}, because they change per call. Binding the
- * runtime at config is also what lets `ctx.code.run(...)` reach it ambiently:
+ * runtime at config is also what lets `ctx.code.execute(...)` reach it ambiently:
  * a per-call runtime argument would force every caller to know the engine.
  */
 /**

@@ -12,7 +12,7 @@
  *
  * const app = createApp(Agent, { code: {} }); // or defineCode({ runtime })
  *
- * const result = await session.code.run({
+ * const result = await session.code.execute({
  *   source: "const x = await tools.recall({ q }); return x",
  *   bindings: { tools: { recall: (input) => tools.dispatch("recall", input) } },
  *   budgets: { timeMs: 5_000 },
@@ -73,7 +73,7 @@ export {
   type CodeNoValue,
   type CodeOutput,
   type CodeReturned,
-  type CodeRunInput,
+  type CodeOneShotInput,
   type CodeRuntimeContext,
   type CodeRuntimeContextOptions,
   type CodeStream,

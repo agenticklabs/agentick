@@ -35,7 +35,7 @@ describe("CodeHarness — provider binding", () => {
     expect(harness.hasRuntime()).toBe(true);
     expect(harness.capabilities().name).toBe("fake");
 
-    const result = await harness.run({ source: fakeCodeSource.returns("bound") });
+    const result = await harness.execute({ source: fakeCodeSource.returns("bound") });
     expect(result).toMatchObject({ outcome: "returned", value: "bound" });
     await close();
   });
@@ -70,16 +70,18 @@ describe("CodeHarness — provider binding", () => {
 });
 
 describe("CodeHarness — the operation envelope", () => {
-  it("guardCodeExecute sees the source, the digest and the binding names", async () => {
+  it("a guard sees the source, the digest and the binding names", async () => {
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
     const program = fakeCodeSource.returns("guarded");
     const seen: unknown[] = [];
-    harness.guardCodeExecute((input) => {
-      seen.push(input);
-      return Effect.succeed({ kind: "proceed" });
+    harness.guard({
+      codeExecute: (input) => {
+        seen.push(input);
+        return { kind: "proceed" };
+      },
     });
 
-    await harness.run({ source: program, bindings: { tenant: "acme" } });
+    await harness.execute({ source: program, bindings: { tenant: "acme" } });
 
     expect(seen).toEqual([
       {
@@ -94,8 +96,8 @@ describe("CodeHarness — the operation envelope", () => {
 
   it("a guard can REPLACE a program's answer without running it", async () => {
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
-    harness.guardCodeExecute(() =>
-      Effect.succeed({
+    harness.guard({
+      codeExecute: () => ({
         kind: "replace",
         result: {
           outcome: "returned",
@@ -106,9 +108,9 @@ describe("CodeHarness — the operation envelope", () => {
           durationMs: 0,
         },
       }),
-    );
+    });
 
-    const result = await harness.run({ source: fakeCodeSource.returns("live") });
+    const result = await harness.execute({ source: fakeCodeSource.returns("live") });
     expect(result).toMatchObject({ outcome: "returned", value: "cached" });
     await close();
   });
@@ -141,7 +143,10 @@ describe("CodeHarness — the operation envelope", () => {
       },
     });
 
-    await harness.run({ source: fakeCodeSource.returns("hooked"), bindings: { tenant: "acme" } });
+    await harness.execute({
+      source: fakeCodeSource.returns("hooked"),
+      bindings: { tenant: "acme" },
+    });
 
     expect(seen).toEqual(["before:tenant", "after:returned"]);
     expect(deriveHookNames("code:command:execute")).toEqual([
@@ -296,7 +301,7 @@ describe("CodeHarness — budgets", () => {
 
   it("truncates on outputBytes and still returns the answer", async () => {
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
-    const result = await harness.run({
+    const result = await harness.execute({
       source: fakeProgram(
         { op: "print", stream: "stdout", text: "0123456789" },
         { op: "return", value: "answered" },
@@ -351,7 +356,7 @@ describe("CodeHarness — the pins that are the HARNESS's, not a provider's", ()
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
     let called = false;
     await expect(
-      harness.run({
+      harness.execute({
         source: fakeCodeSource.callsBinding("recall", {}),
         signal: AbortSignal.abort("pre-aborted"),
         bindings: {
@@ -369,9 +374,9 @@ describe("CodeHarness — the pins that are the HARNESS's, not a provider's", ()
   it("a guard veto stops the program before the provider is touched", async () => {
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
     let called = false;
-    harness.guardCodeExecute(() => Effect.succeed({ kind: "veto", reason: "policy" }));
+    harness.guard({ codeExecute: () => ({ kind: "veto", reason: "policy" }) });
     await expect(
-      harness.run({
+      harness.execute({
         source: fakeCodeSource.callsBinding("recall", {}),
         bindings: {
           recall: async () => {
@@ -388,7 +393,7 @@ describe("CodeHarness — the pins that are the HARNESS's, not a provider's", ()
   it("an unbound harness fails CodeProviderMissing rather than choosing a runtime", async () => {
     const { harness, close } = await fakeCodeHarness();
     expect(harness.hasRuntime()).toBe(false);
-    await expect(harness.run({ source: fakeCodeSource.returns(1) })).rejects.toMatchObject({
+    await expect(harness.execute({ source: fakeCodeSource.returns(1) })).rejects.toMatchObject({
       _tag: "CodeProviderMissing",
     });
     expect(() => harness.capabilities()).toThrow(/none is bound/);
@@ -418,13 +423,12 @@ describe("CodeHarness — the audit record is the harness's to write (C1)", () =
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
     // The reviewer's scenario: policy refuses any program with `deleteAll` in
     // scope. Before C1, fx let a caller declare `bindings: []` and walk past it.
-    harness.guardCodeExecute((input) =>
-      Effect.succeed(
+    harness.guard({
+      codeExecute: (input) =>
         input.bindings.includes("tools.deleteAll")
           ? { kind: "veto", reason: "destructive binding" }
           : { kind: "proceed" },
-      ),
-    );
+    });
     let called = false;
     const context = await harness.createContext({
       bindings: {
@@ -674,7 +678,9 @@ describe("CodeHarness — the provider is held to the result union (H4)", () => 
 
   it("an unknown outcome is a contract violation, not a result", async () => {
     const { harness, close } = await fakeCodeHarness({ runtime: answering({ outcome: "weird" }) });
-    await expect(harness.run({ source: "x" })).rejects.toMatchObject({ _tag: "CodeResultInvalid" });
+    await expect(harness.execute({ source: "x" })).rejects.toMatchObject({
+      _tag: "CodeResultInvalid",
+    });
     await close();
   });
 
@@ -682,7 +688,9 @@ describe("CodeHarness — the provider is held to the result union (H4)", () => 
     const { harness, close } = await fakeCodeHarness({
       runtime: answering({ outcome: "returned", stdout: "", stderr: "", durationMs: 0 }),
     });
-    await expect(harness.run({ source: "x" })).rejects.toMatchObject({ _tag: "CodeResultInvalid" });
+    await expect(harness.execute({ source: "x" })).rejects.toMatchObject({
+      _tag: "CodeResultInvalid",
+    });
     await close();
   });
 
@@ -690,13 +698,13 @@ describe("CodeHarness — the provider is held to the result union (H4)", () => 
     const { harness, close } = await fakeCodeHarness({
       runtime: answering({ outcome: "no-value", stdout: "", stderr: "", durationMs: 0 }),
     });
-    const result = await harness.run({ source: "x" });
+    const result = await harness.execute({ source: "x" });
     expect(result.truncated).toEqual([]);
     await close();
   });
 });
 
-describe("CodeHarness — run() answers even when teardown does not (H3)", () => {
+describe("CodeHarness — the one-shot answers even when teardown does not (H3)", () => {
   it("a dispose failure after the program answered is logged, not thrown", async () => {
     const failing: Runtime = {
       capabilities: { name: "leaky", enforces: [], persistentContext: false },
@@ -716,7 +724,7 @@ describe("CodeHarness — run() answers even when teardown does not (H3)", () =>
       dispose: async () => {},
     };
     const { harness, close } = await fakeCodeHarness({ runtime: failing });
-    const result = await harness.run({ source: "x" });
+    const result = await harness.execute({ source: "x" });
     expect(result).toMatchObject({ outcome: "returned", value: "the answer" });
     await close().catch(() => undefined);
   });

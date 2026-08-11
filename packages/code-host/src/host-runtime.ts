@@ -27,9 +27,16 @@ import type {
 
 import { detectEngine, hostCapabilities, type HostEngine } from "./engine.js";
 import { childProcessPort, type HostProcess, type HostProcessPort } from "./host-process-port.js";
+import { transpiler, type HostLanguage, type Transpiled } from "./language.js";
 import { frameReader, type DoneFrame, type FrameFromChild } from "./protocol.js";
 
 export interface HostRuntimeConfig {
+  /**
+   * What programs are written in. Default `"javascript"`. `"typescript"` is
+   * additive — JavaScript is valid TypeScript — and STRIPS types rather than
+   * checking them; see the README on checking a program before it runs.
+   */
+  readonly language?: HostLanguage;
   /** Where the child is placed. Default: a direct child of this process. */
   readonly host?: HostProcessPort;
   /** The child's environment. Default: empty — a program inherits no secrets. */
@@ -49,7 +56,8 @@ const HEAP_EXHAUSTED = "JavaScript heap out of memory";
 
 export function hostRuntime(config: HostRuntimeConfig = {}): Runtime {
   const engine = detectEngine();
-  const capabilities = hostCapabilities(engine);
+  const capabilities = hostCapabilities(engine, config.language);
+  const transpile = transpiler(config.language ?? "javascript");
   const open = new Set<HostContext>();
   let disposed = false;
 
@@ -57,7 +65,13 @@ export function hostRuntime(config: HostRuntimeConfig = {}): Runtime {
     capabilities,
     createContext: async (options: CodeRuntimeContextOptions): Promise<CodeRuntimeContext> => {
       if (disposed) throw new Error(`${capabilities.name}: the runtime is disposed`);
-      const context = await HostContext.start(engine, capabilities.name, config, options);
+      const context = await HostContext.start(
+        engine,
+        capabilities.name,
+        transpile,
+        config,
+        options,
+      );
       open.add(context);
       context.whenGone(() => open.delete(context));
       return context;
@@ -114,12 +128,14 @@ class HostContext implements CodeRuntimeContext {
   private constructor(
     private readonly proc: HostProcess,
     private readonly providerName: string,
+    private readonly transpile: (source: string) => Promise<Transpiled>,
     private readonly budgets: CodeBudgets,
   ) {}
 
   static async start(
     engine: HostEngine,
     providerName: string,
+    transpile: (source: string) => Promise<Transpiled>,
     config: HostRuntimeConfig,
     options: CodeRuntimeContextOptions,
   ): Promise<HostContext> {
@@ -132,7 +148,7 @@ class HostContext implements CodeRuntimeContext {
       ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
     });
 
-    const context = new HostContext(proc, providerName, options.budgets ?? {});
+    const context = new HostContext(proc, providerName, transpile, options.budgets ?? {});
     context.listen(options.bindings);
     await context.handshake(config.spawnTimeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS);
     return context;
@@ -186,7 +202,18 @@ class HostContext implements CodeRuntimeContext {
           this.proc.kill("SIGKILL");
         }, timeMs);
       }
-      this.send({ t: "exec", id: run.id, source });
+      // Everything above is wired SYNCHRONOUSLY, because a caller that aborts
+      // in the same turn as the call must still be heard — and the transform
+      // below is a turn. A run the abort already settled is no longer in
+      // flight, which is what makes the send safe to skip.
+      void this.transpile(source).then(
+        (transpiled) => {
+          if (this.inFlight !== run) return;
+          if (transpiled.ok) this.send({ t: "exec", id: run.id, source: transpiled.source });
+          else run.settle(didNotParse(transpiled.message, run));
+        },
+        (cause: unknown) => run.fail(new Error(`${this.providerName}: ${messageOf(cause)}`)),
+      );
     });
   }
 
@@ -402,6 +429,16 @@ function output(run: InFlight): CapturedOutput {
     truncated: [...run.truncated],
     durationMs: Date.now() - run.startedAt,
   };
+}
+
+/**
+ * Source that will not parse is the same class of failure in either language:
+ * in JavaScript the engine's own `SyntaxError` comes back as `threw`, so a
+ * transpile that never reached the engine reports it the same way rather than
+ * as the runtime failing.
+ */
+function didNotParse(message: string, run: InFlight): CodeExecuteResult {
+  return { outcome: "threw", error: { name: "SyntaxError", message }, ...output(run) };
 }
 
 function exceeded(budget: "timeMs" | "memoryMb", limit: number, run: InFlight): CodeExecuteResult {

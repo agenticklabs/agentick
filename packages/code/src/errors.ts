@@ -21,7 +21,7 @@ import { AgentickError, registerAgentickError } from "@agentick/spec";
 export abstract class CodeError extends AgentickError {}
 
 /**
- * `createContext` / `run` with no runtime bound — which now means the default
+ * `createContext` / `execute` with no runtime bound — which now means the default
  * could not be resolved either, so the message names the install rather than
  * the abstraction. Reachable two ways: the default package is absent, or an
  * adopter built the harness themselves and has not called `bindRuntime` yet.

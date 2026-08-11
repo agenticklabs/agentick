@@ -11,6 +11,8 @@
 
 import type { CodeBudgetKey, CodeCapabilities } from "@agentick/code";
 
+import type { HostLanguage } from "./language.js";
+
 export interface HostEngine {
   /** `"node"`, `"bun"`, or whatever else `process.versions` names. */
   readonly name: string;
@@ -42,11 +44,14 @@ function otherEngineName(): string {
   return known ?? "unknown";
 }
 
-export function hostCapabilities(engine: HostEngine): CodeCapabilities {
+export function hostCapabilities(
+  engine: HostEngine,
+  language: HostLanguage = "javascript",
+): CodeCapabilities {
   const enforces: CodeBudgetKey[] = ["timeMs", "outputBytes"];
   if (engine.heapLimitFlag !== undefined) enforces.push("memoryMb");
   return {
-    name: `host:${engine.name}`,
+    name: `host:${engine.name}${language === "typescript" ? "+ts" : ""}`,
     enforces,
     // The child outlives the execution, so `globalThis` and everything it
     // reaches carry over. A program's own `const` does not — the body is a

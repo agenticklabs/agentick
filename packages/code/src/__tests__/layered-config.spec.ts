@@ -37,7 +37,9 @@ describe("CodeHarness — the definition's bindings are a base layer", () => {
       bindings: { tools: { search: async () => "from the default" } },
     });
 
-    const result = await harness.run({ source: fakeCodeSource.callsBinding("tools.search", {}) });
+    const result = await harness.execute({
+      source: fakeCodeSource.callsBinding("tools.search", {}),
+    });
 
     expect(result).toMatchObject({ outcome: "returned", value: "from the default" });
     await close();
@@ -101,7 +103,7 @@ describe("CodeHarness — the definition's bindings are a base layer", () => {
       bindings: { tools: { search: async () => "s" } },
     });
 
-    await harness.run({
+    await harness.execute({
       source: fakeCodeSource.callsBinding("tools.search", {}),
       bindings: { tools: { deleteAll: async () => "d" }, tenantId: "acme" },
     });
@@ -118,7 +120,7 @@ describe("CodeHarness — the definition's budgets are a base layer", () => {
       budgets: { timeMs: 10 },
     });
 
-    const result = await harness.run({ source: fakeCodeSource.exceeds!("timeMs", 10) });
+    const result = await harness.execute({ source: fakeCodeSource.exceeds!("timeMs", 10) });
 
     expect(result).toMatchObject({ outcome: "budget-exceeded", budget: "timeMs", limit: 10 });
     await close();
@@ -131,7 +133,7 @@ describe("CodeHarness — the definition's budgets are a base layer", () => {
     });
 
     // The raised deadline wins; the inherited output ceiling still cuts.
-    const result = await harness.run({
+    const result = await harness.execute({
       source: fakeProgram(
         { op: "sleep", ms: 50 },
         { op: "print", stream: "stdout", text: "chatty" },

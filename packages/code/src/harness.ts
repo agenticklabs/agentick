@@ -4,7 +4,7 @@
  * The harness owns the operation and nothing else. `code:execute` is a
  * declared command (ADR 51), so every program the model runs is journaled with
  * its source, its digest and its binding NAMES, is wrapped by the interceptor
- * cascade, and is vetoable by {@link guardCodeExecute} before the provider is
+ * cascade, and is vetoable by `guard({ codeExecute })` before the provider is
  * touched. What the program can reach, what language it is written in and how
  * it is contained are the provider's business.
  *
@@ -29,13 +29,7 @@
  */
 
 import { Effect } from "effect";
-import {
-  BaseHarness,
-  generateId,
-  type BaseHarnessOptions,
-  type GuardDecider,
-  type Unsubscribe,
-} from "@agentick/runtime";
+import { BaseHarness, generateId, type BaseHarnessOptions } from "@agentick/runtime";
 import type {
   EventBus,
   MessageEnvelope,
@@ -60,7 +54,7 @@ import type {
   CodeExecuteRequest,
   CodeExecuteResult,
   CodeFx,
-  CodeRunInput,
+  CodeOneShotInput,
   CodeRuntimeContext,
   Runtime,
 } from "./contract.js";
@@ -200,18 +194,6 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
   }
 
   /**
-   * Veto, replace or defer a program BEFORE it runs — the seam where
-   * deployment policy reads the source, the binding names and the budgets and
-   * decides. The code-typed name for `BaseHarness.guardEffect`, mirroring the
-   * tool executor's `guardDispatch`: guard : operation :: gate : loop.
-   */
-  guardCodeExecute(
-    decide: GuardDecider<CodeExecuteInput, CodeExecuteResult, unknown>,
-  ): Unsubscribe {
-    return this.guardEffect<CodeExecuteInput, CodeExecuteResult>(decide);
-  }
-
-  /**
    * The Effect twin — hand-authored rather than proxied straight onto the
    * command, because the command's input IS the audit record and a caller must
    * not be able to write it. `fx.execute` takes only the context and the
@@ -291,7 +273,7 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
    * value, and the provider's disposal trouble is an operational fact reported
    * on the log, loudly, rather than a reason to discard it.
    */
-  async run(input: CodeRunInput): Promise<CodeExecuteResult> {
+  async execute(input: CodeOneShotInput): Promise<CodeExecuteResult> {
     const { source, ...options } = input;
     const context = await this.createContext(options);
     let answered = false;

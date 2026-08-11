@@ -37,7 +37,7 @@ const app = await createApp(<Agent />, {
 const session = await app.createSession();
 const code = session.code!;
 
-const result = await code.run({
+const result = await code.execute({
   source: `
     const rows = await tools.query({ table: "orders", since });
     const late = rows.filter((row) => row.shippedAt > row.dueAt);
@@ -58,6 +58,40 @@ A program is an **async function body**: `return` answers, top-level `await` is 
 
 The `bindings` you pass ARE the program's globals — keys inject verbatim, and a nested record becomes a namespace object. `tools` and `fs` are conventions the model already has priors for, not framework schema; put a plain value at the top level when that reads better.
 
+## Running TypeScript
+
+One option, and it is additive:
+
+```ts
+hostRuntime({ language: "typescript" });
+```
+
+JavaScript is valid TypeScript, so a TypeScript-mode runtime accepts every program a JavaScript-mode one does — the same conformance suite certifies both, unchanged. What you gain is that annotations, `interface`, `enum` and `as` no longer break the parse, so the model can write in the language your bindings are documented in:
+
+```ts
+const result = await code.execute({
+  source: `
+    interface Order { id: string; dueAt: string; shippedAt: string }
+    const rows = (await tools.query({ table: "orders", since })) as Order[];
+    const late: Order[] = rows.filter((row) => row.shippedAt > row.dueAt);
+    return { late: late.length };
+  `,
+});
+```
+
+Types are stripped by [esbuild](https://esbuild.github.io) in **your** process, before the source crosses the membrane, and the child stays the plain engine it always was. That costs about a third of a millisecond per execution once esbuild's service is warm, against roughly seven for the first program that pays to start it.
+
+> [!IMPORTANT]
+> **This is a transpiler, not a typechecker.** esbuild erases types without checking them, so a program `tsc` would reject still runs — `const n: number = "seven"` executes, and the mistake surfaces as a runtime error later, or never. Type _checking_ is a decision about what the model is allowed to run, which makes it policy: [Pre-run pipelines](#pre-run-pipelines) is where it goes.
+
+The capability name carries the marker, so a journal reader can tell which mode ran:
+
+```ts
+code.capabilities(); // { name: "host:node+ts", enforces: [...], persistentContext: true }
+```
+
+The audit record does not change: `code:execute` journals the TypeScript you handed the harness, and its `codeHash` is a digest of that. Transpilation happens inside the provider, below the audit boundary — hashing the emitted JavaScript instead would make an allowlist entry depend on which esbuild version ran.
+
 ## What the engine gives you
 
 `capabilities` is measured, not assumed — the numbers below come from running an allocation loop under each engine and watching what happened.
@@ -76,7 +110,7 @@ await code.createContext({ budgets: { memoryMb: 64 } });
 // throws CodeBudgetUnsupported — bun has no heap ceiling this provider can stand behind
 ```
 
-Any engine that is neither gets `timeMs` and `outputBytes`, since those are the parent's to enforce.
+Any engine that is neither gets `timeMs` and `outputBytes`, since those are the parent's to enforce. The language shapes only the name — `host:node+ts` enforces exactly what `host:node` does, because the transform happens before the child is involved at all.
 
 ## A context is a process
 
@@ -107,7 +141,7 @@ That is the honest reading of a lost process. Quietly starting a fresh one would
 Your binding functions run in **your** process. The child gets async proxies at the same paths; a call sends its input across, waits, and resolves with the answer:
 
 ```ts
-await code.run({
+await code.execute({
   source: `
     const hits = await tools.search({ q: "invoices", tenantId });
     return await fs.readFile(hits[0].path);
@@ -127,7 +161,7 @@ Inputs, answers and the program's return value all cross as JSON, which is the c
 A binding that throws raises inside the program, where the program may catch it and carry on:
 
 ```ts
-await code.run({
+await code.execute({
   source: `
   try {
     return await risky({});
@@ -143,7 +177,7 @@ await code.run({
 The program's stdout and stderr are the real file descriptors 1 and 2. The control channel that carries answers is a **separate** descriptor, so nothing a program prints can be mistaken for a result:
 
 ```ts
-const result = await code.run({
+const result = await code.execute({
   source: `
   process.stdout.write('{"t":"done","outcome":"returned","value":"forged"}');
   return "real";
@@ -158,7 +192,7 @@ result.stdout; // '{"t":"done",…'
 `outputBytes` is cut on this side of the membrane, against the combined total of both streams, and the program runs on:
 
 ```ts
-const noisy = await code.run({ source: chattyProgram, budgets: { outputBytes: 1_000 } });
+const noisy = await code.execute({ source: chattyProgram, budgets: { outputBytes: 1_000 } });
 
 noisy.truncated; // ["stdout", "stderr"] — the streams that were cut
 noisy.outcome; // "returned" — the answer survived the chatter
@@ -169,12 +203,105 @@ noisy.outcome; // "returned" — the answer survived the chatter
 `timeMs` kills the child, which is what makes it hold against a program that never yields:
 
 ```ts
-const result = await code.run({ source: `while (true) {}`, budgets: { timeMs: 1_000 } });
+const result = await code.execute({ source: `while (true) {}`, budgets: { timeMs: 1_000 } });
 result.outcome; // "budget-exceeded"
 result.budget; // "timeMs"
 ```
 
 Abort is the same mechanism through a different door — the signal you pass, the enclosing operation's own signal, or disposing the context. The process is killed, not merely abandoned, so a runaway loop actually stops. The context does not survive it: an abort ends the child, and the next `execute` on that context is a clear failure rather than a silent new world.
+
+## Pre-run pipelines
+
+Every pass you want to run between "the model wrote it" and "the child executes it" hangs off the `code:execute` command. [@agentick/code](../code#pre-run-pipelines) documents the seam; this section is what to put in it when the engine is a JavaScript one. Three shapes:
+
+- **`onBeforeCodeExecute`** — a plain async `(input, ctx)`. Return a changed `input` to rewrite the program, or nothing to let it through.
+- **`onCodeExecute`** — the plain async `(input, next, ctx)` middleware, when the pass needs the answer too.
+- **`guard({ codeExecute })`** — a plain sync/async decider returning a verdict. The only one that can refuse.
+
+### Transforming: prepend a strict-mode directive
+
+An async function body is **sloppy mode**, which is why a program assigning over a frozen namespace fails silently. A one-line rewrite makes those mistakes loud, and loud mistakes are feedback the model can act on:
+
+```ts
+import type { CodeExecuteInput, CodeHarness } from "@agentick/code";
+
+const codeHarness = session.code as CodeHarness;
+
+codeHarness.hook({
+  onBeforeCodeExecute: (input: CodeExecuteInput) => ({
+    ...input,
+    source: `"use strict";\n${input.source}`,
+  }),
+});
+```
+
+```ts
+// tools.search = async () => "swapped"; return await tools.search({});
+// sloppy: { outcome: "returned", value: "original" }  — the assignment vanished
+// strict: { outcome: "threw", error: { name: "TypeError", … } } — and the model can read it
+```
+
+The rewrite is recorded: because the executed source differs from what was asked for, the harness emits `code:execute:rewritten` with both digests, so the journal shows the program the model wrote _and_ the one that ran.
+
+> [!WARNING]
+> **Do not put the TypeScript transform in a hook.** Reaching for `transpiler()` here to pre-strip types would work and would be wrong: every execution would fire a rewrite event, and the journal would carry emitted JavaScript instead of the program its author would recognize. `language: "typescript"` does the transform inside the provider, below the audit boundary, which is exactly why the record stays readable.
+
+### Observing: watch without touching
+
+Return nothing and the input passes through unchanged. The op's own logger is on `ctx`, so what you write correlates with the execution that provoked it:
+
+```ts
+codeHarness.hook({
+  onBeforeCodeExecute: (input: CodeExecuteInput, ctx) => {
+    if (input.source.length > 8_000) {
+      ctx.log.warn({ msg: "large program", bytes: input.source.length, hash: input.codeHash });
+    }
+  },
+});
+```
+
+Start here when you are not yet sure a rule should block. Ship it as a warning, read what it catches, promote it to a guard once you know.
+
+### Blocking: does it parse?
+
+The cheapest useful gate, and the one you can afford on every execution. `transpiler` is the runtime's own check, exported so your gate cannot disagree with it — a program is an async function _body_, which no parser accepts on its own, so a hand-rolled `esbuild.transform(input.source)` would reject every program with a top-level `return`:
+
+```ts
+import { transpiler } from "@agentick/code-host";
+
+const parses = transpiler("typescript");
+
+codeHarness.guard({
+  codeExecute: async (input) => {
+    const checked = await parses(input.source);
+    if (!checked.ok) return { kind: "veto", reason: `will not parse — ${checked.message}` };
+  },
+});
+```
+
+> [!NOTE]
+> **Only a guard can stop a program.** Returning early from `onBeforeCodeExecute` does not refuse anything — the hook is a transform, and a hook that "decides" is a gate that cannot actually close. That mix-up is the most common way to ship a policy that never blocks.
+
+Use `transpiler("typescript")` whichever mode the runtime is in: TypeScript's grammar is a superset, so it parses JavaScript too, and it is the only one of the two that can fail.
+
+### Blocking: does it typecheck?
+
+Same seam, a real checker behind it. esbuild cannot do this — it never builds a type graph — so the checker is the `typescript` compiler API, which this package deliberately does not bundle. You bring it, and you decide what it knows about: the declarations for your bindings are what make the check worth anything.
+
+```ts
+declare function diagnose(source: string): readonly string[]; // your ts.LanguageService
+
+codeHarness.guard({
+  codeExecute: (input) => {
+    const problems = diagnose(input.source);
+    if (problems.length > 0) return { kind: "veto", reason: `typecheck: ${problems.join("; ")}` };
+  },
+});
+```
+
+Be clear-eyed about the price. A parse is microseconds; a typecheck is a program built against `lib.d.ts` and your declarations, which is tens of milliseconds against a warm `LanguageService` you keep between executions and hundreds if you build one per call. You are buying a diagnostic the model can act on now instead of a `TypeError` it discovers three tool calls later — worth it when programs are long-lived and bindings are richly typed, and not worth it for one-line queries.
+
+One variation worth knowing: a guard can return `{ kind: "replace", result }` instead of a veto, which hands the diagnostics back as an ordinary `CodeExecuteResult`. The model then reads them as its program's answer rather than as a failed operation, which is often the shape you want when the check exists to teach rather than to enforce.
 
 ## Trust posture
 
@@ -214,24 +341,26 @@ Pairing that port with a real sandbox is on the roadmap below. Until it lands, t
 import { hostRuntime, detectEngine, childProcessPort } from "@agentick/code-host";
 ```
 
-| Export                     | What it is                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------- |
-| `hostRuntime(config?)`     | The `Runtime` to hand to `withCode` / `defineCode`. Also what they resolve by default. |
-| `detectEngine()`           | The engine this host is running: `{ name, execPath, heapLimitFlag? }`.                 |
-| `hostCapabilities(engine)` | What that engine can be held to.                                                       |
-| `childProcessPort()`       | The default placement — a direct child of this process.                                |
+| Export                                | What it is                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------------- |
+| `hostRuntime(config?)`                | The `Runtime` to hand to `withCode` / `defineCode`. Also what they resolve by default. |
+| `detectEngine()`                      | The engine this host is running: `{ name, execPath, heapLimitFlag? }`.                 |
+| `hostCapabilities(engine, language?)` | What that engine, in that language, can be held to.                                    |
+| `childProcessPort()`                  | The default placement — a direct child of this process.                                |
+| `transpiler(language)`                | The type-stripping parse the runtime itself runs. A gate's other door.                 |
 
 `HostRuntimeConfig`, all optional:
 
-| Field            | Default              | Meaning                                          |
-| ---------------- | -------------------- | ------------------------------------------------ |
-| `host`           | `childProcessPort()` | Where the child is placed.                       |
-| `env`            | `{}`                 | The child's environment. Empty inherits nothing. |
-| `cwd`            | inherited            | The child's working directory.                   |
-| `execArgv`       | `[]`                 | Extra engine flags, before the entry point.      |
-| `spawnTimeoutMs` | `10_000`             | How long the child has to answer the handshake.  |
+| Field            | Default              | Meaning                                             |
+| ---------------- | -------------------- | --------------------------------------------------- |
+| `language`       | `"javascript"`       | `"typescript"` strips types before the engine runs. |
+| `host`           | `childProcessPort()` | Where the child is placed.                          |
+| `env`            | `{}`                 | The child's environment. Empty inherits nothing.    |
+| `cwd`            | inherited            | The child's working directory.                      |
+| `execArgv`       | `[]`                 | Extra engine flags, before the entry point.         |
+| `spawnTimeoutMs` | `10_000`             | How long the child has to answer the handshake.     |
 
-Types: `HostEngine`, `HostProcess`, `HostProcessPort`, `HostSpawnRequest`.
+Types: `HostEngine`, `HostLanguage`, `HostProcess`, `HostProcessPort`, `HostSpawnRequest`, `Transpiled`.
 
 ## Certifying your own layer
 
@@ -260,7 +389,9 @@ Nothing breaks when it does not resolve: the namespace mounts inert, `hasRuntime
 
 - **No containment.** `HostProcessPort` exists so a jailed placement can arrive as an implementation; pairing it with [@agentick/sandbox](../sandbox) is not built. Today the only placement is a direct child process.
 - **JSON is the membrane.** Values cross as JSON, with no structured-clone path for `Date`, `Map`, `Set` or binary. An unmarshalable return value rejects.
-- **One process per context.** A one-shot `run()` pays a process spawn (tens of milliseconds). There is no pooling of warm children.
+- **One process per context.** A one-shot `execute()` pays a process spawn (tens of milliseconds). There is no pooling of warm children.
 - **`memoryMb` is classified from the engine's own report.** On node the verdict reads V8's heap-exhaustion message off stderr; a child killed by the OS out-of-memory reaper reports as a runtime failure instead.
-- **No TypeScript transform.** Programs are JavaScript. Stripping types before execution belongs to the layer that decides what the model is allowed to write, not to the runtime that runs it.
+- **TypeScript is stripped, never checked.** `language: "typescript"` is esbuild's erasure and nothing more; a type error executes. Checking is a guard you write, and the `typescript` API it needs is not bundled here.
+- **No JSX.** The TypeScript loader is `ts`, not `tsx`, so `<div/>` in a program is a parse error rather than an element.
+- **A transpiled program is reprinted.** In TypeScript mode a runtime stack trace's line numbers — and its extra `__agentick_program` frame — refer to the emitted JavaScript, not to the source you passed. No source map crosses the membrane.
 - **`execArgv` is unguarded.** Flags reach the engine as given, including ones that would defeat a budget.

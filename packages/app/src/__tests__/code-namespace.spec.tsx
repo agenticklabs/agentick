@@ -31,7 +31,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
     expect(session.code!.capabilities().name).toMatch(/^host:/);
 
     // A real subprocess, reached with no configuration at all.
-    const result = await session.code!.run({ source: `return 6 * 7;` });
+    const result = await session.code!.execute({ source: `return 6 * 7;` });
     expect(result).toMatchObject({ outcome: "returned", value: 42 });
 
     await session.close();
@@ -43,7 +43,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
     const session = await app.createSession({ sessionId: "s-code-default-ext" });
 
     expect(session.code!.capabilities().name).toMatch(/^host:/);
-    const result = await session.code!.run({ source: `return "zero config";` });
+    const result = await session.code!.execute({ source: `return "zero config";` });
     expect(result).toMatchObject({ outcome: "returned", value: "zero config" });
 
     await session.close();
@@ -59,7 +59,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
     });
     const session = await app.createSession({ sessionId: "s-code-layered" });
 
-    const result = await session.code!.run({ source: `return await tools.whoami({});` });
+    const result = await session.code!.execute({ source: `return await tools.whoami({});` });
     expect(result).toMatchObject({ outcome: "returned", value: "acme" });
 
     await session.close();
@@ -77,7 +77,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
     const bridges = (session as unknown as { readonly bridges: Record<string, unknown> }).bridges;
     expect(bridges.code).toBe(session.code);
 
-    const result = await session.code!.run({
+    const result = await session.code!.execute({
       source: fakeCodeSource.callsBinding("tools.recall", { q: "hi" }),
       bindings: { tools: { recall: async (input: unknown) => ({ echoed: input }) } },
     });
@@ -102,12 +102,14 @@ describe("createApp({ code }) — the adopter entry point", () => {
     expect(session.code).not.toBe(harness);
     expect(session.code!.id).toBe(harness.id);
     expect(session.code!.hasRuntime()).toBe(false);
-    await expect(session.code!.run({ source: fakeCodeSource.returns(1) })).rejects.toMatchObject({
+    await expect(
+      session.code!.execute({ source: fakeCodeSource.returns(1) }),
+    ).rejects.toMatchObject({
       _tag: "CodeProviderMissing",
     });
 
     harness.bindRuntime(fakeCode());
-    const result = await session.code!.run({ source: fakeCodeSource.returns("bound late") });
+    const result = await session.code!.execute({ source: fakeCodeSource.returns("bound late") });
     expect(result).toMatchObject({ outcome: "returned", value: "bound late" });
 
     await session.close();
@@ -130,7 +132,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
     expect(disposed).not.toHaveBeenCalled();
     // Still usable by the next session, which is the whole point of sharing it.
     const second = await app.createSession({ sessionId: "s-adopted-2" });
-    const result = await second.code!.run({ source: fakeCodeSource.returns("still alive") });
+    const result = await second.code!.execute({ source: fakeCodeSource.returns("still alive") });
     expect(result).toMatchObject({ outcome: "returned", value: "still alive" });
 
     await second.close();
@@ -160,7 +162,7 @@ describe("createApp({ code }) — the adopter entry point", () => {
       install: (installer) => {
         const handler: ToolHandler = async (_input, deps) => {
           const code = (deps as { readonly ctx: { readonly code?: Code } }).ctx.code;
-          seen = await code?.run({ source: fakeCodeSource.returns("from ctx") });
+          seen = await code?.execute({ source: fakeCodeSource.returns("from ctx") });
           return [{ type: "text", text: "ok" } satisfies ContentBlock];
         };
         const handlerRef = `code-ctx-probe:${installer.sessionId}`;

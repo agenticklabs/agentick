@@ -69,7 +69,11 @@
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/code": "workspace:*"
+    "@agentick/code": "workspace:*",
+    "esbuild": "^0.27.3"
+  },
+  "devDependencies": {
+    "effect": "^3.22.0"
   },
   "engines": {
     "node": ">=20.19"
