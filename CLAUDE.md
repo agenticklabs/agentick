@@ -374,7 +374,7 @@ pnpm --filter @agentick/session test        # Run specific package
 When adding a new `@agentick/*` package, update all of these:
 
 1. **Package setup**: `packages/my-package/` with `package.json`, `tsconfig.json`, `tsconfig.build.json`, `src/index.ts`
-2. **Changeset linked list**: Add to `.changeset/config.json` → `linked[0]` array
+2. **Versioning groups**: Add to `pnpm-workspace.yaml` — BOTH the fixed-version group array and the release-lane map (`"@agentick/my-package": next`). Miss either and the package does not version or publish with the rest.
 3. **TypeDoc entry points**: Add to `website/typedoc.json` → `entryPoints` array
 4. **Website package groups**: Add to `website/.vitepress/config.mts` → `PACKAGE_GROUPS` in the appropriate group
 5. **README**: Create `packages/my-package/README.md` following the style of existing package READMEs (Purpose, Quick Start, API, Patterns)
