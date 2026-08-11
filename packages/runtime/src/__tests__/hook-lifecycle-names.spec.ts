@@ -77,6 +77,8 @@ const TYPED_VERBS: ReadonlyArray<readonly [op: string, onBefore: string, onAfter
   ],
   // ── Sandbox ──
   ["sandbox:command:exec", "onBeforeSandboxExec", "onAfterSandboxExec"],
+  // ── Code ──
+  ["code:command:execute", "onBeforeCodeExecute", "onAfterCodeExecute"],
   // ── Gateway ──
   ["gateway:command:start", "onBeforeGatewayStart", "onAfterGatewayStart"],
   ["gateway:command:close", "onBeforeGatewayClose", "onAfterGatewayClose"],

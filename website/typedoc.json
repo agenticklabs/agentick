@@ -32,6 +32,7 @@
     "../packages/resources",
     "../packages/mcp",
     "../packages/gates",
+    "../packages/code",
     "../packages/formatters",
     "../packages/subscriptions",
     "../packages/spec-conformance",

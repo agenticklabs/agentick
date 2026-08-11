@@ -2348,6 +2348,12 @@ export class AppHarness<P = unknown>
     // candidates for something it is about to ask a human about.
     const completionsNamespace = sessionExtensionBridges.get("completions");
     if (completionsNamespace !== undefined) ctxExtensionEntries.completions = completionsNamespace;
+    // `code` rides for the same reason: a code-mode tool handler runs
+    // model-authored source through `ctx.code`, so the program lands on the
+    // journaled, guardable `code:execute` operation instead of an ad-hoc eval
+    // inside the handler.
+    const codeNamespace = sessionExtensionBridges.get("code");
+    if (codeNamespace !== undefined) ctxExtensionEntries.code = codeNamespace;
     const ctxExtensions: Readonly<Record<string, unknown>> | undefined =
       Object.keys(ctxExtensionEntries).length > 0 ? ctxExtensionEntries : undefined;
 

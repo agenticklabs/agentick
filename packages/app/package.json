@@ -89,6 +89,7 @@
     "effect": "^3.22.0"
   },
   "devDependencies": {
+    "@agentick/code": "workspace:*",
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
     "@agentick/prompts": "workspace:*",
