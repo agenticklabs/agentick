@@ -333,11 +333,11 @@ app.use(async (input, next, ctx) => {
 
 Every declared verb runs through `runOperation`, which composes **one** interceptor list around the body. There is exactly one primitive — the wrapping middleware `(input, next, ctx) => output`. Everything at the operation boundary is a kind of it, or sugar over it.
 
-| Kind        | Intent                            | Surface                                                             |
-| ----------- | --------------------------------- | ------------------------------------------------------------------- |
-| `guard`     | Admission control before the body | `harness.guard(decide)` — or a `guards: {}` bag                     |
-| `transform` | Reshape input or output           | `harness.use` / `harness.fx.use`; **hooks** are keyed sugar over it |
-| `observe`   | Pure side effect                  | A `use` middleware that reads and returns `next(...)`               |
+| Kind        | Intent                            | Surface                                                                         |
+| ----------- | --------------------------------- | ------------------------------------------------------------------------------- |
+| `guard`     | Admission control before the body | `harness.guard(decide)`, `harness.guards.<command>(decide)`, a `guards: {}` bag |
+| `transform` | Reshape input or output           | `harness.use` / `harness.fx.use`; **hooks** are keyed sugar over it             |
+| `observe`   | Pure side effect                  | A `use` middleware that reads and returns `next(...)`                           |
 
 ### Two surfaces: `use` and `fx.use`
 
@@ -413,6 +413,7 @@ const app2 = await createApp(Agent, {
 // Imperative, returning an Unsubscribe.
 const off = app2.hook({ onAfterLedgerCredit: (output) => output });
 app2.hooks.onLedgerCredit((input, next) => next(input)); // the full typed middleware
+app2.guards.ledgerCredit((input) => (input.amount < 0 ? { kind: "veto" } : undefined));
 off();
 ```
 

@@ -30,6 +30,7 @@ import type {
   ChunkRegistrarsOf,
   Derived,
   GuardDecision,
+  GuardRegistrarsOf,
   GuardsOf,
   HandlerVerdict,
   HooksOf,
@@ -260,6 +261,16 @@ export type HookRegistrars = RegistrarsOf<CommandRegistry, InterceptorCtx> &
  * transform — or any narrower guard — runs.
  */
 export type CommandGuards = GuardsOf<CommandRegistry, InterceptorCtx>;
+
+/**
+ * The per-verb IMPERATIVE guard registrar surface — the `(decider) =>
+ * Unsubscribe` twin of {@link CommandGuards}, keyed identically (the
+ * discriminated command in camelCase). Reached via `harness.guards` (a Proxy):
+ * `harness.guards.codeExecute(decide)` is sugar over the one-entry bag
+ * `harness.guard({ codeExecute: decide })`, the guard mirror of
+ * {@link HookRegistrars}.
+ */
+export type GuardRegistrars = GuardRegistrarsOf<CommandRegistry, InterceptorCtx>;
 
 /**
  * The DROP-LAYER guard bag for ONE namespace (ADR 93) — what a

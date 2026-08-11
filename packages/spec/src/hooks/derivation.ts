@@ -218,6 +218,22 @@ export type GuardsOf<Reg, Ctx> = {
   >;
 };
 
+/**
+ * The derived IMPERATIVE guard registrar surface — the same camelCase command
+ * keys {@link GuardsOf} mints, valued as `(decider) => Unsubscribe` instead
+ * of optional properties. The guard twin of {@link RegistrarsOf}, reached via a
+ * Proxy: `harness.guards.codeExecute(decide)`.
+ */
+export type GuardRegistrarsOf<Reg, Ctx> = {
+  [K in keyof Reg as Uncap<Pascal<K & string>>]: (
+    decide: GuardDecision<
+      Reg[K] extends { input: infer I } ? I : never,
+      Reg[K] extends { output: infer O } ? O : never,
+      Ctx
+    >,
+  ) => Unsubscribe;
+};
+
 // ============================================================================
 // Namespace-local (drop-layer) projections — ADR 93 definition bags
 // ============================================================================

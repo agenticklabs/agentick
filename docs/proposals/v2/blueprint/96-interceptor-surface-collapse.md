@@ -22,7 +22,7 @@ packages with a hand-written `get fx()` object literal.
 > hand-written:
 >
 > - **Plain forms live on the harness.** `harness.use` · `harness.guard` ·
->   `harness.hook` · `harness.hooks.on*` — and the declarative
+>   `harness.guards.<command>` · `harness.hook` · `harness.hooks.on*` — and the declarative
 >   `defineX({ hooks, guards })` bags, which are the same registrations read
 >   out of the construction options.
 > - **Effect-native forms live on `.fx`.** `fx.use` · `fx.guard`. `.fx` carries
@@ -38,7 +38,7 @@ packages with a hand-written `get fx()` object literal.
 | where                                      | key style             | example                                                                         |
 | ------------------------------------------ | --------------------- | ------------------------------------------------------------------------------- |
 | local `defineX({...})` config (drop-layer) | bare verb             | `hooks: { onBeforeAppend }`, `guards: { append }`                               |
-| registry-wide imperative registrars        | discriminated command | `harness.hooks.onBeforeTimelineAppend(fn)`, `harness.guard({ timelineAppend })` |
+| registry-wide imperative registrars        | discriminated command | `harness.hooks.onBeforeTimelineAppend(fn)`, `harness.guards.timelineAppend(fn)` |
 
 Both desugar onto the identical op-scoped interceptor on the identical
 command. The drop-layer key is colocation sugar: inside `defineTimeline` the

@@ -121,4 +121,27 @@ describe("ADR 96 — the registry-wide registrars keep the discriminated name", 
     offHook();
     await expect(h.mark({ tag: "x" })).resolves.toBe(1);
   });
+
+  it("guards.<command> infers the input and narrows verdicts without `as const`", async () => {
+    const h = new MarkHarness("t4");
+    await h.ready;
+    const off = h.guards.toolMark((input) => (input.tag === "x" ? { kind: "veto" } : undefined));
+    await expect(h.mark({ tag: "x" })).rejects.toThrow("operation outcome: vetoed");
+    off();
+    await expect(h.mark({ tag: "x" })).resolves.toBe(1);
+  });
+
+  it("the drop-layer verb is not a registrar key, and the decider stays typed", async () => {
+    const h = new MarkHarness("t5");
+    await h.ready;
+    // @ts-expect-error — `mark` is the definition bag's key; the registrar,
+    // like `hooks`, names the discriminated command.
+    h.guards.mark(() => undefined);
+    // @ts-expect-error — no such command in the registry.
+    h.guards.toolNope(() => undefined);
+    // @ts-expect-error — `result` must be `MarkOutput` (number).
+    const off = h.guards.toolMark(() => ({ kind: "replace", result: "not-a-number" }));
+    off();
+    await expect(h.mark({ tag: "ab" })).resolves.toBe(2);
+  });
 });

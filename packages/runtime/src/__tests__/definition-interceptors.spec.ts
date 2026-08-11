@@ -154,6 +154,29 @@ describe("ADR 96 — options.guards (drop-layer)", () => {
   });
 });
 
+describe("ADR 96 — harness.guards (the per-verb registrar)", () => {
+  it("vetoes before the body runs, and unsubscribes", async () => {
+    const h = new StampHarness("gp1");
+    await h.ready;
+    const off = h.guards.toolStamp((input) => (input.note === "no" ? { kind: "veto" } : undefined));
+    await expect(h.stamp({ note: "yes" })).resolves.toBe("stamped:yes");
+    await expect(h.stamp({ note: "no" })).rejects.toThrow("operation outcome: vetoed");
+    expect(h.bodyRuns).toBe(1);
+    off();
+    await expect(h.stamp({ note: "no" })).resolves.toBe("stamped:no");
+  });
+
+  it("cascades to a child constructed after it, exactly as the bag does", async () => {
+    const parent = new StampHarness("gp2");
+    await parent.ready;
+    parent.guards.toolStamp((input) => (input.note === "blocked" ? { kind: "veto" } : undefined));
+    const child = parent.child("gp2:child");
+    await child.ready;
+    await expect(child.stamp({ note: "fine" })).resolves.toBe("stamped:fine");
+    await expect(child.stamp({ note: "blocked" })).rejects.toThrow("operation outcome: vetoed");
+  });
+});
+
 describe("ADR 96 — fx.guard (the Effect-native primitive)", () => {
   it("admits, vetoes, and unsubscribes", async () => {
     const h = new StampHarness("fx1");
