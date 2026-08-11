@@ -17,6 +17,7 @@ export const fakeCodeSource: CodeSourceVocabulary = {
   callsBinding: (binding, input) =>
     fakeProgram({ op: "call", binding, input }, { op: "return-last" }),
   readsValue: (name) => fakeProgram({ op: "value", name }, { op: "return-last" }),
+  swapsBinding: (name) => fakeProgram({ op: "swap", binding: name }, { op: "return-last" }),
   writes: (stream: CodeStream, text: string) =>
     fakeProgram({ op: "print", stream, text }, { op: "return", value: "done" }),
   blocks: () => fakeProgram({ op: "block" }),

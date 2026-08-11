@@ -11,8 +11,8 @@
  *     namespace registration is last-writer-wins.
  *
  * Both take the same {@link CodeConfig} — the ADR-42 dichotomy: a definition
- * (`{ runtime }`), or a live `Code` instance whose lifecycle the adopter owns
- * (so it is NOT closed on session close).
+ * (`{ runtime }`, or `{}` for the default), or a live `Code` instance whose
+ * lifecycle the adopter owns (so it is NOT closed on session close).
  *
  * Session-scoped, because a context's bindings, workspace and teardown are:
  * the harness closes with the session and disposes every context it opened
@@ -23,9 +23,11 @@
  */
 
 import { inheritedFrom } from "@agentick/runtime";
+import { omitUndefined } from "@agentick/utils";
 import type { SessionExtension, SessionInstaller } from "@agentick/spec";
 
 import { isCodeInstance, type Code } from "./contract.js";
+import { resolveDefaultRuntime } from "./default-runtime.js";
 import { CodeHarness } from "./harness.js";
 import type { CodeConfig, CodeDefinition } from "./definition.js";
 
@@ -37,7 +39,7 @@ export type WithCodeOptions = CodeDefinition;
 
 export const EXTENSION_NAME = "@agentick/code";
 
-export function withCode(config: CodeConfig): SessionExtension {
+export function withCode(config: CodeConfig = {}): SessionExtension {
   return {
     name: EXTENSION_NAME,
     target: "session",
@@ -60,7 +62,12 @@ export function withCode(config: CodeConfig): SessionExtension {
         {
           parentScope: { sessionId: installer.sessionId },
           ...inheritedFrom(installer),
-          runtime: config.runtime,
+          // An unresolvable default leaves the harness INERT rather than
+          // failing the install: `session.code` still answers `hasRuntime()`,
+          // and the error names the install when someone actually runs a
+          // program.
+          runtime: config.runtime ?? (await resolveDefaultRuntime()),
+          ...omitUndefined({ bindings: config.bindings, budgets: config.budgets }),
         },
       );
       await harness.ready;
@@ -97,6 +104,6 @@ function adopted(instance: Code): Code {
     hasRuntime: () => instance.hasRuntime(),
     capabilities: () => instance.capabilities(),
     createContext: (options) => instance.createContext(options),
-    run: (source, options) => instance.run(source, options),
+    execute: (input) => instance.execute(input),
   };
 }

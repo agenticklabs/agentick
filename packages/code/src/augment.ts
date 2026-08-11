@@ -4,7 +4,7 @@
  *
  *   1. `HookBridges.code`              → render-time access.
  *   2. `NamespaceSlots.code`           → `createApp({ code })`.
- *   3. `SessionHarnessProtocol.code`   → `session.code.run(source)`.
+ *   3. `SessionHarnessProtocol.code`   → `session.code.execute({ source })`.
  *   4. `ToolHandlerCtxExtensions.code` → dispatch-resolved `ctx.code`, the door
  *                                        a code-mode tool reaches through.
  *
@@ -45,7 +45,7 @@ declare module "@agentick/spec" {
   interface SessionHarnessProtocol<P> {
     /**
      * The session's code surface — open a context, or run one program with
-     * `session.code.run(source, { bindings })`. Present iff `withCode()` is
+     * `session.code.execute({ source, bindings })`. Present iff `withCode()` is
      * installed; the dynamic `session.<name>` extension-bridge getter provides
      * it at runtime.
      */
@@ -69,7 +69,7 @@ declare module "@agentick/spec" {
      * The session's code harness (ADR 66) — dispatch-resolved from the live
      * bridge, so a tool handler runs model-authored code through the same
      * journaled, guardable operation the rest of the framework sees:
-     * `await ctx.code?.run(source, { bindings: { tools } })`. Optional, so
+     * `await ctx.code?.execute({ source, bindings: { tools } })`. Optional, so
      * handlers guard.
      */
     readonly code?: Code;

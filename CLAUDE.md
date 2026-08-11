@@ -214,13 +214,14 @@ override the derived body:
 </Event>
 ```
 
-#### Model Components
+#### Model selection
 
-| Component       | Import from              | Purpose                                     |
-| --------------- | ------------------------ | ------------------------------------------- |
-| `<Model>`       | `agentick`               | Generic model config (takes `EngineModel`)  |
-| `<OpenAIModel>` | `@agentick/model-openai` | OpenAI JSX component (takes `model` string) |
-| `<GoogleModel>` | `@agentick/model-google` | Google JSX component (takes `model` string) |
+The model is a `createApp({ model })` option, overridable per send and per
+tick via tree-declared model registrations (`useModelRegistration`, the
+`<model-declaration>` intrinsic — ADR 56). Precedence: tick IR > send >
+session. There are NO model JSX components: the `<Model>` sugar is deferred
+(ADR 56 slice 1) and per-provider components (`<OpenAIModel>`, …) were
+explicitly rejected.
 
 **See `packages/compiler-react/README.md` for the complete JSX reference.**
 
@@ -228,25 +229,30 @@ Patterns (todos, artifacts, memory) are **state parallel to the timeline** - bui
 
 ### Stateful Tool Pattern
 
-Recommended for managed collections (see `example/v2-coding-agent/src/tools.tsx`):
+Recommended for managed collections. A tool has NO `render` option in v2 —
+the handler mutates state (`ctx.setState` or a service), and a separate
+component in the agent tree renders the model-visible view:
 
-```typescript
+```tsx
 export const MyStatefulTool = createTool({
   name: "my_tool",
   description: "...",
   input: schema,
-  handler: async (input, ctx) => {
+  handler: async (input, { ctx }) => {
     const result = MyService.doAction(input);
-    ctx?.setState("lastResult", result);
+    ctx.setState("lastResult", result);
     return [{ type: "text", text: "Done" }];
   },
-  render: () => (
+});
+
+export function MyStateSection() {
+  return (
     <Section id="my-state">
       <H2>Current State</H2>
-      <json data={MyService.getState()} />
+      <Json data={MyService.getState()} />
     </Section>
-  ),
-});
+  );
+}
 ```
 
 ### Dependency Injection into Tool Handlers (ADR 66)

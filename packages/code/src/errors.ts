@@ -21,18 +21,18 @@ import { AgentickError, registerAgentickError } from "@agentick/spec";
 export abstract class CodeError extends AgentickError {}
 
 /**
- * `createContext` / `run` before any runtime was bound — the
- * `CompactStrategyMissing` analogue. There is deliberately no default
- * provider: an implicit one would mean unjailed host execution is what an
- * adopter gets by not deciding.
+ * `createContext` / `execute` with no runtime bound — which now means the default
+ * could not be resolved either, so the message names the install rather than
+ * the abstraction. Reachable two ways: the default package is absent, or an
+ * adopter built the harness themselves and has not called `bindRuntime` yet.
  */
 export class CodeProviderMissing extends CodeError {
   readonly _tag = "CodeProviderMissing" as const;
   constructor(args?: { readonly cause?: unknown }) {
     super(
-      "code execution requires a runtime: none is bound (withCode({ runtime }) / " +
-        "createApp({ code: defineCode({ runtime }) })). There is no default provider — " +
-        "the trust decision is the adopter's",
+      "code execution requires a runtime and none is bound: pass one " +
+        "(withCode({ runtime }) / createApp({ code: defineCode({ runtime }) })) " +
+        "or install @agentick/code-host, the default",
       { cause: args?.cause },
     );
   }
@@ -127,33 +127,6 @@ export class CodeResultInvalid extends CodeError {
 registerAgentickError("CodeResultInvalid", CodeResultInvalid);
 
 /**
- * One name claimed by two binding groups. Refused rather than resolved: the
- * program would call ONE of them and the audit record would list the name
- * twice, so "which ran" becomes a question about group precedence that nobody
- * reading the record can answer. Same stance as an ambiguous resource alias —
- * never pick a winner.
- */
-export class CodeBindingNameConflict extends CodeError {
-  readonly _tag = "CodeBindingNameConflict" as const;
-  readonly bindingName: string;
-  readonly groups: readonly string[];
-  constructor(args: {
-    readonly bindingName: string;
-    readonly groups: readonly string[];
-    readonly cause?: unknown;
-  }) {
-    super(
-      `binding "${args.bindingName}" is claimed by ${args.groups.join(" and ")} — ` +
-        `rename one; the harness will not choose`,
-      { cause: args.cause },
-    );
-    this.bindingName = args.bindingName;
-    this.groups = args.groups;
-  }
-}
-registerAgentickError("CodeBindingNameConflict", CodeBindingNameConflict);
-
-/**
  * A binding name that is not a plain identifier, or one that collides with a
  * prototype member. Refused at the boundary because a provider injects these
  * as AMBIENT names: `__proto__` or `constructor` reaching an injection site is
@@ -244,7 +217,6 @@ export type CodeErrorChannel =
   | CodeContextDisposed
   | CodeRuntimeFailed
   | CodeResultInvalid
-  | CodeBindingNameConflict
   | CodeBindingNameInvalid
   | CodeRuntimeAlreadyBound
   | CodeHarnessClosed

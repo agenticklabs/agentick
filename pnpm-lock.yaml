@@ -566,6 +566,9 @@ importers:
 
   packages/code:
     dependencies:
+      '@agentick/code-host':
+        specifier: workspace:*
+        version: link:../code-host
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
@@ -575,6 +578,19 @@ importers:
       '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
+
+  packages/code-host:
+    dependencies:
+      '@agentick/code':
+        specifier: workspace:*
+        version: link:../code
+      esbuild:
+        specifier: ^0.27.3
+        version: 0.27.3
+    devDependencies:
       effect:
         specifier: ^3.22.0
         version: 3.22.0

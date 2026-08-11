@@ -1,19 +1,17 @@
 /**
  * `defineCode` — the code NAMESPACE DEFINITION (ADR 93).
  *
- * One seam: `runtime`, the provider this session executes with, and it is
- * REQUIRED. Declaring the namespace is the same act as choosing what will run
- * the code — there is no configuration in between, and a `defineCode()` that
- * type-checked would read as a complete installation that can do nothing.
+ * Every field is optional, so naming the namespace is enough:
  *
  * ```ts
- * export default defineCode({ runtime: nodeRuntime({ host: sandbox.get("primary") }) });
+ * createApp(<Agent />, { code: {} });                       // the default runtime
+ * defineCode({ runtime: hostRuntime({ cwd }) });            // a configured one
+ * defineCode({ bindings: { tools }, budgets: { timeMs } }); // a base layer
  * ```
  *
- * An adopter who genuinely needs the harness before the provider is chosen
- * builds one and binds later — `new CodeHarness(...)` + `bindRuntime`, handed
- * to `withCode` as a live instance. That path is deliberately more work than
- * naming a runtime, and `CodeProviderMissing` guards its window.
+ * The default is `@agentick/code-host` — a subprocess of the engine the host
+ * app already runs — because it adds no trust boundary that was not already
+ * there. What stays refused is a default that ESCALATES.
  *
  * Identity + brand: nothing is constructed and no code runs. Definitions are
  * inert until install, where the harness is built per-session.
@@ -22,14 +20,25 @@
  * @see docs/proposals/v2/blueprint/93-namespace-definitions.md
  */
 
-import type { Code, Runtime } from "./contract.js";
+import type { Code, CodeBindings, CodeBudgets, Runtime } from "./contract.js";
 
 /** Symbol-keyed and non-enumerable, so it stays out of spread-visible shape. */
 const CODE_DEFINITION: unique symbol = Symbol("agentick.codeDefinition");
 
 export interface CodeDefinition {
-  /** The provider. Required — there is no default, and no half-installation. */
-  readonly runtime: Runtime;
+  /**
+   * The provider. Omitted, the install resolves `@agentick/code-host`; absent
+   * that, the namespace mounts INERT and every use fails `CodeProviderMissing`.
+   */
+  readonly runtime?: Runtime;
+  /**
+   * The BASE context every program gets. `createContext({ bindings })` merges
+   * OVER this per leaf, so a context adds `tools.extra` without wiping the
+   * default `tools` and overrides one name without naming the rest.
+   */
+  readonly bindings?: CodeBindings;
+  /** Base ceilings, overridden per key by `createContext({ budgets })`. */
+  readonly budgets?: CodeBudgets;
 }
 
 export type BrandedCodeDefinition = CodeDefinition & {
@@ -37,7 +46,7 @@ export type BrandedCodeDefinition = CodeDefinition & {
 };
 
 /** Name a code definition (ADR 93). Identity + brand. */
-export function defineCode(options: CodeDefinition): BrandedCodeDefinition {
+export function defineCode(options: CodeDefinition = {}): BrandedCodeDefinition {
   return Object.defineProperty(options, CODE_DEFINITION, {
     value: true,
     enumerable: false,
@@ -48,7 +57,8 @@ export function defineCode(options: CodeDefinition): BrandedCodeDefinition {
 
 /**
  * Does `value` carry the {@link defineCode} brand? An INLINE bag
- * (`withCode({ runtime })`) is a valid definition and is NOT branded, so the
+ * (`withCode({ runtime })`) — or an empty one — is a valid definition and is
+ * NOT branded, so the
  * slot discriminates definition-from-instance with spec's `isCodeInstance` and
  * reaches for this only when the brand itself is the question.
  */

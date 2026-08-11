@@ -1,32 +1,29 @@
 {
-  "name": "@agentick/code",
+  "name": "@agentick/code-host",
   "version": "1.0.0-next.107",
-  "description": "CodeHarness — running model-authored code as an operation. Language-neutral: the harness owns the envelope (journaled code:execute, guards, abort, typed outcomes) and holds a Runtime provider that owns language, engine and isolation. Always present, inert until a runtime is bound; no default provider. Bundled into the agentick metapackage; not published independently.",
+  "description": "Host-engine-adaptive subprocess Runtime for @agentick/code — spawns process.execPath (node or bun), ndjson control channel on a dedicated fd, bindings marshaled across the membrane, timeMs/outputBytes enforced everywhere and memoryMb where the engine honors a heap ceiling. Placement, not containment.",
   "keywords": [
     "agent",
     "agentick",
     "ai",
+    "bun",
     "code",
-    "harness",
-    "sandbox"
+    "node",
+    "runtime",
+    "subprocess"
   ],
   "license": "MIT",
   "author": "Ryan Lindgren",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/agenticklabs/agentick.git",
-    "directory": "packages/code"
+    "directory": "packages/code-host"
   },
   "files": [
     "dist"
   ],
   "type": "module",
-  "sideEffects": [
-    "./src/index.ts",
-    "./src/augment.ts",
-    "./dist/index.js",
-    "./dist/augment.js"
-  ],
+  "sideEffects": false,
   "main": "src/index.ts",
   "exports": {
     ".": {
@@ -65,25 +62,18 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && cp src/supervisor.js dist/supervisor.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "oxlint src/",
     "format:check": "oxfmt --check src/",
     "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
   },
   "dependencies": {
-    "@agentick/runtime": "workspace:*",
-    "@agentick/spec": "workspace:*",
-    "@agentick/utils": "workspace:*",
+    "@agentick/code": "workspace:*",
+    "esbuild": "^0.27.3"
+  },
+  "devDependencies": {
     "effect": "^3.22.0"
-  },
-  "peerDependencies": {
-    "@agentick/code-host": "workspace:*"
-  },
-  "peerDependenciesMeta": {
-    "@agentick/code-host": {
-      "optional": true
-    }
   },
   "engines": {
     "node": ">=20.19"

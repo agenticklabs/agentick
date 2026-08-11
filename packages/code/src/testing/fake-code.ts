@@ -14,6 +14,7 @@
  * to exactly what it declares).
  */
 
+import { flattenBindings, freezeNamespaces, resolveBindingPath } from "../bindings.js";
 import type {
   CodeBinding,
   CodeBudgetKey,
@@ -30,8 +31,11 @@ import type {
 /** One step of a fake program. {@link fakeCodeSource} builds these. */
 export type FakeInstruction =
   | { readonly op: "print"; readonly stream: CodeStream; readonly text: string }
+  /** `binding` is a dotted path — `"tools.search"` as readily as `"search"`. */
   | { readonly op: "call"; readonly binding: string; readonly input: unknown }
   | { readonly op: "value"; readonly name: string }
+  /** Tries to replace the binding at `binding`, swallowing any refusal, then calls it. */
+  | { readonly op: "swap"; readonly binding: string }
   | { readonly op: "remember"; readonly key: string; readonly value: unknown }
   | { readonly op: "recall"; readonly key: string }
   | { readonly op: "sleep"; readonly ms: number }
@@ -86,6 +90,7 @@ export function fakeCode(options: FakeCodeOptions = {}): Runtime {
 // ============================================================================
 
 class FakeContext implements CodeRuntimeContext {
+  /** Keyed by DOTTED PATH, the same key the audit record names. */
   private readonly bindings = new Map<string, CodeBinding>();
   private readonly values: Readonly<Record<string, unknown>>;
   private readonly budgets: CodeBudgets;
@@ -94,13 +99,11 @@ class FakeContext implements CodeRuntimeContext {
   private closed = false;
 
   constructor(capabilities: CodeCapabilities, init: CodeRuntimeContextOptions) {
-    for (const [name, fn] of Object.entries(init.bindings?.tools ?? {})) {
-      this.bindings.set(name, fn);
-    }
-    for (const [name, fn] of Object.entries(init.bindings?.fs ?? {})) {
-      this.bindings.set(name, fn);
-    }
-    this.values = init.bindings?.values ?? {};
+    const flat = flattenBindings(init.bindings);
+    for (const [path, fn] of flat.functions) this.bindings.set(path, fn);
+    // Frozen for the same reason a real engine freezes: a program must not be
+    // able to swap what it was given.
+    this.values = freezeNamespaces(flat.values);
     // Only budgets the fake declared reach here — the harness rejects the rest.
     this.budgets = init.budgets ?? {};
     this.persistent = capabilities.persistentContext;
@@ -180,14 +183,26 @@ class Run {
         this.last = await binding(instruction.input);
         return undefined;
       }
-      case "value":
-        // `hasOwn`, not `in`: `in` walks the prototype chain, so a program
-        // asking for `constructor` would be handed Object's.
-        if (!Object.hasOwn(this.values, instruction.name)) {
-          throw new Error(`unknown value: ${instruction.name}`);
-        }
-        this.last = this.values[instruction.name];
+      case "value": {
+        const found = resolveBindingPath(this.values, instruction.name);
+        if (!found.found) throw new Error(`unknown value: ${instruction.name}`);
+        this.last = found.value;
         return undefined;
+      }
+      case "swap": {
+        // The attempt is expected to fail — frozen in strict mode THROWS, and
+        // silently no-ops elsewhere, so the pin has to read the same either way.
+        const segments = instruction.binding.split(".");
+        const namespace = segments.slice(0, -1).join(".");
+        const owner =
+          namespace === "" ? this.values : resolveBindingPath(this.values, namespace).value;
+        try {
+          (owner as Record<string, unknown>)[segments.at(-1)!] = "swapped";
+        } catch {
+          // The freeze held, which is the point.
+        }
+        return await this.step({ op: "call", binding: instruction.binding, input: {} });
+      }
       case "remember":
         this.state.set(instruction.key, instruction.value);
         return undefined;

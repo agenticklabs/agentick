@@ -10,18 +10,20 @@
  * ```ts
  * import { defineCode } from "@agentick/code";
  *
- * const app = createApp(Agent, { code: defineCode({ runtime: nodeRuntime() }) });
+ * const app = createApp(Agent, { code: {} }); // or defineCode({ runtime })
  *
- * const result = await session.code.run("const x = await recall({ q }); return x", {
+ * const result = await session.code.execute({
+ *   source: "const x = await tools.recall({ q }); return x",
  *   bindings: { tools: { recall: (input) => tools.dispatch("recall", input) } },
  *   budgets: { timeMs: 5_000 },
  * });
  * if (result.outcome === "returned") use(result.value);
  * ```
  *
- * No default provider: `session.code` exists and costs nothing, and fails
- * `CodeProviderMissing` until an adopter names one. Execution is never what an
- * adopter gets by not deciding.
+ * The default provider is `@agentick/code-host` — a subprocess of the engine
+ * the host app already runs, so it adds no trust boundary that was not there.
+ * What stays refused is a default that ESCALATES: an implicit jail would imply
+ * containment nobody built, an implicit isolate a tier nobody chose.
  *
  * @see docs/proposals/v2/code.md
  */
@@ -33,6 +35,7 @@ import "./augment.js";
 
 export { CodeHarness, type CodeHarnessOptions } from "./harness.js";
 export { withCode, EXTENSION_NAME, type WithCodeOptions } from "./extension.js";
+export { DEFAULT_RUNTIME_PACKAGE, resolveDefaultRuntime } from "./default-runtime.js";
 export {
   defineCode,
   isCodeDefinition,
@@ -41,11 +44,21 @@ export {
   type CodeDefinition,
 } from "./definition.js";
 export {
+  BINDING_PATH_SEPARATOR,
   bindingNames,
+  flattenBindings,
+  freezeNamespaces,
+  MAX_BINDING_DEPTH,
+  resolveBindingPath,
+  type FlatBindings,
+} from "./bindings.js";
+export {
   CODE_BUDGET_KEYS,
   isCodeInstance,
   type Code,
   type CodeBinding,
+  type CodeBindingScalar,
+  type CodeBindingEntry,
   type CodeBindings,
   type CodeBudgetExceeded,
   type CodeBudgetKey,
@@ -60,6 +73,7 @@ export {
   type CodeNoValue,
   type CodeOutput,
   type CodeReturned,
+  type CodeOneShotInput,
   type CodeRuntimeContext,
   type CodeRuntimeContextOptions,
   type CodeStream,
