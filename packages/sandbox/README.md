@@ -260,6 +260,27 @@ Roots do not require a sandbox — a static list or a plain provider function wo
 
 `fsFileResolver(rootDir)` is the no-sandbox backend: lossless text plus base64 blobs for binary, root-contained. `sandboxFileResolver` is text-only, because the handle contract exposes only `readFile(): string`.
 
+## A live process — `spawn`
+
+`exec` is fire-and-collect: you get the command's output once it is over. That is the wrong shape for a supervised child — one that calls back into the host _while_ it runs — so a handle may offer `spawn` instead, which returns a live process with four streams: the program's `stdout` and `stderr`, a **control channel** carrying the supervising protocol, and `exit`.
+
+```ts
+const proc = await sandbox.spawn!({
+  command: "/usr/bin/node",
+  args: [supervisorPath],
+  readablePaths: [supervisorPath], // outside the workspace, so grant the read
+});
+
+proc.onControl((chunk) => reader(chunk));
+proc.writeControl(`${JSON.stringify(frame)}\n`);
+```
+
+The control channel is separate from `stdout` **by construction**, which is what stops a program printing JSON at its own stdout from forging a frame. `readablePaths` exists because a confined process cannot read its own entry script by default; the provider grants those paths read-only at the same path on both sides, and never grants a write alongside.
+
+Like `addMount`, this is **capability-tiered**: a provider with no long-lived process surface leaves `spawn` undefined or throws `SandboxUnsupportedError`. It never degrades to `exec`, because silently dropping the control channel would break the caller's protocol rather than fail it.
+
+[@agentick/code-host](../code-host) is the consumer: `sandboxHostPort(handle)` places the runtime that executes model-authored code inside the jail.
+
 ## Writing a provider
 
 Implement `SandboxProvider`, return a `SandboxHandle`, and prove it with the shipped conformance suite. The suite drives a **real** instance — exec, file round-trips, edits, mounts, teardown — so passing it means the contract holds, not that a mock agreed with you.
@@ -293,6 +314,7 @@ Anything a provider needs is importable from the package root — the constructi
 | `withSandbox(options?)`                     | App extension; builds the registry on the app substrate. Takes `initialize`.                                                                                                                       |
 | `SandboxHarness`                            | Wraps one handle: eight commands, the approval gate, ACL snapshots.                                                                                                                                |
 | `SandboxProvider` / `SandboxHandle`         | What a provider implements and what `create()` returns.                                                                                                                                            |
+| `SandboxSpawnRequest` / `SandboxProcess`    | The capability-tiered live-process surface: argv in, four streams out.                                                                                                                             |
 | `SandboxCreateOptions`                      | `workspace`, `mounts`, `mountAllow`, `allow`, `env`, `limits`, `setup`.                                                                                                                            |
 | `SandboxBridge` / `inMemorySandboxBridge()` | The registry interface, and an unwired one for tests.                                                                                                                                              |
 | `applyEdits(source, edits)` / `EditError`   | The pure edit transform and its diagnostic error.                                                                                                                                                  |
@@ -375,4 +397,5 @@ Addressable command names: `sandbox:exec`, `sandbox:read-file`, `sandbox:write-f
 - `src/react/__tests__/component.spec.tsx` — `<Sandbox>` and `useSandbox()` against the real compiler.
 - `src/mcp/__tests__/roots.spec.ts` — workspace root plus live mounts (add then remove), and `bindSandboxRootsToClient` firing on every change with unsubscribe stopping it.
 - `src/mcp/__tests__/file-resolver.spec.ts` — text round-trip through the sandbox, binary degrade, `fsFileResolver` text and base64 blob, root containment, routing through a real resources harness.
+- `src/testing/conformance.ts` — the provider contract itself, including the capability-tiered `spawn`: a live `/bin/sh` driven over its control channel mid-run, or an honest `undefined` / `SandboxUnsupportedError` from a provider that has no such surface.
 - Provider-side behavior is certified by `runSandboxProviderConformance` in each provider package.

@@ -16,7 +16,9 @@ import {
 } from "@agentick/code";
 import { runCodeConformance } from "@agentick/code/testing";
 
-import { childProcessPort, hostRuntime, transpiler, type HostProcessPort } from "../index.js";
+import { localProvider } from "@agentick/sandbox-local";
+
+import { hostRuntime, sandboxHostPort, transpiler } from "../index.js";
 import { hostCodeProbe, hostCodeSource } from "../testing/index.js";
 
 declare const session: {
@@ -26,7 +28,6 @@ declare const session: {
 };
 declare const tenantId: string;
 declare const chattyProgram: string;
-declare const log: { info(fields: Record<string, unknown>): void };
 declare function myWrapperAround(runtime: Runtime): Runtime;
 
 // ── Quick start
@@ -185,14 +186,15 @@ function pipelines(): void {
 // ── Trust posture
 hostRuntime({ env: { DATA_DIR: "/srv/scratch" }, cwd: "/srv/scratch" });
 
-const audited: HostProcessPort = {
-  spawn: (request) => {
-    log.info({ msg: "spawning a code child", args: request.args });
-    return childProcessPort().spawn(request);
-  },
-};
+// ── Trust posture / Running the child in a jail
+async function jailedPlacement(): Promise<void> {
+  const sandbox = await localProvider().create({
+    workspace: true,
+    allow: { network: false },
+  });
 
-hostRuntime({ host: audited });
+  hostRuntime({ host: sandboxHostPort(sandbox) });
+}
 
 // ── Certifying your own layer
 function certification(): void {
@@ -216,5 +218,6 @@ describe("README examples", () => {
     void output;
     void budgets;
     void certification;
+    void jailedPlacement;
   });
 });

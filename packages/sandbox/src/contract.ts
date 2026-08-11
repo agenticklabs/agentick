@@ -74,6 +74,21 @@ export interface SandboxHandle {
    */
   editFile(path: string, edits: readonly SandboxEdit[]): Promise<SandboxEditResult>;
   /**
+   * Start a LIVE process inside the sandbox and keep talking to it.
+   *
+   * {@link exec} is fire-and-collect: the command's result arrives once,
+   * after it is over. A supervised child — one that calls back into the
+   * host WHILE it runs — cannot be driven that way, so it earns its own
+   * method rather than a flag on `exec`.
+   *
+   * CAPABILITY-TIERED + OPTIONAL, exactly like {@link addMount}: a
+   * provider with no long-lived process surface leaves this `undefined`
+   * or throws `SandboxUnsupportedError`. NEVER fake it — a `spawn` that
+   * silently degrades to `exec` would drop the control channel the
+   * caller's protocol is built on.
+   */
+  spawn?(request: SandboxSpawnRequest): Promise<SandboxProcess>;
+  /**
    * Mount a host directory into the sandbox at runtime — a host-side
    * PRIVILEGED op the sandboxed process cannot perform from inside, so
    * (unlike stat/readdir) `bash` does NOT subsume it: it earns a real
@@ -95,6 +110,58 @@ export interface SandboxHandle {
   listMounts?(): Promise<readonly SandboxMount[]>;
   /** Tear down the sandbox and release provider-side resources. */
   destroy(): Promise<void>;
+}
+
+// ============================================================================
+// Live process (capability tier)
+// ============================================================================
+
+/**
+ * What to start. `command` + `args` rather than a shell line: a jailed
+ * program's path routinely contains a space, and a quoting bug there is a
+ * confinement bug.
+ */
+export interface SandboxSpawnRequest {
+  readonly command: string;
+  readonly args?: readonly string[];
+  /** Merged over the sandbox's own environment, as `exec` merges its options. */
+  readonly env?: Readonly<Record<string, string>>;
+  /** Workspace-confined, like `exec`'s. Defaults to the workspace root. */
+  readonly cwd?: string;
+  /**
+   * Host paths outside the workspace this process must READ — its own
+   * entry script, a runtime's lib directory. The provider grants them
+   * read-only at the SAME path inside the sandbox, so one command line
+   * works on every platform.
+   *
+   * Read, and only read — the provider never grants a write alongside.
+   * A supervisor whose own script the supervised program can rewrite is
+   * not a supervisor, so its script belongs here rather than staged into
+   * the workspace the program can write.
+   */
+  readonly readablePaths?: readonly string[];
+}
+
+/**
+ * A running process inside the sandbox. FOUR streams, because a supervised
+ * child needs a channel its own output cannot forge: the program's stdout
+ * and stderr, a control channel carrying the supervising protocol, and exit.
+ *
+ * Listeners may be attached after the process has started; an implementation
+ * must not drop bytes emitted before then.
+ */
+export interface SandboxProcess {
+  readonly pid: number | undefined;
+  onStdout(listen: (chunk: Buffer) => void): void;
+  onStderr(listen: (chunk: Buffer) => void): void;
+  onControl(listen: (chunk: Buffer) => void): void;
+  onExit(listen: (code: number | null, signal: string | null) => void): void;
+  /** Write to the control channel. A no-op once the channel is gone. */
+  writeControl(chunk: string): void;
+  /** Close the control input — the child's cue to exit on its own. */
+  endControl(): void;
+  /** Signal the process (and any tree it started). */
+  kill(signal: NodeJS.Signals): void;
 }
 
 // ============================================================================

@@ -73,6 +73,8 @@ const provider = localProvider({ strategy });
 
 **`editFile`** is read, then the shared `applyEdits` from the base package, then the same atomic write. The provider owns atomicity; the transform stays pure.
 
+**`spawn`** starts a LIVE process in the same jail and keeps it: argv rather than a shell line, four streams (`stdout`, `stderr`, a control channel, `exit`), and `writeControl` / `endControl` / `kill` to drive it. The control channel is an inherited descriptor, which survives the jail because `sandbox-exec` and `bwrap` _exec_ the program rather than proxying it. `readablePaths` grants host paths outside the workspace read-only at the same path on both sides — a supervisor needs to read its own entry script, and staging that script into the workspace would let the supervised program rewrite it.
+
 **`addMount` / `removeMount` / `listMounts`** extend the confinement allow-set and symlink the sandbox path to the host directory. The ceiling check against `mountAllow` happens in the harness above; the provider performs the mount.
 
 ## Egress
@@ -133,7 +135,7 @@ const provider = localProvider({
 | `resetCapabilitiesCache()`                                 | Clear the detection memo (tests).                                           |
 | `SandboxStrategy` / `PlatformCapabilities`                 | The tier union and the detection result shape.                              |
 | `CgroupManager` / `DiskMonitor`                            | Linux cgroup v2 limits and the disk poll.                                   |
-| `selectExecutor(strategy, cgroup?)` / `CommandExecutor`    | The spawn strategy behind `exec`.                                           |
+| `selectExecutor(strategy)` / `CommandExecutor`             | The jail strategy behind `exec` and `spawn`. `wrap()` returns the argv.     |
 | `createWorkspace` / `destroyWorkspace`                     | Temp workspace allocation and teardown.                                     |
 | `resolveMount` / `resolveMounts` / `ResolvedMount`         | Host-to-sandbox mount resolution.                                           |
 | `resolveSafePath` / `filterEnv` / `ENV_BLOCKLIST`          | Path confinement and environment scrubbing.                                 |
@@ -152,6 +154,7 @@ const provider = localProvider({
 - **`diskMb` is a poll, not a quota.** Five-second sampling means a fast write can exceed the ceiling briefly before the process group is killed.
 - **Per-domain egress is bypassable.** It rides on proxy environment variables. Only `allow.network: false` is kernel-hard.
 - **`restore` is not implemented.** Hibernate is deferred to a provider with real checkpointing; the contract seam stays optional and this provider leaves it off.
+- **The jailed control channel is unverified on Linux.** `spawn`'s fd 3 is proven through macOS seatbelt by `src/__tests__/isolation.spec.ts`; the same cases register skipped without `bwrap` or `unshare`, and no Linux host has run them. The mechanism is the same (neither tool closes inherited descriptors), but treat Linux as untested until the suite runs there.
 - **Windows has no jail.** `detectCapabilities()` reports the platform, but no restricted-token or job-object strategy is implemented, so Windows resolves to `"none"`.
 - **`isolation` needs a cast to reach.** `SandboxProvider.create()` returns the base `SandboxHandle`, which has no `isolation`, so reading the tier off a handle means narrowing to `LocalSandbox`. The contract has no place for a provider to declare its tier generically.
 
@@ -159,4 +162,4 @@ const provider = localProvider({
 
 - `src/__tests__/provider-conformance.spec.ts` — the real provider through `runSandboxProviderConformance`: exec with `onOutput` streaming, filesystem round-trip, atomic fuzzy and range `editFile`, mount add/list/remove, destroy.
 - `src/__tests__/proxy.spec.ts` — egress allow, deny, and default-deny; the audit log; `HTTP(S)_PROXY` injection through the provider.
-- `src/__tests__/isolation.spec.ts` — confinement proof rather than a functional check. A jailed `exec` is denied writing outside the workspace, denied reading a sensitive path (`/Users` on macOS, unbound host paths on Linux), and denied network egress when `allow.network` is false. Each case is paired with a `strategy: "none"` control that **performs** the same escape, which is what proves the denial is the jail's doing. Per-platform gated, and each case asserts `isolation === <the jail>` so it can never pass on an unconfined process.
+- `src/__tests__/isolation.spec.ts` — confinement proof rather than a functional check. A jailed `exec` is denied writing outside the workspace, denied reading a sensitive path (`/Users` on macOS, unbound host paths on Linux), and denied network egress when `allow.network` is false. Each case is paired with a `strategy: "none"` control that **performs** the same escape, which is what proves the denial is the jail's doing. Per-platform gated, and each case asserts `isolation === <the jail>` so it can never pass on an unconfined process. The jailed-`spawn` cases hold the same line for a LIVE process: the control channel round-trips bidirectionally through the jail, a spawned process is denied reading the home directory and denied network egress, `readablePaths` grants exactly the declared path and no write with it, and the workspace stays writable.

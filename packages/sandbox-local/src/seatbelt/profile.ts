@@ -22,6 +22,7 @@
  * Ported faithfully from v1 `@agentick/sandbox-local/seatbelt/profile.ts`.
  */
 
+import { dirname, sep } from "node:path";
 import type { SpawnOptions } from "../executor/types.js";
 
 /**
@@ -42,6 +43,13 @@ const DENIED_READ_PATHS = [
   "/Library/Keychains",
   "/private/var/db/dslocal",
 ];
+
+/** Every directory above `path`, root excluded (`file-read*` already covers it). */
+function ancestorsOf(path: string): string[] {
+  const found: string[] = [];
+  for (let at = dirname(path); at !== sep && at !== dirname(at); at = dirname(at)) found.push(at);
+  return found;
+}
 
 /** Compile a seatbelt profile string from spawn options. */
 export function compileSeatbeltProfile(options: SpawnOptions): string {
@@ -78,6 +86,19 @@ export function compileSeatbeltProfile(options: SpawnOptions): string {
     comment("Re-allow mount reads");
     for (const mount of options.mounts) {
       allow("file-read*", subpath(mount.hostPath));
+    }
+  }
+
+  // A subpath allow reaches the contents but not the directories ABOVE it, so
+  // a granted path under a denied prefix is openable yet un-`realpath`-able —
+  // and node resolves its entry script through `realpath` before running it.
+  // Metadata only: `lstat` passes, the denied directories stay unlistable.
+  const granted = [options.workspacePath, ...options.mounts.map((m) => m.hostPath)];
+  const ancestors = new Set(granted.flatMap(ancestorsOf));
+  if (ancestors.size > 0) {
+    comment("Traverse into granted paths (lstat only) — realpath walks every component");
+    for (const ancestor of ancestors) {
+      allow("file-read-metadata", `(literal "${ancestor}")`);
     }
   }
 

@@ -115,7 +115,7 @@ export function localProvider(config?: LocalProviderConfig): SandboxProvider {
         await cgroup.create(limits);
       }
 
-      const executor = selectExecutor(strategy, cgroup);
+      const executor = selectExecutor(strategy);
 
       const init: ConstructorParameters<typeof LocalSandbox>[0] = {
         id: randomBytes(8).toString("hex"),

@@ -1,67 +1,38 @@
 /**
  * Linux executors — strategies `"bwrap"` and `"unshare"` (ADR 59, #240).
  *
- * Both spawn `sh -c <command>` wrapped by their namespace tool and, when a
- * {@link CgroupManager} is supplied, move the child into the cgroup for
- * memory/CPU enforcement. Children are detached (own process group) so the
- * handle can kill the tree on timeout/abort.
+ * Both prefix the argv with their namespace tool. Neither closes inherited
+ * file descriptors, so a supervised process keeps its control channel across
+ * the jail boundary — unverified on this repo's CI (no Linux host with a
+ * namespace jail); see the package README.
  *
  * Ported from v1 `@agentick/sandbox-local/executor/linux.ts`.
  */
 
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
 import type { SandboxStrategy } from "../platform/types.js";
-import type { CgroupManager } from "../linux/cgroup.js";
 import { buildBwrapArgs } from "../linux/bwrap.js";
 import { buildUnshareArgs } from "../linux/unshare.js";
-import type { CommandExecutor, SpawnOptions } from "./types.js";
+import type { CommandExecutor, JailedCommand, SpawnOptions } from "./types.js";
 
 export class BwrapExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "bwrap";
+  readonly shell = ["sh", "-c"] as const;
 
-  constructor(private readonly cgroup?: CgroupManager) {}
-
-  spawn(command: string, options: SpawnOptions): ChildProcess {
-    const args = buildBwrapArgs(options);
-    args.push("sh", "-c", command);
-
-    // bwrap sets the working directory via `--chdir` (in the args), so cwd
-    // is deliberately not passed to spawn here.
-    const child = spawn("bwrap", args, {
-      env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true,
-    });
-
-    if (this.cgroup && child.pid) {
-      this.cgroup.addProcess(child.pid).catch(() => {});
-    }
-
-    return child;
+  wrap(command: string, args: readonly string[], options: SpawnOptions): JailedCommand {
+    // bwrap sets the working directory itself, via `--chdir`.
+    return { command: "bwrap", args: [...buildBwrapArgs(options), command, ...args] };
   }
 }
 
 export class UnshareExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "unshare";
+  readonly shell = ["sh", "-c"] as const;
 
-  constructor(private readonly cgroup?: CgroupManager) {}
-
-  spawn(command: string, options: SpawnOptions): ChildProcess {
-    const args = buildUnshareArgs(options);
-    args.push("sh", "-c", command);
-
-    const child = spawn("unshare", args, {
+  wrap(command: string, args: readonly string[], options: SpawnOptions): JailedCommand {
+    return {
+      command: "unshare",
+      args: [...buildUnshareArgs(options), command, ...args],
       cwd: options.cwd,
-      env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true,
-    });
-
-    if (this.cgroup && child.pid) {
-      this.cgroup.addProcess(child.pid).catch(() => {});
-    }
-
-    return child;
+    };
   }
 }

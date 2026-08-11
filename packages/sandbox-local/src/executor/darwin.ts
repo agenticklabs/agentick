@@ -1,26 +1,28 @@
 /**
  * macOS seatbelt executor — strategy `"seatbelt"` (ADR 59, #240).
  *
- * Compiles a per-exec SBPL profile from {@link SpawnOptions}, writes it to a
- * per-instance temp dir (mode 0700, profile files 0600), and spawns the
- * command under `sandbox-exec -f <profile> /bin/bash -c <command>`. The
- * profile is removed when the child exits; `dispose` removes the temp dir.
+ * Compiles a per-invocation SBPL profile from {@link SpawnOptions}, writes it
+ * to a per-instance temp dir (mode 0700, profile files 0600), and prefixes the
+ * argv with `sandbox-exec -f <profile>`. `sandbox-exec` applies the profile and
+ * then EXECS the program, so the child keeps its pid and every inherited file
+ * descriptor — which is what lets a supervised process keep its control
+ * channel across the jail boundary. `release` removes the profile; `dispose`
+ * removes the temp dir.
  *
  * Ported from v1 `@agentick/sandbox-local/executor/darwin.ts`.
  */
 
-import { spawn } from "node:child_process";
-import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SandboxStrategy } from "../platform/types.js";
 import { compileSeatbeltProfile } from "../seatbelt/profile.js";
-import type { CommandExecutor, SpawnOptions } from "./types.js";
+import type { CommandExecutor, JailedCommand, SpawnOptions } from "./types.js";
 
 export class DarwinExecutor implements CommandExecutor {
   readonly strategy: SandboxStrategy = "seatbelt";
+  readonly shell = ["/bin/bash", "-c"] as const;
   private readonly profileDir: string;
 
   constructor() {
@@ -29,29 +31,22 @@ export class DarwinExecutor implements CommandExecutor {
     mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
   }
 
-  spawn(command: string, options: SpawnOptions): ChildProcess {
-    const profile = compileSeatbeltProfile(options);
-
+  wrap(command: string, args: readonly string[], options: SpawnOptions): JailedCommand {
     const profilePath = join(this.profileDir, `profile-${randomBytes(4).toString("hex")}.sb`);
-    writeFileSync(profilePath, profile, { mode: 0o600 });
+    writeFileSync(profilePath, compileSeatbeltProfile(options), { mode: 0o600 });
 
-    const child = spawn("sandbox-exec", ["-f", profilePath, "/bin/bash", "-c", command], {
+    return {
+      command: "sandbox-exec",
+      args: ["-f", profilePath, command, ...args],
       cwd: options.cwd,
-      env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
-      detached: true, // own process group → the handle can kill the whole tree
-    });
-
-    // Remove the profile once the process starts / exits (best-effort).
-    child.on("exit", () => {
-      try {
-        unlinkSync(profilePath);
-      } catch {
-        // Best-effort cleanup.
-      }
-    });
-
-    return child;
+      release: () => {
+        try {
+          unlinkSync(profilePath);
+        } catch {
+          // Best-effort cleanup.
+        }
+      },
+    };
   }
 
   dispose(): void {
