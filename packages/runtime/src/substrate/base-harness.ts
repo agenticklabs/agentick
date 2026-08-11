@@ -179,6 +179,7 @@ import {
   type AsyncMiddleware,
   type CommandGuards,
   type CommandHooks,
+  type GuardRegistrars,
   type HarnessInterceptors,
   type HookRegistrars,
   type InterceptorCtx,
@@ -204,6 +205,7 @@ export {
   type CommandHooks,
   type CommandMiddlewares,
   type CommandRegistry,
+  type GuardRegistrars,
   type HarnessInterceptors,
   type HookRegistrars,
   type InterceptorCtx,
@@ -788,7 +790,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    *     (`{ timelineAppend: … }`), each entry self-scoping by `ctx.op` exactly
    *     as a command hook does. This is the declarative twin of {@link hook},
    *     and the shape `createApp({ guards })` / `defineX({ guards })` desugar
-   *     into.
+   *     into. {@link BaseHarness.guards} is the per-verb Proxy over this form.
    *
    * ```ts
    * harness.guard((input, ctx) =>
@@ -838,6 +840,24 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       }),
     );
   }
+
+  /**
+   * Per-verb imperative guard registrars (ADR 96) — the guard mirror of
+   * {@link BaseHarness.hooks}, keyed by the SAME camelCase command the
+   * {@link CommandGuards} bag uses: `harness.guards.codeExecute(decide)`. The
+   * Proxy hands a one-entry bag to {@link guard}, so there stays exactly ONE
+   * guard registration path. Only augmented verbs are callable keys
+   * ({@link GuardRegistrars}); an unknown name registers a guard no op matches.
+   */
+  get guards(): GuardRegistrars {
+    return (this._guardRegistrars ??= new Proxy({} as GuardRegistrars, {
+      get: (_target, name) =>
+        typeof name === "string"
+          ? (decide: unknown) => this.guard({ [name]: decide } as CommandGuards)
+          : undefined,
+    }));
+  }
+  private _guardRegistrars?: GuardRegistrars;
 
   /**
    * Effect-native {@link guard} — the composition path for a decider that is

@@ -115,6 +115,33 @@ describe("CodeHarness — the operation envelope", () => {
     await close();
   });
 
+  it("guards.codeExecute is the per-verb form of the same admission decision", async () => {
+    const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
+    const off = harness.guards.codeExecute((input) =>
+      input.bindings.includes("deleteAll") ? { kind: "veto", reason: "policy" } : undefined,
+    );
+
+    await expect(harness.execute({ source: fakeCodeSource.returns("ok") })).resolves.toMatchObject({
+      outcome: "returned",
+      value: "ok",
+    });
+    await expect(
+      harness.execute({
+        source: fakeCodeSource.returns("blocked"),
+        bindings: { deleteAll: async () => null },
+      }),
+    ).rejects.toBeTruthy();
+
+    off();
+    await expect(
+      harness.execute({
+        source: fakeCodeSource.returns("blocked"),
+        bindings: { deleteAll: async () => null },
+      }),
+    ).resolves.toMatchObject({ outcome: "returned", value: "blocked" });
+    await close();
+  });
+
   it("fx.execute composes in the caller's fiber", async () => {
     const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
     const context = await harness.createContext();
