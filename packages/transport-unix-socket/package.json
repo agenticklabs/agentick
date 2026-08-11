@@ -1,6 +1,6 @@
 {
   "name": "@agentick/transport-unix-socket",
-  "version": "1.0.0-next.107",
+  "version": "1.0.0-next.108",
   "description": "Unix-socket transport for agentick — newline-delimited JSON-RPC 2.0 over `net.Server` / `net.Socket`. Required for tentickle-class local-IPC shapes (TUI ↔ same-host daemon). Node-only.",
   "keywords": [
     "agent",
