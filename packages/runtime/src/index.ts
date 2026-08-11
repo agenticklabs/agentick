@@ -40,8 +40,6 @@ export {
   readChunkCarrier,
   guardsToMiddlewares,
   commandGuardMiddleware,
-  qualifyNamespaceGuards,
-  qualifyNamespaceHooks,
   interceptorKind,
   isOperationSignal,
   liftMiddleware,

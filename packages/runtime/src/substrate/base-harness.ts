@@ -191,8 +191,6 @@ export {
   hooksToMiddlewares,
   guardsToMiddlewares,
   commandGuardMiddleware,
-  qualifyNamespaceGuards,
-  qualifyNamespaceHooks,
   withCallMiddleware,
   annotateOperationSpan,
   spanAttributes,

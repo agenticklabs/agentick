@@ -1,11 +1,13 @@
 /**
- * Tool executor middleware + lifecycle hook exposure (4a.6).
+ * Tool executor middleware + admission, on the REAL dispatch path (4a.6).
  *
- * `.use(middleware)` and `.fx.guard(decider)` are thin typed
- * wrappers over `BaseHarness.middleware.use` and (ADR 83)
- * `BaseHarness.guardEffect(...)` — one composed interceptor seam. The base
- * composes both into every operation; these tests verify the typed
- * surfaces work as advertised.
+ * `.use` and `.fx.guard` are the base's own surfaces — this harness adds no
+ * wrapper for either (ADR 96 retired `guardDispatch`, the tool-typed alias for
+ * `guardEffect`). What these pin is therefore not the surfaces' existence but
+ * their effect HERE: a guard on `tool:dispatch` decides before the tool
+ * HANDLER runs, and a veto reaches the caller as the dispatch terminal. The
+ * base-level semantics live in
+ * `runtime/src/__tests__/definition-interceptors.spec.ts`.
  */
 
 import { describe, expect, it } from "vitest";
