@@ -188,6 +188,66 @@ export function runSandboxProviderConformance(
       expect((await sb.listMounts()).some((m) => m.sandboxPath === "mnt")).toBe(false);
     });
 
+    // ─── spawn (capability-tiered) ───
+
+    it("spawn: a live process talks over its control channel, else capability-tiered", async () => {
+      const sb = await create();
+
+      if (!sb.spawn) {
+        // Honest answer #1: a provider with no long-lived process surface
+        // leaves the method undefined (ADR 59).
+        expect(sb.spawn).toBeUndefined();
+        return;
+      }
+
+      // A shell is the one program every POSIX-ish provider already has, and
+      // `>&3` is the whole question: does a descriptor the parent opened
+      // survive into the sandbox?
+      const proc = await sb
+        .spawn({
+          command: "/bin/sh",
+          args: ["-c", 'echo ready >&3; while read line; do echo "seen:$line" >&3; done'],
+        })
+        .catch((err: unknown) => {
+          // Honest answer #2: the method exists but declines. Never a fake.
+          expect(err).toBeInstanceOf(SandboxUnsupportedError);
+          return undefined;
+        });
+      if (proc === undefined) return;
+
+      const control: string[] = [];
+      const waiting: Array<() => void> = [];
+      const until = (count: number): Promise<void> =>
+        new Promise((resolve) => {
+          const check = (): void => void (control.length >= count && resolve());
+          waiting.push(check);
+          check();
+        });
+
+      let buffered = "";
+      proc.onControl((chunk) => {
+        buffered += chunk.toString();
+        for (let at = buffered.indexOf("\n"); at >= 0; at = buffered.indexOf("\n")) {
+          control.push(buffered.slice(0, at));
+          buffered = buffered.slice(at + 1);
+        }
+        for (const check of waiting) check();
+      });
+      const exited = new Promise<void>((resolve) => proc.onExit(() => resolve()));
+
+      // Written only once the child has spoken, so this is a live process
+      // being driven mid-run — not input fixed before it started.
+      await until(1);
+      proc.writeControl("one\n");
+      proc.writeControl("two\n");
+      await until(3);
+      expect(control).toEqual(["ready", "seen:one", "seen:two"]);
+
+      // Closing the control input is the child's cue to leave on its own.
+      proc.endControl();
+      await exited;
+    });
+
     // ─── destroy ───
 
     it("destroy releases the instance; subsequent ops reject", async () => {

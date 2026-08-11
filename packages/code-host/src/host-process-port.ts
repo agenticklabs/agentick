@@ -3,10 +3,10 @@
  *
  * The runtime spawns a process, writes frames to it and kills it; nothing in
  * that story says the process must be a direct child of the host app. Naming
- * the port now is what lets a sandboxed placement (`SandboxHandle.exec`, a
- * jail, a remote worker) arrive later as a different implementation instead of
- * a rewrite — placement is the trust knob this package deliberately leaves
- * open. The default is `node:child_process`, which is no containment at all.
+ * the port is what let a jailed placement arrive as a different implementation
+ * (`./sandbox-host-port.ts`) rather than a rewrite — placement is the trust
+ * knob this package deliberately leaves open. The default is
+ * `node:child_process`, which is no containment at all.
  */
 
 import { spawn } from "node:child_process";
@@ -17,6 +17,12 @@ export interface HostSpawnRequest {
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly cwd?: string;
+  /**
+   * Host paths the child must be able to READ — the supervisor script, a
+   * loader. A placement that confines the filesystem has to grant them or
+   * the child never starts; one that confines nothing ignores them.
+   */
+  readonly readablePaths?: readonly string[];
 }
 
 /**
@@ -38,14 +44,18 @@ export interface HostProcess {
   kill(signal: NodeJS.Signals): void;
 }
 
+/**
+ * Async because a placement need not be local: a sandbox or a remote worker
+ * has to be reached before it has a process to hand back.
+ */
 export interface HostProcessPort {
-  spawn(request: HostSpawnRequest): HostProcess;
+  spawn(request: HostSpawnRequest): Promise<HostProcess>;
 }
 
 /** The default placement: a direct child of this process, contained by nothing. */
 export function childProcessPort(): HostProcessPort {
   return {
-    spawn: ({ command, args, env, cwd }) => {
+    spawn: async ({ command, args, env, cwd }) => {
       const child = spawn(command, [...args], {
         env: { ...env },
         // The control channel is fd 3 so that fds 1 and 2 stay the program's.

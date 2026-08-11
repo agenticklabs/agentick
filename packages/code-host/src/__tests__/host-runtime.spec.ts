@@ -43,9 +43,9 @@ function recordingPort(): {
     spawns,
     procs,
     port: {
-      spawn: (request) => {
+      spawn: async (request) => {
         spawns.push(request);
-        const proc = inner.spawn(request);
+        const proc = await inner.spawn(request);
         procs.push(proc);
         return proc;
       },
@@ -262,12 +262,12 @@ describe("configuration", () => {
     expect(spawns).toHaveLength(1);
     expect(spawns[0]?.command).toBe(process.execPath);
     expect(spawns[0]?.args[0]).toBe("--title=agentick-code-host");
-    expect(spawns[0]?.args.at(-1)).toMatch(/supervisor\.js$/);
+    expect(spawns[0]?.args.at(-1)).toMatch(/supervisor\.mjs$/);
   });
 
   it("a child that never answers the handshake fails createContext rather than hanging", async () => {
     const silent: HostProcessPort = {
-      spawn: () => ({
+      spawn: async () => ({
         pid: undefined,
         onStdout: () => undefined,
         onStderr: () => undefined,

@@ -8,7 +8,7 @@
  * — a placement that puts the child behind a socket or inside a jail changes
  * the transport and nothing here.
  *
- * @see ./supervisor.js — the other end
+ * @see ./supervisor.mjs — the other end
  */
 
 import type { CodeThrown } from "@agentick/code";

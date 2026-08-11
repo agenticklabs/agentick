@@ -25,6 +25,7 @@
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  */
 
+import { spawn as spawnProcess } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
@@ -38,6 +39,7 @@ import {
   writeFile as fsWriteFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
+import type { Readable, Writable } from "node:stream";
 import { applyEdits } from "@agentick/sandbox";
 import type {
   NetworkRule,
@@ -47,6 +49,8 @@ import type {
   SandboxExecResult,
   SandboxHandle,
   SandboxMount,
+  SandboxProcess,
+  SandboxSpawnRequest,
 } from "@agentick/sandbox";
 import { SandboxIoError } from "@agentick/sandbox";
 import type { CommandExecutor } from "./executor/types.js";
@@ -138,15 +142,9 @@ export class LocalSandbox implements SandboxHandle {
 
     const env = filterEnv({ ...this.env, ...(options?.env ?? {}) });
 
-    // Spawn THROUGH the selected jail (seatbelt / bwrap / unshare / none).
-    const child = this.executor.spawn(command, {
-      cwd,
-      env,
-      workspacePath: this.workspacePath,
-      mounts: this.mounts,
-      network: this.network,
-    });
-    this.activeProcesses.add(child);
+    // Run THROUGH the selected jail (seatbelt / bwrap / unshare / none).
+    const [shell, ...shellArgs] = this.executor.shell;
+    const child = this.start(shell, [...shellArgs, command], { cwd, env, mounts: this.mounts });
 
     // Timeout + external-abort → kill the process group.
     const timeoutMs = options?.timeoutMs ?? this.defaultTimeoutMs;
@@ -175,7 +173,6 @@ export class LocalSandbox implements SandboxHandle {
     const { exitCode, signaled } = await new Promise<{ exitCode: number; signaled: boolean }>(
       (resolve) => {
         child.on("close", (code, signal) => {
-          this.activeProcesses.delete(child);
           resolve({
             exitCode: code ?? (killed ? 124 : 1),
             signaled: signal !== null || killed,
@@ -196,6 +193,103 @@ export class LocalSandbox implements SandboxHandle {
       signaled,
       durationMs: Date.now() - started,
     };
+  }
+
+  /**
+   * A live jailed process with a control channel on fd 3 — the same jail
+   * `exec` runs under, kept open instead of collected.
+   *
+   * The control channel survives the jail because both `sandbox-exec` and
+   * `bwrap` EXEC the program rather than proxying it: inherited descriptors
+   * pass through untouched. That is what makes a supervisor placeable in the
+   * jail without a second IPC path.
+   *
+   * @verifiedBy packages/sandbox-local/src/__tests__/isolation.spec.ts
+   */
+  async spawn(request: SandboxSpawnRequest): Promise<SandboxProcess> {
+    this.assertAlive();
+
+    const cwd = request.cwd
+      ? await resolveSafePath(request.cwd, this.workspacePath, "read", this.mounts)
+      : this.workspacePath;
+    const env = filterEnv({ ...this.env, ...(request.env ?? {}) });
+    // Read-only and at the same path on both sides, so one command line
+    // works whether the jail rebinds the filesystem (bwrap) or filters it
+    // in place (seatbelt).
+    const readable = await Promise.all(
+      (request.readablePaths ?? []).map((path) =>
+        resolveMount({ hostPath: path, sandboxPath: path, readOnly: true }),
+      ),
+    );
+
+    const child = this.start(request.command, request.args ?? [], {
+      cwd,
+      env,
+      mounts: [...this.mounts, ...readable],
+      control: true,
+    });
+
+    const control = child.stdio[3] as Readable & Writable;
+    const stdin = child.stdin as Writable;
+    // A process killed between two frames makes EPIPE a normal event here.
+    stdin.on("error", () => undefined);
+    control.on("error", () => undefined);
+
+    return {
+      pid: child.pid,
+      onStdout: (listen) => void child.stdout?.on("data", listen),
+      onStderr: (listen) => void child.stderr?.on("data", listen),
+      onControl: (listen) => void control.on("data", listen),
+      onExit: (listen) => void child.on("exit", listen),
+      writeControl: (chunk) => {
+        if (stdin.writable) stdin.write(chunk);
+      },
+      endControl: () => {
+        if (stdin.writable) stdin.end();
+      },
+      kill: (signal) => this.killTree(child, signal),
+    };
+  }
+
+  /**
+   * Wrap an invocation in the selected jail and start it detached, so the
+   * handle can kill the whole tree. Every child the sandbox owns comes
+   * through here.
+   */
+  private start(
+    command: string,
+    args: readonly string[],
+    run: {
+      cwd: string;
+      env: Record<string, string>;
+      mounts: readonly ResolvedMount[];
+      control?: boolean;
+    },
+  ): ChildProcess {
+    const jailed = this.executor.wrap(command, args, {
+      cwd: run.cwd,
+      env: run.env,
+      workspacePath: this.workspacePath,
+      mounts: run.mounts,
+      network: this.network,
+    });
+
+    const child = spawnProcess(jailed.command, [...jailed.args], {
+      env: run.env,
+      stdio: run.control ? ["pipe", "pipe", "pipe", "pipe"] : ["pipe", "pipe", "pipe"],
+      detached: true,
+      ...(jailed.cwd === undefined ? {} : { cwd: jailed.cwd }),
+    });
+
+    this.activeProcesses.add(child);
+    if (this.cgroup && child.pid !== undefined) {
+      this.cgroup.addProcess(child.pid).catch(() => {});
+    }
+    child.on("exit", () => {
+      this.activeProcesses.delete(child);
+      jailed.release?.();
+    });
+    return child;
   }
 
   async readFile(path: string): Promise<string> {

@@ -587,10 +587,16 @@ importers:
       '@agentick/code':
         specifier: workspace:*
         version: link:../code
+      '@agentick/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
       esbuild:
         specifier: ^0.27.3
         version: 0.27.3
     devDependencies:
+      '@agentick/sandbox-local':
+        specifier: workspace:*
+        version: link:../sandbox-local
       effect:
         specifier: ^3.22.0
         version: 3.22.0

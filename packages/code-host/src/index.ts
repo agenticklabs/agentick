@@ -23,3 +23,4 @@ export {
   type HostProcessPort,
   type HostSpawnRequest,
 } from "./host-process-port.js";
+export { sandboxHostPort } from "./sandbox-host-port.js";

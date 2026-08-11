@@ -1,11 +1,13 @@
 /**
  * Command-executor contract — the STRATEGY interface (ADR 59, #240).
  *
- * A {@link CommandExecutor} knows how to spawn one shell command under a
- * particular OS-isolation mechanism (seatbelt / bwrap / unshare / none). The
- * handle owns the process lifecycle (stdout/stderr streaming, timeout/abort,
- * process-group kill); the executor owns ONLY the jail wrapping. `selectExecutor`
- * (chain of strategies) picks the concrete executor from the detected
+ * A {@link CommandExecutor} knows how to wrap one argv in a particular
+ * OS-isolation mechanism (seatbelt / bwrap / unshare / none). It returns the
+ * argv to spawn and never touches the child: the handle owns the process
+ * lifecycle (stdio, streaming, timeout/abort, process-group kill), which is
+ * what lets the same jail carry both a fire-and-collect `exec` and a
+ * long-lived `spawn` with a control channel. `selectExecutor` (chain of
+ * strategies) picks the concrete executor from the detected
  * {@link SandboxStrategy}.
  *
  * Ported from v1 `@agentick/sandbox-local/executor/types.ts`, retyped against
@@ -15,16 +17,30 @@
  * the file API, not the jail, enforces path confinement).
  */
 
-import type { ChildProcess } from "node:child_process";
 import type { NetworkRule } from "@agentick/sandbox";
 import type { SandboxStrategy } from "../platform/types.js";
 import type { ResolvedMount } from "../workspace.js";
 
+/** An argv the caller can hand straight to `child_process.spawn`. */
+export interface JailedCommand {
+  readonly command: string;
+  readonly args: readonly string[];
+  /** Absent when the jail sets the working directory itself (bwrap `--chdir`). */
+  readonly cwd?: string;
+  /** Release per-invocation jail resources — call once the child has exited. */
+  readonly release?: () => void;
+}
+
 export interface CommandExecutor {
   /** The isolation tier this executor implements. */
   readonly strategy: SandboxStrategy;
-  /** Spawn `command` jailed per {@link SpawnOptions}; returns the child. */
-  spawn(command: string, options: SpawnOptions): ChildProcess;
+  /**
+   * The shell that exists INSIDE this jail, as an argv prefix. bwrap builds
+   * its own filesystem, so which shells are present is the jail's property.
+   */
+  readonly shell: readonly [string, ...string[]];
+  /** Wrap a program invocation in the jail described by {@link SpawnOptions}. */
+  wrap(command: string, args: readonly string[], options: SpawnOptions): JailedCommand;
   /** Release executor-scoped resources (e.g. seatbelt profile temp dir). */
   dispose?(): void;
 }

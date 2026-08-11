@@ -5,7 +5,7 @@
 What differs between those engines is declared, not hidden. `timeMs` and `outputBytes` are enforced by the parent process, so they hold whatever the child is. `memoryMb` needs the engine's own heap ceiling, and only one engine has one that works — so under bun that budget is absent from `capabilities.enforces` and asking for it is an error rather than a ceiling that quietly does nothing.
 
 > [!WARNING]
-> **This is placement, not containment.** The child is an ordinary process of the same user, with the same filesystem and the same network. It is isolated from your app's memory and nothing else. Read [Trust posture](#trust-posture) before you point it at a program you did not write.
+> **By default this is placement, not containment.** The child is an ordinary process of the same user, with the same filesystem and the same network. Containment is one argument away — `hostRuntime({ host: sandboxHostPort(sandbox) })` runs the same program inside a jail — but you have to ask for it. Read [Trust posture](#trust-posture) before you point the default at a program you did not write.
 
 ## Install
 
@@ -318,27 +318,38 @@ hostRuntime({
 
 The environment is empty unless you fill it, so a program inherits none of your host's secrets by accident — but `env` and `cwd` are conveniences, not a boundary, and a program can read anything the user can.
 
-Placement is where the boundary belongs, and it is a seam rather than a setting. `HostProcessPort` is the whole surface the runtime needs in order to have a child at all — spawn it, write to it, kill it — so a placement that _is_ a jail slots in without touching the protocol:
+Placement is where the boundary belongs, and it is a seam rather than a setting. `HostProcessPort` is the whole surface the runtime needs in order to have a child at all — spawn it, write to it, kill it — so a placement that _is_ a jail slots in without touching the protocol.
+
+### Running the child in a jail
+
+Hand `sandboxHostPort` a live `SandboxHandle` and the same supervisor runs inside that sandbox's confinement:
 
 ```ts
-import { childProcessPort, type HostProcessPort } from "@agentick/code-host";
+import { localProvider } from "@agentick/sandbox-local";
+import { hostRuntime, sandboxHostPort } from "@agentick/code-host";
 
-const audited: HostProcessPort = {
-  spawn: (request) => {
-    log.info({ msg: "spawning a code child", args: request.args });
-    return childProcessPort().spawn(request);
-  },
-};
+const sandbox = await localProvider().create({
+  workspace: true,
+  allow: { network: false },
+});
 
-hostRuntime({ host: audited });
+hostRuntime({ host: sandboxHostPort(sandbox) });
 ```
 
-Pairing that port with a real sandbox is on the roadmap below. Until it lands, treat this runtime the way you would treat running the model's code in your own shell — because that is what it is.
+Nothing else changes. Bindings still resolve, `console.log` still comes back as `stdout`, budgets still hold — because the jail is under the protocol, not in it. What changes is reach: on a host with a real jail, a program can no longer `fetch()` an external address or read a file outside its workspace, while it can still call its bindings and write the workspace it was given.
+
+Two things are worth knowing before you rely on it.
+
+**The provider states what it actually enforces.** `@agentick/sandbox-local` picks the strongest jail the host supports — macOS seatbelt, Linux bubblewrap — and reports the result on `handle.isolation`. Where no jail primitive exists, that reads `"none"` and the placement confines nothing. It is a claim you can assert on, and it never lies; check it in production rather than assuming the jail you tested with is the one you deployed onto.
+
+**A jail is not a sandbox in the V8 sense.** The program still runs on a full engine with the whole standard library. What the jail removes is reach to the filesystem and the network; what it does not remove is the engine's own surface. A provider that denies capability by construction rather than by confinement is a different runtime, and composes inside this one.
+
+Not every provider can offer a live process — `SandboxHandle.spawn` is capability-tiered — so `sandboxHostPort` throws `SandboxUnsupportedError` at wiring time when the handle you gave it has no such surface, rather than on the first program a model writes.
 
 ## API
 
 ```ts
-import { hostRuntime, detectEngine, childProcessPort } from "@agentick/code-host";
+import { hostRuntime, detectEngine, childProcessPort, sandboxHostPort } from "@agentick/code-host";
 ```
 
 | Export                                | What it is                                                                             |
@@ -347,6 +358,7 @@ import { hostRuntime, detectEngine, childProcessPort } from "@agentick/code-host
 | `detectEngine()`                      | The engine this host is running: `{ name, execPath, heapLimitFlag? }`.                 |
 | `hostCapabilities(engine, language?)` | What that engine, in that language, can be held to.                                    |
 | `childProcessPort()`                  | The default placement — a direct child of this process.                                |
+| `sandboxHostPort(handle)`             | Placement inside a `SandboxHandle`'s jail. Throws if the provider has no live process. |
 | `transpiler(language)`                | The type-stripping parse the runtime itself runs. A gate's other door.                 |
 
 `HostRuntimeConfig`, all optional:
@@ -354,7 +366,7 @@ import { hostRuntime, detectEngine, childProcessPort } from "@agentick/code-host
 | Field            | Default              | Meaning                                             |
 | ---------------- | -------------------- | --------------------------------------------------- |
 | `language`       | `"javascript"`       | `"typescript"` strips types before the engine runs. |
-| `host`           | `childProcessPort()` | Where the child is placed.                          |
+| `host`           | `childProcessPort()` | Where the child is placed. `sandboxHostPort` jails. |
 | `env`            | `{}`                 | The child's environment. Empty inherits nothing.    |
 | `cwd`            | inherited            | The child's working directory.                      |
 | `execArgv`       | `[]`                 | Extra engine flags, before the entry point.         |
@@ -387,7 +399,9 @@ Nothing breaks when it does not resolve: the namespace mounts inert, `hasRuntime
 
 ## Roadmap & known gaps
 
-- **No containment.** `HostProcessPort` exists so a jailed placement can arrive as an implementation; pairing it with [@agentick/sandbox](../sandbox) is not built. Today the only placement is a direct child process.
+- **The default placement contains nothing.** Containment is opt-in through `sandboxHostPort`; the default is a direct child with your user's reach.
+- **The Linux jail's control channel is unverified.** The supervisor talks to its child over an inherited descriptor, which is proven to survive macOS seatbelt (`sandbox-exec` execs the program rather than proxying it) and is expected to survive bubblewrap for the same reason — but no Linux host with `bwrap` has run the suite. Verify `packages/sandbox-local`'s jailed-spawn cases on your target before trusting the jail in production there.
+- **A jailed program still has the whole engine.** The jail removes filesystem and network reach, not the engine's own surface. Denying capability by construction is a different runtime.
 - **JSON is the membrane.** Values cross as JSON, with no structured-clone path for `Date`, `Map`, `Set` or binary. An unmarshalable return value rejects.
 - **One process per context.** A one-shot `execute()` pays a process spawn (tens of milliseconds). There is no pooling of warm children.
 - **`memoryMb` is classified from the engine's own report.** On node the verdict reads V8's heap-exhaustion message off stderr; a child killed by the OS out-of-memory reaper reports as a runtime failure instead.

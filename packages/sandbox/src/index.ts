@@ -35,6 +35,8 @@ export type {
   SandboxProvider,
   SandboxHandle,
   SandboxCreateOptions,
+  SandboxProcess,
+  SandboxSpawnRequest,
   SandboxSnapshot,
   SandboxIntent,
 } from "./contract.js";

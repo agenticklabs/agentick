@@ -3,10 +3,11 @@
  *
  * One child process per context, running `process.execPath`: the engine
  * executing model-authored code is by construction the engine the adopter
- * already trusts to run their app. There is no containment here — see the
- * package README on placement.
+ * already trusts to run their app. Whether that child is contained is the
+ * PORT's business, not this file's: the default places it beside the app
+ * with the app's own reach, and `sandboxHostPort` places it in a jail.
  *
- * @see ./supervisor.js — the child
+ * @see ./supervisor.mjs — the child
  * @see ./host-process-port.ts — where the child is placed
  */
 
@@ -37,7 +38,10 @@ export interface HostRuntimeConfig {
    * checking them; see the README on checking a program before it runs.
    */
   readonly language?: HostLanguage;
-  /** Where the child is placed. Default: a direct child of this process. */
+  /**
+   * Where the child is placed. Default: a direct child of this process,
+   * contained by nothing. `sandboxHostPort(handle)` places it in a jail.
+   */
   readonly host?: HostProcessPort;
   /** The child's environment. Default: empty — a program inherits no secrets. */
   readonly env?: Readonly<Record<string, string>>;
@@ -48,7 +52,7 @@ export interface HostRuntimeConfig {
   readonly spawnTimeoutMs?: number;
 }
 
-const SUPERVISOR = fileURLToPath(new URL("./supervisor.js", import.meta.url));
+const SUPERVISOR = fileURLToPath(new URL("./supervisor.mjs", import.meta.url));
 const DEFAULT_SPAWN_TIMEOUT_MS = 10_000;
 /** How long a child gets to leave on its own before the signal. */
 const GRACE_MS = 100;
@@ -141,10 +145,11 @@ class HostContext implements CodeRuntimeContext {
   ): Promise<HostContext> {
     const memoryMb = options.budgets?.memoryMb;
     const heapFlag = memoryMb === undefined ? undefined : engine.heapLimitFlag?.(memoryMb);
-    const proc = (config.host ?? childProcessPort()).spawn({
+    const proc = await (config.host ?? childProcessPort()).spawn({
       command: engine.execPath,
       args: [...(config.execArgv ?? []), ...(heapFlag === undefined ? [] : [heapFlag]), SUPERVISOR],
       env: config.env ?? {},
+      readablePaths: [SUPERVISOR],
       ...(config.cwd === undefined ? {} : { cwd: config.cwd }),
     });
 
