@@ -1,0 +1,84 @@
+{
+  "name": "@agentick/code-secure-exec",
+  "version": "1.0.0-next.111",
+  "description": "In-process V8 isolate Runtime for @agentick/code — runs model-authored code in an isolated-vm isolate that contains by construction (no fs, no network, no require, no ambient authority), so it needs no OS jail. timeMs and memoryMb enforced by the isolate; bindings marshaled across the isolate boundary as JSON. Construction, not confinement.",
+  "keywords": [
+    "agent",
+    "agentick",
+    "ai",
+    "code",
+    "isolate",
+    "isolated-vm",
+    "runtime",
+    "sandbox",
+    "v8"
+  ],
+  "license": "MIT",
+  "author": "Ryan Lindgren",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agenticklabs/agentick.git",
+    "directory": "packages/code-secure-exec"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
+      }
+    },
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "testing": [
+          "./dist/testing/index.d.ts"
+        ]
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src/",
+    "format:check": "oxfmt --check src/",
+    "clean": "rm -rf dist tsconfig.build.tsbuildinfo"
+  },
+  "dependencies": {
+    "@agentick/code": "workspace:*",
+    "@agentick/spec": "workspace:*",
+    "esbuild": "^0.27.3",
+    "isolated-vm": "^7.0.1"
+  },
+  "devDependencies": {
+    "effect": "^3.22.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

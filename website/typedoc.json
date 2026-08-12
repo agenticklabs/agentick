@@ -34,6 +34,7 @@
     "../packages/gates",
     "../packages/code",
     "../packages/code-host",
+    "../packages/code-secure-exec",
     "../packages/formatters",
     "../packages/subscriptions",
     "../packages/spec-conformance",
