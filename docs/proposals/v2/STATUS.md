@@ -2206,6 +2206,25 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-12 — scoped capability leasing, named (ADR 98)
+
+`blueprint/98-scoped-capability-leasing.md`. Two shipped seams — the code
+runtime over a session sandbox and the data-layer `View` over a `Store` —
+independently converged on one shape: a capability **declared session-blind**,
+**resolved late** against the `SessionInstaller` (`RuntimeProvider.resolve`,
+with `capabilities()` deliberately session-free), **selected** by a total
+`activeX(ns, id?)` (id → primary → sole → ambiguous-fails, one rule in one
+place), and **borrowed** as a narrowed type that omits the ownership verbs
+(`SandboxPlacement` has no `destroy`; `View` is not `Store`). Attenuation is by
+type, not by comment.
+
+The ADR names the pattern and its three elements; the one new call is a
+**deferral** — no shared `Lease<T>`/`Provider<T>` at two instances. It waits for
+the third consumer (`@agentick/code-stdlib`, the natural one), which proves what
+actually factors — the `resolve(installer)` verb and the `activeX` tie-break
+look universal, the attenuation is per-capability by construction. Same "extract
+at three" discipline the model/compaction two-door took in ADR 97.
+
 ### 2026-08-12 — measuring the request; compaction decides outside the tree (ADR 97)
 
 `blueprint/97-measuring-the-request.md`. A production thread compacted twice in a
