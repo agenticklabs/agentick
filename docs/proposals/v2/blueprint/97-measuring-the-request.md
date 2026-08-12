@@ -124,13 +124,23 @@ if (result.truncated) return entries; // a summary cut mid-thought, not persiste
 ```
 
 Each fold is followed by a fresh measurement. A fold that changes nothing leaves the next
-measurement still over the ceiling, so the trigger fires again — an unbounded series of
-_paid model calls_, worse than the bug being fixed.
+measurement still over the ceiling, so the trigger fires again — a series of _paid model
+calls_, worse than the bug being fixed.
 
-`TimelineSnapshot.version` is "monotonic; bumps on every projection mutation", which is
-exactly the signal. **No bump after a fold ⇒ the fold could not help ⇒ do not retry until
-the projection changes.** A guard on effect, not on the reading — the trigger stops asking
-a question folding has already declined to answer.
+The guard reads the fold's own report (`CompactResult.entriesBefore/entriesAfter`), and is
+scoped to the **execution**: one refusal stops further attempts until the next user turn.
+
+Two things were tried first and are recorded because both look right and are not:
+
+- **`TimelineSnapshot.version`** is documented as bumping on every projection mutation, so
+  it reads like the progress signal. It is not: the harness bumps it for a compaction that
+  changed nothing, so the version says _a fold ran_ where the question is _did a fold help_.
+- **Scoping the stall to the projection version** rather than the execution is nearly
+  useless. An agentic tick appends its tool results, the version bumps, and the stall clears
+  — every single time. The loop it exists to stop is exactly the loop that clears it.
+
+A throw counts as a refusal too: retrying a summarizer that just died buys a second model
+call to watch it die again.
 
 ### Part 3 — two doors (ADR 56, verbatim)
 

@@ -32,6 +32,7 @@
 
 import type { Effect } from "effect";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { TokenEstimate } from "../data/execution-result.js";
 import type { OperationCtx } from "../data/runtime-context.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { TimelineWriteFailed } from "../errors/lifecycle.js";
@@ -175,6 +176,23 @@ export interface CompactGenerateResult {
  * The `metadata` field is preserved on the snapshot as PROVENANCE — what
  * shaped the projection last (read by tooling / a later `compact`).
  */
+/**
+ * What a trigger knows when it asks whether to fold (ADR 97).
+ *
+ * `usedTokens` is the provider's number for the whole last request. `estimate`
+ * is the locally-measured split, and a strategy that has it should prefer
+ * `estimate.messages`: folding the conversation cannot shrink a tool schema, so
+ * a threshold compared against the total can be crossed by something folding
+ * has no power to relieve — and is then crossed again on every tick, forever.
+ */
+export interface CompactDecisionCtx {
+  /** Input tokens the provider billed for the last request. */
+  readonly usedTokens: number;
+  readonly contextWindow?: number;
+  /** The locally-measured split, when a tick has been measured. */
+  readonly estimate?: TokenEstimate;
+}
+
 export interface CompactStrategy {
   /** Where the strategy reads entries from. Default: `"persisted"`. */
   readonly source?: "persisted" | "projection";
@@ -187,10 +205,7 @@ export interface CompactStrategy {
    * both when it should fire and how much it may emit, so a trigger asks rather
    * than carrying its own copy of the thresholds.
    */
-  readonly shouldCompact?: (ctx: {
-    readonly usedTokens: number;
-    readonly contextWindow?: number;
-  }) => boolean;
+  readonly shouldCompact?: (ctx: CompactDecisionCtx) => boolean;
   /**
    * Stable metadata describing the strategy (model id, sliding-window
    * size, etc). Recorded on the snapshot as projection provenance.
@@ -411,6 +426,21 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    *   call with no construction-bound default configured.
    */
   compact(strategy?: CompactStrategy): Promise<CompactResult>;
+
+  /**
+   * Whether the resident strategy wants to fold at this size.
+   *
+   * The harness answers the QUESTION rather than handing out the strategy —
+   * executable configuration does not leave this harness, and a trigger that
+   * held the strategy would also be free to keep its own copy of the threshold,
+   * which is exactly the duplication this replaces (ADR 97). Part of the
+   * protocol so the session's tick-end fold can ask without knowing whether the
+   * strategy came from config or from the tree.
+   *
+   * `false` when no strategy is bound, or when the bound one states no policy —
+   * an absent opinion is not a yes.
+   */
+  shouldCompact?(ctx: CompactDecisionCtx): boolean;
 
   /**
    * Overwrite the projection with the supplied entries. The log is

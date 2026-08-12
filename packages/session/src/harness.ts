@@ -45,6 +45,7 @@ import type {
   ApplyToolResultsInput,
   ChannelHandle,
   ChannelSnapshotProvider,
+  CompactDecisionCtx,
   ContentBlock,
   Cost,
   CostResolver,
@@ -835,6 +836,23 @@ export class SessionHarness<P = unknown>
   private _executionRollup: UsageRollup | undefined;
   /** Input entries the running execution has observed (ADR 53 live check). */
   private _inputEntriesSeen = 0;
+  /**
+   * A fold ran during this execution and changed nothing (ADR 97).
+   *
+   * `rollingSummary` returns its input unchanged in three cases — nothing older
+   * than the verbatim tail, only summaries left to fold, a truncated summary —
+   * and the trigger's own measurement does not move when that happens, so the
+   * next tick reads the same over-ceiling number and folds again. A fold is a
+   * model call, so that is an execution paying twice per tick to accomplish
+   * nothing.
+   *
+   * Scoped to the EXECUTION rather than to the projection version, which was
+   * the first attempt and is nearly useless: an agentic tick appends its tool
+   * results, the version bumps, and the stall clears every single time — the
+   * loop it was meant to stop is exactly the loop that clears it. A user turn
+   * resets this, so a refusal costs at most one wasted fold per turn.
+   */
+  private _compactRefusedThisExecution = false;
   /**
    * Per-execution STEER queue (ADR 53 §5). A `send({ onBusy: "steer" })`
    * that joins an in-flight execution pushes its messages here instead of
@@ -1885,6 +1903,19 @@ export class SessionHarness<P = unknown>
       // `continue` — so a drained `stop` is legitimately a tier-1 halt.
       const loopReq = this.bridges.loop.drainLoopRequests();
 
+      // (a') Compaction (ADR 97). Here rather than in the tree because a
+      // component cannot measure the tree it is part of: a render-time trigger
+      // reads the PREVIOUS request's size, does not see it change when the fold
+      // lands, and fires again on the same number. At tick end the measurement
+      // describes the request that just went out and arrives exactly once, so
+      // acting twice on one reading is not possible — and the fold can be
+      // awaited, landing before the next render instead of racing it.
+      //
+      // Ahead of the steer drain (b') so the fold sees the conversation as the
+      // tick left it; a steer appended first would be folded away before the
+      // model ever answered it.
+      if (result !== undefined) yield* this.compactIfNeededFx(result);
+
       // (b') Drain the per-execution STEER queue (ADR 53 §5). Steers
       // enqueued during THIS tick (by a concurrent `send({ onBusy: "steer" })`)
       // are appended to the timeline NOW — after the tick's tool results applied
@@ -1917,6 +1948,62 @@ export class SessionHarness<P = unknown>
   /** Promise facade over {@link notifyLifecycleFx}, for a caller not in a fiber. */
   notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
     return runHarnessProtocol(this.notifyLifecycleFx(input));
+  }
+
+  /**
+   * Ask the timeline whether it wants to fold, and fold if so (ADR 97).
+   *
+   * The THRESHOLD is not read here. `shouldCompact` is the strategy's own
+   * policy, asked through the harness so the number lives in exactly one place
+   * — the duplicate constant in a userland trigger component is what this
+   * replaces. What the session contributes is the two facts only it holds: the
+   * settled measurement of the request that just went out, and the model's
+   * window.
+   */
+  private compactIfNeededFx(result: TickResult): Effect.Effect<void, never, never> {
+    return Effect.gen(this, function* () {
+      const timeline = this.bridges.timeline;
+      if (timeline.shouldCompact === undefined) return;
+
+      const terminal = result.executorTerminal;
+      if (terminal.outcome !== "succeeded") return;
+      const usedTokens = terminal.result.usage?.inputTokens ?? 0;
+      const estimate = terminal.result.estimate;
+      if (usedTokens === 0 && estimate === undefined) return;
+
+      if (this._compactRefusedThisExecution) return;
+
+      const target = this.modelFacade.current?.target ?? this.target;
+      const contextWindow = target
+        ? effectiveModelInfo(target, this.models)?.contextWindow
+        : undefined;
+
+      if (
+        !timeline.shouldCompact(
+          omitUndefined({ usedTokens, contextWindow, estimate }) as CompactDecisionCtx,
+        )
+      ) {
+        return;
+      }
+
+      // A fold that throws must not fail the tick — the conversation is intact
+      // and oversized, which is recoverable; a failed tick is not. A throw is
+      // also a refusal: retrying a summarizer that just died costs a second
+      // model call to watch it die again.
+      const outcome = yield* Effect.promise(() =>
+        timeline.compact().then(
+          (r) => r,
+          () => undefined,
+        ),
+      );
+
+      // Read the fold's own report, not the projection version — the harness
+      // bumps `version` on every compaction including one that changed nothing,
+      // so the version says "a fold ran" where this says "a fold helped".
+      if (outcome === undefined || outcome.entriesAfter >= outcome.entriesBefore) {
+        this._compactRefusedThisExecution = true;
+      }
+    });
   }
 
   // ──────── Extended interaction surface (block 5) ────────
@@ -2768,6 +2855,9 @@ export class SessionHarness<P = unknown>
 
     // ADR 53: the first render will include everything appended so far.
     this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
+    // A new turn is new material — a fold that could not help last turn may be
+    // able to now (ADR 97).
+    this._compactRefusedThisExecution = false;
     this._executionRollup = undefined;
 
     const executionId = `exec:${generateId()}`;

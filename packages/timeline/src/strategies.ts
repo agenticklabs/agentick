@@ -18,6 +18,7 @@
  */
 
 import type {
+  CompactDecisionCtx,
   CompactGenerateResult,
   CompactRun,
   CompactStrategy,
@@ -68,9 +69,15 @@ export interface RollingSummaryOptions {
    * reports a million — what you are managing is per-turn cost, not running out
    * of room.
    *
+   * Compared against the FOLDABLE half of the request (`estimate.messages`)
+   * when a measurement is available, falling back to the provider's total.
+   * Tool schemas are billed on every call and cannot be folded away, so a
+   * ceiling compared against the total can be crossed by something folding
+   * cannot relieve — and would then be crossed again on every tick, forever.
+   *
    * Default 120_000.
    */
-  readonly threshold?: Sized<{ readonly usedTokens: number; readonly contextWindow?: number }>;
+  readonly threshold?: Sized<CompactDecisionCtx>;
   /**
    * Recent entries that survive verbatim. Default 6.
    *
@@ -435,7 +442,9 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
   return {
     source: "projection",
     run,
-    shouldCompact: (ctx) => ctx.usedTokens >= resolve(options.threshold, DEFAULT_THRESHOLD, ctx),
+    shouldCompact: (ctx) =>
+      (ctx.estimate?.messages ?? ctx.usedTokens) >=
+      resolve(options.threshold, DEFAULT_THRESHOLD, ctx),
     ...omitUndefined({ metadata: options.metadata }),
   };
 }

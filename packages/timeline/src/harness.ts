@@ -60,6 +60,7 @@ import type {
   TimelineHarnessFx,
   SubstrateError,
   CompactResult,
+  CompactDecisionCtx,
   CompactStrategy,
   ContentBlock,
   CostRollup,
@@ -420,6 +421,17 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
    * default was configured — the no-arg signal form then fails with
    * `CompactStrategyMissing`, which is the contract.
    */
+  /**
+   * Whether the resident strategy wants to fold at this size (ADR 97).
+   *
+   * The strategy stays private — the caller asks a question and gets a verdict,
+   * which is what keeps the threshold in exactly one place. A harness with no
+   * strategy bound says no: an absent opinion is not a yes.
+   */
+  shouldCompact(ctx: CompactDecisionCtx): boolean {
+    return this.defaultStrategy()?.shouldCompact?.(ctx) ?? false;
+  }
+
   private defaultStrategy(): CompactStrategy | undefined {
     if (this.compactStrategy !== undefined) return this.compactStrategy;
     const fn = this.compactor;
