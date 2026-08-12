@@ -644,14 +644,17 @@ That enumeration is itself a wire door: `await client.session(id).timeline.comma
 
 ### `@agentick/timeline/react`
 
-| Export                              | Purpose                                                      |
-| ----------------------------------- | ------------------------------------------------------------ |
-| `<Timeline>`                        | Override the default fold; filter, budget, or render-prop it |
-| `<Transcript>`                      | The same component, chat-shaped name                         |
-| `useTimeline()`                     | Projection snapshot; re-renders when the version advances    |
-| `compactEntries` / `getEntryTokens` | The budget primitives `<Timeline>` uses internally           |
+| Export                              | Purpose                                                            |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `<Timeline>`                        | Override the default fold; filter, budget, or render-prop it       |
+| `<Transcript>`                      | The same component, chat-shaped name                               |
+| `<Compaction strategy>`             | Declare the fold strategy from the tree; outranks `defineTimeline` |
+| `useTimeline()`                     | Projection snapshot; re-renders when the version advances          |
+| `compactEntries` / `getEntryTokens` | The budget primitives `<Timeline>` uses internally                 |
 
 `<Timeline>` props: `roles`, `filter`, `limit` (pre-filters) · `maxTokens`, `strategy`, `preserveRoles`, `headroom`, `guidance`, `onEvict` (budget) · `children` as a render function or static JSX.
+
+`<Compaction>` takes one prop, `strategy`. It **declares** and never triggers — the session decides at tick end (see [Who decides when to fold](#who-decides-when-to-fold)). Reach for it when the strategy depends on something only the tree knows; otherwise `defineTimeline({ compact })` keeps the fold's configuration in one place.
 
 ### `@agentick/timeline/client`
 

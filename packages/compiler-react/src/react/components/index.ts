@@ -36,3 +36,4 @@ export type { ToolGateProps } from "./tool-gate.js";
 // /react subpaths per ADR 27. Adopters import:
 //   <Knobs> + useKnobsContext       from "@agentick/knobs/react"
 //   <Timeline> + compactEntries     from "@agentick/timeline/react"
+//   <Compaction strategy={...}>     from "@agentick/timeline/react"
