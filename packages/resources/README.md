@@ -362,10 +362,10 @@ new McpServerHarness(id, journal, bus, inbox, {
 
 **Reading another server's resources.** That is the client direction, and it composes rather than folding external content into this registry. [@agentick/mcp](../mcp) proxy-registers a connected server's resources under `mcp://<alias>/<uri>`, keyed on the alias _you_ assigned rather than any name the server reports about itself, with the original uri kept readable as an alias. Hand-rolled, the same shape is one line: `register("proxy://…", () => client.readResource(uri))`.
 
-**Files as resources.** [@agentick/sandbox](../sandbox) ships ready-made `file://{+path}` resolvers on its opt-in MCP subpath, so a filesystem boundary declared as a root is also readable as a resource:
+**Files as resources.** [@agentick/sandbox](../sandbox) ships ready-made `file://{+path}` resolvers on its opt-in `/files` subpath, so a sandbox — or a plain rooted directory — is readable as a resource:
 
 ```ts
-import { sandboxFileResolver, fsFileResolver, registerFileResolver } from "@agentick/sandbox/mcp";
+import { sandboxFileResolver, fsFileResolver, registerFileResolver } from "@agentick/sandbox/files";
 
 registerFileResolver(resources, sandboxFileResolver(sandbox)); // ACL-gated, text
 registerFileResolver(resources, fsFileResolver("/srv/data")); // rooted + containment-checked

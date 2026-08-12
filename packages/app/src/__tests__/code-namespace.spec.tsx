@@ -27,12 +27,31 @@ describe("createApp({ code }) — the adopter entry point", () => {
 
     expect(session.code).toBeDefined();
     expect(session.code!.hasRuntime()).toBe(true);
-    // Whichever engine is running this test is the one the programs run on.
+    // Caps are a SYNC read, prepared at install — no program has run.
+    // Whichever engine runs this test is the one the programs run on.
     expect(session.code!.capabilities().name).toMatch(/^host:/);
 
     // A real subprocess, reached with no configuration at all.
     const result = await session.code!.execute({ source: `return 6 * 7;` });
     expect(result).toMatchObject({ outcome: "returned", value: 42 });
+
+    await session.close();
+    await app.close();
+  });
+
+  it("capabilities() is available at install without spawning or running a program", async () => {
+    const app = await createApp(React.createElement(Agent), { code: {} });
+    const session = await app.createSession({ sessionId: "s-code-caps-only" });
+
+    // Caps are known the instant the session exists — the engine was resolved
+    // sandbox-free at install; the subprocess spawn belongs to createContext.
+    const caps = session.code!.capabilities();
+    expect(caps.name).toMatch(/^host:/);
+    expect(typeof caps.persistentContext).toBe("boolean");
+
+    // And a program still runs afterwards on the same engine.
+    const result = await session.code!.execute({ source: `return "after caps";` });
+    expect(result).toMatchObject({ outcome: "returned", value: "after caps" });
 
     await session.close();
     await app.close();

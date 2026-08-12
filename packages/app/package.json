@@ -93,6 +93,8 @@
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
     "@agentick/prompts": "workspace:*",
+    "@agentick/sandbox": "workspace:*",
+    "@agentick/sandbox-local": "workspace:*",
     "@agentick/skills": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"

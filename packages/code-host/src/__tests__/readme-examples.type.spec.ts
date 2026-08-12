@@ -8,6 +8,7 @@
 
 import { describe, it } from "vitest";
 import {
+  defineCode,
   withCode,
   type Code,
   type CodeExecuteInput,
@@ -18,8 +19,8 @@ import { runCodeConformance } from "@agentick/code/testing";
 
 import { localProvider } from "@agentick/sandbox-local";
 
-import { hostRuntime, sandboxHostPort, transpiler } from "../index.js";
-import { hostCodeProbe, hostCodeSource } from "../testing/index.js";
+import { hostRuntime, sandboxHost, transpiler } from "../index.js";
+import { hostCodeProbe, hostCodeSource, hostRuntimeInstance } from "../testing/index.js";
 
 declare const session: {
   readonly code?: Code;
@@ -186,14 +187,17 @@ function pipelines(): void {
 // ── Trust posture
 hostRuntime({ env: { DATA_DIR: "/srv/scratch" }, cwd: "/srv/scratch" });
 
-// ── Trust posture / Running the child in a jail
-async function jailedPlacement(): Promise<void> {
-  const sandbox = await localProvider().create({
-    workspace: true,
-    allow: { network: false },
+// ── Trust posture / code owns its jail
+function ownedJail(): void {
+  defineCode({
+    runtime: sandboxHost({ provider: localProvider(), create: { allow: { network: false } } }),
   });
+}
 
-  hostRuntime({ host: sandboxHostPort(sandbox) });
+// ── Sharing the jail the agent already has (config 4)
+function sharedJail(): void {
+  // `sandbox: defineSandbox()` mounts the jail; `sandboxHost()` adopts it.
+  withCode({ runtime: sandboxHost() });
 }
 
 // ── Certifying your own layer
@@ -201,7 +205,7 @@ function certification(): void {
   runCodeConformance(hostCodeProbe());
   runCodeConformance({
     label: "my wrapper",
-    makeRuntime: () => myWrapperAround(hostRuntime()),
+    makeRuntime: () => myWrapperAround(hostRuntimeInstance()),
     source: hostCodeSource,
   });
 }
@@ -218,6 +222,7 @@ describe("README examples", () => {
     void output;
     void budgets;
     void certification;
-    void jailedPlacement;
+    void ownedJail;
+    void sharedJail;
   });
 });

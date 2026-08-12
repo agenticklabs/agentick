@@ -25,7 +25,7 @@ import type {
 import type { SandboxHandle } from "../contract.js";
 import { SandboxHarness } from "../harness.js";
 import { applyEdits } from "../edit.js";
-import { inMemorySandboxBridge } from "../bridge.js";
+import { activeSandbox, inMemorySandboxBridge } from "../bridge.js";
 
 function makeHandle(
   opts: {
@@ -124,13 +124,17 @@ async function makeHarnessBundle(
   return { harness, bus, inbox, journal, elicitation };
 }
 
-function makeHarness(acl?: SandboxACL, handle = makeHandle()): SandboxHarness {
+function makeHarness(
+  acl?: SandboxACL,
+  handle = makeHandle(),
+  sandboxId = "test-sb",
+): SandboxHarness {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
   const elicitation = new ElicitationHarness("test-sb:elicitation", journal, bus, inbox);
   return new SandboxHarness(journal, bus, inbox, {
-    sandboxId: "test-sb",
+    sandboxId,
     handle,
     providerName: "test",
     elicitation,
@@ -574,5 +578,64 @@ describe("inMemorySandboxBridge", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     unsub();
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("SandboxHarness — placement (borrowing the jail)", () => {
+  it("exposes the workspace and the handle's spawn, and nothing that ends the sandbox", async () => {
+    const spawn = vi.fn();
+    const handle = { ...makeHandle(), spawn } as unknown as SandboxHandle;
+    const harness = makeHarness(undefined, handle);
+    await harness.ready;
+
+    expect(harness.placement.workspacePath).toBe("/tmp/h");
+    await harness.placement.spawn?.({ command: "/bin/sh" });
+    expect(spawn).toHaveBeenCalledWith({ command: "/bin/sh" });
+
+    // The point of the narrow view: a borrower cannot reach these.
+    // @ts-expect-error — destroy is the harness's, never the borrower's
+    void harness.placement.destroy;
+    // @ts-expect-error — widening the jail is not a borrower's to do
+    void harness.placement.addMount;
+  });
+
+  it("carries a provider's honest `undefined` spawn through unchanged", async () => {
+    const harness = makeHarness();
+    await harness.ready;
+    expect(harness.placement.spawn).toBeUndefined();
+  });
+});
+
+describe("activeSandbox", () => {
+  it("prefers primary, falls back to a sole sandbox, and refuses to guess", async () => {
+    const bridge = inMemorySandboxBridge();
+    expect(activeSandbox(undefined)).toBeUndefined();
+    expect(activeSandbox(bridge)).toBeUndefined();
+
+    const only = makeHarness(undefined, makeHandle(), "build");
+    await only.ready;
+    bridge.register(only);
+    expect(activeSandbox(bridge)).toBe(only); // sole sandbox, not named primary
+
+    const primary = makeHarness(undefined, makeHandle(), "primary");
+    await primary.ready;
+    bridge.register(primary);
+    expect(activeSandbox(bridge)).toBe(primary); // primary wins once it exists
+
+    bridge.unregister("primary");
+    const second = makeHarness(undefined, makeHandle(), "test");
+    await second.ready;
+    bridge.register(second);
+    expect(activeSandbox(bridge)).toBeUndefined(); // ambiguous — never a guess
+  });
+
+  it("an explicit id is exact: a missing one resolves to nothing, never to the default", async () => {
+    const bridge = inMemorySandboxBridge();
+    const primary = makeHarness(undefined, makeHandle(), "primary");
+    await primary.ready;
+    bridge.register(primary);
+
+    expect(activeSandbox(bridge, "primary")).toBe(primary);
+    expect(activeSandbox(bridge, "build")).toBeUndefined();
   });
 });

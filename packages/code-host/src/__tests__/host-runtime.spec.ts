@@ -6,11 +6,15 @@
  */
 
 import { realpathSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CodeRuntimeContext, Runtime } from "@agentick/code";
+import { isRuntimeProvider, type CodeRuntimeContext, type Runtime } from "@agentick/code";
+import type { SessionInstaller } from "@agentick/spec";
 
 import { hostRuntime } from "../host-runtime.js";
+import { hostRuntimeInstance } from "../testing/host-runtime-instance.js";
 import {
   childProcessPort,
   type HostProcess,
@@ -18,16 +22,27 @@ import {
   type HostSpawnRequest,
 } from "../host-process-port.js";
 
-const runtimes: Runtime[] = [];
+/** The host provider is session-blind — resolve never reads this. */
+const noInstaller = {} as SessionInstaller;
 
-function runtime(...args: Parameters<typeof hostRuntime>): Runtime {
-  const made = hostRuntime(...args);
+const runtimes: Runtime[] = [];
+const dirs: string[] = [];
+
+function runtime(...args: Parameters<typeof hostRuntimeInstance>): Runtime {
+  const made = hostRuntimeInstance(...args);
   runtimes.push(made);
   return made;
 }
 
+async function scratchDir(): Promise<string> {
+  const dir = realpathSync(await mkdtemp(join(tmpdir(), "agentick-code-host-")));
+  dirs.push(dir);
+  return dir;
+}
+
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((made) => made.dispose()));
+  await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 /** The placement seam, wrapping the default so the spawns are real. */
@@ -60,6 +75,32 @@ async function returned(context: CodeRuntimeContext, source: string): Promise<un
   }
   return result.value;
 }
+
+describe("hostRuntime is a session-blind RuntimeProvider", () => {
+  it("is a provider, not a live runtime — resolve is the seam", () => {
+    const provider = hostRuntime();
+    expect(isRuntimeProvider(provider)).toBe(true);
+    // A provider describes caps and resolves; a live runtime opens contexts.
+    expect(typeof provider.capabilities).toBe("function");
+    expect((provider as { createContext?: unknown }).createContext).toBeUndefined();
+  });
+
+  it("reports engine caps without building the runtime or spawning", () => {
+    const engine = process.versions.bun === undefined ? "node" : "bun";
+    expect(hostRuntime().capabilities()).toMatchObject({ name: `host:${engine}` });
+    expect(hostRuntime({ language: "typescript" }).capabilities()).toMatchObject({
+      name: `host:${engine}+ts`,
+    });
+  });
+
+  it("yields a FRESH runtime per resolve, so each session owns its own engine", () => {
+    const provider = hostRuntime();
+    const a = provider.resolve(noInstaller) as Runtime;
+    const b = provider.resolve(noInstaller) as Runtime;
+    runtimes.push(a, b);
+    expect(a).not.toBe(b);
+  });
+});
 
 describe("engine adaptation", () => {
   it("names the engine that is running the host, and claims only what it enforces", () => {
@@ -207,6 +248,22 @@ describe("the child is the context", () => {
     const pid = await returned(first, `return process.pid;`);
     expect(await returned(first, `return process.pid;`)).toBe(pid);
     expect(await returned(second, `return process.pid;`)).not.toBe(pid);
+  });
+
+  it("a file one execution writes is there for the next — one warm workspace per session", async () => {
+    const cwd = await scratchDir();
+    const context = await runtime({ cwd }).createContext({});
+    await context.execute(
+      `const fs = await import("node:fs/promises");
+       await fs.writeFile("carried.txt", "across executes");
+       return "wrote";`,
+    );
+    const readBack = await returned(
+      context,
+      `const fs = await import("node:fs/promises");
+       return await fs.readFile("carried.txt", "utf8");`,
+    );
+    expect(readBack).toBe("across executes");
   });
 
   it("a child that dies mid-execution kills the context with it", async () => {

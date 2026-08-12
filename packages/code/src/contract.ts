@@ -20,7 +20,7 @@
  */
 
 import type { Effect } from "effect";
-import type { HarnessFx, SubstrateError } from "@agentick/spec";
+import type { HarnessFx, SessionInstaller, SubstrateError } from "@agentick/spec";
 
 import type { CodeErrorChannel } from "./errors.js";
 
@@ -323,9 +323,12 @@ export interface Code {
   /** Is a runtime bound? The presence question, asked without provoking a throw. */
   hasRuntime(): boolean;
   /**
-   * The bound provider's capabilities.
+   * The engine's capabilities — a synchronous read. Caps are engine-only
+   * (sandbox-independent) and are resolved once at install, so inspecting them
+   * costs nothing and needs no program to have run.
    *
-   * @throws {CodeProviderMissing} no runtime is bound.
+   * @throws {CodeProviderMissing} no engine is configured (a bare, unbound
+   * harness), or the default engine could not be resolved at install.
    */
   capabilities(): CodeCapabilities;
 
@@ -361,7 +364,8 @@ export function isCodeInstance(v: unknown): v is Code {
 // ============================================================================
 
 /**
- * A bound, configured code runtime — the value `withCode({ runtime })` takes.
+ * A bound, configured code runtime — what a {@link RuntimeProvider} resolves to,
+ * or a live instance passed straight to `withCode({ runtime })`.
  *
  * The factory that produces one takes STABLE config (engine, isolation,
  * placement, permission drivers): the same for every execution in a session.
@@ -393,6 +397,49 @@ export interface Runtime {
   createContext(options: CodeRuntimeContextOptions): Promise<CodeRuntimeContext>;
   /** Release provider-wide resources. Called once, on harness close. */
   dispose(): Promise<void>;
+}
+
+/**
+ * Binds an engine to a session — the exact peer of `SandboxProvider` on the
+ * placement axis (`localProvider()` is to `SandboxHandle` what `sandboxHost()`
+ * is to a {@link Runtime}). `withCode` calls {@link resolve} ONCE per session,
+ * on the first `createContext`, and caches the result for the session's life.
+ *
+ * The timing is load-bearing. Deferring to first use, rather than resolving at
+ * install, is what lets a placed engine reach the session's sandbox namespace
+ * (which may not be registered when `withCode` installs) and what keeps one
+ * warm engine per session instead of one per execution.
+ *
+ * A session-blind engine (`hostRuntime()`) ignores the installer and returns a
+ * fresh per-session {@link Runtime}. A placed engine (`sandboxHost()`) adopts
+ * the session's `SandboxHandle` from the installer. A live {@link Runtime} is
+ * NOT a provider — it is bound directly (the ADR-42 live-instance arm), so its
+ * `capabilities` are legible without a resolve.
+ *
+ * The two methods split two genuinely-separate concerns. {@link capabilities}
+ * describes the ENGINE — name, enforced budgets, persistence — which no sandbox
+ * touches, so it takes NO installer and is resolved at INSTALL (sandbox-free,
+ * spawn-free) to keep `code.capabilities()` a plain synchronous read.
+ * {@link resolve} binds the full session runtime and is deferred to the first
+ * `createContext` — that is where a placed engine reaches the sandbox namespace,
+ * and where the one warm engine per session is built.
+ */
+export interface RuntimeProvider {
+  /**
+   * The engine's capabilities, with NO installer, NO sandbox, and NO spawn — a
+   * placed engine reports the SAME caps jailed or not. Called once at install.
+   */
+  capabilities(): CodeCapabilities | Promise<CodeCapabilities>;
+  resolve(installer: SessionInstaller): Runtime | Promise<Runtime>;
+}
+
+/** A {@link RuntimeProvider} declares `resolve`; a live {@link Runtime} never does. */
+export function isRuntimeProvider(value: unknown): value is RuntimeProvider {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { resolve?: unknown }).resolve === "function"
+  );
 }
 
 /** Named for its context, not the other way round — `RuntimeContextOptions` sits one letter from spec's own name-family. */

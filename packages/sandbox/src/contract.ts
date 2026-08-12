@@ -41,6 +41,41 @@ import type {
 // ============================================================================
 
 /**
+ * Where a process can be PLACED — the workspace it would run in, and how
+ * to start it there. The narrow view of a {@link SandboxHandle} that a
+ * consumer borrows when it wants to run something inside somebody else's
+ * jail, without also being handed that sandbox's lifecycle.
+ *
+ * Read it as a reduced BLAST RADIUS, not reduced authority: a borrower
+ * that can `spawn` can run anything the jail permits, the same as `exec`
+ * and with no ACL in front of it (placement is adopter wiring, never
+ * something the model reaches). What it withholds is the power to
+ * `destroy` the sandbox the harness owns, or to `addMount` and widen the
+ * jail underneath it.
+ *
+ * @see SandboxHarness.placement — how a consumer borrows one
+ */
+export interface SandboxPlacement {
+  /** Absolute path to the workspace root inside the sandbox. */
+  readonly workspacePath: string;
+  /**
+   * Start a LIVE process inside the sandbox and keep talking to it.
+   *
+   * {@link SandboxHandle.exec} is fire-and-collect: the command's result
+   * arrives once, after it is over. A supervised child — one that calls
+   * back into the host WHILE it runs — cannot be driven that way, so it
+   * earns its own method rather than a flag on `exec`.
+   *
+   * CAPABILITY-TIERED + OPTIONAL, exactly like {@link
+   * SandboxHandle.addMount}: a provider with no long-lived process
+   * surface leaves this `undefined` or throws `SandboxUnsupportedError`.
+   * NEVER fake it — a `spawn` that silently degraded to `exec` would drop
+   * the control channel the caller's protocol is built on.
+   */
+  spawn?(request: SandboxSpawnRequest): Promise<SandboxProcess>;
+}
+
+/**
  * Live sandbox instance. Created by a {@link SandboxProvider}, wrapped
  * 1:1 by a {@link import("./harness.js").SandboxHarness} which registers
  * with the session's `SandboxBridge`, queried by tools at dispatch time.
@@ -50,11 +85,9 @@ import type {
  * recreates handles by replaying the provider create-call from the
  * snapshot's declared {@link SandboxIntent}.
  */
-export interface SandboxHandle {
+export interface SandboxHandle extends SandboxPlacement {
   /** Unique sandbox instance id within the session. */
   readonly id: string;
-  /** Absolute path to the workspace root inside the sandbox. */
-  readonly workspacePath: string;
   /** Execute a shell command. */
   exec(command: string, options?: SandboxExecOptions): Promise<SandboxExecResult>;
   /** Read a file from the sandbox filesystem. */
@@ -73,21 +106,6 @@ export interface SandboxHandle {
    * out for those.
    */
   editFile(path: string, edits: readonly SandboxEdit[]): Promise<SandboxEditResult>;
-  /**
-   * Start a LIVE process inside the sandbox and keep talking to it.
-   *
-   * {@link exec} is fire-and-collect: the command's result arrives once,
-   * after it is over. A supervised child — one that calls back into the
-   * host WHILE it runs — cannot be driven that way, so it earns its own
-   * method rather than a flag on `exec`.
-   *
-   * CAPABILITY-TIERED + OPTIONAL, exactly like {@link addMount}: a
-   * provider with no long-lived process surface leaves this `undefined`
-   * or throws `SandboxUnsupportedError`. NEVER fake it — a `spawn` that
-   * silently degrades to `exec` would drop the control channel the
-   * caller's protocol is built on.
-   */
-  spawn?(request: SandboxSpawnRequest): Promise<SandboxProcess>;
   /**
    * Mount a host directory into the sandbox at runtime — a host-side
    * PRIVILEGED op the sandboxed process cannot perform from inside, so

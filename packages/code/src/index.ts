@@ -55,6 +55,7 @@ export {
 export {
   CODE_BUDGET_KEYS,
   isCodeInstance,
+  isRuntimeProvider,
   type Code,
   type CodeBinding,
   type CodeBindingScalar,
@@ -80,6 +81,7 @@ export {
   type CodeThrew,
   type CodeThrown,
   type Runtime,
+  type RuntimeProvider,
 } from "./contract.js";
 export {
   CodeAborted,

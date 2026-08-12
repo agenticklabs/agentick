@@ -1,48 +1,63 @@
 /**
- * `withSandbox()` — `AppExtension` factory for the sandbox surface.
+ * `withSandbox()` — the install form for the sandbox surface.
  *
- * Constructs a `SandboxBridge` wired to the AppHarness's shared
- * substrate at install time. The bridge's `createHarness(input)`
- * method closes over that substrate — React components that mount
- * `<Sandbox>` call into the bridge to materialize harnesses, and
- * those harnesses publish events into the app's bus + journal.
+ * Two ways in, one type (a {@link SandboxDefinition}):
  *
- * This is the critical architectural point: the bridge is constructed
- * during `install()` (when substrate is reachable) and lives for the
- * lifetime of the app. Whether the `<Sandbox>` JSX is mounted or not
- * is irrelevant — the bridge is ready and usable.
+ *   - `createApp({ sandbox: defineSandbox({ provider }) })` — the top-level
+ *     SLOT (ADR 93), lit by this package's `augment.ts`. The normal path.
+ *   - `extensions: [withSandbox({ provider })]` — the dynamic escape hatch. An
+ *     explicit entry OVERRIDES the slot (namespace registration is
+ *     last-writer-wins).
  *
+ * Session-scoped, because the jail is per conversation: the bridge is wired to
+ * the session's substrate so its ops journal alongside everything else, and the
+ * auto-spun `"primary"` sandbox is created with the session's elicitation
+ * harness (its permission gate) and torn down on session close. Whether a
+ * `<Sandbox>` is also mounted in the tree is irrelevant — the bridge is ready.
+ *
+ * @see ./augment.ts — the top-level slot registration
  * @see docs/proposals/v2/blueprint/24-sandbox-as-harness.md
- * @see docs/proposals/v2/blueprint/26-harness-api-shape.md §Extension
  */
 
-import type { AppExtension, AppInstaller } from "@agentick/spec";
+import { omitUndefined } from "@agentick/utils";
+import type { SessionExtension, SessionInstaller } from "@agentick/spec";
 
-import { createSandboxBridge, type SandboxBridge } from "./bridge.js";
+import { createSandboxBridge } from "./bridge.js";
+import { aclOf, toCreateOptions } from "./create-options.js";
+import type { SandboxDefinition } from "./definition.js";
 
-export interface WithSandboxOptions {
-  /**
-   * Run at extension install time, with the bridge already
-   * registered. Useful for pre-spinning sandboxes at app-init that
-   * don't need to be driven by JSX `<Sandbox>` components.
-   */
-  readonly initialize?: (bridge: SandboxBridge, installer: AppInstaller) => void | Promise<void>;
-}
+export const EXTENSION_NAME = "@agentick/sandbox";
 
-export function withSandbox(options: WithSandboxOptions = {}): AppExtension {
+export function withSandbox(definition: SandboxDefinition = {}): SessionExtension {
   return {
-    name: "@agentick/sandbox",
-    target: "app",
-    async install(installer) {
+    name: EXTENSION_NAME,
+    target: "session",
+    install: async (installer: SessionInstaller) => {
       const bridge = createSandboxBridge({ substrate: installer.substrate });
       installer.registerNamespace("sandbox", bridge);
-      if (options.initialize) {
-        await options.initialize(bridge, installer);
-      }
+
+      const { provider } = definition;
+      if (!provider) return;
+
+      const id = definition.id ?? "primary";
+      await bridge.createHarness({
+        sandboxId: id,
+        provider,
+        options: toCreateOptions(definition),
+        elicitation: installer.elicitation,
+        ...omitUndefined({
+          acl: aclOf(definition.allow),
+          permissionTimeoutDecision: definition.onPermissionTimeout,
+          permissionTimeoutMs: definition.permissionTimeoutMs,
+        }),
+      });
+
+      installer.onClose(async () => {
+        const harness = bridge.get(id);
+        if (!harness) return;
+        await harness.destroy();
+        bridge.unregister(id);
+      });
     },
   };
 }
-
-// Adopters who want a custom bridge implementation write their own
-// AppExtension that calls installer.registerNamespace("sandbox", customBridge)
-// — same surface, same result, no `bridgeFactory` option needed.

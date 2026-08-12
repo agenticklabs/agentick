@@ -78,6 +78,29 @@ export interface SandboxBridge {
   subscribe(listener: () => void): Unsubscribe;
 }
 
+/**
+ * The sandbox a consumer means when it doesn't say which — the default
+ * `<Sandbox id="primary">`, or the sole registered sandbox when no
+ * "primary" exists.
+ *
+ * Returns `undefined` rather than guessing when the choice is genuinely
+ * ambiguous (several sandboxes, none primary), so a caller reports that
+ * instead of silently reaching into the wrong jail. Passing `id` is an
+ * exact lookup with NO fallback: an explicit name that isn't registered
+ * must not resolve to a different sandbox.
+ */
+export function activeSandbox(
+  bridge: SandboxBridge | undefined,
+  id?: string,
+): SandboxHarness | undefined {
+  if (!bridge) return undefined;
+  if (id !== undefined) return bridge.get(id);
+  const primary = bridge.get("primary");
+  if (primary) return primary;
+  const only = bridge.list();
+  return only.length === 1 && only[0] ? bridge.get(only[0].id) : undefined;
+}
+
 export interface CreateSandboxBridgeOptions {
   readonly substrate: AppSubstrate;
 }

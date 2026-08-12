@@ -35,6 +35,7 @@ export type {
   SandboxProvider,
   SandboxHandle,
   SandboxCreateOptions,
+  SandboxPlacement,
   SandboxProcess,
   SandboxSpawnRequest,
   SandboxSnapshot,
@@ -69,7 +70,12 @@ export type {
   ProxiedRequest,
 } from "@agentick/spec";
 
-export { inMemorySandboxBridge, type SandboxBridge, type SandboxRegistration } from "./bridge.js";
+export {
+  activeSandbox,
+  inMemorySandboxBridge,
+  type SandboxBridge,
+  type SandboxRegistration,
+} from "./bridge.js";
 
 export { SandboxHarness, type SandboxHarnessOptions, type SandboxStatus } from "./harness.js";
 
@@ -88,4 +94,5 @@ export {
 
 export * from "./errors.js";
 
-export { withSandbox, type WithSandboxOptions } from "./extension.js";
+export { withSandbox, EXTENSION_NAME } from "./extension.js";
+export { defineSandbox, type SandboxDefinition } from "./definition.js";

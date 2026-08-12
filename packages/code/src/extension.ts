@@ -62,11 +62,12 @@ export function withCode(config: CodeConfig = {}): SessionExtension {
         {
           parentScope: { sessionId: installer.sessionId },
           ...inheritedFrom(installer),
-          // An unresolvable default leaves the harness INERT rather than
-          // failing the install: `session.code` still answers `hasRuntime()`,
-          // and the error names the install when someone actually runs a
-          // program.
-          runtime: config.runtime ?? (await resolveDefaultRuntime()),
+          // The default provider resolves LAZILY at first use, so the install
+          // stays synchronous and ordering-free: a placed engine reaches the
+          // sandbox namespace only once every extension has registered, and an
+          // absent default names the install when a program actually runs.
+          runtime: config.runtime ?? resolveDefaultRuntime(),
+          installer,
           ...omitUndefined({
             bindings: config.bindings,
             budgets: config.budgets,
@@ -76,6 +77,10 @@ export function withCode(config: CodeConfig = {}): SessionExtension {
         },
       );
       await harness.ready;
+      // Resolve the ENGINE's caps now — sandbox-free — so `code.capabilities()`
+      // is a sync read. The full runtime (which adopts the sandbox) stays lazy
+      // until the first program. A missing default engine surfaces here.
+      await harness.prepareCapabilities();
 
       installer.registerNamespace("code", harness);
       installer.onClose(() => harness.close());

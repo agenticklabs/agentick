@@ -31,6 +31,7 @@ import "../augment.js";
 // `mcp/src/integration/with-mcp.ts`.
 import "@agentick/elicitation";
 import type { SandboxBridge } from "../bridge.js";
+import { aclOf, toCreateOptions } from "../create-options.js";
 import { SandboxContext } from "./context.js";
 
 export interface SandboxProps {
@@ -73,7 +74,7 @@ export function Sandbox(props: SandboxProps): React.ReactElement {
     sandboxBridge.createHarness({
       sandboxId: id,
       provider: props.provider,
-      options: sandboxAsCreateOptions(props),
+      options: toCreateOptions(props),
       elicitation,
       ...(props.allow !== undefined ? { acl: aclOf(props.allow) } : {}),
       ...(props.onPermissionTimeout !== undefined
@@ -91,25 +92,4 @@ export function Sandbox(props: SandboxProps): React.ReactElement {
   });
 
   return <SandboxContext.Provider value={harness}>{props.children}</SandboxContext.Provider>;
-}
-
-function sandboxAsCreateOptions(props: SandboxProps): SandboxCreateOptions {
-  return {
-    ...(props.workspace !== undefined ? { workspace: props.workspace } : {}),
-    ...(props.mounts !== undefined ? { mounts: props.mounts } : {}),
-    ...(props.allow !== undefined ? { allow: props.allow } : {}),
-    ...(props.env !== undefined ? { env: props.env } : {}),
-    ...(props.limits !== undefined ? { limits: props.limits } : {}),
-  };
-}
-
-function aclOf(allow: SandboxProps["allow"]): SandboxACL | undefined {
-  if (allow === undefined) return undefined;
-  const a = allow as SandboxACL;
-  const acl: SandboxACL = {};
-  if (a.read !== undefined) (acl as { read?: readonly string[] }).read = a.read;
-  if (a.write !== undefined) (acl as { write?: readonly string[] }).write = a.write;
-  if (a.exec !== undefined) (acl as { exec?: SandboxACL["exec"] }).exec = a.exec;
-  if (a.network !== undefined) (acl as { network?: boolean }).network = a.network;
-  return Object.keys(acl).length > 0 ? acl : undefined;
 }

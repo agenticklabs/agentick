@@ -14,6 +14,7 @@
  * @see docs/proposals/v2/blueprint/59-sandbox-providers.md
  */
 
+export { defineSandbox, type LocalSandboxOptions } from "./define-sandbox.js";
 export { localProvider, type LocalProviderConfig } from "./provider.js";
 export { LocalSandbox, type LocalSandboxInit } from "./local-sandbox.js";
 export { NetworkProxyServer, type ProxyServerConfig } from "./proxy.js";

@@ -5,7 +5,7 @@
 What differs between those engines is declared, not hidden. `timeMs` and `outputBytes` are enforced by the parent process, so they hold whatever the child is. `memoryMb` needs the engine's own heap ceiling, and only one engine has one that works — so under bun that budget is absent from `capabilities.enforces` and asking for it is an error rather than a ceiling that quietly does nothing.
 
 > [!WARNING]
-> **By default this is placement, not containment.** The child is an ordinary process of the same user, with the same filesystem and the same network. Containment is one argument away — `hostRuntime({ host: sandboxHostPort(sandbox) })` runs the same program inside a jail — but you have to ask for it. Read [Trust posture](#trust-posture) before you point the default at a program you did not write.
+> **By default this is placement, not containment.** The child is an ordinary process of the same user, with the same filesystem and the same network. Containment is one swap away — `sandboxHost({ provider })` runs the same program inside a jail — but you have to ask for it. Read [Trust posture](#trust-posture) before you point the default at a program you did not write.
 
 ## Install
 
@@ -318,25 +318,42 @@ hostRuntime({
 
 The environment is empty unless you fill it, so a program inherits none of your host's secrets by accident — but `env` and `cwd` are conveniences, not a boundary, and a program can read anything the user can.
 
-Placement is where the boundary belongs, and it is a seam rather than a setting. `HostProcessPort` is the whole surface the runtime needs in order to have a child at all — spawn it, write to it, kill it — so a placement that _is_ a jail slots in without touching the protocol.
+Placement is where the boundary belongs, and it is the `sandboxHost()` provider — the host engine, spawned inside a jail. Engine unchanged, containment added: the same supervisor, the same fd-3 control channel, the same bindings, now inside whatever the sandbox confines.
 
-### Running the child in a jail
+### Code owns its jail
 
-Hand `sandboxHostPort` a live `SandboxHandle` and the same supervisor runs inside that sandbox's confinement:
+`sandboxHost({ provider })` creates its own sandbox and tears it down with the session — nothing else in the app needs to know about a sandbox:
 
 ```ts
+import { defineCode } from "@agentick/code";
+import { sandboxHost } from "@agentick/code-host";
 import { localProvider } from "@agentick/sandbox-local";
-import { hostRuntime, sandboxHostPort } from "@agentick/code-host";
 
-const sandbox = await localProvider().create({
-  workspace: true,
-  allow: { network: false },
+createApp(<Agent />, {
+  model,
+  code: defineCode({ runtime: sandboxHost({ provider: localProvider() }) }),
 });
-
-hostRuntime({ host: sandboxHostPort(sandbox) });
 ```
 
 Nothing else changes. Bindings still resolve, `console.log` still comes back as `stdout`, budgets still hold — because the jail is under the protocol, not in it. What changes is reach: on a host with a real jail, a program can no longer `fetch()` an external address or read a file outside its workspace, while it can still call its bindings and write the workspace it was given.
+
+### Sharing the jail the agent already has
+
+`sandboxHost()` with no provider **adopts** the session's sandbox — the same one the agent's `bash` and `edit_file` tools reach through `ctx.sandbox`. One jailed workspace per conversation:
+
+```ts
+import { defineCode } from "@agentick/code";
+import { sandboxHost } from "@agentick/code-host";
+import { defineSandbox } from "@agentick/sandbox-local";
+
+createApp(<Agent />, {
+  model,
+  sandbox: defineSandbox(), // the placement, chosen by import
+  code: defineCode({ runtime: sandboxHost() }), // the host engine, adopting it
+});
+```
+
+Swap that `defineSandbox` import from `sandbox-local` to `sandbox-docker` and the same `sandboxHost()` now runs in a container — engine unchanged, placement swapped, one import touched. The distinction is ownership: the adopted sandbox is `withSandbox`'s to destroy, so `sandboxHost()` **borrows** it and never tears it down, where `sandboxHost({ provider })` owns and destroys the one it made.
 
 Two things are worth knowing before you rely on it.
 
@@ -344,22 +361,33 @@ Two things are worth knowing before you rely on it.
 
 **A jail is not a sandbox in the V8 sense.** The program still runs on a full engine with the whole standard library. What the jail removes is reach to the filesystem and the network; what it does not remove is the engine's own surface. A provider that denies capability by construction rather than by confinement is a different runtime, and composes inside this one.
 
-Not every provider can offer a live process — `SandboxHandle.spawn` is capability-tiered — so `sandboxHostPort` throws `SandboxUnsupportedError` at wiring time when the handle you gave it has no such surface, rather than on the first program a model writes.
+Not every provider can offer a live process — `spawn` is capability-tiered — so `sandboxHost` throws `SandboxUnsupportedError` at wiring time when the sandbox has no such surface, rather than on the first program a model writes.
+
+**The low-level seam.** `sandboxHost` composes `hostRuntime` over `sandboxHostPort`, the placement port. Reach for `sandboxHostPort` directly only when you hold a `SandboxPlacement` outside a session — it takes the workspace and `spawn`, without the power to destroy the sandbox or widen it, and `hostRuntime({ host: sandboxHostPort(place) })` is the manual composition `sandboxHost` performs for you.
 
 ## API
 
 ```ts
-import { hostRuntime, detectEngine, childProcessPort, sandboxHostPort } from "@agentick/code-host";
+import {
+  hostRuntime,
+  sandboxHost,
+  detectEngine,
+  childProcessPort,
+  sandboxHostPort,
+} from "@agentick/code-host";
 ```
 
-| Export                                | What it is                                                                             |
-| ------------------------------------- | -------------------------------------------------------------------------------------- |
-| `hostRuntime(config?)`                | The `Runtime` to hand to `withCode` / `defineCode`. Also what they resolve by default. |
-| `detectEngine()`                      | The engine this host is running: `{ name, execPath, heapLimitFlag? }`.                 |
-| `hostCapabilities(engine, language?)` | What that engine, in that language, can be held to.                                    |
-| `childProcessPort()`                  | The default placement — a direct child of this process.                                |
-| `sandboxHostPort(handle)`             | Placement inside a `SandboxHandle`'s jail. Throws if the provider has no live process. |
-| `transpiler(language)`                | The type-stripping parse the runtime itself runs. A gate's other door.                 |
+| Export                                | What it is                                                                                    |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `hostRuntime(config?)`                | The `RuntimeProvider` to hand to `withCode` / `defineCode`. The default they resolve.         |
+| `sandboxHost(config?)`                | The host engine placed in a jail — `{ provider }` owns one, no provider adopts the session's. |
+| `detectEngine()`                      | The engine this host is running: `{ name, execPath, heapLimitFlag? }`.                        |
+| `hostCapabilities(engine, language?)` | What that engine, in that language, can be held to.                                           |
+| `childProcessPort()`                  | The default placement — a direct child of this process.                                       |
+| `sandboxHostPort(place)`              | The low-level port: placement inside a `SandboxPlacement`'s jail. Throws if no live process.  |
+| `transpiler(language)`                | The type-stripping parse the runtime itself runs. A gate's other door.                        |
+
+`SandboxHostConfig` is `HostRuntimeConfig` (minus `host`) plus `provider?` + `create?` (OWN) or `sandboxId?` (ADOPT — omitted, the session's active sandbox).
 
 `HostRuntimeConfig`, all optional:
 
@@ -380,13 +408,14 @@ The programs this provider is certified with ship from `/testing`, so a layer bu
 
 ```ts
 import { runCodeConformance } from "@agentick/code/testing";
-import { hostCodeProbe, hostCodeSource } from "@agentick/code-host/testing";
+import { hostCodeProbe, hostCodeSource, hostRuntimeInstance } from "@agentick/code-host/testing";
 
 runCodeConformance(hostCodeProbe()); // this provider, end to end
 
 runCodeConformance({
   label: "my wrapper",
-  makeRuntime: () => myWrapperAround(hostRuntime()),
+  // hostRuntimeInstance resolves the session-blind provider to a live Runtime.
+  makeRuntime: () => myWrapperAround(hostRuntimeInstance()),
   source: hostCodeSource,
 });
 ```
@@ -395,11 +424,11 @@ runCodeConformance({
 
 `@agentick/code` imports `"@agentick/code-host"` at install and uses `hostRuntime()` if the import resolves. It does not DEPEND on this package — the dependency runs the other way, and an edge back would be a cycle — so the specifier has to resolve from where `@agentick/code` sits. Installing this package in your app is what makes that true, and a package manager that nests dependencies strictly needs it to be **your** dependency rather than a transitive one.
 
-Nothing breaks when it does not resolve: the namespace mounts inert, `hasRuntime()` answers `false`, and the first program fails `CodeProviderMissing` with the install named in the message. If you would rather not rely on resolution at all, pass the runtime explicitly — `withCode({ runtime: hostRuntime() })` is one import and never guesses.
+The engine is resolved at install to read its capabilities (a sandbox-free step — no subprocess, no jail), so `code: {}` with this package absent fails `CodeProviderMissing` — naming the install — at session creation. If you would rather not rely on resolution at all, pass the runtime explicitly — `withCode({ runtime: hostRuntime() })` is one import and never guesses.
 
 ## Roadmap & known gaps
 
-- **The default placement contains nothing.** Containment is opt-in through `sandboxHostPort`; the default is a direct child with your user's reach.
+- **The default placement contains nothing.** Containment is opt-in through `sandboxHost`; the default is a direct child with your user's reach.
 - **The Linux jail's control channel is unverified.** The supervisor talks to its child over an inherited descriptor, which is proven to survive macOS seatbelt (`sandbox-exec` execs the program rather than proxying it) and is expected to survive bubblewrap for the same reason — but no Linux host with `bwrap` has run the suite. Verify `packages/sandbox-local`'s jailed-spawn cases on your target before trusting the jail in production there.
 - **A jailed program still has the whole engine.** The jail removes filesystem and network reach, not the engine's own surface. Denying capability by construction is a different runtime.
 - **JSON is the membrane.** Values cross as JSON, with no structured-clone path for `Date`, `Map`, `Set` or binary. An unmarshalable return value rejects.

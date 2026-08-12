@@ -24,28 +24,7 @@ import { createTool } from "@agentick/compiler-react";
 import type { ContentBlock } from "@agentick/spec";
 
 import "../augment.js";
-import type { SandboxBridge } from "../bridge.js";
-import type { SandboxHarness } from "../harness.js";
-
-/**
- * Resolve the harness the built-in tools operate on from the app-scoped
- * bridge. Targets the default `<Sandbox id="primary">`; when no
- * "primary" is registered but exactly one sandbox exists, that sole
- * sandbox is used. Returns `undefined` when no sandbox is mounted or the
- * selection is ambiguous (multiple non-primary sandboxes) — the handler
- * surfaces a clear error in that case.
- */
-function activeSandbox(bridge: SandboxBridge | undefined): SandboxHarness | undefined {
-  if (!bridge) return undefined;
-  const primary = bridge.get("primary");
-  if (primary) return primary;
-  const regs = bridge.list();
-  if (regs.length === 1) {
-    const only = regs[0];
-    if (only) return bridge.get(only.id);
-  }
-  return undefined;
-}
+import { activeSandbox } from "../bridge.js";
 
 /**
  * `<Bash.Tool />` — execute a shell command in the in-scope sandbox.

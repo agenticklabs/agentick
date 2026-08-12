@@ -366,6 +366,8 @@ export function myRuntime(config: MyConfig): Runtime {
 
 Honoring `options.signal` is required of every provider, not a capability you declare — a runtime that cannot stop a program cannot enforce a `timeMs` budget either. Check `signal.aborted` before you start _and_ register a listener; a listener attached after the abort never fires.
 
+An engine that has to bind to a **session** — a placed one that adopts the session's sandbox — implements `RuntimeProvider` instead. It has two methods for two separate concerns. `capabilities()` describes the engine — name, enforced budgets, persistence — which no sandbox touches, so it takes no installer and is resolved once **at install**, sandbox-free, to keep `code.capabilities()` a plain synchronous read. `resolve(installer)` binds the full session runtime and is deferred to the **first program**: that is where a placed engine reaches the sandbox namespace (registered by then) and where the one warm engine per session is built. A session-blind engine writes only trivial versions of both; hand `defineCode({ runtime })` a plain `Runtime` and its `.capabilities` are read directly.
+
 Then certify it. The suite cannot author source in your language, so you supply the vocabulary and it drives the contract through it:
 
 ```ts
@@ -424,35 +426,36 @@ const executeCode = createTool({
 
 ## API
 
-| Export               | What it is                                                           |
-| -------------------- | -------------------------------------------------------------------- |
-| `defineCode`         | The namespace definition. Every field optional; inert until install. |
-| `withCode`           | The session-extension form of the same bag.                          |
-| `CodeHarness`        | The harness class. `guard`, `hook`, `bindRuntime`, `fx`.             |
-| `Runtime`            | The provider contract: `capabilities`, `createContext`, `dispose`.   |
-| `CodeRuntimeContext` | One live context: `execute`, `dispose`.                              |
+| Export               | What it is                                                                       |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `defineCode`         | The namespace definition. Every field optional; inert until install.             |
+| `withCode`           | The session-extension form of the same bag.                                      |
+| `CodeHarness`        | The harness class. `guard`, `hook`, `bindRuntime`, `fx`.                         |
+| `Runtime`            | The provider contract: `capabilities`, `createContext`, `dispose`.               |
+| `RuntimeProvider`    | Binds an engine: `capabilities()` at install, `resolve(installer)` on first use. |
+| `CodeRuntimeContext` | One live context: `execute`, `dispose`.                                          |
 
 `defineCode` / `withCode` take:
 
-| Field      | Default               | What it is                                                      |
-| ---------- | --------------------- | --------------------------------------------------------------- |
-| `runtime`  | `@agentick/code-host` | The provider. Unresolvable and absent → the namespace is inert. |
-| `bindings` | none                  | The base context every program gets; a context merges over it.  |
-| `budgets`  | none                  | Base ceilings, overridden per key by a context.                 |
+| Field      | Default               | What it is                                                          |
+| ---------- | --------------------- | ------------------------------------------------------------------- |
+| `runtime`  | `@agentick/code-host` | A live `Runtime` or a `RuntimeProvider`. Absent → the default host. |
+| `bindings` | none                  | The base context every program gets; a context merges over it.      |
+| `budgets`  | none                  | Base ceilings, overridden per key by a context.                     |
 
-The default is resolved by importing `@agentick/code-host` at install, not by depending on it — that package depends on this one, and an edge back would be a cycle. It resolves for anyone who has it and for nobody who does not, so an app that never installed it mounts an inert namespace instead of failing to boot.
+The default runtime is `@agentick/code-host`, imported by name rather than depended on — that package depends on this one, and an edge back would be a cycle. The engine is resolved at install (to read its capabilities), so `code: {}` with the package absent fails `CodeProviderMissing` — naming it — at session creation rather than at boot. An explicit `runtime` skips the lookup entirely.
 
 `runCodeConformance` ships from `@agentick/code/testing`, not from the main entry point — it imports vitest, and a production bundle should never load a test framework.
 
 Session surface (`session.code`, `ctx.code`, `bridges.code` — all optional):
 
-| Member                    | Returns                                                   |
-| ------------------------- | --------------------------------------------------------- |
-| `execute(input)`          | `Promise<CodeExecuteResult>` — the one-shot.              |
-| `createContext(options?)` | `Promise<CodeContext>`.                                   |
-| `capabilities()`          | `CodeCapabilities`; throws when no runtime is bound.      |
-| `hasRuntime()`            | `boolean` — the presence question, without a throw.       |
-| `fx.execute(input)`       | The Effect twin, for callers already inside an operation. |
+| Member                    | Returns                                                                   |
+| ------------------------- | ------------------------------------------------------------------------- |
+| `execute(input)`          | `Promise<CodeExecuteResult>` — the one-shot.                              |
+| `createContext(options?)` | `Promise<CodeContext>`.                                                   |
+| `capabilities()`          | `CodeCapabilities` — a sync read; the engine is resolved once at install. |
+| `hasRuntime()`            | `boolean` — is an engine configured, asked without a throw.               |
+| `fx.execute(input)`       | The Effect twin, for callers already inside an operation.                 |
 
 The one-shot takes ONE bag — `{ source, bindings?, budgets?, signal? }`, typed `CodeOneShotInput` — which is exactly what `createContext` takes plus the program, because it IS a context used once. One object rather than a positional program beside its options, so every hook, guard and middleware handles the same shape.
 

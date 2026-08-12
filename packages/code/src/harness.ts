@@ -36,6 +36,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  SessionInstaller,
 } from "@agentick/spec";
 import { HandlerError } from "@agentick/spec";
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
@@ -57,7 +58,9 @@ import type {
   CodeOneShotInput,
   CodeRuntimeContext,
   Runtime,
+  RuntimeProvider,
 } from "./contract.js";
+import { isRuntimeProvider } from "./contract.js";
 import {
   CodeAborted,
   CodeBudgetUnsupported,
@@ -101,11 +104,22 @@ declare module "@agentick/runtime" {
 
 export interface CodeHarnessOptions extends BaseHarnessOptions<unknown, "code"> {
   /**
-   * The provider. Optional: the harness is always present and INERT until a
-   * runtime is bound, so a session can carry `code` at zero cost and an
-   * adopter can bind late via {@link CodeHarness.bindRuntime}.
+   * The engine. Optional: the harness is always present and INERT until one is
+   * configured, so a session can carry `code` at zero cost and an adopter can
+   * bind late via {@link CodeHarness.bindRuntime}.
+   *
+   * A live {@link Runtime} is bound eagerly (the ADR-42 live-instance arm), so
+   * its capabilities are legible at once. A {@link RuntimeProvider} is resolved
+   * LAZILY — once, on the first `createContext` — so a placed engine reaches
+   * the session's sandbox after every namespace has registered.
    */
-  readonly runtime?: Runtime;
+  readonly runtime?: Runtime | RuntimeProvider;
+  /**
+   * Passed to {@link RuntimeProvider.resolve} at first use. Present whenever a
+   * provider is configured through `withCode`; a session-blind provider ignores
+   * it.
+   */
+  readonly installer?: SessionInstaller;
   /** The BASE context every program on this harness gets. */
   readonly bindings?: CodeBindings;
   /** Base ceilings, overridden per key at `createContext`. */
@@ -136,6 +150,16 @@ interface OpenContext {
 
 export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
   private runtime: Runtime | undefined;
+  private readonly provider: RuntimeProvider | undefined;
+  private readonly installer: SessionInstaller | undefined;
+  /**
+   * The engine's capabilities, cached at install (sandbox-free). Present once a
+   * runtime is bound or {@link prepareCapabilities} has run; `undefined` on a
+   * bare, unbound harness.
+   */
+  private capabilitiesCache: CodeCapabilities | undefined;
+  /** The one lazy resolution — memoized so `resolve` runs exactly once. */
+  private resolution: Promise<Runtime> | undefined;
   private readonly baseBindings: CodeBindings | undefined;
   private readonly baseBudgets: CodeBudgets | undefined;
   private closed = false;
@@ -155,7 +179,15 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
     options: CodeHarnessOptions = {},
   ) {
     super(SURFACE, scopeId, journal, bus, inbox, options);
-    this.runtime = options.runtime;
+    // ADR 42 — a live instance binds now (its caps legible at once); a provider
+    // resolves on first use, its caps prepared sandbox-free at install.
+    if (isRuntimeProvider(options.runtime)) {
+      this.provider = options.runtime;
+    } else {
+      this.runtime = options.runtime;
+      this.capabilitiesCache = options.runtime?.capabilities;
+    }
+    this.installer = options.installer;
     this.baseBindings = options.bindings;
     this.baseBudgets = options.budgets;
     this.executeCommand = this.command({
@@ -182,15 +214,55 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
     if (this.runtime !== undefined) {
       throw new CodeRuntimeAlreadyBound({ provider: this.runtime.capabilities.name });
     }
+    if (this.provider !== undefined) {
+      throw new CodeRuntimeAlreadyBound({ provider: "configured provider" });
+    }
     this.runtime = runtime;
+    this.capabilitiesCache = runtime.capabilities;
   }
 
   hasRuntime(): boolean {
-    return this.runtime !== undefined;
+    return this.runtime !== undefined || this.provider !== undefined;
+  }
+
+  /**
+   * Prepare the engine's capabilities so {@link capabilities} is a sync read.
+   * Called once by `withCode` at install: it resolves the ENGINE's caps
+   * (sandbox-free, spawn-free — a placed engine reports the same caps jailed or
+   * not) and caches them. Idempotent; a no-op once a runtime is bound.
+   *
+   * Kept apart from {@link ensureRuntime} on purpose: the full session runtime —
+   * which adopts the sandbox — stays lazy until the first `createContext`, while
+   * caps, which no sandbox affects, are known up front.
+   *
+   * @throws {CodeProviderMissing} the default engine could not be resolved.
+   */
+  async prepareCapabilities(): Promise<void> {
+    if (this.capabilitiesCache !== undefined || this.provider === undefined) return;
+    this.capabilitiesCache = await this.provider.capabilities();
+  }
+
+  /**
+   * The engine, resolving the provider on the first call and caching it for the
+   * session. A live-bound runtime is returned straight; a configured provider's
+   * `resolve` runs exactly once (M: lazy, once) even under concurrent first
+   * executions, because the promise itself is the memo.
+   */
+  private ensureRuntime(): Promise<Runtime> {
+    if (this.runtime !== undefined) return Promise.resolve(this.runtime);
+    if (this.provider === undefined) return Promise.reject(new CodeProviderMissing());
+    this.resolution ??= Promise.resolve(
+      this.provider.resolve(this.installer as SessionInstaller),
+    ).then((runtime) => {
+      this.runtime = runtime;
+      return runtime;
+    });
+    return this.resolution;
   }
 
   capabilities(): CodeCapabilities {
-    return this.requireRuntime().capabilities;
+    if (this.capabilitiesCache === undefined) throw new CodeProviderMissing();
+    return this.capabilitiesCache;
   }
 
   /**
@@ -228,7 +300,7 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
 
   async createContext(options: CodeContextOptions = {}): Promise<CodeContext> {
     if (this.closed) throw new CodeHarnessClosed({ harnessId: this.scopeId });
-    const runtime = this.requireRuntime();
+    const runtime = await this.ensureRuntime();
     // The definition's layer is the BASE and this context's is the override,
     // so everything downstream — the ceiling check, the audit names, the
     // provider — sees one merged context rather than two half-configs.
@@ -556,11 +628,6 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
     }
   }
 
-  private requireRuntime(): Runtime {
-    if (this.runtime === undefined) throw new CodeProviderMissing();
-    return this.runtime;
-  }
-
   private providerName(): string {
     return this.runtime?.capabilities.name ?? "unbound";
   }
@@ -582,6 +649,9 @@ export class CodeHarness extends BaseHarness<typeof SURFACE> implements Code {
    */
   protected override async teardown(): Promise<void> {
     this.closed = true;
+    // A close racing a first execute must still dispose what that execute
+    // resolved — await the one resolution, then tear its runtime down.
+    if (this.resolution !== undefined) await this.resolution.catch(() => undefined);
     for (const id of [...this.contexts.keys()]) {
       await this.disposeContext(id).catch((cause: unknown) => {
         this.reportDisposeFailure(id, cause);

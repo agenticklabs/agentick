@@ -4,3 +4,4 @@
  */
 
 export { hostCodeProbe, hostCodeSource } from "./host-code-probe.js";
+export { hostRuntimeInstance } from "./host-runtime-instance.js";

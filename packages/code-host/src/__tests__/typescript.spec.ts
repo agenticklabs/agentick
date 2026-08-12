@@ -15,7 +15,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { CodeExecuteInput, CodeExecuteResult, Runtime } from "@agentick/code";
 import { fakeCodeHarness } from "@agentick/code/testing";
 
-import { hostRuntime, type HostLanguage } from "../index.js";
+import { type HostLanguage } from "../index.js";
+import { hostRuntimeInstance } from "../testing/host-runtime-instance.js";
 
 const runtimes: Runtime[] = [];
 
@@ -27,7 +28,7 @@ async function run(
   source: string,
   language: HostLanguage = "typescript",
 ): Promise<CodeExecuteResult> {
-  const runtime = hostRuntime({ language });
+  const runtime = hostRuntimeInstance({ language });
   runtimes.push(runtime);
   const context = await runtime.createContext({});
   return context.execute(source);
@@ -36,8 +37,10 @@ async function run(
 describe("TypeScript is a mode of this provider, not a second one", () => {
   it("marks the language in the capability name", () => {
     const engine = process.versions.bun === undefined ? "node" : "bun";
-    expect(hostRuntime({ language: "typescript" }).capabilities.name).toBe(`host:${engine}+ts`);
-    expect(hostRuntime().capabilities.name).toBe(`host:${engine}`);
+    expect(hostRuntimeInstance({ language: "typescript" }).capabilities.name).toBe(
+      `host:${engine}+ts`,
+    );
+    expect(hostRuntimeInstance().capabilities.name).toBe(`host:${engine}`);
   });
 
   it("runs a program whose annotations have no runtime form", async () => {
@@ -61,7 +64,7 @@ describe("TypeScript is a mode of this provider, not a second one", () => {
   });
 
   it("keeps the async-function body — top-level await and return still work", async () => {
-    const runtime = hostRuntime({ language: "typescript" });
+    const runtime = hostRuntimeInstance({ language: "typescript" });
     runtimes.push(runtime);
     const context = await runtime.createContext({
       bindings: { fetchRow: async (input: unknown) => ({ echoed: input }) },
@@ -106,7 +109,7 @@ describe("TypeScript is a mode of this provider, not a second one", () => {
     // the record a guard reads and the digest that keys it are both over the
     // source as written. Hashing the transpiled text instead would make an
     // allowlist entry depend on which esbuild version ran.
-    const runtime = hostRuntime({ language: "typescript" });
+    const runtime = hostRuntimeInstance({ language: "typescript" });
     runtimes.push(runtime);
     const { harness, close } = await fakeCodeHarness({ runtime });
     const program = `const total: number = 41;\nreturn total + 1;`;
