@@ -524,6 +524,10 @@ export class TasksHarness
       wakeState: wakeArmed ? "armed" : "none",
       ...(wakeArmed ? { wakePolicy } : {}),
     };
+    // A detached task (ADR 68) rejects a `result` no one awaits; drain the
+    // orphan so a recorded terminal failure doesn't also trip Node's
+    // unhandled-rejection. A real `result(taskId)` caller still observes it.
+    void live.resultDeferred.promise.catch(() => undefined);
     // Cache (LiveTask) + durable-write (projected record) the initial
     // `working` snapshot, then live-emit it BEFORE the executor starts (so
     // subscribers see `working` first).

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { ProtocolEvent, TaskEvent, TaskInfo, TaskRejection } from "@agentick/spec";
 import type { LocalEventBus } from "@agentick/runtime";
-import { drainRejection } from "@agentick/utils/testing";
+import { drainRejection, waitForStable } from "@agentick/utils/testing";
 import { stubStoreCtx } from "@agentick/store";
 
 import { TASK_PROGRESS_CHANNEL_FQN, TASK_STATUS_CHANNEL_FQN } from "../channel.js";
@@ -283,6 +283,40 @@ describe("TasksHarness — cancel", () => {
     expect(info?.status).toBe("cancelled");
     expect(info?.failure?.kind).toBe("aborted");
     expect(info?.failure?.reason).toBe("user-aborted");
+  });
+
+  it("cancelling a detached task whose result is never awaited emits no unhandled rejection", async () => {
+    bundle = await fakeTasks();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const handle = bundle.harness.submit(
+        async ({ signal }) => {
+          await new Promise<void>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason ?? new Error("aborted")));
+          });
+          return "should-not-reach";
+        },
+        { detached: true },
+      );
+
+      await new Promise((r) => setTimeout(r, 0));
+      await bundle.harness.cancel(handle.taskId, "conversation deleted");
+
+      // "nothing more arrives" — the poll drains the queue so Node's
+      // unhandled-rejection detector runs; a missing guard would land here.
+      await waitForStable(
+        () => unhandled.filter((r) => (r as { _tag?: unknown })?._tag === "TaskRejection").length,
+      );
+
+      expect(unhandled).toEqual([]);
+      expect(bundle.harness.status(handle.taskId)).toBe("cancelled");
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
   });
 
   it("cancel() on a completed task is a no-op (idempotent)", async () => {
