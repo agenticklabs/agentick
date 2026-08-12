@@ -71,6 +71,7 @@
   "dependencies": {
     "@agentick/code": "workspace:*",
     "@agentick/sandbox": "workspace:*",
+    "@agentick/spec": "workspace:*",
     "esbuild": "^0.27.3"
   },
   "devDependencies": {

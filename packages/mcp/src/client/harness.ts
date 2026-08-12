@@ -32,8 +32,7 @@
  *     handler, the SDK responds method-not-found (no fake model call).
  *   - `roots/list` — handled (#146) when a `roots` source is
  *     configured; advertises `roots: { listChanged }`. The source is
- *     pluggable (ADR 65): a static list, a provider fn, or the sandbox
- *     adapter (`@agentick/sandbox/mcp`) — kept decoupled here.
+ *     pluggable (ADR 65): a static list or a provider fn — kept decoupled here.
  *   - `notifications/message` (logging) — surfaced via `onLogMessage`
  *     + the `mcp:<scopeId>:log` bus envelope.
  *
@@ -1413,10 +1412,9 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
    * function is re-evaluated on each `roots/list` so a live source (the
    * sandbox adapter) reflects mount changes.
    *
-   * The source is the pluggable seam (ADR 65): a static list, an adopter
-   * provider fn, or the sandbox adapter (`@agentick/sandbox/mcp`,
-   * which deps this package — one direction, no cycle). This harness has
-   * no knowledge of any source; it just resolves a list.
+   * The source is the pluggable seam (ADR 65): a static list or an adopter
+   * provider fn. This harness has no knowledge of any source; it just
+   * resolves a list.
    *
    * TODO(#237-4b / ADR-65): roots-registry upgrade path — if a unified,
    * inspectable, cross-source mount registry is ever needed, a RootsHarness

@@ -22,8 +22,8 @@ import type { CodeRuntimeContext, Runtime } from "@agentick/code";
 import { SandboxUnsupportedError, type SandboxHandle } from "@agentick/sandbox";
 import { localProvider } from "@agentick/sandbox-local";
 
-import { hostRuntime } from "../host-runtime.js";
 import { sandboxHostPort } from "../sandbox-host-port.js";
+import { hostRuntimeInstance } from "../testing/host-runtime-instance.js";
 
 // Gate on what this host can actually do: `isolation` is the provider's
 // honest claim, and "none" means the suite would prove nothing.
@@ -70,13 +70,13 @@ const bindings = { tools: { lookup: async (id: unknown) => `record:${String(id)}
 async function jailedContext(): Promise<{ context: CodeRuntimeContext; sandbox: SandboxHandle }> {
   const sandbox = await localProvider().create({ workspace: true, allow: { network: false } });
   live.sandboxes.push(sandbox);
-  const runtime = hostRuntime({ host: sandboxHostPort(sandbox) });
+  const runtime = hostRuntimeInstance({ host: sandboxHostPort(sandbox) });
   live.runtimes.push(runtime);
   return { context: await runtime.createContext({ bindings }), sandbox };
 }
 
 async function unjailedContext(): Promise<CodeRuntimeContext> {
-  const runtime = hostRuntime();
+  const runtime = hostRuntimeInstance();
   live.runtimes.push(runtime);
   return runtime.createContext({ bindings });
 }

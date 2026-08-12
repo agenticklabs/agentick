@@ -1,6 +1,14 @@
 # ADR 65 — Roots are a projection over sources, NOT a harness
 
-**Status:** ACCEPTED 2026-07-07 (Fable, for Ryan). **Builds on:** ADR 62
+**Status:** ACCEPTED 2026-07-07 (Fable, for Ryan). **Superseded in part
+2026-08-11:** the MCP **roots** projection (`sandboxRootsSource` /
+`bindSandboxRootsToClient`) is REMOVED — MCP dropped roots support in the
+stateless rewrite and it had no consumers; removing it also cleared a
+`sandbox → mcp` dependency cycle. The **file-resource** projection
+(`sandboxFileResolver` / `fsFileResolver` / `registerFileResolver`) is
+RETAINED and moved to the mcp-free `@agentick/sandbox/files` subpath. The
+decision below stands for the file-resolution half; the roots half is
+historical. **Builds on:** ADR 62
 (resources = read-projection seam), ADR 63 (projection ≠ registration ≠ a new
 layer), the sandbox mount model (`add-mount`/`remove-mount` declared commands),
 the existing `McpRootsSource` client config seam. **Decides:** how MCP roots +

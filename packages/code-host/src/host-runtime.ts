@@ -24,6 +24,7 @@ import type {
   CodeRuntimeContextOptions,
   CodeStream,
   Runtime,
+  RuntimeProvider,
 } from "@agentick/code";
 
 import { detectEngine, hostCapabilities, type HostEngine } from "./engine.js";
@@ -58,7 +59,22 @@ const DEFAULT_SPAWN_TIMEOUT_MS = 10_000;
 const GRACE_MS = 100;
 const HEAP_EXHAUSTED = "JavaScript heap out of memory";
 
-export function hostRuntime(config: HostRuntimeConfig = {}): Runtime {
+/**
+ * The host engine as a {@link RuntimeProvider}. Session-blind: `resolve` ignores
+ * the installer and builds a FRESH host {@link Runtime} per session, so each
+ * session owns and disposes its own engine. The subprocess is not spun here —
+ * one is started per `createContext`, and stays warm across executes on it.
+ */
+export function hostRuntime(config: HostRuntimeConfig = {}): RuntimeProvider {
+  return {
+    // Engine-only: the caps are the same whatever the placement, so this reads
+    // them without building the runtime or spawning a child.
+    capabilities: () => hostCapabilities(detectEngine(), config.language),
+    resolve: () => buildHostRuntime(config),
+  };
+}
+
+function buildHostRuntime(config: HostRuntimeConfig): Runtime {
   const engine = detectEngine();
   const capabilities = hostCapabilities(engine, config.language);
   const transpile = transpiler(config.language ?? "javascript");

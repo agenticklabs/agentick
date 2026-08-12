@@ -338,6 +338,12 @@ importers:
       '@agentick/prompts':
         specifier: workspace:*
         version: link:../prompts
+      '@agentick/sandbox':
+        specifier: workspace:*
+        version: link:../sandbox
+      '@agentick/sandbox-local':
+        specifier: workspace:*
+        version: link:../sandbox-local
       '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
@@ -590,6 +596,9 @@ importers:
       '@agentick/sandbox':
         specifier: workspace:*
         version: link:../sandbox
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
       esbuild:
         specifier: ^0.27.3
         version: 0.27.3
@@ -1316,9 +1325,6 @@ importers:
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
-      '@agentick/mcp':
-        specifier: workspace:*
-        version: link:../mcp
       '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub

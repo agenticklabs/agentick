@@ -10,41 +10,42 @@ That split is the whole design. Isolation is an OS problem, so it lives behind t
 npm install @agentick/sandbox @agentick/sandbox-local
 ```
 
-You need two packages: this one and a provider. Subpaths: `/react` (component + hook + tools), `/mcp` (roots and file resources), `/testing` (provider conformance suite + in-memory fake).
+You need two packages: this one and a provider. Subpaths: `/react` (component + hook + tools), `/files` (`file://` resource resolvers), `/testing` (provider conformance suite + in-memory fake).
 
 ## Quick start
 
+The slot form spins one jailed workspace per session — the import chooses the placement:
+
 ```tsx
-import type { AppExtension } from "@agentick/spec";
-import { withSandbox } from "@agentick/sandbox";
-import { Bash, EditFile, ReadFile, Sandbox, WriteFile } from "@agentick/sandbox/react";
-import { localProvider } from "@agentick/sandbox-local";
+import { createApp } from "@agentick/app/react";
+import { defineSandbox } from "@agentick/sandbox-local";
+import { Bash, EditFile, ReadFile, WriteFile } from "@agentick/sandbox/react";
 
-// Goes into `createApp(Agent, { extensions })`.
-export const extensions: AppExtension[] = [withSandbox()];
+const app = await createApp(<Agent />, {
+  model,
+  sandbox: defineSandbox({
+    allow: { read: ["/workspace/**"], exec: { allow: ["git *", "npm test"] } },
+  }),
+});
 
-const provider = localProvider();
-
-export function Agent() {
+function Agent() {
   return (
-    <Sandbox
-      provider={provider}
-      workspace
-      allow={{ read: ["/workspace/**"], exec: { allow: ["git *", "npm test"] } }}
-    >
+    <>
       <Bash.Tool />
       <ReadFile.Tool />
       <WriteFile.Tool />
       <EditFile.Tool />
-    </Sandbox>
+    </>
   );
 }
 ```
 
+The four built-in tools reach the session's `"primary"` sandbox through `ctx.sandbox` — no `<Sandbox>` JSX required. Mount `<Sandbox provider={…}>` only when you need a second, differently-configured sandbox in the same tree.
+
 > [!IMPORTANT]
 > The tools are values, not components — mount them as `<Bash.Tool />`. `Bash` itself is the created tool (name, schema, handler); `Bash.Tool` is the React element that registers the handler with the session.
 
-`withSandbox()` must be installed even if no `<Sandbox>` ever mounts: it builds the registry on the app's substrate at install time, which is what lets sandbox operations journal into the same store as everything else and show up in `app.events({ surface: "sandbox" })`.
+`withSandbox` is session-scoped: it builds the registry on the session's substrate at install time — which is what lets sandbox operations journal into the same store as everything else and show up in `app.events({ surface: "sandbox" })` — and, given a `provider`, spins the `"primary"` sandbox and tears it down on session close. `defineSandbox({ … })` is the declarative arm the `sandbox` slot resolves; `extensions: [withSandbox({ … })]` is the dynamic escape hatch.
 
 ## Security boundary
 
@@ -110,7 +111,7 @@ sandbox.importACLSnapshot(snap);
 
 ## Reaching the sandbox from a handler
 
-`ctx.sandbox` is the app-scoped registry, resolved **at dispatch** from the live bridge. This is how the built-in tools work and how yours should:
+`ctx.sandbox` is the session-scoped registry, resolved **at dispatch** from the live bridge. This is how the built-in tools work and how yours should:
 
 ```ts
 import { createTool } from "@agentick/compiler-react";
@@ -132,7 +133,7 @@ export const Typecheck = createTool({
 
 `ctx.sandbox` is `undefined` when `withSandbox()` isn't installed, so guard it. It carries the same registry as `useBridges().sandbox`; reading it at dispatch rather than capturing it at render means it always reflects current state. The built-ins target `"primary"` — the default `<Sandbox>` id — and fall back to the sole registered sandbox when exactly one exists; with several non-primary sandboxes they report an error rather than guess, and you route explicitly by id.
 
-`useSandbox()` is the other door: a React hook returning the tree-nearest harness instance, or `null`. Reserve it for genuinely **tree-positional** selection — "the sandbox this subtree is under" — captured through a tool's `use:` slot. Anything app-scoped belongs on `ctx.sandbox`.
+`useSandbox()` is the other door: a React hook returning the tree-nearest harness instance, or `null`. Reserve it for genuinely **tree-positional** selection — "the sandbox this subtree is under" — captured through a tool's `use:` slot. Anything session-scoped belongs on `ctx.sandbox`.
 
 ```tsx
 import { useSandbox } from "@agentick/sandbox/react";
@@ -201,9 +202,9 @@ for await (const event of app.events({ surface: "sandbox", phase: "delta" })) {
 
 Providers that can't stream simply never call it; the final `SandboxExecResult` stays authoritative either way.
 
-## Constructing a sandbox without JSX
+## Constructing a sandbox on the raw bridge
 
-`<Sandbox>` is a convenience over the registry. Calling it directly is the route to the create options the component doesn't forward — `mountAllow` and `setup`:
+`defineSandbox({ … })` (the slot) and `<Sandbox>` (JSX) both drive the registry. Reach for `bridge.createHarness` directly only when you are managing a sandbox outside the session-extension lifecycle:
 
 ```ts
 import type { SandboxBridge, SandboxHarness, SandboxProvider } from "@agentick/sandbox";
@@ -232,33 +233,20 @@ export function spinUp(
 
 `setup(handle)` runs once, after the provider produces the handle and before the harness is handed back — clone a repo, install dependencies, seed fixtures. The bridge invokes it rather than the provider, so it behaves identically across every provider.
 
-`withSandbox({ initialize })` hands you the same bridge at install time, which is how you pre-spin a sandbox at app init instead of waiting for JSX to mount one. You supply the elicitation harness yourself there; the installer doesn't carry one.
+`defineSandbox({ provider, … })` is the declarative version of this: the session extension calls `createHarness` for you at install with the session's elicitation harness, and tears the sandbox down on close. Drop to the raw bridge only when the sandbox outlives — or lives outside — a single session.
 
-## MCP roots and file resources — `/mcp`
+## Files as resources — `/files`
 
-An opt-in adapter that projects a sandbox onto two MCP surfaces. It is a projection over primitives that already exist, not a new layer: mount state stays owned by the sandbox, reads stay owned by [@agentick/resources](../resources), and the MCP client core stays free of any sandbox dependency.
+The opt-in `/files` subpath projects a sandbox — or a plain rooted directory — onto `file://` resources, so files behind the jail are readable through [@agentick/resources](../resources). It is a projection over primitives that already exist, not a new layer.
 
 ```ts
-import {
-  bindSandboxRootsToClient,
-  registerFileResolver,
-  sandboxFileResolver,
-  sandboxRootsSource,
-} from "@agentick/sandbox/mcp";
+import { registerFileResolver, sandboxFileResolver, fsFileResolver } from "@agentick/sandbox/files";
 
-// Outbound: offer workspace + live mounts as file:// roots, kept in sync.
-const roots = sandboxRootsSource(sandbox); // pass to the MCP client's `roots`
-const stop = bindSandboxRootsToClient(sandbox, mcpClient); // fires notifyRootsListChanged
-
-// Read: expose mounted files as resources under file://{+path}.
-registerFileResolver(resources, sandboxFileResolver(sandbox));
+registerFileResolver(resources, sandboxFileResolver(sandbox)); // ACL-gated reads through the jail
+registerFileResolver(resources, fsFileResolver("/srv/data")); // rooted + containment-checked
 ```
 
-`sandboxRootsSource` re-evaluates on every `roots/list`, so it reflects live mounts, and degrades to workspace-only against a provider without `listMounts`. `bindSandboxRootsToClient` subscribes to mount changes and returns an `Unsubscribe`.
-
-Roots do not require a sandbox — a static list or a plain provider function works, and that path lives in [@agentick/mcp](../mcp). The inbound direction, a connecting client's roots on `ctx.mcp.clientRoots`, needs no sandbox either.
-
-`fsFileResolver(rootDir)` is the no-sandbox backend: lossless text plus base64 blobs for binary, root-contained. `sandboxFileResolver` is text-only, because the handle contract exposes only `readFile(): string`.
+`sandboxFileResolver` is text-only, because the handle contract exposes only `readFile(): string`; `fsFileResolver(rootDir)` is the lossless backend — text plus base64 blobs for binary, root-contained.
 
 ## A live process — `spawn`
 
@@ -279,7 +267,21 @@ The control channel is separate from `stdout` **by construction**, which is what
 
 Like `addMount`, this is **capability-tiered**: a provider with no long-lived process surface leaves `spawn` undefined or throws `SandboxUnsupportedError`. It never degrades to `exec`, because silently dropping the control channel would break the caller's protocol rather than fail it.
 
-[@agentick/code-host](../code-host) is the consumer: `sandboxHostPort(handle)` places the runtime that executes model-authored code inside the jail.
+### Borrowing a session's jail
+
+A consumer that wants to run its own process inside a sandbox somebody else owns borrows `harness.placement` — the workspace plus `spawn`, and deliberately not `destroy` or `addMount`:
+
+```ts
+import { activeSandbox } from "@agentick/sandbox";
+import { sandboxHostPort } from "@agentick/code-host";
+
+const harness = activeSandbox(bridge); // or activeSandbox(bridge, "build")
+if (harness) hostRuntime({ host: sandboxHostPort(harness.placement) });
+```
+
+Read `SandboxPlacement` as a reduced **blast radius**, not reduced authority. A borrower that can `spawn` can run anything the jail permits, ungated — the same reach as `exec` without the ACL in front of it, which is sound only because placement is adopter wiring the model never touches. What it withholds is the power to tear down the sandbox the harness owns, or to widen the jail underneath it.
+
+`activeSandbox(bridge, id?)` is the same selection the built-in tools use: the default `<Sandbox id="primary">`, or the sole registered sandbox when no primary exists, and `undefined` rather than a guess when several are mounted and none is primary. Passing `id` is an exact lookup with no fallback.
 
 ## Writing a provider
 
@@ -311,10 +313,14 @@ Anything a provider needs is importable from the package root — the constructi
 
 | Export                                      | Purpose                                                                                                                                                                                            |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `withSandbox(options?)`                     | App extension; builds the registry on the app substrate. Takes `initialize`.                                                                                                                       |
+| `defineSandbox(config?)`                    | The `sandbox`-slot definition (ADR 93). `provider` + the flat create shape; the import from a provider package bakes `provider`.                                                                   |
+| `withSandbox(definition?)`                  | Session extension the slot mints; builds the registry on the session substrate and spins `"primary"` when a `provider` is set. The dynamic escape hatch.                                           |
+| `SandboxDefinition`                         | The `defineSandbox` / `withSandbox` config type: `provider`, `id`, `allow`, `workspace`, `mounts`, `mountAllow`, `env`, `limits`, `setup`, permission-timeout knobs.                               |
 | `SandboxHarness`                            | Wraps one handle: eight commands, the approval gate, ACL snapshots.                                                                                                                                |
 | `SandboxProvider` / `SandboxHandle`         | What a provider implements and what `create()` returns.                                                                                                                                            |
 | `SandboxSpawnRequest` / `SandboxProcess`    | The capability-tiered live-process surface: argv in, four streams out.                                                                                                                             |
+| `SandboxPlacement`                          | The borrow-only view — workspace + `spawn`, no lifecycle. `harness.placement`.                                                                                                                     |
+| `activeSandbox(bridge, id?)`                | The sandbox a consumer means by default: primary, else the sole one, else `undefined`.                                                                                                             |
 | `SandboxCreateOptions`                      | `workspace`, `mounts`, `mountAllow`, `allow`, `env`, `limits`, `setup`.                                                                                                                            |
 | `SandboxBridge` / `inMemorySandboxBridge()` | The registry interface, and an unwired one for tests.                                                                                                                                              |
 | `applyEdits(source, edits)` / `EditError`   | The pure edit transform and its diagnostic error.                                                                                                                                                  |
@@ -349,15 +355,14 @@ Addressable command names: `sandbox:exec`, `sandbox:read-file`, `sandbox:write-f
 
 `<Sandbox>` props: `provider` (required) · `id` (default `"primary"`) · `workspace`, `mounts`, `allow`, `env`, `limits` · `onPermissionTimeout`, `permissionTimeoutMs`.
 
-### `@agentick/sandbox/mcp`
+### `@agentick/sandbox/files`
 
-| Export                                                              | Purpose                                     |
-| ------------------------------------------------------------------- | ------------------------------------------- |
-| `sandboxRootsSource(sandbox)`                                       | Workspace + live mounts as `file://` roots. |
-| `bindSandboxRootsToClient(sandbox, client)`                         | Keeps a connected server's roots in sync.   |
-| `sandboxFileResolver` / `fsFileResolver`                            | `file://` template resolvers.               |
-| `registerFileResolver(resources, resolver)`                         | Mounts a resolver on a resources harness.   |
-| `FILE_URI_TEMPLATE`, `pathToFileUri`, `guessMimeType`, `isTextMime` | URI helpers.                                |
+| Export                                                                                 | Purpose                                            |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `sandboxFileResolver(sandbox)`                                                         | ACL-gated `file://` reads through the jail (text). |
+| `fsFileResolver(rootDir)`                                                              | Rooted, containment-checked `file://` reads.       |
+| `registerFileResolver(resources, resolver)`                                            | Mounts a resolver on a resources harness.          |
+| `FILE_URI_TEMPLATE`, `pathToFileUri`, `fileUriFromPath`, `guessMimeType`, `isTextMime` | URI helpers.                                       |
 
 ### `@agentick/sandbox/testing`
 
@@ -395,7 +400,6 @@ Addressable command names: `sandbox:exec`, `sandbox:read-file`, `sandbox:write-f
 - `src/react/__tests__/tools.spec.ts` — exactly four model-facing tools, and no mount tool among them.
 - `src/react/__tests__/tools-ctx-sandbox.spec.ts` — handlers resolving from `ctx.sandbox`: primary, sole-sandbox fallback, absent-bridge guard, multi-sandbox ambiguity.
 - `src/react/__tests__/component.spec.tsx` — `<Sandbox>` and `useSandbox()` against the real compiler.
-- `src/mcp/__tests__/roots.spec.ts` — workspace root plus live mounts (add then remove), and `bindSandboxRootsToClient` firing on every change with unsubscribe stopping it.
-- `src/mcp/__tests__/file-resolver.spec.ts` — text round-trip through the sandbox, binary degrade, `fsFileResolver` text and base64 blob, root containment, routing through a real resources harness.
+- `src/files/__tests__/file-resolver.spec.ts` — text round-trip through the sandbox, binary degrade, `fsFileResolver` text and base64 blob, root containment, routing through a real resources harness.
 - `src/testing/conformance.ts` — the provider contract itself, including the capability-tiered `spawn`: a live `/bin/sh` driven over its control channel mid-run, or an honest `undefined` / `SandboxUnsupportedError` from a provider that has no such surface.
 - Provider-side behavior is certified by `runSandboxProviderConformance` in each provider package.

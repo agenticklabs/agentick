@@ -21,15 +21,15 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./files": {
+      "types": "./src/files/index.ts",
+      "import": "./src/files/index.ts",
+      "default": "./src/files/index.ts"
+    },
     "./react": {
       "types": "./src/react/index.ts",
       "import": "./src/react/index.ts",
       "default": "./src/react/index.ts"
-    },
-    "./mcp": {
-      "types": "./src/mcp/index.ts",
-      "import": "./src/mcp/index.ts",
-      "default": "./src/mcp/index.ts"
     },
     "./testing": {
       "types": "./src/testing/index.ts",
@@ -45,15 +45,15 @@
         "import": "./dist/index.js",
         "default": "./dist/index.js"
       },
+      "./files": {
+        "types": "./dist/files/index.d.ts",
+        "import": "./dist/files/index.js",
+        "default": "./dist/files/index.js"
+      },
       "./react": {
         "types": "./dist/react/index.d.ts",
         "import": "./dist/react/index.js",
         "default": "./dist/react/index.js"
-      },
-      "./mcp": {
-        "types": "./dist/mcp/index.d.ts",
-        "import": "./dist/mcp/index.js",
-        "default": "./dist/mcp/index.js"
       },
       "./testing": {
         "types": "./dist/testing/index.d.ts",
@@ -65,11 +65,11 @@
     "types": "./dist/index.d.ts",
     "typesVersions": {
       "*": {
+        "files": [
+          "./dist/files/index.d.ts"
+        ],
         "react": [
           "./dist/react/index.d.ts"
-        ],
-        "mcp": [
-          "./dist/mcp/index.d.ts"
         ],
         "testing": [
           "./dist/testing/index.d.ts"
@@ -88,7 +88,6 @@
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
     "@agentick/elicitation": "workspace:*",
-    "@agentick/mcp": "workspace:*",
     "@agentick/pubsub": "workspace:*",
     "@agentick/resources": "workspace:*",
     "@agentick/runtime": "workspace:*",

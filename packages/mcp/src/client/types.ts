@@ -194,12 +194,9 @@ export interface McpClientHarnessOptions extends BaseHarnessOptions<unknown, "mc
    *
    * Omitted → the `roots` capability is NOT advertised.
    *
-   * The source is PLUGGABLE (ADR 65): a static list, an adopter provider
-   * fn, or the sandbox adapter. The sandbox↔roots adapter
-   * (`sandboxRootsSource` / `bindSandboxRootsToClient`) lives OUTSIDE this
-   * package, in `@agentick/sandbox/mcp`, so the MCP client core stays
-   * decoupled from the sandbox (no dep, no cycle). The seam is exactly
-   * this provider fn — see {@link McpRootsSource}.
+   * The source is PLUGGABLE (ADR 65): a static list or an adopter provider
+   * fn — see {@link McpRootsSource}. The MCP client core stays decoupled
+   * from any particular source (no dep, no cycle).
    */
   readonly roots?: McpRootsSource;
 }
@@ -239,8 +236,8 @@ export type { McpRoot };
  * (so a live source — e.g. the sandbox adapter — reflects mount changes).
  *
  * This IS the pluggable seam (ADR 65): a static list keeps roots usable
- * standalone with no sandbox in the graph; a provider fn lets the sandbox
- * adapter (`@agentick/sandbox/mcp`) project workspace + mounts.
+ * standalone; a provider fn lets an adopter project a live source
+ * (e.g. a workspace + mounts).
  *
  * TODO(#237-4b / ADR-65): roots-registry upgrade path — if a unified,
  * inspectable, cross-source mount registry is ever needed, a RootsHarness

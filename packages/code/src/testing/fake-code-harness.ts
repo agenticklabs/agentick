@@ -34,5 +34,8 @@ export async function fakeCodeHarness(
   const inbox = new LocalInbox();
   const harness = new CodeHarness(harnessId, journal, bus, inbox, rest);
   await harness.ready;
+  // Mirror `withCode`: resolve engine caps at construction so `capabilities()`
+  // is a sync read even for a provider-configured fake.
+  await harness.prepareCapabilities();
   return { harness, journal, bus, inbox, close: () => harness.close() };
 }

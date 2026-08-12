@@ -6,14 +6,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { deriveHookNames, type MemoryJournal } from "@agentick/runtime";
-import type { EventQuery, ProtocolEvent } from "@agentick/spec";
+import type { EventQuery, ProtocolEvent, SessionInstaller } from "@agentick/spec";
 
 import { fakeCodeHarness } from "../testing/fake-code-harness.js";
 import { fakeCode, fakeProgram } from "../testing/fake-code.js";
 import { fakeCodeSource } from "../testing/fake-code-probe.js";
 import { defineCode, isCodeDefinition } from "../definition.js";
 import { sha256Hex } from "../code-hash.js";
-import type { CodeExecuteInput, CodeExecuteResult, Runtime } from "../contract.js";
+import type { CodeExecuteInput, CodeExecuteResult, Runtime, RuntimeProvider } from "../contract.js";
+
+/** A stand-in for the arg a session-blind provider never reads. */
+const stubInstaller = (sessionId: string): SessionInstaller =>
+  ({ sessionId }) as unknown as SessionInstaller;
 
 /** Journal reads go through `compileQuery` — the same matcher a bus subscription uses. */
 async function collect(
@@ -37,6 +41,125 @@ describe("CodeHarness — provider binding", () => {
 
     const result = await harness.execute({ source: fakeCodeSource.returns("bound") });
     expect(result).toMatchObject({ outcome: "returned", value: "bound" });
+    await close();
+  });
+
+  it("a RuntimeProvider resolves LAZILY — once, on first execute, never at install", async () => {
+    const runtime = fakeCode();
+    const disposed = vi.spyOn(runtime, "dispose");
+    let resolves = 0;
+    let seenInstaller: SessionInstaller | undefined;
+    const provider: RuntimeProvider = {
+      capabilities: () => runtime.capabilities,
+      resolve: (installer) => {
+        resolves += 1;
+        seenInstaller = installer;
+        return runtime;
+      },
+    };
+    const installer = stubInstaller("s-lazy");
+    const { harness, close } = await fakeCodeHarness({ runtime: provider, installer });
+
+    // Constructed, caps prepared — but the full runtime has NOT resolved. This
+    // is the install-order dodge: a placed engine reaches the sandbox namespace
+    // only at first use, while its caps were legible sandbox-free at install.
+    expect(resolves).toBe(0);
+    expect(harness.hasRuntime()).toBe(true);
+    expect(harness.capabilities().name).toBe(runtime.capabilities.name);
+
+    await harness.execute({ source: fakeCodeSource.returns("first") });
+    expect(resolves).toBe(1);
+    expect(seenInstaller).toBe(installer);
+
+    // A second execution reuses the cached runtime — resolve stays at one, and
+    // the one warm engine is what carries state across a session.
+    await harness.execute({ source: fakeCodeSource.returns("second") });
+    expect(resolves).toBe(1);
+
+    await close();
+    expect(disposed).toHaveBeenCalledTimes(1);
+  });
+
+  it("a provider is never resolved when no program runs — nothing to dispose", async () => {
+    const runtime = fakeCode();
+    const disposed = vi.spyOn(runtime, "dispose");
+    let resolves = 0;
+    const provider: RuntimeProvider = {
+      capabilities: () => runtime.capabilities,
+      resolve: () => {
+        resolves += 1;
+        return runtime;
+      },
+    };
+    const { harness, close } = await fakeCodeHarness({
+      runtime: provider,
+      installer: stubInstaller("s-untouched"),
+    });
+
+    expect(harness.hasRuntime()).toBe(true);
+    await close();
+
+    expect(resolves).toBe(0);
+    expect(disposed).not.toHaveBeenCalled();
+  });
+
+  it("concurrent first executes resolve the provider exactly once", async () => {
+    const runtime = fakeCode();
+    let resolves = 0;
+    const provider: RuntimeProvider = {
+      capabilities: () => runtime.capabilities,
+      resolve: async (): Promise<Runtime> => {
+        resolves += 1;
+        await Promise.resolve();
+        return runtime;
+      },
+    };
+    const { harness, close } = await fakeCodeHarness({
+      runtime: provider,
+      installer: stubInstaller("s-race"),
+    });
+
+    await Promise.all([
+      harness.execute({ source: fakeCodeSource.returns(1) }),
+      harness.execute({ source: fakeCodeSource.returns(2) }),
+    ]);
+    expect(resolves).toBe(1);
+
+    await close();
+  });
+
+  it("capabilities() is a sync read prepared at install — from the engine, not a resolve", async () => {
+    const runtime = fakeCode({ name: "engine-caps" });
+    const opened = vi.spyOn(runtime, "createContext");
+    let capsCalls = 0;
+    let resolves = 0;
+    const provider: RuntimeProvider = {
+      capabilities: () => {
+        capsCalls += 1;
+        return runtime.capabilities;
+      },
+      resolve: () => {
+        resolves += 1;
+        return runtime;
+      },
+    };
+    const { harness, close } = await fakeCodeHarness({
+      runtime: provider,
+      installer: stubInstaller("s-caps"),
+    });
+
+    // Caps came from provider.capabilities() at install — NOT from resolve, and
+    // no context was opened. Repeated reads hit the cache, not the provider.
+    expect(harness.capabilities().name).toBe("engine-caps");
+    expect(harness.capabilities().name).toBe("engine-caps");
+    expect(capsCalls).toBe(1);
+    expect(resolves).toBe(0);
+    expect(opened).not.toHaveBeenCalled();
+
+    // The full runtime resolves only when a program runs.
+    await harness.execute({ source: fakeCodeSource.returns(1) });
+    expect(resolves).toBe(1);
+
     await close();
   });
 

@@ -15,6 +15,7 @@
  */
 
 export { hostRuntime, type HostRuntimeConfig } from "./host-runtime.js";
+export { sandboxHost, type SandboxHostConfig } from "./sandbox-host.js";
 export { detectEngine, hostCapabilities, type HostEngine } from "./engine.js";
 export { transpiler, type HostLanguage, type Transpiled } from "./language.js";
 export {

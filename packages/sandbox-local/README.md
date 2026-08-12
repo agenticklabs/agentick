@@ -29,7 +29,19 @@ await sandbox.editFile("notes.md", [{ old: "# Notes", new: "# Journal" }]);
 await sandbox.destroy(); // kills the process tree, removes the temp workspace
 ```
 
-Under an agent you rarely call the handle directly — mount it with `<Sandbox provider={provider}>` and the four built-in tools drive it. See [@agentick/sandbox](../sandbox).
+Under an agent you rarely call the handle directly. Reach for the placement-baked `defineSandbox()` — the import IS the choice of local — and drop it into the `sandbox` slot:
+
+```ts
+import { createApp } from "@agentick/app/react";
+import { defineSandbox } from "@agentick/sandbox-local";
+
+const app = await createApp(<Agent />, {
+  model,
+  sandbox: defineSandbox({ strategy: "auto", allow: { read: ["/workspace/**"] } }),
+});
+```
+
+Options are flat — the local provider's own config (`strategy`, `network`, `tmpBase`, `cleanupWorkspace`) alongside the generic definition fields (`allow`, `workspace`, `mounts`, …). The session spins one `"primary"` jail the four built-in tools drive; see [@agentick/sandbox](../sandbox). For coarser composition, import the generic `defineSandbox` from `@agentick/sandbox` and pass `localProvider()` explicitly.
 
 ## Fail closed on an unjailed host
 
@@ -126,19 +138,21 @@ const provider = localProvider({
 
 ## API
 
-| Export                                                     | Purpose                                                                     |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `localProvider(config?)`                                   | The provider. Config: `strategy`, `network`, `tmpBase`, `cleanupWorkspace`. |
-| `LocalSandbox`                                             | The handle class, plus `readonly isolation: SandboxStrategy`.               |
-| `NetworkProxyServer` / `ProxyServerConfig`                 | The egress proxy, usable standalone.                                        |
-| `detectCapabilities()` / `selectStrategy(caps, override?)` | Probe the host and resolve `"auto"` before creating.                        |
-| `resetCapabilitiesCache()`                                 | Clear the detection memo (tests).                                           |
-| `SandboxStrategy` / `PlatformCapabilities`                 | The tier union and the detection result shape.                              |
-| `CgroupManager` / `DiskMonitor`                            | Linux cgroup v2 limits and the disk poll.                                   |
-| `selectExecutor(strategy)` / `CommandExecutor`             | The jail strategy behind `exec` and `spawn`. `wrap()` returns the argv.     |
-| `createWorkspace` / `destroyWorkspace`                     | Temp workspace allocation and teardown.                                     |
-| `resolveMount` / `resolveMounts` / `ResolvedMount`         | Host-to-sandbox mount resolution.                                           |
-| `resolveSafePath` / `filterEnv` / `ENV_BLOCKLIST`          | Path confinement and environment scrubbing.                                 |
+| Export                                                     | Purpose                                                                                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `defineSandbox(options?)`                                  | The `sandbox`-slot definition with `localProvider` baked. Flat options: the provider config + the generic definition fields. |
+| `LocalSandboxOptions`                                      | The flat options type — `LocalProviderConfig` ∪ the definition shape (minus `provider`).                                     |
+| `localProvider(config?)`                                   | The provider. Config: `strategy`, `network`, `tmpBase`, `cleanupWorkspace`.                                                  |
+| `LocalSandbox`                                             | The handle class, plus `readonly isolation: SandboxStrategy`.                                                                |
+| `NetworkProxyServer` / `ProxyServerConfig`                 | The egress proxy, usable standalone.                                                                                         |
+| `detectCapabilities()` / `selectStrategy(caps, override?)` | Probe the host and resolve `"auto"` before creating.                                                                         |
+| `resetCapabilitiesCache()`                                 | Clear the detection memo (tests).                                                                                            |
+| `SandboxStrategy` / `PlatformCapabilities`                 | The tier union and the detection result shape.                                                                               |
+| `CgroupManager` / `DiskMonitor`                            | Linux cgroup v2 limits and the disk poll.                                                                                    |
+| `selectExecutor(strategy)` / `CommandExecutor`             | The jail strategy behind `exec` and `spawn`. `wrap()` returns the argv.                                                      |
+| `createWorkspace` / `destroyWorkspace`                     | Temp workspace allocation and teardown.                                                                                      |
+| `resolveMount` / `resolveMounts` / `ResolvedMount`         | Host-to-sandbox mount resolution.                                                                                            |
+| `resolveSafePath` / `filterEnv` / `ENV_BLOCKLIST`          | Path confinement and environment scrubbing.                                                                                  |
 
 ## Patterns
 

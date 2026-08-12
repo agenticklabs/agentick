@@ -22,17 +22,19 @@
 
 import type { HarnessInterceptors } from "@agentick/runtime";
 
-import type { Code, CodeBindings, CodeBudgets, Runtime } from "./contract.js";
+import type { Code, CodeBindings, CodeBudgets, Runtime, RuntimeProvider } from "./contract.js";
 
 /** Symbol-keyed and non-enumerable, so it stays out of spread-visible shape. */
 const CODE_DEFINITION: unique symbol = Symbol("agentick.codeDefinition");
 
 export interface CodeDefinition extends HarnessInterceptors<"code"> {
   /**
-   * The provider. Omitted, the install resolves `@agentick/code-host`; absent
-   * that, the namespace mounts INERT and every use fails `CodeProviderMissing`.
+   * The engine — a {@link RuntimeProvider} (`hostRuntime()`, `sandboxHost()`)
+   * resolved once per session at first use, or a live {@link Runtime} bound
+   * directly. Omitted, the install resolves `@agentick/code-host`; absent that,
+   * running a program fails `CodeProviderMissing`, naming the install.
    */
-  readonly runtime?: Runtime;
+  readonly runtime?: Runtime | RuntimeProvider;
   /**
    * The BASE context every program gets. `createContext({ bindings })` merges
    * OVER this per leaf, so a context adds `tools.extra` without wiping the

@@ -10,19 +10,23 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { SessionInstaller } from "@agentick/spec";
 
 import { DEFAULT_RUNTIME_PACKAGE, resolveDefaultRuntime } from "../default-runtime.js";
 import { fakeCodeHarness } from "../testing/index.js";
 
+// The default provider is session-blind — its resolve ignores the installer —
+// so a bare stub stands in for the argument the host path never reads.
+const noInstaller = {} as SessionInstaller;
+
 describe("the default runtime", () => {
   it("resolves to the host runtime when the package is present", async () => {
-    const runtime = await resolveDefaultRuntime();
+    const runtime = await resolveDefaultRuntime().resolve(noInstaller);
 
-    expect(runtime).toBeDefined();
     // Named for the engine running this process — the point of the default is
     // that it introduces no engine the adopter had not already accepted.
-    expect(runtime?.capabilities.name).toMatch(/^host:/);
-    await runtime?.dispose();
+    expect(runtime.capabilities.name).toMatch(/^host:/);
+    await runtime.dispose();
   });
 
   it("names the package it looks for, so the failure mode is greppable", () => {

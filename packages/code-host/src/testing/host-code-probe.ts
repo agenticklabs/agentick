@@ -10,7 +10,8 @@
 import type { CodeConformanceProbe, CodeSourceVocabulary } from "@agentick/code/testing";
 import type { CodeBudgetKey, CodeStream } from "@agentick/code";
 
-import { hostRuntime, type HostRuntimeConfig } from "../host-runtime.js";
+import { type HostRuntimeConfig } from "../host-runtime.js";
+import { hostRuntimeInstance } from "./host-runtime-instance.js";
 
 /** JSON with a name for the one value JSON cannot spell. */
 function literal(value: unknown): string {
@@ -59,7 +60,7 @@ export function hostCodeProbe(config: HostRuntimeConfig = {}): CodeConformancePr
   const engine = process.versions.bun === undefined ? "node" : "bun";
   return {
     label: `hostRuntime (${engine}, ${config.language ?? "javascript"})`,
-    makeRuntime: () => hostRuntime(config),
+    makeRuntime: () => hostRuntimeInstance(config),
     source: hostCodeSource,
   };
 }

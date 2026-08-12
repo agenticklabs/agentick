@@ -69,7 +69,12 @@ import type {
   SandboxRemoveMountInput,
   SandboxWriteFileInput,
 } from "@agentick/spec";
-import type { SandboxCreateOptions, SandboxHandle, SandboxProvider } from "./contract.js";
+import type {
+  SandboxCreateOptions,
+  SandboxHandle,
+  SandboxPlacement,
+  SandboxProvider,
+} from "./contract.js";
 import { HandlerError } from "@agentick/spec";
 
 import {
@@ -167,9 +172,8 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
    * Mount-topology fan-out — fires after a successful `add-mount` /
    * `remove-mount`. Mirrors `ResourcesHarness.subscribeAll`: a
    * plain notifier is the idiomatic "a mutation happened" seam (the raw
-   * bus is a heavier `Stream` substrate for audit/observability). Consumed
-   * by the roots↔MCP adapter (`@agentick/sandbox/mcp`) to fire
-   * `notifyRootsListChanged()` so a connected server re-pulls (ADR 65).
+   * bus is a heavier `Stream` substrate for audit/observability). A
+   * consumer subscribes to re-pull mount topology on change (ADR 65).
    */
   private readonly mountsNotifier: Notifier = createNotifier();
 
@@ -291,6 +295,23 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
         permissionTimeoutMs: init.permissionTimeoutMs,
       }),
     });
+  }
+
+  /**
+   * The sandbox as a place to RUN something — what a consumer borrows to
+   * put its own process inside this jail (`sandboxHostPort` in
+   * `@agentick/code-host` is the one that does).
+   *
+   * Borrow-only, and narrow on purpose: the caller gets the workspace and
+   * `spawn`, never `destroy` or `addMount`, because the harness owns this
+   * sandbox's lifecycle and a borrower tearing it down — or widening the
+   * jail under it — is the accident worth making unrepresentable. It is
+   * NOT an ACL-reduced handle: `spawn` runs whatever the jail permits,
+   * ungated, which is sound only because placement is adopter wiring the
+   * model never reaches.
+   */
+  get placement(): SandboxPlacement {
+    return this.handle;
   }
 
   get status(): SandboxStatus {
