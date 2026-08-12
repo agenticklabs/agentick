@@ -610,6 +610,25 @@ importers:
         specifier: ^3.22.0
         version: 3.22.0
 
+  packages/code-secure-exec:
+    dependencies:
+      '@agentick/code':
+        specifier: workspace:*
+        version: link:../code
+      '@agentick/spec':
+        specifier: workspace:*
+        version: link:../spec
+      esbuild:
+        specifier: ^0.27.3
+        version: 0.27.3
+      isolated-vm:
+        specifier: ^7.0.1
+        version: 7.0.1
+    devDependencies:
+      effect:
+        specifier: ^3.22.0
+        version: 3.22.0
+
   packages/compiler:
     dependencies:
       '@agentick/formatters':
@@ -4745,6 +4764,10 @@ packages:
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
 
+  isolated-vm@7.0.1:
+    resolution: {integrity: sha512-nBCQ1hXEaYKYJ79wwfhaF44ITOJC30Hw0wPEsFeNsdD3hdeKK7FW1SGMQYBUA+qasvkqdOazI+iBuq0lcbN/aw==}
+    engines: {node: '>=24.0.0'}
+
   istanbul-lib-coverage@3.2.2:
     resolution: {integrity: sha512-O8dpsF+r0WV/8MNRKfnmrtCWhuKjxrq2w+jpzBL5UZKTi2LeVWnWOmWRxFlesJONmc+wLAGvKQZEOanko0LFTg==}
     engines: {node: '>=8'}
@@ -5018,6 +5041,10 @@ packages:
 
   node-gyp-build-optional-packages@5.2.2:
     resolution: {integrity: sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==}
+    hasBin: true
+
+  node-gyp-build@4.8.4:
+    resolution: {integrity: sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ==}
     hasBin: true
 
   object-assign@4.1.1:
@@ -8505,6 +8532,10 @@ snapshots:
 
   isexe@2.0.0: {}
 
+  isolated-vm@7.0.1:
+    dependencies:
+      node-gyp-build: 4.8.4
+
   istanbul-lib-coverage@3.2.2: {}
 
   istanbul-lib-report@3.0.1:
@@ -8802,6 +8833,8 @@ snapshots:
     dependencies:
       detect-libc: 2.1.2
     optional: true
+
+  node-gyp-build@4.8.4: {}
 
   object-assign@4.1.1: {}
 
