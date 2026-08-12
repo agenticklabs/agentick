@@ -117,6 +117,7 @@
     "@agentick/client-core": "workspace:*",
     "@agentick/compiler": "workspace:*",
     "@agentick/compiler-react": "workspace:*",
+    "@agentick/model": "workspace:*",
     "@agentick/pubsub": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",

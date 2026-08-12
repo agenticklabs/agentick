@@ -4,17 +4,19 @@
  * Pure functions. Used by `<Timeline maxTokens={…}>` to evict older
  * entries when the persisted history exceeds a configured budget.
  *
- * Token estimates use a `chars / 4` heuristic — intentionally approximate
- * (this is a budgeting hint, not a billing surface). The estimate inspects
- * text-shaped blocks (`text`, `code`, `reasoning`, `json`, `xml`, `csv`,
- * `html`, `tool_result`) and ignores opaque media. A floor of 4 tokens
- * accounts for role/wrapper overhead the wire format adds.
+ * Token estimates come from `estimateBlocks` in `@agentick/model` — one
+ * arithmetic, shared with the request estimator (ADR 97), so media is priced
+ * at the active model's real per-modality rates instead of the zero a
+ * text-only walk gave it. Approximate by design; this is a budgeting hint, not
+ * a billing surface. A floor of 4 tokens per entry accounts for the
+ * role/wrapper overhead the wire format adds.
  *
  * @see packages/core/src/jsx/components/token-budget.ts (v1 origin)
  */
 
-import type { ContentBlock, TimelineEntry } from "@agentick/spec";
+import type { TimelineEntry } from "@agentick/spec";
 import { danglingToolIds, isDangling, isIntact, toolSpanEnd } from "@agentick/spec";
+import { estimateBlocks, type EstimateOptions } from "@agentick/model";
 
 // ============================================================================
 // Types
@@ -67,6 +69,12 @@ export interface TokenBudgetInfo {
 
 export interface CompactOptions {
   readonly maxTokens: number;
+  /**
+   * Per-modality rates for sizing media. Absent, media prices at the shared
+   * floor — a caller with the active model in hand passes `{ info }` so an
+   * image costs what THIS provider charges for it.
+   */
+  readonly estimate?: EstimateOptions;
   readonly strategy?: CompactionStrategy;
   readonly headroom?: number;
   readonly preserveRoles?: readonly string[];
@@ -83,72 +91,22 @@ export interface CompactResult {
 // Token estimation
 // ============================================================================
 
-const CHARS_PER_TOKEN = 4;
 const ENTRY_OVERHEAD = 4;
 
-function blockCharCount(block: ContentBlock): number {
-  switch (block.type) {
-    case "text":
-    case "code":
-    case "reasoning":
-    case "xml":
-    case "csv":
-    case "html": {
-      const text = (block as { text?: unknown }).text;
-      return typeof text === "string" ? text.length : 0;
-    }
-    case "json": {
-      const data = (block as { data?: unknown; text?: unknown }).data;
-      if (data !== undefined) {
-        try {
-          return JSON.stringify(data).length;
-        } catch {
-          return 0;
-        }
-      }
-      const text = (block as { text?: unknown }).text;
-      return typeof text === "string" ? text.length : 0;
-    }
-    case "tool_result": {
-      const content = (block as { content?: unknown }).content;
-      if (typeof content === "string") return content.length;
-      if (Array.isArray(content)) {
-        let n = 0;
-        for (const child of content) {
-          if (child && typeof child === "object" && "type" in child) {
-            n += blockCharCount(child as ContentBlock);
-          }
-        }
-        return n;
-      }
-      return 0;
-    }
-    case "tool_use": {
-      const input = (block as { input?: unknown }).input;
-      if (input !== undefined) {
-        try {
-          return JSON.stringify(input).length;
-        } catch {
-          return 0;
-        }
-      }
-      return 0;
-    }
-    default:
-      return 0;
-  }
-}
-
 /**
- * TODO(converge-token-estimators): a second estimator, weaker than
- * `estimateTokenBreakdown` in `@agentick/model` and blind to the same media —
- * an image scores zero here. It cannot delegate without this package taking a
- * dependency on `@agentick/model`. See ADR 97 "Known gaps".
+ * Tokens an entry costs, plus the role/wrapper overhead the wire format adds.
+ *
+ * The arithmetic is `estimateBlocks` in `@agentick/model` (ADR 97). This used
+ * to be a hand-rolled per-block switch with a `default: return 0` arm, which is
+ * how an image, a PDF and a recording each came to cost nothing — the entries
+ * most likely to be worth evicting were the ones the budget could not see.
+ *
+ * `options` is how a caller supplies the active model's real per-modality
+ * rates; without it the shared floor applies, which is still a number rather
+ * than a silent zero.
  */
-export function getEntryTokens(entry: MessageTimelineEntry): number {
-  let chars = 0;
-  for (const block of entry.message.content) chars += blockCharCount(block);
-  return Math.ceil(chars / CHARS_PER_TOKEN) + ENTRY_OVERHEAD;
+export function getEntryTokens(entry: MessageTimelineEntry, options?: EstimateOptions): number {
+  return estimateBlocks(entry.message.content, options) + ENTRY_OVERHEAD;
 }
 
 // ============================================================================
@@ -158,12 +116,13 @@ export function getEntryTokens(entry: MessageTimelineEntry): number {
 function truncateStrategy(
   entries: readonly MessageTimelineEntry[],
   effectiveBudget: number,
+  estimate: EstimateOptions | undefined,
 ): CompactionResult {
   const kept: MessageTimelineEntry[] = [];
   const evicted: MessageTimelineEntry[] = [];
   let budget = effectiveBudget;
   for (let i = entries.length - 1; i >= 0; i--) {
-    const tokens = getEntryTokens(entries[i]!);
+    const tokens = getEntryTokens(entries[i]!, estimate);
     if (budget >= tokens) {
       kept.unshift(entries[i]!);
       budget -= tokens;
@@ -178,13 +137,14 @@ function slidingWindowStrategy(
   entries: readonly MessageTimelineEntry[],
   effectiveBudget: number,
   preserveRoles: readonly string[],
+  estimate: EstimateOptions | undefined,
 ): CompactionResult {
   const preserved = new Set<number>();
   let preservedTokens = 0;
   for (let i = 0; i < entries.length; i++) {
     if (preserveRoles.includes(entries[i]!.message.role)) {
       preserved.add(i);
-      preservedTokens += getEntryTokens(entries[i]!);
+      preservedTokens += getEntryTokens(entries[i]!, estimate);
     }
   }
 
@@ -193,7 +153,7 @@ function slidingWindowStrategy(
   const keptCandidates = new Set<number>();
   for (let i = entries.length - 1; i >= 0; i--) {
     if (preserved.has(i)) continue;
-    const tokens = getEntryTokens(entries[i]!);
+    const tokens = getEntryTokens(entries[i]!, estimate);
     if (budget >= tokens) {
       keptCandidates.add(i);
       budget -= tokens;
@@ -263,17 +223,18 @@ export function compactEntries(
     headroom = 0,
     preserveRoles = ["system"],
     guidance,
+    estimate,
   } = options;
 
   if (strategy === "none" || entries.length === 0) {
     let total = 0;
-    for (const e of entries) total += getEntryTokens(e);
+    for (const e of entries) total += getEntryTokens(e, estimate);
     return { kept: entries, evicted: [], currentTokens: total };
   }
 
   const effectiveBudget = maxTokens - headroom;
   let totalTokens = 0;
-  for (const e of entries) totalTokens += getEntryTokens(e);
+  for (const e of entries) totalTokens += getEntryTokens(e, estimate);
   if (totalTokens <= effectiveBudget) {
     return { kept: entries, evicted: [], currentTokens: totalTokens };
   }
@@ -286,13 +247,13 @@ export function compactEntries(
       guidance,
     );
   } else if (strategy === "truncate") {
-    result = truncateStrategy(entries, effectiveBudget);
+    result = truncateStrategy(entries, effectiveBudget, estimate);
   } else {
-    result = slidingWindowStrategy(entries, effectiveBudget, preserveRoles);
+    result = slidingWindowStrategy(entries, effectiveBudget, preserveRoles, estimate);
   }
 
   const intact = evictDanglingHalves(entries, result);
   let keptTokens = 0;
-  for (const e of intact.kept) keptTokens += getEntryTokens(e);
+  for (const e of intact.kept) keptTokens += getEntryTokens(e, estimate);
   return { kept: intact.kept, evicted: intact.evicted, currentTokens: keptTokens };
 }

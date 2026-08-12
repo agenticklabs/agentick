@@ -19,6 +19,7 @@
  */
 
 import type {
+  ContentBlock,
   LanguageModelInput,
   LanguageModelMessagePart,
   LanguageModelTool,
@@ -26,6 +27,7 @@ import type {
   TokenEstimate,
 } from "@agentick/spec";
 import type { ModelInfo } from "./model-info.js";
+import { messagePartFromBlock } from "./canonical-projection.js";
 
 export type { MediaTokenRates, TokenEstimate };
 
@@ -159,3 +161,27 @@ export function estimateTokens(input: LanguageModelInput | string, info?: ModelI
 }
 
 const omitInfo = (info?: ModelInfo): EstimateOptions => (info ? { info } : {});
+
+/**
+ * Estimate content blocks — timeline entries, a message body — rather than a
+ * whole request.
+ *
+ * Lowers through {@link messagePartFromBlock} and reuses the one fold, rather
+ * than walking `ContentBlock` directly. Two reasons, and the second is why this
+ * function exists at all: a second exhaustive fold would be the duplication
+ * this replaces wearing better clothes, and the lowered form is what actually
+ * goes on the wire, so it is what actually gets billed.
+ *
+ * A caller sizing a conversation wants this; a caller sizing a REQUEST wants
+ * {@link estimateTokenBreakdown}, which additionally counts the system text and
+ * tool schemas that only join at projection.
+ */
+export function estimateBlocks(
+  blocks: Iterable<ContentBlock>,
+  options: EstimateOptions = {},
+): number {
+  const media = { ...DEFAULT_MEDIA_TOKENS, ...options.info?.mediaTokens, ...options.media };
+  let chars = 0;
+  for (const block of blocks) chars += partChars(messagePartFromBlock(block), media);
+  return fromChars(chars);
+}

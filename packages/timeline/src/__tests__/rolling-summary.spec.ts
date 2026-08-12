@@ -54,6 +54,82 @@ const summaryOf = (e: TimelineEntry) =>
   (e as { message: { content: readonly { data?: { summary?: string } }[] } }).message.content[0]
     ?.data?.summary;
 
+describe("keepVerbatim bounds the tail by tokens, not just by count", () => {
+  /** A turn carrying a large tool result — a page outline, a query dump. */
+  const fat = (id: string, chars: number): TimelineEntry => ({
+    kind: "message",
+    message: {
+      id,
+      ts: 0,
+      role: "user",
+      content: [{ type: "text", text: "x".repeat(chars) }],
+    },
+  });
+
+  it("keeps fewer entries when the recent ones are large", async () => {
+    // The ratchet: a COUNT-bounded tail of six page outlines can exceed the
+    // trigger's ceiling on its own, and then no amount of folding older
+    // material gets under it — the fold destroys context and the trigger stays
+    // hot. Bounding the tail by tokens is what makes the fold able to succeed.
+    const keepVerbatim = ({
+      entries: all,
+      sizeOf,
+    }: {
+      entries: readonly TimelineEntry[];
+      sizeOf: (e: TimelineEntry) => number;
+    }): number => {
+      let budget = 10_000;
+      let n = 0;
+      for (let i = all.length - 1; i >= 0; i--) {
+        budget -= sizeOf(all[i]!);
+        if (budget < 0) break;
+        n++;
+      }
+      return Math.max(1, n);
+    };
+
+    const strategy = rollingSummary({ keepVerbatim });
+    // Ten turns of ~5k tokens each (20k chars / 4). Only two fit in 10k.
+    const fatLog = Array.from({ length: 10 }, (_, i) => fat(`f${i}`, 20_000));
+    const out = await strategy.run({ ...ctx(), entries: fatLog, generate: stubGenerate() });
+
+    // 1 summary + the tail that fits, which is far fewer than the default 6.
+    expect(out.length).toBeLessThan(6);
+    expect(summaryOf(out[0]!)).toBe("a summary");
+  });
+
+  it("still takes a plain number, which is the common case", async () => {
+    const out = await rollingSummary({ keepVerbatim: 2 }).run({
+      ...ctx(),
+      entries: entries(10),
+      generate: stubGenerate(),
+    });
+    expect(out).toHaveLength(3); // summary + 2
+  });
+
+  it("sizes an image, so a screenshot-heavy tail is not measured as empty", () => {
+    // `sizeOf` is the shared arithmetic (ADR 97). Before it, media scored zero,
+    // so a token-bounded tail would have kept everything and bounded nothing.
+    let seen = 0;
+    const withImage: TimelineEntry = {
+      kind: "message",
+      message: {
+        id: "img",
+        ts: 0,
+        role: "user",
+        content: [{ type: "image", source: { type: "url", url: "https://e.test/a.png" } }],
+      },
+    };
+    void rollingSummary({
+      keepVerbatim: ({ entries: all, sizeOf }) => {
+        seen = sizeOf(all[0]!);
+        return 1;
+      },
+    }).run({ ...ctx(), entries: [withImage, ...entries(3)], generate: stubGenerate() });
+    expect(seen).toBeGreaterThan(0);
+  });
+});
+
 describe("the fold", () => {
   it("replaces everything but the kept tail with one summary event", async () => {
     const strategy = rollingSummary({ keepVerbatim: 2 });

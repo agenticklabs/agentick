@@ -1732,6 +1732,9 @@ importers:
       '@agentick/compiler-react':
         specifier: workspace:*
         version: link:../compiler-react
+      '@agentick/model':
+        specifier: workspace:*
+        version: link:../model
       '@agentick/pubsub':
         specifier: workspace:*
         version: link:../pubsub

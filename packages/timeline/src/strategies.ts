@@ -26,6 +26,7 @@ import type {
 } from "@agentick/spec";
 import { toolSpanEnd } from "@agentick/spec";
 import { omitUndefined, generateId } from "@agentick/utils";
+import { estimateBlocks } from "@agentick/model";
 
 export interface FromHandlerOptions {
   readonly handler: CompactRun;
@@ -73,14 +74,31 @@ export interface RollingSummaryOptions {
   /**
    * Recent entries that survive verbatim. Default 6.
    *
-   * TODO(keep-verbatim-token-bound): an entry COUNT, with no token bound —
-   * unlike `threshold` and `maxOutputTokens`, which are `Sized<>`. When the
-   * retained tail alone exceeds the trigger's ceiling (six entries each
-   * carrying a large tool result), the trigger stays hot and every tick folds
-   * again without ever getting under the bar, destroying older context on each
-   * pass. Making this `Sized<>` closes it. See ADR 97 "Known gaps".
+   * A COUNT is the wrong bound when the entries are large: six turns each
+   * carrying a page outline can exceed the trigger's ceiling on their own, and
+   * then folding cannot get under it no matter how much older material it
+   * destroys. Pass a function to bound the tail by tokens instead — the ctx
+   * carries the entries and a sizer, so the common case is a fold over
+   * `sizeOf` (ADR 97).
+   *
+   * @example
+   * // Keep as many recent turns as fit in 40k tokens, at most 12.
+   * keepVerbatim: ({ entries, sizeOf }) => {
+   *   let budget = 40_000;
+   *   let n = 0;
+   *   for (let i = entries.length - 1; i >= 0 && n < 12; i--) {
+   *     budget -= sizeOf(entries[i]!);
+   *     if (budget < 0) break;
+   *     n++;
+   *   }
+   *   return Math.max(1, n);
+   * }
    */
-  readonly keepVerbatim?: number;
+  readonly keepVerbatim?: Sized<{
+    readonly entries: readonly TimelineEntry[];
+    /** Tokens one entry costs — the same arithmetic the request estimator uses. */
+    readonly sizeOf: (entry: TimelineEntry) => number;
+  }>;
   /**
    * How many summary events the PROJECTION may hold. Below the bound a fold
    * leaves earlier summaries alone and appends a new one; at the bound it
@@ -121,6 +139,17 @@ const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 const DEFAULT_THRESHOLD = 120_000;
 const DEFAULT_KEEP_VERBATIM = 6;
 const DEFAULT_KEEP_SUMMARIES = 1;
+
+/**
+ * Tokens one entry costs — the sizer handed to a `keepVerbatim` function.
+ *
+ * The same arithmetic the request estimator runs (ADR 97), so a tail bounded
+ * here and a ceiling checked there are denominated in one currency. No model
+ * info: a strategy is construction-bound and does not know which model a given
+ * session will call, so media prices at the shared floor.
+ */
+const sizeOf = (entry: TimelineEntry): number =>
+  entry.kind === "message" ? estimateBlocks(entry.message.content) : 0;
 
 const isSummary = (e: TimelineEntry): boolean =>
   e.kind === "message" &&
@@ -350,7 +379,6 @@ function joinInstructions(
  * session can supply.
  */
 export function rollingSummary(options: RollingSummaryOptions = {}): CompactStrategy {
-  const keepVerbatim = options.keepVerbatim ?? DEFAULT_KEEP_VERBATIM;
   const keepSummaries = options.keepSummaries ?? DEFAULT_KEEP_SUMMARIES;
   const standing = options.instructions ?? DEFAULT_SUMMARY_INSTRUCTIONS;
   const questionsInstruction = options.questions === false ? undefined : QUESTIONS_INSTRUCTION;
@@ -361,6 +389,10 @@ export function rollingSummary(options: RollingSummaryOptions = {}): CompactStra
         "rollingSummary needs a model: nothing bound `generate` on the compaction context.",
       );
     }
+    const keepVerbatim = resolve(options.keepVerbatim, DEFAULT_KEEP_VERBATIM, {
+      entries,
+      sizeOf,
+    });
     const cut = nearestTurnStart(entries, Math.max(0, entries.length - keepVerbatim));
     const older = entries.slice(0, cut);
     const keep = entries.slice(cut);

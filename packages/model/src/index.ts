@@ -81,6 +81,7 @@ export {
 } from "./pricing.js";
 export {
   DEFAULT_MEDIA_TOKENS,
+  estimateBlocks,
   estimateTokenBreakdown,
   estimateTokens,
   type EstimateOptions,

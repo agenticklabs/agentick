@@ -214,7 +214,10 @@ existing wire-part fold via `messagePartFromBlock`:
   its own estimator precisely by avoiding model, and paid for it in blindness to media. The
   dep is the correction, not the cost.
 
-Closes `TODO(keep-verbatim-token-bound)` and `TODO(converge-token-estimators)` together.
+**Landed.** `estimateBlocks` is in `@agentick/model`; `getEntryTokens` delegates to it (an
+image in a timeline entry used to cost zero and now costs the model's rate); `keepVerbatim`
+is `Sized<{ entries, sizeOf }>`, so a tail can be bounded in the same currency the ceiling is
+checked in. Both TODOs closed.
 
 ### Genuinely separate
 

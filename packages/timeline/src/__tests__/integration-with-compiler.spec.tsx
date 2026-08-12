@@ -318,6 +318,38 @@ describe("<Timeline> — token budget", () => {
 // Pure compaction unit tests (no harness needed)
 // ============================================================================
 
+describe("getEntryTokens sees media (ADR 97)", () => {
+  const withImage = (): MessageTimelineEntry =>
+    ({
+      kind: "message",
+      message: {
+        id: "img",
+        ts: 0,
+        role: "user",
+        content: [
+          { type: "text", text: "look" },
+          { type: "image", source: { type: "url", url: "https://example.test/a.png" } },
+        ],
+      },
+    }) as MessageTimelineEntry;
+
+  it("charges for an image, which used to cost nothing at all", () => {
+    // The old per-block switch had a `default: return 0` arm, so a screenshot
+    // scored zero — the entries most worth evicting were the ones the budget
+    // could not see. A conversation of images sat at "0 tokens" forever.
+    const textOnly = getEntryTokens(userEntry("t", "look"));
+    expect(getEntryTokens(withImage())).toBeGreaterThan(textOnly + 100);
+  });
+
+  it("prices it at the model's rate when the caller supplies one", () => {
+    // Same arithmetic and same rate table as the request estimator — one
+    // number for one image, wherever it is being counted.
+    const cheap = getEntryTokens(withImage(), { media: { image: 10 } });
+    const dear = getEntryTokens(withImage(), { media: { image: 5_000 } });
+    expect(dear - cheap).toBe(4_990);
+  });
+});
+
 describe("compactEntries", () => {
   it("returns all entries unchanged when total tokens <= budget", () => {
     const entries = [userEntry("a", "hi"), userEntry("b", "ho")];
