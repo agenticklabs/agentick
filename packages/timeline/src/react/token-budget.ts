@@ -139,6 +139,12 @@ function blockCharCount(block: ContentBlock): number {
   }
 }
 
+/**
+ * TODO(converge-token-estimators): a second estimator, weaker than
+ * `estimateTokenBreakdown` in `@agentick/model` and blind to the same media —
+ * an image scores zero here. It cannot delegate without this package taking a
+ * dependency on `@agentick/model`. See ADR 97 "Known gaps".
+ */
 export function getEntryTokens(entry: MessageTimelineEntry): number {
   let chars = 0;
   for (const block of entry.message.content) chars += blockCharCount(block);

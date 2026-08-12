@@ -214,6 +214,19 @@ describe("lifecycle bridge — real loop drives the WHOLE hook family (#206 / AD
     expect(last.usedTokens).toBe(250);
     expect(last.utilization).toBeCloseTo(0.25); // 250 / 1000
 
+    // The locally-measured estimate rides the same bridge, and carries the one
+    // thing `usedTokens` cannot: which part of the request was conversation and
+    // which was tool schema. A trigger that folds the timeline can only act on
+    // the first, so a single total is the wrong number to hand it.
+    //
+    // This assertion is here rather than in a unit test on purpose — the chain
+    // it proves is executor → TickResult → lifecycle metadata → hook, five
+    // packages, exactly the shape that shipped dead before this file existed.
+    expect(last.estimated).toBeDefined();
+    expect(last.estimated!.total).toBe(last.estimated!.messages + last.estimated!.tools);
+    // The tree declares one tool, so the schema half is real and separable.
+    expect(last.estimated!.tools).toBeGreaterThan(0);
+
     await session.close();
     await tools.close();
   });

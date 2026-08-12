@@ -154,6 +154,34 @@ export interface ExecutionTarget {
    * @see docs/proposals/v2/usage-cost.md
    */
   readonly rates?: import("./usage-cost.js").RateCard;
+  /**
+   * Self-described token cost for content a character count cannot read — an
+   * image, a PDF page, a minute of audio. Same authority argument as
+   * {@link pricing}: only the adapter knows how ITS provider bills a
+   * screenshot, and the same image is ~765 tokens on OpenAI and ~1365 on
+   * Anthropic because they use different formulas.
+   *
+   * On the target rather than in a table inside `@agentick/model` so a
+   * third-party adapter can supply rates at all — a central table is closed to
+   * every package that is not agentick's own. Consumers resolve
+   * adopter-registry > `target.mediaTokens` > seed, the ladder `pricing` uses.
+   */
+  readonly mediaTokens?: Partial<MediaTokenRates>;
+}
+
+/**
+ * Tokens charged per whole media block, by modality.
+ *
+ * Flat per block because a `MediaSource` carries no dimensions, page count or
+ * duration — there is nothing to compute from. An adapter states the published
+ * formula evaluated at one typical instance; a deployment that knows its own
+ * media better overrides through the model registry.
+ */
+export interface MediaTokenRates {
+  readonly image: number;
+  readonly document: number;
+  readonly audio: number;
+  readonly video: number;
 }
 
 export interface LanguageModelTarget extends ExecutionTarget {

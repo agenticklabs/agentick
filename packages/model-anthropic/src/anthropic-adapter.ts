@@ -281,6 +281,20 @@ export function anthropic(
       contextWindow: 200_000,
       maxOutputTokens: 8_192,
     },
+    // Anthropic charges an image at roughly `width × height / 750`, which tops
+    // out near 1590 at the 1092² it recommends; a PDF page runs 1.5k–3k. A
+    // MediaSource carries no dimensions or page count, so these are that
+    // formula at one typical instance (a ~1024² screenshot, one page).
+    //
+    // `audio` and `video` are declared unsupported above and dropped before the
+    // wire — the rates exist only so a block that somehow reaches an estimate
+    // is not silently free.
+    mediaTokens: {
+      image: 1_365,
+      document: 2_250,
+      audio: 1_900,
+      video: 15_000,
+    },
   };
   // `rates` and `providerOptions` layer OVER the resolved target, explicit
   // or default. An adopter who overrides the target is describing

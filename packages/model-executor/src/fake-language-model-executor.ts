@@ -42,6 +42,7 @@ import type {
   ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
+  TokenEstimate,
   ExecutorError,
   ExecutorFx,
   ExecutorStream,
@@ -72,7 +73,13 @@ import {
 
 import { omitUndefined } from "@agentick/utils";
 
-import { buildMessages, buildParameters, buildTools } from "@agentick/model";
+import {
+  buildMessages,
+  buildParameters,
+  buildTools,
+  effectiveModelInfo,
+  estimateTokenBreakdown,
+} from "@agentick/model";
 import {
   ExecutorLifecycle,
   isFoldedTerminal,
@@ -339,6 +346,19 @@ export class FakeLanguageModelExecutor
 
   project(input: ProjectInput): Promise<LanguageModelInput> {
     return runHarnessProtocol(this.projectFx(input));
+  }
+
+  /**
+   * Measure a projection, the same arithmetic the real executor runs.
+   *
+   * A fake that omits this makes the estimate invisible to every integration
+   * test — which is how the lifecycle bridge this file's sibling gate exists to
+   * protect shipped dead across five packages. The fake projects for real, so
+   * it can measure for real.
+   */
+  estimateInput(input: LanguageModelInput, target?: ExecutionTarget): TokenEstimate {
+    const info = effectiveModelInfo(target ?? this.target);
+    return estimateTokenBreakdown(input, ...(info ? [{ info }] : []));
   }
 
   execute(input: ExecuteInput<LanguageModelInput>): Promise<unknown> {
@@ -649,7 +669,13 @@ export class FakeLanguageModelExecutor
       }
 
       // 6. normalize (identity for the mock).
-      return { outcome: "succeeded", result: raw as LanguageModelExecutionResult };
+      return {
+        outcome: "succeeded",
+        result: {
+          ...(raw as LanguageModelExecutionResult),
+          estimate: this.estimateInput(projected, input.target),
+        },
+      };
     });
   }
 }

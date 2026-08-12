@@ -1195,7 +1195,19 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           target: tickTarget,
           scope: { sessionId: input.sessionId, executionId, tickId },
         });
-        executorTerminal = { outcome: "succeeded", result: normalized };
+        // The non-streaming `run` stamps this inside the executor, where one
+        // call sees both halves. Here the loop composes the three phases
+        // itself, so `normalize` never meets the input that was sent and the
+        // stamp has to happen at the only point holding both.
+        executorTerminal = {
+          outcome: "succeeded",
+          result: {
+            ...normalized,
+            ...(tickModelExecutor.estimateInput
+              ? { estimate: tickModelExecutor.estimateInput(projected, tickTarget) }
+              : {}),
+          },
+        };
       } else {
         // Non-streaming path: classic project → execute → normalize via run.
         executorTerminal = yield* tickModelExecutor.fx.run({

@@ -48,6 +48,7 @@ import type {
   ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
+  TokenEstimate,
   ExecutorError,
   ExecutorFx,
   ExecutorStream,
@@ -85,6 +86,8 @@ import {
   customBlockTransform,
   defaultFinalizeStream,
   defaultProject,
+  effectiveModelInfo,
+  estimateTokenBreakdown,
   StreamAccumulator,
   type CustomBlockDefinition,
   type DeltaTransform,
@@ -429,6 +432,28 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    */
   private projectImpl(input: ProjectInput): LanguageModelInput {
     return this.adapter.project ? this.adapter.project(input) : defaultProject(input);
+  }
+
+  /**
+   * Measure a projected request — what it will cost to SEND.
+   *
+   * Lives here because this is the only layer holding both halves: the
+   * projection (system text folded in, tools attached, sections already
+   * formatted) and the target's model facts, which carry the per-modality
+   * rates. Measuring earlier measures a different request.
+   *
+   * Public so the loop can measure the streaming path, where it composes
+   * project → executeStream → normalize itself and no single executor call
+   * sees both the input and the result.
+   *
+   * TODO(estimate-adopter-registry): reads `effectiveModelInfo(target)` with no
+   * adopter registry — the session owns that — so a deployment's overridden
+   * media rates do not reach this estimate. Thread the registry to executors
+   * alongside the target.
+   */
+  estimateInput(input: LanguageModelInput, target?: ExecutionTarget): TokenEstimate {
+    const info = effectiveModelInfo(target ?? this.target);
+    return estimateTokenBreakdown(input, ...(info ? [{ info }] : []));
   }
 
   /**
@@ -1210,13 +1235,16 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       // 5. merge provider-specific metadata (v1 extractMetadata parity).
       //    Default `extractMetadata` returns undefined → no-op.
       const extracted = this.extractMetadata(rawForNormalize);
-      const finalResult: LanguageModelExecutionResult =
-        extracted !== undefined
-          ? {
-              ...result,
-              finishMetadata: { ...(result.finishMetadata ?? {}), ...extracted },
-            }
-          : result;
+      const finalResult: LanguageModelExecutionResult = {
+        ...result,
+        // Measured off the SAME projection that was sent, so the estimate and
+        // the provider's reported usage describe one request and can be
+        // compared to calibrate the heuristic.
+        estimate: this.estimateInput(projected, input.target),
+        ...(extracted !== undefined
+          ? { finishMetadata: { ...(result.finishMetadata ?? {}), ...extracted } }
+          : {}),
+      };
 
       const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
         outcome: "succeeded",

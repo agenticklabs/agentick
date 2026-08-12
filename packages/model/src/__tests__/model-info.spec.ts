@@ -5,12 +5,10 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { LanguageModelInput } from "@agentick/spec";
 
 import {
   contextUtilization,
   effectiveModelInfo,
-  estimateTokens,
   mergeRegistry,
   resolveModelInfo,
   SEED_MODELS,
@@ -146,26 +144,6 @@ describe("contextUtilization — ratio 0..1", () => {
     expect(
       contextUtilization(100, { pricing: { inputPerMTok: 1, outputPerMTok: 1 } }),
     ).toBeUndefined();
-  });
-});
-
-describe("estimateTokens", () => {
-  it("char/4 default over a string", () => {
-    expect(estimateTokens("12345678")).toBe(2); // 8 / 4
-  });
-
-  it("char/4 default over LanguageModelInput text parts", () => {
-    const input: LanguageModelInput = {
-      messages: [
-        { role: "user", content: [{ type: "text", text: "aaaa" } as never] },
-        { role: "assistant", content: [{ type: "text", text: "bbbbbbbb" } as never] },
-      ],
-    };
-    expect(estimateTokens(input)).toBe(3); // (4 + 8) / 4
-  });
-
-  it("uses info.tokenEstimator when present", () => {
-    expect(estimateTokens("ignored", { tokenEstimator: () => 777 })).toBe(777);
   });
 });
 

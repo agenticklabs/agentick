@@ -46,7 +46,36 @@ export interface ExecutionResult {
   /** Canonical output blocks (includes tool_use blocks when present). */
   readonly output: readonly ContentBlock[];
   readonly usage?: UsageStats;
+  /**
+   * What the request was measured to cost BEFORE it was sent, beside what the
+   * provider says it did cost.
+   *
+   * Not a redundant `usage` — it carries the one thing no provider reports: the
+   * split between conversation and tool schemas. A caller deciding whether to
+   * compact needs that split, because folding the timeline cannot shrink a tool
+   * schema, and a threshold that counts both can be crossed by something
+   * compaction has no power to relieve.
+   *
+   * Absent when nothing estimated the request (an executor with no adapter
+   * projection, a replayed terminal).
+   */
+  readonly estimate?: TokenEstimate;
   readonly finishMetadata?: Record<string, unknown>;
+}
+
+/**
+ * A request's estimated input cost, split by what a caller can act on.
+ *
+ * `messages` and `tools` are separate because the two questions asked of an
+ * estimate have different answers: "will this fit in the window" reads
+ * {@link total}, "should I compact" reads {@link messages}.
+ */
+export interface TokenEstimate {
+  /** Every message part, including tool calls and their results. */
+  readonly messages: number;
+  /** Advertised tool declarations, schemas included. Billed, and unfoldable. */
+  readonly tools: number;
+  readonly total: number;
 }
 
 // ============================================================================

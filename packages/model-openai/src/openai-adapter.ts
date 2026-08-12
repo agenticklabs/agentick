@@ -299,6 +299,17 @@ export function openai(
         audio: ["base64"],
       },
     },
+    // OpenAI charges 85 base tokens plus 170 per 512² tile at high detail (low
+    // detail is the 85 alone). A MediaSource carries no dimensions, so `image`
+    // is that formula at a ~1024² screenshot — four tiles. Video has no Chat
+    // Completions part at all; its rate exists only so a stray block is not
+    // silently free.
+    mediaTokens: {
+      image: 765,
+      document: 1_500,
+      audio: 1_500,
+      video: 15_000,
+    },
   };
   // `rates` and `providerOptions` layer OVER the resolved target, explicit
   // or default. An adopter who overrides the target is describing

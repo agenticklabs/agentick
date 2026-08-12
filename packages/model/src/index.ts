@@ -80,9 +80,16 @@ export {
   type PricingTable,
 } from "./pricing.js";
 export {
+  DEFAULT_MEDIA_TOKENS,
+  estimateTokenBreakdown,
+  estimateTokens,
+  type EstimateOptions,
+  type MediaTokenRates,
+  type TokenEstimate,
+} from "./token-estimate.js";
+export {
   contextUtilization,
   effectiveModelInfo,
-  estimateTokens,
   modelFactsOf,
   mergeRegistry,
   resolveModelInfo,

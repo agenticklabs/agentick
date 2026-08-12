@@ -388,6 +388,44 @@ contextUtilization(96_000, info); // 0.75 — or undefined when no window is kno
 estimateTokens("some prompt text", info); // info.tokenEstimator ?? char/4
 ```
 
+### Estimating a request
+
+`estimateTokenBreakdown` measures a **projected** `LanguageModelInput` — the last shape before the wire, after system text has been folded in, tools attached, and sections formatted. Measuring anything earlier measures a different request.
+
+```ts
+import { estimateTokenBreakdown } from "@agentick/model";
+
+const { messages, tools, total } = estimateTokenBreakdown(projected, { info });
+```
+
+The split is the point. `total` answers "will this fit in the window". `messages` answers "should I compact" — because folding a conversation cannot shrink a tool schema, and a threshold that counts both can be crossed by something compaction has no power to relieve. Providers report one number for the whole request, so this breakdown has to be computed locally.
+
+Text is `chars / 4`. Media is priced per modality, and the rates come from **the adapter**, declared on the target it derives — right beside `pricing`, for the same reason:
+
+```ts
+// inside an adapter
+const target: ExecutionTarget = {
+  provider: "acme",
+  mediaTokens: { image: 765, document: 1_500, audio: 1_500, video: 15_000 },
+};
+```
+
+Only the adapter can know this. The same 1024² screenshot is ~765 tokens on OpenAI (85 base + 170 per 512² tile), ~1365 on Anthropic (`width × height / 750`), and ~1032 on Gemini (258 per 768² tile) — one shared constant is wrong for everyone by construction. A table inside this package would also be closed to any adapter shipped outside this repo, which is the decisive argument.
+
+Rates are **data**, so they layer like pricing — adopter registry > target > seed — and a deployment overrides without touching adapter code:
+
+```ts
+mergeRegistry(SEED_MODELS, {
+  "google/gemini-3.6-flash": { mediaTokens: { image: 258 } },
+});
+```
+
+A target that declares none falls back to `DEFAULT_MEDIA_TOKENS`, which exists so undescribed media costs _something_ rather than nothing. `runMediaDeclarationCheck` (in `@agentick/model/testing`) enforces the pairing: an adapter that declares which media reach the wire must also declare what they cost.
+
+`info.tokenEstimator` remains the escape hatch for an adapter that wants a real tokenizer (tiktoken and friends) rather than better constants; it may return a bare number or the full `TokenEstimate`.
+
+Executors stamp the estimate on `ExecutionResult.estimate`, which reaches a JSX tree as `useContextInfo().estimated`.
+
 Resolution is longest-prefix over the whole composed key (`openai/gpt-4o-mini` beats `openai/gpt-4o` for minis, and one vendor's prefixes can never reach another's), and `effectiveModelInfo` folds per field with a fixed precedence: **adopter registry > the adapter's self-description > seed**. When no layer knows the model the answer is `undefined` — never a fabricated number.
 
 ### The provider segment means the SERVING provider

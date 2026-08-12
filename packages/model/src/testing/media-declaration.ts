@@ -77,6 +77,20 @@ export function runMediaDeclarationCheck(adapter: ProjectingAdapter): void {
   }
 
   describe(`${adapter.provider}() — capabilities.media matches the wire projection`, () => {
+    // An adapter that knows its provider well enough to say WHICH media reach
+    // the wire knows it well enough to say what they cost — and only it can,
+    // since the same screenshot is ~765 tokens on OpenAI and ~1365 on
+    // Anthropic. Tied to the media declaration rather than asserted per package
+    // so an adapter added later cannot quietly ship media that estimates as
+    // free. A meta-adapter declaring neither never reaches this suite.
+    it("declares what its media COSTS, not only what it accepts", () => {
+      const rates = adapter.target.mediaTokens;
+      expect(rates).toBeDefined();
+      for (const modality of MEDIA_MODALITIES) {
+        expect(rates?.[modality]).toBeGreaterThan(0);
+      }
+    });
+
     for (const modality of MEDIA_MODALITIES) {
       it(`carries exactly the declared ${modality} source kinds`, () => {
         const allowed = declared[modality] ?? [];

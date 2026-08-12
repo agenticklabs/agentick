@@ -70,7 +70,16 @@ export interface RollingSummaryOptions {
    * Default 120_000.
    */
   readonly threshold?: Sized<{ readonly usedTokens: number; readonly contextWindow?: number }>;
-  /** Recent entries that survive verbatim. Default 6. */
+  /**
+   * Recent entries that survive verbatim. Default 6.
+   *
+   * TODO(keep-verbatim-token-bound): an entry COUNT, with no token bound —
+   * unlike `threshold` and `maxOutputTokens`, which are `Sized<>`. When the
+   * retained tail alone exceeds the trigger's ceiling (six entries each
+   * carrying a large tool result), the trigger stays hot and every tick folds
+   * again without ever getting under the bar, destroying older context on each
+   * pass. Making this `Sized<>` closes it. See ADR 97 "Known gaps".
+   */
   readonly keepVerbatim?: number;
   /**
    * How many summary events the PROJECTION may hold. Below the bound a fold

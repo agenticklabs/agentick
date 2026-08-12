@@ -680,6 +680,28 @@ export interface ExecutorProtocol<
    */
   executeStream?(input: ExecuteInput<TInput>): ExecutorStream<TOutput>;
 
+  /**
+   * Measure a projected input before it is sent.
+   *
+   * Belongs to the executor because it is the only layer holding both halves:
+   * the projection (system text folded in, tools attached, formatting already
+   * applied) and the target's per-modality rates. Measuring anywhere earlier
+   * measures a different request.
+   *
+   * `run` stamps `ExecutionResult.estimate` itself. The loop's streaming path
+   * composes project → executeStream → normalize by hand, so no single call
+   * meets both the input and the result — it calls this at the one point that
+   * sees both.
+   *
+   * Optional, and feature-detected like {@link executeStream}: an executor that
+   * projects nothing has nothing to measure, and an absent estimate is honest
+   * where a zero would not be.
+   */
+  estimateInput?(
+    input: TInput,
+    target?: ExecutionTarget,
+  ): import("../data/execution-result.js").TokenEstimate;
+
   // `normalize` is derived from `PromiseView<ExecutorFx>` — the Promise
   // facade of the Effect-canonical {@link ExecutorFx.normalize} twin.
 

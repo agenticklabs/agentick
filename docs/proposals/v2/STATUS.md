@@ -2206,6 +2206,49 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-12 — measuring the request; compaction decides outside the tree (ADR 97)
+
+`blueprint/97-measuring-the-request.md`. A production thread compacted twice in a
+row. Root cause is structural, not a bug in the trigger: **a component cannot
+measure the tree it is part of**, so a render-time trigger can only read the
+PREVIOUS request's size, and a level check re-fires on a number the fold did not
+change. Relocating the predicate does not fix it; the decision has to leave the
+render.
+
+**Landed (parts 1–3 of the ADR).** `estimateTokens` was not merely imprecise — it
+walked `part.text` only, so `input.tools` (every schema, on every call) and all
+media counted as **zero**. Rewritten as `estimateTokenBreakdown` returning
+`{ messages, tools, total }`, folding all nine wire part types with a `never`
+guard so a new part type breaks the build instead of silently costing nothing.
+The split is load-bearing: compaction can only fold `messages`, and a trigger
+counting `tools` against a ceiling it can only relieve by folding is the
+**ratchet** — it folds forever without ever getting under the bar.
+
+Per-modality rates went onto **the adapter** (`ExecutionTarget.mediaTokens`),
+beside `pricing` and under the same authority argument. Ryan rejected the central
+`PROVIDER_MEDIA_TOKENS` table in `@agentick/model` and was right: a table here is
+closed to any adapter shipped outside this repo — ADR 27's privileged center. The
+same 1024² screenshot is ~765 tokens on OpenAI, ~1365 on Anthropic, ~1032 on
+Gemini, so one shared constant is wrong for everyone by construction.
+`runMediaDeclarationCheck` now ties the pair together, so a future adapter cannot
+ship media that estimates as free. `model-ai-sdk` declares none, deliberately —
+it cannot know its concrete provider.
+
+**Discovered:** `CompactStrategy.shouldCompact` has **zero call sites** — spec
+declares it, `rollingSummary` implements it, the timeline README documents "a
+trigger asks the strategy rather than keeping its own copy of the number", and no
+trigger ever asked. `rollingSummary({ threshold })` compiles, typechecks, reads
+correctly, and does nothing. That is why Ernesto hand-rolled `<Compaction>` with
+a duplicate constant.
+
+**Next (parts 2–3):** the trigger moves to the ADR 67 tick-end fold, where each
+measurement arrives once as an event and the double-fire cannot occur; and a
+compaction strategy becomes declarable in the tree via ADR 56's coat-check
+pattern (`compactRef` in the IR, live strategy on a bridge), precedence
+tick-IR > config. No per-send rung — a send names a model, nothing names a fold
+strategy. The two-door mechanism is NOT generalized: models is one consumer,
+compaction is two, extract at three.
+
 ### 2026-08-11 — the interceptor surface collapses into BaseHarness (ADR 96)
 
 `blueprint/96-interceptor-surface-collapse.md`. A harness now owns only its

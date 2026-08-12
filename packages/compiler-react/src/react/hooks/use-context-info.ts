@@ -16,6 +16,12 @@
  *                        the latest `metadata.usage.inputTokens` (the
  *                        prior tick's / turn's input tokens; UsageStats
  *                        is stamped by the loop→compiler bridge).
+ *   - `estimated`      ← the same bridge's `metadata.estimate`, measured
+ *                        by the executor off the projection it sent. What
+ *                        it adds over `usedTokens` is the SPLIT between
+ *                        conversation and tool schemas, which no provider
+ *                        reports and which a caller acting on one of them
+ *                        needs.
  *
  * `utilization` is the `usedTokens / contextWindow` ratio in `[0, 1]`,
  * computed inline so this hook stays dependency-free (no `@agentick/
@@ -45,7 +51,12 @@
  */
 
 import { useContext, useState } from "react";
-import type { LifecycleExecutionEnd, LifecycleTickEnd, UsageStats } from "@agentick/spec";
+import type {
+  LifecycleExecutionEnd,
+  LifecycleTickEnd,
+  TokenEstimate,
+  UsageStats,
+} from "@agentick/spec";
 import { useOnExecutionEnd } from "./use-on-execution-end.js";
 import { useOnTickEnd } from "./use-on-tick-end.js";
 import { RenderContextContext } from "../render-context-context.js";
@@ -57,11 +68,25 @@ export interface ContextInfo {
   readonly usedTokens: number;
   /** `usedTokens / contextWindow`, clamped to `[0, 1]`; `undefined` with no window. */
   readonly utilization?: number;
+  /**
+   * The last request's cost as measured locally, split into conversation and
+   * tool schemas — the breakdown no provider reports.
+   *
+   * Read this, not {@link usedTokens}, when the answer drives an action on one
+   * part of the request. `estimated.tools` is billed on every call and cannot
+   * be reduced by compacting; treating the two as one number is how a fold
+   * trigger ends up firing at something folding cannot fix.
+   *
+   * Absent until a tick has been measured, and — like `usedTokens` — describes
+   * the PREVIOUS request. A component cannot measure the tree it is part of.
+   */
+  readonly estimated?: TokenEstimate;
 }
 
 /** Lifecycle `metadata` slice this hook reads (the open-ended carrier). */
 interface ContextMetadata {
   readonly usage?: UsageStats;
+  readonly estimate?: TokenEstimate;
   readonly contextWindow?: number;
 }
 
@@ -77,7 +102,10 @@ export function useContextInfo(): ContextInfo {
   // setState (which races the compiler's sync render and never reaches
   // this IR). `contextInfo` is the seeded foundational slot.
   const rendered = useContext(RenderContextContext)?.contextInfo;
-  const [observed, setObserved] = useState<{ usedTokens: number }>({ usedTokens: 0 });
+  const [observed, setObserved] = useState<{
+    usedTokens: number;
+    estimated?: TokenEstimate;
+  }>({ usedTokens: 0 });
 
   // MERGE, not replace: `contextWindow` rides the RenderContext envelope
   // (synchronous — live DURING this render, read above; a changed window
@@ -87,9 +115,17 @@ export function useContextInfo(): ContextInfo {
   // one-tick-behind is correct). Each updates its own field; utilization
   // recomputes from the merged pair.
   const observe = (event: LifecycleTickEnd | LifecycleExecutionEnd): void => {
-    const used = readMetadata(event)?.usage?.inputTokens;
-    if (used === undefined) return;
-    setObserved((prev) => (prev.usedTokens === used ? prev : { usedTokens: used }));
+    const metadata = readMetadata(event);
+    const used = metadata?.usage?.inputTokens;
+    const estimated = metadata?.estimate;
+    if (used === undefined && estimated === undefined) return;
+    setObserved((prev) => {
+      const next = {
+        usedTokens: used ?? prev.usedTokens,
+        ...((estimated ?? prev.estimated) ? { estimated: estimated ?? prev.estimated } : {}),
+      };
+      return next.usedTokens === prev.usedTokens && next.estimated === prev.estimated ? prev : next;
+    });
   };
   useOnTickEnd(observe);
   useOnExecutionEnd(observe);
@@ -102,7 +138,11 @@ export function useContextInfo(): ContextInfo {
     contextWindow && contextWindow > 0
       ? Math.min(1, Math.max(0, usedTokens / contextWindow))
       : undefined;
-  return contextWindow !== undefined
-    ? { usedTokens, contextWindow, ...(utilization !== undefined ? { utilization } : {}) }
-    : { usedTokens };
+  const estimated = observed.estimated;
+  return {
+    usedTokens,
+    ...(contextWindow !== undefined ? { contextWindow } : {}),
+    ...(utilization !== undefined ? { utilization } : {}),
+    ...(estimated !== undefined ? { estimated } : {}),
+  };
 }

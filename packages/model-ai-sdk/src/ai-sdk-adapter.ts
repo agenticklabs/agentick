@@ -897,6 +897,12 @@ function mapBackFinishReason(reason: LanguageModelStopReason): FinishReason {
  * nothing and behaviour is exactly as before. An adopter who DOES know their
  * provider states it by passing their own `target` with `capabilities.media` —
  * which is the honest division: the fact lives with whoever actually holds it.
+ *
+ * `mediaTokens` is absent for the same reason and is not an oversight to fix by
+ * picking a number: the same screenshot is ~765 tokens on OpenAI and ~1365 on
+ * Anthropic, and this adapter cannot tell which is behind it. Estimates fall
+ * back to `DEFAULT_MEDIA_TOKENS` until an adopter states the rates on a target
+ * of their own.
  */
 function deriveTarget(model: LanguageModel): ExecutionTarget {
   if (typeof model === "string") {

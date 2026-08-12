@@ -163,7 +163,17 @@ export function wireLifecycleProjection(
         // usage, straight off the `TickResult` the loop settled. Rendered
         // through `omitUndefined` so an unpriced tick's record carries NO
         // `cost` key: absent means unpriced, never zero.
-        const metadata = omitUndefined({ usage, cost: result.cost, model: result.model });
+        //
+        // `estimate` rides beside `usage` because it answers what `usage`
+        // cannot: the provider reports one number for the whole request, and a
+        // tree deciding what to render — or what to fold — needs to know how
+        // much of it was conversation and how much was tool schema.
+        const metadata = omitUndefined({
+          usage,
+          estimate: terminal.result.estimate,
+          cost: result.cost,
+          model: result.model,
+        });
         await settle({
           kind: "tick-end",
           tickId: result.tickId,

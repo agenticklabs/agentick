@@ -29,6 +29,7 @@
 import type {
   ExecutionTarget,
   LanguageModelInput,
+  MediaTokenRates,
   ModelFacts,
   TargetCapabilities,
 } from "@agentick/spec";
@@ -48,12 +49,25 @@ export type { ModelFacts, ModelPricing } from "@agentick/spec";
  */
 export interface ModelInfo extends ModelFacts {
   /**
-   * Token counter for the model. Defaults to a char/4 heuristic
-   * (`estimateTokens`); adapters/adopters inject a real tokenizer
+   * What this provider charges for content the char/4 heuristic cannot read —
+   * an image, a PDF page, a minute of audio. Layered like `pricing`: an
+   * adopter row wins, then a seed model row, then the provider's default.
+   */
+  readonly mediaTokens?: Partial<MediaTokenRates>;
+  /**
+   * Token counter for the model. Defaults to the arithmetic in
+   * `estimateTokenBreakdown`; adapters/adopters inject a real tokenizer
    * (tiktoken, etc.) here rather than dragging the dep into this layer
    * (#175).
+   *
+   * Reach for this only when better CONSTANTS are not enough — per-modality
+   * rates belong on {@link mediaTokens}, which is data and therefore layerable.
+   * Returning a `TokenEstimate` reports the message/tool split; a bare number
+   * is read as having measured the request whole.
    */
-  readonly tokenEstimator?: (input: LanguageModelInput | string) => number;
+  readonly tokenEstimator?: (
+    input: LanguageModelInput | string,
+  ) => number | import("./token-estimate.js").TokenEstimate;
 }
 
 /** The serializable subset — what `app/model_info` returns to a client. */
@@ -231,7 +245,10 @@ export function mergeRegistry(base: ModelRegistry, overrides: ModelRegistry): Mo
  * layer describes the model at all — never fabricates.
  */
 export function effectiveModelInfo(
-  target: Pick<ExecutionTarget, "provider" | "modelId" | "pricing" | "capabilities">,
+  target: Pick<
+    ExecutionTarget,
+    "provider" | "modelId" | "pricing" | "capabilities" | "mediaTokens"
+  >,
   registry?: ModelRegistry,
 ): ModelInfo | undefined {
   const seed = resolveModelInfo(target, SEED_MODELS);
@@ -251,6 +268,10 @@ export function effectiveModelInfo(
     contextWindow: adopter?.contextWindow ?? selfCaps?.contextWindow ?? seed?.contextWindow,
     maxOutputTokens: adopter?.maxOutputTokens ?? selfCaps?.maxOutputTokens ?? seed?.maxOutputTokens,
     capabilities,
+    // Same ladder as `pricing`, and for the same reason: the adapter is the
+    // authority on its own provider's arithmetic, and a table here could never
+    // be extended by an adapter shipped outside this repo.
+    mediaTokens: adopter?.mediaTokens ?? target.mediaTokens ?? seed?.mediaTokens,
     tokenEstimator: adopter?.tokenEstimator ?? seed?.tokenEstimator,
   });
 }
@@ -264,27 +285,4 @@ export function contextUtilization(usedTokens: number, info?: ModelInfo): number
   const window = info?.contextWindow;
   if (!window) return undefined;
   return Math.min(1, Math.max(0, usedTokens / window));
-}
-
-/**
- * Estimate token count for an input. Uses `info.tokenEstimator` when
- * present (adapter/adopter-injected tokenizer); otherwise a char/4
- * heuristic over the concatenated text (#175).
- */
-export function estimateTokens(input: LanguageModelInput | string, info?: ModelInfo): number {
-  if (info?.tokenEstimator) return info.tokenEstimator(input);
-  const text = typeof input === "string" ? input : concatInputText(input);
-  return Math.ceil(text.length / 4);
-}
-
-/** Concatenate the text carried by a `LanguageModelInput` for char/4 estimation. */
-function concatInputText(input: LanguageModelInput): string {
-  let text = "";
-  for (const message of input.messages) {
-    for (const part of message.content) {
-      const maybeText = (part as { readonly text?: unknown }).text;
-      if (typeof maybeText === "string") text += maybeText;
-    }
-  }
-  return text;
 }

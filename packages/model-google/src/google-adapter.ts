@@ -297,6 +297,17 @@ export function google(
       contextWindow: catalog?.contextWindow ?? 1_000_000,
       maxOutputTokens: catalog?.maxOutputTokens ?? 8_192,
     },
+    // Gemini bills 258 tokens per 768² image tile (an image under 384² is one
+    // flat tile), 32 tokens per second of audio and 263 per second of video; a
+    // PDF page is rasterized to a tile plus its extracted text. A MediaSource
+    // carries no dimensions or duration, so each of these is that formula at
+    // one typical instance — a ~1024² screenshot, one page, one minute.
+    mediaTokens: {
+      image: 1_032,
+      document: 1_300,
+      audio: 1_920,
+      video: 15_780,
+    },
   };
   // `rates` and `providerOptions` layer OVER the resolved target, explicit
   // or default. An adopter who overrides the target is describing
