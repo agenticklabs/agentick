@@ -443,6 +443,28 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
   shouldCompact?(ctx: CompactDecisionCtx): boolean;
 
   /**
+   * Declare the compaction strategy from the agent tree, taking precedence over
+   * the construction-bound one (`defineTimeline({ compact })`). Returns an
+   * unsubscribe that restores the configured default.
+   *
+   * The second door (ADR 97): a strategy is configurable either where the app
+   * is composed or where the conversation is rendered, resolved
+   * **tree > config** — the inner-scope-wins ladder every other layered seam
+   * uses.
+   *
+   * ADR 56 solves the same problem for models by putting a `modelRef` in the IR
+   * and the live value on a bridge, because the LOOP resolves it and the loop
+   * reads the IR. This resolves in the session's tick-end fold, which holds
+   * these bridges directly — so the ref, the intrinsic and the collector
+   * contributor would be machinery with no reader. The live half alone is the
+   * whole mechanism here.
+   *
+   * Last writer wins, matching `ToolBridge`. Nesting two declarations is
+   * therefore the inner one, which is what a reader expects.
+   */
+  declareCompact?(strategy: CompactStrategy): Unsubscribe;
+
+  /**
    * Overwrite the projection with the supplied entries. The log is
    * untouched. Useful when an offline process produced a better
    * projection (e.g., human-curated summary, batch-computed digest).

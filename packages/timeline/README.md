@@ -319,18 +319,41 @@ const stop = session.onProgress(
 );
 ```
 
+#### Who decides when to fold
+
+The session does, at **tick end** — not the tree. A component runs during the render that produces the prompt whose size it wants to know, so it can only read the _previous_ request's count, and a fold does not change that number: the tick that triggered the fold had already sent the unfolded prompt. A trigger built in the tree folds the same thread twice. At tick end the measurement describes the request that just went out, and arrives exactly once.
+
+You configure the policy; the session asks for it through `strategy.shouldCompact(...)`, so the threshold lives in one place instead of being copied into a trigger. See [ADR 97](../../docs/proposals/v2/blueprint/97-measuring-the-request.md).
+
 #### Numbers that are functions
 
-`maxOutputTokens` and `threshold` each take a number **or** a function of the facts at hand:
+`maxOutputTokens`, `threshold` and `keepVerbatim` each take a number **or** a function of the facts at hand:
 
 ```ts
 rollingSummary({
   maxOutputTokens: ({ entries }) => clamp(entries.length * 120, 2_000, 16_000),
   threshold: ({ contextWindow }) => (contextWindow ?? 200_000) * 0.5,
+  // Bound the kept tail by TOKENS, not by a count — six turns each carrying a
+  // page outline can exceed the ceiling on their own, and then folding older
+  // material cannot get under it however much context it destroys.
+  keepVerbatim: ({ entries, sizeOf }) => fitCount(entries, sizeOf, 40_000),
 });
 ```
 
-`threshold` answers _when_ rather than _how much_, and it is read through `strategy.shouldCompact({ usedTokens, contextWindow })` — a trigger asks the strategy rather than keeping its own copy of the number. It defaults to a flat **120k tokens**, not a fraction of the window: a model reporting a million-token window makes any fraction meaningless, and what you are managing is per-turn cost and latency, not running out of room.
+`threshold` answers _when_ rather than _how much_. It defaults to a flat **120k tokens**, not a fraction of the window: a model reporting a million-token window makes any fraction meaningless, and what you are managing is per-turn cost and latency, not running out of room.
+
+It is compared against `estimate.messages` — the part of the request folding can actually shrink — falling back to the provider's total when nothing measured the tick. Tool schemas are billed on every call and cannot be folded away, so a ceiling compared against the total can be crossed by something compaction has no power to relieve.
+
+#### Declaring the strategy from the tree
+
+`compact` is settable where the app is composed **or** where the conversation is rendered:
+
+```tsx
+defineTimeline({ compact: rollingSummary({ keepVerbatim: 6 }) })   // config
+<Compaction strategy={rollingSummary({ keepVerbatim: 6 })} />      // tree
+```
+
+The tree wins while mounted, and unmounting restores the configured default. `<Compaction>` only _declares_ — it never triggers, for the reason above.
 
 #### The projection is a pure function of the log
 

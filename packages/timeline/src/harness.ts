@@ -432,7 +432,24 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
     return this.defaultStrategy()?.shouldCompact?.(ctx) ?? false;
   }
 
+  /**
+   * The tree's strategy, when one is rendered (ADR 97). Outranks the
+   * construction-bound default for as long as it is mounted.
+   */
+  private declaredStrategy?: CompactStrategy;
+
+  declareCompact(strategy: CompactStrategy): Unsubscribe {
+    this.declaredStrategy = strategy;
+    return () => {
+      // Identity-checked so a late unmount cannot clear a strategy some other
+      // component has since declared — the same rule `ToolBridge` follows.
+      if (this.declaredStrategy === strategy) this.declaredStrategy = undefined;
+    };
+  }
+
   private defaultStrategy(): CompactStrategy | undefined {
+    // Tree over config — inner scope wins, as everywhere else.
+    if (this.declaredStrategy !== undefined) return this.declaredStrategy;
     if (this.compactStrategy !== undefined) return this.compactStrategy;
     const fn = this.compactor;
     if (fn === undefined) return undefined;

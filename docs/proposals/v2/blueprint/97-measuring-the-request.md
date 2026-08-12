@@ -2,7 +2,7 @@
 
 **Status:** PROPOSED 2026-08-12 (for Ryan)
 **Depends on:** ADR 55 (render-context seam; the `contextInfo` slot), ADR 56 (tree-declared
-model per tick — the coat-check pattern this reuses verbatim), ADR 67 (flip the tick-end
+model per tick — the same two-door problem, solved differently here; see Part 3), ADR 67 (flip the tick-end
 order: settle in, decide out), ADR 89 §4 (lifecycle is the projected command-hook system),
 ADR 27 (modular built-ins — no privileged center)
 **Motivated by:** a production thread that compacted **twice in a row**, the second fold
@@ -28,7 +28,7 @@ Three rules follow:
    the trigger.
 
 Plus the surface Ryan asked for: a compaction strategy is declarable **in the tree or in
-config**, resolved by ADR 56's ladder.
+config**, resolved tree-over-config.
 
 ## The defect
 
@@ -142,24 +142,38 @@ Two things were tried first and are recorded because both look right and are not
 A throw counts as a refusal too: retrying a summarizer that just died buys a second model
 call to watch it die again.
 
-### Part 3 — two doors (ADR 56, verbatim)
+### Part 3 — two doors
 
-A `CompactStrategy` holds a function (`run`), and executable configuration does not enter the
-IR — the timeline harness is explicit that _"the strategy itself never travels."_ ADR 56
-already solved this shape for models, so this reuses it rather than inventing a second
-mechanism:
+A compaction strategy is declarable where the app is composed or where the conversation is
+rendered, resolved **tree > config** — inner-scope-wins, as everywhere else.
 
-```
-register("ernesto-fold", rollingSummary({...}))   → live strategy, on the bridge
-declarations.compact = { compactRef }             → IR carries the ref only
+```tsx
+defineTimeline({ compact: rollingSummary({ keepVerbatim: 6 }) })   // config door
+<Compaction strategy={rollingSummary({ keepVerbatim: 6 })} />      // tree door
 ```
 
-- **spec**: `RuntimeDeclarations.compact?: CompactDeclaration = { compactRef: string }`;
-  a `CompactBridge` slot (module augmentation from `@agentick/timeline`, per ADR 27).
-- **compiler-react**: `<compaction-declaration>` intrinsic + collector contributor +
-  `useCompactionRegistration(ref, strategy)` — the live/IR split `useModelRegistration`
-  makes, for the same reason it makes it.
-- **resolution**: **tick IR > session config**. Inner-scope-wins, as everywhere else.
+**This is NOT ADR 56's mechanism, and the difference is worth stating** — the plan said it
+would be, and building it showed otherwise. ADR 56 puts a `modelRef` in the IR and the live
+model on a bridge because the **loop** resolves it, and the loop reads the IR. Compaction
+resolves in the session's tick-end fold, which holds the bridges directly
+(`bridges.timeline` in a component IS the session's harness instance). So the ref, the
+`<compaction-declaration>` intrinsic, and the collector contributor would every one of them
+be machinery with no reader.
+
+What is left is the live half alone:
+
+- **spec**: `TimelineHarnessProtocol.declareCompact?(strategy): Unsubscribe`.
+- **timeline**: the harness holds a declared strategy that outranks the construction-bound
+  one; `defaultStrategy()` resolves tree-then-config. Unsubscribe is identity-checked, so a
+  late unmount cannot clear a strategy some other component has since declared —
+  `ToolBridge`'s rule.
+- **timeline/react**: `<Compaction strategy>` — a `useEffect` over `declareCompact`, and
+  nothing else.
+
+Two touchpoints rather than five, and no new IR surface. The generalization ("every config
+slot gets a tree door automatically") is still deferred — and this run is evidence for
+deferring it, since the second instance of the pattern turned out not to be the same shape
+as the first.
 
 **No per-send rung.** Models have three (config / send / tree) because a send legitimately
 names a model. Nothing suggests a send names a fold strategy; the rung is added when a caller

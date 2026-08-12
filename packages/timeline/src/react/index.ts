@@ -20,6 +20,7 @@ export {
   type TimelineBudgetOptions,
 } from "./timeline.js";
 export { Transcript, type TranscriptProps } from "./transcript.js";
+export { Compaction, type CompactionProps } from "./compaction.js";
 export {
   compactEntries,
   getEntryTokens,
