@@ -6,8 +6,8 @@
  * `tasksWireExtension`) — gates rides the GENERIC dynamic-command lane. So this
  * test doubles as the dynamic-lane e2e: `gates/list` / `gates/clear` /
  * `gates/defer` / `gates/override` resolve through `createDynamicCommandResolver`
- * (SESSION_SURFACES ⊇ "gates") → `inbox.ask("gates:<sid>:gates", …)` →
- * `GatesHarness` command → the ONE controller. Drives it through the REAL
+ * → `inbox.ask("gates:<sid>:gates", …)` lands on the mounted `GatesHarness`
+ * command → the ONE controller. Drives it through the REAL
  * `GatewayHarness` + `inProcessTransport` (no stub JSON-RPC handler) via the
  * client `session.gates` handle (ADR 87).
  *

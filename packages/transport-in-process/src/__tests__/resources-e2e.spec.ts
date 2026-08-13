@@ -1,13 +1,14 @@
 /**
  * Full-stack resources round-trip — sanity net over the real wire.
  *
- * `ResourcesHarness` already declared `resources:read` / `resources:list` /
- * `resources:listTemplates` with `exposure: "wire"`; the gateway just never
- * routed them (SESSION_SURFACES omitted "resources"). A1 adds "resources" to
- * SESSION_SURFACES — one line — so those declared commands now resolve through
- * the generic dynamic-command lane. This test drives them end-to-end through the
- * REAL `GatewayHarness` + `inProcessTransport` (no client resources handle in
- * this PR — the calls go straight through `client.transport.request`).
+ * `ResourcesHarness` declares `resources:read` / `resources:list` /
+ * `resources:listTemplates` with `exposure: "wire"`, and the dynamic-command
+ * lane routes them because the surface is MOUNTED — the ask to
+ * `resources:<sid>:resources` lands on a live handler (#258 dropped the
+ * addressing allowlist; reachability is now the inbox's call). This test drives
+ * them end-to-end through the REAL `GatewayHarness` + `inProcessTransport` (no
+ * client resources handle in this PR — the calls go straight through
+ * `client.transport.request`).
  */
 
 import { describe, expect, it } from "vitest";

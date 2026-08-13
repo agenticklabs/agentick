@@ -9,6 +9,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AddressNotFound,
   ErrorCode,
   progressEventName,
   WireRpcError,
@@ -34,7 +35,9 @@ function commandInbox(commandsByAddress: Record<string, readonly CommandInfo[]>)
     fallback: (call: StubInboxCall) => {
       if (call.type.endsWith(":commands")) {
         const commands = commandsByAddress[call.address];
-        if (!commands) throw new Error(`no harness at ${call.address}`);
+        // An unmounted surface has no inbox handler — the real LocalInbox
+        // fails the ask with AddressNotFound, which the resolver reads as absent.
+        if (!commands) throw new AddressNotFound({ address: call.address });
         return { commands };
       }
       return { ok: true, echoed: call.payload };
@@ -172,16 +175,36 @@ describe("dynamic command lane — deny-by-default", () => {
     expect(dispatch.payload).toMatchObject({ instructions: "tight" });
   });
 
-  it("underivable address (missing sessionId; unknown surface) → MethodNotFound", async () => {
+  it("no sessionId → underivable, and an UNMOUNTED surface → absent, both MethodNotFound", async () => {
     const { resolver } = lane({ alice: ["*"] });
     const noSession = await resolver("timeline/compact")!
       .handler({}, { principal: "alice" })
       .catch((e: unknown) => e);
     expect((noSession as WireRpcError).code).toBe(ErrorCode.MethodNotFound);
-    const badSurface = await resolver("sandbox/exec")!
+    // Address is now derivable for any surface; `sandbox` simply isn't mounted,
+    // so the ask fails AddressNotFound and the lane reports it as absent.
+    const unmounted = await resolver("sandbox/exec")!
       .handler({ sessionId: "s1" }, { principal: "alice" })
       .catch((e: unknown) => e);
-    expect((badSurface as WireRpcError).code).toBe(ErrorCode.MethodNotFound);
+    expect((unmounted as WireRpcError).code).toBe(ErrorCode.MethodNotFound);
+  });
+
+  it("a MOUNTED adopter surface routes through the lane with no allowlist entry (#258)", async () => {
+    const { inbox, asks } = commandInbox({
+      "sandbox:s1:sandbox": [cmd("sandbox:exec", "wire"), cmd("sandbox:commands", "wire")],
+    });
+    const resolver = createDynamicCommandResolver({
+      inbox,
+      authorizer: staticAuthorizer({ grants: { alice: ["sandbox:exec"] } }),
+    });
+    const result = await resolver("sandbox/exec")!.handler(
+      { sessionId: "s1", cmd: "ls" },
+      { principal: "alice" },
+    );
+    expect(result).toMatchObject({ ok: true });
+    const dispatch = asks.find((a) => a.type === "sandbox:exec")!;
+    expect(dispatch.address).toBe("sandbox:s1:sandbox");
+    expect(dispatch.origin).toBe("wire");
   });
 });
 

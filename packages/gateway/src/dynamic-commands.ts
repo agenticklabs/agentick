@@ -38,20 +38,22 @@ import {
 import { fanOutProgressSignals } from "./wire/progress-fanout.js";
 
 /**
- * Session-scoped surfaces the dynamic lane can address (VERB-MATRIX).
+ * Surfaces {@link createCommandsListHandler} enumerates for `commands/list`.
  *
- * This list bounds ADDRESSING (`resolveAddress`) and, with it, the
- * cross-surface enumeration in {@link createCommandsListHandler} — a
- * namespace absent from it is invisible to `commands/list` even though
- * its own `<ns>/commands` door works (`mcp` is exactly that case; it
- * gets addressing below but is not enumerated). An adopter harness is
- * unreachable through this lane entirely.
+ * ADDRESSING no longer consults this list: {@link resolveAddress} mints a
+ * deterministic address for ANY surface, and the inbox decides reachability —
+ * an ask to an unmounted surface fails `AddressNotFound`, which the resolver
+ * maps back to `MethodNotFound`. So an adopter harness routes through this lane
+ * the moment it mounts, with no gateway edit (#258, the addressing half).
  *
- * // TODO(#258): derive the addressable set from the session's mounted
- * // harnesses instead of hardcoding it here, so a new surface — or an
- * // adopter's — is discoverable without editing the gateway.
+ * Enumeration still needs a NAME to ask and cannot probe an unbounded
+ * namespace, so it walks this known set — a surface absent from it is
+ * addressable but not listed (the long-standing `mcp` case).
+ *
+ * // TODO(#258): derive the ENUMERATION set from the session's mounted
+ * // harnesses too, so adopter surfaces list as well as route.
  */
-const SESSION_SURFACES = [
+const ENUMERATED_SURFACES = [
   "timeline",
   "knobs",
   "skills",
@@ -69,18 +71,23 @@ interface DynamicParams {
   readonly [key: string]: unknown;
 }
 
-/** Derive the target inbox address for a surface from wire params. */
+/**
+ * The deterministic inbox address for a surface. Whether anything ANSWERS
+ * there is the inbox's call, not ours — an unmounted surface fails the ask
+ * with `AddressNotFound`, which the resolver reads as an absent method.
+ */
 function resolveAddress(surface: string, params: DynamicParams): string | undefined {
   if (typeof params.sessionId !== "string" || params.sessionId.length === 0) return undefined;
   if (surface === "mcp") {
     if (typeof params.serverId !== "string" || params.serverId.length === 0) return undefined;
     return `mcp:${params.sessionId}:mcp:${params.serverId}`;
   }
-  if ((SESSION_SURFACES as readonly string[]).includes(surface)) {
-    return `${surface}:${params.sessionId}:${surface}`;
-  }
-  return undefined;
+  return `${surface}:${params.sessionId}:${surface}`;
 }
+
+/** The inbox's "nothing mounted here" — an unmounted surface, not a real fault. */
+const isAddressNotFound = (err: unknown): boolean =>
+  typeof err === "object" && err !== null && (err as { _tag?: unknown })._tag === "AddressNotFound";
 
 export interface DynamicCommandResolverOptions {
   readonly inbox: MessageInbox;
@@ -136,6 +143,18 @@ export function createDynamicCommandResolver(
     return (reply as { commands?: readonly CommandInfo[] } | undefined)?.commands ?? [];
   };
 
+  /** `askCommands`, but an unmounted surface (no inbox handler) reads as absent. */
+  const askCommandsOrAbsent = async (
+    address: string,
+  ): Promise<readonly CommandInfo[] | undefined> => {
+    try {
+      return await askCommands(address);
+    } catch (err) {
+      if (isAddressNotFound(err)) return undefined;
+      throw err;
+    }
+  };
+
   return (method: string) => {
     const slash = method.indexOf("/");
     if (slash <= 0) return undefined;
@@ -152,13 +171,18 @@ export function createDynamicCommandResolver(
 
       // `<surface>/commands` is itself the ratified discovery meta-verb —
       // the dispatch choke point already authorized it; serve directly.
+      // An unmounted surface answers nothing, so it reads as absent.
       if (rest === "commands") {
-        return { commands: await askCommands(address) };
+        const commands = await askCommandsOrAbsent(address);
+        if (commands === undefined) throw WireRpcError.methodNotFound(method);
+        return { commands };
       }
 
       // Exposure check: deny-by-default — a verb that isn't declared
-      // `wire` does not exist as far as the wire is concerned.
-      const commands = await askCommands(address);
+      // `wire` (or a surface that isn't mounted) does not exist as far as
+      // the wire is concerned.
+      const commands = await askCommandsOrAbsent(address);
+      if (commands === undefined) throw WireRpcError.methodNotFound(method);
       const declared = commands.find((c) => c.name === verb);
       if (!declared || declared.exposure !== "wire") {
         throw WireRpcError.methodNotFound(method);
@@ -218,7 +242,7 @@ export function createCommandsListHandler(options: DynamicCommandResolverOptions
     }
     const ctx = (rawCtx ?? {}) as WireExtensionContext;
     const out: Array<{ method: string; command: CommandInfo }> = [];
-    for (const surface of SESSION_SURFACES) {
+    for (const surface of ENUMERATED_SURFACES) {
       // Visibility filter (not a gate — the choke point gated
       // commands/list itself): discovery lists only surfaces whose
       // meta-verb scope this caller holds.
