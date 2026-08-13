@@ -183,18 +183,26 @@ choke point BEFORE your handler runs. Discovery (`foo/commands`) needs scope
 (`staticAuthorizer({ grants: { alice: ["foo:bar"] } })`, or a surface glob
 `foo:*`). Deny-by-default: no grant → `Forbidden`.
 
-### 6. Call it from the client
+### 6. Call it from the client — zero client code
 
-Typed by the `WireMethods` augmentation (import the `wire-augment` as a side
-effect from your `/client` subpath):
+The `WireMethods` rows from step 2 ARE the client surface. The session handle's
+wire-proxy synthesizes any unregistered namespace, so — with the `wire-augment`
+loaded (type-only, side-effect import from your `/client` subpath) — this is
+typed and callable with nothing else written:
 
 ```ts
-const result = await client.transport.request("foo/bar", { sessionId, q: "hello" });
+const ok = await session.foo.bar({ q: "hello" }); // → request("foo/bar", { sessionId, q })
 ```
 
-For an ergonomic handle, register a client namespace (`packages/gates/src/client`
-is the reference: `registerNamespace("gates", …)` + a `session.gates` handle that
-wraps `transport.request`).
+`session.<ns>.<method>` is DERIVED from `WireMethods` — params minus the bound
+`sessionId`, result typed off the row — so a typo is a compile error, not a 404.
+No `registerNamespace`, no handle. The raw `client.transport.request("foo/bar",
+{ sessionId, q })` still works when you need it.
+
+A hand-written handle is OPTIONAL, only for richer ergonomics (positional args,
+defaults, sync snapshot reads). It shadows the synthesized methods it names and
+leaves the rest to the wire (`wireFallthrough`); `packages/gates/src/client` is
+the reference.
 
 ### 7. Test
 
