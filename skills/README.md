@@ -6,10 +6,11 @@ The repo is mid-rewrite: v2 lives under `packages/` (`feat/v2`), v1 under `packa
 
 ## v2 skills (author here)
 
-| Skill                  | Use for                                                                                                                                                                                                             |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`create-harness`**   | A new v2 harness — `BaseHarness` subclass with substrate, protocol, `HookBridges` augmentation, `withX()` extension, conformance suite, optional `/react` + `/testing` subpaths. Lives at `skills/create-harness/`. |
-| **`create-extension`** | The adopter-facing entry: routes to a harness, a compiler contributor, or a descriptor-only React surface, for local or published extensions. Lives at `skills/create-extension/`.                                  |
+| Skill                  | Use for                                                                                                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **`create-harness`**   | A new v2 harness — `BaseHarness` subclass with substrate, protocol, `HookBridges` augmentation, `withX()` extension, conformance suite, optional `/react` + `/testing` subpaths. Lives at `skills/create-harness/`.                                          |
+| **`create-extension`** | The adopter-facing entry: routes to a harness, a compiler contributor, or a descriptor-only React surface, for local or published extensions. Lives at `skills/create-extension/`.                                                                           |
+| **`add-wire-command`** | Give a harness surface `exposure:"wire"` commands that route to wire clients through the generic dynamic-command lane — the `WireMethods` augmentation, the `withX` mount, auth, and the client call. No gateway edits. Lives at `skills/add-wire-command/`. |
 
 ## v1 skills (stable `packages/` line)
 
