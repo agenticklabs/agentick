@@ -875,6 +875,14 @@ export class AppHarness<P = unknown>
   private readonly extensionTools: ToolRegistration[] = [];
 
   private readonly registry = new Map<string, InternalSessionEntry<P>>();
+  /**
+   * In-flight disposals, by session id. {@link disposeSession} deletes the
+   * registry entry SYNCHRONOUSLY but releases each sub-harness inbox address only
+   * inside an awaited `close()`; a create-or-resume of the same id racing that
+   * window would rebuild and collide (`address already registered:
+   * <surface>:<id>:<…>`). The barrier in {@link buildSession} waits this out.
+   */
+  private readonly disposing = new Map<string, Promise<void>>();
   private _closed = false;
 
   /**
@@ -2115,6 +2123,12 @@ export class AppHarness<P = unknown>
     }
 
     const sessionId = input.sessionId ?? `session:${generateId()}`;
+    // Disposal barrier: a same-id disposal in flight has deleted its registry
+    // entry but not yet released its sub-harness inbox addresses (that happens
+    // inside its awaited `close()`). Rebuilding now would collide, so wait it out
+    // first; the registry re-read below then reflects the settled state.
+    const inFlightDisposal = this.disposing.get(sessionId);
+    if (inFlightDisposal !== undefined) await inFlightDisposal;
     // Idempotent open-or-rehydrate (ADR 49 §Hydration): createSession
     // with an id that's already live returns the existing session — the
     // same call is create AND resume, which is what stateless-replica
@@ -3212,7 +3226,13 @@ export class AppHarness<P = unknown>
     reason: "close" | "evict" = "close",
   ): Promise<void> {
     const entry = this.registry.get(sessionId);
-    if (!entry) return;
+    if (!entry) {
+      // No live entry — either never opened, or a disposal is already in flight
+      // for this id. Join it, so a caller awaiting dispose truly waits for the
+      // inbox addresses to be released rather than returning while they are held.
+      await this.disposing.get(sessionId);
+      return;
+    }
     // TOCTOU re-guard (eviction only): the sweep/LRU selected this victim
     // BEFORE awaiting prior disposals — a send may have landed since. No
     // await sits between this check and the registry delete, so the guard
@@ -3220,30 +3240,45 @@ export class AppHarness<P = unknown>
     // evicted mid-send.
     if (reason === "evict" && !this.isEvictable(entry)) return;
     this.registry.delete(sessionId);
-    try {
-      // ADR 92 Family 2 §5 — eviction routes THROUGH `session:command:close`,
-      // not around it. Page-out and hangup are the same teardown; the audit
-      // record tells them apart by provenance, not by code path.
-      await entry.session.close({ reason: reason === "evict" ? "evicted" : "closed" });
-    } catch {
-      // best effort — already-closed sessions throw; ignore
-    }
-    try {
-      await closeOf(entry.tools);
-    } catch {
-      // best effort
-    }
-    // Eviction is paging, not a lifecycle end — suppress the app-level
-    // "session closed" notification (PA2/PA3). A genuine close fires it.
-    if (reason === "evict") return;
-    // Fire onSessionClose handlers (informational, return value
-    // ignored). Errors swallowed — handlers don't block teardown.
-    for (const h of this.sessionCloseHandlers) {
+
+    // The teardown that actually RELEASES the inbox addresses (session.close →
+    // BaseHarness unregister). Published on `disposing` — with no await between
+    // the registry delete and the publish, so it is atomic in single-threaded
+    // JS — so `buildSession`'s barrier can wait it out before a same-id resume
+    // rebuilds and collides on those addresses.
+    const teardown = (async (): Promise<void> => {
       try {
-        await h({ sessionId: entry.id, metadata: entry.metadata });
+        // ADR 92 Family 2 §5 — eviction routes THROUGH `session:command:close`,
+        // not around it. Page-out and hangup are the same teardown; the audit
+        // record tells them apart by provenance, not by code path.
+        await entry.session.close({ reason: reason === "evict" ? "evicted" : "closed" });
+      } catch {
+        // best effort — already-closed sessions throw; ignore
+      }
+      try {
+        await closeOf(entry.tools);
       } catch {
         // best effort
       }
+      // Eviction is paging, not a lifecycle end — suppress the app-level
+      // "session closed" notification (PA2/PA3). A genuine close fires it.
+      if (reason === "evict") return;
+      // Fire onSessionClose handlers (informational, return value
+      // ignored). Errors swallowed — handlers don't block teardown.
+      for (const h of this.sessionCloseHandlers) {
+        try {
+          await h({ sessionId: entry.id, metadata: entry.metadata });
+        } catch {
+          // best effort
+        }
+      }
+    })();
+    this.disposing.set(sessionId, teardown);
+    try {
+      await teardown;
+    } finally {
+      // Clear only if still ours — a fresh dispose of the same id must not wipe it.
+      if (this.disposing.get(sessionId) === teardown) this.disposing.delete(sessionId);
     }
   }
 

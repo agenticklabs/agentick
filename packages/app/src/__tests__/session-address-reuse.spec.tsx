@@ -42,7 +42,17 @@ import type {
   TaskExecution,
 } from "@agentick/spec";
 
+import { waitFor } from "@agentick/utils/testing";
+
 import { createApp } from "../react.js";
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -76,10 +86,19 @@ class RejectingCancelExecutor extends InProcessTaskExecutor {
   }
 }
 
+/** Cancel BLOCKS on a gate the test resolves — so a disposal can be held mid-close. */
+class GatedCancelExecutor extends InProcessTaskExecutor {
+  readonly gate = deferred<void>();
+  override cancel(_execution: TaskExecution, _reason?: string): Promise<void> {
+    return this.gate.promise;
+  }
+}
+
 async function mkApp(
   opts: {
     sessions?: { maxActive?: number };
     extensions?: readonly SessionExtension[];
+    taskExecutor?: InProcessTaskExecutor;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -95,7 +114,7 @@ async function mkApp(
     journal,
     bus,
     inbox,
-    tasks: { executors: [new RejectingCancelExecutor()] },
+    tasks: { executors: [opts.taskExecutor ?? new RejectingCancelExecutor()] },
     ...(opts.sessions !== undefined ? { sessions: opts.sessions } : {}),
     ...(opts.extensions !== undefined ? { extensions: opts.extensions } : {}),
   });
@@ -262,6 +281,40 @@ describe("a create that fails partway claims nothing", () => {
     expect(retried.id).toBe("c2");
     await expect(
       (retried as unknown as { tasks: { hydrated: Promise<void> } }).tasks.hydrated,
+    ).resolves.toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4 — a resume that RACES an in-flight disposal (not awaited first)
+// ---------------------------------------------------------------------------
+
+describe("create → dispose IN FLIGHT → create the SAME id", () => {
+  it("waits for the disposal to release the addresses before rebuilding", async () => {
+    const executor = new GatedCancelExecutor();
+    const { app } = await mkApp({ taskExecutor: executor });
+    parkTask(asSession(await app.createSession({ sessionId: "race" })));
+
+    // Dispose, NOT awaited: it deletes the registry entry, then blocks in close
+    // on the gated task cancel — the inbox addresses are still held.
+    const disposing = app.destroySession("race");
+    await waitFor(() => app.getSession("race") === undefined, {
+      description: "registry entry deleted",
+    });
+
+    // Resume DURING that window. The registry is empty but the addresses are
+    // held: without the barrier this rebuilds and collides; with it, it waits.
+    const resuming = app.createSession({ sessionId: "race" });
+
+    // Release the disposal, then let both settle.
+    executor.gate.resolve();
+    await disposing;
+    const resumed = asSession(await resuming);
+    expect(resumed.id).toBe("race");
+    // The tell of a collision is a rejected harness `ready`, out of band from the
+    // create — so assert the fresh tasks harness actually addressed itself.
+    await expect(
+      (resumed as unknown as { tasks: { hydrated: Promise<void> } }).tasks.hydrated,
     ).resolves.toBeUndefined();
   });
 });
