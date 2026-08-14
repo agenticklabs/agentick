@@ -1500,6 +1500,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         sessionId: input.sessionId,
         executionId,
         tickId,
+        tickIndex,
         result: {
           ...result,
           ...omitUndefined({ cost: tickCost, model: tickModel }),
@@ -1510,6 +1511,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           sessionId: input.sessionId,
           executionId,
           tickId,
+          tickIndex,
           results: tickToolResults,
         });
       }

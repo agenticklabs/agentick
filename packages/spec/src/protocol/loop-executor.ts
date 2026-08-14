@@ -96,12 +96,9 @@ export interface StateApplicatorFx {
     input: import("./session-harness.js").ApplyExecutorResultInput,
   ): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
 
-  applyToolResults(input: {
-    readonly sessionId: string;
-    readonly executionId: string;
-    readonly tickId: string;
-    readonly results: readonly LoopToolResult[];
-  }): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
+  applyToolResults(
+    input: import("./session-harness.js").ApplyToolResultsInput,
+  ): Effect.Effect<void, StateApplyErrorChannel | SubstrateError, never>;
 }
 
 export interface StateApplicator extends PromiseView<StateApplicatorFx> {

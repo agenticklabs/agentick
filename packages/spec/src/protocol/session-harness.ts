@@ -119,6 +119,8 @@ export interface SessionMessage {
 export interface SessionMessageMetadata {
   readonly executionId?: string;
   readonly tickId?: string;
+  /** 1-based index of this tick within its execution — the loop's ordinal, stamped alongside `tickId`. */
+  readonly tickIndex?: number;
   /** The generation's usage — execution-produced assistant entries. */
   readonly usage?: import("../data/execution-result.js").UsageStats;
   /**
@@ -653,6 +655,7 @@ export interface ApplyExecutorResultInput {
   readonly sessionId: string;
   readonly executionId: string;
   readonly tickId: string;
+  readonly tickIndex?: number;
   readonly result: import("../data/execution-result.js").LanguageModelExecutionResult & {
     /**
      * The tick's cost, stamped ONCE at settlement against the resolved
@@ -675,6 +678,7 @@ export interface ApplyToolResultsInput {
   readonly sessionId: string;
   readonly executionId: string;
   readonly tickId: string;
+  readonly tickIndex?: number;
   readonly results: readonly LoopToolResult[];
 }
 

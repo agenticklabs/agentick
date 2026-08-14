@@ -3489,7 +3489,7 @@ export class SessionHarness<P = unknown>
           metadata: {
             executionId: input.executionId,
             tickId: input.tickId,
-            ...omitUndefined({ usage, cost, model }),
+            ...omitUndefined({ tickIndex: input.tickIndex, usage, cost, model }),
           },
         });
         ids.push(id);
@@ -3584,7 +3584,11 @@ export class SessionHarness<P = unknown>
           content: [block],
           toolCallId: tr.toolCallId,
           name: tr.toolName,
-          metadata: { executionId: input.executionId, tickId: input.tickId },
+          metadata: {
+            executionId: input.executionId,
+            tickId: input.tickId,
+            ...omitUndefined({ tickIndex: input.tickIndex }),
+          },
         });
         ids.push(id);
       }
