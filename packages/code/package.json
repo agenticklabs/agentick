@@ -1,6 +1,6 @@
 {
   "name": "@agentick/code",
-  "version": "1.0.0-next.115",
+  "version": "1.0.0-next.116",
   "description": "CodeHarness — running model-authored code as an operation. Language-neutral: the harness owns the envelope (journaled code:execute, guards, abort, typed outcomes) and holds a Runtime provider that owns language, engine and isolation. Always present, inert until a runtime is bound; no default provider. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agent",
