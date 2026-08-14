@@ -4,7 +4,7 @@
  * estimation, and SEED_PRICING⇄SEED_MODELS single-source parity.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   contextUtilization,
@@ -51,6 +51,28 @@ describe("resolveModelInfo", () => {
       resolveModelInfo({ provider: "google", modelId: "gemini-3.5-flash-002" })?.pricing
         ?.outputPerMTok,
     ).toBe(9);
+  });
+
+  it("gemini 3.x flash: shared promo rate card through 2026, doubles in 2027", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-01"));
+      for (const id of ["gemini-3.6-flash", "gemini-3.7-flash"]) {
+        const p = resolveModelInfo({ provider: "google", modelId: id })?.pricing;
+        expect(p?.inputPerMTok).toBe(0.75);
+        expect(p?.outputPerMTok).toBe(3.75);
+        expect(p?.cachedInputPerMTok).toBe(0.075);
+      }
+      vi.setSystemTime(new Date("2027-06-01"));
+      for (const id of ["gemini-3.6-flash", "gemini-3.7-flash"]) {
+        const p = resolveModelInfo({ provider: "google", modelId: id })?.pricing;
+        expect(p?.inputPerMTok).toBe(1.5);
+        expect(p?.outputPerMTok).toBe(7.5);
+        expect(p?.cachedInputPerMTok).toBe(0.15);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("unknown model / provider → undefined, never fabricated", () => {

@@ -102,6 +102,22 @@ const VISION_TOOLS: TargetCapabilities = {
 };
 
 /**
+ * Gemini 3.x Flash rate card — 3.6 and 3.7 Flash share it. Input, output, and
+ * cached input are all promo-priced through 2026 and double on 2027-01-01.
+ */
+const GEMINI_3X_FLASH_PRICING = {
+  get inputPerMTok(): number {
+    return new Date().getTime() < new Date("2027-01-01").getTime() ? 0.75 : 1.5;
+  },
+  get outputPerMTok(): number {
+    return new Date().getTime() < new Date("2027-01-01").getTime() ? 3.75 : 7.5;
+  },
+  get cachedInputPerMTok(): number {
+    return new Date().getTime() < new Date("2027-01-01").getTime() ? 0.075 : 0.15;
+  },
+};
+
+/**
  * APPROXIMATE seed catalog (USD/MTok + window/limit numbers migrated
  * from v1's `MODEL_CATALOG`). The single source table — `SEED_PRICING`
  * is its pricing projection. Verify against current provider pricing
@@ -195,26 +211,17 @@ export const SEED_MODELS: ModelRegistry = {
     maxOutputTokens: 65536,
     capabilities: VISION_TOOLS,
   },
-  // Cheaper per output token than 3.5 Flash AND it emits fewer of them —
-  // Google reports a 17% reduction in output token usage, which compounds with
-  // the 17% lower rate to roughly a third off generation. Reasoning bills as
-  // output, so that lands hardest on a thinking agent.
+  // Same flash-family rate card as 3.7, but 3.6 emits fewer output tokens
+  // (Google reports ~17% less); reasoning bills as output, so that saving lands
+  // hardest on a thinking agent.
   "google/gemini-3.6-flash": {
-    pricing: { inputPerMTok: 1.5, outputPerMTok: 7.5, cachedInputPerMTok: 0.15 },
+    pricing: GEMINI_3X_FLASH_PRICING,
     contextWindow: 1048576,
     maxOutputTokens: 65536,
     capabilities: VISION_TOOLS,
   },
   "google/gemini-3.7-flash": {
-    pricing: {
-      get inputPerMTok(): number {
-        return new Date().getTime() < new Date("2027-01-01").getTime() ? 0.75 : 1.5;
-      },
-      get outputPerMTok(): number {
-        return new Date().getTime() < new Date("2027-01-01").getTime() ? 3.75 : 7.5;
-      },
-      cachedInputPerMTok: 0.15,
-    },
+    pricing: GEMINI_3X_FLASH_PRICING,
     contextWindow: 1048576,
     maxOutputTokens: 65536,
     capabilities: VISION_TOOLS,
