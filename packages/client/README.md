@@ -111,7 +111,7 @@ first turn, where message provenance cannot.
 
 ```ts
 const current = await client.session(id).modelInfo();
-current?.modelId; // "gemini-3.6-flash" — what THIS session will call next
+current?.modelId; // "gemini-3.7-flash" — what THIS session will call next
 current?.info?.contextWindow; // 1048576 — the denominator for a usage gauge
 current?.info?.pricing?.outputPerMTok; // 7.5
 current?.info?.capabilities?.supportsVision; // gate an attach button on this, not a hardcoded list

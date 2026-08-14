@@ -205,6 +205,20 @@ export const SEED_MODELS: ModelRegistry = {
     maxOutputTokens: 65536,
     capabilities: VISION_TOOLS,
   },
+  "google/gemini-3.7-flash": {
+    pricing: {
+      get inputPerMTok(): number {
+        return new Date().getTime() < new Date("2027-01-01").getTime() ? 0.75 : 1.5;
+      },
+      get outputPerMTok(): number {
+        return new Date().getTime() < new Date("2027-01-01").getTime() ? 3.75 : 7.5;
+      },
+      cachedInputPerMTok: 0.15,
+    },
+    contextWindow: 1048576,
+    maxOutputTokens: 65536,
+    capabilities: VISION_TOOLS,
+  },
   // TODO(pricing-tiers): Gemini 3.1 Pro is priced in TWO tiers by input size
   // ($2/$12 under 200K, $4/$18 over), and `ModelPricing` has one rate per
   // direction. It is omitted rather than entered at the low tier, which would
