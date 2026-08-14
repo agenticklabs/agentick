@@ -30,7 +30,20 @@
  * single-record projection archetype — the session-scoped sibling of tasks'
  * `live` — expressed with the shared primitive instead of bespoke machinery.
  *
- * **Persist/notify parity (this migration is parity-only):**
+ * The cached record is the SOLE home of every durable field: nothing this class
+ * writes is also mirrored in a sibling instance field, so no write-through can
+ * project a stale shadow over what the store already holds.
+ *
+ * ## Construction seeds; {@link SessionRuntime.hydrate} adopts and upserts
+ *
+ * Construction is synchronous, so it only SEEDS the cache (fresh record: idle,
+ * count 0, zero usage). The durable upsert is deferred to `hydrate()` — the
+ * session's genesis step (ADR 93), run before first render — which first reads
+ * the persisted record and ADOPTS it. Deferring is what makes resume correct:
+ * an eager construction write would overwrite a live session's durable record
+ * with a blank one before anything had a chance to read it back.
+ *
+ * **Persist/notify parity (the View migration was parity-only):**
  *   - `setStatus` / `setMeta` PERSIST (`view.write` → cache + store.put +
  *     notify). `setStatus` is the metadata-change notify trigger, exactly as
  *     the old `notify()` was; `setMeta` persists directly (as it did).
@@ -140,20 +153,33 @@ export interface SessionRuntimeInit {
   readonly metadata?: Record<string, unknown>;
 }
 
+/**
+ * The mutable slice of a {@link SessionRecord}. Presence semantics, not value
+ * semantics: a key ABSENT from the patch preserves the cached value, a key
+ * PRESENT replaces it — including with `undefined`, which clears the field.
+ * Clearing has to be expressible: restoring an unpriced snapshot must drop a
+ * stale `cost`, and ending an execution must drop `currentExecutionId`.
+ */
+type SessionRecordPatch = Partial<
+  Pick<
+    SessionRecord,
+    | "status"
+    | "executionCount"
+    | "usage"
+    | "byModel"
+    | "cost"
+    | "currentExecutionId"
+    | "title"
+    | "description"
+    | "metadata"
+  >
+>;
+
 export class SessionRuntime {
   readonly id: string;
 
-  /** Captured identity (E11) — folded into every record write. */
-  private readonly createdAt: number;
-  private readonly appId: string | undefined;
-  private readonly parentSessionId: string | undefined;
-  /** Owning principal (ADR 48) — folded into every record write; absent when principal-less. */
-  private readonly principal: string | undefined;
-  /** Spawn lineage (SP5) — folded into every record write; absent for a root. */
-  private readonly spawnPath: readonly string[] | undefined;
-  /** Origin edge (EX1) — folded into every record write; absent for a root. */
-  private readonly originExecutionId: string | undefined;
-  private readonly originCallId: string | undefined;
+  /** The durable registry, for the {@link hydrate} read-back. */
+  private readonly store: SessionStore | undefined;
   private readonly storeCtx: () => StoreCtx;
 
   /**
@@ -175,32 +201,10 @@ export class SessionRuntime {
    */
   private _currentTick = 0;
 
-  /**
-   * App-owned descriptive slots (E11) — the framework STORES these, never
-   * populates their semantics. Seeded at construction, mutated by {@link
-   * setMeta}, folded into every record write.
-   */
-  private _meta: {
-    title?: string;
-    description?: string;
-    metadata?: Record<string, unknown>;
-  };
-
   constructor(init: SessionRuntimeInit) {
     this.id = init.id;
-    this.createdAt = Date.now();
-    this.appId = init.appId;
-    this.parentSessionId = init.parentSessionId;
-    this.principal = init.principal;
-    this.spawnPath = init.spawnPath;
-    this.originExecutionId = init.originExecutionId;
-    this.originCallId = init.originCallId;
+    this.store = init.store;
     this.storeCtx = init.storeCtx;
-    this._meta = omitUndefined({
-      title: init.title,
-      description: init.description,
-      metadata: init.metadata,
-    });
 
     const store: Store<
       SessionRecord,
@@ -209,31 +213,60 @@ export class SessionRuntime {
     > = init.store ?? NULL_STORE;
     this.view = View.collection(store, (record) => record.id);
 
-    // Seed + persist the initial record (idle / count 0 / zero usage). With a
-    // real store this is the E11 construction upsert; with NULL_STORE the write
-    // is a no-op and only the cache is seeded (parity with the old
-    // store-guarded initial `syncSessionRecord`). No metadata subscribers exist
-    // at construction, so the view's notify is inert either way.
-    const initial: SessionRecord = {
-      id: this.id,
-      createdAt: this.createdAt,
-      updatedAt: Date.now(),
-      status: "idle",
-      executionCount: 0,
-      usage: { ...ZERO_USAGE },
-      ...omitUndefined({
-        parentSessionId: this.parentSessionId,
-        principal: this.principal,
-        spawnPath: this.spawnPath,
-        originExecutionId: this.originExecutionId,
-        originCallId: this.originCallId,
-        appId: this.appId,
-        title: this._meta.title,
-        description: this._meta.description,
-        metadata: this._meta.metadata,
-      }),
-    };
-    this.view.write(initial, this.storeCtx());
+    const now = Date.now();
+    this.view.seedSync(
+      omitUndefined({
+        id: this.id,
+        createdAt: now,
+        updatedAt: now,
+        status: "idle",
+        executionCount: 0,
+        usage: { ...ZERO_USAGE },
+        parentSessionId: init.parentSessionId,
+        principal: init.principal,
+        spawnPath: init.spawnPath,
+        originExecutionId: init.originExecutionId,
+        originCallId: init.originCallId,
+        appId: init.appId,
+        title: init.title,
+        description: init.description,
+        metadata: init.metadata,
+      }) as SessionRecord,
+    );
+  }
+
+  /**
+   * GENESIS (ADR 93) — adopt this session's persisted record, then upsert.
+   *
+   * A `createSession` with an id the durable registry already holds is a
+   * RESUME, and the record it holds is the session's real history: when it was
+   * created, how many executions it has run, what it has spent, and the
+   * app-owned `title` / `description` / `metadata` an app-side titler wrote.
+   * All of it is adopted; only the fields that describe THIS process win over
+   * it — the construction-bound identity (a caller-supplied lineage slot, an
+   * explicitly re-supplied title) and the live lifecycle fields, since a
+   * freshly opened harness is `idle` and the execution the previous process
+   * died mid-way through is not running here.
+   *
+   * The durable upsert lands here rather than in the constructor so that a
+   * resume reads before it writes.
+   */
+  async hydrate(): Promise<void> {
+    const persisted = await this.store?.get(this.id, this.storeCtx());
+    if (persisted !== undefined) {
+      const fresh = this.record();
+      this.view.seedSync(
+        omitUndefined({
+          ...persisted,
+          ...fresh,
+          createdAt: persisted.createdAt,
+          executionCount: persisted.executionCount,
+          usage: persisted.usage,
+          currentExecutionId: undefined,
+        }) as SessionRecord,
+      );
+    }
+    this.commit({}, { persist: true });
   }
 
   // ────────── record read-modify-write ──────────
@@ -251,60 +284,19 @@ export class SessionRuntime {
   }
 
   /**
-   * Rebuild the full record from the cached one with `patch` applied, then
-   * commit it: `persist: true` ⇒ `view.write` (cache + store.put + notify);
-   * `persist: false` ⇒ `view.seedSync` (cache-only — no store write, no
-   * notify). `updatedAt` bumps only on a persisting write, mirroring the old
-   * `syncSessionRecord` which stamped it at `store.put` time. `currentExecutionId`
-   * is three-valued: a `string` sets it, `null` clears it (omitted from the
-   * record), and absence from `patch` preserves the cached value.
+   * Apply `patch` to the cached record and commit it: `persist: true` ⇒
+   * `view.write` (cache + store.put + notify); `persist: false` ⇒
+   * `view.seedSync` (cache-only — no store write, no notify). `updatedAt` bumps
+   * only on a persisting write, mirroring the old `syncSessionRecord` which
+   * stamped it at `store.put` time.
    */
-  private commit(
-    patch: {
-      status?: SessionStatus;
-      executionCount?: number;
-      usage?: UsageStats;
-      byModel?: Readonly<Record<ModelKey, ModelUsage>>;
-      cost?: CostRollup;
-      currentExecutionId?: string | null;
-    },
-    opts: { persist: boolean },
-  ): void {
+  private commit(patch: SessionRecordPatch, opts: { persist: boolean }): void {
     const cur = this.record();
-    const nextExecutionId =
-      patch.currentExecutionId !== undefined
-        ? patch.currentExecutionId
-        : (cur.currentExecutionId ?? null);
-    // The two accounting slots are PRESENCE-keyed, not value-keyed: a restore
-    // of an unpriced snapshot must CLEAR a stale cost, and `?? cur.cost` would
-    // silently keep it. Absence from the patch preserves; presence replaces
-    // (including with `undefined`).
-    const byModel = "byModel" in patch ? patch.byModel : cur.byModel;
-    const cost = "cost" in patch ? patch.cost : cur.cost;
-    const record: SessionRecord = {
-      id: this.id,
-      createdAt: this.createdAt,
+    const record = omitUndefined({
+      ...cur,
+      ...patch,
       updatedAt: opts.persist ? Date.now() : cur.updatedAt,
-      status: patch.status ?? cur.status,
-      executionCount: patch.executionCount ?? cur.executionCount,
-      usage: patch.usage ?? cur.usage,
-      ...omitUndefined({
-        byModel,
-        cost,
-      }),
-      ...omitUndefined({
-        parentSessionId: this.parentSessionId,
-        principal: this.principal,
-        spawnPath: this.spawnPath,
-        originExecutionId: this.originExecutionId,
-        originCallId: this.originCallId,
-        appId: this.appId,
-        currentExecutionId: nextExecutionId ?? undefined,
-        title: this._meta.title,
-        description: this._meta.description,
-        metadata: this._meta.metadata,
-      }),
-    };
+    }) as SessionRecord;
     if (opts.persist) {
       this.view.write(record, this.storeCtx());
     } else {
@@ -343,7 +335,7 @@ export class SessionRuntime {
   }
   /** CACHE-ONLY — rides the next `setStatus` into the store (parity). */
   setCurrentExecutionId(id: string | null): void {
-    this.commit({ currentExecutionId: id }, { persist: false });
+    this.commit({ currentExecutionId: id ?? undefined }, { persist: false });
   }
 
   /**
@@ -440,15 +432,14 @@ export class SessionRuntime {
     readonly description?: string;
     readonly metadata?: Record<string, unknown>;
   }): void {
-    this._meta = {
-      ...this._meta,
-      ...omitUndefined({
+    this.commit(
+      omitUndefined({
         title: meta.title,
         description: meta.description,
         metadata: meta.metadata,
       }),
-    };
-    this.commit({}, { persist: true });
+      { persist: true },
+    );
   }
 
   // ────────── subscriptions (status / metadata changes only) ──────────

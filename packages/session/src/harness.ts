@@ -1169,14 +1169,20 @@ export class SessionHarness<P = unknown>
     // `restore(snapshot)`, and a second genesis would duplicate them or diverge
     // from them. Lineage is the discriminator, and only this layer knows it.
     // Genesis runs on CREATE and RESUME; never on FORK / SPAWN-inherit.
+    // The fork law binds the TIMELINE only. The session's own record hydrates
+    // unconditionally: a child's id is new, so its read finds nothing and the
+    // step degenerates to the E11 construction upsert.
     const inheritsParentImage =
       options.parentSessionId !== undefined || (options.spawnPath?.length ?? 0) > 0;
-    this._genesisReady = inheritsParentImage
-      ? Promise.resolve()
-      : // `timeline.hydrate()` is itself a no-op when the definition configures
-        // neither a `store` nor a `hydrate`, so the bundled in-memory default
-        // stays a zero-cost resolved promise.
-        this.bridges.timeline.hydrate();
+    this._genesisReady = Promise.all([
+      this.runtime.hydrate(),
+      inheritsParentImage
+        ? Promise.resolve()
+        : // `timeline.hydrate()` is itself a no-op when the definition configures
+          // neither a `store` nor a `hydrate`, so the bundled in-memory default
+          // stays a zero-cost resolved promise.
+          this.bridges.timeline.hydrate(),
+    ]).then(() => {});
 
     // Eagerly mount — the compiler exposes `.ready` for its own
     // inbox registration; our mount is awaited via `_mountReady`. The
@@ -1202,12 +1208,12 @@ export class SessionHarness<P = unknown>
 
     // E11 — the session's durable-registry mirror. The record write-through +
     // the metadata notifier the harness used to hand-roll here
-    // (`subscribeMetadata → syncSessionRecord → void store.put(...)`, plus the
-    // initial construction upsert) now live INSIDE the runtime's single-key
-    // `View<SessionRecord>`: `SessionRuntime` seeds + persists the initial
-    // record in its constructor, and every `setStatus` / `setMeta` write-through
-    // hits the store via `view.write`. Only a status transition (or `setMeta`)
-    // persists; `executionCount` / `currentExecutionId` / `usage` ride the next
+    // (`subscribeMetadata → syncSessionRecord → void store.put(...)`) live
+    // INSIDE the runtime's single-key `View<SessionRecord>`: the genesis
+    // `runtime.hydrate()` above performs the construction/resume upsert, and
+    // every `setStatus` / `setMeta` write-through hits the store via
+    // `view.write`. Only a status transition (or `setMeta`) persists;
+    // `executionCount` / `currentExecutionId` / `usage` ride the next
     // transition — the same upsert-on-transition contract, unchanged. No store
     // injected ⇒ a NULL_STORE no-op (no durable mirror), exactly as before.
   }
