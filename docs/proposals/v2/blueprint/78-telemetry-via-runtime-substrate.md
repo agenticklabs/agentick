@@ -34,6 +34,12 @@ None of this is urgent; each step is additive and independently shippable.
 4. **Explicit span nesting.** Add `spanContext` (a serialized parent-span ref) to the propagated op scope beside `parentOpId`; `makeEvent`/`runOperation` apply it as the `withSpan` `parent`. Now spine spans nest into one trace tree — via the same channel that stitches across nodes.
 5. **BYO Layer.** No `@effect/opentelemetry` dep is bundled; the adopter passes the Layer (`createApp(Agent, { telemetry: NodeSdkLive })`) — same BYO ethos as the client-side telemetry extension.
 
+## Span attributes: harness owns identity, app owns policy
+
+Domain span attributes are stamped per-harness, not centrally enumerated. A harness OWNS its op's IDENTITY — cheap, input/scope-derived facts about the op — and stamps them by overriding `BaseHarness.spanAttributes(op)`, which augments the base identity ids (op_id / surface / session_id / …) and runs ALWAYS, telemetry on or off (identity is free). Each override calls `super.spanAttributes(op)` and gates on `op.name`: the model harness adds `gen_ai.request.model` / `gen_ai.system` (generate / generate_stream / run); the tool harness `<ns>.tool.name` (dispatch); the loop harness `<ns>.tick.index` (tick); the MCP client/server harnesses `<ns>.tool.name` + `<ns>.mcp.server` (call-tool). Adding an MCP call-tool span attribute means editing the MCP package — not touching the app.
+
+The app's `telemetry-defaults.ts` holds only cross-cutting POLICY, switch-gated by `createApp({ telemetry })`: GLOBAL app identity (app / function / service names + adopter attributes) and RESULT-derived usage tokens + cost. Cost needs the app's rate card and usage is read off the model result, so neither can be an input-derived override. A future symmetric `resultAttributes(op, result)` seam would let the model harness own even the result-derived usage; deferred.
+
 ## What this retires from ADR 77
 
 - The loop `Effect.gen` rewrite — **not needed** under B.

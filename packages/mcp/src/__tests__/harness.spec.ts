@@ -216,6 +216,35 @@ describe("McpClientHarness — protocol", () => {
     }
   });
 
+  it("spanAttributes stamps tool.name + mcp.server on the call-tool op (ADR 78 identity seam)", async () => {
+    const f = await makeFixture();
+    try {
+      const spanAttributes = (op: { readonly name: string; readonly input?: unknown }) =>
+        (
+          f.harness as unknown as {
+            spanAttributes(o: unknown): Readonly<Record<string, unknown>>;
+          }
+        ).spanAttributes({ opId: "x", surface: "mcp", scope: {}, ...op });
+
+      const attrs = spanAttributes({
+        name: "mcp:command:call-tool",
+        input: { name: "echo", args: { message: "hi" } },
+      });
+      expect(attrs["agentick.tool.name"]).toBe("echo");
+      expect(attrs["agentick.mcp.server"]).toBe("test-server");
+
+      // A different op carries the server id nowhere near tool.name.
+      const listing = spanAttributes({
+        name: "mcp:command:list-tools",
+        input: { cursor: undefined },
+      });
+      expect(listing["agentick.tool.name"]).toBeUndefined();
+      expect(listing["agentick.mcp.server"]).toBeUndefined();
+    } finally {
+      await f.close();
+    }
+  });
+
   it("listTools / callTool fail before connect with McpClientNotReadyError", async () => {
     const f = await makeFixture();
     try {

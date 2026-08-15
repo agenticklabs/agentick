@@ -374,6 +374,26 @@ export class McpServerHarness
   }
 
   /**
+   * Adds `<ns>.tool.name` (the called tool) + `<ns>.mcp.server` (this server's
+   * id) to the base identity ids on the `mcp:command:call-tool` crossing span.
+   * Input/scope-derived and always-on (ADR 78 identity seam).
+   */
+  protected override spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    const base = super.spanAttributes(op);
+    if (op.name !== "mcp:command:call-tool") return base;
+    const ns = this.telemetryNamespace;
+    const params = (op.input as { params?: unknown } | undefined)?.params;
+    const name = (params as { name?: unknown } | undefined)?.name;
+    return {
+      ...base,
+      ...(typeof name === "string" ? { [`${ns}.tool.name`]: name } : {}),
+      [`${ns}.mcp.server`]: this.scopeId,
+    };
+  }
+
+  /**
    * The Prompts source this server projects on the wire, or `null` if
    * no prompts slot was wired. Use this to register/update/remove
    * prompts at runtime (independent of how it was originally
@@ -1019,8 +1039,13 @@ export class McpServerHarness
         identity,
         origin: "wire" as const,
       });
+      const crossingToolName = crossing.params?.name;
+      const opId =
+        crossing.verb === "call-tool" && typeof crossingToolName === "string"
+          ? `mcp:call-tool:${crossingToolName}:${generateId()}`
+          : `${opName}:${generateId()}`;
       const op: Operation<McpCrossingInput, R, unknown> = {
-        opId: `${opName}:${generateId()}`,
+        opId,
         surface: SURFACE,
         name: opName,
         scope,

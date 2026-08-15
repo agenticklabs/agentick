@@ -96,4 +96,46 @@ describe("LanguageModelExecutor — spine telemetry parity (adoptTelemetry)", ()
 
     await exec.close();
   });
+
+  it("spanAttributes stamps GenAI model identity on the model-call ops (ADR 78 identity seam)", async () => {
+    const exec = new LanguageModelExecutor<StubRaw, never>(
+      "exec-span-attrs",
+      new MemoryJournal(),
+      new LocalEventBus(),
+      new LocalInbox(),
+      { adapter: stubAdapter() },
+    );
+    await exec.ready;
+
+    // Protected override — exercised directly on the REAL harness. `op.input`
+    // carries the ExecutionTarget the identity is derived from.
+    const spanAttributes = (op: {
+      readonly name: string;
+      readonly input?: unknown;
+    }): Readonly<Record<string, unknown>> =>
+      (
+        exec as unknown as {
+          spanAttributes(o: unknown): Readonly<Record<string, unknown>>;
+        }
+      ).spanAttributes({ opId: "x", surface: "model", scope: {}, ...op });
+
+    for (const name of [
+      "model:command:generate",
+      "model:command:generate_stream",
+      "model:command:run",
+    ]) {
+      const attrs = spanAttributes({ name, input: { target: TARGET } });
+      expect(attrs["gen_ai.request.model"]).toBe("stub-v1");
+      expect(attrs["gen_ai.system"]).toBe("stub");
+    }
+
+    // Not a model-call op → identity is absent (normalize is result-derived).
+    const normalize = spanAttributes({
+      name: "model:command:normalize",
+      input: { target: TARGET },
+    });
+    expect(normalize["gen_ai.request.model"]).toBeUndefined();
+
+    await exec.close();
+  });
 });

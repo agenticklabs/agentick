@@ -159,7 +159,13 @@ async function mkToolExecutor() {
             ] as ContentBlock[],
             stopReason: "tool_use",
             toolCalls: [{ id: "tc-1", name: "calculator", input: { expression: "47*23" } }],
-            usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12 },
+            usage: {
+              inputTokens: 8,
+              outputTokens: 4,
+              totalTokens: 12,
+              cachedInputTokens: 3,
+              reasoningTokens: 2,
+            },
           },
         },
         {
@@ -214,6 +220,10 @@ describe("App telemetry rung 1 — the enrichment switch", () => {
     expect(gen!.attributes.get("gen_ai.system")).toBe("mock");
     expect(gen!.attributes.get("gen_ai.usage.input_tokens")).toBe(8);
     expect(gen!.attributes.get("gen_ai.usage.output_tokens")).toBe(4);
+    // Cached input tokens use the verbatim semconv key; reasoning tokens have no
+    // ratified semconv key, so they stay framework-namespaced.
+    expect(gen!.attributes.get("gen_ai.usage.cached_tokens")).toBe(3);
+    expect(gen!.attributes.get("agentick.usage.reasoning_tokens")).toBe(2);
     expect(gen!.attributes.get("gen_ai.response.finish_reason")).toBe("tool_use");
     // cost = 8/1e6*1 + 4/1e6*2 = 1.6e-5
     expect(gen!.attributes.get("agentick.usage.cost_usd")).toBeCloseTo(1.6e-5, 10);

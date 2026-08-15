@@ -101,6 +101,7 @@ import {
   type ExecutorInFlightEntry,
   type ProviderRequestCall,
 } from "./executor-lifecycle.js";
+import { modelIdentityAttributes } from "./model-span-identity.js";
 
 // ADR 80/83/89 — light up the model-path verbs on the derived `CommandHooks`
 // surface. The provider call is command-ified (Phase 1B): `generate` /
@@ -640,6 +641,19 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         cause: new Error(`${this.constructor.name} inbox dispatch not yet wired`),
       }),
     );
+  }
+
+  /**
+   * Adds the GenAI-semconv model identity (`gen_ai.request.model` /
+   * `gen_ai.system`, verbatim — NOT whitelabeled) to the base identity ids on
+   * the model-call spans (`generate` / `generate_stream` / `run`). Target-derived
+   * and always-on (ADR 78 identity seam); token usage + cost stay switch-gated in
+   * the app's telemetry defaults (result-derived + rate-card policy).
+   */
+  protected override spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    return { ...super.spanAttributes(op), ...modelIdentityAttributes(op) };
   }
 
   // ──────────────────────────────────────────────────────────────────

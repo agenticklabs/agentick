@@ -96,6 +96,7 @@ import type {
   MessageHandlerError,
   EventBus,
   MessageInbox,
+  Operation,
   OperationJournal,
   OutputSpec,
   RunExecutionInput,
@@ -319,6 +320,22 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       }),
       body: (i, sink) => this.runExecutionBody(i, sink),
     });
+  }
+
+  /**
+   * Adds `<ns>.tick.index` (1-based) to the base identity ids on the
+   * `loop:command:tick` span only — `run-execution` carries no tick index.
+   * Input-derived and always-on (ADR 78 identity seam).
+   */
+  protected override spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    const base = super.spanAttributes(op);
+    if (op.name !== "loop:command:tick") return base;
+    const idx = (op.input as { tickIndex?: unknown } | undefined)?.tickIndex;
+    return typeof idx === "number"
+      ? { ...base, [`${this.telemetryNamespace}.tick.index`]: idx }
+      : base;
   }
 
   // ──────── LoopExecutorProtocol ────────

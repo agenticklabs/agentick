@@ -1,16 +1,29 @@
 /**
- * Telemetry enrichment defaults (telemetry rung 1) — the composition the
- * `createApp({ telemetry })` switch registers when enrichment is ON.
+ * Telemetry enrichment defaults (telemetry rung 1) — the cross-cutting POLICY
+ * the `createApp({ telemetry })` switch registers when enrichment is ON.
+ *
+ * The division of labor (ADR 78): a harness OWNS its op's IDENTITY, the app
+ * owns cross-cutting POLICY.
+ *   - Cheap, INPUT/SCOPE-derived identity (model id, tool name, tick index) is
+ *     stamped by each harness's own `spanAttributes` override — ALWAYS-ON,
+ *     exactly like the base identity ids (op_id / surface / session_id / …).
+ *     Those attrs are NOT built here.
+ *   - What remains here is genuinely cross-cutting: GLOBAL app identity
+ *     (app/function/service names + adopter attributes) and RESULT-derived
+ *     usage tokens + cost. Cost needs the app's rate card; usage is read off
+ *     the model result, so neither can be an input-derived `spanAttributes`
+ *     override.
  *
  * This module is PURE SUGAR over rungs 2–3: it builds a list of Effect-native
  * {@link Middleware} from the rung-3 helpers ({@link spanAttributes},
  * {@link annotateOperationSpan}) plus the pricing module. There is NO bespoke
  * telemetry machinery here — every interceptor annotates the ambient operation
- * span that `runOperation` already opened (ADR 78). The list is threaded onto
- * the session's tier-4 `withCallMiddleware` seam (the same seam rung 2 rides),
- * so it reaches EVERY op a send touches — ticks, model calls, tool dispatches —
- * across construction-siblings and per-tick-swapped executors alike. When the
- * switch is off the list is never built (zero overhead).
+ * span that `runOperation` already opened. The list is threaded onto the
+ * session's tier-4 `withCallMiddleware` seam (the same seam rung 2 rides), so
+ * it reaches every op a send touches across construction-siblings and
+ * per-tick-swapped executors alike. When the switch is off the list is never
+ * built (zero overhead) — but the harness identity overrides still run, because
+ * identity is free and always on.
  *
  * Attribute-key naming (Ryan's rule): keys are DOT-separated, never colon
  * (colons live only in span/op NAMES). Two tiers:
@@ -134,8 +147,6 @@ const MODEL_GENERATE = opKey("model:command:generate");
 const MODEL_GENERATE_STREAM = opKey("model:command:generate_stream");
 const MODEL_RUN = opKey("model:command:run");
 const MODEL_NORMALIZE = opKey("model:command:normalize");
-const TOOL_DISPATCH = opKey("tool:command:dispatch");
-const LOOP_TICK = opKey("loop:command:tick");
 
 /** Model-call ops whose result carries a normalized {@link UsageStats}. */
 const MODEL_USAGE_OPS = new Set([
@@ -207,24 +218,19 @@ export function buildTelemetryInterceptors(
   for (const [k, v] of Object.entries(config.attributes ?? {})) globalAttrs[k] = v;
   if (Object.keys(globalAttrs).length > 0) list.push(spanAttributes(() => globalAttrs));
 
-  // Model identity — GenAI semconv `gen_ai.request.model` / `gen_ai.system`
-  // (verbatim, vendor-recognized) off the op input's target.
-  list.push(
-    onOps<unknown, unknown>(
-      new Set([MODEL_GENERATE, MODEL_GENERATE_STREAM, MODEL_RUN]),
-      spanAttributes((input) => {
-        const target = inputTarget(input);
-        if (target === undefined) return {};
-        return { "gen_ai.request.model": target.modelId, "gen_ai.system": target.provider };
-      }),
-    ),
-  );
-
   // Token usage + cost — read the model result, estimate cost, annotate the
-  // model-call span. Usage tokens use GenAI semconv verbatim; total-tokens +
-  // cost have no GenAI standard, so they stay framework-namespaced.
-  // `estimateCost` returns undefined for un-priced models (never fabricates
-  // zeros); usage-only ops still stamp token counts.
+  // model-call span. Result-derived (not input/scope-derived), so it stays on
+  // the switch-gated enrichment list rather than a per-harness `spanAttributes`
+  // override; cost additionally needs the app's rate card. Usage tokens use
+  // GenAI semconv verbatim where one exists; total-tokens + cost have no GenAI
+  // standard, so they stay framework-namespaced. `estimateCost` returns
+  // undefined for un-priced models (never fabricates zeros); usage-only ops
+  // still stamp token counts.
+  // TODO(telemetry-result-seam): a symmetric `resultAttributes(op, result)`
+  // seam (parallel to `spanAttributes`) would let the model harness OWN this
+  // result-derived usage the way it now owns model identity, and let per-tick
+  // usage roll up onto the `loop:command:tick` span. Deferred — this change
+  // moves only the input/scope-derived identity attrs.
   const usageCost: Middleware<unknown, unknown, unknown> = (input, next) =>
     Effect.gen(function* () {
       const result = yield* next(input);
@@ -235,6 +241,12 @@ export function buildTelemetryInterceptors(
         "gen_ai.usage.output_tokens": usage.outputTokens,
         [`${ns}.usage.total_tokens`]: usage.totalTokens,
       };
+      if (typeof usage.cachedInputTokens === "number") {
+        attrs["gen_ai.usage.cached_tokens"] = usage.cachedInputTokens;
+      }
+      if (typeof usage.reasoningTokens === "number") {
+        attrs[`${ns}.usage.reasoning_tokens`] = usage.reasoningTokens;
+      }
       const finish = (result as { stopReason?: unknown } | undefined)?.stopReason;
       if (typeof finish === "string") attrs["gen_ai.response.finish_reason"] = finish;
       const target = inputTarget(input);
@@ -250,28 +262,6 @@ export function buildTelemetryInterceptors(
       return result;
     });
   list.push(onOps(MODEL_USAGE_OPS, usageCost));
-
-  // Tool identity — `<ns>.tool.name` off the dispatch input.
-  list.push(
-    onOps<unknown, unknown>(
-      new Set([TOOL_DISPATCH]),
-      spanAttributes((input) => {
-        const name = (input as { name?: unknown } | undefined)?.name;
-        return typeof name === "string" ? { [`${ns}.tool.name`]: name } : {};
-      }),
-    ),
-  );
-
-  // Tick index — `<ns>.tick.index` off the TickInput (1-based).
-  list.push(
-    onOps<unknown, unknown>(
-      new Set([LOOP_TICK]),
-      spanAttributes((input) => {
-        const idx = (input as { tickIndex?: unknown } | undefined)?.tickIndex;
-        return typeof idx === "number" ? { [`${ns}.tick.index`]: idx } : {};
-      }),
-    ),
-  );
 
   return list;
 }

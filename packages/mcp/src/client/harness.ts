@@ -49,6 +49,7 @@ import type {
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
+  Operation,
   OperationJournal,
   OperationOrigin,
 } from "@agentick/spec";
@@ -521,6 +522,7 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
     });
     this.callToolCmd = this.command({
       name: "mcp:call-tool",
+      opId: (i: McpCallToolInput) => `mcp:call-tool:${i.name}:${generateId()}`,
       handler: (i: McpCallToolInput) => this.callToolBody(i),
     });
     this.callToolAsTaskCmd = this.command({
@@ -587,6 +589,25 @@ export class McpClientHarness extends BaseHarness<"mcp"> {
       name: "mcp:set-logging-level",
       handler: (i: McpSetLoggingLevelInput) => this.setLoggingLevelBody(i),
     });
+  }
+
+  /**
+   * Adds `<ns>.tool.name` (the called tool) + `<ns>.mcp.server` (this server's
+   * adopter alias) to the base identity ids on the `mcp:command:call-tool` span.
+   * Input/scope-derived and always-on (ADR 78 identity seam).
+   */
+  protected override spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    const base = super.spanAttributes(op);
+    if (op.name !== "mcp:command:call-tool") return base;
+    const ns = this.telemetryNamespace;
+    const name = (op.input as { name?: unknown } | undefined)?.name;
+    return {
+      ...base,
+      ...(typeof name === "string" ? { [`${ns}.tool.name`]: name } : {}),
+      [`${ns}.mcp.server`]: this.serverId,
+    };
   }
 
   // ============================================================================

@@ -76,6 +76,34 @@ describe("McpServerHarness — construction + lifecycle", () => {
   });
 });
 
+describe("McpServerHarness — spanAttributes identity seam (ADR 78)", () => {
+  it("stamps tool.name + mcp.server on the call-tool crossing op", async () => {
+    const h = await makeHarness();
+    const spanAttributes = (op: { readonly name: string; readonly input?: unknown }) =>
+      (
+        h as unknown as {
+          spanAttributes(o: unknown): Readonly<Record<string, unknown>>;
+        }
+      ).spanAttributes({ opId: "x", surface: "mcpServer", scope: {}, ...op });
+
+    const attrs = spanAttributes({
+      name: "mcp:command:call-tool",
+      input: { params: { name: "echo", arguments: { message: "hi" } }, toolInput: undefined },
+    });
+    expect(attrs["agentick.tool.name"]).toBe("echo");
+    expect(attrs["agentick.mcp.server"]).toBe(h.id);
+
+    const other = spanAttributes({
+      name: "mcp:command:list-tools",
+      input: { params: {}, toolInput: undefined },
+    });
+    expect(other["agentick.tool.name"]).toBeUndefined();
+    expect(other["agentick.mcp.server"]).toBeUndefined();
+
+    await h.close();
+  });
+});
+
 describe("McpServerHarness — options validation", () => {
   it("throws on missing name", () => {
     expect(caughtTag(() => validateOptions({ ...makeOptions(), name: "" }))).toBe(

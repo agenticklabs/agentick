@@ -86,6 +86,7 @@ import {
   operationOutcomeToTerminal,
   type ProviderRequestCall,
 } from "./executor-lifecycle.js";
+import { modelIdentityAttributes } from "./model-span-identity.js";
 
 /**
  * The fake's twin of the real executor's `ProviderCallRef` — the per-call
@@ -320,6 +321,17 @@ export class FakeLanguageModelExecutor
   private peekScripted(): MockScriptedRun | undefined {
     if (this.scriptedSequence.length === 0) return undefined;
     return this.scriptedSequence[Math.min(this.scriptIndex, this.scriptedSequence.length - 1)];
+  }
+
+  /**
+   * Shares the real {@link import("./language-model-executor.js").LanguageModelExecutor}
+   * span-identity contract via {@link modelIdentityAttributes} — one source, so
+   * the double's spans can't drift from the real executor's.
+   */
+  protected override spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    return { ...super.spanAttributes(op), ...modelIdentityAttributes(op) };
   }
 
   // ──────── ExecutorProtocol ────────

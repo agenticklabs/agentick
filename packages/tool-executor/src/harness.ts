@@ -306,6 +306,23 @@ export class ToolExecutorHarness
     return result.content;
   }
 
+  /**
+   * Adds `<ns>.tool.name` (the dispatched tool) to the base identity ids on
+   * the `tool:command:dispatch` span. Identity is input-derived and free, so
+   * it rides the always-on `spanAttributes` seam rather than the switch-gated
+   * enrichment (ADR 78).
+   */
+  protected override spanAttributes(
+    op: Operation<unknown, unknown, unknown>,
+  ): Readonly<Record<string, unknown>> {
+    const base = super.spanAttributes(op);
+    if (op.name !== "tool:command:dispatch") return base;
+    const name = (op.input as { name?: unknown } | undefined)?.name;
+    return typeof name === "string"
+      ? { ...base, [`${this.telemetryNamespace}.tool.name`]: name }
+      : base;
+  }
+
   // ──────────────────────── ToolExecutorProtocol ────────────────────────
 
   register(input: RegisterToolInput): Promise<void> {
