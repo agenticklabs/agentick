@@ -244,6 +244,18 @@ Failover is per-adapter all the way down: each adapter runs its own `prepareRequ
 
 `tapModel` is observation only — tap callbacks that throw are swallowed and never break the pipeline.
 
+### Which layer retries what
+
+Three retry layers exist, each owning a different failure shape — a layer that defaults must assume the layers below already defaulted, so none of them overlap:
+
+| Layer                                                    | Owns                                                                            | Default                                                        |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Provider SDK (`clientOptions`)                           | 408/429/5xx with `Retry-After`-honoring backoff, per HTTP request               | ON — Anthropic/OpenAI SDKs retry twice; ai-sdk `maxRetries: 2` |
+| `withRetry`                                              | The same transient class, when the SDK default is not enough; stream START only | opt-in composition                                             |
+| Tick retry (`tickFailurePolicy`, session-level — ADR 99) | Failures no HTTP layer can replay: malformed model output, mid-stream death     | ON for `MalformedModelOutput`, once                            |
+
+A 429 killing a run means the SDK's retries were exhausted — reach for `clientOptions.maxRetries` or `withRetry`, never `tickFailurePolicy`: the tick loop re-issues immediately (no backoff, no `Retry-After`), and a tick re-renders and re-bills full context — the right price for a garbage generation, the wrong one for "wait 800ms and resend." The inverse also holds: once a stream has produced a chunk, only the tick layer can retry it (`{ StreamFailed: 1 }` as policy), because no lower layer replays a started stream.
+
 ## Projection — what the model actually sees
 
 `defaultProject` folds a compiled tree into a `LanguageModelInput`. The fold law is short, and most of it is about what the fold does NOT do:
