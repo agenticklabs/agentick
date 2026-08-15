@@ -93,6 +93,7 @@ export interface TokenEstimate {
 import type { ExecutorErrorChannel } from "../errors/harnesses.js";
 export type ExecutorError = ExecutorErrorChannel;
 export {
+  MalformedModelOutput,
   NormalizationFailed,
   ProjectionFailed,
   ProviderAborted,

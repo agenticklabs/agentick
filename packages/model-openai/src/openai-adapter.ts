@@ -464,6 +464,10 @@ export function openai(
       return parseThinkTags ? [thinkTagTransform()] : [];
     },
 
+    // TODO(malformed-output): no `mapProviderError` — OpenAI publishes no error
+    // class or finish reason that positively names malformed model output. Its
+    // one occurrence, an unparseable `tool_calls[].function.arguments` run, is
+    // caught generically at stream finalize (ADR 99 slice 4a).
     normalize(raw: ChatCompletion): LanguageModelExecutionResult {
       return normalizeImpl({ targetOutput: raw, target });
     },

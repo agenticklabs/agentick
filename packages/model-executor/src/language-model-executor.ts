@@ -73,8 +73,8 @@ import {
   NormalizationFailed,
   ProjectionFailed,
   ProviderAborted,
-  ProviderRejected,
   StreamFailed,
+  isExecuteError,
 } from "@agentick/spec";
 
 import {
@@ -85,6 +85,8 @@ import {
   composeTransforms,
   customBlockTransform,
   defaultFinalizeStream,
+  defaultIsAbortError,
+  defaultMapProviderError,
   defaultProject,
   effectiveModelInfo,
   estimateTokenBreakdown,
@@ -580,32 +582,19 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
    */
   private isAbortError(cause: unknown): boolean {
     if (this.adapter.isAbortError) return this.adapter.isAbortError(cause);
-    if (!(cause instanceof Error)) return false;
-    return (
-      cause.name === "AbortError" ||
-      cause.name === "APIUserAbortError" ||
-      /abort/i.test(cause.message)
-    );
+    return defaultIsAbortError(cause);
   }
 
   /**
-   * Default provider-error mapping: AbortError → `ProviderAborted`;
-   * any error with a numeric `status` / `statusCode` field →
-   * `ProviderRejected`; everything else → `StreamFailed`. Override
-   * when your provider surfaces structured errors you can extract more
-   * detail from.
+   * Provider error → typed failure. The adapter's own `mapProviderError` wins
+   * when it has one; {@link defaultMapProviderError} is the fallback table.
    */
   private mapProviderError(cause: unknown): ExecuteErrorChannel {
+    // An already-classified failure is not re-classified — `MalformedModelOutput`
+    // raised by finalize would otherwise come back out as `StreamFailed`.
+    if (isExecuteError(cause)) return cause;
     if (this.adapter.mapProviderError) return this.adapter.mapProviderError(cause);
-    if (this.isAbortError(cause)) {
-      return new ProviderAborted({ reason: cause instanceof Error ? cause.message : "aborted" });
-    }
-    const status =
-      (cause as { status?: unknown })?.status ?? (cause as { statusCode?: unknown })?.statusCode;
-    if (typeof status === "number") {
-      return new ProviderRejected({ status, cause });
-    }
-    return new StreamFailed({ cause });
+    return defaultMapProviderError(cause, (c) => this.isAbortError(c));
   }
 
   /**
@@ -1054,8 +1043,14 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         const flushStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.suspend(() =>
           Stream.fromIterable(pipeline.flush()),
         );
-        const finalizeStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.suspend(
-          () => Stream.fromIterable(this.finalizeStream(accum)),
+        // `Effect.try`, not `Stream.suspend`: finalize RAISES on malformed model
+        // output (ADR 99 slice 4a), and a raise inside `suspend` is a defect —
+        // it would bypass the stream's typed error channel entirely.
+        const finalizeStream: Stream.Stream<AdapterDelta, ExecuteErrorChannel> = Stream.unwrap(
+          Effect.try({
+            try: () => Stream.fromIterable(this.finalizeStream(accum)),
+            catch: (cause): ExecuteErrorChannel => this.mapProviderError(cause),
+          }),
         );
 
         // Synthetic-message-start guard: if the provider's first delta

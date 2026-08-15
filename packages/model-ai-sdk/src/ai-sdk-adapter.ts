@@ -38,12 +38,17 @@ import {
 } from "ai";
 
 import { generateId } from "@agentick/utils";
-import { createSourceInterner, defineLanguageModelAdapter } from "@agentick/model";
+import {
+  createSourceInterner,
+  defaultMapProviderError,
+  defineLanguageModelAdapter,
+} from "@agentick/model";
 import type { LanguageModelAdapter, SourceInterner, StreamAccumulatorView } from "@agentick/model";
 import type {
   AdapterDelta,
   Citation,
   ContentBlock,
+  ExecuteErrorChannel,
   ExecuteInput,
   ExecutionTarget,
   LanguageModelExecutionResult,
@@ -58,7 +63,7 @@ import type {
   TextBlock,
   ToolCall,
 } from "@agentick/spec";
-import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import { MalformedModelOutput, mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
 // ============================================================================
@@ -318,18 +323,15 @@ export function aisdk(
             // Provider skipped tool-input-start; synthesize for symmetry.
             out.push({ type: "tool-call-start", callId, name, blockIndex: state.blockIndex });
           }
-          // tool-call-end + tool-call (with parsed input) — accumulator
-          // resolves input via argsBuffer + the optional `input` field.
           const inputObj =
             (part.input as Readonly<Record<string, unknown>> | undefined) ??
             (part.args as Readonly<Record<string, unknown>> | undefined);
+          // `tool-input-end` carries no input — the SDK's own `tool-call` part
+          // does, and absent that the executor's finalize resolves it from the
+          // accumulated buffer (where an unparseable one fails the tick).
+          if (inputObj === undefined) break;
           out.push({ type: "tool-call-end", callId });
-          out.push({
-            type: "tool-call",
-            callId,
-            name,
-            input: inputObj ?? accum.toolCallInput(callId),
-          });
+          out.push({ type: "tool-call", callId, name, input: inputObj });
           break;
         }
         case "reasoning-start": {
@@ -397,6 +399,11 @@ export function aisdk(
           break;
         }
         case "error": {
+          // TODO(malformed-output): `streamText` reports an invalid tool input as
+          // an error PART, not a rejection, so it reaches `mapProviderError` only
+          // on the non-streaming path. Failing the stream from here needs the
+          // delta pipeline to carry a failure channel — `mapChunk` is sync, and a
+          // raise inside it is a defect (ADR 99 slice 1).
           const err = part.error;
           out.push({
             type: "error",
@@ -463,7 +470,39 @@ export function aisdk(
     normalize(raw: unknown): LanguageModelExecutionResult {
       return normalizeImpl({ targetOutput: raw, target });
     },
+
+    mapProviderError,
   });
+}
+
+/**
+ * AI SDK error names for a tool call whose arguments the SDK could not parse or
+ * validate — the model's own garbage, not a bad request (ADR 99 slice 1). Both
+ * names are carried because the class was renamed between SDK 4 and 5, and this
+ * adapter is duck-typed against that drift everywhere else too.
+ */
+const INVALID_TOOL_INPUT_ERROR_NAMES = new Set([
+  "AI_InvalidToolInputError",
+  "AI_InvalidToolArgumentsError",
+]);
+
+/**
+ * Classify the shapes this adapter recognises; delegate the rest to the
+ * executor's own table.
+ */
+export function mapProviderError(cause: unknown): ExecuteErrorChannel {
+  if (cause instanceof Error && INVALID_TOOL_INPUT_ERROR_NAMES.has(cause.name)) {
+    const toolName = (cause as { toolName?: unknown }).toolName;
+    const rawArguments = (cause as { toolInput?: unknown }).toolInput;
+    return new MalformedModelOutput({
+      ...omitUndefined({
+        toolName: typeof toolName === "string" ? toolName : undefined,
+        rawArguments: typeof rawArguments === "string" ? rawArguments : undefined,
+      }),
+      cause,
+    });
+  }
+  return defaultMapProviderError(cause);
 }
 
 // ============================================================================

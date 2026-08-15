@@ -59,6 +59,8 @@ export type ProjectionError = import("../errors/harnesses.js").ProjectionFailed;
 export {
   ExecuteError,
   type ExecuteErrorChannel,
+  isExecuteError,
+  MalformedModelOutput,
   NormalizationFailed,
   ProviderAborted,
   ProviderRejected,

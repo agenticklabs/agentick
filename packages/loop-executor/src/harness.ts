@@ -120,6 +120,7 @@ import {
   ResponseValidationError,
   StructuredOutputIncomplete,
   TerminalToolNameCollision,
+  isExecuteError,
   DEFAULT_TERMINAL_TOOL_NAME,
   foldUsageRollup,
   resolveAutoStrategy,
@@ -129,7 +130,7 @@ import {
   toRegistration,
   validateStructuredOutput,
 } from "@agentick/spec";
-import { mergeAbortSignals, omitUndefined } from "@agentick/utils";
+import { mergeAbortSignals, omitUndefined, reasonOf } from "@agentick/utils";
 
 // ADR 80/83 — light up the execution-lifecycle verb. `loop:run-execution`
 // is a STREAMING command (`this.commandStream`, see the constructor): its
@@ -1442,6 +1443,13 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           }
           const err = dispatched.left;
           const durationMs = Date.now() - startedAt;
+          // The paired `tool_result` IS the model's feedback loop (ADR 99 slice
+          // 4b) — persisted with `is_error` and an EMPTY body, it told the model
+          // only that something went wrong, and it could not self-correct.
+          // TODO(tool-error-detail): `ToolValidationError.message` names the tool
+          // but not its `issues`, so the model still cannot see WHICH argument was
+          // wrong. The fix belongs in the error's own message composition (spec).
+          const content: readonly ContentBlock[] = [{ type: "text", text: reasonOf(err) }];
           yield* input.emit({
             kind: "tool-dispatch-end",
             tick: tickIndex,
@@ -1455,7 +1463,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             tick: tickIndex,
             callId: tc.id,
             name: tc.name,
-            content: [],
+            content,
             succeeded: false,
             durationMs,
             isError: true,
@@ -1464,7 +1472,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             toolCallId: tc.id,
             toolName: tc.name,
             succeeded: false,
-            content: [],
+            content,
             durationMs,
             error: err,
           };
@@ -1664,6 +1672,10 @@ function streamTerminal(cause: unknown): ExecutorTerminal<LanguageModelExecution
   if (cause instanceof ProviderAborted) {
     return { outcome: "canceled", ...(cause.reason !== undefined ? { reason: cause.reason } : {}) };
   }
+  // An adapter that already classified the failure (ADR 99 slice 1) keeps its
+  // `_tag` — wrapping would flatten every class into `ProviderRejected`, which
+  // is exactly the distinction recovery policy reads.
+  if (isExecuteError(cause)) return { outcome: "failed", error: cause };
   return { outcome: "failed", error: new ProviderRejected({ cause }) };
 }
 

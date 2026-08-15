@@ -22,6 +22,8 @@
 
 export {
   defaultFinalizeStream,
+  defaultIsAbortError,
+  defaultMapProviderError,
   defineLanguageModelAdapter,
   isLanguageModelAdapter,
   type LanguageModelAdapter,

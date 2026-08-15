@@ -577,6 +577,10 @@ export function anthropic(
       return parseThinkTags ? [thinkTagTransform()] : [];
     },
 
+    // TODO(malformed-output): no `mapProviderError` — Anthropic publishes no
+    // error class or stop reason that positively names malformed model output.
+    // Its one occurrence, an unparseable `input_json_delta` run, is caught
+    // generically at stream finalize (ADR 99 slice 4a).
     normalize(raw: AnthropicMessage): LanguageModelExecutionResult {
       return normalizeImpl({ targetOutput: raw, target });
     },

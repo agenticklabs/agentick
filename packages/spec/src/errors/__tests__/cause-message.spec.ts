@@ -24,6 +24,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   causeMessage,
+  MalformedModelOutput,
   ProviderRejected,
   StreamFailed,
   UnknownExecutorError,
@@ -71,6 +72,39 @@ describe("ProviderRejected — the cause's words survive the wrapping", () => {
     const inner = new StreamFailed({ cause: new Error("socket hangup") });
     const wrapped = new ProviderRejected({ cause: inner });
     expect(wrapped.cause).toBe(inner);
+  });
+});
+
+describe("MalformedModelOutput — the same fold, minus the model's own words", () => {
+  it("adopts the cause's message and names the tool", () => {
+    const err = new MalformedModelOutput({
+      toolName: "knowify__query",
+      cause: new SyntaxError("Unexpected end of JSON input"),
+    });
+    expect(err.message).toBe("Unexpected end of JSON input (tool=knowify__query)");
+    expect(err._tag).toBe("MalformedModelOutput");
+  });
+
+  it("keeps the bare classification when the cause has nothing to say", () => {
+    expect(new MalformedModelOutput().message).toBe("malformed model output");
+    expect(new MalformedModelOutput({ toolName: "t1" }).message).toBe(
+      "malformed model output (tool=t1)",
+    );
+  });
+
+  it("REDACTS rawArguments from the projection — model output may carry user data", () => {
+    const err = new MalformedModelOutput({
+      toolName: "knowify__query",
+      rawArguments: '{"ssn":"078-05-1120',
+      cause: new SyntaxError("Unexpected end of JSON input"),
+    });
+    // Readable in-process, where the operator debugging the run already holds
+    // the data; gone from the shape that crosses a wire or lands in a log.
+    expect(err.rawArguments).toBe('{"ssn":"078-05-1120');
+    const json = err.toJSON();
+    expect("rawArguments" in json).toBe(false);
+    expect(JSON.stringify(err)).not.toContain("078-05-1120");
+    expect(json.toolName).toBe("knowify__query");
   });
 });
 

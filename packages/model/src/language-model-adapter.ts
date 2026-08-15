@@ -19,6 +19,7 @@
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
+import { ProviderAborted, ProviderRejected, StreamFailed } from "@agentick/spec";
 import type {
   AdapterDelta,
   ContentBlock,
@@ -162,7 +163,11 @@ export interface LanguageModelAdapter<TRaw = unknown, TChunk = unknown, TRequest
   extractMetadata?(raw: TRaw): Readonly<Record<string, unknown>> | undefined;
   /** Provider-specific abort detection (SDK error classes). */
   isAbortError?(cause: unknown): boolean;
-  /** Provider error → typed `ExecuteErrorChannel`. */
+  /**
+   * Provider error → typed `ExecuteErrorChannel`. REPLACES the executor's
+   * classification rather than extending it, so an adapter that recognises only
+   * its own shapes delegates the rest to {@link defaultMapProviderError}.
+   */
   mapProviderError?(cause: unknown): ExecuteErrorChannel;
   /** Close open blocks / emit summaries at stream end. */
   finalizeStream?(accum: StreamAccumulatorView): readonly AdapterDelta[];
@@ -233,6 +238,49 @@ export function isLanguageModelAdapter(value: unknown): value is LanguageModelAd
 }
 
 /**
+ * The executor's default abort detection — SDK abort classes plus the
+ * message-shape fallback. Exported for the same reason
+ * {@link defaultMapProviderError} is: an adapter refines, then delegates.
+ */
+export function defaultIsAbortError(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  return (
+    cause.name === "AbortError" ||
+    cause.name === "APIUserAbortError" ||
+    /abort/i.test(cause.message)
+  );
+}
+
+/**
+ * The executor's default provider-error classification: abort →
+ * `ProviderAborted`, a numeric `status` / `statusCode` → `ProviderRejected`,
+ * everything else → `StreamFailed`.
+ *
+ * Exported as an executable value so an adapter's `mapProviderError` can
+ * classify the shapes it recognises and delegate the rest, instead of
+ * re-rolling this table (the same composition `defaultFinalizeStream` offers):
+ *
+ * ```ts
+ * mapProviderError(cause) {
+ *   if (isInvalidToolInput(cause)) return new MalformedModelOutput({ cause });
+ *   return defaultMapProviderError(cause);
+ * }
+ * ```
+ */
+export function defaultMapProviderError(
+  cause: unknown,
+  isAbortError: (cause: unknown) => boolean = defaultIsAbortError,
+): ExecuteErrorChannel {
+  if (isAbortError(cause)) {
+    return new ProviderAborted({ reason: cause instanceof Error ? cause.message : "aborted" });
+  }
+  const status =
+    (cause as { status?: unknown })?.status ?? (cause as { statusCode?: unknown })?.statusCode;
+  if (typeof status === "number") return new ProviderRejected({ status, cause });
+  return new StreamFailed({ cause });
+}
+
+/**
  * The executor's default end-of-stream finalization — exported as an
  * executable value so adapters overriding `finalizeStream` can compose
  * with it instead of re-rolling (mutate the view, then delegate):
@@ -273,12 +321,7 @@ export function defaultFinalizeStream(accum: StreamAccumulatorView): readonly Ad
   //    AI SDK don't emit explicit tool-call-end events).
   for (const entry of accum.toolCalls.values()) {
     if (entry.input !== undefined) continue;
-    let parsed: Readonly<Record<string, unknown>> = {};
-    try {
-      parsed = JSON.parse(entry.argsBuffer || "{}") as Readonly<Record<string, unknown>>;
-    } catch {
-      parsed = {};
-    }
+    const parsed = accum.toolCallInput(entry.callId);
     out.push({ type: "tool-call-end", callId: entry.callId });
     const tc: AdapterDelta = {
       type: "tool-call",

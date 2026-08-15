@@ -73,6 +73,10 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
   ["ProviderTimeout", () => new Errors.ProviderTimeout({ timeoutMs: 5000 })],
   ["ProviderAborted", () => new Errors.ProviderAborted({ reason: "test" })],
   ["StreamFailed", () => new Errors.StreamFailed({ cause: new Error("test") })],
+  [
+    "MalformedModelOutput",
+    () => new Errors.MalformedModelOutput({ toolName: "t1", rawArguments: '{"a":' }),
+  ],
   ["NormalizationFailed", () => new Errors.NormalizationFailed({ cause: new Error("test") })],
   ["ProjectionFailed", () => new Errors.ProjectionFailed({ reason: "test" })],
   ["Unknown", () => new Errors.UnknownExecutorError({ cause: new Error("test") })],

@@ -1478,6 +1478,11 @@ function mapFinishReason(
       // calling anything": Gemini had emitted the call as Python source
       // (`print(default_api.knowify__query(...))`) and aborted its own turn.
       // `finishMessage` carries that offending text; see `stopMessage`.
+      // TODO(malformed-output): ADR 99 wants this raised as `MalformedModelOutput`
+      // so recovery policy can retry it. Raising here today would only convert a
+      // quiet stop that PRESERVES `stopMessage` into `executor_failed` with no
+      // recovery — it becomes a win once failed ticks reach the decide fold
+      // (ADR 99 slice 2).
       return "malformed_tool_call";
     default:
       return "other";

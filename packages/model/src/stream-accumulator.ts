@@ -22,11 +22,12 @@
  * @see docs/proposals/v2/blueprint/06-executor-harness.md
  */
 
-import type {
-  AdapterDelta,
-  ContentBlock,
-  LanguageModelStopReason,
-  UsageStats,
+import {
+  MalformedModelOutput,
+  type AdapterDelta,
+  type ContentBlock,
+  type LanguageModelStopReason,
+  type UsageStats,
 } from "@agentick/spec";
 
 /**
@@ -241,9 +242,12 @@ export class StreamAccumulator {
   }
 
   /**
-   * Helper: parsed input for a tool call. Returns `entry.input` when
-   * the `tool-call` summary set it; otherwise tries to parse
-   * `argsBuffer` as JSON; falls back to `{}` on parse failure.
+   * Helper: parsed input for a tool call. Returns `entry.input` when the
+   * `tool-call` summary set it; otherwise parses `argsBuffer` as JSON.
+   *
+   * @throws {MalformedModelOutput} when a non-empty buffer does not parse (ADR
+   * 99 slice 4a). Coercing to `{}` used to hide that: under a permissive
+   * validator the tool then ran with empty input, silently wrong.
    */
   toolCallInput(callId: string): Readonly<Record<string, unknown>> {
     const entry = this.toolCalls.get(callId);
@@ -251,8 +255,12 @@ export class StreamAccumulator {
     if (entry.input !== undefined) return entry.input;
     try {
       return JSON.parse(entry.argsBuffer || "{}") as Readonly<Record<string, unknown>>;
-    } catch {
-      return {};
+    } catch (cause) {
+      throw new MalformedModelOutput({
+        toolName: entry.name,
+        rawArguments: entry.argsBuffer,
+        cause,
+      });
     }
   }
 

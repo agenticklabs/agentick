@@ -2255,8 +2255,19 @@ authority). Two independent tool-path bugs ride along: the accumulator's silent
 `{}` coercion of unparseable tool args (silently-wrong execution under
 `permissiveValidator`), and failed dispatches persisting `content: []` so the
 model gets an error with no body. The split: retry when there is nothing
-coherent to show the model; feedback when there is. Status: ADR drafted, no
-implementation yet.
+coherent to show the model; feedback when there is. Status: wave 1 (slices 1, 4a, 4b)
+LANDED — `MalformedModelOutput` + `isExecuteError` in spec, accumulator raises
+at finalize instead of coercing to `{}` (executor finalize moved to
+`Effect.try` so the raise reaches the typed channel), adapters classify via
+`mapProviderError` with `defaultMapProviderError`/`defaultIsAbortError`
+extracted so an adapter refines-then-delegates, `streamTerminal` passes typed
+errors through, failed dispatches persist the error text. Deliberate deferral:
+Google's `MALFORMED_FUNCTION_CALL` finish reason stays a quiet
+`malformed_tool_call` stop (TODO at the arm) — raising it before slice 2 lands
+trades a diagnostic-preserving stop for unrecoverable `executor_failed`; the
+flip is a wave 2 item. Also wave 2: fold `ToolValidationError.issues` into its
+message (`TODO(tool-error-detail)`) so the persisted error text names the bad
+argument. Waves 2–3 (decide routing + policy) not started; tracked on #291.
 
 ### 2026-08-12 — scoped capability leasing, named (ADR 98)
 

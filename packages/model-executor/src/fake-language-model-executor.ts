@@ -69,6 +69,7 @@ import {
   ProviderAborted,
   ProviderRejected,
   SPEC_VERSION,
+  isExecuteError,
 } from "@agentick/spec";
 
 import { omitUndefined } from "@agentick/utils";
@@ -138,6 +139,12 @@ export interface MockScriptedRun {
    * goes through `abort()` / the lifecycle; this is the *scripted* variant.)
    */
   readonly outcome?: "failed" | "vetoed" | "canceled";
+  /**
+   * The typed failure an `outcome: "failed"` run raises. Default:
+   * `ProviderRejected`. Set it to drive the loop's classification-sensitive
+   * paths (a `MalformedModelOutput` must reach the caller with its own `_tag`).
+   */
+  readonly error?: ExecuteErrorChannel;
   /**
    * Hold this run until the promise resolves — the scripted-timing knob for
    * race tests (an in-flight execution a concurrent send must join, an abort
@@ -578,7 +585,9 @@ export class FakeLanguageModelExecutor
         // and the loop folds all three back into terminals.
         switch (next?.outcome) {
           case "failed":
-            return yield* Effect.fail(new ProviderRejected({ cause: "scripted stream failure" }));
+            return yield* Effect.fail(
+              next.error ?? new ProviderRejected({ cause: "scripted stream failure" }),
+            );
           case "canceled":
             return yield* Effect.fail(new ProviderAborted({ reason: "scripted cancel" }));
           case "vetoed":
@@ -658,14 +667,17 @@ export class FakeLanguageModelExecutor
             reason: e.reason ?? "aborted",
           }),
         ),
-        // Scripted `outcome: "failed"` surfaces from `generateBody` as a
-        // ProviderRejected — the fake maps it to a FAILED terminal (drives
-        // the loop's failure path) rather than rejecting `run()`.
-        Effect.catchTag("ProviderRejected", (e) =>
-          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-            outcome: "failed",
-            error: e,
-          }),
+        // Scripted `outcome: "failed"` surfaces from `generateBody` as an
+        // `ExecuteError` — the fake maps it to a FAILED terminal (drives the
+        // loop's failure path) rather than rejecting `run()`, carrying the
+        // scripted class so the caller sees the same `_tag` a real adapter emits.
+        Effect.catchIf(
+          (e): e is ExecuteErrorChannel => isExecuteError(e),
+          (e) =>
+            Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
+              outcome: "failed",
+              error: e,
+            }),
         ),
         // A `guardGenerate` veto at the command boundary folds to the
         // matching executor terminal; deferred / failed-replay re-raise.

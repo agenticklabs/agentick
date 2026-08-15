@@ -161,6 +161,8 @@ export {
   ResourcesBackendError,
   ResourcesError,
   type ResourcesErrorChannel,
+  isExecuteError,
+  MalformedModelOutput,
   ProviderAborted,
   ProviderRejected,
   ProviderTimeout,

@@ -32,6 +32,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import type {
   ContentBlock,
   DispatchResult,
+  ExecuteErrorChannel,
   ExecutionTerminal,
   LanguageModelExecutionResult,
   LoopExecutorProtocol,
@@ -43,7 +44,7 @@ import type {
   ToolCall,
   ToolExecutorProtocol,
 } from "@agentick/spec";
-import { SPEC_VERSION } from "@agentick/spec";
+import { MalformedModelOutput, SPEC_VERSION, ToolValidationError } from "@agentick/spec";
 import { FakeLanguageModelExecutor, type MockScriptedRun } from "@agentick/model-executor";
 import { omitUndefined } from "@agentick/utils";
 
@@ -299,9 +300,13 @@ function assertLoopInvariants(trace: CharTrace, maxTicks: number): void {
 
 /** A model result carrying a scripted failure `outcome` (the `result` is a
  *  placeholder the fake ignores on non-success outcomes). */
-const failRun = (outcome: "failed" | "vetoed" | "canceled"): MockScriptedRun => ({
+const failRun = (
+  outcome: "failed" | "vetoed" | "canceled",
+  error?: ExecuteErrorChannel,
+): MockScriptedRun => ({
   result: ended(),
   outcome,
+  ...(error !== undefined ? { error } : {}),
 });
 
 const toolUse = (id: string): LanguageModelExecutionResult => ({
@@ -856,6 +861,66 @@ describe("LoopExecutorHarness [characterization] — streaming vs non-streaming"
     const trace = await runChar({ scripted: [failRun("failed")], maxTicks: 5, stream: true });
     expect(trace.terminal.result!.ticks).toBe(1);
     expect(trace.terminal.result!.stopReason).toBe("executor_failed");
+  });
+});
+
+// ============================================================================
+// Failure classification (ADR 99 slices 1 + 4b)
+// ============================================================================
+
+describe("LoopExecutorHarness — failure classification", () => {
+  it("a stream failure the adapter already classified keeps its own tag", async () => {
+    // The distinction recovery policy reads: "the model emitted garbage" (retry
+    // is promising) vs "this request is bad" (retry is futile, and billed).
+    // Wrapping every stream failure in `ProviderRejected` erased it at the last
+    // hop, after the adapter had gone to the trouble of making it.
+    const trace = await runChar({
+      scripted: [failRun("failed", new MalformedModelOutput({ toolName: "knowify__query" }))],
+      maxTicks: 5,
+      stream: true,
+    });
+    const cause = trace.terminal.result!.stopCause;
+    if (cause?.kind !== "failed") throw new Error("expected a failure cause");
+    expect(cause.error._tag).toBe("MalformedModelOutput");
+    expect(trace.terminal.result!.stopReason).toBe("executor_failed");
+  });
+
+  it("a cause from OUTSIDE the ExecuteError family is still wrapped", async () => {
+    // Substrate failures and adapter throws that escape classification arrive
+    // untyped, and the terminal must still carry a typed error. Scripted through
+    // the fake's typed slot on purpose — this arm exists for exactly the values
+    // the type system cannot promise.
+    const trace = await runChar({
+      scripted: [failRun("failed", new Error("socket hang up") as unknown as ExecuteErrorChannel)],
+      maxTicks: 5,
+      stream: true,
+    });
+    const cause = trace.terminal.result!.stopCause;
+    if (cause?.kind !== "failed") throw new Error("expected a failure cause");
+    expect(cause.error._tag).toBe("ProviderRejected");
+    expect(cause.error.message).toContain("socket hang up");
+  });
+
+  it("a failed dispatch renders the error into the tool_result the model reads", async () => {
+    // `content: []` with `is_error: true` told the model only that SOMETHING went
+    // wrong. The paired result IS the feedback loop for this class — the
+    // `tool_use` block is valid, so the model self-corrects on the next tick
+    // rather than the tick being retried.
+    const trace = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      dispatch: async () => {
+        throw new ToolValidationError({ toolName: "t", issues: [] });
+      },
+    });
+    const expected = [{ type: "text", text: "tool t validation failed" }];
+    const result = trace.terminal.result!.toolResults[0]!;
+    expect(result.succeeded).toBe(false);
+    expect(result.content).toEqual(expected);
+    // The event stream carries the same body — a client renders the failure off
+    // this, and it was empty there too.
+    const dispatched = trace.events.find((e) => e.kind === "tool-dispatch");
+    expect(dispatched?.content).toEqual(expected);
   });
 });
 

@@ -9,7 +9,7 @@
  * `AgentickError`.
  */
 
-import { AgentickError } from "./base.js";
+import { AgentickError, type SerializedAgentickError } from "./base.js";
 import { registerAgentickError } from "./registry.js";
 import { JournalError } from "./substrate.js";
 import type { ToolConfirmationResolution } from "../protocol/tool-executor.js";
@@ -305,7 +305,8 @@ export abstract class ExecuteError extends AgentickError {
     | "ProviderRejected"
     | "ProviderTimeout"
     | "ProviderAborted"
-    | "StreamFailed";
+    | "StreamFailed"
+    | "MalformedModelOutput";
 }
 
 /**
@@ -411,11 +412,59 @@ export class StreamFailed extends ExecuteError {
 }
 registerAgentickError("StreamFailed", StreamFailed);
 
+/**
+ * The model emitted something no consumer can act on — a tool call whose
+ * argument JSON does not parse, a provider finish reason that reports the
+ * generation itself as malformed. Distinct from {@link ProviderRejected} because
+ * the request was fine: this is nondeterministic model output, and re-issuing an
+ * identical request is a promising recovery (ADR 99). Only the adapter can tell
+ * the two apart, which is why it is classified there.
+ */
+export class MalformedModelOutput extends ExecuteError {
+  readonly _tag = "MalformedModelOutput" as const;
+  readonly toolName?: string;
+  override readonly cause?: unknown;
+  readonly rawArguments?: string;
+  constructor(args?: {
+    readonly toolName?: string;
+    /** The unusable fragment, verbatim. Redacted from {@link toJSON}. */
+    readonly rawArguments?: string;
+    readonly cause?: unknown;
+  }) {
+    const toolPart = args?.toolName !== undefined ? ` (tool=${args.toolName})` : "";
+    const detail = causeMessage(args?.cause);
+    super(detail !== undefined ? `${detail}${toolPart}` : `malformed model output${toolPart}`, {
+      cause: args?.cause,
+    });
+    if (args?.toolName !== undefined) this.toolName = args.toolName;
+    if (args?.rawArguments !== undefined) this.rawArguments = args.rawArguments;
+    if (args?.cause !== undefined) this.cause = args.cause;
+  }
+
+  /** Model output may carry user data, and this projection crosses the wire. */
+  override toJSON(): SerializedAgentickError {
+    const { rawArguments: _redacted, ...rest } = super.toJSON();
+    return rest as SerializedAgentickError;
+  }
+}
+registerAgentickError("MalformedModelOutput", MalformedModelOutput);
+
 export type ExecuteErrorChannel =
   | ProviderRejected
   | ProviderTimeout
   | ProviderAborted
-  | StreamFailed;
+  | StreamFailed
+  | MalformedModelOutput;
+
+/**
+ * Narrows to the CHANNEL rather than the abstract class: `ExecuteError` declares
+ * `_tag` as the union of its subclasses' tags, which TypeScript will not accept
+ * where a {@link ExecuteErrorChannel} member is expected. Every consumer that
+ * re-raises an already-classified failure instead of re-wrapping it needs this.
+ */
+export function isExecuteError(value: unknown): value is ExecuteErrorChannel {
+  return value instanceof ExecuteError;
+}
 
 /**
  * `ProjectionFailed` — JSX → model-input projection step. Carried in
@@ -460,6 +509,7 @@ export type ExecutorErrorChannel =
   | ProviderTimeout
   | ProviderAborted
   | StreamFailed
+  | MalformedModelOutput
   | NormalizationFailed
   | UnknownExecutorError;
 
