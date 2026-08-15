@@ -2312,11 +2312,16 @@ ai-sdk error PARTS: the adapter records the first part's native error and its
 channel, no new machinery; classification then routes invalid-tool-input to
 `MalformedModelOutput`. (4) Conformance `errorFixtures` also drive
 `executeStream` (same `throws` seam, zero adapter-file edits); non-streaming
-executors `ctx.skip()` visibly. Still open on #291: structured-output
-validation as a taxonomy candidate (design pass), the `createApp` shorthand
-(file still owned by the identity session), replayed `failed` terminals at the
-command boundary still reject (documented choice; rehydration needed to
-change it).
+executors `ctx.skip()` visibly.
+
+CLOSED (#291, board Done). Close-out commit 487b4f62b: the
+`createApp({ tickFailurePolicy, maxConsecutiveFailedTicks })` flat shorthand
+(unblocked by ADR 100 landing) and the `defaultIsAbortError` dead-name fix
+(`constructor.name`, twin of wave 3's timeout discovery). Shipped in
+1.0.0-next.118/119. Follow-on design spun off: #293 structured-output
+validation failures → feedback via the §B2 forced wrap-up tick (open
+question: un-winding the steer-proof stop for an INVALID capture); #294
+replayed-terminal rehydration + usage on failed ticks (the §6 honesty gap).
 
 ### 2026-08-12 — scoped capability leasing, named (ADR 98)
 
