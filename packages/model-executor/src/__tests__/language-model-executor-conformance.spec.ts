@@ -156,7 +156,12 @@ describe("LanguageModelExecutor + adapter — ExecutorProtocol conformance", () 
         Object.assign(new Error("rate limited"), { status: 429 }),
         Object.assign(new Error("server error"), { statusCode: 500 }),
       ],
-      ProviderAborted: [new DOMException("This operation was aborted", "AbortError")],
+      ProviderAborted: [
+        new DOMException("This operation was aborted", "AbortError"),
+        // Class-named like the SDK convention, message deliberately without
+        // "abort" — only the `constructor.name` check can classify this.
+        new (class APIUserAbortError extends Error {})("The user cancelled."),
+      ],
       StreamFailed: [new Error("socket hang up")],
       // The socket code and the SDK convention of naming the CLASS rather than
       // the `name` field — the two shapes the default table's timeout arm reads.

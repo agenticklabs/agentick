@@ -244,9 +244,12 @@ export function isLanguageModelAdapter(value: unknown): value is LanguageModelAd
  */
 export function defaultIsAbortError(cause: unknown): boolean {
   if (!(cause instanceof Error)) return false;
+  // `constructor.name` alongside `name` for the same reason as
+  // {@link isTimeoutError}: the provider SDK error classes don't assign `name`
+  // (`APIUserAbortError` reports `name === "Error"`).
   return (
     cause.name === "AbortError" ||
-    cause.name === "APIUserAbortError" ||
+    cause.constructor.name === "APIUserAbortError" ||
     /abort/i.test(cause.message)
   );
 }

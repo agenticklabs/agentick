@@ -567,6 +567,16 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
 
   /** Per-session max tick bound. Equivalent to `session.defaultMaxTicks`. */
   readonly defaultMaxTicks?: number;
+  /**
+   * Which failed ticks are re-issued (ADR 99). Equivalent to
+   * `session.tickFailurePolicy`.
+   */
+  readonly tickFailurePolicy?: import("@agentick/spec").TickFailurePolicy;
+  /**
+   * Hard cap on consecutive failed ticks (ADR 99). Equivalent to
+   * `session.maxConsecutiveFailedTicks`.
+   */
+  readonly maxConsecutiveFailedTicks?: number;
   /** Default initial props. Equivalent to `session.props`. */
   readonly initialProps?: P;
   /** Default initial knobs. Equivalent to `session.initialKnobs`. */
@@ -3451,6 +3461,15 @@ function mergeSessionDefaults<P>(options: AppHarnessOptions<P>): SessionDefaults
   const merged: Record<string, unknown> = { ...fromLong };
   if (fromLong.defaultMaxTicks === undefined && options.defaultMaxTicks !== undefined) {
     merged.defaultMaxTicks = options.defaultMaxTicks;
+  }
+  if (fromLong.tickFailurePolicy === undefined && options.tickFailurePolicy !== undefined) {
+    merged.tickFailurePolicy = options.tickFailurePolicy;
+  }
+  if (
+    fromLong.maxConsecutiveFailedTicks === undefined &&
+    options.maxConsecutiveFailedTicks !== undefined
+  ) {
+    merged.maxConsecutiveFailedTicks = options.maxConsecutiveFailedTicks;
   }
   if (fromLong.props === undefined && options.initialProps !== undefined) {
     merged.props = options.initialProps;

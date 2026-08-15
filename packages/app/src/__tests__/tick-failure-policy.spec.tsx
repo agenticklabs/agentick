@@ -66,6 +66,25 @@ describe("createApp — tick-failure policy reaches the session", () => {
     await app.closeApp();
   });
 
+  it("`createApp({ tickFailurePolicy })` — the flat shorthand cascades like defaultMaxTicks", async () => {
+    const executor = mkExecutor([
+      { result: ended, outcome: "failed", error: new ProviderRejected({ status: 503 }) },
+      { result: ended },
+    ]);
+    await executor.ready;
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: executor,
+      compiler: reactCompiler(),
+      target,
+      tickFailurePolicy: { ProviderRejected: 1 },
+      maxConsecutiveFailedTicks: 2,
+    });
+    const { result } = await app.runOnce({ send: { messages: [{ role: "user", content: "x" }] } });
+    expect(result.ticks).toBe(2);
+    expect(result.stopReason).toBe("end");
+    await app.closeApp();
+  });
+
   it("`createApp({ session: { tickFailurePolicy } })` replaces it", async () => {
     // The bundled policy would stop on this class; the app-level table says retry.
     const executor = mkExecutor([
