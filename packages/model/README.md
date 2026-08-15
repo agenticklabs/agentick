@@ -218,6 +218,43 @@ function finalizeStream(accum: StreamAccumulatorView): readonly AdapterDelta[] {
 
 It closes open blocks, closes tool calls that never saw an explicit end, emits `message-end`, and synthesizes the canonical `message` summary — rolling every block's `sources` up onto the message, deduped by source id.
 
+One raise it makes for you: a tool call whose accumulated argument buffer is non-empty and unparseable throws `MalformedModelOutput` at finalize — the model's own garbage never silently becomes a `{}` dispatch, on any adapter, with no adapter code.
+
+### Error classification (ADR 99)
+
+Everything downstream of an adapter — the failed-tick retry policy, `stopCause`, every log line and UI — reads one typed vocabulary, the `ExecuteError` family. Your provider's failure shapes map into it through ONE pure function:
+
+| Class                  | Means                                                         | Downstream handling                                      |
+| ---------------------- | ------------------------------------------------------------- | -------------------------------------------------------- |
+| `MalformedModelOutput` | The generation is unusable (bad tool JSON, malformed finish)  | Retried by the bundled `tickFailurePolicy` — see below   |
+| `StreamFailed`         | The stream died mid-flight                                    | Retryable by policy opt-in (`{ StreamFailed: 1 }`)       |
+| `ProviderTimeout`      | The call exceeded a deadline                                  | Same opt-in story                                        |
+| `ProviderRejected`     | The provider said no (4xx/5xx, auth, quota); carries `status` | Stops — retrying a deterministic rejection reproduces it |
+| `ProviderAborted`      | Someone cancelled                                             | Not a failure; the run ends `canceled`                   |
+
+The load-bearing line is `MalformedModelOutput` vs `ProviderRejected`: _the request was fine but the output is garbage_ (re-roll the dice) vs _the request is the problem_ (retrying burns money). Only the adapter can tell them apart, which is why classification lives here.
+
+**Classify the shapes you recognise; delegate the rest.** `mapProviderError` REPLACES the executor's table rather than extending it, so always end with the exported default:
+
+```ts
+import { defaultMapProviderError } from "@agentick/model";
+import { MalformedModelOutput, type ExecuteErrorChannel } from "@agentick/spec";
+
+function mapProviderError(cause: unknown): ExecuteErrorChannel {
+  if (isMyProvidersInvalidToolInput(cause)) return new MalformedModelOutput({ cause });
+  return defaultMapProviderError(cause); // abort → timeout → status → StreamFailed
+}
+```
+
+Gotchas the shipped adapters already paid for:
+
+- **Provider SDK error classes don't assign `name`** — `APIConnectionTimeoutError` reports `name === "Error"`. Match `constructor.name`, not `name` (`defaultIsAbortError` / the default timeout arm both do).
+- **Don't regex the `message` for classification** — `/timed out/` on a 504's message would steal it from `ProviderRejected` and lose its `status`.
+- **Finish-reason malformation can't ride `mapProviderError`** — a finish reason arrives on a _successful_ response. Raise from `finalizeStream`/`normalize` instead (Google's `MALFORMED_FUNCTION_CALL` does exactly this); the executor's finalize catch classifies the raise, and an already-typed `ExecuteError` passes through unwrapped.
+- **Streaming error _parts_** (a provider that reports failure as a delta, not a rejection): record the native error in your serving state and throw it from `finalizeStream` — the finalize raise IS the failure channel; no delta-pipeline machinery.
+
+Skipping all of this is legal: every failure still exits typed via the default table, and the accumulator's finalize raise covers unparseable tool JSON with zero adapter code. What an unmapped adapter loses is its provider's _specific_ shapes — they land in `StreamFailed`, which the bundled retry policy doesn't touch. The conformance suite is where this obligation is enforced: `runExecutorConformance` requires an `errorFixtures` entry per `ExecuteError` tag — provider-native fixtures or an explicit `"not-applicable"` — so the decision is made consciously per class ([@agentick/spec-conformance](../spec-conformance)). The consuming configs (`tickFailurePolicy` in both forms, `maxConsecutiveFailedTicks`) are documented in [@agentick/session](../session#retrying-a-failed-tick).
+
 ## Combinators
 
 Adapters are values, so resilience composes:
@@ -516,6 +553,7 @@ A source with neither a URL nor a document index has no shared identity and is i
 | `defaultFinalizeStream`                                                                      | End-of-stream finalization, composable                   |
 | `withRetry` / `withFallback` / `tapModel`                                                    | Resilience, failover, observability                      |
 | `isTransientProviderError`                                                                   | The default retry predicate (429/5xx/network)            |
+| `defaultMapProviderError` / `defaultIsAbortError`                                            | The classification table an adapter delegates to         |
 | `StreamAccumulator`                                                                          | The canonical delta fold                                 |
 | `composeTransforms` / `identityTransform`                                                    | `DeltaTransform` pipeline                                |
 | `thinkTagTransform` / `customBlockTransform`                                                 | Tag routing as transforms                                |
