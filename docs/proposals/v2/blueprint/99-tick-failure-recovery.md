@@ -180,7 +180,16 @@ nothing coherent to show the model; feedback when there is.**
 ## Verification (every claim a test)
 
 - Adapter conformance: each shipped adapter maps its provider's malformed-
-  output shape to `MalformedModelOutput` (fixture per provider).
+  output shape to `MalformedModelOutput` (fixture per provider). The nudge for
+  ALL adapter authors is structural: `runExecutorConformance` takes a REQUIRED
+  `errorFixtures` input — per `ExecuteError["_tag"]`, provider-native error
+  fixtures that must classify to that class, or an explicit `"not-applicable"`.
+  Thrown from the stub client and asserted on the EXECUTOR's error path
+  (end-to-end, not the mapping function in isolation). Typed against the tag
+  union, so adding a taxonomy class breaks every adapter's conformance file at
+  compile time — the taxonomy propagates itself. `mapProviderError` stays
+  optional at runtime (the `ProviderRejected` fold is the fail-safe default);
+  the conformance input is where silence becomes a decision.
 - Loop: failed tick persists nothing (timeline byte-identical before/after) —
   the invariant retry rests on.
 - Loop: failed terminal reaches `notifyTickEnd`; abstain → stop with today's
