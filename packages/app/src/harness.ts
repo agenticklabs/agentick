@@ -68,6 +68,7 @@ import type {
   CursorPage,
   PageRequest,
   SessionRecord,
+  SessionSnapshot,
   SessionStore,
   SessionStoreQuery,
   SnapshotMigration,
@@ -895,6 +896,24 @@ export class AppHarness<P = unknown>
    * <surface>:<id>:<…>`). The barrier in {@link buildSession} waits this out.
    */
   private readonly disposing = new Map<string, Promise<void>>();
+  /**
+   * In-flight construction single-flight, by session id. Two concurrent
+   * same-id `createSession` calls after an eviction would otherwise both
+   * construct and collide on the shared inbox addresses. The first build
+   * publishes its promise here; a concurrent same-id call awaits and returns
+   * the SAME session instead of constructing a second. Mirrors {@link disposing}.
+   */
+  private readonly building = new Map<string, Promise<SessionHarnessProtocol<P>>>();
+  /**
+   * Eviction snapshots, by session id — captured on `disposeSession(id, "evict")`
+   * and applied via `session.restore()` on the next reopen, so knob / state
+   * bridge values survive a page-out. App-scoped so it outlives the harness.
+   *
+   * TODO(eviction-durable-snapshot): in-memory only — fixes single-node
+   * eviction. Cross-restart / cross-node durability is the data-layer Phase 4
+   * extension (store-backed), not built here.
+   */
+  private readonly evictionSnapshots = new Map<string, SessionSnapshot>();
   private _closed = false;
 
   /**
@@ -2093,21 +2112,43 @@ export class AppHarness<P = unknown>
       readonly originCallId?: string;
     } = {},
   ): Promise<SessionHarnessProtocol<P>> {
-    const claimed: unknown[] = [];
-    try {
-      return await this.buildSession(input, ephemeral, overrides, claimed);
-    } catch (err) {
-      // LIFO, best-effort, and never masking the real error: a cleanup that
-      // itself fails must not become the exception the adopter sees.
-      for (const built of claimed.reverse()) {
-        try {
-          await closeOf(built);
-        } catch {
-          // best effort
-        }
-      }
-      throw err;
+    // Construction single-flight for durable, explicitly-id'd sessions: a
+    // concurrent same-id reopen collapses onto the first build rather than
+    // double-constructing and colliding on the shared inbox addresses.
+    // Generated ids never collide; ephemeral (`runOnce`) sessions are throwaway.
+    const singleFlightId =
+      !ephemeral && input.sessionId !== undefined ? input.sessionId : undefined;
+    if (singleFlightId !== undefined) {
+      const inFlight = this.building.get(singleFlightId);
+      if (inFlight !== undefined) return inFlight;
     }
+
+    const build = (async (): Promise<SessionHarnessProtocol<P>> => {
+      const claimed: unknown[] = [];
+      try {
+        return await this.buildSession(input, ephemeral, overrides, claimed);
+      } catch (err) {
+        // LIFO, best-effort, and never masking the real error: a cleanup that
+        // itself fails must not become the exception the adopter sees.
+        for (const built of claimed.reverse()) {
+          try {
+            await closeOf(built);
+          } catch {
+            // best effort
+          }
+        }
+        throw err;
+      }
+    })();
+
+    if (singleFlightId === undefined) return build;
+
+    this.building.set(singleFlightId, build);
+    const clear = (): void => {
+      if (this.building.get(singleFlightId) === build) this.building.delete(singleFlightId);
+    };
+    void build.then(clear, clear);
+    return build;
   }
 
   /**
@@ -2679,6 +2720,17 @@ export class AppHarness<P = unknown>
     ]);
     await session.mountReady;
 
+    // Eviction-restore (symmetric to genesis): a session paged out by the LRU
+    // sweep was snapshot on the way down; reopening the same id fans those knob
+    // / state bridge values back in through the SAME SnapshotCapable machinery
+    // the cold snapshot→restore path uses. Keyed by session id, so a fork /
+    // spawn-inherit (new id) never finds one — the fork law is untouched.
+    const evictionSnapshot = this.evictionSnapshots.get(sessionId);
+    if (evictionSnapshot !== undefined) {
+      this.evictionSnapshots.delete(sessionId);
+      await session.restore({ snapshot: evictionSnapshot });
+    }
+
     // C-core (three-audiences-plan §C) — late-bind the session's `send` into
     // any session-extension bridge that runs sends on the adopter's behalf but
     // was constructed WITHOUT session access (`RunnerBindable` — the skills
@@ -3005,6 +3057,11 @@ export class AppHarness<P = unknown>
     const existed = (await this.sessionStore.get(sessionId, storeCtx)) !== undefined;
     await this.sessionStore.delete(sessionId, storeCtx);
 
+    // Destroy is terminal — drop any eviction snapshot so a later create of the
+    // same id starts fresh rather than resurrecting paged-out bridge state.
+    this.evictionSnapshots.delete(sessionId);
+    for (const entry of subtree) this.evictionSnapshots.delete(entry.id);
+
     return {
       sessionId,
       live: {
@@ -3293,6 +3350,16 @@ export class AppHarness<P = unknown>
     // JS — so `buildSession`'s barrier can wait it out before a same-id resume
     // rebuilds and collides on those addresses.
     const teardown = (async (): Promise<void> => {
+      // Snapshot BEFORE close so a reopen of this id can restore knob / state
+      // bridge values. Captured inside the published teardown, so the disposal
+      // barrier a same-id reopen awaits also covers the snapshot.
+      if (reason === "evict") {
+        try {
+          this.evictionSnapshots.set(sessionId, await entry.session.snapshot());
+        } catch {
+          // best effort — a snapshot failure must not block page-out
+        }
+      }
       try {
         // ADR 92 Family 2 §5 — eviction routes THROUGH `session:command:close`,
         // not around it. Page-out and hangup are the same teardown; the audit

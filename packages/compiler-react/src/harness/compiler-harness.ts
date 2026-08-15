@@ -186,6 +186,14 @@ export class CompilerHarness
   implements CompilerProtocol, LifecycleProjectionTarget, TreeInterceptionSource
 {
   private readonly mounts = new Map<string, MountState>();
+  /**
+   * Per-mountId activation generation. Folded into the mount idempotency opId
+   * so a reopen (same mountId, after an intervening `unmount`) is a fresh
+   * Operation — not an idempotent replay of the first, torn-down mount — while
+   * genuinely-concurrent mounts of one LIVE activation still share the opId and
+   * dedup. Bumped in `unmount`.
+   */
+  private readonly mountGen = new Map<string, number>();
   private readonly registry: ContributorRegistry;
   private readonly formatters: ReadonlyMap<string, DefinedFormatter>;
   private readonly defaultFormatterId: string;
@@ -237,8 +245,9 @@ export class CompilerHarness
     // React element + the HookBridges bag — non-serializable input can
     // never be a declared command. Also preserves the deterministic
     // mountId-keyed idempotency opId the registry (id-minted) can't.
+    const gen = this.mountGen.get(input.mountId) ?? 0;
     const op: Operation<MountInput, MountResult> = {
-      opId: input.opId ?? `compiler:mount:${input.mountId}`,
+      opId: input.opId ?? `compiler:mount:${input.mountId}:${gen}`,
       surface: "compiler",
       name: "compiler:command:mount",
       scope: { sessionId: input.sessionId, executionId: input.executionId },
@@ -418,6 +427,7 @@ export class CompilerHarness
     state.container.children.length = 0;
     this.mounts.delete(input.mountId);
     this.suspenseWarnedMounts.delete(input.mountId);
+    this.mountGen.set(input.mountId, (this.mountGen.get(input.mountId) ?? 0) + 1);
   }
 
   async snapshot(input: SnapshotInput): Promise<CompilerSnapshot> {
