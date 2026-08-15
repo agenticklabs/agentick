@@ -153,13 +153,14 @@ export interface EventScope extends EventScopeExtensions {
    * whole {@link import("../wire/authorizer.js").IngressIdentity}: the
    * adopter-shaped `user` record and the credential's `scopes`.
    *
-   * Stamped at the wire boundary: the gateway threads the per-request
-   * ingress identity onto its `wire:<method>` op so a before-hook
-   * (`onBeforeWire<...>`) can read WHO is calling and reshape params
-   * accordingly. Absent off the wire path (in-process calls carry no
-   * ingress identity → `undefined`), and never client-settable — the
-   * gateway populates it from the identity it authenticated, not from
-   * request params.
+   * Stamped at the identity boundary: the gateway threads the per-request
+   * ingress identity onto its `wire:<method>` op, and the `as()` doors
+   * (`app.as(identity)` / `gateway.as(identity)`) thread it onto their ops the
+   * same way — so a before-hook (`onBeforeWire<...>`, or an app-op hook) can
+   * read WHO is acting and reshape params accordingly. Absent on the bare
+   * local pole (host calls carry no ingress identity → `undefined`), and
+   * never client-settable — populated from an identity the caller
+   * authenticated, not from request params.
    *
    * A fact on the identity axis (twin of {@link principal}/{@link origin}),
    * not a decision: nothing consults it for enforcement.

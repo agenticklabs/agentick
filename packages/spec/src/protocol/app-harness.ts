@@ -25,6 +25,8 @@ import type { Layer } from "effect";
 import type { SpanProcessor } from "@opentelemetry/sdk-trace-base";
 import type { MetricReader } from "@opentelemetry/sdk-metrics";
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
+import type { IngressIdentity } from "../wire/authorizer.js";
+import type { IdentityScoped } from "./identity.js";
 import type { ModelFacts } from "../data/model-facts.js";
 import type { SessionStatus } from "./hook-bridges.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
@@ -276,6 +278,13 @@ export interface RunOnceInput<P = unknown> {
   readonly sessionId?: string;
   /** Override the app-level default `maxTicks`. */
   readonly maxTicks?: number;
+  /**
+   * ADR 48 — the owning principal stamped onto the ephemeral session, same
+   * field and semantics as {@link CreateSessionInput.principal}. An ephemeral
+   * session is still a session: attribution-aware stores and the wire
+   * dispatch gate read the stamp regardless of lifetime.
+   */
+  readonly principal?: string;
 }
 
 export interface RunOnceResult {
@@ -506,6 +515,30 @@ export {
  * below are Promise-typed at the boundary and run on the substrate via
  * `runHarnessProtocol`.
  */
+/**
+ * An app handle scoped to an authenticated identity — the return of
+ * {@link AppHarnessProtocol.as}.
+ *
+ * The bare local pole (`app.createSession(...)`) is the trusted host talking to
+ * its own composition: whatever `principal` the caller supplies is taken at its
+ * word, and nothing checks the work. This handle is the other stance — "act as
+ * this identity": the ADR-48 `principal` stamp is DERIVED from the identity
+ * rather than hand-assembled, clobbering anything the input claims (the
+ * identity is the authority, exactly the wire rule), and the identity rides
+ * the op scope so hooks on the create op can read WHO is acting.
+ *
+ * Attribution only, at this level — an app alone has no authorizer and no
+ * gateway hook bag. The policy-bearing twin is
+ * {@link GatewayHarnessProtocol.as}, which routes the same calls through the
+ * wire dispatch seam first.
+ */
+export interface IdentityScopedApp<P = unknown> extends IdentityScoped {
+  /** {@link AppHarnessProtocol.createSession}, principal-stamped from the identity. */
+  createSession(input?: CreateSessionInput<P>): Promise<SessionHarnessProtocol<P>>;
+  /** {@link AppHarnessProtocol.runOnce}, principal-stamped from the identity. */
+  runOnce(input: RunOnceInput<P>): Promise<RunOnceResult>;
+}
+
 export interface AppHarnessProtocol<P = unknown> {
   /**
    * Stable app identifier. Set at construction (from
@@ -555,6 +588,16 @@ export interface AppHarnessProtocol<P = unknown> {
    * envelopes. After `runOnce` resolves, the registry entry is removed.
    */
   runOnce(input: RunOnceInput<P>): Promise<RunOnceResult>;
+
+  /**
+   * Act as an authenticated identity — see {@link IdentityScopedApp}.
+   *
+   * Trust contract: this method does NOT authenticate. The identity is
+   * whatever the caller hands it — verify the credential first (an
+   * `AuthSource` is the door for that); from here on, correct stamping is the
+   * framework's job.
+   */
+  as(identity: IngressIdentity): IdentityScopedApp<P>;
 
   /**
    * Remove a session — the STRONGEST form, and the transitive one.

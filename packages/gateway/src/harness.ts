@@ -45,6 +45,7 @@ import type {
   CreateAppInput,
   DestroySessionInput,
   GatewayDestroySessionResult,
+  CreateSessionInput,
   CursorPage,
   GatewaySessionRecord,
   PageRequest,
@@ -61,6 +62,10 @@ import type {
   GatewayHarnessProtocol,
   GatewayInstaller,
   GatewayInstallerHost,
+  HookBridges,
+  IdentityScopedApp,
+  IdentityScopedGateway,
+  IngressIdentity,
   JournalingPolicy,
   MessageEnvelope,
   MessageHandlerError,
@@ -70,6 +75,8 @@ import type {
   Operation,
   OperationJournal,
   ProtocolEvent,
+  RunOnceInput,
+  RunOnceResult,
   ServerTransport,
   SubscribeOptions,
   TelemetrySetting,
@@ -98,9 +105,11 @@ import {
   GatewayLifecycleError,
   GatewayNotStartedError,
   resolveTruncateToolResults,
+  OFF_PATH_FACETS,
   sessionKeysetPage,
   sortSessionRecords,
   toRegistration,
+  WireRpcError,
 } from "@agentick/spec";
 import { remoteTrace } from "./remote-trace.js";
 import { createWireExtensionRegistry } from "./wire-registry.js";
@@ -976,6 +985,105 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
 
   apps(): readonly AppHarnessProtocol[] {
     return Array.from(this._apps.values());
+  }
+
+  as(identity: IngressIdentity): IdentityScopedGateway {
+    return {
+      identity,
+      app: (appId: string): IdentityScopedApp | undefined => {
+        const app = this.app(appId);
+        if (app === undefined) return undefined;
+        return {
+          identity,
+          createSession: (input: CreateSessionInput = {}) =>
+            this.dispatchAsIdentity(identity, app, { ...input, appId }, ({ appId: _, ...params }) =>
+              app.as(identity).createSession(params as CreateSessionInput),
+            ),
+          runOnce: (input: RunOnceInput): Promise<RunOnceResult> =>
+            this.dispatchAsIdentity(identity, app, { ...input, appId }, ({ appId: _, ...params }) =>
+              app.as(identity).runOnce(params as unknown as RunOnceInput),
+            ),
+        };
+      },
+    };
+  }
+
+  /**
+   * The `as()` door's dispatch spine — the wire mechanism minus the framing.
+   *
+   * A transport dispatch is authn (AuthSource, already done by whoever built
+   * `identity`) → authz (`authorizeDispatch`) → `runWireDispatch` → handler.
+   * This runs the SAME middle: the verb-scope policy gate through the hookable
+   * {@link authorize} op (the exact call `authorizeDispatch` routes through,
+   * with the same derived scope label and the same {@link WireRpcError}
+   * denial), then {@link runWireDispatch} under the real wire method — so the
+   * `wire:app/…` op fires the adopter's `onBeforeWire…` hooks with
+   * `ctx.identity` populated and honors their param reshaping. Only the
+   * terminal differs: `run` lands on the LOCAL harness (`app.as(identity)`,
+   * which owns the ADR-48 stamp), because the local pole keeps what the
+   * serialized wire cannot carry — structured `output`, handler-carrying
+   * `tools`, the live session handle.
+   *
+   * `runOnce` rides the same `app/create_session` crossing: a run-once IS
+   * create → send → dispose, and the create is the identity-relevant crossing
+   * (ownership is construction-bound, ADR 48). The send happens session-side
+   * on the just-created session under the same-principal rule's own terms.
+   *
+   * Structural ceiling note: `authorizeDispatch`'s un-waivable
+   * `requiredScopes` pre-gate applies to a TARGET session named in params.
+   * `app/create_session` has no target — the session does not exist yet — so
+   * the ceiling is vacuous here by construction, not skipped.
+   */
+  private async dispatchAsIdentity<R>(
+    identity: IngressIdentity,
+    app: AppHarnessProtocol,
+    params: Record<string, unknown>,
+    run: (params: Record<string, unknown>) => Promise<R>,
+  ): Promise<R> {
+    const method: WireMethod = "app/create_session";
+    // `methodScope`'s derivation (`app/create_session` → `app:create_session`)
+    // — the ADR 51 §3.3 verb label, never relabeled.
+    const verbScope = "app:create_session";
+    const verdict = await this.authorize({
+      scope: verbScope,
+      ...omitUndefined({ principal: identity.principal, tokenScopes: identity.scopes }),
+    });
+    if (!verdict.allowed) throw WireRpcError.forbidden(verbScope);
+    return this.runWireDispatch(method, params, this.identityDispatchCtx(identity, app), (p) =>
+      run(p as Record<string, unknown>),
+    );
+  }
+
+  /**
+   * The dispatch ctx for an `as()` crossing — what `buildWireExtensionContext`
+   * hands a transport dispatch, minus the client: there is no connection, so
+   * `publish` is a silent no-op (nobody to notify), the `wire` slot's progress
+   * writer discards, and subscriptions are refused. The five Observability +
+   * Ops facet placeholders are overwritten IN-FIBER by `runWireDispatch`
+   * (ADR 64/78) exactly as on the transport path.
+   */
+  private identityDispatchCtx(
+    identity: IngressIdentity,
+    app: AppHarnessProtocol,
+  ): WireExtensionContext {
+    return {
+      ...OFF_PATH_FACETS,
+      gateway: this,
+      identity,
+      ...omitUndefined({ principal: identity.principal }),
+      app,
+      requestId: generateId(),
+      bridges: () => ({}) as HookBridges,
+      publish: () => {},
+      wire: {
+        progress: () => ({ push: () => {}, close: () => {} }),
+        registerCancel: () => {},
+        registerSubscription: () => {
+          throw new Error("subscriptions are wire-connection verbs; the as() door has no client");
+        },
+        closeSubscription: () => {},
+      },
+    } as WireExtensionContext;
   }
 
   /**

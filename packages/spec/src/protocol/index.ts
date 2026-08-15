@@ -42,6 +42,7 @@ export * from "./session-store.js";
 export * from "./paging.js";
 export * from "./session-paging.js";
 export * from "./app-harness.js";
+export * from "./identity.js";
 export * from "./app-extension.js";
 export * from "./gateway-harness.js";
 export * from "./gateway-index.js";

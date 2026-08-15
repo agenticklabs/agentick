@@ -31,6 +31,8 @@ import { omitUndefined, isThenable } from "@agentick/utils";
 import type {
   AfterHook,
   BeforeHook,
+  IdentityScoped,
+  IngressIdentity,
   ChunkInterceptor,
   EventBus,
   CommandExposure,
@@ -919,6 +921,38 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * Prefer {@link BaseHarness.hooks} for the per-verb call style
    * (`harness.hooks.onBeforeToolDispatch(fn)`), which is a Proxy over this.
    */
+  /**
+   * The `as()` stance — act as an authenticated identity (ADR 100), the
+   * dynamic twin of the construction-bound {@link BaseHarnessOptions.principal}
+   * and, like {@link hook}, universal: declared once on the base so identity
+   * scoping is a stance every harness shares rather than a bespoke feature.
+   *
+   * The BASE binding is deliberately inert — it carries the identity and
+   * nothing else, because the base has no identity-meaningful verbs to scope.
+   * Harnesses that do (the app's session doors, the gateway's wire seam)
+   * override covariantly, returning their own {@link IdentityScoped} surface,
+   * and thread the identity onto their ops' scopes EXPLICITLY (structural
+   * identity doctrine: bound at the call, never read ambiently) — see
+   * {@link identityScope}.
+   *
+   * Trust contract (ADR 100 §3): `as()` does not authenticate. Verify the
+   * credential first; the identity handed here is taken as the authority.
+   */
+  as(identity: IngressIdentity): IdentityScoped {
+    return Object.freeze({ identity });
+  }
+
+  /**
+   * Thread an identity onto an op scope — the ONE way an `as()` override
+   * stamps WHO onto the operations it runs, centralized on the base for the
+   * same reason `principal` is (see {@link BaseHarnessOptions.principal}):
+   * per-command hand-threading is how identity axes drift. `undefined`
+   * identity returns the scope untouched — the bare local pole stays clean.
+   */
+  protected identityScope(scope: EventScope, identity: IngressIdentity | undefined): EventScope {
+    return identity === undefined ? scope : { ...scope, identity };
+  }
+
   hook(config: CommandHooks): Unsubscribe {
     const unsubs: Unsubscribe[] = [];
     for (const [key, fn] of Object.entries(config as Record<string, unknown>)) {

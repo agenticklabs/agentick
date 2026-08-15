@@ -107,6 +107,7 @@ function fakeGateway(
     ready: Promise.resolve(),
     app: (appId: string) => augmentedApps.get(appId),
     apps: () => Array.from(augmentedApps.values()),
+    as: (identity) => ({ identity, app: () => undefined }),
     // Session-address resolution + the gateway destroy verb: present to satisfy
     // the protocol; no test here dispatches `gateway/destroy_session`.
     appForSession: async (sessionId: string) =>
@@ -276,6 +277,7 @@ describe("dispatchRequest — wire extension registry integration", () => {
       ready: Promise.resolve(),
       app: () => undefined,
       apps: () => [],
+      as: (identity) => ({ identity, app: () => undefined }),
       appForSession: async () => undefined,
       destroySession: async (sessionId: string) => ({
         sessionId,

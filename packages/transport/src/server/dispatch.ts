@@ -21,12 +21,9 @@ import {
   WireRpcError,
   ErrorCode,
   isAgentickError,
-  createLog,
+  OFF_PATH_FACETS,
   WIRE_PROTOCOL_VERSION,
   type AgentickError,
-  type Observability,
-  type Ops,
-  type Span,
   type ExtensionsListResult,
   type GatewayHarnessProtocol,
   type HookBridges,
@@ -58,40 +55,6 @@ import { projectClientNotification, projectClientResult } from "./client-project
  * extension wrapper, not here.
  */
 export type DispatchHost = GatewayHarnessProtocol;
-
-/** No-op {@link Span} handed to the off-path `trace` before host enrichment. */
-const NOOP_SPAN: Span = Object.freeze({
-  setAttribute: () => {},
-  setAttributes: () => {},
-  addEvent: () => {},
-  recordException: () => {},
-});
-
-/**
- * Off-path {@link Observability} + {@link Ops} facets pre-seeded onto every
- * wire-extension ctx (ADR 64/78) so the ctx satisfies its type BEFORE the host
- * enriches it. `log` is a no-op callable; `trace`/`metrics` are the frozen
- * no-op / passthrough; `run`/`runner` THROW — a wire host that routes through
- * `runWireDispatch` (the real gateway) OVERWRITES all five in-fiber with live
- * facets, so a surviving throw means a stub host left the ctx un-enriched.
- * Frozen + shared (referential identity, zero per-request build).
- */
-const OFF_PATH_FACETS: Observability & Ops = Object.freeze({
-  log: createLog(() => {}),
-  trace: <T>(_name: string, fn: (span: Span) => T | Promise<T>): Promise<T> =>
-    Promise.resolve(fn(NOOP_SPAN)),
-  metrics: Object.freeze({ count: () => {}, record: () => {}, gauge: () => {} }),
-  run: (() => {
-    throw new Error("ctx.run is unavailable: the wire host did not enrich this dispatch context");
-  }) as Ops["run"],
-  runner: Object.freeze({
-    runOperation: () => {
-      throw new Error(
-        "ctx.runner is unavailable: the wire host did not enrich this dispatch context",
-      );
-    },
-  }) as Ops["runner"],
-});
 
 export interface DispatchSink {
   sendNotification(notification: { method: string; params?: unknown }): void;

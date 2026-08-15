@@ -32,8 +32,11 @@ import type {
   AppHarnessProtocol,
   DestroySessionInput,
   DestroySessionResult,
+  IdentityScopedApp,
   SessionEntry,
 } from "./app-harness.js";
+import type { IngressIdentity } from "../wire/authorizer.js";
+import type { IdentityScoped } from "./identity.js";
 import type { SessionRecord, SessionStoreQuery } from "./session-store.js";
 import type { CursorPage, PageRequest } from "./paging.js";
 import type { WireExtensionRegistry } from "../wire/registry.js";
@@ -189,6 +192,29 @@ export interface GatewaySessionEntry extends SessionEntry {
  */
 export type RemoteParentPolicy = "ignore" | "link" | "parent";
 
+/**
+ * A gateway handle scoped to an authenticated identity — the return of
+ * {@link GatewayHarnessProtocol.as}, and the local pole's door onto the SAME
+ * mechanism a transport dispatch runs.
+ *
+ * "Wire" in agentick was never the socket — it is the trust boundary: a
+ * dispatch whose authority comes from an authenticated identity rather than
+ * from being the host. This handle is that boundary without the framing:
+ * calls route through the gateway's wire dispatch seam (`wire:app/…` op →
+ * `onBeforeWire…` hooks → authorizer → ADR-48 principal stamp), then land on
+ * the LOCAL harness — so the session that comes back keeps full local powers
+ * (structured `output`, handler-carrying `tools`) that the serialized wire
+ * cannot carry. One policy chokepoint, both doors.
+ */
+export interface IdentityScopedGateway extends IdentityScoped {
+  /**
+   * The identity-scoped twin of {@link GatewayHarnessProtocol.app}: resolve a
+   * mounted app, `undefined` when no app claims the id. The returned handle's
+   * verbs run as the scoped identity.
+   */
+  app(appId: string): IdentityScopedApp | undefined;
+}
+
 export interface GatewayHarnessProtocol {
   readonly id: string;
   readonly metadata: Readonly<Record<string, unknown>>;
@@ -212,6 +238,15 @@ export interface GatewayHarnessProtocol {
 
   /** Look up a registered App by id. */
   app(appId: string): AppHarnessProtocol | undefined;
+
+  /**
+   * Act as an authenticated identity — see {@link IdentityScopedGateway}.
+   *
+   * Trust contract: does NOT authenticate. Verify the credential first (an
+   * `AuthSource`); the identity handed here is taken as the authority, and
+   * from here on stamping + policy are the framework's job.
+   */
+  as(identity: IngressIdentity): IdentityScopedGateway;
 
   /** Enumerate all registered Apps. */
   apps(): readonly AppHarnessProtocol[];

@@ -47,6 +47,7 @@ import type { Effect } from "effect";
 
 import type { Operation } from "./operations.js";
 import type { SubstrateError } from "./errors.js";
+import { createLog, NOOP_METRICS, OFF_TRACE, type Observability } from "./observability.js";
 
 // ============================================================================
 // Options — frozen-small BY DESIGN
@@ -161,3 +162,38 @@ export interface Ops {
    */
   readonly runner: OperationRunnerView;
 }
+
+// ============================================================================
+// Off-path facet bundle
+// ============================================================================
+
+/**
+ * Off-path {@link Observability} + {@link Ops} facets, pre-seeded onto a
+ * dispatch ctx that is built BEFORE its operation starts — so the ctx
+ * satisfies its type at construction time. A host that routes the dispatch
+ * through its op seam (`runWireDispatch`, ADR 64/78) OVERWRITES all five
+ * in-fiber with live facets bound to the op runtime.
+ *
+ * Two tempers, deliberately: `log`/`trace`/`metrics` are the shared frozen
+ * no-op / passthrough singletons above (harmless if read), while `run`/`runner`
+ * THROW — a surviving placeholder there means the host never enriched the ctx,
+ * and silently no-op'ing an operation launch would hide the wiring bug.
+ *
+ * Shared here (both the transport dispatcher and the gateway's `as()` door
+ * seed contexts with it; the dependency between those packages points the
+ * wrong way for either to lend it to the other). Frozen + referentially
+ * stable: zero per-request build.
+ */
+export const OFF_PATH_FACETS: Observability & Ops = Object.freeze({
+  log: createLog(() => {}),
+  trace: OFF_TRACE,
+  metrics: NOOP_METRICS,
+  run: (() => {
+    throw new Error("ctx.run is unavailable: the host did not enrich this dispatch context");
+  }) as Ops["run"],
+  runner: Object.freeze({
+    runOperation: () => {
+      throw new Error("ctx.runner is unavailable: the host did not enrich this dispatch context");
+    },
+  }) as Ops["runner"],
+});

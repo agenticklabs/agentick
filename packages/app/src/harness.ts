@@ -123,6 +123,8 @@ import type {
   OperationJournal,
   ProtocolEvent,
   CompilerProtocol,
+  IdentityScopedApp,
+  IngressIdentity,
   RegisteredModel,
   RunOnceInput,
   RunOnceResult,
@@ -1671,13 +1673,46 @@ export class AppHarness<P = unknown>
     // methods. close-app is serializable (no input) and is a declared-
     // command candidate; its exposure is a verb-matrix decision
     // (remote shutdown is powerful) — deferred with slice 5.
+    return this.runCreateSessionOp(input);
+  }
+
+  runOnce(input: RunOnceInput<P>): Promise<RunOnceResult> {
+    return this.runRunOnceOp(input);
+  }
+
+  as(identity: IngressIdentity): IdentityScopedApp<P> {
+    // The stamp clobbers whatever the input claims, exactly the wire rule
+    // (`app/create_session` spreads `ctx.principal` OVER params): the identity
+    // is the authority, the input is not. An identity with no `principal`
+    // stamps nothing — mirroring the wire handler's conditional — rather than
+    // erasing a caller-supplied value with `undefined`.
+    const stamp = <I extends { readonly principal?: string }>(input: I): I => ({
+      ...input,
+      ...(identity.principal !== undefined ? { principal: identity.principal } : {}),
+    });
+    return {
+      identity,
+      createSession: (input: CreateSessionInput<P> = {}) =>
+        this.runCreateSessionOp(stamp(input), identity),
+      runOnce: (input: RunOnceInput<P>) => this.runRunOnceOp(stamp(input), identity),
+    };
+  }
+
+  /**
+   * The one create-session op both doors run. `identity` present (the `as()`
+   * door) rides the op scope — the same axis a wire dispatch threads it on —
+   * so op-scoped hooks read WHO is acting either way; absent (the bare local
+   * pole) the scope stays clean and nothing is second-guessed.
+   */
+  private runCreateSessionOp(
+    input: CreateSessionInput<P>,
+    identity?: IngressIdentity,
+  ): Promise<SessionHarnessProtocol<P>> {
     const op: Operation<CreateSessionInput<P>, SessionHarnessProtocol<P>> = {
       opId: `app:create-session:${generateId()}`,
       surface: "app",
       name: "app:command:create-session",
-      scope: {
-        ...omitUndefined({ sessionId: input.sessionId }),
-      },
+      scope: this.identityScope({ ...omitUndefined({ sessionId: input.sessionId }) }, identity),
       input,
     };
     return this.runWithTelemetry(
@@ -1690,14 +1725,12 @@ export class AppHarness<P = unknown>
     );
   }
 
-  runOnce(input: RunOnceInput<P>): Promise<RunOnceResult> {
+  private runRunOnceOp(input: RunOnceInput<P>, identity?: IngressIdentity): Promise<RunOnceResult> {
     const op: Operation<RunOnceInput<P>, RunOnceResult> = {
       opId: `app:run-once:${generateId()}`,
       surface: "app",
       name: "app:command:run-once",
-      scope: {
-        ...omitUndefined({ sessionId: input.sessionId }),
-      },
+      scope: this.identityScope({ ...omitUndefined({ sessionId: input.sessionId }) }, identity),
       input,
     };
     return this.runWithTelemetry(
@@ -2822,6 +2855,9 @@ export class AppHarness<P = unknown>
         metadata: input.metadata,
         initialProps: input.initialProps,
         maxTicks: input.maxTicks,
+        // ADR 48 — an ephemeral session is still a session; the stamp rides
+        // the same construction path as a durable one.
+        principal: input.principal,
       }),
     };
     const session = (await this.createSessionBody(
