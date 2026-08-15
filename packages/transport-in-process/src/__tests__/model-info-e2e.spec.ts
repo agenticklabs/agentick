@@ -68,7 +68,11 @@ describe("app/model_info", () => {
 
     expect(res.info?.contextWindow).toBe(1048576);
     expect(res.info?.maxOutputTokens).toBe(65536);
-    expect(res.info?.pricing?.outputPerMTok).toBe(7.5);
+    // Promo-priced through 2026, doubling 2027-01-01 — mirror the rate card's
+    // date gate so the e2e doesn't expire with the promo.
+    expect(res.info?.pricing?.outputPerMTok).toBe(
+      Date.now() < Date.parse("2027-01-01") ? 3.75 : 7.5,
+    );
     await cleanup();
   });
 
