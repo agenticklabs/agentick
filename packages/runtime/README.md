@@ -562,6 +562,20 @@ stop();
 
 The attribute bag is an open record at every seam, so a new dimension is a new key — never a framework change and never a release.
 
+### Extension-installed harnesses: the two obligations
+
+There is no `installer.installTelemetry(...)` — deliberately. A harness OWNS its ops' identity (ADR 78), so an install-time registration would put that fact in the wrong place and be exactly as forgettable as the override it replaced. An extension that installs a harness has two obligations instead, and everything else is automatic:
+
+1. **Thread the cascade.** Spread `inheritedFrom(installer)` into your harness's construction options. Skip it and your ops run OUTSIDE the app's interceptor cascade — `app.guard()`, `app.hook()`, and every telemetry middleware silently never see them (ADR 93 landmine 11). This is the one that bites.
+
+   ```ts
+   new MyHarness(id, journal, bus, inbox, { ...config, ...inheritedFrom(installer) });
+   ```
+
+2. **Own your span identity.** Override `spanAttributes(op)` with your ops' cheap, input-derived identity (`<ns>.tool.name`, `<ns>.resource.uri`, …). Always-on like the base ids; the app's telemetry switch only gates the expensive result-derived enrichment.
+
+Plugin code that is NOT a harness (a polling loop, a store adapter) records through the ambient op it runs inside — `annotateOperationSpan` in-fiber, or `ctx.log`/facets at a boundary. A pre-scoped `installer.telemetry` tracer/meter facet is deliberately deferred until a real non-harness consumer needs one (#295 tracks it, with the structural nudges — a `registerNamespace` cascade tripwire and a conformance telemetry rung).
+
 ### The attribute-key naming rule
 
 - Keys are **dot-separated, never colon** — colons appear only in span and operation _names_ (`model:command:generate`).
