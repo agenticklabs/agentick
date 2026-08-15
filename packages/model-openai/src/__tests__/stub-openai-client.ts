@@ -138,6 +138,13 @@ export function asClient(stub: StubOpenAIClient): OpenAI {
   return stub as unknown as OpenAI;
 }
 
+/** A client whose every call rejects with `cause` — the provider-error path. */
+export function throwingClient(cause: unknown): OpenAI {
+  return {
+    chat: { completions: { create: (): Promise<never> => Promise.reject(cause) } },
+  } as unknown as OpenAI;
+}
+
 // ============================================================================
 // Helpers for building canned responses
 // ============================================================================

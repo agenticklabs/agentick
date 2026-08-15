@@ -183,21 +183,42 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 import { aisdk } from "@agentick/model-ai-sdk";
 
-runExecutorConformance(async ({ harnessId, scripted }) => {
-  const bus = new LocalEventBus();
-  const executor = new LanguageModelExecutor(
-    harnessId,
-    new MemoryJournal(),
-    bus,
-    new LocalInbox(),
-    { adapter: aisdk(new MockLanguageModelV2({ doGenerate: mockGenerateFor(scripted) })) },
-  );
-  await executor.ready;
-  return { executor, bus };
-});
+runExecutorConformance(
+  async ({ harnessId, scripted, throws }) => {
+    const bus = new LocalEventBus();
+    const model =
+      throws !== undefined
+        ? new MockLanguageModelV2({
+            doGenerate: () => Promise.reject(throws),
+            doStream: () => Promise.reject(throws),
+          })
+        : new MockLanguageModelV2({ doGenerate: mockGenerateFor(scripted) });
+    const executor = new LanguageModelExecutor(
+      harnessId,
+      new MemoryJournal(),
+      bus,
+      new LocalInbox(),
+      { adapter: aisdk(model) },
+    );
+    await executor.ready;
+    return { executor, bus };
+  },
+  {
+    // Both SDK 4 and SDK 5 spellings of the invalid-tool-input class.
+    MalformedModelOutput: [invalidToolInput("AI_InvalidToolInputError")],
+    ProviderRejected: [Object.assign(new Error("rate limited"), { status: 429 })],
+    ProviderAborted: [
+      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+    ],
+    StreamFailed: [new Error("socket hang up")],
+    ProviderTimeout: "not-applicable",
+  },
+);
 ```
 
 `mockGenerateFor` is yours to write: it returns an SDK result shaped so it normalizes back to what the suite scripted, which means the round trip through `prepareRequest → send → normalize` is what is actually under test rather than a mock of your own code. Write the bridge tests the same way — assert against the call the mock _received_, and against the canonical result your `normalize` produced.
+
+The second argument is required and total over `ExecuteError["_tag"]`: for each failure class, provider-native errors your classification must resolve to it, or `"not-applicable"` when nothing does. The suite throws each fixture from the model and asserts the tag on the executor's own rejection — so a class added to the taxonomy breaks this file at compile time until you decide.
 
 ## Patterns
 

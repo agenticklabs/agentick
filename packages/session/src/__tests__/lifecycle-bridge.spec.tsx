@@ -40,10 +40,12 @@ import type {
   LifecycleExecutionStart,
   LifecycleModelGenerateEnd,
   LifecycleModelGenerateStart,
+  LifecycleTickEnd,
   LifecycleToolEnd,
   LifecycleToolStart,
   NotifyTickEndInput,
   TickEndForwardDecision,
+  TickResult,
 } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -464,14 +466,14 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
     await tools.close();
   });
 
-  it("error projection: a FAILED executor terminal fires useOnError (phase 'model'); no tick-end settle for the failed tick", async () => {
+  it("error projection: a FAILED executor terminal fires useOnError (phase 'model') AND settles tick-end, so a tree effect can re-issue it", async () => {
     const stack = await mkStack(`err-model-${Math.random()}`);
 
     const errors: LifecycleError[] = [];
-    const tickEnds: string[] = [];
+    const tickEnds: LifecycleTickEnd[] = [];
     function Agent() {
       useOnError((e) => void errors.push(e));
-      useOnTickEnd((e) => void tickEnds.push(e.tickId));
+      useOnTickEnd((e) => void tickEnds.push(e));
       return React.createElement(System, null, "err");
     }
 
@@ -507,9 +509,13 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
 
     expect(errors).toHaveLength(1);
     expect(errors[0]!.phase).toBe("model");
-    // The failed tick did NOT settle (parity with the retired in-body
-    // settle, which only ran on a succeeded executor terminal).
-    expect(tickEnds).toHaveLength(0);
+    // ADR 99 slice 2 — the failed tick reaches the DECIDE, so it settles first:
+    // `useOnTickEnd` + `useLoopControl().continueAfterTick()` is the tree-level
+    // retry seam, and it only works if the effect runs before the decision.
+    expect(tickEnds).toHaveLength(1);
+    const failed = tickEnds[0]!.result as TickResult;
+    expect(failed.executorTerminal.outcome).toBe("failed");
+    expect(failed.consecutiveFailures).toBe(1);
 
     await session.close();
     await tools.close();

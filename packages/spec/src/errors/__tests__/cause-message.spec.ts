@@ -27,6 +27,7 @@ import {
   MalformedModelOutput,
   ProviderRejected,
   StreamFailed,
+  ToolValidationError,
   UnknownExecutorError,
 } from "../harnesses.js";
 
@@ -105,6 +106,50 @@ describe("MalformedModelOutput — the same fold, minus the model's own words", 
     expect("rawArguments" in json).toBe(false);
     expect(JSON.stringify(err)).not.toContain("078-05-1120");
     expect(json.toolName).toBe("knowify__query");
+  });
+});
+
+describe("ToolValidationError — the issues reach the message", () => {
+  // Same discipline, different reader: the loop renders this text into the
+  // failed `tool_result` it persists (ADR 99 slice 4b), so the MODEL reads it.
+  // "tool t validation failed" told it the call was wrong and not which
+  // argument, which is the half it needs to self-correct.
+  it("names each failing argument path", () => {
+    const err = new ToolValidationError({
+      toolName: "query_invoices",
+      issues: [
+        { path: ["amount"], message: "expected number, received string" },
+        { path: ["items", 0, { key: "id" }], message: "required" },
+      ],
+    });
+    expect(err.message).toBe(
+      "tool query_invoices validation failed: amount: expected number, received string; " +
+        "items.0.id: required",
+    );
+  });
+
+  it("keeps a pathless issue's own words", () => {
+    const err = new ToolValidationError({
+      toolName: "t",
+      issues: [{ message: "expected an object" }],
+    });
+    expect(err.message).toBe("tool t validation failed: expected an object");
+  });
+
+  it("summarizes past three — a schema failure must not become the turn's largest message", () => {
+    const err = new ToolValidationError({
+      toolName: "t",
+      issues: [1, 2, 3, 4, 5].map((n) => ({ path: [`f${n}`], message: "required" })),
+    });
+    expect(err.message).toBe(
+      "tool t validation failed: f1: required; f2: required; f3: required (+2 more)",
+    );
+  });
+
+  it("stays a bare classification when there are no issues", () => {
+    expect(new ToolValidationError({ toolName: "t", issues: [] }).message).toBe(
+      "tool t validation failed",
+    );
   });
 });
 

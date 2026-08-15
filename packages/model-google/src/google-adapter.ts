@@ -62,6 +62,7 @@ import {
   createSourceInterner,
   type CustomBlockDefinition,
   defaultFinalizeStream,
+  defaultMapProviderError,
   defineLanguageModelAdapter,
   type DeltaTransform,
   lowerSemanticRole,
@@ -75,7 +76,7 @@ import {
 } from "@agentick/model";
 import type { AdapterDelta } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
-import { ProviderRejected, StreamFailed, type ExecuteErrorChannel } from "@agentick/spec";
+import { MalformedModelOutput, ProviderRejected, type ExecuteErrorChannel } from "@agentick/spec";
 
 // ============================================================================
 // ProviderOptions augmentation — typed Google escape hatch (G5)
@@ -486,6 +487,9 @@ export function google(
      */
     finalizeStream(accum: StreamAccumulatorView): readonly AdapterDelta[] {
       const state = getGoogleState(accum);
+      if (isMalformedToolCallReason(state.finishReasonRaw)) {
+        throw malformedToolCall(state.finishReasonRaw!, state.finishMessageRaw);
+      }
       if (state.finishReasonRaw && accum.stopReason === "end") {
         accum.stopReason = mapFinishReason(state.finishReasonRaw);
       }
@@ -736,7 +740,7 @@ export function mapProviderError(cause: unknown): ExecuteErrorChannel {
   if (detail.message === undefined && detail.code === undefined) {
     // Nothing structured to extract — let the executor's default classification stand
     // rather than dressing an unknown failure as a provider rejection.
-    return new StreamFailed({ cause });
+    return defaultMapProviderError(cause);
   }
   // `INVALID_ARGUMENT` and friends name the failure CLASS in a way the sentence often
   // does not ("Request contains an invalid argument." says nothing about which one).
@@ -1236,6 +1240,12 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
   //   `executedBy: "provider:google"`, but it is out of scope for this
   //   grounding-citation pass and un-mapped here. Narrowed, greppable.
   const candidate = raw.candidates?.[0];
+  if (isMalformedToolCallReason(candidate?.finishReason)) {
+    throw malformedToolCall(
+      candidate!.finishReason!,
+      (candidate as { finishMessage?: unknown }).finishMessage as string | undefined,
+    );
+  }
   const output: ContentBlock[] = [];
   const toolCalls: ToolCall[] = [];
   // part-index → output-block index, so grounding citations (which reference a
@@ -1298,9 +1308,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       : mapFinishReason(candidate?.finishReason);
   const usage = toUsageStats(raw.usageMetadata);
 
-  // The provider's own explanation, when it gives one. For a malformed tool
-  // call this holds the OFFENDING TEXT the model emitted, which is the whole
-  // diagnostic — without it the failure is indistinguishable from a clean stop.
+  // The provider's own explanation, when it gives one.
   const finishMessage = (candidate as { finishMessage?: unknown } | undefined)?.finishMessage;
   const result: LanguageModelExecutionResult = {
     specVersion: SPEC_VERSION_LITERAL,
@@ -1466,27 +1474,38 @@ function mapFinishReason(
     case FinishReason.LANGUAGE:
     case "LANGUAGE":
       return "content_filter";
-    case FinishReason.MALFORMED_FUNCTION_CALL:
-    case "MALFORMED_FUNCTION_CALL":
-    case "UNEXPECTED_TOOL_CALL":
-    case "TOO_MANY_TOOL_CALLS":
-    case "MISSING_THOUGHT_SIGNATURE":
-      // The model TRIED to call a tool and Google rejected the attempt. This
-      // used to fold into "other" — "recoverable from raw if needed" — and
-      // nothing ever recovered it, so a loop could not tell this from a clean
-      // stop. Observed in production as "the model keeps stopping without
-      // calling anything": Gemini had emitted the call as Python source
-      // (`print(default_api.knowify__query(...))`) and aborted its own turn.
-      // `finishMessage` carries that offending text; see `stopMessage`.
-      // TODO(malformed-output): ADR 99 wants this raised as `MalformedModelOutput`
-      // so recovery policy can retry it. Raising here today would only convert a
-      // quiet stop that PRESERVES `stopMessage` into `executor_failed` with no
-      // recovery — it becomes a win once failed ticks reach the decide fold
-      // (ADR 99 slice 2).
-      return "malformed_tool_call";
     default:
       return "other";
   }
+}
+
+/**
+ * The four finish reasons that mean *the model tried to call a tool and Google
+ * rejected the attempt*. Not a stop reason: these never reach
+ * {@link mapFinishReason}, because both entry points raise
+ * {@link MalformedModelOutput} first (ADR 99 slice 1).
+ */
+function isMalformedToolCallReason(reason: FinishReason | string | null | undefined): boolean {
+  return (
+    reason === FinishReason.MALFORMED_FUNCTION_CALL ||
+    reason === "MALFORMED_FUNCTION_CALL" ||
+    reason === "UNEXPECTED_TOOL_CALL" ||
+    reason === "TOO_MANY_TOOL_CALLS" ||
+    reason === "MISSING_THOUGHT_SIGNATURE"
+  );
+}
+
+/**
+ * Gemini's `finishMessage` for a malformed function call contains the OFFENDING
+ * TEXT the model emitted — the whole diagnostic. It rides `cause`, so the
+ * family's `causeMessage` fold puts it on the error's `message` verbatim, where
+ * `stopMessage` used to carry it.
+ */
+function malformedToolCall(
+  reason: FinishReason | string,
+  finishMessage: string | null | undefined,
+): MalformedModelOutput {
+  return new MalformedModelOutput({ cause: new Error(finishMessage || String(reason)) });
 }
 
 // ============================================================================

@@ -29,6 +29,7 @@ import type {
   AdapterDeltaType,
   ContentBlock,
   EventBus,
+  ExecuteError,
   ImageBlock,
   MediaSourceKind,
   MediaSupport,
@@ -47,7 +48,27 @@ import type {
 export interface ExecutorConformanceFactoryInput {
   readonly harnessId: string;
   readonly scripted?: LanguageModelExecutionResult;
+  /**
+   * When present, the factory MUST build the executor over a client whose
+   * provider call throws this value — whichever of the streaming and
+   * non-streaming calls the adapter makes.
+   */
+  readonly throws?: unknown;
 }
+
+/**
+ * Provider-native error fixtures, one entry per {@link ExecuteError} class:
+ * shapes this executor's classification MUST resolve to that class, or
+ * `"not-applicable"` when it classifies nothing to that class today.
+ *
+ * Required, total, and keyed off the tag union, so adding a class to the
+ * taxonomy breaks every adapter's conformance file at compile time — the
+ * taxonomy propagates itself (ADR 99, Verification). `mapProviderError` stays
+ * optional at runtime; this is where silence becomes a decision.
+ */
+export type ExecutorErrorFixtures = {
+  readonly [Tag in ExecuteError["_tag"]]: readonly unknown[] | "not-applicable";
+};
 
 /**
  * Construct an executor for a single conformance test. Returning the
@@ -131,7 +152,10 @@ function mkScripted(text = "hi"): LanguageModelExecutionResult {
 // Suite
 // ============================================================================
 
-export function runExecutorConformance(factory: ExecutorConformanceFactory): void {
+export function runExecutorConformance(
+  factory: ExecutorConformanceFactory,
+  errorFixtures: ExecutorErrorFixtures,
+): void {
   describe("ExecutorProtocol — project phase", () => {
     it("projects a RenderedTree into a target-shaped input", async () => {
       const { executor } = await factory({ harnessId: "ex-project-1" });
@@ -732,5 +756,50 @@ export function runExecutorConformance(factory: ExecutorConformanceFactory): voi
       // ...and NOTHING carries the pre-1B `executor:*` op surface.
       expect(names.every((n) => !n.startsWith("executor:"))).toBe(true);
     });
+  });
+
+  // ==========================================================================
+  // ADR 99 — the taxonomy, asserted END-TO-END. A fixture is thrown from the
+  // stub client and the assertion reads the `_tag` off the EXECUTOR's
+  // rejection, so it covers the adapter's `mapProviderError`, the executor's
+  // fallback table, and the pass-through between them — not the mapping
+  // function in isolation, which can be right while the wiring is not.
+  // ==========================================================================
+
+  const declaredEntries = Object.entries(errorFixtures);
+  const unclassified = declaredEntries
+    .filter(([, fixtures]) => fixtures === "not-applicable")
+    .map(([tag]) => tag);
+  const classified = declaredEntries.filter(
+    (entry): entry is [string, readonly unknown[]] => entry[1] !== "not-applicable",
+  );
+
+  describe("ExecutorProtocol — provider-error classification (ADR 99)", () => {
+    for (const tag of unclassified) {
+      it.skip(`${tag}: this executor classifies nothing to it`, () => {});
+    }
+
+    for (const [tag, fixtures] of classified) {
+      it(`${tag}: declares at least one fixture`, () => {
+        expect(fixtures.length).toBeGreaterThan(0);
+      });
+
+      fixtures.forEach((fixture, index) => {
+        it(`${tag}: classifies provider fixture #${index}`, async () => {
+          const { executor } = await factory({
+            harnessId: `ex-err-${tag}-${index}`,
+            throws: fixture,
+          });
+          const projected = await executor.project({
+            compiled: mkRenderedTree(),
+            target: mkTarget(),
+            tools: [],
+          });
+          await expect(
+            executor.execute({ targetInput: projected, target: mkTarget() }),
+          ).rejects.toMatchObject({ _tag: tag });
+        });
+      });
+    }
   });
 }

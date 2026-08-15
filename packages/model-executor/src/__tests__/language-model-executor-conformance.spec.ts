@@ -75,6 +75,7 @@ function chunksForScripted(scripted: LanguageModelExecutionResult): readonly Syn
 
 function adapterFor(
   scripted: LanguageModelExecutionResult | undefined,
+  throws?: unknown,
 ): LanguageModelAdapter<LanguageModelExecutionResult, SyntheticChunk> {
   const effective = scripted ?? DEFAULT_SCRIPTED;
   return {
@@ -82,8 +83,9 @@ function adapterFor(
     target: DEFAULT_TARGET,
     streamByDefault: true,
     prepareRequest: () => ({}),
-    send: () => Promise.resolve(effective),
+    send: () => (throws !== undefined ? Promise.reject(throws) : Promise.resolve(effective)),
     openStream: async function* (): AsyncIterable<SyntheticChunk> {
+      if (throws !== undefined) throw throws;
       for (const chunk of chunksForScripted(effective)) yield chunk;
     },
     mapChunk(chunk: SyntheticChunk, _accum: StreamAccumulatorView): readonly AdapterDelta[] {
@@ -136,14 +138,31 @@ function adapterFor(
 }
 
 describe("LanguageModelExecutor + adapter — ExecutorProtocol conformance", () => {
-  runExecutorConformance(async ({ harnessId, scripted }) => {
-    const journal = new MemoryJournal();
-    const bus = new LocalEventBus();
-    const inbox = new LocalInbox();
-    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
-      adapter: adapterFor(scripted),
-    });
-    await exec.ready;
-    return { executor: exec, bus };
-  });
+  runExecutorConformance(
+    async ({ harnessId, scripted, throws }) => {
+      const journal = new MemoryJournal();
+      const bus = new LocalEventBus();
+      const inbox = new LocalInbox();
+      const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+        adapter: adapterFor(scripted, throws),
+      });
+      await exec.ready;
+      return { executor: exec, bus };
+    },
+    // This adapter declares no `mapProviderError`, so these fixtures certify
+    // `defaultMapProviderError` — the table every adapter falls back to.
+    {
+      ProviderRejected: [
+        Object.assign(new Error("rate limited"), { status: 429 }),
+        Object.assign(new Error("server error"), { statusCode: 500 }),
+      ],
+      ProviderAborted: [new DOMException("This operation was aborted", "AbortError")],
+      StreamFailed: [new Error("socket hang up")],
+      // Neither class is reachable from a THROWN provider error under the
+      // default table: malformation is raised at stream finalize
+      // (`malformed-tool-arguments.spec.ts`), and nothing names a timeout.
+      MalformedModelOutput: "not-applicable",
+      ProviderTimeout: "not-applicable",
+    },
+  );
 });

@@ -183,17 +183,27 @@ export function wireLifecycleProjection(
         });
         return;
       }
-      // No settle for non-succeeded terminals (the old in-body settle
-      // only ran on success). A provider FAILURE projects `useOnError`.
-      if (terminal.outcome === "failed") {
-        notify({
-          kind: "error",
-          phase: "model",
-          error: describeError(terminal.error),
-          tickId: result.tickId,
-          executionId: result.executionId,
-        });
-      }
+      // No settle for `canceled` / `vetoed` — neither reaches the DECIDE, so
+      // there is no decision for a tree effect to influence.
+      if (terminal.outcome !== "failed") return;
+      notify({
+        kind: "error",
+        phase: "model",
+        error: describeError(terminal.error),
+        tickId: result.tickId,
+        executionId: result.executionId,
+      });
+      // A FAILED tick settles too (ADR 99 slice 2): it reaches the DECIDE, so a
+      // `useOnTickEnd` effect calling `continueAfterTick()` is what re-issues
+      // it — and that has to be awaited before the DECIDE, on the same cascade
+      // the success path uses. Handlers discriminate on
+      // `result.executorTerminal.outcome`; there is no usage metadata to carry.
+      await settle({
+        kind: "tick-end",
+        tickId: result.tickId,
+        executionId: result.executionId,
+        result,
+      });
     },
   };
 

@@ -1238,7 +1238,11 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
       // 4. normalize (deterministic)
       const result = yield* Effect.try({
         try: () => this.normalizeRaw(rawForNormalize),
-        catch: (cause): ExecutorError => new NormalizationFailed({ cause }),
+        // An adapter that raises an already-classified failure (Google's
+        // malformed-function-call finish reason) keeps its class; anything else
+        // is a normalization defect.
+        catch: (cause): ExecutorError =>
+          isExecuteError(cause) ? cause : new NormalizationFailed({ cause }),
       });
 
       // 5. merge provider-specific metadata (v1 extractMetadata parity).

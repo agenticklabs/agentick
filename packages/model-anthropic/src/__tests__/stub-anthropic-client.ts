@@ -99,6 +99,13 @@ export function asClient(stub: StubAnthropicClient): Anthropic {
   return stub as unknown as Anthropic;
 }
 
+/** A client whose every call rejects with `cause` — the provider-error path. */
+export function throwingClient(cause: unknown): Anthropic {
+  return {
+    messages: { create: (): Promise<never> => Promise.reject(cause) },
+  } as unknown as Anthropic;
+}
+
 // ============================================================================
 // Helpers for building canned responses
 // ============================================================================

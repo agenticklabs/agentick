@@ -21,8 +21,10 @@ import type {
 
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
+import { APIConnectionError, APIError, APIUserAbortError } from "@anthropic-ai/sdk";
+
 import { anthropic } from "../anthropic-adapter.js";
-import { StubAnthropicClient, asClient } from "./stub-anthropic-client.js";
+import { StubAnthropicClient, asClient, throwingClient } from "./stub-anthropic-client.js";
 
 function messageFor(scripted: LanguageModelExecutionResult | undefined): AnthropicMessage {
   const text =
@@ -132,18 +134,47 @@ function streamingEventsFor(
 }
 
 describe("anthropic() adapter — ExecutorProtocol conformance", () => {
-  runExecutorConformance(async ({ harnessId, scripted }) => {
-    const stub = new StubAnthropicClient([
-      { kind: "non-streaming", message: messageFor(scripted) },
-      { kind: "streaming", events: streamingEventsFor(scripted) },
-    ]);
-    const journal = new MemoryJournal();
-    const bus = new LocalEventBus();
-    const inbox = new LocalInbox();
-    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
-      adapter: anthropic("claude-3-5-sonnet-latest", { client: asClient(stub) }),
-    });
-    await exec.ready;
-    return { executor: exec, bus };
-  });
+  runExecutorConformance(
+    async ({ harnessId, scripted, throws }) => {
+      const stub = new StubAnthropicClient([
+        { kind: "non-streaming", message: messageFor(scripted) },
+        { kind: "streaming", events: streamingEventsFor(scripted) },
+      ]);
+      const journal = new MemoryJournal();
+      const bus = new LocalEventBus();
+      const inbox = new LocalInbox();
+      const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+        adapter: anthropic("claude-3-5-sonnet-latest", {
+          client: throws !== undefined ? throwingClient(throws) : asClient(stub),
+        }),
+      });
+      await exec.ready;
+      return { executor: exec, bus };
+    },
+    {
+      ProviderRejected: [
+        new APIError(
+          429,
+          { type: "error", error: { type: "rate_limit_error", message: "rate limited" } },
+          undefined,
+          undefined,
+        ),
+        new APIError(
+          400,
+          { type: "error", error: { type: "invalid_request_error", message: "bad request" } },
+          undefined,
+          undefined,
+        ),
+      ],
+      ProviderAborted: [new APIUserAbortError()],
+      StreamFailed: [new APIConnectionError({ message: "Connection error." })],
+      // Anthropic publishes no error class or stop reason that positively names
+      // malformed model output; its one occurrence, an unparseable
+      // `input_json_delta` run, is caught generically at stream finalize.
+      MalformedModelOutput: "not-applicable",
+      // `APIConnectionTimeoutError` exists, but nothing classifies it yet —
+      // TODO(provider-timeout): teach `defaultMapProviderError` to name it.
+      ProviderTimeout: "not-applicable",
+    },
+  );
 });

@@ -18,7 +18,7 @@ import type { GenerateContentResponse } from "@google/genai";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
 import { google } from "../google-adapter.js";
-import { StubGoogleClient, asClient, mkResponse } from "./stub-google-client.js";
+import { StubGoogleClient, asClient, mkResponse, throwingClient } from "./stub-google-client.js";
 
 function responseFor(scripted: LanguageModelExecutionResult | undefined): GenerateContentResponse {
   const text =
@@ -73,19 +73,41 @@ function streamingChunksFor(
   return [response];
 }
 
+/** Verbatim from a live Vertex 400 — doubly serialized, exactly as the SDK hands it over. */
+const NESTED_400 =
+  '{"error":{"message":"{\\n  \\"error\\": {\\n    \\"code\\": 400,\\n    \\"message\\": ' +
+  '\\"Request contains an invalid argument.\\",\\n    \\"status\\": \\"INVALID_ARGUMENT\\"\\n  }\\n}\\n",' +
+  '"code":400,"status":"Bad Request"}}';
+
 describe("google() adapter — ExecutorProtocol conformance", () => {
-  runExecutorConformance(async ({ harnessId, scripted }) => {
-    const stub = new StubGoogleClient([
-      { kind: "non-streaming", response: responseFor(scripted) },
-      { kind: "streaming", chunks: streamingChunksFor(scripted) },
-    ]);
-    const journal = new MemoryJournal();
-    const bus = new LocalEventBus();
-    const inbox = new LocalInbox();
-    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
-      adapter: google("gemini-2.5-flash", { client: asClient(stub) }),
-    });
-    await exec.ready;
-    return { executor: exec, bus };
-  });
+  runExecutorConformance(
+    async ({ harnessId, scripted, throws }) => {
+      const stub = new StubGoogleClient([
+        { kind: "non-streaming", response: responseFor(scripted) },
+        { kind: "streaming", chunks: streamingChunksFor(scripted) },
+      ]);
+      const journal = new MemoryJournal();
+      const bus = new LocalEventBus();
+      const inbox = new LocalInbox();
+      const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+        adapter: google("gemini-2.5-flash", {
+          client: throws !== undefined ? throwingClient(throws) : asClient(stub),
+        }),
+      });
+      await exec.ready;
+      return { executor: exec, bus };
+    },
+    {
+      ProviderRejected: [new Error(NESTED_400)],
+      // `@google/genai` calls `fetch`, which rejects an aborted request with
+      // exactly this DOMException.
+      ProviderAborted: [new DOMException("This operation was aborted", "AbortError")],
+      StreamFailed: [new Error("socket hang up")],
+      // Gemini reports malformed tool calls as a FINISH REASON on an otherwise
+      // successful response, so no thrown fixture can express it — see
+      // `malformed-tool-call.spec.ts`.
+      MalformedModelOutput: "not-applicable",
+      ProviderTimeout: "not-applicable",
+    },
+  );
 });

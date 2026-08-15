@@ -2261,13 +2261,38 @@ at finalize instead of coercing to `{}` (executor finalize moved to
 `Effect.try` so the raise reaches the typed channel), adapters classify via
 `mapProviderError` with `defaultMapProviderError`/`defaultIsAbortError`
 extracted so an adapter refines-then-delegates, `streamTerminal` passes typed
-errors through, failed dispatches persist the error text. Deliberate deferral:
-Google's `MALFORMED_FUNCTION_CALL` finish reason stays a quiet
-`malformed_tool_call` stop (TODO at the arm) — raising it before slice 2 lands
-trades a diagnostic-preserving stop for unrecoverable `executor_failed`; the
-flip is a wave 2 item. Also wave 2: fold `ToolValidationError.issues` into its
-message (`TODO(tool-error-detail)`) so the persisted error text names the bad
-argument. Waves 2–3 (decide routing + policy) not started; tracked on #291.
+errors through, failed dispatches persist the error text.
+
+Wave 2 (slices 2 + 3 + the deferred items) LANDED. The loop no longer breaks
+before notify on a `failed` terminal: it folds `notifyTickEnd`
+(`outcome: "failed"`), abstain resolves to STOP for that outcome (so a run with
+no policy is byte-identical to before — pinned by a test), `canceled`/`vetoed`
+still break out ahead of the fold, and `maxConsecutiveFailedTicks` (default 3,
+session-settable) backstops whatever a participant asks for, reporting the LAST
+failure as `stopCause`. `TickResult.consecutiveFailures` carries the count to
+every participant (`TickInput.consecutiveFailures` is the entry-side twin, and
+non-zero is what stamps `retryOfTick` on the retry's `tick-start` — spec's
+`LoopExecutionEvent` + the public `TickStartEvent` both carry it). The session
+fold gained the tick-failure predicate LAST (weakest claim: a tree stop and a
+gate hold are deliberate, this only answers "worth re-issuing?"), with
+`tickFailurePolicy` in both forms normalized by
+`session/src/tick-failure-policy.ts`; a failure outside the `ExecuteError`
+family never retries. The lifecycle projection now SETTLES a failed tick
+(previously skipped) — without that, `useOnTickEnd` +
+`useLoopControl().continueAfterTick()` could not be the tree-level retry seam
+the ADR promises. Google's `MALFORMED_FUNCTION_CALL` family flipped to a raised
+`MalformedModelOutput` (both stream-finalize and normalize), which retired the
+`malformed_tool_call` stop reason entirely; `runExecutorConformance` now takes a
+REQUIRED `errorFixtures` map over `ExecuteError["_tag"]`, so a future taxonomy
+class breaks every adapter's conformance file at compile time; and
+`ToolValidationError` folds its issues into its message, so the persisted
+tool_result names the bad argument path.
+
+Not done, deliberately: usage on failed ticks (ADR open point 1 — the provider
+bills for a malformed generation and the run under-reports), and the app-level
+`createApp({ tickFailurePolicy })` shorthand (the longhand
+`createApp({ session: { … } })` works today; `AppHarnessOptions` was owned by a
+concurrent session). Tracked on #291.
 
 ### 2026-08-12 — scoped capability leasing, named (ADR 98)
 

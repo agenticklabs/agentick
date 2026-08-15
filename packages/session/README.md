@@ -569,6 +569,28 @@ Once per tick — after the tree has settled — the session folds every continu
 
 Settle-then-decide is load-bearing: a tick-end effect may set a knob a gate reads, so the tree must settle before the predicates run. That ordering is what makes `useOnTickEnd` usable as a real hook rather than a fire-and-forget notification — and the whole `useOn*` family is a projection of the real command lifecycle, not a bespoke feed.
 
+### Retrying a failed tick
+
+A tick that FAILED reaches the same fold, and a `continue` there is a retry — a failed tick persists nothing, so the next tick renders the same tree over the same conversation and issues an identical model request. The fold's default inverts for that outcome: abstain means stop, so a run with no policy ends on `executor_failed` exactly as before.
+
+The bundled policy retries a `MalformedModelOutput` — the model emitted a tool call nobody can parse — once, and stops on everything else. A refused request is refused identically on the next tick, and billed. Replace it with either form of `tickFailurePolicy`:
+
+```tsx
+const session = new SessionHarness(journal, bus, inbox, {
+  // ...
+  // A per-class retry budget, keyed by the `_tag` adapters emit…
+  tickFailurePolicy: { MalformedModelOutput: 2, StreamFailed: 1 },
+  // …or the live predicate the table desugars into:
+  // tickFailurePolicy: (error, { consecutiveFailures }) =>
+  //   error._tag === "MalformedModelOutput" && consecutiveFailures < 3 ? "retry" : "stop",
+  maxConsecutiveFailedTicks: 3,
+});
+```
+
+Either form REPLACES the bundled default entirely — a table that omits a class is you saying that class should not retry. The loop's `maxConsecutiveFailedTicks` (default 3) and `maxTicks` still bound both, so raise the cap before raising a budget past it. The taxonomy is the config namespace: there is no `max<Mode>Retries` option per failure class, and a typo breaks at compile time.
+
+Layering: an adapter-level `withRetry` owns transient transport errors (429/5xx/network) before the first chunk. This owns post-stream failures — the classes `withRetry` correctly refuses to replay. And the tree participates without any of it: `useOnTickEnd` sees the failed `TickResult`, and `useLoopControl().continueAfterTick()` re-issues the tick.
+
 ## Middleware, guards, and hooks
 
 `session.use(mw)` wraps **this session's** operations — narrower than `app.use`, which wraps every session. Reach for it for concerns bound to one conversation: per-session rate limiting, a redaction pass, request logging keyed to `ctx.sessionId`.

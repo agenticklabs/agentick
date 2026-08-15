@@ -61,6 +61,7 @@ function tickResult(
       },
     } as unknown as TickResult["executorTerminal"],
     toolResults: [],
+    consecutiveFailures: 0,
     ...overrides,
   };
 }

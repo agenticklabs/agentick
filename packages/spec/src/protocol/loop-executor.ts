@@ -244,6 +244,19 @@ export interface RunExecutionInput {
   readonly maxTicks: number;
 
   /**
+   * Hard cap on CONSECUTIVE failed ticks (ADR 99 slice 2), sibling of
+   * {@link maxTicks}. Counts ticks whose executor terminal is `failed`;
+   * resets on the first success. At the cap the loop stops with
+   * `stopReason: "executor_failed"` and the LAST failure as `stopCause`,
+   * whatever a decide participant asked for.
+   *
+   * The cap is MECHANISM; how many retries actually happen is policy (the
+   * session's `tickFailurePolicy`, folded into the tick-end decision). Both
+   * are bounded by this and by `maxTicks`. Default: 3.
+   */
+  readonly maxConsecutiveFailedTicks?: number;
+
+  /**
    * Concurrency for dispatching a tick's tool calls (ADR 77 Stage 5).
    * `"unbounded"` (default) runs every `result.toolCalls` entry
    * concurrently — results stay in call-order (`Effect.all` preserves
@@ -375,7 +388,19 @@ export type LoopExecutionEvent =
       readonly delta: import("../data/streaming.js").AdapterDelta;
     }
   // Orchestration layer — loop's own lifecycle + tool dispatch lifecycle
-  | { readonly kind: "tick-start"; readonly tick: number; readonly tickIndex: number }
+  | {
+      readonly kind: "tick-start";
+      readonly tick: number;
+      readonly tickIndex: number;
+      /**
+       * The index of the failed tick this one re-issues (ADR 99 slice 2).
+       * Present iff the preceding tick failed and a decide participant
+       * force-continued: nothing was persisted, so this tick renders the same
+       * tree over the same timeline and issues an identical model request. A
+       * UI collapses the failed attempt off this instead of rendering dead air.
+       */
+      readonly retryOfTick?: number;
+    }
   | {
       readonly kind: "tick-end";
       readonly tick: number;
@@ -588,6 +613,16 @@ export interface TickInput {
   /** Spawn lineage of the session (SP5) — forwarded onto the tick's `EventScope`. */
   readonly spawnPath?: readonly string[];
 
+  /**
+   * Failed ticks immediately PRECEDING this one (ADR 99 slice 2) — the run's
+   * counter at tick entry, absent/0 when the last tick succeeded. The tick
+   * rolls it into {@link TickResult.consecutiveFailures} and, when non-zero,
+   * stamps `retryOfTick` on its `tick-start` event: a non-zero count means the
+   * previous tick failed and was force-continued, which is what makes this tick
+   * a retry.
+   */
+  readonly consecutiveFailures?: number;
+
   /** Compiler harness whose `mountId` this tick renders. */
   readonly compiler: CompilerProtocol;
   /**
@@ -699,6 +734,13 @@ export interface TickResult extends TickInfo {
    * handler verdicts that may override).
    */
   readonly shouldContinue: boolean;
+  /**
+   * Consecutive failed ticks INCLUDING this one — 0 whenever the executor
+   * terminal succeeded (ADR 99 slice 2). Every decide participant reads its
+   * own retry budget off this rather than keeping private per-execution state
+   * that a fork, a restore, or a second participant would desynchronize.
+   */
+  readonly consecutiveFailures: number;
   readonly stopReason?:
     | LanguageModelStopReason
     | "max_ticks"

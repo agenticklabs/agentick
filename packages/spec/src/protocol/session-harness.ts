@@ -872,6 +872,12 @@ export interface NotifyTickEndInput {
   readonly sessionId: string;
   readonly executionId: string;
   readonly tickId: string;
+  /**
+   * `"succeeded"` or `"failed"` (ADR 99 slice 2 — a failed tick reaches the
+   * fold so a policy can re-issue it). `"canceled"` / `"vetoed"` never arrive:
+   * an abort is not a failure to recover from, and a veto is a policy decision
+   * that already happened.
+   */
   readonly outcome: CommandOutcome;
   /**
    * The settled {@link TickResult} for the tick that just completed
@@ -890,6 +896,40 @@ export type TickEndForwardDecision =
   | { readonly kind: "continue" }
   | { readonly kind: "stop"; readonly reason?: string }
   | undefined;
+
+/** What the failed tick a {@link TickFailurePolicy} is judging knows about itself. */
+export interface TickFailureInfo {
+  readonly tickIndex: number;
+  /** Consecutive failed ticks including this one — 1 on the first failure. */
+  readonly consecutiveFailures: number;
+}
+
+/**
+ * Whether a failed tick is re-issued (ADR 99 slice 3).
+ *
+ * A failed tick persists nothing, so `"retry"` is an identical model request
+ * as a fresh tick — promising for nondeterministic model garbage
+ * (`MalformedModelOutput`), futile and billed for a deterministically bad
+ * request. Only the adapter can tell those apart, which is why this is keyed
+ * by the `_tag` the adapters already emit: the taxonomy IS the config
+ * namespace, so there is no `max<Mode>Retries` option per failure class, and a
+ * typo breaks at compile time.
+ *
+ * The table form is a per-class retry BUDGET — `{ MalformedModelOutput: 1 }`
+ * retries that class once — desugared into the predicate form. Supplying
+ * either form REPLACES the bundled default entirely; the loop's
+ * `maxConsecutiveFailedTicks` and `maxTicks` still bound both.
+ *
+ * Layering: an adapter-level `withRetry` owns pre-first-chunk transient
+ * transport errors (429/5xx/network). This owns post-stream failures — the
+ * classes `withRetry` correctly refuses to replay.
+ */
+export type TickFailurePolicy =
+  | Partial<Record<import("../errors/harnesses.js").ExecuteError["_tag"], number>>
+  | ((
+      error: import("../errors/harnesses.js").ExecuteErrorChannel,
+      info: TickFailureInfo,
+    ) => "retry" | "stop");
 
 // ============================================================================
 // SessionHarnessProtocol — minimum 4e surface

@@ -105,6 +105,14 @@ export function asClient(stub: StubGoogleClient): GoogleGenAI {
   return stub as unknown as GoogleGenAI;
 }
 
+/** A client whose every call rejects with `cause` — the provider-error path. */
+export function throwingClient(cause: unknown): GoogleGenAI {
+  const raise = (): Promise<never> => Promise.reject(cause);
+  return {
+    models: { generateContent: raise, generateContentStream: raise },
+  } as unknown as GoogleGenAI;
+}
+
 // ============================================================================
 // Helpers for building canned responses
 // ============================================================================

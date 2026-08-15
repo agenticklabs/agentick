@@ -17,8 +17,10 @@ import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/
 
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
+import { APIConnectionError, APIError, APIUserAbortError } from "openai";
+
 import { openai } from "../openai-adapter.js";
-import { StubOpenAIClient, asClient } from "./stub-openai-client.js";
+import { StubOpenAIClient, asClient, throwingClient } from "./stub-openai-client.js";
 
 /**
  * Reverse-engineer a `ChatCompletion` from the scripted
@@ -130,27 +132,53 @@ function streamingChunksFor(
 }
 
 describe("openai() adapter — ExecutorProtocol conformance", () => {
-  runExecutorConformance(async ({ harnessId, scripted }) => {
-    const completion = completionFor(scripted);
-    const chunks = streamingChunksFor(scripted);
-    // Stub clamps to the last entry — supplying both shapes lets the
-    // suite exercise execute() (non-streaming) and executeStream()
-    // (streaming) interchangeably across tests.
-    const stub = new StubOpenAIClient([
-      { kind: "non-streaming", completion },
-      { kind: "streaming", chunks },
-    ]);
-    // Round-robin via a small extension — each call picks the matching
-    // shape. The existing stub returns clamped-to-last; emit a custom
-    // wrapper that returns the appropriate canned response by stream
-    // param.
-    const journal = new MemoryJournal();
-    const bus = new LocalEventBus();
-    const inbox = new LocalInbox();
-    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
-      adapter: openai("gpt-4o-mini", { client: asClient(stub) }),
-    });
-    await exec.ready;
-    return { executor: exec, bus };
-  });
+  runExecutorConformance(
+    async ({ harnessId, scripted, throws }) => {
+      const completion = completionFor(scripted);
+      const chunks = streamingChunksFor(scripted);
+      // Stub clamps to the last entry — supplying both shapes lets the
+      // suite exercise execute() (non-streaming) and executeStream()
+      // (streaming) interchangeably across tests.
+      const stub = new StubOpenAIClient([
+        { kind: "non-streaming", completion },
+        { kind: "streaming", chunks },
+      ]);
+      const journal = new MemoryJournal();
+      const bus = new LocalEventBus();
+      const inbox = new LocalInbox();
+      const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+        adapter: openai("gpt-4o-mini", {
+          client: throws !== undefined ? throwingClient(throws) : asClient(stub),
+        }),
+      });
+      await exec.ready;
+      return { executor: exec, bus };
+    },
+    {
+      ProviderRejected: [
+        new APIError(
+          429,
+          { error: { message: "Rate limit reached", type: "requests" } },
+          undefined,
+          undefined,
+        ),
+        new APIError(
+          400,
+          { error: { message: "Invalid schema", type: "invalid_request_error" } },
+          undefined,
+          undefined,
+        ),
+      ],
+      ProviderAborted: [new APIUserAbortError()],
+      StreamFailed: [new APIConnectionError({ message: "Connection error." })],
+      // OpenAI publishes no error class or finish reason that positively names
+      // malformed model output; its one occurrence, an unparseable
+      // `tool_calls[].function.arguments` run, is caught generically at stream
+      // finalize.
+      MalformedModelOutput: "not-applicable",
+      // `APIConnectionTimeoutError` exists, but nothing classifies it yet —
+      // TODO(provider-timeout): teach `defaultMapProviderError` to name it.
+      ProviderTimeout: "not-applicable",
+    },
+  );
 });

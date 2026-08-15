@@ -95,6 +95,7 @@ import type {
   StateApplyError,
   SubstrateError,
   TickEndForwardDecision,
+  TickFailurePolicy,
   TickResult,
   TimelineEntry,
   TokenKind,
@@ -116,6 +117,7 @@ import {
   foldUsageRollup,
   HandlerError,
   isChannelSnapshotProvider,
+  isExecuteError,
   isSnapshotCapable,
   NoModelForExecutionError,
   SteerCannotCarryStructuredOutput,
@@ -142,6 +144,7 @@ import type { TimelineDefinition, TimelineHandle } from "@agentick/timeline";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
 import { wireLifecycleProjection, type LifecycleProjection } from "./lifecycle-projection.js";
+import { resolveTickFailurePolicy, type TickFailurePredicate } from "./tick-failure-policy.js";
 import {
   SessionModelFacade,
   type ModelSelectionHandle,
@@ -367,6 +370,21 @@ export interface SessionHarnessOptions<P = unknown> {
   readonly target?: ExecutionTarget;
   /** Default per-execution max tick bound. Default: 8. */
   readonly defaultMaxTicks?: number;
+  /**
+   * Hard cap on CONSECUTIVE failed ticks (ADR 99 slice 2), sibling of
+   * {@link defaultMaxTicks} and threaded onto every execution. Bounds
+   * {@link tickFailurePolicy} — raise it before raising a retry budget past
+   * it, or the cap silently truncates the budget. Default: 3 (the loop's).
+   */
+  readonly maxConsecutiveFailedTicks?: number;
+  /**
+   * Which failed ticks are re-issued (ADR 99 slice 3). Absent, the bundled
+   * policy retries a `MalformedModelOutput` once and stops on everything else.
+   * Supplying either form — a per-class retry budget or the live predicate —
+   * REPLACES that default; both stay bounded by
+   * {@link maxConsecutiveFailedTicks} and {@link defaultMaxTicks}.
+   */
+  readonly tickFailurePolicy?: TickFailurePolicy;
   /**
    * Session-level streaming default. Overridden by `SendInput.stream`
    * per-call. Falls through to the executor-capability default when
@@ -748,6 +766,10 @@ export class SessionHarness<P = unknown>
    */
   private escalationInterceptor: EscalationInterceptor | undefined;
   private readonly defaultMaxTicks: number;
+  /** See {@link SessionHarnessOptions.maxConsecutiveFailedTicks}. */
+  private readonly maxConsecutiveFailedTicks: number | undefined;
+  /** The resolved tick-failure predicate (ADR 99 slice 3) — bundled or supplied. */
+  private readonly tickFailurePolicy: TickFailurePredicate;
   private readonly defaultStreaming: boolean | undefined;
   /** Model-call narration switch (default `true`). See SessionHarnessOptions.narrate. */
   private readonly narrate: boolean;
@@ -1096,6 +1118,8 @@ export class SessionHarness<P = unknown>
     this.telemetryMiddleware = options.telemetryMiddleware ?? [];
     this.telemetryEnabled = this.telemetryMiddleware.length > 0;
     this.defaultMaxTicks = options.defaultMaxTicks ?? 8;
+    this.maxConsecutiveFailedTicks = options.maxConsecutiveFailedTicks;
+    this.tickFailurePolicy = resolveTickFailurePolicy(options.tickFailurePolicy);
     this.requiredScopes = options.requiredScopes;
     this.models = options.models;
     this.costResolver = options.costResolver;
@@ -1947,6 +1971,14 @@ export class SessionHarness<P = unknown>
       if (loopReq.continue !== undefined || steering) {
         return { kind: "continue" };
       }
+      // (d) Tick-failure policy (ADR 99 slice 3). Last, because it is the
+      // weakest claim in the fold: a tree `stop` and a gate hold are both
+      // deliberate, while this only answers "was that failure worth
+      // re-issuing?". A failed tick's abstain means STOP at the loop, so
+      // returning `continue` here IS the retry.
+      if (result !== undefined && this.wantsTickRetry(result)) {
+        return { kind: "continue" };
+      }
       return undefined;
     });
   }
@@ -1954,6 +1986,26 @@ export class SessionHarness<P = unknown>
   /** Promise facade over {@link notifyLifecycleFx}, for a caller not in a fiber. */
   notifyLifecycle(input: NotifyTickEndInput): Promise<TickEndForwardDecision> {
     return runHarnessProtocol(this.notifyLifecycleFx(input));
+  }
+
+  /**
+   * Whether this tick's failure is worth re-issuing (ADR 99 slice 3). Only a
+   * `failed` terminal is eligible — the loop never folds `canceled` / `vetoed`.
+   *
+   * A failure OUTSIDE the `ExecuteError` family (projection, normalization, an
+   * unclassified throw) never retries: the policy's vocabulary is the adapter
+   * taxonomy, and those describe a deterministic local failure that re-issuing
+   * would reproduce exactly.
+   */
+  private wantsTickRetry(result: TickResult): boolean {
+    const terminal = result.executorTerminal;
+    if (terminal.outcome !== "failed" || !isExecuteError(terminal.error)) return false;
+    return (
+      this.tickFailurePolicy(terminal.error, {
+        tickIndex: result.tickIndex,
+        consecutiveFailures: result.consecutiveFailures,
+      }) === "retry"
+    );
   }
 
   /**
@@ -3090,6 +3142,9 @@ export class SessionHarness<P = unknown>
                 // targetForCall) covers the undeclared case.
                 resolveModel: (ref) => this.bridges.models.resolve(ref),
                 maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+                // ADR 99 slice 2 — the hard backstop under `tickFailurePolicy`.
+                // Absent, the loop's own default (3) applies.
+                ...omitUndefined({ maxConsecutiveFailedTicks: this.maxConsecutiveFailedTicks }),
                 // Pass B — the model-narration switch gates `_summary` schema
                 // injection at the projection site. Session default (from the
                 // app-level cascade); the projector defaults ON if unset.
@@ -3365,7 +3420,12 @@ export class SessionHarness<P = unknown>
           emit({ ...loopEvent.delta, tick: loopEvent.tick } as never);
           return;
         case "tick-start":
-          emit({ type: "tick-start", tick: loopEvent.tick, tickIndex: loopEvent.tickIndex });
+          emit({
+            type: "tick-start",
+            tick: loopEvent.tick,
+            tickIndex: loopEvent.tickIndex,
+            ...omitUndefined({ retryOfTick: loopEvent.retryOfTick }),
+          });
           return;
         case "tick-end":
           emit({

@@ -105,6 +105,14 @@ Resolution is two-tier: **stop-force beats continue-force beats abstain**, all u
 
 `notifyTickEnd` runs **after** the tick command's terminal, so every hook registered on `onAfterLoopTick` has already settled. Settle is in the cascade; decide is outside it.
 
+### Failed ticks reach the gate too
+
+A tick whose executor terminal is `failed` goes through the same seam, with `outcome: "failed"` and the failed `TickResult`. The default flips for that outcome: **abstain means stop**, so with no participant the run ends with `stopReason: "executor_failed"` exactly as it always did, and a `continue` is a retry.
+
+Retry is safe by construction: a failed tick persists nothing (the state applicator runs only on the success path), so the next iteration renders the same tree over the same timeline and issues an identical model request — as a new tick with a fresh `tickId`, carrying `retryOfTick` on its `tick-start` event. `canceled` and `vetoed` terminals never reach the gate: an abort is not a failure to recover from, and a veto already decided.
+
+`maxConsecutiveFailedTicks` (default 3) is the backstop. It counts consecutive failed terminals, resets on success, and reports the last failure as `stopCause` when it stops the run. `TickResult.consecutiveFailures` carries the same count to every participant, so a policy bounds itself without private state. Which failures are worth re-issuing is policy, and lives above this: see `tickFailurePolicy` in [@agentick/session](../session).
+
 ## Hook and guard a tick
 
 The `loop:tick` and `loop:run-execution` commands mint their lifecycle surface. Registering on it is how the session projects React's `useOnTickStart` / `useOnTickEnd` — and it is available to you directly:

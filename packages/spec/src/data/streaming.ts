@@ -380,6 +380,12 @@ export type SpawnEndEvent = {
 export type TickStartEvent = {
   readonly type: "tick-start";
   readonly tickIndex: number;
+  /**
+   * The index of the failed tick this one re-issues (ADR 99 slice 2). A failed
+   * tick persists nothing, so the retry is an identical model request — a UI
+   * collapses the failed attempt off this instead of rendering dead air.
+   */
+  readonly retryOfTick?: number;
 } & StreamEventBase;
 
 export type TickEndEvent = {

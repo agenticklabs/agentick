@@ -100,15 +100,53 @@ function modelFor(scripted: LanguageModelExecutionResult | undefined): MockLangu
   });
 }
 
-describe("aisdk() adapter — ExecutorProtocol conformance", () => {
-  runExecutorConformance(async ({ harnessId, scripted }) => {
-    const journal = new MemoryJournal();
-    const bus = new LocalEventBus();
-    const inbox = new LocalInbox();
-    const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
-      adapter: aisdk(modelFor(scripted)),
-    });
-    await exec.ready;
-    return { executor: exec, bus };
+/** A model whose every call rejects with the supplied provider-native error. */
+function throwingModel(cause: unknown): MockLanguageModelV2 {
+  const raise = async (): Promise<never> => {
+    throw cause;
+  };
+  return new MockLanguageModelV2({
+    provider: "mock-aisdk",
+    modelId: "mock-1",
+    doGenerate: raise,
+    doStream: raise,
   });
+}
+
+/** The SDK's own shape: an `Error` whose `name` carries the class. */
+function invalidToolInput(name: string): Error {
+  const err = new Error("Invalid arguments for tool knowify__query: Unexpected end of JSON input");
+  err.name = name;
+  Object.assign(err, { toolName: "knowify__query", toolInput: '{"table":"Alloc' });
+  return err;
+}
+
+describe("aisdk() adapter — ExecutorProtocol conformance", () => {
+  runExecutorConformance(
+    async ({ harnessId, scripted, throws }) => {
+      const journal = new MemoryJournal();
+      const bus = new LocalEventBus();
+      const inbox = new LocalInbox();
+      const exec = new LanguageModelExecutor(harnessId, journal, bus, inbox, {
+        adapter: aisdk(throws !== undefined ? throwingModel(throws) : modelFor(scripted)),
+      });
+      await exec.ready;
+      return { executor: exec, bus };
+    },
+    {
+      // Both spellings — the SDK renamed the class between 4 and 5, the shape
+      // is unchanged, and a deployment can be on either.
+      MalformedModelOutput: [
+        invalidToolInput("AI_InvalidToolInputError"),
+        invalidToolInput("AI_InvalidToolArgumentsError"),
+      ],
+      ProviderRejected: [Object.assign(new Error("rate limited"), { status: 429 })],
+      ProviderAborted: [
+        Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+      ],
+      StreamFailed: [new Error("socket hang up")],
+      // The SDK surfaces a timeout as an aborted request, not a class of its own.
+      ProviderTimeout: "not-applicable",
+    },
+  );
 });

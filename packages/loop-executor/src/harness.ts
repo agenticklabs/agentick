@@ -204,6 +204,9 @@ function zeroUsage(): UsageStats {
   return { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 }
 
+/** See {@link RunExecutionInput.maxConsecutiveFailedTicks}. */
+const DEFAULT_MAX_CONSECUTIVE_FAILED_TICKS = 3;
+
 // ============================================================================
 // LoopExecutorHarness
 // ============================================================================
@@ -456,6 +459,12 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         toolResults: [],
       };
 
+      // ADR 99 slice 2 — consecutive failed terminals, reset by any success.
+      // Bounds the retry loop no matter what the decide fold asks for.
+      let consecutiveFailures = 0;
+      const maxConsecutiveFailedTicks =
+        input.maxConsecutiveFailedTicks ?? DEFAULT_MAX_CONSECUTIVE_FAILED_TICKS;
+
       let stopReason:
         | LanguageModelStopReason
         | "max_ticks"
@@ -521,6 +530,9 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
+          // Non-zero ⇒ the previous tick failed and was force-continued, so
+          // this tick is its retry (ADR 99 slice 2).
+          ...(consecutiveFailures > 0 ? { consecutiveFailures } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -555,29 +567,18 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           tickInput,
         );
 
-        // A model-executor failure returned a failed terminal WITHOUT settling
-        // (the pre-command inline `break` before the tick-end bridge). Map the
-        // outcome to the stop reason and break — the exact mapping the inline
-        // code used (streaming `failed` and the general non-success terminal
-        // both land `executor_failed`).
+        // A canceled or vetoed terminal ends the run without reaching the
+        // DECIDE (ADR 99 slice 2): an abort is not a failure to recover from,
+        // and a veto is a policy decision that already happened.
+        //
+        // `vetoed` carries a guard's plain reason: a policy decision that
+        // worked, not a break, which is why it does NOT become an error (see
+        // `StopCause`). `canceled` needs neither; the stop reason already says
+        // everything true about it.
         const executorTerminal = tickResult.executorTerminal;
-        if (executorTerminal.outcome !== "succeeded") {
-          stopReason =
-            executorTerminal.outcome === "canceled"
-              ? "aborted"
-              : executorTerminal.outcome === "vetoed"
-                ? "vetoed"
-                : "executor_failed";
-          // Carry the CAUSE, not just the outcome — and keep the two bad endings
-          // apart. `failed` holds a typed error (`ProviderRejected`,
-          // `ProviderTimeout`, `StreamFailed`, …) — how a missing key or a refused
-          // model arrives. `vetoed` holds a guard's plain reason: a policy decision
-          // that worked, not a break, which is why it does NOT become an error
-          // (see `StopCause`). `canceled` needs neither; the stop reason already
-          // says everything true about it.
-          if (executorTerminal.outcome === "failed") {
-            stopCause = { kind: "failed", error: executorTerminal.error.toJSON() };
-          } else if (executorTerminal.outcome === "vetoed") {
+        if (executorTerminal.outcome === "canceled" || executorTerminal.outcome === "vetoed") {
+          stopReason = executorTerminal.outcome === "canceled" ? "aborted" : "vetoed";
+          if (executorTerminal.outcome === "vetoed") {
             stopCause = {
               kind: "vetoed",
               ...omitUndefined({ reason: executorTerminal.reason }),
@@ -585,6 +586,42 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           }
           break;
         }
+
+        // A FAILED terminal reaches the DECIDE (ADR 99 slice 2). Nothing was
+        // persisted — `applyExecutorResult` / `applyToolResults` run only on the
+        // success path — so the timeline is exactly as the tick found it and a
+        // `continue` here re-renders the same tree into an identical model
+        // request, as a NEW tick with a fresh `tickId`.
+        //
+        // The fold's default is INVERTED for this outcome: abstain resolves to
+        // stop, so absent any policy the run ends with today's `executor_failed`
+        // + `stopCause`, byte-identical. Retry happens only when a participant
+        // force-continues, and only while both hard caps have room — a cap stop
+        // reports the LAST failure.
+        if (executorTerminal.outcome === "failed") {
+          consecutiveFailures += 1;
+          const failForward = input.notifyTickEnd
+            ? yield* withContext(
+                { tickId },
+                input.notifyTickEnd({
+                  sessionId: input.sessionId,
+                  executionId,
+                  tickId,
+                  outcome: "failed",
+                  result: tickResult,
+                }),
+              )
+            : undefined;
+          const retry =
+            failForward?.kind === "continue" &&
+            consecutiveFailures < maxConsecutiveFailedTicks &&
+            acc.ticks < input.maxTicks;
+          if (retry) continue;
+          stopReason = "executor_failed";
+          stopCause = { kind: "failed", error: executorTerminal.error.toJSON() };
+          break;
+        }
+        consecutiveFailures = 0;
 
         // Accumulate this tick's contribution from the settled `TickResult`
         // (the tick command body no longer mutates the run's accumulator).
@@ -988,7 +1025,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
     return Effect.gen(function* () {
       // Tick-start orchestration event (public stream). The
       // `useOnTickStart` projection rides `onBeforeLoopTick` (ADR 89 §4).
-      yield* input.emit({ kind: "tick-start", tick: tickIndex, tickIndex });
+      // A non-zero preceding-failure count means this tick re-issues the last
+      // one (ADR 99 slice 2) — the counter only survives a force-continue.
+      const precedingFailures = input.consecutiveFailures ?? 0;
+      yield* input.emit({
+        kind: "tick-start",
+        tick: tickIndex,
+        tickIndex,
+        ...(precedingFailures > 0 ? { retryOfTick: tickIndex - 1 } : {}),
+      });
 
       // Resolve THIS render's RenderContext envelope (ADR 55) — the
       // session's per-render fact producer (window today via
@@ -1446,9 +1491,6 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           // The paired `tool_result` IS the model's feedback loop (ADR 99 slice
           // 4b) — persisted with `is_error` and an EMPTY body, it told the model
           // only that something went wrong, and it could not self-correct.
-          // TODO(tool-error-detail): `ToolValidationError.message` names the tool
-          // but not its `issues`, so the model still cannot see WHICH argument was
-          // wrong. The fix belongs in the error's own message composition (spec).
           const content: readonly ContentBlock[] = [{ type: "text", text: reasonOf(err) }];
           yield* input.emit({
             kind: "tool-dispatch-end",
@@ -1578,6 +1620,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         executorTerminal,
         toolResults: tickToolResults,
         shouldContinue: provisionalContinue,
+        consecutiveFailures: 0,
         stopReason: result.stopReason,
         // usage-cost.md §5 — the stamp, surfaced for the run-execution
         // continuation to fold (§7) and emit on the tick events. Absent
@@ -1682,11 +1725,9 @@ function streamTerminal(cause: unknown): ExecutorTerminal<LanguageModelExecution
 /**
  * Build a `TickResult` for a tick whose model executor did NOT succeed
  * (failed / canceled / vetoed). `toolResults` is empty and
- * `shouldContinue` false; the session's tick-end forwarder skips the
- * settle for non-succeeded terminals (ADR 89 §4). The run-execution
- * continuation reads `executorTerminal.outcome`, maps it to the stop
- * reason, and breaks — byte-identical to the pre-command inline `break`
- * on a non-success terminal.
+ * `shouldContinue` false. A `failed` terminal reaches the run-execution
+ * DECIDE carrying `consecutiveFailures` (ADR 99 slice 2) so a policy can
+ * re-issue the tick; `canceled` / `vetoed` break out before the fold.
  */
 function failedTickResult(
   input: TickInput,
@@ -1700,5 +1741,7 @@ function failedTickResult(
     executorTerminal,
     toolResults: [],
     shouldContinue: false,
+    consecutiveFailures:
+      executorTerminal.outcome === "failed" ? (input.consecutiveFailures ?? 0) + 1 : 0,
   };
 }

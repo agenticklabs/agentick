@@ -58,6 +58,7 @@ export {
   runExecutorConformance,
   type ExecutorConformanceFactory,
   type ExecutorConformanceFactoryInput,
+  type ExecutorErrorFixtures,
 } from "./executor.js";
 
 // NOTE: `runMediaDeclarationCheck` lives in `@agentick/model/testing`, not here. It

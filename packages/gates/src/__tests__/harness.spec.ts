@@ -36,6 +36,7 @@ function tickResult(
       result: { kind: "language-model-result", ticks: [], usage: { totalTokens: 0 } },
     } as unknown as TickResult["executorTerminal"],
     toolResults: [],
+    consecutiveFailures: 0,
     ...overrides,
   };
 }

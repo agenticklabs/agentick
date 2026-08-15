@@ -922,6 +922,28 @@ describe("LoopExecutorHarness — failure classification", () => {
     const dispatched = trace.events.find((e) => e.kind === "tool-dispatch");
     expect(dispatched?.content).toEqual(expected);
   });
+
+  it("the persisted text NAMES the bad argument — the model cannot fix what it cannot see", async () => {
+    // Wave 1 rendered the error's message and stopped there; the message was a
+    // bare classification, so the model was told the call was invalid and not
+    // which argument. The issues now fold into the message at composition.
+    const trace = await runChar({
+      ticks: [toolUse("c1"), ended()],
+      maxTicks: 5,
+      dispatch: async () => {
+        throw new ToolValidationError({
+          toolName: "t",
+          issues: [
+            { path: ["amount"], message: "expected number, received string" },
+            { path: ["items", 0, { key: "id" }], message: "required" },
+          ],
+        });
+      },
+    });
+    const text = (trace.terminal.result!.toolResults[0]!.content[0] as { text: string }).text;
+    expect(text).toContain("amount: expected number, received string");
+    expect(text).toContain("items.0.id: required");
+  });
 });
 
 // ============================================================================

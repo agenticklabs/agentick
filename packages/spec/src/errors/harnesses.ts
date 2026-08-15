@@ -608,6 +608,31 @@ interface StandardSchemaIssueLike {
   readonly message: string;
 }
 
+/** How many issues a validation message names before it summarizes the rest. */
+const VALIDATION_ISSUES_IN_MESSAGE = 3;
+
+/**
+ * The issues as a sentence — `amount: expected number; items.0.id: required`.
+ *
+ * Same discipline as {@link causeMessage}: `message` is what every consumer
+ * reads, and here one of those consumers is the MODEL (the loop renders this
+ * text into the failed `tool_result` it persists, ADR 99 slice 4b), which
+ * cannot correct an argument the message never names. Bounded, because a
+ * hundred-issue schema failure would otherwise become the turn's largest
+ * message.
+ */
+function describeIssues(issues: readonly StandardSchemaIssueLike[]): string | undefined {
+  if (issues.length === 0) return undefined;
+  const named = issues.slice(0, VALIDATION_ISSUES_IN_MESSAGE).map((issue) => {
+    const path = (issue.path ?? [])
+      .map((seg) => (typeof seg === "object" ? String(seg.key) : String(seg)))
+      .join(".");
+    return path === "" ? issue.message : `${path}: ${issue.message}`;
+  });
+  const rest = issues.length - named.length;
+  return rest > 0 ? `${named.join("; ")} (+${rest} more)` : named.join("; ");
+}
+
 export class ToolValidationError extends ToolExecutorError {
   readonly _tag = "ToolValidationError" as const;
   readonly toolName: string;
@@ -617,7 +642,10 @@ export class ToolValidationError extends ToolExecutorError {
     readonly issues: readonly StandardSchemaIssueLike[];
     readonly cause?: unknown;
   }) {
-    super(`tool ${args.toolName} validation failed`, { cause: args.cause });
+    const detail = describeIssues(args.issues);
+    super(`tool ${args.toolName} validation failed${detail !== undefined ? `: ${detail}` : ""}`, {
+      cause: args.cause,
+    });
     this.toolName = args.toolName;
     this.issues = args.issues;
   }
