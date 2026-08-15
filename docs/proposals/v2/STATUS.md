@@ -2206,6 +2206,58 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-15 — no installer telemetry verb; nudges are structural (deferred facet)
+
+Follow-on to the ADR 78 inversion. Proposal considered: an
+`installer.installTelemetry(...)` verb to nudge plugins toward registering
+their telemetry. **Rejected** — it re-centralizes span identity the inversion
+just moved into class-level `spanAttributes` overrides (install-time state for
+a class-level fact), and an optional verb is omitted exactly as silently as an
+un-overridden method, so it nudges nobody. The forgettable-and-catastrophic
+step is INTERCEPTOR THREADING (ADR 93 landmine 11 — an extension harness that
+doesn't spread `inheritedFrom(installer)` runs outside the whole app cascade,
+telemetry middleware included). Nudges land structurally instead:
+
+1. **`registerNamespace` tripwire** — detect a registered harness that didn't
+   inherit the installer's cascade (dev warning → hard error once definitions
+   advertise `hooks:`/`guards:` bags).
+2. **Conformance telemetry rung** — shared rung in every `runXHarnessConformance`
+   asserting ops carry `<ns>.*` identity attrs and flow through a parent cascade.
+3. **DEFERRED: `installer.telemetry` read-side facet** — a tracer/meter/logger
+   pre-scoped to the extension's namespace, for plugin code that is NOT a
+   harness (connector polling loops, store adapters, sandbox providers) and
+   today would reach for `@opentelemetry/api` globals. Nudges by existing; not
+   a registration path. Waits for the first real non-harness consumer
+   (React-style absorption — userland first).
+
+Related trailhead already in code: `resultAttributes(op, result)` (symmetric
+result-derived sibling of `spanAttributes`) — class-level, not installer-level.
+
+### 2026-08-15 — failed ticks flow through the decide fold (ADR 99)
+
+`blueprint/99-tick-failure-recovery.md`. Production incident: a malformed model
+tool call killed the run (`executor_failed`, dead air, human "try again"). The
+finding: **no new hook.** A failed executor terminal currently breaks out of the
+loop BEFORE `notifyTickEnd`, so the failure is invisible to every continuation
+authority that already exists — and `NotifyTickEndInput.outcome` anticipated
+non-success ticks all along. Route the failed terminal through the decide fold;
+because a failed tick persists nothing, **force-continue IS retry by
+construction** (fresh tick, identical request, clean events). Abstain flips to
+stop on failure (fail-safe), `maxConsecutiveFailedTicks` backstops, and the
+bundled policy retries `MalformedModelOutput` once — a new `ExecuteError`
+classified by adapters in their existing `mapProviderError`. Config is ONE
+dual-form option (`tickFailurePolicy`, ADR 42 dichotomy): a retry-budget table
+keyed by `ExecuteError["_tag"]` or the full predicate — the taxonomy IS the
+config namespace, no `max<Mode>Retries` breeding. Rejected: a
+transform-retry on `loop:tick` (re-enters the same tickId, hides the attempt,
+competes with decide) and any `onTickFailure` lifecycle name (a third
+authority). Two independent tool-path bugs ride along: the accumulator's silent
+`{}` coercion of unparseable tool args (silently-wrong execution under
+`permissiveValidator`), and failed dispatches persisting `content: []` so the
+model gets an error with no body. The split: retry when there is nothing
+coherent to show the model; feedback when there is. Status: ADR drafted, no
+implementation yet.
+
 ### 2026-08-12 — scoped capability leasing, named (ADR 98)
 
 `blueprint/98-scoped-capability-leasing.md`. Two shipped seams — the code
