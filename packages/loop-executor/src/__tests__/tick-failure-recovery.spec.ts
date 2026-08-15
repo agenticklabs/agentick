@@ -125,6 +125,8 @@ interface RecoveryConfig {
   readonly decide?: (input: NotifyTickEndInput) => TickEndForwardDecision;
   /** Omit the decide callback entirely — the no-policy baseline. */
   readonly noNotify?: boolean;
+  /** Default `true` — the path production takes. `false` drives `executor.run`. */
+  readonly stream?: boolean;
 }
 
 interface RecoveryTrace {
@@ -163,7 +165,7 @@ async function runRecovery(cfg: RecoveryConfig): Promise<RecoveryTrace> {
     stateApplicator: noopApplicator,
     executionId: "tf-exec",
     maxTicks: cfg.maxTicks ?? 5,
-    stream: true,
+    stream: cfg.stream ?? true,
     ...omitUndefined({ maxConsecutiveFailedTicks: cfg.maxConsecutiveFailedTicks }),
     ...(cfg.noNotify === true
       ? {}
@@ -260,6 +262,27 @@ describe("ADR 99 — a failed terminal reaches the decide fold", () => {
     });
     expect(events.filter((e) => e.kind === "tick-end").map((e) => e.tickIndex)).toEqual([2]);
     expect(events.filter((e) => e.kind === "tick").map((e) => e.tickIndex)).toEqual([2]);
+  });
+
+  it("the NON-STREAMING path recovers identically — the terminal is the seam", async () => {
+    // `stream: false` composes the tick through `executor.run`, which used to
+    // reject on a provider failure and so never reached this fold. That the loop
+    // needs no arm of its own is the point: it consumes one terminal vocabulary.
+    // The executor's own half of that fix is certified in
+    // `model-executor/__tests__/run-failure-terminal.spec.ts`.
+    const { terminal, notified, executor } = await runRecovery({
+      scripted: [fails(new MalformedModelOutput({})), { result: ended() }],
+      decide: retryFailed,
+      stream: false,
+    });
+    expect(notified.map((n) => n.outcome)).toEqual(["failed", "succeeded"]);
+    expect(notified[0]!.result!.executorTerminal).toMatchObject({
+      outcome: "failed",
+      error: { _tag: "MalformedModelOutput" },
+    });
+    expect(terminal.result!.ticks).toBe(2);
+    expect(terminal.result!.stopReason).toBe("end");
+    expect(executor.seenRuns).toHaveLength(2);
   });
 
   it("canceled and vetoed terminals never enter the fold", async () => {

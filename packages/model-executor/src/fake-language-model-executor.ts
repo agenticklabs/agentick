@@ -83,6 +83,7 @@ import {
 } from "@agentick/model";
 import {
   ExecutorLifecycle,
+  executeErrorToTerminal,
   isFoldedTerminal,
   operationOutcomeToTerminal,
   type ProviderRequestCall,
@@ -660,24 +661,13 @@ export class FakeLanguageModelExecutor
         unknown,
         ExecuteErrorChannel
       >("model:generate", executeInput).pipe(
-        // A mid-flight provider abort folds to a canceled terminal.
-        Effect.catchTag("ProviderAborted", (e) =>
-          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-            outcome: "canceled",
-            reason: e.reason ?? "aborted",
-          }),
-        ),
-        // Scripted `outcome: "failed"` surfaces from `generateBody` as an
-        // `ExecuteError` — the fake maps it to a FAILED terminal (drives the
-        // loop's failure path) rather than rejecting `run()`, carrying the
-        // scripted class so the caller sees the same `_tag` a real adapter emits.
+        // A scripted `outcome: "failed"` / `"canceled"` surfaces from
+        // `generateBody` as an `ExecuteError`; the shared fold turns it into the
+        // terminal the real executor produces for the same class, so a script
+        // means the same thing against either.
         Effect.catchIf(
           (e): e is ExecuteErrorChannel => isExecuteError(e),
-          (e) =>
-            Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-              outcome: "failed",
-              error: e,
-            }),
+          (e) => Effect.succeed(executeErrorToTerminal(e)),
         ),
         // A `guardGenerate` veto at the command boundary folds to the
         // matching executor terminal; deferred / failed-replay re-raise.

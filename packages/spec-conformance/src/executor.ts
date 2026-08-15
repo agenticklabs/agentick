@@ -50,8 +50,10 @@ export interface ExecutorConformanceFactoryInput {
   readonly scripted?: LanguageModelExecutionResult;
   /**
    * When present, the factory MUST build the executor over a client whose
-   * provider call throws this value — whichever of the streaming and
-   * non-streaming calls the adapter makes.
+   * provider call throws this value — BOTH seams, since the classification
+   * lane drives `execute()` and `executeStream()` over the same fixture.
+   * A stub that raises only from the non-streaming call would leave the
+   * streaming half asserting against a stream that succeeds.
    */
   readonly throws?: unknown;
 }
@@ -797,6 +799,40 @@ export function runExecutorConformance(
           });
           await expect(
             executor.execute({ targetInput: projected, target: mkTarget() }),
+          ).rejects.toMatchObject({ _tag: tag });
+        });
+
+        // The streaming twin. Streaming is the path production takes, and an
+        // adapter can classify differently on it (a separate SDK surface, a
+        // different error shape at stream open) — the tag must be the same one.
+        it(`${tag}: classifies provider fixture #${index} on the streaming path`, async (ctx) => {
+          const { executor } = await factory({
+            harnessId: `ex-err-stream-${tag}-${index}`,
+            throws: fixture,
+          });
+          if (
+            typeof executor.executeStream !== "function" ||
+            executor.target.capabilities?.supportsStreaming === false
+          ) {
+            // Reported as skipped rather than passed: this executor has no
+            // streaming seam to raise from, which is a fact worth seeing.
+            ctx.skip();
+            return;
+          }
+          const projected = await executor.project({
+            compiled: mkRenderedTree(),
+            target: mkTarget(),
+            tools: [],
+          });
+          const stream = executor.executeStream({
+            targetInput: projected,
+            target: mkTarget(),
+          });
+          await expect(
+            (async () => {
+              for await (const _ of stream) void _;
+              await stream.result;
+            })(),
           ).rejects.toMatchObject({ _tag: tag });
         });
       });

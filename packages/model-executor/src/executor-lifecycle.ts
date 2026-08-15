@@ -24,6 +24,7 @@ import type { Effect, Fiber } from "effect";
 
 import type {
   AdapterDelta,
+  ExecuteErrorChannel,
   ExecuteInput,
   ExecutorTerminal,
   LanguageModelExecutionResult,
@@ -201,6 +202,28 @@ export function isFoldedTerminal(
   if (typeof value !== "object" || value === null || !("outcome" in value)) return false;
   const outcome = (value as { outcome?: unknown }).outcome;
   return outcome === "canceled" || outcome === "vetoed" || outcome === "failed";
+}
+
+/**
+ * Fold a classified provider failure into the terminal vocabulary `run`
+ * returns — the non-streaming twin of the loop's `streamTerminal`.
+ *
+ * An abort is a cancellation, not a failure to recover from; every other member
+ * of the family is a `failed` terminal carrying its own class, which is what the
+ * decide fold reads to decide whether re-issuing the tick is worth it (ADR 99).
+ * Failures OUTSIDE the family — a projection or normalization defect — never
+ * reach here and stay rejections: they reproduce exactly, so a retry is futile.
+ */
+export function executeErrorToTerminal(
+  error: ExecuteErrorChannel,
+): ExecutorTerminal<LanguageModelExecutionResult> {
+  if (error._tag === "ProviderAborted") {
+    return {
+      outcome: "canceled",
+      ...(error.reason !== undefined ? { reason: error.reason } : {}),
+    };
+  }
+  return { outcome: "failed", error };
 }
 
 /**

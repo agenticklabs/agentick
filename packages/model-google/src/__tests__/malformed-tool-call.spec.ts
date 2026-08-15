@@ -126,11 +126,15 @@ describe("MALFORMED_FUNCTION_CALL — through the executor", () => {
     ).rejects.toMatchObject({ _tag: "MalformedModelOutput", message: FINISH_MESSAGE });
   });
 
-  it("non-streaming: run() rejects with MalformedModelOutput, not NormalizationFailed", async () => {
+  it("non-streaming: run() fails the terminal with MalformedModelOutput, not NormalizationFailed", async () => {
+    // A terminal, not a rejection: `run` is the `stream: false` path into the
+    // loop, and only a terminal reaches the decide fold that can retry it.
     const stub = new StubGoogleClient([{ kind: "non-streaming", response: malformedResponse() }]);
     const { exec } = await makeExecutor(stub);
-    await expect(
-      exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] }),
-    ).rejects.toMatchObject({ _tag: "MalformedModelOutput", message: FINISH_MESSAGE });
+    const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
+    expect(terminal).toMatchObject({
+      outcome: "failed",
+      error: { _tag: "MalformedModelOutput", message: FINISH_MESSAGE },
+    });
   });
 });

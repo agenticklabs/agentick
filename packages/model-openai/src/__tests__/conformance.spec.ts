@@ -17,7 +17,7 @@ import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/
 
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
-import { APIConnectionError, APIError, APIUserAbortError } from "openai";
+import { APIConnectionError, APIConnectionTimeoutError, APIError, APIUserAbortError } from "openai";
 
 import { openai } from "../openai-adapter.js";
 import { StubOpenAIClient, asClient, throwingClient } from "./stub-openai-client.js";
@@ -176,9 +176,7 @@ describe("openai() adapter — ExecutorProtocol conformance", () => {
       // `tool_calls[].function.arguments` run, is caught generically at stream
       // finalize.
       MalformedModelOutput: "not-applicable",
-      // `APIConnectionTimeoutError` exists, but nothing classifies it yet —
-      // TODO(provider-timeout): teach `defaultMapProviderError` to name it.
-      ProviderTimeout: "not-applicable",
+      ProviderTimeout: [new APIConnectionTimeoutError({})],
     },
   );
 });

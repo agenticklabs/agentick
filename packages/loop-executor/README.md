@@ -111,6 +111,8 @@ A tick whose executor terminal is `failed` goes through the same seam, with `out
 
 Retry is safe by construction: a failed tick persists nothing (the state applicator runs only on the success path), so the next iteration renders the same tree over the same timeline and issues an identical model request — as a new tick with a fresh `tickId`, carrying `retryOfTick` on its `tick-start` event. `canceled` and `vetoed` terminals never reach the gate: an abort is not a failure to recover from, and a veto already decided.
 
+Streaming and `stream: false` behave identically here, and the loop needs no arm of its own for the difference: the streaming path folds the model call's error channel into a terminal, `executor.run` returns one directly, and the gate sees the same shape either way.
+
 `maxConsecutiveFailedTicks` (default 3) is the backstop. It counts consecutive failed terminals, resets on success, and reports the last failure as `stopCause` when it stops the run. `TickResult.consecutiveFailures` carries the same count to every participant, so a policy bounds itself without private state. Which failures are worth re-issuing is policy, and lives above this: see `tickFailurePolicy` in [@agentick/session](../session).
 
 ## Hook and guard a tick

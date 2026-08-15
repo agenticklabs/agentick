@@ -158,11 +158,15 @@ describe("LanguageModelExecutor + adapter — ExecutorProtocol conformance", () 
       ],
       ProviderAborted: [new DOMException("This operation was aborted", "AbortError")],
       StreamFailed: [new Error("socket hang up")],
-      // Neither class is reachable from a THROWN provider error under the
-      // default table: malformation is raised at stream finalize
-      // (`malformed-tool-arguments.spec.ts`), and nothing names a timeout.
+      // The socket code and the SDK convention of naming the CLASS rather than
+      // the `name` field — the two shapes the default table's timeout arm reads.
+      ProviderTimeout: [
+        Object.assign(new Error("connect ETIMEDOUT"), { code: "ETIMEDOUT" }),
+        new (class APIConnectionTimeoutError extends Error {})("Request timed out."),
+      ],
+      // Not reachable from a THROWN provider error under the default table:
+      // malformation is raised at stream finalize (`malformed-tool-arguments.spec.ts`).
       MalformedModelOutput: "not-applicable",
-      ProviderTimeout: "not-applicable",
     },
   );
 });

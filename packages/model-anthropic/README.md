@@ -230,14 +230,14 @@ runExecutorConformance(
     ProviderAborted: [new APIUserAbortError()],
     StreamFailed: [new APIConnectionError({ message: "Connection error." })],
     MalformedModelOutput: "not-applicable",
-    ProviderTimeout: "not-applicable",
+    ProviderTimeout: [new APIConnectionTimeoutError({})],
   },
 );
 ```
 
 `stubClientFor` is yours to write: it returns canned SDK payloads shaped so they normalize back to what the suite scripted, which means the round trip through `prepareRequest → send → normalize` is what is actually under test rather than a mock of your own code. Write the dialect tests the same way — assert against the request the stub _received_, and against the canonical result your `normalize` produced.
 
-The second argument is required and total over `ExecuteError["_tag"]`: for each failure class, provider-native errors your classification must resolve to it, or `"not-applicable"` when nothing does. The suite throws each fixture from the client and asserts the tag on the executor's own rejection — so a class added to the taxonomy breaks this file at compile time until you decide.
+The second argument is required and total over `ExecuteError["_tag"]`: for each failure class, provider-native errors your classification must resolve to it, or `"not-applicable"` when nothing does. The suite throws each fixture from the client on BOTH seams — `execute()` and `executeStream()` — and asserts the tag on the executor's own rejection each time — so a class added to the taxonomy breaks this file at compile time until you decide.
 
 ## Patterns
 

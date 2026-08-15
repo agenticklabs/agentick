@@ -40,6 +40,7 @@ import {
 import { generateId } from "@agentick/utils";
 import {
   createSourceInterner,
+  defaultFinalizeStream,
   defaultMapProviderError,
   defineLanguageModelAdapter,
 } from "@agentick/model";
@@ -155,6 +156,8 @@ interface AISDKStreamState {
   reasoningBlockStarted: boolean;
   toolCallNameByCallId: Map<string, string>;
   finishReason: FinishReason | null;
+  /** The first `error` part's provider-native error — raised at finalize. */
+  streamError: unknown;
 }
 
 // AI SDK emits reasoning BEFORE text — reserve a distinct block index so
@@ -171,6 +174,7 @@ function getAISDKState(accum: StreamAccumulatorView): AISDKStreamState {
       reasoningBlockStarted: false,
       toolCallNameByCallId: new Map(),
       finishReason: null,
+      streamError: undefined,
     };
     accum.providerExtra = s;
   }
@@ -399,12 +403,11 @@ export function aisdk(
           break;
         }
         case "error": {
-          // TODO(malformed-output): `streamText` reports an invalid tool input as
-          // an error PART, not a rejection, so it reaches `mapProviderError` only
-          // on the non-streaming path. Failing the stream from here needs the
-          // delta pipeline to carry a failure channel — `mapChunk` is sync, and a
-          // raise inside it is a defect (ADR 99 slice 1).
           const err = part.error;
+          // Recorded, not raised: `mapChunk` is sync, and a raise here would be a
+          // defect. {@link finalizeStream} raises it instead. The delta still
+          // goes out so chunk hooks observe the failure where it happened.
+          state.streamError ??= err ?? new Error("ai-sdk error part carried no error");
           out.push({
             type: "error",
             error: { message: err instanceof Error ? err.message : String(err) },
@@ -465,6 +468,21 @@ export function aisdk(
         },
         toolCalls,
       };
+    },
+
+    /**
+     * The streaming failure channel. `streamText` reports a failed generation —
+     * an invalid tool input above all — as an `error` PART rather than by
+     * rejecting, so nothing else in the delta pipeline can fail the tick. Raising
+     * the recorded error here puts it on the executor's typed error channel,
+     * where {@link mapProviderError} classifies it exactly as it does the
+     * non-streaming rejection. A stream that ALSO throws never reaches finalize,
+     * so the thrown error wins and nothing raises twice.
+     */
+    finalizeStream(accum: StreamAccumulatorView): readonly AdapterDelta[] {
+      const recorded = getAISDKState(accum).streamError;
+      if (recorded !== undefined) throw recorded;
+      return defaultFinalizeStream(accum);
     },
 
     normalize(raw: unknown): LanguageModelExecutionResult {

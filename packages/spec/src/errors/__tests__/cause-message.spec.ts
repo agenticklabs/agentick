@@ -26,6 +26,7 @@ import {
   causeMessage,
   MalformedModelOutput,
   ProviderRejected,
+  ProviderTimeout,
   StreamFailed,
   ToolValidationError,
   UnknownExecutorError,
@@ -106,6 +107,22 @@ describe("MalformedModelOutput — the same fold, minus the model's own words", 
     expect("rawArguments" in json).toBe(false);
     expect(JSON.stringify(err)).not.toContain("078-05-1120");
     expect(json.toolName).toBe("knowify__query");
+  });
+});
+
+describe("ProviderTimeout — classifiable without a deadline to name", () => {
+  it("degrades the message when the shape carries no timeoutMs", () => {
+    // The SDK-thrown timeouts that classify here report that a deadline passed,
+    // never which one. Requiring `timeoutMs` is what kept the class unreachable.
+    expect(new ProviderTimeout({ cause: new Error("Request timed out.") }).message).toBe(
+      "provider timed out",
+    );
+  });
+
+  it("keeps the sharper message for a caller that set the deadline itself", () => {
+    expect(new ProviderTimeout({ timeoutMs: 5000 }).message).toBe(
+      "provider timed out after 5000ms",
+    );
   });
 });
 

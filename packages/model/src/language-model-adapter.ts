@@ -19,7 +19,7 @@
  * @see docs/proposals/v2/blueprint/52-executors-and-model-adapters.md
  */
 
-import { ProviderAborted, ProviderRejected, StreamFailed } from "@agentick/spec";
+import { ProviderAborted, ProviderRejected, ProviderTimeout, StreamFailed } from "@agentick/spec";
 import type {
   AdapterDelta,
   ContentBlock,
@@ -252,9 +252,25 @@ export function defaultIsAbortError(cause: unknown): boolean {
 }
 
 /**
+ * Timeout detection for {@link defaultMapProviderError} — the SDK-thrown shapes
+ * that name a deadline.
+ *
+ * `constructor.name` carries the class because neither the OpenAI nor the
+ * Anthropic SDK assigns `name` on its error classes (`APIConnectionTimeoutError`
+ * reports `name === "Error"`), which is also why `defaultIsAbortError` needs its
+ * message fallback. Node's socket codes cover the transport layer beneath them.
+ */
+function isTimeoutError(cause: unknown): boolean {
+  if (!(cause instanceof Error)) return false;
+  const code = (cause as { code?: unknown }).code;
+  if (code === "ETIMEDOUT" || code === "ESOCKETTIMEDOUT") return true;
+  return /timeout/i.test(cause.name) || /timeout/i.test(cause.constructor.name);
+}
+
+/**
  * The executor's default provider-error classification: abort →
- * `ProviderAborted`, a numeric `status` / `statusCode` → `ProviderRejected`,
- * everything else → `StreamFailed`.
+ * `ProviderAborted`, a named timeout → `ProviderTimeout`, a numeric `status` /
+ * `statusCode` → `ProviderRejected`, everything else → `StreamFailed`.
  *
  * Exported as an executable value so an adapter's `mapProviderError` can
  * classify the shapes it recognises and delegate the rest, instead of
@@ -274,6 +290,10 @@ export function defaultMapProviderError(
   if (isAbortError(cause)) {
     return new ProviderAborted({ reason: cause instanceof Error ? cause.message : "aborted" });
   }
+  // Before the status arm: a gateway that answers 504 has rejected the request,
+  // but an SDK timeout class carries no status at all and would otherwise fall
+  // through to the catch-all.
+  if (isTimeoutError(cause)) return new ProviderTimeout({ cause });
   const status =
     (cause as { status?: unknown })?.status ?? (cause as { statusCode?: unknown })?.statusCode;
   if (typeof status === "number") return new ProviderRejected({ status, cause });

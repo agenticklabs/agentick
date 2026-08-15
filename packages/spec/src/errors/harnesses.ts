@@ -380,12 +380,23 @@ export class ProviderRejected extends ExecuteError {
 }
 registerAgentickError("ProviderRejected", ProviderRejected);
 
+/**
+ * The provider did not answer in time. `timeoutMs` is optional because the
+ * shapes that classify here — an SDK's own timeout error, an `ETIMEDOUT`
+ * socket — report that a deadline passed without naming it; a caller that set
+ * the deadline itself supplies it and gets the sharper message.
+ */
 export class ProviderTimeout extends ExecuteError {
   readonly _tag = "ProviderTimeout" as const;
-  readonly timeoutMs: number;
-  constructor(args: { readonly timeoutMs: number; readonly cause?: unknown }) {
-    super(`provider timed out after ${args.timeoutMs}ms`, { cause: args.cause });
-    this.timeoutMs = args.timeoutMs;
+  readonly timeoutMs?: number;
+  constructor(args?: { readonly timeoutMs?: number; readonly cause?: unknown }) {
+    super(
+      args?.timeoutMs !== undefined
+        ? `provider timed out after ${args.timeoutMs}ms`
+        : `provider timed out`,
+      { cause: args?.cause },
+    );
+    if (args?.timeoutMs !== undefined) this.timeoutMs = args.timeoutMs;
   }
 }
 registerAgentickError("ProviderTimeout", ProviderTimeout);

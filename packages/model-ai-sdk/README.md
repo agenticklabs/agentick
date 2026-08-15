@@ -170,7 +170,9 @@ Two lessons specific to wrapping an SDK rather than an HTTP API:
 
 **Duck-type the stream you don't own.** The AI SDK's full-stream parts are matched on `type` as loose records rather than against its exported union, so an SDK minor version that adds a part kind does not break the build — it is simply unmapped until someone maps it. When you wrap a moving target, tolerate parts you don't know and map the ones you do.
 
-Provider-private streaming state goes on `accum.providerExtra`, a scratch slot nothing else touches. This adapter keeps block indices, whether text and reasoning blocks have opened, tool-call names by id, and the finish reason there — reasoning gets a reserved block index so it can never collide with the text block.
+Provider-private streaming state goes on `accum.providerExtra`, a scratch slot nothing else touches. This adapter keeps block indices, whether text and reasoning blocks have opened, tool-call names by id, the finish reason, and the first error part there — reasoning gets a reserved block index so it can never collide with the text block.
+
+**A stream can fail without rejecting.** `streamText` reports a failed generation — an invalid tool input above all — as an `error` PART in `fullStream`, so a stream that carries one still ends "successfully" as far as the iterator is concerned. `mapChunk` is synchronous and cannot fail the tick from there, so this adapter records the first such error on its scratch state and `finalizeStream` raises it. Finalize is the one seam in the pipeline allowed to throw, and the raise lands on the executor's typed error channel, where `mapProviderError` classifies it exactly as it classifies the non-streaming rejection. If the stream also throws, the thrown error reaches classification first and finalize never runs, so nothing raises twice.
 
 ### Certify it
 
@@ -218,7 +220,7 @@ runExecutorConformance(
 
 `mockGenerateFor` is yours to write: it returns an SDK result shaped so it normalizes back to what the suite scripted, which means the round trip through `prepareRequest → send → normalize` is what is actually under test rather than a mock of your own code. Write the bridge tests the same way — assert against the call the mock _received_, and against the canonical result your `normalize` produced.
 
-The second argument is required and total over `ExecuteError["_tag"]`: for each failure class, provider-native errors your classification must resolve to it, or `"not-applicable"` when nothing does. The suite throws each fixture from the model and asserts the tag on the executor's own rejection — so a class added to the taxonomy breaks this file at compile time until you decide.
+The second argument is required and total over `ExecuteError["_tag"]`: for each failure class, provider-native errors your classification must resolve to it, or `"not-applicable"` when nothing does. The suite throws each fixture from the model on BOTH seams — `execute()` and `executeStream()` — and asserts the tag on the executor's own rejection each time — so a class added to the taxonomy breaks this file at compile time until you decide.
 
 ## Patterns
 
@@ -243,4 +245,5 @@ The second argument is required and total over `ExecuteError["_tag"]`: for each 
 - `src/__tests__/ai-sdk-executor.spec.ts` — the bridge against `MockLanguageModelV2`: target derivation from a handle, tool-call extraction, the finish-reason vocabulary, abort, reasoning output and `reasoningTokens`, the invariant that `providerTools` leak nowhere, provider sources becoming citations, and the factory `providerOptions` bag reaching the model's call options on both paths, folding over an explicit target's bag, and losing to a tree-declared one.
 - `src/__tests__/multimodal-projection.spec.ts` — wire-native modality projection across the source kinds, plus request-level and message-level `providerOptions` carry.
 - `src/__tests__/usage-normalization.spec.ts` — every kind mapped 1:1 with nothing added, unreported kinds left `undefined`, cache reads and writes surviving the streaming reconstruction, streaming and non-streaming agreeing, and a declared `rates` card landing on `target.rates` — including alongside an explicit `target`.
+- `src/__tests__/provider-error.spec.ts` — the classification refinement and its delegation, plus, end to end through the real executor: a truncated tool call failing the stream instead of dispatching `{}`, an error part reaching classification with the right tag, the first of several winning, and a clean stream unaffected.
 - `src/__tests__/conformance.spec.ts` — the executor conformance suite against the real executor and this adapter.

@@ -21,7 +21,12 @@ import type {
 
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
-import { APIConnectionError, APIError, APIUserAbortError } from "@anthropic-ai/sdk";
+import {
+  APIConnectionError,
+  APIConnectionTimeoutError,
+  APIError,
+  APIUserAbortError,
+} from "@anthropic-ai/sdk";
 
 import { anthropic } from "../anthropic-adapter.js";
 import { StubAnthropicClient, asClient, throwingClient } from "./stub-anthropic-client.js";
@@ -172,9 +177,7 @@ describe("anthropic() adapter — ExecutorProtocol conformance", () => {
       // malformed model output; its one occurrence, an unparseable
       // `input_json_delta` run, is caught generically at stream finalize.
       MalformedModelOutput: "not-applicable",
-      // `APIConnectionTimeoutError` exists, but nothing classifies it yet —
-      // TODO(provider-timeout): teach `defaultMapProviderError` to name it.
-      ProviderTimeout: "not-applicable",
+      ProviderTimeout: [new APIConnectionTimeoutError({})],
     },
   );
 });

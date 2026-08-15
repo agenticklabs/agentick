@@ -2294,6 +2294,30 @@ bills for a malformed generation and the run under-reports), and the app-level
 `createApp({ session: { … } })` works today; `AppHarnessOptions` was owned by a
 concurrent session). Tracked on #291.
 
+Wave 3 LANDED — the coverage holes named in the wave-2 review, closed. (1)
+Non-streaming retry parity: `executor.run` folds any `ExecuteError`-classified
+failure to a `failed` terminal via a shared `executeErrorToTerminal` (the fake
+already folded; the real executor did not — one helper now prevents that
+divergence recurring), placed as a tail catch so a classified raise from
+`normalize` (Google's flip) folds too; projection/normalization defects keep
+rejecting. (2) `ProviderTimeout.timeoutMs` optional and the timeout arm added
+to `defaultMapProviderError` BEFORE the status arm — matching on
+`constructor.name`, because neither the OpenAI nor Anthropic SDK assigns
+`name` on its error classes (`APIConnectionTimeoutError` reports `"Error"`);
+deliberately no message regex, which would steal a 504 from `ProviderRejected`.
+Known latent twin: `defaultIsAbortError`'s `APIUserAbortError` name check is
+dead for the same reason (survives on its message fallback) — #291. (3)
+ai-sdk error PARTS: the adapter records the first part's native error and its
+`finalizeStream` raises it raw — the wave-1 finalize raise IS the failure
+channel, no new machinery; classification then routes invalid-tool-input to
+`MalformedModelOutput`. (4) Conformance `errorFixtures` also drive
+`executeStream` (same `throws` seam, zero adapter-file edits); non-streaming
+executors `ctx.skip()` visibly. Still open on #291: structured-output
+validation as a taxonomy candidate (design pass), the `createApp` shorthand
+(file still owned by the identity session), replayed `failed` terminals at the
+command boundary still reject (documented choice; rehydration needed to
+change it).
+
 ### 2026-08-12 — scoped capability leasing, named (ADR 98)
 
 `blueprint/98-scoped-capability-leasing.md`. Two shipped seams — the code

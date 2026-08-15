@@ -98,6 +98,7 @@ import {
 
 import {
   ExecutorLifecycle,
+  executeErrorToTerminal,
   isFoldedTerminal,
   operationOutcomeToTerminal,
   type ExecutorInFlightEntry,
@@ -1172,7 +1173,7 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
   > {
     return Effect.gen(this, function* () {
       // Pre-execution abort short-circuit. Mid-stream aborts surface as
-      // `ProviderAborted` from `executeBody` and are caught below.
+      // `ProviderAborted` from `executeBody` and fold in the tail catch.
       if (this.lifecycle.isAborted(executionId)) {
         const terminal: ExecutorTerminal<LanguageModelExecutionResult> = {
           outcome: "canceled",
@@ -1209,15 +1210,6 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         unknown,
         ExecuteErrorChannel
       >("model:generate", executeInput).pipe(
-        // A mid-flight provider abort folds to a canceled terminal
-        // (`runOperation` re-raises the body's ORIGINAL ProviderAborted,
-        // identity-preserving, so this catch still narrows it).
-        Effect.catchTag("ProviderAborted", (e) =>
-          Effect.succeed<ExecutorTerminal<LanguageModelExecutionResult>>({
-            outcome: "canceled",
-            reason: e.reason ?? "aborted",
-          }),
-        ),
         // A `guardGenerate` veto (or a replayed non-success terminal) at the
         // command boundary folds to the matching executor terminal; a
         // `deferred` verdict / `failed` replay re-raise on the failure channel.
@@ -1264,7 +1256,17 @@ export class LanguageModelExecutor<TRaw = unknown, TChunk = unknown>
         result: finalResult,
       };
       return terminal;
-    });
+    }).pipe(
+      // `run` answers in terminals, so a classified provider failure from EITHER
+      // the generate step or an adapter's normalize becomes one — the same fold
+      // the streaming path gets from the loop's `streamTerminal`. Without it a
+      // `stream: false` deployment rejects and never reaches the decide fold,
+      // so no policy can retry it (ADR 99).
+      Effect.catchIf(
+        (cause): cause is ExecuteErrorChannel => isExecuteError(cause),
+        (error) => Effect.succeed(executeErrorToTerminal(error)),
+      ),
+    );
   }
 }
 

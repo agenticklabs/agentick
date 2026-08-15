@@ -108,27 +108,139 @@ function truncatedToolCallModel(): MockLanguageModelV2 {
   });
 }
 
+async function executorOver(scope: string, model: MockLanguageModelV2) {
+  const exec = new LanguageModelExecutor(
+    scope,
+    new MemoryJournal(),
+    new LocalEventBus(),
+    new LocalInbox(),
+    { adapter: aisdk(model) },
+  );
+  await exec.ready;
+  return exec;
+}
+
+/** Drain the iterator and settle on `.result` — the caller's whole view. */
+function drain(stream: {
+  [Symbol.asyncIterator](): AsyncIterator<unknown>;
+  result: Promise<unknown>;
+}) {
+  return (async () => {
+    for await (const _ of stream) void _;
+    await stream.result;
+  })();
+}
+
 describe("a truncated tool call on the streaming path", () => {
   it("fails the execution instead of dispatching the tool with `{}`", async () => {
-    const exec = new LanguageModelExecutor(
-      "exec-aisdk-malformed",
-      new MemoryJournal(),
-      new LocalEventBus(),
-      new LocalInbox(),
-      { adapter: aisdk(truncatedToolCallModel()) },
-    );
-    await exec.ready;
+    const exec = await executorOver("exec-aisdk-malformed", truncatedToolCallModel());
     const target: LanguageModelTarget = exec.target as LanguageModelTarget;
     const projected = await exec.project({ compiled: mkTree(), target, tools: [] });
 
     const stream = exec.executeStream({ targetInput: projected, target });
-    await expect(
-      (async () => {
-        for await (const _ of stream) {
-          /* drain */
-        }
-        await stream.result;
-      })(),
-    ).rejects.toMatchObject({ _tag: "MalformedModelOutput" });
+    await expect(drain(stream)).rejects.toMatchObject({ _tag: "MalformedModelOutput" });
+  });
+});
+
+// ============================================================================
+// Error PARTS — the SDK's other way of reporting a failed generation
+// ============================================================================
+
+/** Streams `error` parts, then finishes normally as `streamText` does. */
+function erroringModel(errors: readonly unknown[]): MockLanguageModelV2 {
+  return new MockLanguageModelV2({
+    provider: "mock-aisdk",
+    modelId: "mock-1",
+    doStream: async () => ({
+      stream: new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] });
+          for (const error of errors) controller.enqueue({ type: "error", error });
+          controller.enqueue({
+            type: "finish",
+            finishReason: "error",
+            usage: { inputTokens: 1, outputTokens: 0, totalTokens: 1 },
+          });
+          controller.close();
+        },
+      }) as never,
+    }),
+  });
+}
+
+describe("an error PART on the streaming path", () => {
+  /**
+   * `streamText` reports a failed generation as a part in the delta stream, not
+   * as a rejection — so before finalize raised it, the stream ended "cleanly"
+   * with whatever text had arrived and the tick counted as a success.
+   */
+  it("classifies an invalid tool input as MalformedModelOutput, same as the rejection", async () => {
+    const exec = await executorOver(
+      "exec-aisdk-error-part",
+      erroringModel([invalidToolInputError()]),
+    );
+    const target: LanguageModelTarget = exec.target as LanguageModelTarget;
+    const projected = await exec.project({ compiled: mkTree(), target, tools: [] });
+
+    const stream = exec.executeStream({ targetInput: projected, target });
+    await expect(drain(stream)).rejects.toMatchObject({
+      _tag: "MalformedModelOutput",
+      toolName: "knowify__query",
+    });
+  });
+
+  it("a generic error part is classified, not swallowed", async () => {
+    const exec = await executorOver(
+      "exec-aisdk-error-part-generic",
+      erroringModel([Object.assign(new Error("upstream exploded"), { status: 503 })]),
+    );
+    const target: LanguageModelTarget = exec.target as LanguageModelTarget;
+    const projected = await exec.project({ compiled: mkTree(), target, tools: [] });
+
+    const stream = exec.executeStream({ targetInput: projected, target });
+    await expect(drain(stream)).rejects.toMatchObject({ _tag: "ProviderRejected", status: 503 });
+  });
+
+  it("raises the FIRST error when the stream reports several", async () => {
+    const exec = await executorOver(
+      "exec-aisdk-error-part-first",
+      erroringModel([invalidToolInputError(), new Error("secondary noise")]),
+    );
+    const target: LanguageModelTarget = exec.target as LanguageModelTarget;
+    const projected = await exec.project({ compiled: mkTree(), target, tools: [] });
+
+    const stream = exec.executeStream({ targetInput: projected, target });
+    await expect(drain(stream)).rejects.toMatchObject({ _tag: "MalformedModelOutput" });
+  });
+
+  it("a stream with no error parts is unaffected", async () => {
+    const model = new MockLanguageModelV2({
+      provider: "mock-aisdk",
+      modelId: "mock-1",
+      doStream: async () => ({
+        stream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: "stream-start", warnings: [] });
+            controller.enqueue({ type: "text-start", id: "t1" });
+            controller.enqueue({ type: "text-delta", id: "t1", delta: "hello" });
+            controller.enqueue({ type: "text-end", id: "t1" });
+            controller.enqueue({
+              type: "finish",
+              finishReason: "stop",
+              usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+            });
+            controller.close();
+          },
+        }) as never,
+      }),
+    });
+    const exec = await executorOver("exec-aisdk-no-error-part", model);
+    const target: LanguageModelTarget = exec.target as LanguageModelTarget;
+    const projected = await exec.project({ compiled: mkTree(), target, tools: [] });
+
+    const stream = exec.executeStream({ targetInput: projected, target });
+    for await (const _ of stream) void _;
+    const normalized = await exec.normalize({ targetOutput: await stream.result, target });
+    expect(normalized.output).toEqual([{ type: "text", text: "hello" }]);
   });
 });

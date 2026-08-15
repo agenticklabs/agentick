@@ -105,9 +105,8 @@ describe("google() adapter — non-streaming", () => {
       },
     ]);
     const { exec } = await makeExecutor(stub);
-    await expect(
-      exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] }),
-    ).rejects.toMatchObject({ _tag: "MalformedModelOutput" });
+    const t = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
+    expect(t).toMatchObject({ outcome: "failed", error: { _tag: "MalformedModelOutput" } });
   });
 });
 
