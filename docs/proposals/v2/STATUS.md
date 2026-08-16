@@ -2233,6 +2233,34 @@ telemetry middleware included). Nudges land structurally instead:
 Related trailhead already in code: `resultAttributes(op, result)` (symmetric
 result-derived sibling of `spanAttributes`) — class-level, not installer-level.
 
+### 2026-08-16 — session status is a projected fact (channel + seed + outcome + input_required)
+
+9f49ec69b, shipped in 1.0.0-next.122. The reload bug (a refreshed chat panel
+renders a running session as idle — the client SessionHandle had NO status
+surface) closed by completing the enumerate/notify pair:
+`session:channel:status` publishes one self-describing frame per transition
+from `SessionRuntime.setStatus` (the field's sole writer, change-gated,
+fire-and-forget), with a `ChannelSnapshotProvider` splicing the CURRENT status
+in as frame one — channel rather than discrete event PRECISELY because only
+`session:channel:*` names get the existing snapshot splice (the raceless
+seed). Frame outcome rider (`succeeded`/`failed`/`aborted`, `runOutcomeOf`,
+vetoed→failed) rides only the execution-end transition, passed as a setStatus
+ARGUMENT (ambient context could stamp a stale outcome onto the next unrelated
+transition). `input_required` joins `SessionStatus` as a first-class literal —
+blocked-on-elicit/confirmation tracked via the elicit OPERATION's
+requested/terminal pair (balanced on every exit; Set of opIds; both flips
+status-guarded; end-beats-blocked) — NOT `paused`, reserved for the
+blueprint's operator pause/resume. Consumption: `session.status` ChannelView
+on the handle (value/view asymmetry documented), `create_session` answers
+status (protocol gained the read), thread lists = list rows seed + ONE
+gateway-scope `sessionStatusEventQuery()` subscription (zero new client API).
+Ryan's ambient-tier doctrine recorded: bus hierarchy IS isolation
+(global←tenant←user child buses, fan-in up, attach-down = scope; authorize
+the attachment once — never per-event filters). Follow-ups: #297
+(subscription attachment authorization), #298 (fake executor holdUntil
+ignores abort). Knowify consumption (thread-list indicator, seen_at
+watermark, panel serverBusy) in flight on the knowify side.
+
 ### 2026-08-16 — recovery is a conformance rung; two adapters were still coercing
 
 A staging MALFORMED_FUNCTION_CALL incident (reproducible in-session,
