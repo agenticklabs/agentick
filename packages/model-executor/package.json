@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model-executor",
-  "version": "1.0.0-next.119",
+  "version": "1.0.0-next.120",
   "description": "THE executor harness for Agentick v2 (ADR 52). One final LanguageModelExecutor — BaseHarness plus the Effect execution engine — consuming a LanguageModelAdapter from @agentick/model. Ships FakeLanguageModelExecutor for tests + reference.",
   "keywords": [
     "agent",
