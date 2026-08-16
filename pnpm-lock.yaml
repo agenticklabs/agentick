@@ -1087,6 +1087,9 @@ importers:
         specifier: ^5.0.0
         version: 5.0.123(zod@4.3.6)
     devDependencies:
+      '@agentick/app':
+        specifier: workspace:*
+        version: link:../app
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1096,12 +1099,12 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      effect:
-        specifier: ^3.22.0
-        version: 3.22.0
-      msw:
-        specifier: ^2.0.0
-        version: 2.14.6(@types/node@25.0.9)(typescript@7.0.2)
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages/model-anthropic:
     dependencies:
@@ -1118,6 +1121,9 @@ importers:
         specifier: ^0.39.0
         version: 0.39.0
     devDependencies:
+      '@agentick/app':
+        specifier: workspace:*
+        version: link:../app
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1127,9 +1133,15 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages/model-executor:
     dependencies:
@@ -1205,6 +1217,9 @@ importers:
         specifier: ^6.0.0
         version: 6.16.0(ws@8.19.0)(zod@4.3.6)
     devDependencies:
+      '@agentick/app':
+        specifier: workspace:*
+        version: link:../app
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1214,9 +1229,15 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages/prompts:
     dependencies:
@@ -6713,7 +6734,8 @@ snapshots:
 
   '@iconify/types@2.0.0': {}
 
-  '@inquirer/ansi@2.0.5': {}
+  '@inquirer/ansi@2.0.5':
+    optional: true
 
   '@inquirer/confirm@6.0.13(@types/node@25.0.9)':
     dependencies:
@@ -6721,6 +6743,7 @@ snapshots:
       '@inquirer/type': 4.0.5(@types/node@25.0.9)
     optionalDependencies:
       '@types/node': 25.0.9
+    optional: true
 
   '@inquirer/core@11.1.10(@types/node@25.0.9)':
     dependencies:
@@ -6733,12 +6756,15 @@ snapshots:
       signal-exit: 4.1.0
     optionalDependencies:
       '@types/node': 25.0.9
+    optional: true
 
-  '@inquirer/figures@2.0.5': {}
+  '@inquirer/figures@2.0.5':
+    optional: true
 
   '@inquirer/type@4.0.5(@types/node@25.0.9)':
     optionalDependencies:
       '@types/node': 25.0.9
+    optional: true
 
   '@ioredis/commands@1.10.0': {}
 
@@ -6810,17 +6836,22 @@ snapshots:
       is-node-process: 1.2.0
       outvariant: 1.4.3
       strict-event-emitter: 0.5.1
+    optional: true
 
-  '@open-draft/deferred-promise@2.2.0': {}
+  '@open-draft/deferred-promise@2.2.0':
+    optional: true
 
-  '@open-draft/deferred-promise@3.0.0': {}
+  '@open-draft/deferred-promise@3.0.0':
+    optional: true
 
   '@open-draft/logger@0.3.0':
     dependencies:
       is-node-process: 1.2.0
       outvariant: 1.4.3
+    optional: true
 
-  '@open-draft/until@2.1.0': {}
+  '@open-draft/until@2.1.0':
+    optional: true
 
   '@opentelemetry/api-logs@0.221.0':
     dependencies:
@@ -7344,8 +7375,10 @@ snapshots:
   '@types/set-cookie-parser@2.4.10':
     dependencies:
       '@types/node': 25.0.9
+    optional: true
 
-  '@types/statuses@2.0.6': {}
+  '@types/statuses@2.0.6':
+    optional: true
 
   '@types/unist@3.0.3': {}
 
@@ -7837,7 +7870,8 @@ snapshots:
 
   character-entities-legacy@3.0.0: {}
 
-  cli-width@4.1.0: {}
+  cli-width@4.1.0:
+    optional: true
 
   cliui@8.0.1:
     dependencies:
@@ -7886,7 +7920,8 @@ snapshots:
 
   cookie@0.7.2: {}
 
-  cookie@1.1.1: {}
+  cookie@1.1.1:
+    optional: true
 
   copy-anything@4.0.5:
     dependencies:
@@ -8240,17 +8275,20 @@ snapshots:
 
   fast-levenshtein@2.0.6: {}
 
-  fast-string-truncated-width@3.0.3: {}
+  fast-string-truncated-width@3.0.3:
+    optional: true
 
   fast-string-width@3.0.2:
     dependencies:
       fast-string-truncated-width: 3.0.3
+    optional: true
 
   fast-uri@3.1.0: {}
 
   fast-wrap-ansi@0.2.0:
     dependencies:
       fast-string-width: 3.0.2
+    optional: true
 
   fdir@6.5.0(picomatch@4.0.3):
     optionalDependencies:
@@ -8409,7 +8447,8 @@ snapshots:
 
   gopd@1.2.0: {}
 
-  graphql@16.14.0: {}
+  graphql@16.14.0:
+    optional: true
 
   gtoken@8.0.0(supports-color@8.1.1):
     dependencies:
@@ -8457,6 +8496,7 @@ snapshots:
     dependencies:
       '@types/set-cookie-parser': 2.4.10
       set-cookie-parser: 3.1.0
+    optional: true
 
   hono@4.11.9: {}
 
@@ -8532,7 +8572,8 @@ snapshots:
     dependencies:
       is-extglob: 2.1.1
 
-  is-node-process@1.2.0: {}
+  is-node-process@1.2.0:
+    optional: true
 
   is-obj@2.0.0: {}
 
@@ -8818,10 +8859,12 @@ snapshots:
       typescript: 7.0.2
     transitivePeerDependencies:
       - '@types/node'
+    optional: true
 
   multipasta@0.2.8: {}
 
-  mute-stream@3.0.0: {}
+  mute-stream@3.0.0:
+    optional: true
 
   nanoid@3.3.11: {}
 
@@ -8882,7 +8925,8 @@ snapshots:
       type-check: 0.4.0
       word-wrap: 1.2.5
 
-  outvariant@1.4.3: {}
+  outvariant@1.4.3:
+    optional: true
 
   oxfmt@0.28.0:
     dependencies:
@@ -8940,7 +8984,8 @@ snapshots:
       lru-cache: 10.4.3
       minipass: 7.1.2
 
-  path-to-regexp@6.3.0: {}
+  path-to-regexp@6.3.0:
+    optional: true
 
   path-to-regexp@8.3.0: {}
 
@@ -9107,7 +9152,8 @@ snapshots:
 
   resolve-pkg-maps@1.0.0: {}
 
-  rettime@0.11.11: {}
+  rettime@0.11.11:
+    optional: true
 
   rfdc@1.4.1: {}
 
@@ -9196,7 +9242,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  set-cookie-parser@3.1.0: {}
+  set-cookie-parser@3.1.0:
+    optional: true
 
   setprototypeof@1.2.0: {}
 
@@ -9267,7 +9314,8 @@ snapshots:
 
   std-env@3.10.0: {}
 
-  strict-event-emitter@0.5.1: {}
+  strict-event-emitter@0.5.1:
+    optional: true
 
   string-width@4.2.3:
     dependencies:
@@ -9311,7 +9359,8 @@ snapshots:
 
   tabbable@6.4.0: {}
 
-  tagged-tag@1.0.0: {}
+  tagged-tag@1.0.0:
+    optional: true
 
   tinybench@2.9.0: {}
 
@@ -9326,17 +9375,20 @@ snapshots:
 
   tinyrainbow@3.0.3: {}
 
-  tldts-core@7.0.30: {}
+  tldts-core@7.0.30:
+    optional: true
 
   tldts@7.0.30:
     dependencies:
       tldts-core: 7.0.30
+    optional: true
 
   toidentifier@1.0.1: {}
 
   tough-cookie@6.0.1:
     dependencies:
       tldts: 7.0.30
+    optional: true
 
   tr46@0.0.3: {}
 
@@ -9389,6 +9441,7 @@ snapshots:
   type-fest@5.6.0:
     dependencies:
       tagged-tag: 1.0.0
+    optional: true
 
   type-is@2.0.1:
     dependencies:
@@ -9473,7 +9526,8 @@ snapshots:
 
   unpipe@1.0.0: {}
 
-  until-async@3.0.2: {}
+  until-async@3.0.2:
+    optional: true
 
   uri-js@4.4.1:
     dependencies:

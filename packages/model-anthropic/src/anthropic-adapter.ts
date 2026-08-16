@@ -438,7 +438,11 @@ export function anthropic(
                 ? (JSON.parse(entry.argsBuffer) as Readonly<Record<string, unknown>>)
                 : {};
             } catch {
-              /* invalid JSON */
+              // TODO(adr-99): coercing to `{}` here dispatches the tool with
+              // empty input and hides the malformed generation from the retry
+              // policy. Emitting no summary delta would let the accumulator's
+              // `toolCallInput` raise `MalformedModelOutput` from the buffer.
+              // Un-skips `__tests__/recovery-conformance.spec.ts`.
             }
             out.push({ type: "tool-call-end", callId });
             out.push({

@@ -56,11 +56,12 @@
     "ai": "^5.0.0"
   },
   "devDependencies": {
+    "@agentick/app": "workspace:*",
     "@agentick/model-executor": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
-    "effect": "^3.22.0",
-    "msw": "^2.0.0"
+    "@types/react": "^19.2.5",
+    "react": "^19.2.4"
   },
   "peerDependencies": {
     "ai": "^5.0.0"

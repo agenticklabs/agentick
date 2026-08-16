@@ -46,6 +46,7 @@ Six tests now run: a stable string `id`, bind on `listen(host)`, teardown on `cl
 | `runCompilerConformance(factory)`                | `CompilerProtocol`              | Mount idempotence on `mountId`, `NotMounted` on unmounted ids, render output shape, rerender, snapshot round-trip, unmount cleanup — and that lifecycle projection is an _optional_ capability                                                |
 | `runToolExecutorConformance(factory)`            | `ToolExecutorProtocol`          | Registry semantics, the two doors (model vs. dispatch exposure), all three handler return currencies normalizing identically, validation and lookup failure shapes, handler errors, abort                                                     |
 | `runExecutorConformance(factory, errorFixtures)` | `LanguageModelExecutor`         | Project/run phase isolation, abort, cross-adapter parity (base64 image sources, sampling params, `providerOptions` threading, the stream surface), and provider-error classification end-to-end on both the streaming and non-streaming seams |
+| `runRecoveryConformance(factory, options?)`      | An adapter's malformed lane     | That a malformed generation on the wire is classified, retried at the PROVIDER, replayed byte-identically, budgeted by the policy, and stamped `retryOfTick` — composed, not injected at a seam                                               |
 | `runLoopExecutorConformance(factory)`            | `LoopExecutorProtocol`          | Single-tick happy path, the tool-call round trip, the max-tick stop, abort mid-loop                                                                                                                                                           |
 | `runSessionConformance(factory)`                 | `SessionHarnessProtocol`        | `send` happy path, timeline integration, snapshot, the state applicator, close, lifecycle notification, execution-handle shape                                                                                                                |
 | `runDataBridgeConformance(factory)`              | `DataBridge`                    | `peek`/`fetch` cache states, in-flight join on the same key, rejected-fetch replay, subscribe notification points, `invalidate` / `invalidateTag` / TTL expiry                                                                                |
@@ -70,6 +71,29 @@ runObservabilityCtxConformance("ToolHandlerCtx (mcp)", () =>
 );
 runOpsCtxConformance("ToolHandlerCtx (mcp)", () => fakeToolHandlerCtx({ transport: "mcp" }));
 ```
+
+### Malformed-generation recovery
+
+`runExecutorConformance`'s error fixtures certify that an adapter _names_ a failure; `runRecoveryConformance` certifies that naming it buys something. Its factory builds a whole app — the real adapter, the real loop, the adapter's own stub client — from a script of provider turns, so the failure enters where production puts it rather than at a seam, and the load-bearing assertion is the provider call count: a retry that never reaches the provider is not a retry. Four cases run: recovery on a second call with a byte-identical request payload (a failed tick persists nothing, so the retry is the SAME request) and `retryOfTick` stamped on the second tick start; a model that stays malformed spending exactly the bundled budget; a supplied zero budget stopping at one call; and the non-streaming twin. The last is opt-out — an adapter with no malformed lane on its non-streaming seam passes `{ nonStreaming: false }` and the case reports as **skipped**, the same explicit decision `"not-applicable"` makes in the error fixtures. An adapter with no malformed lane at all skips the whole invocation, with the reason named in the file.
+
+```ts
+type RecoveryStep = "malformed" | "ok";
+
+type RecoveryFactory = (script: readonly RecoveryStep[]) => Promise<RecoveryHandle>;
+
+interface RecoveryHandle {
+  run(input?: { stream?: boolean; tickFailurePolicy?: TickFailurePolicy }): Promise<{
+    succeeded: boolean;
+    stopCauseTag?: string;
+  }>;
+  providerCalls(): number;
+  providerRequests(): readonly unknown[]; // JSON-comparable payloads, call order
+  tickStarts(): readonly { tickIndex: number; retryOfTick?: number }[];
+  close(): Promise<void>;
+}
+```
+
+`run` constructs and drives the app, so the policy and the stream flag vary per case while the script is fixed at factory time. Build the stub's canned sequence from the requested stream flag: an adapter that takes the wrong seam then fails loudly instead of quietly proving nothing.
 
 ## Shared fixtures
 
@@ -106,6 +130,7 @@ Use it in every test that needs a ctx rather than hand-rolling one. When the can
 - **No store-port suite lives here.** `Store` / `CollectionStore` / `LogStore` adapters certify against the owning namespace's suite instead; there is no archetype-level runner, despite the seam supporting one.
 - **`runExecutorConformance` needs a bus it can subscribe to.** An adapter that does not expose the bus it was wired with may pass a fresh one, but the delta-envelope assertion then silently skips rather than failing.
 - **The classification block needs a stub that fails on both seams.** Each fixture runs twice — once through `execute()`, once through `executeStream()` — and asserts the same tag on each rejection, because streaming is the path production takes and an adapter can classify differently there. A factory whose `throws` reaches only the non-streaming call therefore fails the streaming half rather than skipping it; the skip is reserved for an executor with no streaming seam at all (`supportsStreaming: false`), which is reported as skipped rather than passed.
+- **`runRecoveryConformance` does not run fully for every adapter.** [@agentick/model-google](../model-google) and [@agentick/model-ai-sdk](../model-ai-sdk) cover both seams. [@agentick/model-openai](../model-openai) skips the non-streaming case: `normalizeImpl` keeps an unparseable `function.arguments` as `{ value }` rather than failing the tick. [@agentick/model-anthropic](../model-anthropic) skips the whole invocation for the same class of reason — `translateEvent` coerces an unparseable tool-args buffer to `{}` — so it has no malformed lane at all. Both parameterizations are written and skipped rather than absent, so fixing the adapter is a one-word change here.
 - **The suites are vitest-bound.** `describe` / `it` / `expect` are imported directly, so they cannot run under another test runner.
 
 ## Verified by

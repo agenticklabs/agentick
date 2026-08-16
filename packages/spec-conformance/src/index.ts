@@ -68,6 +68,19 @@ export {
 // What stays here is the part that is genuinely spec-level: declaration/supportsVision
 // coherence, inside `runExecutorConformance`.
 
+// Malformed-generation recovery (ADR 99) — the composition proof, one
+// parameterization per adapter.
+export {
+  runRecoveryConformance,
+  type RecoveryConformanceOptions,
+  type RecoveryFactory,
+  type RecoveryHandle,
+  type RecoveryRunInput,
+  type RecoveryRunResult,
+  type RecoveryStep,
+  type RecoveryTickStart,
+} from "./recovery.js";
+
 // Loop executor (Phase 4d.2)
 export {
   runLoopExecutorConformance,

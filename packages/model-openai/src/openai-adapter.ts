@@ -982,6 +982,10 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       try {
         parsed = t.function.arguments ? JSON.parse(t.function.arguments) : {};
       } catch {
+        // TODO(adr-99): keeping the raw string dispatches the tool with
+        // `{ value: "<garbage>" }` instead of failing the tick, so the retry
+        // policy never sees the malformed generation. Un-skips the
+        // non-streaming case in `__tests__/recovery-conformance.spec.ts`.
         parsed = t.function.arguments ?? {};
       }
       const inputObj =
