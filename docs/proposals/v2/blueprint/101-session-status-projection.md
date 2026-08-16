@@ -74,6 +74,6 @@ this.
   framework field: "seen" is per-user, and the record's scalar would be wrong
   the day sessions are shared.
 
-@verifiedBy packages/session/src/**tests**/status-channel.spec.ts ·
-packages/client-core/src/**tests**/session-status-view.spec.ts ·
-packages/transport-in-process/src/**tests**/session-status-e2e.spec.ts
+@verifiedBy `packages/session/src/__tests__/status-channel.spec.ts` ·
+`packages/client-core/src/__tests__/session-status-view.spec.ts` ·
+`packages/transport-in-process/src/__tests__/session-status-e2e.spec.ts`
