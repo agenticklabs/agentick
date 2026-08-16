@@ -78,10 +78,14 @@
     "effect": "^3.22.0"
   },
   "peerDependencies": {
-    "@agentick/code-host": "workspace:*"
+    "@agentick/code-host": "workspace:*",
+    "vitest": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@agentick/code-host": {
+      "optional": true
+    },
+    "vitest": {
       "optional": true
     }
   },

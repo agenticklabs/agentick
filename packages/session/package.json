@@ -97,10 +97,14 @@
   },
   "peerDependencies": {
     "@agentick/compiler-react": "workspace:*",
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "vitest": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@agentick/compiler-react": {
+      "optional": true
+    },
+    "vitest": {
       "optional": true
     }
   },

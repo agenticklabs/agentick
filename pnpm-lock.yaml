@@ -504,6 +504,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
 
   packages/cluster-broker:
     dependencies:
@@ -587,6 +590,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
 
   packages/code-host:
     dependencies:
@@ -704,6 +710,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
 
   packages/connector:
     dependencies:
@@ -762,6 +771,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
@@ -784,6 +796,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
@@ -932,6 +947,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.4
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
@@ -1037,6 +1055,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/app':
         specifier: workspace:*
@@ -1071,6 +1092,9 @@ importers:
       '@agentick/utils':
         specifier: workspace:*
         version: link:../utils
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
 
   packages/model-ai-sdk:
     dependencies:
@@ -1262,6 +1286,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/completions':
         specifier: workspace:*
@@ -1330,6 +1357,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.4
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/compiler':
         specifier: workspace:*
@@ -1499,6 +1529,9 @@ importers:
       react:
         specifier: ^19.2.4
         version: 19.2.4
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/compiler-react':
         specifier: workspace:*
@@ -1548,6 +1581,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/resources':
         specifier: workspace:*
@@ -1616,6 +1652,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.4
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*
@@ -1638,6 +1677,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/runtime':
         specifier: workspace:*
@@ -1694,6 +1736,9 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/elicitation':
         specifier: workspace:*
@@ -1786,6 +1831,9 @@ importers:
       react:
         specifier: ^19.0.0
         version: 19.2.4
+      vitest:
+        specifier: ^4.0.0
+        version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
     devDependencies:
       '@agentick/spec-conformance':
         specifier: workspace:*

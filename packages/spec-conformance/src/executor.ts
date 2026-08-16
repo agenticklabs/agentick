@@ -157,7 +157,17 @@ function mkScripted(text = "hi"): LanguageModelExecutionResult {
 export function runExecutorConformance(
   factory: ExecutorConformanceFactory,
   errorFixtures: ExecutorErrorFixtures,
+  options: {
+    /**
+     * `false` for an executor with no streaming seam — its streaming
+     * classification twins report as SKIPPED (the same explicit decision
+     * `"not-applicable"` makes per class). Default `true`: an executor that
+     * then lacks `executeStream` FAILS the twin rather than skipping it.
+     */
+    readonly streaming?: boolean;
+  } = {},
 ): void {
+  const streamingIt = options.streaming === false ? it.skip : it;
   describe("ExecutorProtocol — project phase", () => {
     it("projects a RenderedTree into a target-shaped input", async () => {
       const { executor } = await factory({ harnessId: "ex-project-1" });
@@ -805,36 +815,33 @@ export function runExecutorConformance(
         // The streaming twin. Streaming is the path production takes, and an
         // adapter can classify differently on it (a separate SDK surface, a
         // different error shape at stream open) — the tag must be the same one.
-        it(`${tag}: classifies provider fixture #${index} on the streaming path`, async (ctx) => {
-          const { executor } = await factory({
-            harnessId: `ex-err-stream-${tag}-${index}`,
-            throws: fixture,
-          });
-          if (
-            typeof executor.executeStream !== "function" ||
-            executor.target.capabilities?.supportsStreaming === false
-          ) {
-            // Reported as skipped rather than passed: this executor has no
-            // streaming seam to raise from, which is a fact worth seeing.
-            ctx.skip();
-            return;
-          }
-          const projected = await executor.project({
-            compiled: mkRenderedTree(),
-            target: mkTarget(),
-            tools: [],
-          });
-          const stream = executor.executeStream({
-            targetInput: projected,
-            target: mkTarget(),
-          });
-          await expect(
-            (async () => {
-              for await (const _ of stream) void _;
-              await stream.result;
-            })(),
-          ).rejects.toMatchObject({ _tag: tag });
-        });
+        streamingIt(
+          `${tag}: classifies provider fixture #${index} on the streaming path`,
+          async () => {
+            const { executor } = await factory({
+              harnessId: `ex-err-stream-${tag}-${index}`,
+              throws: fixture,
+            });
+            const projected = await executor.project({
+              compiled: mkRenderedTree(),
+              target: mkTarget(),
+              tools: [],
+            });
+            // Declared streaming (options.streaming !== false) — absence is a
+            // conformance FAILURE, not a skip.
+            expect(typeof executor.executeStream).toBe("function");
+            const stream = executor.executeStream!({
+              targetInput: projected,
+              target: mkTarget(),
+            });
+            await expect(
+              (async () => {
+                for await (const _ of stream) void _;
+                await stream.result;
+              })(),
+            ).rejects.toMatchObject({ _tag: tag });
+          },
+        );
       });
     }
   });

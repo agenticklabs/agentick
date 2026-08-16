@@ -137,6 +137,14 @@
     "@types/react": "^19.2.5",
     "react": "^19.2.4"
   },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=20.19"
   }

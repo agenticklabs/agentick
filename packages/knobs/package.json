@@ -117,10 +117,14 @@
     "@types/react": "^19.2.5"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "vitest": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "react": {
+      "optional": true
+    },
+    "vitest": {
       "optional": true
     }
   },

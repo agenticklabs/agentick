@@ -126,6 +126,14 @@
     "@agentick/resources": "workspace:*",
     "@agentick/spec-conformance": "workspace:*"
   },
+  "peerDependencies": {
+    "vitest": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
   "engines": {
     "node": ">=20.19"
   }
