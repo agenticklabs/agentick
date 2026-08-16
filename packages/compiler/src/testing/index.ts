@@ -13,6 +13,7 @@
  */
 
 export { fakeCompiler } from "./fake-compiler.js";
+export { timelineCompiler } from "./timeline-compiler.js";
 export {
   fakeBridges,
   stubLoopBridge,
