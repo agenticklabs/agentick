@@ -100,7 +100,9 @@ describe("gateway.as(identity) — the wire mechanism without the framing", () =
       },
     });
 
-    const session = await gateway.as(IDENTITY).app("classifier")!.createSession();
+    // `eager` so the reshaped metadata lands in the durable record we read
+    // below (lazy genesis otherwise defers the write to the first mutation).
+    const session = await gateway.as(IDENTITY).app("classifier")!.createSession({ eager: true });
     expect(seen.identity).toEqual(IDENTITY);
     const record = await gateway.app("classifier")!.getSessionRecord(session.id);
     expect(record?.metadata?.stamped).toEqual({ tenantId: "tenant-1", userId: "user-9" });

@@ -40,12 +40,15 @@ export const appWireExtension: WireExtension = defineWireExtension({
   namespace: "app",
   version: "1.0.0",
   methods: {
-    "app/create_session": async ({ appId, sessionId, metadata }, ctx) => {
+    "app/create_session": async ({ appId, sessionId, metadata, eager }, ctx) => {
       const app = ctx.gateway.app(appId);
       if (!app) throw new AppNotFoundError({ appId });
       const session = await app.createSession({
         ...(sessionId !== undefined ? { sessionId } : {}),
         ...(metadata !== undefined ? { metadata } : {}),
+        // E11 — lazy genesis by default; the client opts in to an immediate
+        // durable write for a session it wants listed before the first message.
+        ...(eager !== undefined ? { eager } : {}),
         // ADR 48 — stamp the OWNING principal from the authenticated caller's
         // identity (resolved once at ingress, ADR 51 §4.1). This is the
         // framework's own concept feeding the framework's own dispatch gate

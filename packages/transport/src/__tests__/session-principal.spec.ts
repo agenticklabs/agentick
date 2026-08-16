@@ -122,7 +122,12 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
 
     const resp = await dispatchRequest(
       gateway,
-      { jsonrpc: "2.0", id: 1, method: "app/create_session", params: { appId: app.id } },
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "app/create_session",
+        params: { appId: app.id, eager: true },
+      },
       stubSink(),
       { identity: IDENTITY_B },
     );
@@ -150,7 +155,10 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
         method: "app/create_session",
         // `principal` is NOT a member of AppCreateSessionParams — smuggled as an
         // untyped extra; the handler never destructures it.
-        params: { appId: app.id, principal: "SMUGGLED-BY-CLIENT" } as Record<string, unknown>,
+        params: { appId: app.id, eager: true, principal: "SMUGGLED-BY-CLIENT" } as Record<
+          string,
+          unknown
+        >,
       },
       stubSink(),
       { identity: IDENTITY_B },

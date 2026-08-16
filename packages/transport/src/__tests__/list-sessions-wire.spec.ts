@@ -138,7 +138,11 @@ async function seed(
   principal?: string,
 ): Promise<void> {
   for (const sessionId of ids) {
-    await app.createSession({ sessionId, ...(principal !== undefined ? { principal } : {}) });
+    await app.createSession({
+      sessionId,
+      eager: true,
+      ...(principal !== undefined ? { principal } : {}),
+    });
     await apart();
   }
 }
@@ -176,9 +180,14 @@ describe("app/list_sessions — the page and its shape", () => {
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
 
-    await app.createSession({ sessionId: "older", title: "Yesterday", description: "the old one" });
+    await app.createSession({
+      sessionId: "older",
+      eager: true,
+      title: "Yesterday",
+      description: "the old one",
+    });
     await apart();
-    await app.createSession({ sessionId: "newer" });
+    await app.createSession({ sessionId: "newer", eager: true });
 
     const { sessions, nextCursor } = await listApp(gateway, app.id, {});
 
@@ -231,7 +240,7 @@ describe("app/list_sessions — the keyset walk", () => {
     await apart();
     await app.setSessionMeta("s0", { title: "someone replied" });
     await apart();
-    await app.createSession({ sessionId: "s6" });
+    await app.createSession({ sessionId: "s6", eager: true });
 
     const page2 = await listApp(gateway, app.id, { limit: 2, cursor: page1.nextCursor! });
     const page3 = await listApp(gateway, app.id, { limit: 2, cursor: page2.nextCursor! });
@@ -270,9 +279,9 @@ describe("app/list_sessions — the keyset walk", () => {
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
 
-    await app.createSession({ sessionId: "a" });
-    await app.createSession({ sessionId: "b" });
-    await app.createSession({ sessionId: "c" });
+    await app.createSession({ sessionId: "a", eager: true });
+    await app.createSession({ sessionId: "b", eager: true });
+    await app.createSession({ sessionId: "c", eager: true });
 
     const seen: string[] = [];
     let cursor: string | undefined;
@@ -341,7 +350,7 @@ describe("app/list_sessions — principal scoping", () => {
       ["userA", "a3"],
       ["userB", "b3"],
     ] as const) {
-      await app.createSession({ sessionId: id, principal: owner });
+      await app.createSession({ sessionId: id, eager: true, principal: owner });
       await apart();
     }
 
@@ -424,7 +433,7 @@ describe("gateway/list_sessions — the index seam", () => {
     // A real app with a real session, which the index knows nothing about. If the
     // gateway were still merging the apps' stores, this row would appear.
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
-    await app.createSession({ sessionId: "not-in-the-index" });
+    await app.createSession({ sessionId: "not-in-the-index", eager: true });
 
     const page1 = await listGateway(gateway, { limit: 2 });
     // The index's own ordering survives — the gateway does not re-sort, because
@@ -608,7 +617,7 @@ describe("app/list_sessions — the store's cursor, and the fallback when it has
       ["keep-2", "thread"],
       ["drop-2", "scratch"],
     ] as const) {
-      await app.createSession({ sessionId: id, metadata: { kind } });
+      await app.createSession({ sessionId: id, eager: true, metadata: { kind } });
       await apart();
     }
 
@@ -711,9 +720,9 @@ describe("gateway/list_sessions — the cross-app union", () => {
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
 
-    await app.createSession({ sessionId: "parent" });
+    await app.createSession({ sessionId: "parent", eager: true });
     await apart();
-    await app.createSession({ sessionId: "child", parentSessionId: "parent" });
+    await app.createSession({ sessionId: "child", eager: true, parentSessionId: "parent" });
 
     const roots = await listGateway(gateway, { filter: { root: true } });
     expect(roots.sessions.map((s) => s.id)).toEqual(["parent"]);

@@ -127,6 +127,7 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
         appId,
         sessionId: input?.sessionId,
         metadata: input?.metadata,
+        eager: input?.eager,
       });
     },
     async getSession(sessionId): Promise<SessionEntry> {

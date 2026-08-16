@@ -2660,6 +2660,9 @@ export class AppHarness<P = unknown>
       ...omitUndefined({
         title: input.title,
         description: input.description,
+        // E11 — genesis persistence is lazy by default (first mutation writes);
+        // `eager` forces the write at construction.
+        eager: input.eager,
       }),
     });
     claimed.push(session);
@@ -2829,6 +2832,12 @@ export class AppHarness<P = unknown>
     const sessionId = input.sessionId ?? `session:${generateId()}`;
     const createInput: CreateSessionInput<P> = {
       sessionId,
+      // A spawned / forked child persists its record at genesis: unlike a
+      // top-level "new chat", the record encodes the lineage edge
+      // (parentSessionId / spawnPath / originExecutionId) that abort-tree walks
+      // and lineage listings read, and that edge exists at creation — it is not
+      // speculative garbage waiting on a first message.
+      eager: true,
       ...omitUndefined({
         metadata: input.metadata,
         // ADR 48 — thread the inherited principal (the parent's own, set by

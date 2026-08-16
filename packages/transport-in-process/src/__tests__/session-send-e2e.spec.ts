@@ -74,7 +74,10 @@ async function makeStack(replyText: string) {
     rootElement: null,
     options: { modelExecutor: executor, compiler: fakeCompiler() },
   });
-  const session = await app.createSession({ sessionId: "test-session" });
+  // `eager` so the durable record is enumerable immediately (the "exposes the
+  // right session" test lists it without a prior send; lazy genesis otherwise
+  // defers the write to the first mutation).
+  const session = await app.createSession({ sessionId: "test-session", eager: true });
 
   // Minimal DispatchSink — no subscription / in-flight tracking
   // exercised in this test; sendNotification routed into the transport.

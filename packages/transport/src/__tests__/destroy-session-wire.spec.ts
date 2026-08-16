@@ -105,7 +105,12 @@ describe("app/destroy_session — wire round-trip", () => {
 
     const created = await dispatchRequest(
       gateway,
-      { jsonrpc: "2.0", id: 1, method: "app/create_session", params: { appId: app.id } },
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "app/create_session",
+        params: { appId: app.id, eager: true },
+      },
       stubSink(),
       { identity: IDENTITY_B },
     );
@@ -166,7 +171,7 @@ describe("app/destroy_session — ownership", () => {
     });
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
-    const session = await app.createSession({ principal: "userB" });
+    const session = await app.createSession({ principal: "userB", eager: true });
 
     const denied = await dispatchRequest(
       gateway,

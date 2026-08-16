@@ -140,24 +140,23 @@ describe("AppHarness — createSession + send", () => {
     const app = await mkApp();
     const session = await app.createSession({ sessionId: "acct", title: "My chat" });
 
-    // Construction write — initial record.
-    const initial = await app.getSessionRecord("acct");
-    expect(initial?.status).toBe("idle");
-    expect(initial?.executionCount).toBe(0);
-    expect(initial?.currentExecutionId).toBeUndefined();
-    expect(initial?.title).toBe("My chat");
-    expect(initial?.appId).toBe(app.id);
+    // Lazy genesis: creation persists NOTHING durable — the record materializes
+    // on the first mutation, not at `createSession`.
+    expect(await app.getSessionRecord("acct")).toBeUndefined();
 
     const handle = await session.send({ messages: [{ role: "user", content: "47 * 23" }] });
     await handle.result;
 
     // Execution-boundary write: status back to idle, count bumped, in-flight id
     // cleared, usage aggregated across both ticks (8+10 in / 4+8 out / 12+18).
+    // The title seeded at construction rides that first durable put.
     const after = await app.getSessionRecord("acct");
     expect(after?.status).toBe("idle");
     expect(after?.executionCount).toBe(1);
     expect(after?.currentExecutionId).toBeUndefined();
     expect(after?.usage.totalTokens).toBe(30);
+    expect(after?.title).toBe("My chat");
+    expect(after?.appId).toBe(app.id);
 
     // App-owned descriptive slot — the framework STORES, never populates it.
     await app.setSessionMeta("acct", { description: "arithmetic" });
@@ -172,8 +171,10 @@ describe("AppHarness — createSession + send", () => {
 
   it("listSessions enumerates non-ephemeral sessions from the durable store (E11)", async () => {
     const app = await mkApp();
-    await app.createSession({ sessionId: "s1", metadata: { tier: "free" } });
-    await app.createSession({ sessionId: "s2", metadata: { tier: "pro" } });
+    // `eager` forces the durable write at genesis (lazy genesis otherwise keeps
+    // an unsent session out of the store) — this test is about enumeration.
+    await app.createSession({ sessionId: "s1", eager: true, metadata: { tier: "free" } });
+    await app.createSession({ sessionId: "s2", eager: true, metadata: { tier: "pro" } });
     // Durable store-backed superset — async, returns SessionRecord[].
     const all = await app.listSessions();
     expect(all.map((e) => e.id).sort()).toEqual(["s1", "s2"]);
@@ -189,7 +190,9 @@ describe("AppHarness — createSession + send", () => {
 
   it("createSession with a live id is idempotent open — returns the SAME session (ADR 49)", async () => {
     const app = await mkApp();
-    const first = await app.createSession({ sessionId: "dup" });
+    // `eager` on the first open so the anti-duplication check below reads a
+    // durable row; the second open must NOT write a second one.
+    const first = await app.createSession({ sessionId: "dup", eager: true });
     const second = await app.createSession({ sessionId: "dup" });
     // create AND resume are the same call — stateless-replica deployments
     // open a session by id without knowing whether it's already live.

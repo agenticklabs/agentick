@@ -243,8 +243,10 @@ describe("app.destroySession — the durable record", () => {
   it("calls SessionStore.delete exactly once, with the destroyed id", async () => {
     const store = new DeleteRecordingSessionStore();
     const app = await mkApp({ sessionStore: store });
-    await app.createSession({ sessionId: "doomed" });
-    await app.createSession({ sessionId: "bystander" });
+    // `eager` so the durable rows exist before destroy (lazy genesis would
+    // otherwise leave an unsent session unpersisted) — this test is the delete verb.
+    await app.createSession({ sessionId: "doomed", eager: true });
+    await app.createSession({ sessionId: "bystander", eager: true });
 
     expect((await app.getSessionRecord("doomed"))?.id).toBe("doomed");
 

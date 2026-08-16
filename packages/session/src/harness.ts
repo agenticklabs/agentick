@@ -517,6 +517,13 @@ export interface SessionHarnessOptions<P = unknown> {
    * @see docs/proposals/v2/data-layer-plan.md §E11
    */
   readonly sessionStore?: SessionStore;
+  /**
+   * Persist the durable `SessionRecord` at genesis rather than on first
+   * mutation (E11). Default `false` — a created-but-never-used session stays
+   * out of the durable registry until its first status transition / `setMeta`.
+   * `true` writes the record immediately (the "show it in the list now" case).
+   */
+  readonly eager?: boolean;
   /** Owning app id — stamped on the session's `SessionRecord.appId`. */
   readonly appId?: string;
   /**
@@ -1003,6 +1010,7 @@ export class SessionHarness<P = unknown>
       storeCtx: () => this.storeCtx(),
       ...omitUndefined({
         appId: options.appId,
+        eager: options.eager,
         parentSessionId: options.parentSessionId,
         // ADR 48 — persist ownership on the durable record (resume index).
         principal: options.principal,

@@ -126,6 +126,13 @@ export interface AppCreateSessionParams extends WireRequestParams {
   readonly appId: string;
   readonly sessionId?: string;
   readonly metadata?: Readonly<Record<string, unknown>>;
+  /**
+   * Persist the durable `SessionRecord` at genesis rather than on first
+   * mutation (E11). Default `false` — an unsent "new chat" leaves no row in the
+   * durable list. Set `true` when the client renders the session row before the
+   * first message and needs it enumerable / readable immediately.
+   */
+  readonly eager?: boolean;
 }
 
 export interface AppCreateSessionResult {

@@ -92,6 +92,16 @@ export interface CreateSessionInput<P = unknown> {
    */
   readonly title?: string;
   readonly description?: string;
+  /**
+   * Persist the durable `SessionRecord` (E11) at genesis rather than on the
+   * first mutation. Default `false` — creating a session seeds its state but
+   * writes NOTHING durable, so a "new chat" the user never speaks into leaves
+   * no blank row in the "list my sessions" registry; the first `send` /
+   * `setSessionMeta` performs the first write. Set `true` when the empty
+   * session must appear in the durable list immediately (e.g. a client that
+   * renders the row before the first message).
+   */
+  readonly eager?: boolean;
   /** Initial component props injected into the agent root element. */
   readonly initialProps?: P;
   /** Initial knob values copied into the session's knob bridge. */

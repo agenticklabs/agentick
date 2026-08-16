@@ -34,14 +34,19 @@
  * writes is also mirrored in a sibling instance field, so no write-through can
  * project a stale shadow over what the store already holds.
  *
- * ## Construction seeds; {@link SessionRuntime.hydrate} adopts and upserts
+ * ## Construction seeds; {@link SessionRuntime.hydrate} adopts, then persists lazily
  *
  * Construction is synchronous, so it only SEEDS the cache (fresh record: idle,
- * count 0, zero usage). The durable upsert is deferred to `hydrate()` — the
- * session's genesis step (ADR 93), run before first render — which first reads
- * the persisted record and ADOPTS it. Deferring is what makes resume correct:
- * an eager construction write would overwrite a live session's durable record
- * with a blank one before anything had a chance to read it back.
+ * count 0, zero usage). `hydrate()` — the session's genesis step (ADR 93), run
+ * before first render — first reads the persisted record and ADOPTS it. A
+ * RESUME (a record already exists) re-writes it; a genuinely NEW session
+ * persists at genesis only when `eager`, and otherwise LAZILY: the cache is
+ * seeded and the first status transition / `setMeta` performs the first durable
+ * `put`. Lazy-by-default is what keeps a "new chat" that never sends off the
+ * durable "list my sessions" registry (no blank "Untitled" rows). Deferring the
+ * write to `hydrate` is also what makes resume correct: an eager construction
+ * write would overwrite a live session's durable record with a blank one before
+ * anything read it back.
  *
  * **Persist/notify parity (the View migration was parity-only):**
  *   - `setStatus` / `setMeta` PERSIST (`view.write` → cache + store.put +
@@ -151,6 +156,13 @@ export interface SessionRuntimeInit {
   readonly title?: string;
   readonly description?: string;
   readonly metadata?: Record<string, unknown>;
+  /**
+   * Persist the durable record at genesis (E11). Default `false` — genesis
+   * seeds the cache only, and the first status transition / `setMeta` performs
+   * the first durable `put`. `true` writes the record immediately, for the
+   * "show the empty session in the list now" case.
+   */
+  readonly eager?: boolean;
 }
 
 /**
@@ -182,6 +194,9 @@ export class SessionRuntime {
   private readonly store: SessionStore | undefined;
   private readonly storeCtx: () => StoreCtx;
 
+  /** Persist the record at genesis rather than on first mutation (E11). */
+  private readonly eager: boolean;
+
   /**
    * The single-key projection of this session's `SessionRecord`. One cache
    * entry, keyed by session id; write-through to the durable `SessionStore`
@@ -205,6 +220,7 @@ export class SessionRuntime {
     this.id = init.id;
     this.store = init.store;
     this.storeCtx = init.storeCtx;
+    this.eager = init.eager ?? false;
 
     const store: Store<
       SessionRecord,
@@ -236,7 +252,8 @@ export class SessionRuntime {
   }
 
   /**
-   * GENESIS (ADR 93) — adopt this session's persisted record, then upsert.
+   * GENESIS (ADR 93) — adopt a persisted record on RESUME; otherwise persist
+   * a new record only when `eager`, else lazily on first mutation.
    *
    * A `createSession` with an id the durable registry already holds is a
    * RESUME, and the record it holds is the session's real history: when it was
@@ -248,8 +265,9 @@ export class SessionRuntime {
    * freshly opened harness is `idle` and the execution the previous process
    * died mid-way through is not running here.
    *
-   * The durable upsert lands here rather than in the constructor so that a
-   * resume reads before it writes.
+   * The read lands here rather than in the constructor so that a resume reads
+   * before it writes. A NEW session (nothing persisted) defers its first write
+   * to the first status transition / `setMeta` unless `eager` forces it now.
    */
   async hydrate(): Promise<void> {
     const persisted = await this.store?.get(this.id, this.storeCtx());
@@ -265,8 +283,10 @@ export class SessionRuntime {
           currentExecutionId: undefined,
         }) as SessionRecord,
       );
+      this.commit({}, { persist: true });
+      return;
     }
-    this.commit({}, { persist: true });
+    this.commit({}, { persist: this.eager });
   }
 
   // ────────── record read-modify-write ──────────

@@ -132,7 +132,9 @@ function createSessionReq(appId: string, metadata: Record<string, unknown>): Jso
     jsonrpc: "2.0",
     id: 1,
     method: "app/create_session",
-    params: { appId, metadata },
+    // `eager` so the durable record these tests read back exists at genesis
+    // (lazy genesis otherwise defers the write to the first mutation).
+    params: { appId, metadata, eager: true },
   };
 }
 

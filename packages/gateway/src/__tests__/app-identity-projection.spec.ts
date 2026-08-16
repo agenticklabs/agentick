@@ -125,6 +125,9 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
     const session = await app.createSession({
       title: "Kitchen reno costs",
       description: "Job 4471 overrun",
+      // `eager` so the durable record exists to project (lazy genesis otherwise
+      // defers the write to the first mutation).
+      eager: true,
     });
     const wire = fakeWireCaller({ apps: [app] });
 
@@ -156,8 +159,12 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
       rootElement: NULL_ROOT,
       options: mkAppOptions({ title: "Ernesto" }),
     });
-    const parent = await app.createSession({ title: "a real conversation" });
-    await app.createSession({ title: "the analyst's own work", parentSessionId: parent.id });
+    const parent = await app.createSession({ title: "a real conversation", eager: true });
+    await app.createSession({
+      title: "the analyst's own work",
+      parentSessionId: parent.id,
+      eager: true,
+    });
     const wire = fakeWireCaller({ apps: [app] });
 
     const all = await wire.call<{ sessions: readonly SessionEntry[] }>("app/list_sessions", {
@@ -193,7 +200,7 @@ describe("SessionEntry projection — a thread list can label its rows", () => {
     const gateway = await createGateway();
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
-    const session = await app.createSession();
+    const session = await app.createSession({ eager: true });
 
     const entry = await fakeWireCaller({ apps: [app] }).call<SessionEntry>("app/get_session", {
       appId: app.id,
