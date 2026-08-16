@@ -12,7 +12,7 @@ import { describe } from "vitest";
 
 import { runRecoveryConformance } from "@agentick/spec-conformance";
 import type { RecoveryFactory, RecoveryStep, RecoveryTickStart } from "@agentick/spec-conformance";
-import type { ChatCompletionChunk } from "openai/resources/chat/completions";
+import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/completions";
 
 import { createApp } from "@agentick/app/react";
 
@@ -20,6 +20,7 @@ import { openai } from "../index.js";
 import {
   StubOpenAIClient,
   asClient,
+  mkCompletion,
   mkContentChunk,
   mkFinishChunk,
   type CannedResponse,
@@ -52,7 +53,21 @@ function truncatedToolCallChunk(): ChatCompletionChunk {
   } as ChatCompletionChunk;
 }
 
-function canned(step: RecoveryStep): CannedResponse {
+function truncatedToolCallCompletion(): ChatCompletion {
+  const completion = mkCompletion({
+    toolCalls: [{ id: "call_1", name: "query", arguments: {} }],
+  });
+  const call = completion.choices[0].message.tool_calls![0] as { function: { arguments: string } };
+  call.function.arguments = '{"table":"Alloc';
+  return completion;
+}
+
+function canned(step: RecoveryStep, stream: boolean): CannedResponse {
+  if (!stream) {
+    return step === "malformed"
+      ? { kind: "non-streaming", completion: truncatedToolCallCompletion() }
+      : { kind: "non-streaming", completion: mkCompletion({ text: "recovered" }) };
+  }
   return step === "malformed"
     ? {
         kind: "streaming",
@@ -75,7 +90,7 @@ const recoveryFactory: RecoveryFactory = async (script) => {
 
   return {
     async run({ stream = true, tickFailurePolicy } = {}) {
-      stub = new StubOpenAIClient(script.map(canned));
+      stub = new StubOpenAIClient(script.map((s) => canned(s, stream)));
       const app = await createApp(React.createElement(Agent), {
         model: openai("gpt-4o-mini", { client: asClient(stub) }),
         ...(tickFailurePolicy !== undefined ? { tickFailurePolicy } : {}),
@@ -107,9 +122,6 @@ const recoveryFactory: RecoveryFactory = async (script) => {
   };
 };
 
-// Non-streaming has no malformed lane: `normalizeImpl` catches the
-// `JSON.parse` of `function.arguments` and keeps the raw string as
-// `{ value }`, so the tool dispatches instead of the tick failing.
 describe("openai()", () => {
-  runRecoveryConformance(recoveryFactory, { nonStreaming: false });
+  runRecoveryConformance(recoveryFactory);
 });

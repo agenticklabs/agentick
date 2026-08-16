@@ -432,25 +432,24 @@ export function anthropic(
           } else if (kind === "tool_use") {
             const callId = state.toolCallIdByBlock.get(idx) ?? "";
             const entry = accum.toolCalls.get(callId);
-            let parsedInput: Readonly<Record<string, unknown>> = {};
+            let parsedInput: Readonly<Record<string, unknown>> | undefined;
             try {
               parsedInput = entry?.argsBuffer
                 ? (JSON.parse(entry.argsBuffer) as Readonly<Record<string, unknown>>)
                 : {};
             } catch {
-              // TODO(adr-99): coercing to `{}` here dispatches the tool with
-              // empty input and hides the malformed generation from the retry
-              // policy. Emitting no summary delta would let the accumulator's
-              // `toolCallInput` raise `MalformedModelOutput` from the buffer.
-              // Un-skips `__tests__/recovery-conformance.spec.ts`.
+              // No summary on unparseable arguments — the accumulator raises
+              // MalformedModelOutput from the buffer at finalize (ADR 99).
             }
             out.push({ type: "tool-call-end", callId });
-            out.push({
-              type: "tool-call",
-              callId,
-              name: entry?.name ?? "",
-              input: parsedInput,
-            });
+            if (parsedInput !== undefined) {
+              out.push({
+                type: "tool-call",
+                callId,
+                name: entry?.name ?? "",
+                input: parsedInput,
+              });
+            }
           } else if (kind === "thinking" || kind === "redacted_thinking") {
             out.push({ type: "reasoning-end", blockIndex: idx });
             out.push({

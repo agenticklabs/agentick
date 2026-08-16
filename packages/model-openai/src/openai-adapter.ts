@@ -72,7 +72,7 @@ import type {
   TextBlock,
   ToolCall,
 } from "@agentick/spec";
-import { mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
+import { MalformedModelOutput, mergeProviderOptions, SPEC_VERSION } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 
 // ============================================================================
@@ -981,12 +981,12 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
       let parsed: unknown;
       try {
         parsed = t.function.arguments ? JSON.parse(t.function.arguments) : {};
-      } catch {
-        // TODO(adr-99): keeping the raw string dispatches the tool with
-        // `{ value: "<garbage>" }` instead of failing the tick, so the retry
-        // policy never sees the malformed generation. Un-skips the
-        // non-streaming case in `__tests__/recovery-conformance.spec.ts`.
-        parsed = t.function.arguments ?? {};
+      } catch (cause) {
+        throw new MalformedModelOutput({
+          toolName: name,
+          rawArguments: t.function.arguments,
+          cause,
+        });
       }
       const inputObj =
         parsed && typeof parsed === "object" && !Array.isArray(parsed)

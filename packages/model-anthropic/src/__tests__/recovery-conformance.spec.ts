@@ -107,8 +107,9 @@ const recoveryFactory: RecoveryFactory = async (script) => {
   };
 };
 
-// TODO(adr-99): drop `.skip` once `translateEvent` stops coercing an
-// unparseable tool-args buffer to `{}` (`anthropic-adapter.ts`).
-describe.skip("anthropic()", () => {
+// Non-streaming stays skipped for a different reason than streaming ever was:
+// `messages.create` returns `tool_use.input` server-parsed, so an unparseable
+// argument buffer cannot occur on that seam.
+describe("anthropic()", () => {
   runRecoveryConformance(recoveryFactory, { nonStreaming: false });
 });
