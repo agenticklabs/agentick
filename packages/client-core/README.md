@@ -565,6 +565,37 @@ A spent budget is reported, not silent: `readiness` settles on
 `{ kind: "handshake-failed", retrying: false }`. Verified by
 [`src/__tests__/handshake-retry.spec.ts`](src/__tests__/handshake-retry.spec.ts).
 
+### `reconnect()` — the click that says "try now"
+
+Both loops back off up to 30s. That is right for an unattended client and wrong
+for a person looking at a disconnected dot: they know the VPN came back, and the
+loop does not. `reconnect()` is how they say so — it is what makes the indicator
+a button.
+
+```tsx
+<button className={dotClass(client.state, client.readiness)} onClick={() => client.reconnect()} />
+```
+
+Whichever loop is waiting gets collapsed: a wire that is down is dialled
+immediately, and a wire that is UP with a failed handshake re-arms the handshake
+from attempt zero. That includes the spent-budget terminal above, which nothing
+else recovers — a finite `maxAttempts` bounds what the client does **on its own**,
+and a person asking is not that, so the manual attempt runs on a fresh budget.
+
+It resolves when the attempt has **settled**, not when it succeeded, and it does
+not reject on a failed attempt — a click handler has nowhere to put that, and the
+failure is already on `state` and `readiness`, which is where the dot is looking
+anyway. Re-read them after it resolves. It is a no-op while `ready` or
+`handshaking` on a live wire, so a double-click costs one handshake, and it throws
+on a client you have `close()`d: closed is terminal, and the way back is a fresh
+`connect()`. Verified by [`src/__tests__/reconnect.spec.ts`](src/__tests__/reconnect.spec.ts).
+
+> **Stale tokens.** Reconnecting is the only thing that re-runs the handshake, so
+> today it is also the only thing that picks up refreshed credentials — the
+> connection carries whatever the transport was built with. If a reconnect keeps
+> failing on auth, the token is the suspect, and re-authenticating means standing
+> up a new client rather than kicking this one. ADR 34 owns the real fix.
+
 ### The gateway you come back to may not be the one you left
 
 A reconnect restores the **wire**. It does not restore anything the peer was
@@ -943,6 +974,7 @@ auto-connect; call `connect()` when you want the wire open.
 | Member                                  | Purpose                                            |
 | --------------------------------------- | -------------------------------------------------- |
 | `connect()` / `close()`                 | Open the wire + handshake; tear everything down    |
+| `reconnect()`                           | Try NOW — collapse whichever backoff is waiting    |
 | `state` / `onStateChange(fn)`           | Connection state, and transitions                  |
 | `capabilities` / `serverInfo`           | What the connected gateway supports, and who it is |
 | `onCapabilitiesChange(fn)`              | Fires on every capability-snapshot swap            |
@@ -1077,6 +1109,13 @@ transport changes the `createClient` call and nothing else.
   `serverInfo`, `MethodNotFound` degradation on `_extensions/list`, rejection when
   `initialize` fails, clearing on drop, re-handshake on reconnect (and _not_ on the
   initial open), best-effort failure of the post-reconnect handshake.
+- `src/__tests__/reconnect.spec.ts` — `reconnect()` collapsing both waits, with the
+  retry floor pinned far past the test's own lifetime so a second attempt can only
+  be the manual kick: a retrying handshake re-armed, a SPENT budget recovered all
+  the way to `ready`, a down wire dialled now, a failed kick resolving rather than
+  rejecting, the ready no-op, and the closed-client refusal. The transport half —
+  a `connect()` that wins during backoff not being clobbered by the timer it beat —
+  is pinned in [@agentick/transport](../transport)'s `never-stops.spec.ts`.
 - `src/__tests__/hooks.spec.ts` — `onBeforeSessionSend` param transform and abort,
   `onAfterSessionSend` result transform, method scoping, `hook` batch and `hooks`
   proxy registration plus unsubscribe, empty-registry fast path, and the

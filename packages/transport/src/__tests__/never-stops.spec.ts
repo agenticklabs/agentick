@@ -138,6 +138,19 @@ class ProbeTransport extends BaseClientTransport {
   }
 }
 
+const FIXED_BACKOFF_MS = 50;
+
+/**
+ * Full jitter means a scheduled delay can land anywhere in `[0, exp)`, so a
+ * test that needs a timer to still be PENDING at a known moment has to pin the
+ * curve rather than pick a big number and hope.
+ */
+class FixedBackoffProbe extends ProbeTransport {
+  protected override computeBackoff(): number {
+    return FIXED_BACKOFF_MS;
+  }
+}
+
 describe("the dial loop cannot be stopped by a failing dial", () => {
   it("keeps dialing when a dial reports its failure to NOBODY", async () => {
     // No close event, no drop — just a rejected promise the loop used to
@@ -306,6 +319,28 @@ describe("the dial loop cannot be stopped by a failing dial", () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(t.dials).toBe(settled);
     expect(t.state).toBe("closed");
+  });
+
+  it("a connect() that wins during backoff is not clobbered by the pending timer", async () => {
+    // What `client.reconnect()` drives: dial NOW rather than serve out a wait
+    // that can reach 30s. The timer it beats is still armed — and before it was
+    // taught to stand down, it re-entered `openConnection` on a HEALTHY wire,
+    // which in the WebSocket subclass replaces the live socket with a second
+    // one and orphans the first.
+    const t = new FixedBackoffProbe();
+    await t.connect().catch(() => {});
+    expect(t.state).toBe("reconnecting");
+
+    t.behavior = "succeed";
+    await t.connect();
+    expect(t.state).toBe("open");
+    const dialsWhenOpen = t.dials;
+
+    // Past the armed timer's deadline.
+    await new Promise((r) => setTimeout(r, FIXED_BACKOFF_MS * 3));
+    expect(t.dials).toBe(dialsWhenOpen);
+    expect(t.state).toBe("open");
+    await t.close();
   });
 });
 

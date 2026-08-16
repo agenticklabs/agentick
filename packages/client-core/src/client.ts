@@ -57,6 +57,7 @@ import {
   WireRpcError,
   deserializeAgentickError,
   isClientStateFailed,
+  isClientStateOpen,
   parseHookKey,
 } from "@agentick/spec";
 import { computeFullJitterBackoff, generateId } from "@agentick/utils";
@@ -456,6 +457,36 @@ class AgentickClient implements ClientProtocol {
     this.closed = false;
     await this.transport.connect();
     await this.startHandshake();
+  }
+
+  /**
+   * Collapse whichever recovery loop is waiting — see
+   * {@link ClientProtocol.reconnect} for the contract.
+   *
+   * Both branches reuse the machinery the automatic loops already run on
+   * rather than duplicating it: `transport.connect()` dials immediately (the
+   * transport's pending backoff timer stands down on its own once the wire is
+   * open), and {@link startHandshake} clears the handshake timer, stamps a new
+   * epoch and resets the attempt count — which is exactly "from attempt zero,
+   * on a fresh budget".
+   *
+   * @verifiedBy src/__tests__/reconnect.spec.ts
+   */
+  async reconnect(): Promise<void> {
+    if (this.closed) {
+      throw new Error(`client ${this.id} is closed; call connect() to open a new one`);
+    }
+    const wireOpen = isClientStateOpen(this.transport.state);
+    if (wireOpen && (this._readiness === "ready" || this._readiness === "handshaking")) return;
+
+    if (!wireOpen) {
+      // A failed dial is not this caller's to throw — see the contract. The
+      // transport's own loop carries it forward from here.
+      await this.transport.connect().catch(() => undefined);
+      // Still down: the wire owns recovery and there is no handshake to run.
+      if (!isClientStateOpen(this.transport.state)) return;
+    }
+    await this.startHandshake().catch(() => undefined);
   }
 
   /**

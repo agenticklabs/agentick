@@ -116,6 +116,36 @@ export interface ClientProtocol {
 
   // ── connection lifecycle ────────────────────────────────────────────────
   connect(): Promise<void>;
+  /**
+   * Try NOW — the user-initiated twin of the two automatic recovery loops.
+   *
+   * Both of those loops back off with full jitter up to 30s, which is right
+   * for an unattended client and wrong for a person looking at a disconnected
+   * indicator: they have information the loop does not (the VPN is back), and
+   * without this there is no way to say so.
+   *
+   * ```ts
+   * <button onClick={() => client.reconnect()} />
+   * ```
+   *
+   * Whichever loop is waiting gets collapsed: a wire that is down is dialled
+   * immediately, and a wire that is UP with a failed handshake re-arms the
+   * handshake from attempt zero — including the spent-budget terminal
+   * (`{ kind: "handshake-failed", retrying: false }`), which nothing else
+   * recovers. A finite `maxAttempts` bounds what the client does on its own;
+   * a person asking is not that, so the manual attempt starts a fresh budget.
+   *
+   * Resolves when the attempt has SETTLED, not when it succeeded — read
+   * {@link ClientProtocol.readiness} / {@link ClientProtocol.state} afterwards,
+   * exactly as the indicator that called it already does. It does not reject on
+   * a failed attempt: a click handler has nowhere to put that, and the failure
+   * is already reported on both surfaces.
+   *
+   * A no-op when the client is already `ready` or mid-`handshaking` on a live
+   * wire. Throws on a CLOSED client — `close()` is terminal, and the way back
+   * is a fresh {@link ClientProtocol.connect}, not a resurrection.
+   */
+  reconnect(): Promise<void>;
   close(): Promise<void>;
   onStateChange(handler: (state: ClientState) => void): () => void;
 

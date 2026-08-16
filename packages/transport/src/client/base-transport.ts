@@ -931,6 +931,11 @@ export abstract class BaseClientTransport implements ClientTransport {
     const generation = ++this.dialGeneration;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      // Someone dialled successfully while this timer counted down — an
+      // adopter's `connect()`, or the `reconnect()` verb collapsing the wait.
+      // Dialling now would run `openConnection` against a HEALTHY wire, and a
+      // subclass that replaces its socket there would orphan the live one.
+      if (this.currentState === "open") return;
       // `dial()` is single-flight and never throws synchronously — a subclass
       // whose `openConnection` throws would otherwise escape this timer
       // callback as an uncaught exception, taking the loop (and, under Node's
