@@ -28,17 +28,22 @@
  *
  * ## Authorization
  *
- * Every scope kind passes through the SAME gate, and there is exactly one: the
- * verb-derived `sub:subscribe` label the dispatcher requires of any caller.
- * Scope-target resolution — the same-principal rule and the session's scope
- * ceiling — keys on `params.sessionId`, which these params do not carry (the
- * target rides `params.scope.id`), so it does not run for ANY subscription
+ * Every scope kind passes through the dispatcher's verb-derived `sub:subscribe`
+ * label. Scope-target resolution — the same-principal rule and the session's
+ * scope ceiling — keys on `params.sessionId`, which these params do not carry
+ * (the target rides `params.scope.id`), so it does not run for ANY subscription
  * scope. `session-tree` therefore adds no reachability a `session` subscription
  * did not already have, and it is the right shape when it does run: principal
- * descends the spawn tree (ADR 48), so admitting a root admits its tree. The
- * gap is not this scope's, and it is already named —
- * `TODO(trail-session-resolution-seam)` in `@agentick/transport`'s
- * `authorizeDispatch`, which is where subscribe scopes must route to be seen.
+ * descends the spawn tree (ADR 48), so admitting a root admits its tree. That
+ * gap is already named — `TODO(trail-session-resolution-seam)` in
+ * `@agentick/transport`'s `authorizeDispatch`, which is where subscribe scopes
+ * must route to be seen.
+ *
+ * Until they do, the two UNBOUNDED scopes carry their own admission: `gateway`
+ * and `app` are narrowed to the caller's principal by {@link onlyOwnedBy}.
+ * Without it, holding `sub:subscribe` was enough to receive every tenant's
+ * traffic — a live leak (#297), not a theoretical one, since a thread list
+ * subscribes at gateway scope by design.
  *
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  */
@@ -89,33 +94,77 @@ async function* onlyInTree(
 }
 
 /**
+ * Admit only what the CALLER owns — the identity axis of {@link onlyInTree}'s
+ * lineage one, and the thing that makes the two unbounded scopes tenant-safe.
+ *
+ * TENANT DATA is what a session emits, so naming a session is what subjects an
+ * envelope to the rule — and an envelope that names one had better be stamped,
+ * because an UNSTAMPED session envelope fails CLOSED. That is the whole point:
+ * a channel frame that forgot to stamp itself must not become the way around
+ * the filter, and the fix for one belongs at its emitter.
+ *
+ * An envelope that names NO session is control plane — `gateway:capabilities:
+ * changed` carries `gatewayId` and nothing else — and passes. Filtering it out
+ * would break capability reactivity for every authenticated deployment while
+ * protecting nothing: it is a signal that the extension set moved, with no
+ * tenant content to leak. The soft edge, stated rather than discovered: an
+ * app-level operation event carries no session either, so app lifecycle is
+ * visible across tenants. That is a metadata surface, not a data one, and
+ * closing it means stamping the emitter — not widening this predicate, which
+ * would only move the hole.
+ *
+ * A principal-LESS deployment (the local pole, no authenticator) matches
+ * `undefined === undefined` and is unaffected: nothing is stamped, nobody is
+ * authenticated, everything is admitted exactly as before.
+ *
+ * INTERIM per #297. The structural end-state is bus topology — a subscriber
+ * ATTACHES to the bus it is entitled to, so isolation is a property of what you
+ * are connected to rather than of a predicate every new event kind has to
+ * remember to satisfy. This filter is the stopgap that closes the live leak.
+ */
+async function* onlyOwnedBy(
+  live: AsyncIterable<EventEnvelope>,
+  principal: string | undefined,
+): AsyncGenerator<EventEnvelope> {
+  for await (const envelope of live) {
+    if (envelope.scope.sessionId === undefined) {
+      yield envelope;
+    } else if (envelope.scope.principal === principal) {
+      yield envelope;
+    }
+  }
+}
+
+/**
  * Resolve the scope's event iterable — mirrors the pre-#303
  * `openScopeEvents` helper. `null` return means the scope's target
  * (app or session) wasn't found.
  *
- * TODO(gateway-scope-subscription): the third rung of the scope ladder — a
- * subscription over everything ONE PRINCIPAL owns, carved by principal rather
- * than by spawn lineage. `{ kind: "gateway" }` exists but is the whole gateway,
- * which is an operator's view, not a tenant's. The design is principal-prefix
- * admission: widen to `gateway.events(...)` and admit an envelope iff the
- * emitting session's principal equals the caller's, the same arrival-filter
- * shape as `session-tree` with the identity axis instead of the lineage one.
- * Unbuilt because no consumer has asked and the envelope scope carries no
- * principal today (`TODO(signal-scope-app-id)`'s neighbor — both want more
- * identity on the envelope, and closing them belongs at the emitter).
+ * The two UNBOUNDED scopes (`gateway`, and `app` — which the shared default bus
+ * makes gateway-wide in practice) are narrowed to the caller's principal on
+ * arrival by {@link onlyOwnedBy}. The two session scopes are already bounded by
+ * an id the caller named.
+ *
+ * TODO(gateway-scope-subscription): what remains of #297 is the OPERATOR view —
+ * a caller entitled to the whole gateway rather than to one tenant's slice of
+ * it. Deliberately not built here: there is no privileged-caller notion in this
+ * layer to key it off, and inventing one inside a leak fix is how a privilege
+ * escalation gets shipped. Its natural home is the authorizer's existing scope
+ * label (`AuthorizeInput.scope`), asked once at subscribe time.
  */
 function openScopeEvents(
   gateway: GatewayHarnessProtocol,
   params: SubscribeParams,
+  principal: string | undefined,
 ): AsyncIterable<EventEnvelope> | null {
   const scope = params.scope;
   if (scope.kind === "gateway") {
-    return gateway.events(params.query) as AsyncIterable<EventEnvelope>;
+    return onlyOwnedBy(gateway.events(params.query) as AsyncIterable<EventEnvelope>, principal);
   }
   if (scope.kind === "app") {
     const app = gateway.app(scope.id);
     if (!app) return null;
-    return app.events(params.query) as AsyncIterable<EventEnvelope>;
+    return onlyOwnedBy(app.events(params.query) as AsyncIterable<EventEnvelope>, principal);
   }
   if (scope.kind === "session") {
     const app = ownerApp(gateway, scope.id);
@@ -224,7 +273,7 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // tiny overlap (a delta counted in both the snapshot version and the
       // live tail) is absorbed by the client's idempotent, version-gated
       // reducer.
-      let iterable = openScopeEvents(ctx.gateway, params);
+      let iterable = openScopeEvents(ctx.gateway, params, ctx.principal);
       if (!iterable) {
         // Name the thing that is missing. Not cosmetic: a client deciding
         // whether to re-ask needs to tell "this scope is not here (yet)" from
