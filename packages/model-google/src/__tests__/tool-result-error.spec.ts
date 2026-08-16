@@ -20,7 +20,8 @@ import { describe, expect, it } from "vitest";
 import type { GenerateContentParameters } from "@google/genai";
 import type { ContentBlock } from "@agentick/spec";
 
-import { StubGoogleClient, makeExecutor, mkResponse, mkTarget } from "./stub-google-client.js";
+import { StubGoogleClient, mkResponse, mkTarget } from "../testing/index.js";
+import { makeExecutor } from "./executor-harness.js";
 
 /** The `functionResponse.response` the adapter sent for the first tool result. */
 function sentToolResponse(params: GenerateContentParameters): Record<string, unknown> | undefined {

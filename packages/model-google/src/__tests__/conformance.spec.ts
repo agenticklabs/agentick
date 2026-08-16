@@ -18,7 +18,7 @@ import type { GenerateContentResponse } from "@google/genai";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 
 import { google } from "../google-adapter.js";
-import { StubGoogleClient, asClient, mkResponse, throwingClient } from "./stub-google-client.js";
+import { StubGoogleClient, asClient, mkResponse, throwingClient } from "../testing/index.js";
 
 function responseFor(scripted: LanguageModelExecutionResult | undefined): GenerateContentResponse {
   const text =

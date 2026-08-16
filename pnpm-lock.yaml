@@ -1168,6 +1168,9 @@ importers:
         specifier: ^1.31.0
         version: 1.38.0(@modelcontextprotocol/sdk@1.29.0(supports-color@8.1.1)(zod@4.3.6))(supports-color@8.1.1)
     devDependencies:
+      '@agentick/app':
+        specifier: workspace:*
+        version: link:../app
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1177,9 +1180,15 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
+      '@types/react':
+        specifier: ^19.2.5
+        version: 19.2.13
       effect:
         specifier: ^3.22.0
         version: 3.22.0
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages/model-openai:
     dependencies:

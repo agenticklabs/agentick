@@ -30,7 +30,7 @@ import {
   mkTextChunk,
   mkFunctionCallChunk,
   mkFinishChunk,
-} from "../__tests__/stub-google-client.js";
+} from "../testing/index.js";
 
 const ITERATIONS = 25;
 

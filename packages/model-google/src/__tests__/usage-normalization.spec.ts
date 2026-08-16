@@ -26,13 +26,12 @@ import type { ExecutionTarget, RateCard } from "@agentick/spec";
 import { google } from "../google-adapter.js";
 import {
   StubGoogleClient,
-  emptyTree,
-  makeExecutor,
   mkFinishChunk,
   mkResponse,
   mkTarget,
   mkTextChunk,
-} from "./stub-google-client.js";
+} from "../testing/index.js";
+import { emptyTree, makeExecutor } from "./executor-harness.js";
 
 const CARD: RateCard = {
   id: "google:gemini-2.5-flash@2026-07-01",

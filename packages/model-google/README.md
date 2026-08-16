@@ -14,6 +14,8 @@ npm install @agentick/model-google
 manifest only when you import from it directly — combinators, the model
 registry, `defineLanguageModelAdapter`.
 
+Subpaths: `/testing` (`StubGoogleClient`, `throwingClient`, and the canned-response builders — see [Certify it](#certify-it)).
+
 ## Quick start
 
 ```tsx
@@ -267,6 +269,7 @@ import { runExecutorConformance } from "@agentick/spec-conformance";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { LanguageModelExecutor } from "@agentick/model-executor";
 import { google } from "@agentick/model-google";
+import { throwingClient } from "@agentick/model-google/testing";
 
 runExecutorConformance(
   async ({ harnessId, scripted, throws }) => {
@@ -295,7 +298,7 @@ runExecutorConformance(
 );
 ```
 
-`stubClientFor` is yours to write: it returns canned SDK payloads shaped so they normalize back to what the suite scripted, which means the round trip through `prepareRequest → send → normalize` is what is actually under test rather than a mock of your own code. Write the dialect tests the same way — assert against the request the stub _received_, and against the canonical result your `normalize` produced.
+`@agentick/model-google/testing` ships the pieces that are the same for every suite: `StubGoogleClient` (a `GoogleGenAI` whose `generateContent` / `generateContentStream` record their params and hand back a canned sequence), `asClient`, `throwingClient`, and the response builders `mkResponse` / `mkTextChunk` / `mkFunctionCallChunk` / `mkFinishChunk`. Only `stubClientFor` is yours: it maps the suite's scripted result to canned SDK payloads that normalize back to it, so the round trip through `prepareRequest → send → normalize` is what is under test rather than a mock of your own code. Write the dialect tests the same way — assert against the request the stub _received_, and against the canonical result your `normalize` produced.
 
 The second argument is required and total over `ExecuteError["_tag"]`: for each failure class, provider-native errors your classification must resolve to it, or `"not-applicable"` when nothing does. The suite throws each fixture from the client on BOTH seams — `execute()` and `executeStream()` — and asserts the tag on the executor's own rejection each time — so a class added to the taxonomy breaks this file at compile time until you decide.
 

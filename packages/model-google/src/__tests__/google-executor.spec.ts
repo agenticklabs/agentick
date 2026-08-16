@@ -30,10 +30,9 @@ import {
   mkThoughtChunk,
   mkFunctionCallChunk,
   mkFinishChunk,
-  makeExecutor,
-  emptyTree,
   mkTarget,
-} from "./stub-google-client.js";
+} from "../testing/index.js";
+import { emptyTree, makeExecutor } from "./executor-harness.js";
 
 // ============================================================================
 // Helpers

@@ -28,6 +28,11 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts",
+      "default": "./src/testing/index.ts"
     }
   },
   "publishConfig": {
@@ -37,10 +42,22 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js",
+        "default": "./dist/testing/index.js"
       }
     },
     "main": "./dist/index.js",
-    "types": "./dist/index.d.ts"
+    "types": "./dist/index.d.ts",
+    "typesVersions": {
+      "*": {
+        "testing": [
+          "./dist/testing/index.d.ts"
+        ]
+      }
+    }
   },
   "scripts": {
     "bench": "vitest bench --run",
@@ -57,10 +74,13 @@
     "@google/genai": "^1.31.0"
   },
   "devDependencies": {
+    "@agentick/app": "workspace:*",
     "@agentick/model-executor": "workspace:*",
     "@agentick/runtime": "workspace:*",
     "@agentick/spec-conformance": "workspace:*",
-    "effect": "^3.22.0"
+    "@types/react": "^19.2.5",
+    "effect": "^3.22.0",
+    "react": "^19.2.4"
   },
   "engines": {
     "node": ">=20.19"

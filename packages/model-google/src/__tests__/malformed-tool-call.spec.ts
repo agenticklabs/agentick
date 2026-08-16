@@ -23,7 +23,8 @@ import { describe, expect, it } from "vitest";
 import type { GenerateContentResponse } from "@google/genai";
 
 import { google } from "../google-adapter.js";
-import { StubGoogleClient, emptyTree, makeExecutor, mkTarget } from "./stub-google-client.js";
+import { StubGoogleClient, mkTarget } from "../testing/index.js";
+import { emptyTree, makeExecutor } from "./executor-harness.js";
 
 /** Verbatim from the round-trip capture that surfaced this. */
 const FINISH_MESSAGE =

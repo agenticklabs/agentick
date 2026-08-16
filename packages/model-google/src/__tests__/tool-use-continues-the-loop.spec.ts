@@ -20,13 +20,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   StubGoogleClient,
-  emptyTree,
-  makeExecutor,
   mkFinishChunk,
   mkFunctionCallChunk,
   mkResponse,
   mkTarget,
-} from "./stub-google-client.js";
+} from "../testing/index.js";
+import { emptyTree, makeExecutor } from "./executor-harness.js";
 
 describe("google() adapter — a candidate with functionCall parts stops for TOOL USE", () => {
   it("reports tool_use, not end, when the non-streaming candidate carries a call", async () => {
