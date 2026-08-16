@@ -338,12 +338,15 @@ Individual contributors are exported alongside their props types: `sectionContri
 | Export                                                          | Purpose                                                   |
 | --------------------------------------------------------------- | --------------------------------------------------------- |
 | `fakeCompiler()`                                                | Pass-through factory; `renderTree` returns an empty tree. |
+| `timelineCompiler()`                                            | React-free factory; `renderTree` folds the timeline only. |
 | `fakeBridges(options?)` / `FakeBridgesOptions`                  | A protocol-conforming bridge bundle.                      |
 | `fakeTimelineHarness` / `fakeKnobsHarness` / `mockStateHarness` | Protocol doubles, no real harness behavior.               |
 | `stubLoopBridge` / `stubSessionBridge`                          | Canned loop and session bridges.                          |
 
 > [!WARNING]
 > `fakeCompiler()` is for tests orthogonal to rendering — wire paths, session lifecycle, cross-layer integration. Its empty IR satisfies the protocol surface without exercising a renderer, so using it for component output, IR diagnostics, or hook lifecycle produces false-green results. Those need the real compiler from [@agentick/compiler-react](../compiler-react).
+
+`timelineCompiler()` exists for the case between the two: a test driving a REAL model adapter through the REAL loop, where the conversation must actually reach the provider. `fakeCompiler()` renders no messages at all, so every provider request it produces is empty — invisible when a `FakeLanguageModelExecutor` ignores the prompt, false green when the assertion is about the request. It folds message entries off `bridges.timeline` structurally, mirroring `timelineDefaultProjection`, and contributes nothing else: no sections, tools, or knobs. A test needing one of those needs the real compiler.
 
 The doubles are typed against the protocol interfaces, so a protocol change breaks them at compile time. They are also re-exported from the package root for convenience; prefer the `/testing` subpath in new code.
 

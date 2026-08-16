@@ -10,14 +10,13 @@
  * @see docs/proposals/v2/blueprint/99-tick-failure-recovery.md
  */
 
-import React from "react";
 import { describe } from "vitest";
 
 import { MockLanguageModelV2 } from "ai/test";
+import { createApp } from "@agentick/app";
+import { timelineCompiler } from "@agentick/compiler/testing";
 import { runRecoveryConformance } from "@agentick/spec-conformance";
 import type { RecoveryFactory, RecoveryStep, RecoveryTickStart } from "@agentick/spec-conformance";
-
-import { createApp } from "@agentick/app/react";
 
 import { aisdk } from "../index.js";
 
@@ -52,10 +51,6 @@ function partsFor(step: RecoveryStep): readonly unknown[] {
       usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
     },
   ];
-}
-
-function Agent(): React.ReactElement {
-  return React.createElement("section" as never, { id: "system" }, "You are a helpful agent.");
 }
 
 const recoveryFactory: RecoveryFactory = async (script) => {
@@ -95,7 +90,8 @@ const recoveryFactory: RecoveryFactory = async (script) => {
 
   return {
     async run({ stream = true, tickFailurePolicy } = {}) {
-      const app = await createApp(React.createElement(Agent), {
+      const app = await createApp(null, {
+        compiler: timelineCompiler(),
         model: aisdk(model),
         ...(tickFailurePolicy !== undefined ? { tickFailurePolicy } : {}),
       });

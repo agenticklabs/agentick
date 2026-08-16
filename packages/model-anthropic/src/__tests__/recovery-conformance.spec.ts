@@ -3,24 +3,20 @@
  * whose argument fragments never close the object, recovered by a REAL second
  * provider call.
  *
- * SKIPPED, and the parameterization is kept armed so un-skipping is the whole
- * change: `translateEvent` coerces an unparseable `input_json_delta` buffer to
- * `{}` at `content_block_stop` and emits it as the summary `tool-call` delta,
- * which is what the accumulator's `toolCallInput` reads instead of the buffer.
- * So the tick SUCCEEDS with an empty-input tool call — the exact silent-wrong
- * dispatch ADR 99 slice 4a removed from the shared accumulator — and there is
- * no malformed generation for a policy to recover from.
+ * `translateEvent` withholds the summary `tool-call` delta when the buffer does
+ * not parse, so the accumulator's `toolCallInput` reads the buffer and raises
+ * — rather than the tick succeeding with an empty-input tool call, which is the
+ * silent-wrong dispatch ADR 99 slice 4a removed from the shared accumulator.
  *
  * @see docs/proposals/v2/blueprint/99-tick-failure-recovery.md
  */
 
-import React from "react";
 import { describe } from "vitest";
 
+import { createApp } from "@agentick/app";
+import { timelineCompiler } from "@agentick/compiler/testing";
 import { runRecoveryConformance } from "@agentick/spec-conformance";
 import type { RecoveryFactory, RecoveryStep, RecoveryTickStart } from "@agentick/spec-conformance";
-
-import { createApp } from "@agentick/app/react";
 
 import { anthropic } from "../index.js";
 import {
@@ -64,10 +60,6 @@ function canned(step: RecoveryStep): CannedResponse {
   };
 }
 
-function Agent(): React.ReactElement {
-  return React.createElement("section" as never, { id: "system" }, "You are a helpful agent.");
-}
-
 const recoveryFactory: RecoveryFactory = async (script) => {
   let stub = new StubAnthropicClient([]);
   let close = async (): Promise<void> => {};
@@ -76,7 +68,8 @@ const recoveryFactory: RecoveryFactory = async (script) => {
   return {
     async run({ stream = true, tickFailurePolicy } = {}) {
       stub = new StubAnthropicClient(script.map(canned));
-      const app = await createApp(React.createElement(Agent), {
+      const app = await createApp(null, {
+        compiler: timelineCompiler(),
         model: anthropic("claude-3-5-sonnet-latest", { client: asClient(stub) }),
         ...(tickFailurePolicy !== undefined ? { tickFailurePolicy } : {}),
       });

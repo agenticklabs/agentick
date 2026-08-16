@@ -1114,6 +1114,9 @@ importers:
       '@agentick/app':
         specifier: workspace:*
         version: link:../app
+      '@agentick/compiler':
+        specifier: workspace:*
+        version: link:../compiler
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1123,12 +1126,6 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
 
   packages/model-anthropic:
     dependencies:
@@ -1148,6 +1145,9 @@ importers:
       '@agentick/app':
         specifier: workspace:*
         version: link:../app
+      '@agentick/compiler':
+        specifier: workspace:*
+        version: link:../compiler
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1157,15 +1157,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
       effect:
         specifier: ^3.22.0
         version: 3.22.0
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
 
   packages/model-executor:
     dependencies:
@@ -1207,6 +1201,9 @@ importers:
       '@agentick/app':
         specifier: workspace:*
         version: link:../app
+      '@agentick/compiler':
+        specifier: workspace:*
+        version: link:../compiler
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1216,15 +1213,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
       effect:
         specifier: ^3.22.0
         version: 3.22.0
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
 
   packages/model-openai:
     dependencies:
@@ -1244,6 +1235,9 @@ importers:
       '@agentick/app':
         specifier: workspace:*
         version: link:../app
+      '@agentick/compiler':
+        specifier: workspace:*
+        version: link:../compiler
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
@@ -1253,15 +1247,9 @@ importers:
       '@agentick/spec-conformance':
         specifier: workspace:*
         version: link:../spec-conformance
-      '@types/react':
-        specifier: ^19.2.5
-        version: 19.2.13
       effect:
         specifier: ^3.22.0
         version: 3.22.0
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
 
   packages/prompts:
     dependencies:

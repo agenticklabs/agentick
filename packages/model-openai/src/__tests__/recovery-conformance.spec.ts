@@ -7,14 +7,13 @@
  * @see docs/proposals/v2/blueprint/99-tick-failure-recovery.md
  */
 
-import React from "react";
 import { describe } from "vitest";
 
+import { createApp } from "@agentick/app";
+import { timelineCompiler } from "@agentick/compiler/testing";
 import { runRecoveryConformance } from "@agentick/spec-conformance";
 import type { RecoveryFactory, RecoveryStep, RecoveryTickStart } from "@agentick/spec-conformance";
 import type { ChatCompletion, ChatCompletionChunk } from "openai/resources/chat/completions";
-
-import { createApp } from "@agentick/app/react";
 
 import { openai } from "../index.js";
 import {
@@ -79,10 +78,6 @@ function canned(step: RecoveryStep, stream: boolean): CannedResponse {
       };
 }
 
-function Agent(): React.ReactElement {
-  return React.createElement("section" as never, { id: "system" }, "You are a helpful agent.");
-}
-
 const recoveryFactory: RecoveryFactory = async (script) => {
   let stub = new StubOpenAIClient([]);
   let close = async (): Promise<void> => {};
@@ -91,7 +86,8 @@ const recoveryFactory: RecoveryFactory = async (script) => {
   return {
     async run({ stream = true, tickFailurePolicy } = {}) {
       stub = new StubOpenAIClient(script.map((s) => canned(s, stream)));
-      const app = await createApp(React.createElement(Agent), {
+      const app = await createApp(null, {
+        compiler: timelineCompiler(),
         model: openai("gpt-4o-mini", { client: asClient(stub) }),
         ...(tickFailurePolicy !== undefined ? { tickFailurePolicy } : {}),
       });

@@ -93,7 +93,7 @@ interface RecoveryHandle {
 }
 ```
 
-`run` constructs and drives the app, so the policy and the stream flag vary per case while the script is fixed at factory time. Build the stub's canned sequence from the requested stream flag: an adapter that takes the wrong seam then fails loudly instead of quietly proving nothing.
+`run` constructs and drives the app, so the policy and the stream flag vary per case while the script is fixed at factory time. Build the stub's canned sequence from the requested stream flag: an adapter that takes the wrong seam then fails loudly instead of quietly proving nothing. Build the app with the root `createApp` from [@agentick/app](../app) over `timelineCompiler()` from [@agentick/compiler](../compiler)`/testing` — a model adapter must not depend on React, and `fakeCompiler()` renders no messages, which would leave the byte-identity assertion comparing two empty requests.
 
 ## Shared fixtures
 

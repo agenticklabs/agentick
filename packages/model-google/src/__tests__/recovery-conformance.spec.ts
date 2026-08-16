@@ -6,13 +6,12 @@
  * @see docs/proposals/v2/blueprint/99-tick-failure-recovery.md
  */
 
-import React from "react";
 import { describe } from "vitest";
 
+import { createApp } from "@agentick/app";
+import { timelineCompiler } from "@agentick/compiler/testing";
 import { runRecoveryConformance } from "@agentick/spec-conformance";
 import type { RecoveryFactory, RecoveryStep, RecoveryTickStart } from "@agentick/spec-conformance";
-
-import { createApp } from "@agentick/app/react";
 
 import { google } from "../index.js";
 import {
@@ -25,10 +24,6 @@ import {
 } from "../testing/index.js";
 
 type GoogleResponse = Extract<CannedResponse, { kind: "non-streaming" }>["response"];
-
-function Agent(): React.ReactElement {
-  return React.createElement("section" as never, { id: "system" }, "You are a helpful agent.");
-}
 
 function malformed(): GoogleResponse {
   return {
@@ -65,7 +60,8 @@ const recoveryFactory: RecoveryFactory = async (script) => {
   return {
     async run({ stream = true, tickFailurePolicy } = {}) {
       stub = new StubGoogleClient(script.map((step) => canned(step, stream)));
-      const app = await createApp(React.createElement(Agent), {
+      const app = await createApp(null, {
+        compiler: timelineCompiler(),
         model: google("gemini-2.5-flash", { client: asClient(stub) }),
         ...(tickFailurePolicy !== undefined ? { tickFailurePolicy } : {}),
       });
