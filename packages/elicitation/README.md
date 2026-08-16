@@ -132,6 +132,8 @@ switch (result.outcome) {
 
 `accepted` / `declined` / `cancelled` mirror MCP's three elicitation actions verbatim, and pass through with their `reason` intact. `failed` collapses the three system-driven terminals MCP has no vocabulary for — timeout, abort, schema violation — into one branch, with a nested discriminator for callers who care which.
 
+One observable side-effect worth knowing: while an ask is pending inside a running execution, the SESSION's status reads `input_required` (back to `running` on any resolution) — visible on `session.status`, on `list_sessions` rows, and as a `session:channel:status` frame. That is what lets a thread list say "this conversation is waiting on you" without the panel being open — see [@agentick/session](../session)'s README.
+
 Validation happens **server-side, against the live schema**, after the reply comes back. Async validators (a Zod `refine`, a Valibot `pipeAsync`) are awaited; a violation resolves to `failed`, never throws.
 
 `url` mode is the same call with a different shape: `{ mode: "url", message, url, elicitationId }`. Its `accepted` terminal carries `value: undefined` and means **the user consented to open the URL** — not that the out-of-band flow finished. Completion is a separate signal you layer on top of the consent.

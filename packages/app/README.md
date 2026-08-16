@@ -146,7 +146,7 @@ const b = await app.createSession({ sessionId: "chat-1" }); // same id, later pr
 const child = await a.spawn(<SubAgent />, { messages }); // inherits; no genesis
 ```
 
-Create-is-resume: there is no separate `resume` verb. Opening a session id whose durable log exists rehydrates it.
+Create-is-resume: there is no separate `resume` verb. Opening a session id whose durable log exists rehydrates it. Over the wire, `app/create_session` answers `{ sessionId, status }` — so a client that reopens a thread knows immediately whether it is `running` or `input_required` mid-turn, without waiting for a frame (the live feed after that moment is `session.status` — see [@agentick/client-core](../client-core#is-it-running-right-now)).
 
 ## Sessions
 
@@ -163,7 +163,7 @@ The store is the queryable superset: every non-ephemeral session ever, including
 
 ```ts
 const live = app.getSession("chat-1"); // undefined once closed or paged out
-const mine = await app.listSessions({ status: "active", updatedAfter: Date.now() - 86_400_000 });
+const mine = await app.listSessions({ status: "running", updatedAfter: Date.now() - 86_400_000 });
 const record = await app.getSessionRecord("chat-1"); // resolves closed sessions too
 ```
 
@@ -180,7 +180,7 @@ let cursor: string | undefined;
 do {
   const page = await client.gateway
     .app("ernesto")
-    .listSessions({ status: "active" }, { cursor, limit: 50 });
+    .listSessions({ status: "running" }, { cursor, limit: 50 });
   render(page.sessions);
   cursor = page.nextCursor;
 } while (cursor !== undefined);

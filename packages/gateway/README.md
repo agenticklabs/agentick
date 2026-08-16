@@ -99,10 +99,16 @@ It is the same verb as [`app.destroySession`](../app#close-vs-destroy) with the 
 The enumeration half of that pair: a client that can delete a session without naming its app has to be able to **find** one the same way. `gateway/list_sessions` unions every mounted app's session store into one recency-ordered list, and every row names the app it came from — which is what you then address its app-scoped verbs with.
 
 ```ts
-const { sessions, nextCursor } = await client.gateway.listSessions({ status: "active" }, { limit: 50 });
+const { sessions, nextCursor } = await client.gateway.listSessions(
+  { status: ["running", "input_required"] }, // the busy ones; omit for all
+  { limit: 50 },
+);
 sessions[0].appId; // stamped from the app the row was READ from, never copied off the record
+sessions[0].status; // "idle" | "running" | "input_required" | … — the live status, per row
 await client.gateway.app(sessions[0].appId).session(sessions[0].id).send({ ... });
 ```
+
+Every row carries the session's live `status`, and `list_sessions` is the ENUMERATE half of a pair: the NOTIFY half is `session:channel:status`, one gateway-scoped subscription delivering `{ sessionId, status, outcome? }` frames for every session the caller owns — including ones no handle is open for. Seed the list from the rows, subscribe once, and a thread list shows who is working, who needs an answer (`input_required`), and how the last run ended, live. The full consumption walk (subscribe-then-seed ordering included) is in [@agentick/client-core](../client-core#is-it-running-right-now)'s "Is it running right now?".
 
 **Scoped to the caller, and the only thing scoping it.** A cross-app list names no session, so the dispatch gate's same-principal target rule has nothing to resolve. Scoping rides the query (`principal`) so it reaches whichever source answers and is honored _inside_ the page — a filter applied after the page is cut returns short pages. Another principal's threads are absent, not an error.
 
