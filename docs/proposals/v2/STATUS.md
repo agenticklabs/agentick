@@ -2233,6 +2233,33 @@ telemetry middleware included). Nudges land structurally instead:
 Related trailhead already in code: `resultAttributes(op, result)` (symmetric
 result-derived sibling of `spanAttributes`) — class-level, not installer-level.
 
+### 2026-08-16 — recovery is a conformance rung; two adapters were still coercing
+
+A staging MALFORMED_FUNCTION_CALL incident (reproducible in-session,
+clean in a fresh one — context-correlated, not dice) prompted an
+end-to-end proof that the ADR 99 retry chain composes. It does:
+zero production changes needed, pinned at the provider boundary
+(exactly 2 calls, byte-identical requests, retryOfTick [--,1]). The
+proof first landed WRONG twice — in packages/app with a leafward-
+pointing devDep (Ryan: reject; inverted in-place), then as one
+adapter's bespoke spec (Ryan: "how is this not a generalizable testing
+pattern?"). Final form: `runRecoveryConformance` in spec-conformance
+(ca5e904aa), dependency-inverted — the suite imports vitest + one spec
+type; each adapter ships a ~30-line factory mapping an abstract
+[malformed, ok] script to its provider's native failure shape; the
+bespoke spec deleted. Wiring all four adapters found two live instances
+of the slice-4a defect one layer up (644b1c897): anthropic coerced an
+unparseable input_json_delta buffer to {} (now withholds the summary
+delta so the accumulator raises); openai's normalizeImpl wrapped
+garbage as { value } (now raises MalformedModelOutput). openai 4/4
+both seams; anthropic streaming live, nonStreaming:false as a provider
+fact (messages.create returns input server-parsed). Two review rules
+now standing in session memory: dep edges never point leafward, and
+family obligations ride the existing conformance vehicle. Remaining
+recovery design item: guided retry (ephemeral corrective context on
+the retry tick — blind identical retry provably loses to
+context-correlated malformation).
+
 ### 2026-08-15 — failed ticks flow through the decide fold (ADR 99)
 
 `blueprint/99-tick-failure-recovery.md`. Production incident: a malformed model
