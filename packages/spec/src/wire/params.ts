@@ -18,6 +18,7 @@ import type { ExecutionTarget } from "../data/execution-target.js";
 import type { ModelFacts } from "../data/model-facts.js";
 import type { ResponseFormat } from "../data/rendered-tree.js";
 import type { DestroySessionResult, SessionEntry, SessionFilter } from "../protocol/app-harness.js";
+import type { SessionStatus } from "../protocol/hook-bridges.js";
 import type {
   GatewayDestroySessionResult,
   GatewaySessionEntry,
@@ -137,6 +138,13 @@ export interface AppCreateSessionParams extends WireRequestParams {
 
 export interface AppCreateSessionResult {
   readonly sessionId: string;
+  /**
+   * What the session is doing, as of this reply. `create_session` is
+   * create-OR-RESUME, so an id the app already holds comes back with whatever
+   * that session is currently doing — a resume that lands on `running` is a
+   * turn already in flight, not an empty conversation.
+   */
+  readonly status: SessionStatus;
 }
 
 export interface AppGetSessionParams extends WireRequestParams {

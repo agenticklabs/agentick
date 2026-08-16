@@ -1007,6 +1007,13 @@ export interface SessionHarnessProtocol<P = unknown> {
   readonly id: string;
 
   /**
+   * What the session is doing right now — the live twin of the durable
+   * `SessionRecord.status` a `list_sessions` row carries — read it to answer
+   * "is this one busy?" without a store round trip.
+   */
+  readonly status: BridgeSessionStatus;
+
+  /**
    * Primary entry point. Adds the supplied messages to the timeline
    * and runs ONE execution via the loop executor. Returns a handle
    * that is both an `AsyncIterable<ProtocolEvent>` (for streaming

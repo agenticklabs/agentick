@@ -41,6 +41,7 @@ export {
 export {
   ELICITATION_CHANNEL,
   ELICITATION_CHANNEL_FQN,
+  ELICITATION_ELICIT_COMMAND,
   type ElicitationChannelName,
   type ElicitationSnapshotFrame,
   type PendingElicitation,

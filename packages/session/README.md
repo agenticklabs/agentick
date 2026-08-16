@@ -702,6 +702,41 @@ const recent = await app.listSessions({ status: "idle", updatedAfter: Date.now()
 await app.setSessionMeta("s:1", { title: "Release triage" });
 ```
 
+A record is the **enumerate** half. The notify half is `session:channel:status`: every
+status transition — including the ones a `close()` or an eviction sweep produces — is
+published as a `SessionStatusFrame`, and the channel opens on the session's CURRENT
+status. So a "list my conversations" screen seeds its rows from `listSessions` and keeps
+them live from one subscription, and a client that reconnects mid-turn learns the session
+is still running from frame one rather than from the next transition. `session.status`
+reads the same fact synchronously. See `@agentick/client-core` for the client side.
+
+```ts
+interface SessionStatusFrame {
+  sessionId: string;
+  status: SessionStatus; // idle · running · input_required · failed · closed
+  executionId?: string; // the turn in flight, when there is one
+  outcome?: "succeeded" | "failed" | "aborted";
+}
+```
+
+`outcome` rides **only the transition that ends a run**, never the status value and never
+the opening snapshot. That separation is the point: a turn that failed leaves a session
+that is `idle` and perfectly usable, so folding the ending into the state would make a
+healthy session render as broken. A UI raises a toast off the frame and draws the badge
+off the status.
+
+A running session blocked on a **pending elicitation** transitions to `input_required`,
+and back to `running` when the last ask is answered — so "action required over there" is a
+frame rather than something a UI can learn only by opening the session. Concurrent asks
+are one blocked state; an ask raised outside an execution does not block an idle session;
+and a turn that ends with asks outstanding still lands on `idle` — the ending beats the
+block.
+
+It is `input_required`, not `paused`, and the distinction is load-bearing: `paused` is
+reserved for an operator explicitly stopping a session, and a UI has to tell "someone
+stopped this" apart from "someone needs to answer something". The name matches the tasks
+harness, where the same state one level down is already called `input_required`.
+
 Records are written off the critical path — one write per status transition, never read back during render. `title`, `description` and `metadata` are yours: the framework stores them and is blind to their semantics. There is no `currentTick` on a record, because a tick is execution-local. `InMemorySessionStore` is the bundled default; any adapter that passes `runSessionStoreConformance` swaps in.
 
 ## Building a session yourself
@@ -789,6 +824,7 @@ const session = factory({
 
 | Method                          | Returns                                                        |
 | ------------------------------- | -------------------------------------------------------------- |
+| `status`                        | What the session is doing now — the live twin of the record    |
 | `send(input)`                   | `Promise<SessionExecutionHandle>` — `.result` + `.events()`    |
 | `spawn(input)`                  | A child session, or its handle when `send` is supplied         |
 | `fork(input?)`                  | An unbound same-image child with the parent's state copied     |
@@ -855,6 +891,7 @@ const session = factory({
 - `src/__tests__/tree-interceptors.spec.tsx` — tree-side guards vetoing and admitting a model tool call, a deferred call resolved by an elicitation confirm in both directions, a transform reaching the model's actual projected input, per-mount isolation on a shared loop, freshness against the latest render's state, and unmounting mid-execution without a crash.
 - `src/__tests__/layered-tools.spec.ts` — execution-scoped registration and removal, execution-over-session precedence, and session-scoped tools persisting across sends.
 - `src/__tests__/channel-snapshot.spec.ts` — a channel opening on its current frame, an unowned channel reporting none, and a pending ask seeding the elicitation channel.
+- `src/__tests__/status-channel.spec.ts` — a real execution bracketed by `running` → `idle` on `session:channel:status` (the running frame naming the turn in flight), `closed` on teardown, the status channel opening on the CURRENT status mid-execution, and `setStatus` calling back on a change but not on a same-value write; the ending riding the end transition for all three outcomes and never the snapshot; and blocked-on-input pausing a running session, resuming on the answer, leaving an idle session alone, and losing to the ending when a turn finishes with an ask outstanding.
 - `src/__tests__/define-session.spec.ts` — the factory marker, delegation to the supplied callbacks, helpful errors from unconfigured verbs, and no-op handles resolving cleanly.
 - `src/__tests__/usage-cost.spec.tsx` — the accounting record end to end: a two-model session partitioned into two `byModel` buckets whose usage sums to the flat total, an unidentified model keyed `unknown` rather than dropped, and the honesty rule in four forms (an unpriced session rolling up `partial` and never a zero `complete`, a mixed run's amount being the priced subset only, a foreign-currency tick counted unpriced in the total yet fully priced in its own bucket, and a session with no usage carrying no `cost` key at all). Plus `cost` + `model` stamped on the assistant entry (and absent, not zero, when unpriced), `SendResult` lifting the loop's own rollup, the turn-boundary record carrying the session-folded one, `byModel` + `cost` round-tripping a snapshot — including a restore that CLEARS a stale cost — and the wire projection: a priced tick's `tick` event carrying `cost` + `model` computed from the target's declared rates, an unpriced one carrying no `cost` key. The metrics mirror gets its own suite against a spy meter: a priced tick recording the cost histogram in micro-units labelled by model + currency, one observation per tick and per model rather than a pre-aggregate, an unpriced tick counting `unpriced` and recording NO cost observation, a mixed run emitting both, token histograms carrying only the kinds actually reported (an unreported kind emitting nothing, not a zero), a tick with no usage emitting nothing at all, labels holding to the bounded set — never `rateRef`, never a session / execution / tick id — the same mirror landing on the REAL loop path (the `.fx` twin, not just the public facade), and a session with no meter wired emitting nothing while its durable accounting lands unchanged.
 - Spawn, fork and lifecycle operations are verified where both layers live, in [@agentick/app](../app): `spawn-hardening.spec.tsx` (the depth ceiling and `SpawnDepthExceededError`, `spawnPath` on the record / event scope / handle stream, parent close and abort disposing children), `fork.spec.tsx` (state copy, lineage, divergence), `lifecycle-operations.spec.tsx` (the linked spawn and child-create records, a guard vetoing at either layer, the bus-only close op and its `"evicted"` provenance from both the idle sweep and the memory cap), `set-model.spec.tsx` (the swap end-to-end through `createApp`), `session-principal-lifecycle.spec.tsx` (spawn and fork inheriting the principal), and `cascading-abort.spec.tsx` (`abort({ cascade: true })` over the live subtree deepest-first with nothing disposed, a plain abort leaving a session-scoped child alone but tearing down one spawned inside the aborted execution, and the `originExecutionId` edge `abortExecutionTree` walks). The wire gate engaging on the stamped principal is pinned in [@agentick/transport](../transport) (`session-principal.spec.ts`).

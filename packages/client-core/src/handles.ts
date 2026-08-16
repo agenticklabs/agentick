@@ -43,6 +43,7 @@ import { isProgressEventName } from "@agentick/spec";
 import { omitUndefined } from "@agentick/utils";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
+import { sessionStatusView, type SessionStatusView } from "./session-status-view.js";
 import {
   applySessionHandleExtensions,
   knownSessionHandleExtensionImports,
@@ -188,6 +189,11 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   // Assigned right below the literal, once the sub-handle getters are installed;
   // `close()` reaches it through the closure rather than through `this`.
   let closeSubHandles: SessionSubHandleTeardown;
+  // Declared BEFORE the handle literal because the `status` getter builds
+  // against it. See the comment at `applySessionHandleExtensions` below for why
+  // sub-handle factories get this view of the client rather than the raw one.
+  const handleClient = withMiddlewareTransport(client);
+  let statusView: SessionStatusView | undefined;
   // Typed against the hand-written BASE ({@link SessionHandleBase}) so the literal
   // is fully checked. The registered sub-handles (`session.knobs`, …) are attached
   // as getters below (ADR 87); the wire-DERIVED namespace methods
@@ -197,6 +203,11 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   const handle: SessionHandleBase = {
     ...scopedSubscriptions(client, { kind: "session", id: sessionId }),
     id: sessionId,
+    // Built on FIRST ACCESS, not at handle construction: `app.session(id)` is a
+    // cheap addressing call and must not open a wire subscription per call.
+    get status(): SessionStatusView {
+      return (statusView ??= sessionStatusView(handleClient, sessionId));
+    },
     send<P = unknown>(input: ClientSendInput<P>): ClientSessionExecutionHandle {
       return createSessionExecutionHandle(client, sessionId, input);
     },
@@ -255,6 +266,7 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
      * runs once and every sub-handle `close()` is itself idempotent.
      */
     async close() {
+      statusView?.close();
       const failures = closeSubHandles();
       await client.request("session/close", { sessionId });
       if (failures.length > 0) {
@@ -276,7 +288,6 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   // WITHOUT each handle rewiring its transport — the derived-from-wire rule made
   // universal. `transport.subscribe`/`progress` pass through untouched (a fold's
   // input is a stream, not a call — it gets a frame tap, not middleware).
-  const handleClient = withMiddlewareTransport(client);
   closeSubHandles = applySessionHandleExtensions(handle, handleClient, sessionId);
   // B2 slice 4 — WIRE PROXY: wrap so an unregistered namespace access
   // (`session.billing`) synthesizes a namespace whose methods issue

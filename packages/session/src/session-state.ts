@@ -89,6 +89,7 @@ import type {
   ModelKey,
   ModelUsage,
   SessionRecord,
+  SessionRunOutcome,
   SessionStatus,
   SessionStore,
   SessionStoreQuery,
@@ -147,6 +148,13 @@ export interface SessionRuntimeInit {
   readonly parentSessionId?: string;
   /** Owning principal (ADR 48) — construction-bound; folded into every record write. */
   readonly principal?: string;
+  /**
+   * Called after a persisting write that CHANGED the status — the transition
+   * seam the harness publishes `session:channel:status` from. A write that
+   * leaves the value alone still persists (parity) but is not a transition and
+   * does not call this. `outcome` rides only the transition that ends a run.
+   */
+  readonly onStatusTransition?: (status: SessionStatus, outcome?: SessionRunOutcome) => void;
   /** Spawn lineage (SP5) — ancestor session ids, root-first. Folded into the record. */
   readonly spawnPath?: readonly string[];
   /** Origin edge (EX1) — the parent EXECUTION that spawned this session. Folded in. */
@@ -197,6 +205,10 @@ export class SessionRuntime {
   /** Persist the record at genesis rather than on first mutation (E11). */
   private readonly eager: boolean;
 
+  private readonly onStatusTransition:
+    | ((status: SessionStatus, outcome?: SessionRunOutcome) => void)
+    | undefined;
+
   /**
    * The single-key projection of this session's `SessionRecord`. One cache
    * entry, keyed by session id; write-through to the durable `SessionStore`
@@ -221,6 +233,7 @@ export class SessionRuntime {
     this.store = init.store;
     this.storeCtx = init.storeCtx;
     this.eager = init.eager ?? false;
+    this.onStatusTransition = init.onStatusTransition;
 
     const store: Store<
       SessionRecord,
@@ -330,8 +343,10 @@ export class SessionRuntime {
     return this.record().status;
   }
   /** PERSIST + NOTIFY — the metadata-change trigger (the old `notify()`). */
-  setStatus(next: SessionStatus): void {
+  setStatus(next: SessionStatus, outcome?: SessionRunOutcome): void {
+    const prev = this.record().status;
     this.commit({ status: next }, { persist: true });
+    if (next !== prev) this.onStatusTransition?.(next, outcome);
   }
 
   // ────────── tick (execution-local — see the file TODO; not in SessionRecord) ──────────

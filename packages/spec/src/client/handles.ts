@@ -25,6 +25,8 @@ import type {
   SessionExecutionHandle,
 } from "../protocol/session-harness.js";
 import type { ContentBlock } from "../data/content-blocks.js";
+import type { SessionStatusFrame } from "../data/session-status-channel.js";
+import type { SessionStatus } from "../protocol/hook-bridges.js";
 import type {
   GatewayListAppsResult,
   GatewayListSessionsResult,
@@ -244,6 +246,36 @@ export interface ClientSendInput<P = unknown> extends SendInput<P> {
  * surface ({@link SessionWireNamespaces}).
  */
 export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
+  /**
+   * Is this session executing right now — seeded AND live.
+   *
+   * The harness's `status` is the value; the handle's is the view over it —
+   * same fact, one no-await door per side. A wire cannot answer synchronously
+   * without a subscription, so the shapes differ where the two doors cannot.
+   *
+   * ```ts
+   * session.status.get();            // "running" | "idle" | … (undefined pre-seed)
+   * session.status.subscribe(render); // every transition after that
+   * ```
+   *
+   * The subscription opens with the server's CURRENT status as frame one, so a
+   * panel that reloads mid-turn renders "running" immediately rather than
+   * looking idle until the turn happens to end. There is no seed/subscribe
+   * race to lose a transition in: both arrive on one ordered stream.
+   *
+   * `onChange` hands over the whole `SessionStatusFrame` — including the
+   * `executionId` of the turn in flight, the key for correlating a reattached
+   * client against the execution already running.
+   *
+   * For a THREAD LIST, don't open one of these per row: seed from
+   * `listSessions()` (every row already carries `status`) and subscribe once at
+   * `gateway.events(sessionStatusEventQuery())`, which delivers transitions for
+   * every session the caller owns — including ones no handle is open for.
+   *
+   * Built on first access and closed by {@link SessionHandleBase.close}; a
+   * handle that never reads it never opens a subscription.
+   */
+  readonly status: ChannelView<SessionStatus | undefined, SessionStatusFrame>;
   send<P = unknown>(input: ClientSendInput<P>): ClientSessionExecutionHandle;
   dispatch(tool: string, input: unknown): Promise<readonly ContentBlock[]>;
   /**

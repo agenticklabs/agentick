@@ -62,7 +62,11 @@ import type {
 } from "@agentick/spec";
 import { HandlerError, toJsonSchema } from "@agentick/spec";
 
-import { ELICITATION_CHANNEL, type ElicitationSnapshotFrame } from "./channel.js";
+import {
+  ELICITATION_CHANNEL,
+  ELICITATION_ELICIT_COMMAND,
+  type ElicitationSnapshotFrame,
+} from "./channel.js";
 import type { ElicitRequestInboxPayload } from "./inbox-protocol.js";
 
 // ============================================================================
@@ -268,7 +272,7 @@ export class ElicitationHarness
     const op: Operation<ElicitationRequest, R> = {
       opId: `elicitation:elicit:${generateId()}`,
       surface: "elicitation",
-      name: "elicitation:command:elicit",
+      name: ELICITATION_ELICIT_COMMAND,
       scope: this.parentScope ?? {},
       input: request,
     };

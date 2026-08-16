@@ -59,7 +59,10 @@ export const appWireExtension: WireExtension = defineWireExtension({
         // pole) → `ctx.principal` undefined → the session is left unstamped.
         ...(ctx.principal !== undefined ? { principal: ctx.principal } : {}),
       });
-      return { sessionId: session.id };
+      // Read from the LIVE session, not the durable record: `createSession` is
+      // create-or-resume, and a resumed session that is mid-turn is running
+      // here before the store round trip would say so.
+      return { sessionId: session.id, status: session.status };
     },
     "app/get_session": async ({ appId, sessionId }, ctx) => {
       const app = ctx.gateway.app(appId);

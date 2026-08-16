@@ -156,11 +156,15 @@ when you're walking down from a listing.
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `client.gateway()`   | `listApps` · `getApp` · `listSessions` · `destroySession` · `app(id)` · `events`                                    |
 | `client.app(id)`     | `createSession` · `getSession` · `listSessions` · `destroySession` · `runOnce` · `close` · `session(id)` · `events` |
-| `client.session(id)` | `send` · `dispatch` · `abort` · `snapshot` · `rebind` · `close` · `events`                                          |
+| `client.session(id)` | `send` · `dispatch` · `abort` · `status` · `snapshot` · `rebind` · `close` · `events`                               |
 
 Every handle also carries `onLog`, `onProgress`, and `channelView` pre-bound to
 its own scope. The generic `client.onLog(scope, cb)` stays available for a scope
 you don't hold a handle for.
+
+`createSession` is create-OR-RESUME and its reply says which state it resumed into
+(`{ sessionId, status }`) — so a client reconnecting to a live conversation knows a turn
+is already in flight before it subscribes to anything.
 
 Both `listSessions` return the **page**, not a bare array — `{ sessions, nextCursor }`.
 A reply that handed back only rows would leave you with no way to ask for the rest.
@@ -175,6 +179,53 @@ do {
   render(page.sessions);
   cursor = page.nextCursor;
 } while (cursor !== undefined);
+```
+
+### Is it running right now?
+
+`session.status` is a live view of one session's `SessionStatus`. It matters on
+RELOAD: a panel that refreshes mid-turn holds a brand-new handle and would
+otherwise render a busy conversation as idle until the turn happened to end.
+
+```ts
+const session = client.session("sess-123");
+session.status.get(); // "running" | "idle" | "input_required" | … (undefined until frame one)
+session.status.subscribe(() => render(session.status.get()));
+session.status.onChange((frame) => {
+  frame.executionId; // the turn in flight, for correlation
+  if (frame.outcome === "failed") toast("That turn failed.");
+});
+```
+
+`outcome` (`"succeeded" | "failed" | "aborted"`) rides only the frame that ENDS a run, so
+a toast is a frame and a badge is the status. A turn that failed leaves an `idle`,
+perfectly usable session — which is exactly why the ending is not folded into the state.
+`input_required` means the session is running but blocked on a pending elicitation:
+"action required" is a frame, not something a UI has to open the session to discover.
+(Not `paused` — that is reserved for an operator stopping a session, which a UI must be
+able to tell apart from waiting on an answer.)
+
+The harness's `status` is the value; the handle's is the view over it — same fact, one
+no-await door per side.
+
+The subscription **opens with the current status**, so there is no window between
+reading a seed and starting to listen in which a transition could be missed. It is
+built on first access and closed by `session.close()`.
+
+For a thread LIST, don't open one per row. Every `listSessions` row already carries
+`status`; subscribe once at gateway (or app) scope and fold the frames, which arrive
+for every session the caller owns — including ones no handle is open for.
+
+```ts
+// Subscribe FIRST, then seed: the other order has a window to lose a transition.
+const stream = client.gateway().events(sessionStatusEventQuery());
+void (async () => {
+  for await (const { envelope } of stream) {
+    const frame = envelope.payload as SessionStatusFrame;
+    rows.update(frame.sessionId, { status: frame.status });
+  }
+})();
+for (const row of (await client.gateway().listSessions()).sessions) rows.upsert(row);
 ```
 
 The cursor is opaque, and it is opaque because it is not the framework's. The client and
@@ -920,6 +971,7 @@ auto-connect; call `connect()` when you want the wire open.
 | `makeGatewayHandle` / `makeAppHandle` / `makeSessionHandle`            | Handle factories, for building a client of your own            |
 | `onLog` / `onProgress`                                                 | Tree-shakeable signal subscriptions                            |
 | `channelStream` / `channelView`                                        | Channel-pinned stream and fold                                 |
+| `sessionStatusView`                                                    | The fold behind `session.status`                               |
 | `progressView` / `foldProgress`                                        | Per-token progress state, and the fold it is built on          |
 | `eventStream` / `eventView`                                            | The generic stream and fold beneath them                       |
 | `liveStore` / `filteredView`                                           | Fan-out core; shared-subscription projections                  |
@@ -1029,6 +1081,13 @@ transport changes the `createClient` call and nothing else.
   `onAfterSessionSend` result transform, method scoping, `hook` batch and `hooks`
   proxy registration plus unsubscribe, empty-registry fast path, and the
   `session/send` → `SessionSend` name derivation.
+- `src/__tests__/session-status-view.spec.ts` — the status fold (folded state is the
+  bare status, the change feed carries the whole frame including `executionId`), and
+  `session.status` opening nothing until read, memoizing, and closing with the
+  session. The reload story it exists for is pinned end-to-end in
+  [@agentick/transport-in-process](../transport-in-process)'s
+  `session-status-e2e.spec.ts`, alongside the thread-list subscription that updates
+  sessions no handle is open for.
 - `src/__tests__/handle-conformance.spec.ts` — `runClientHandleConformance` proven
   against a fake handle; `isClientHandle` / `isEnumerable` / `isRespondable`
   duck-typing, including a bare store that is a handle but not enumerable.

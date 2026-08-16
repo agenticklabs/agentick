@@ -85,7 +85,10 @@ import type {
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
+  SessionRunOutcome,
   SessionSnapshot,
+  SessionStatus,
+  SessionStatusFrame,
   SessionStore,
   SnapshotMigration,
   SessionSubstrateParent,
@@ -120,6 +123,7 @@ import {
   isExecuteError,
   isSnapshotCapable,
   NoModelForExecutionError,
+  SESSION_STATUS_CHANNEL,
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   SessionClosedError,
@@ -129,7 +133,7 @@ import {
   TimelineWriteFailed,
 } from "@agentick/spec";
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
-import { buildSessionElicit } from "@agentick/elicitation";
+import { buildSessionElicit, ELICITATION_ELICIT_COMMAND } from "@agentick/elicitation";
 import { withScope } from "@agentick/tool-executor";
 import {
   effectiveModelInfo,
@@ -640,6 +644,20 @@ const TICK_TOKEN_KINDS: readonly (readonly [TokenKind, (u: UsageStats) => number
   ["reasoning", (u) => u.reasoningTokens],
 ];
 
+/**
+ * How a settled run ENDED, from its stop reason — the `outcome` that rides the
+ * transition ending it. A run refused before it started (`vetoed`) and one that
+ * ran out of time are endings a UI reports the same way as an executor failure;
+ * every provider stop reason, `max_ticks` included, is a run that finished.
+ */
+function runOutcomeOf(stopReason: SendResult["stopReason"]): SessionRunOutcome {
+  if (stopReason === "aborted") return "aborted";
+  if (stopReason === "executor_failed" || stopReason === "timeout" || stopReason === "vetoed") {
+    return "failed";
+  }
+  return "succeeded";
+}
+
 // ============================================================================
 // SessionHarness
 // ============================================================================
@@ -1008,6 +1026,7 @@ export class SessionHarness<P = unknown>
       store: options.sessionStore,
       // The harness's scope carrier, threaded on every persisting record write.
       storeCtx: () => this.storeCtx(),
+      onStatusTransition: (status, outcome) => this.publishStatusTransition(status, outcome),
       ...omitUndefined({
         appId: options.appId,
         eager: options.eager,
@@ -1175,6 +1194,7 @@ export class SessionHarness<P = unknown>
     // The abort listener is `once` (abort fires at most once) and is removed
     // on close so it never outlives the session on a shared app signal.
     this.onClose(() => this.disposeChildren());
+    this.trackBlockedOnInput();
     if (this.constructionSignal !== undefined) {
       const sig = this.constructionSignal;
       const onAbort = (): void => {
@@ -1456,6 +1476,14 @@ export class SessionHarness<P = unknown>
    */
   get timeline(): TimelineHandle {
     return this.bridges.timeline;
+  }
+
+  /**
+   * What this session is doing right now. The live twin of the durable
+   * `SessionRecord.status`; `session:channel:status` is the push half.
+   */
+  get status(): SessionStatus {
+    return this.runtime.status();
   }
 
   /**
@@ -2401,6 +2429,90 @@ export class SessionHarness<P = unknown>
   }
 
   /**
+   * A RUNNING session with an outstanding ask is `input_required`; answering the
+   * last one resumes it. This is what makes "action required over there" a frame
+   * on the status channel rather than something a UI learns only by opening the
+   * session. NOT `paused`, which is reserved for an operator stopping a session.
+   *
+   * Subscribes to the elicit OPERATION rather than the elicitation CHANNEL
+   * because only the op has both edges — see {@link ELICITATION_ELICIT_COMMAND}.
+   * Tracked as a SET of op ids so concurrent asks are one blocked state and a
+   * replayed terminal cannot drive the count negative.
+   *
+   * Both flips are guarded on the current status, which is what enforces the
+   * rules: an ask raised outside an execution never blocks an idle session, and
+   * an execution that ends with asks still outstanding lands on `idle` — the
+   * ending beats the block, and nothing later resurrects `running`.
+   */
+  private trackBlockedOnInput(): void {
+    const outstanding = new Set<string>();
+    const fiber = Effect.runFork(
+      Stream.runForEach(
+        this.bus.subscribe({
+          surface: "elicitation",
+          name: { exact: ELICITATION_ELICIT_COMMAND },
+          phase: ["requested", "terminal"],
+          scope: { sessionId: this.runtime.id },
+        }),
+        (event) =>
+          Effect.sync(() => {
+            const opId = (event as { opId?: string }).opId;
+            if (opId === undefined) return;
+            if (event.phase === "requested") outstanding.add(opId);
+            else outstanding.delete(opId);
+
+            const status = this.runtime.status();
+            if (outstanding.size > 0 && status === "running") {
+              this.runtime.setStatus("input_required");
+            } else if (outstanding.size === 0 && status === "input_required") {
+              this.runtime.setStatus("running");
+            }
+          }),
+      ),
+    );
+    this.onClose(() => {
+      void Effect.runPromise(Fiber.interrupt(fiber));
+    });
+  }
+
+  /**
+   * `session:channel:status` — the NOTIFY half of the pair whose enumerate half
+   * is `SessionRecord.status` on every `list_sessions` row.
+   *
+   * Fire-and-forget by construction: `notifyChannel` swallows a bus-append
+   * failure, so a dropped frame can never fail the execution whose start or end
+   * produced the transition.
+   */
+  private publishStatusTransition(status: SessionStatus, outcome?: SessionRunOutcome): void {
+    Effect.runFork(
+      this.notifyChannel<SessionStatusFrame>(
+        SESSION_STATUS_CHANNEL,
+        this.statusFrame(status, outcome),
+        { scope: omitUndefined({ sessionId: this.runtime.id, principal: this.principal }) },
+      ),
+    );
+  }
+
+  private statusFrame(status: SessionStatus, outcome?: SessionRunOutcome): SessionStatusFrame {
+    return omitUndefined({
+      sessionId: this.runtime.id,
+      status,
+      executionId: this.runtime.currentExecutionId() ?? undefined,
+      outcome,
+    }) as SessionStatusFrame;
+  }
+
+  /**
+   * The status channel's opening frame — the session's CURRENT status, so a
+   * client that reconnects mid-execution renders "running" from frame one
+   * instead of looking idle until the next transition.
+   */
+  private readonly statusSnapshotProvider: ChannelSnapshotProvider = {
+    snapshotChannel: SESSION_STATUS_CHANNEL,
+    channelSnapshotPayload: () => this.statusFrame(this.runtime.status()),
+  };
+
+  /**
    * Current snapshot of a channel as a ready-to-publish envelope, or
    * `undefined` when no bridge owns `channel`. Scans the session's
    * bridges for the {@link ChannelSnapshotProvider} keyed by `channel`
@@ -2436,12 +2548,17 @@ export class SessionHarness<P = unknown>
    * bridge slot is a render-time handler-resolver adapter, not the executor),
    * yet it OWNS the `tool_call` request channel and provides its pending-call
    * snapshot (§6.1). Feature-detection still keeps the scan slot-agnostic — the
-   * executor is just another candidate, discovered by shape.
+   * executor and {@link statusSnapshotProvider} are just further candidates,
+   * discovered by shape.
    */
   private snapshotProviders(): Map<string, ChannelSnapshotProvider> {
     if (this._snapshotProviders === null) {
       const map = new Map<string, ChannelSnapshotProvider>();
-      const candidates: readonly unknown[] = [...Object.values(this.bridges), this.toolExecutor];
+      const candidates: readonly unknown[] = [
+        ...Object.values(this.bridges),
+        this.toolExecutor,
+        this.statusSnapshotProvider,
+      ];
       for (const value of candidates) {
         if (isChannelSnapshotProvider(value)) map.set(value.snapshotChannel, value);
       }
@@ -2971,9 +3088,19 @@ export class SessionHarness<P = unknown>
     const executionAbort = new AbortController();
     this._currentExecutionAbort = executionAbort;
     const resultDeferred = {} as { resolve: (r: SendResult) => void; reject: (e: unknown) => void };
+    // How this run ENDED, captured at the settle so the running→idle transition
+    // can carry it. An abort RESOLVES with `stopReason: "aborted"` rather than
+    // rejecting, so the reject arm is genuine failure only.
+    let runOutcome: SessionRunOutcome = "succeeded";
     const resultPromise = new Promise<SendResult>((resolve, reject) => {
-      resultDeferred.resolve = resolve;
-      resultDeferred.reject = reject;
+      resultDeferred.resolve = (result) => {
+        runOutcome = runOutcomeOf(result.stopReason);
+        resolve(result);
+      };
+      resultDeferred.reject = (error) => {
+        runOutcome = "failed";
+        reject(error);
+      };
     }).finally(() => {
       this._currentExecution = null;
       this._currentHandle = null;
@@ -2981,7 +3108,10 @@ export class SessionHarness<P = unknown>
       this._currentExecutionAbort = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
-      this.runtime.setStatus(durabilityFailed ? "failed" : "idle");
+      this.runtime.setStatus(
+        durabilityFailed ? "failed" : "idle",
+        durabilityFailed ? "failed" : runOutcome,
+      );
       // 4b — the session is now truly idle. Release quiescence waiters
       // (`whenQuiescent` / queued sends) AFTER the reservation clears.
       settledResolve();

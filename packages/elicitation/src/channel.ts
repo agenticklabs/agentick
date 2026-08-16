@@ -17,6 +17,15 @@ export type ElicitationChannelName = typeof ELICITATION_CHANNEL;
 export const ELICITATION_CHANNEL_FQN = "session:channel:elicitation" as const;
 
 /**
+ * The elicit OPERATION's event name. Subscribe to its `requested`/`terminal`
+ * pair — not the channel — to count asks OUTSTANDING: the channel publishes
+ * the ask and nothing else, because the answer comes back over the inbox. The
+ * op pair is balanced on every exit, an answer, a timeout, an abort and a
+ * harness close alike.
+ */
+export const ELICITATION_ELICIT_COMMAND = "elicitation:command:elicit" as const;
+
+/**
  * One outstanding elicitation ask, as it appears in the channel's opening
  * SNAPSHOT frame (§6.1 — the Design-B watch-list). Carries the exact fields a
  * subscriber lifts off a LIVE request delta (`metadata.correlationId` /

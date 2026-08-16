@@ -71,6 +71,7 @@ import type {
   SendInput,
   SessionError,
   SessionExecutionHandle,
+  SessionStatus,
   SessionHarnessFactory,
   SessionHarnessFactoryDeps,
   SessionHarnessProtocol,
@@ -219,6 +220,26 @@ class CallbackSessionHarness<P = unknown>
     return this.scopeId;
   }
 
+  get status(): SessionStatus {
+    return this._status;
+  }
+  private _status: SessionStatus = "idle";
+
+  /**
+   * Mark the session busy for the life of `handle.result`. A callback session
+   * runs its own turn, so the handle settling is the only point at which the
+   * framework can see the run end.
+   */
+  private trackRun<T>(handle: SessionExecutionHandle<T>): SessionExecutionHandle<T> {
+    this._status = "running";
+    void Promise.resolve(handle.result)
+      .catch(() => undefined)
+      .finally(() => {
+        this._status = "idle";
+      });
+    return handle;
+  }
+
   private readonly spec: DefineSessionInput<P>;
   readonly timeline: TimelineHandle;
   readonly knobs: KnobsHandle;
@@ -277,14 +298,16 @@ class CallbackSessionHarness<P = unknown>
     };
     // Same one-boundary cast as the reference harness: the pipeline is erased
     // to `unknown` data; the caller's `output` schema is the narrowing truth.
-    return runHarnessProtocol(
-      this.runOperation(op, (i) =>
-        Effect.tryPromise({
-          try: () => this.spec.send(i),
-          catch: (cause): SessionError => coerceSessionError(cause),
-        }),
-      ),
-    ) as Promise<SessionExecutionHandle<T>>;
+    return (
+      runHarnessProtocol(
+        this.runOperation(op, (i) =>
+          Effect.tryPromise({
+            try: () => this.spec.send(i),
+            catch: (cause): SessionError => coerceSessionError(cause),
+          }),
+        ),
+      ) as Promise<SessionExecutionHandle<T>>
+    ).then((handle) => this.trackRun(handle));
   }
 
   abort(reason?: string): Promise<void> {

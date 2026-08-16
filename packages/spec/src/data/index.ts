@@ -39,6 +39,7 @@ export * from "./signals.js";
 export * from "./observability.js";
 export * from "./ops.js";
 export * from "./channels.js";
+export * from "./session-status-channel.js";
 export * from "./timeline.js";
 export * from "./streaming.js";
 export * from "./semantic.js";

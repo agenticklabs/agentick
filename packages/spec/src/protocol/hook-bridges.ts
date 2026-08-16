@@ -409,6 +409,14 @@ export interface SessionBridge {
 export type SessionStatus =
   | "idle"
   | "running"
+  /**
+   * Running, but blocked on a human — at least one elicitation is outstanding.
+   * Distinct from `paused`, which is reserved for an operator explicitly
+   * pausing a session: a UI needs to tell "someone stopped this" apart from
+   * "someone needs to answer something". Named for the tasks harness's
+   * `input_required`, which is the same state one level down.
+   */
+  | "input_required"
   | "paused"
   | "hibernated"
   | "completed"
