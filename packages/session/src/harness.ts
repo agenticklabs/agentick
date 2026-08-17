@@ -127,6 +127,7 @@ import {
   SESSION_STATUS_CHANNEL,
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
+  InvalidMediaSource,
   SessionClosedError,
   SnapshotVersionMismatch,
   SpawnDepthExceededError,
@@ -3851,9 +3852,21 @@ export class SessionHarness<P = unknown>
   private appendInputMessageFx(
     m: SendMessageInput,
     executionId?: string,
-  ): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never> {
+  ): Effect.Effect<void, TimelineWriteFailed | SubstrateError | InvalidMediaSource, never> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
+    // Rejected AT THE DOOR: past it the block is durable and replays into a
+    // provider rejection on every later turn of the session.
+    for (const [index, block] of content.entries()) {
+      const source = (block as { source?: { type?: string; data?: unknown } }).source;
+      if (
+        source?.type === "base64" &&
+        typeof source.data === "string" &&
+        source.data.startsWith("data:")
+      ) {
+        return Effect.fail(new InvalidMediaSource({ blockIndex: index, blockType: block.type }));
+      }
+    }
     const metadata = { ...m.metadata, ...omitUndefined({ executionId }) };
     return this.appendMessageEntryFx({
       role: m.role,

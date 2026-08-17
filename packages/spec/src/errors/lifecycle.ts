@@ -188,6 +188,27 @@ export class SessionTimelineError extends SessionError {
 }
 registerAgentickError("SessionTimelineError", SessionTimelineError);
 
+/**
+ * A media source that cannot reach any provider — today: a `base64` source
+ * whose `data` is a `data:` URI rather than the raw payload. Raised at the
+ * SEND door, because past it the block lands on the durable timeline and
+ * replays into a provider rejection on every later turn.
+ */
+export class InvalidMediaSource extends SessionError {
+  readonly _tag = "InvalidMediaSource" as const;
+  readonly blockIndex: number;
+  readonly blockType: string;
+  constructor(args: { readonly blockIndex: number; readonly blockType: string }) {
+    super(
+      `content[${args.blockIndex}] (${args.blockType}): base64 source carries a data: URI — ` +
+        `strip the prefix; \`data\` is the raw base64 payload`,
+    );
+    this.blockIndex = args.blockIndex;
+    this.blockType = args.blockType;
+  }
+}
+registerAgentickError("InvalidMediaSource", InvalidMediaSource);
+
 export class KnobError extends SessionError {
   readonly _tag = "KnobError" as const;
   readonly knob: string;

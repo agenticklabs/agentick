@@ -75,6 +75,7 @@ export {
   GatewayLifecycleError,
   GatewayNotStartedError,
   KnobError,
+  InvalidMediaSource,
   ModelExecutorBuilderMissingError,
   NoModelForExecutionError,
   SessionBusyError,
