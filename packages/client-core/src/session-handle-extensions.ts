@@ -158,9 +158,16 @@ export type SessionSubHandleTeardown = () => readonly unknown[];
  * Define a lazy, cached getter on `handle` for every registered sub-handle.
  * Called by `makeSessionHandle` after the base handle is built. The factory runs
  * on first property access (opening any subscription then, not at handle
- * construction), and the result is memoized for the handle's lifetime. A built
- * sub-handle whose harness declared `wireMethods` is wrapped in the namespace
+ * construction), and the result is memoized until IT closes. A built sub-handle
+ * whose harness declared `wireMethods` is wrapped in the namespace
  * {@link wireFallthrough} proxy before it is handed out.
+ *
+ * `close()` on a sub-handle is a release, not a poison pill: it resets the
+ * slot's memo, so the next access builds a fresh, working instance. Session
+ * handles are memoized per client (one per session), so a slot closed by one
+ * consumer is a slot every later visit to that session would otherwise inherit
+ * dead — the invariant is that a lazy slot on a shared handle stays
+ * re-openable.
  *
  * Returns the {@link SessionSubHandleTeardown} for the handles this call
  * installs. It closes what was BUILT and nothing else — an untouched getter is
@@ -183,6 +190,14 @@ export function applySessionHandleExtensions(
       get() {
         if (!done) {
           const made = entry.make(client, sessionId);
+          const closable = made as { close?: (...args: unknown[]) => unknown };
+          if (typeof closable.close === "function") {
+            const close = closable.close;
+            closable.close = function (this: unknown, ...args: unknown[]) {
+              done = false;
+              return close.apply(this ?? made, args);
+            };
+          }
           const rows = entry.options.wireMethods;
           instance =
             rows !== undefined && rows.length > 0 && typeof made === "object" && made !== null

@@ -44,4 +44,53 @@ describe("session handle extension registry (ADR 87)", () => {
     applySessionHandleExtensions(handle, fakeClient, "s1");
     expect(handle.__test_shadow__).toBe("real");
   });
+
+  it("a closed slot revives: the next access builds a fresh, working instance", () => {
+    let builds = 0;
+    registerSessionHandleExtension("__test_revive__", () => {
+      const build = ++builds;
+      let closed = false;
+      return {
+        build,
+        isClosed: () => closed,
+        close: () => {
+          closed = true;
+        },
+      };
+    });
+    const handle: Record<string, unknown> = { id: "s1" };
+    applySessionHandleExtensions(handle, fakeClient, "s1");
+
+    type Slot = { build: number; isClosed: () => boolean; close: () => void };
+    const first = handle.__test_revive__ as Slot;
+    first.close();
+    expect(first.isClosed()).toBe(true);
+
+    // Session handles are memoized per client, so this is what a LATER visit
+    // to the same session receives — it must not inherit the corpse.
+    const second = handle.__test_revive__ as Slot;
+    expect(builds).toBe(2);
+    expect(second.build).toBe(2);
+    expect(second.isClosed()).toBe(false);
+  });
+
+  it("handle teardown closes both the closed-and-revived and the live instance", () => {
+    const closes: number[] = [];
+    let builds = 0;
+    registerSessionHandleExtension("__test_revive_teardown__", () => {
+      const build = ++builds;
+      return { build, close: () => closes.push(build) };
+    });
+    const handle: Record<string, unknown> = { id: "s1" };
+    const teardown = applySessionHandleExtensions(handle, fakeClient, "s1");
+
+    (handle.__test_revive_teardown__ as { close: () => void }).close();
+    void handle.__test_revive_teardown__;
+    expect(closes).toEqual([1]);
+
+    expect(teardown()).toEqual([]);
+    // Build 1 closes twice (adopter, then teardown) — sub-handle closes are
+    // idempotent by contract; the invariant here is build 2 is not orphaned.
+    expect(closes).toEqual([1, 1, 2]);
+  });
 });
