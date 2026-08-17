@@ -194,3 +194,32 @@ describe("causeMessage — one format for every wrapper", () => {
     );
   });
 });
+
+describe("a message is a sentence, not a payload", () => {
+  // Observed live: Gemini rejected an image and echoed the ENTIRE base64 payload
+  // into its error string, which then rode `message` onto the timeline, into
+  // logs, and into telemetry. The uncut original stays on `cause`.
+  const PAYLOAD = `Base64 decoding failed for "data:image/png;base64,${"A".repeat(100_000)}"`;
+
+  it("ProviderRejected clamps a payload-echoing cause", () => {
+    const err = new ProviderRejected({ status: 400, cause: new Error(PAYLOAD) });
+    expect(err.message.length).toBeLessThan(2_200);
+    expect(err.message).toContain("… [+");
+    expect(err.message).toContain("(status=400)");
+    expect((err.cause as Error).message.length).toBeGreaterThan(100_000);
+  });
+
+  it("ProviderRejected clamps an adapter-extracted message the same way", () => {
+    const err = new ProviderRejected({ message: PAYLOAD });
+    expect(err.message.length).toBeLessThan(2_200);
+  });
+
+  it("StreamFailed clamps its inlined cause", () => {
+    const err = new StreamFailed({ cause: new Error(PAYLOAD) });
+    expect(err.message.length).toBeLessThan(2_300);
+  });
+
+  it("a sentence-sized message is untouched", () => {
+    expect(causeMessage("invalid api key")).toBe("invalid api key");
+  });
+});

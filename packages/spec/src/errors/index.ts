@@ -94,6 +94,8 @@ export {
 export {
   AlreadyMounted,
   BridgeUnavailable,
+  causeMessage,
+  clampErrorDetail,
   CompactHandlerFailed,
   CompactStrategyMissing,
   CredentialsBackendUnavailable,

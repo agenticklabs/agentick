@@ -330,10 +330,24 @@ export abstract class ExecuteError extends AgentickError {
 export function causeMessage(cause: unknown): string | undefined {
   if (cause === undefined || cause === null) return undefined;
   // Covers AgentickError too — a nested one contributes its own composed message.
-  if (cause instanceof Error) return cause.message || undefined;
-  if (typeof cause === "string") return cause || undefined;
+  if (cause instanceof Error) return clampErrorDetail(cause.message) || undefined;
+  if (typeof cause === "string") return clampErrorDetail(cause) || undefined;
   const text = String(cause);
-  return text === "" || text === "[object Object]" ? undefined : text;
+  return text === "" || text === "[object Object]" ? undefined : clampErrorDetail(text);
+}
+
+const ERROR_DETAIL_MAX = 2_048;
+
+/**
+ * A message is a sentence, not a payload. Providers echo request bytes into
+ * their error strings (Gemini: the full base64 of a rejected image), and a
+ * wrapper's message lands on the timeline, in logs, and in telemetry — the
+ * uncut original stays on `cause` for whoever walks it.
+ */
+export function clampErrorDetail(text: string): string {
+  return text.length <= ERROR_DETAIL_MAX
+    ? text
+    : `${text.slice(0, ERROR_DETAIL_MAX)}… [+${text.length - ERROR_DETAIL_MAX} chars]`;
 }
 
 export class ProviderRejected extends ExecuteError {
@@ -370,7 +384,8 @@ export class ProviderRejected extends ExecuteError {
     // already nested.
     // Precedence: an adapter's extracted message (it knows its provider's envelope
     // shape) > the cause's own words > the bare classification.
-    const detail = args?.message ?? causeMessage(args?.cause);
+    const detail =
+      args?.message !== undefined ? clampErrorDetail(args.message) : causeMessage(args?.cause);
     super(detail !== undefined ? `${detail}${statusPart}` : `provider rejected${statusPart}`, {
       cause: args?.cause,
     });
@@ -417,7 +432,7 @@ export class StreamFailed extends ExecuteError {
   readonly _tag = "StreamFailed" as const;
   override readonly cause: unknown;
   constructor(args: { readonly cause: unknown }) {
-    super(`provider stream failed: ${String(args.cause)}`, { cause: args.cause });
+    super(`provider stream failed: ${clampErrorDetail(String(args.cause))}`, { cause: args.cause });
     this.cause = args.cause;
   }
 }
