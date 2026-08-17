@@ -101,7 +101,10 @@ async function* onlyInTree(
  * envelope to the rule — and an envelope that names one had better be stamped,
  * because an UNSTAMPED session envelope fails CLOSED. That is the whole point:
  * a channel frame that forgot to stamp itself must not become the way around
- * the filter, and the fix for one belongs at its emitter.
+ * the filter, and the fix for one belongs at its emitter. The three that had
+ * forgotten — `session.channel().publish`, the channel snapshot, and the model
+ * deltas the app-level executor emits under the scope the loop hands it — now
+ * stamp at those emitters (#304).
  *
  * An envelope that names NO session is control plane — `gateway:capabilities:
  * changed` carries `gatewayId` and nothing else — and passes. Filtering it out

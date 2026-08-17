@@ -2324,6 +2324,7 @@ export class SessionHarness<P = unknown>
   channel<T = unknown>(name: string): ChannelHandle<T> {
     const fullName = `session:channel:${name}`;
     const sessionId = this.runtime.id;
+    const scope = omitUndefined({ sessionId, principal: this.principal });
     const bus = this.bus;
     const inbox = this.inbox;
     const sessionAddress = this.address;
@@ -2336,7 +2337,7 @@ export class SessionHarness<P = unknown>
           name: fullName,
           phase: "delta",
           timestamp: Date.now(),
-          scope: { sessionId },
+          scope,
           payload,
           ...(metadata !== undefined ? { metadata } : {}),
         } as ProtocolEvent;
@@ -2532,7 +2533,7 @@ export class SessionHarness<P = unknown>
       name: channelEventName(channel),
       phase: "delta",
       timestamp: Date.now(),
-      scope: { sessionId: this.runtime.id },
+      scope: omitUndefined({ sessionId: this.runtime.id, principal: this.principal }),
       payload,
     };
   }
@@ -3032,9 +3033,11 @@ export class SessionHarness<P = unknown>
 
     await this._mountReady;
 
+    const executionId = `exec:${generateId()}`;
+
     // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
     // drain. The first tick's render sees it via <Timeline/>.
-    for (const m of input.messages ?? []) await this.appendInputMessage(m);
+    for (const m of input.messages ?? []) await this.appendInputMessage(m, executionId);
 
     // ADR 53: the first render will include everything appended so far.
     this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
@@ -3043,7 +3046,6 @@ export class SessionHarness<P = unknown>
     this._compactRefusedThisExecution = false;
     this._executionRollup = undefined;
 
-    const executionId = `exec:${generateId()}`;
     // E11 accounting: bump the execution count + set the in-flight id BEFORE
     // `setStatus("running")`. The count / id updates are cache-only on the
     // runtime's view; the `setStatus` write-through then persists ONE record
@@ -3222,6 +3224,9 @@ export class SessionHarness<P = unknown>
                 // The tab that asked, carried for the run's life — a tool call
                 // relayed on tick 6 still knows where the request came from.
                 ...omitUndefined({ connectionId: input.connectionId, clientId: input.clientId }),
+                // ADR 48 — the app-level model executor has no principal of its
+                // own, so this execution's owner rides the scope it is handed.
+                ...omitUndefined({ principal: this.principal }),
                 compiler: this.compiler,
                 mountId: this.mountId,
                 modelExecutor: modelExecutorForCall,
@@ -3822,24 +3827,29 @@ export class SessionHarness<P = unknown>
       if (this._steerQueue.length === 0) return;
       const pending = this._steerQueue;
       this._steerQueue = [];
-      for (const m of pending) yield* this.appendInputMessageFx(m);
+      const executionId = this.runtime.currentExecutionId() ?? undefined;
+      for (const m of pending) yield* this.appendInputMessageFx(m, executionId);
     });
   }
 
   /**
    * Append a user-input message directly to the timeline (ADR 53 §2.1)
-   * — the user's words are a fact the moment they arrive. Input carries
-   * no execution provenance (it wasn't produced BY an execution).
+   * — the user's words are a fact the moment they arrive. `executionId` is
+   * the execution the input OPENS, stamped in the same metadata slot the
+   * assistant / tool entries carry theirs in, so a reader can tell an
+   * unanswered turn from a settled one without waiting for a tick.
    */
   private appendInputMessageFx(
     m: SendMessageInput,
+    executionId?: string,
   ): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never> {
     const content =
       typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
+    const metadata = { ...m.metadata, ...omitUndefined({ executionId }) };
     return this.appendMessageEntryFx({
       role: m.role,
       content,
-      ...omitUndefined({ metadata: m.metadata }),
+      ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
     }).pipe(Effect.asVoid);
   }
 
@@ -3849,8 +3859,8 @@ export class SessionHarness<P = unknown>
    * has no ambient fiber to preserve and paying a root here costs nothing. Once
    * `sendBody` is Effect-native it should compose the twin instead.
    */
-  private appendInputMessage(m: SendMessageInput): Promise<void> {
-    return runHarnessProtocol(this.appendInputMessageFx(m));
+  private appendInputMessage(m: SendMessageInput, executionId?: string): Promise<void> {
+    return runHarnessProtocol(this.appendInputMessageFx(m, executionId));
   }
 
   /**
