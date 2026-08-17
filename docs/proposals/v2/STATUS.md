@@ -2206,6 +2206,38 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-16 — emitter stamping, client-call op, ADR 102 draft (shipped next.125)
+
+Three landings in one arc (#305, #306; cut 1.0.0-next.125):
+
+- **Envelope stamping at the emitters (#304).** The three principal-unstamped
+  emitters (`channel().publish`, channel snapshot, model deltas) now stamp;
+  model deltas via `RunExecutionInput.principal → TickInput → modelScope` —
+  the model packages stay principal-free, the scope arrives stamped. The
+  probe established the rule: ops through `runOperation` inherit principal
+  ambiently; the at-risk emitters are exactly those supplying an EXPLICIT
+  scope. A fourth (`BaseHarness.request()` → elicitation request frames) is
+  found and still open on #304.
+- **User turns carry execution provenance.** Input messages appended from
+  send are stamped with the `executionId` they open (same metadata slot as
+  assistant/tool entries); steers stamp the live id. An open turn is now
+  derivable from the log alone — the downstream `hasOpenTurn` scaffolding
+  retires against this.
+- **`tool:command:client-call` (#303, #306).** The `requiresResponse` client
+  relay wraps in an operation so the suspension has both bus edges (elicit's
+  exact shape); its opIds fold into the SAME blocked set, so a session
+  waiting on a browser reads `input_required`. Ruling: no default timeout —
+  a pending ask is a surfaced state, not a silent fallback. Plus `sessionId`
+  on `ClientToolCall`/`ToolCtx`, memoized `client.session(id)` (destroy
+  verbs release), per-dispatch ctx contributor via `ToolCtxExtensions`.
+- **ADR 102 draft** — attachment is authorization; the bus tree is the scope
+  model. Generalized at Ryan's direction: scope NODES (registry of path-named
+  buses) with tenancy, session-tree/fanIn, operator views, and arena rooms as
+  profiles over one primitive. Accepting it deletes `onlyOwnedBy`.
+- Environment: website `pnpm build` fails on typedoc ENAMETOOLONG from a
+  recursive `code ↔ code-host` node_modules nesting in transport-in-process —
+  packages build green; docs-only, unresolved.
+
 ### 2026-08-15 — no installer telemetry verb; nudges are structural (deferred facet)
 
 Follow-on to the ADR 78 inversion. Proposal considered: an
