@@ -25,8 +25,12 @@ function messageEntry(id: string, role: string, text: string, visibility?: strin
 
 async function render(bridges: HookBridges) {
   const compiler = timelineCompiler()();
-  await compiler.ready;
-  const { mountId } = await compiler.mount({ element: null, sessionId: "s1", bridges });
+  const { mountId } = await compiler.mount({
+    mountId: "mt-1",
+    element: null,
+    sessionId: "s1",
+    bridges,
+  });
   const result = await compiler.renderTree({ mountId, sessionId: "s1" });
   return result.tree.context.entries;
 }

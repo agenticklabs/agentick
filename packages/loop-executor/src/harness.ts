@@ -289,6 +289,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
         ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
         ...(i.clientId !== undefined ? { clientId: i.clientId } : {}),
+        ...(i.principal !== undefined ? { principal: i.principal } : {}),
       }),
       handler: (i) => this.tickBody(i),
     });
@@ -321,6 +322,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         ...(i.spawnPath !== undefined ? { spawnPath: i.spawnPath } : {}),
         ...(i.connectionId !== undefined ? { connectionId: i.connectionId } : {}),
         ...(i.clientId !== undefined ? { clientId: i.clientId } : {}),
+        ...(i.principal !== undefined ? { principal: i.principal } : {}),
       }),
       body: (i, sink) => this.runExecutionBody(i, sink),
     });
@@ -530,6 +532,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
+          ...(input.principal !== undefined ? { principal: input.principal } : {}),
           // Non-zero ⇒ the previous tick failed and was force-continued, so
           // this tick is its retry (ADR 99 slice 2).
           ...(consecutiveFailures > 0 ? { consecutiveFailures } : {}),
@@ -807,6 +810,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
           ...(input.spawnPath !== undefined ? { spawnPath: input.spawnPath } : {}),
           ...(input.connectionId !== undefined ? { connectionId: input.connectionId } : {}),
           ...(input.clientId !== undefined ? { clientId: input.clientId } : {}),
+          ...(input.principal !== undefined ? { principal: input.principal } : {}),
           compiler: input.compiler,
           modelExecutor: input.modelExecutor,
           target: input.target,
@@ -1022,6 +1026,15 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
   private tickBody(input: TickInput): Effect.Effect<TickResult, unknown, never> {
     const { executionId, tickId, tickIndex } = input;
     const execSignal = input.signal;
+    // The model executor is APP-level — it has no construction-bound principal
+    // to stamp, so the scope it emits its deltas under has to arrive carrying
+    // the session's (ADR 48).
+    const modelScope = omitUndefined({
+      sessionId: input.sessionId,
+      executionId,
+      tickId,
+      principal: input.principal,
+    });
     return Effect.gen(function* () {
       // Tick-start orchestration event (public stream). The
       // `useOnTickStart` projection rides `onBeforeLoopTick` (ADR 89 §4).
@@ -1228,7 +1241,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         const projected = yield* tickModelExecutor.fx.project({
           compiled: tickCompiled,
           target: tickTarget,
-          scope: { sessionId: input.sessionId, executionId, tickId },
+          scope: modelScope,
           tools: modelToolsForRun,
           ...(providerTools.length > 0 ? { providerTools } : {}),
           ...(input.narrate !== undefined ? { narrate: input.narrate } : {}),
@@ -1241,7 +1254,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
             {
               targetInput: projected,
               target: tickTarget,
-              scope: { sessionId: input.sessionId, executionId, tickId },
+              scope: modelScope,
               signal: execSignal,
             },
             (delta) => input.emit({ kind: "model", tick: tickIndex, delta }),
@@ -1256,7 +1269,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         const normalized = yield* tickModelExecutor.fx.normalize({
           targetOutput: streamed.right,
           target: tickTarget,
-          scope: { sessionId: input.sessionId, executionId, tickId },
+          scope: modelScope,
         });
         // The non-streaming `run` stamps this inside the executor, where one
         // call sees both halves. Here the loop composes the three phases
@@ -1276,7 +1289,7 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
         executorTerminal = yield* tickModelExecutor.fx.run({
           compiled: tickCompiled,
           target: tickTarget,
-          scope: { sessionId: input.sessionId, executionId, tickId },
+          scope: modelScope,
           tools: modelToolsForRun,
           signal: execSignal,
           ...(providerTools.length > 0 ? { providerTools } : {}),

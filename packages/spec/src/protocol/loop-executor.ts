@@ -162,6 +162,14 @@ export interface RunExecutionInput {
   readonly connectionId?: string;
   /** The client this execution serves — stamped onto its `EventScope`. */
   readonly clientId?: string;
+  /**
+   * Owning principal of the session running this execution (ADR 48) — stamped
+   * onto the execution's `EventScope` AND onto the scope handed to the model
+   * executor, which is app-level and so has no principal of its own to stamp
+   * from. Without it every model delta is a session-named envelope no
+   * principal-carved subscription can admit.
+   */
+  readonly principal?: string;
 
   /** Compiler harness whose `mountId` the loop will render each tick. */
   readonly compiler: CompilerProtocol;
@@ -612,6 +620,8 @@ export interface TickInput {
   readonly clientId?: string;
   /** Spawn lineage of the session (SP5) — forwarded onto the tick's `EventScope`. */
   readonly spawnPath?: readonly string[];
+  /** Owning principal of the session (ADR 48), inherited from the run. */
+  readonly principal?: string;
 
   /**
    * Failed ticks immediately PRECEDING this one (ADR 99 slice 2) — the run's
