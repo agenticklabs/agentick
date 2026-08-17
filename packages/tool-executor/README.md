@@ -421,12 +421,16 @@ const openFile = createTool({
 });
 ```
 
-| `annotations.requiresResponse` | Behaviour                                                                                                                                                                            |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `true`                         | The dispatch **suspends**, relays the call, and resumes with the client's result (`executedBy: "client"`). On timeout it falls back to `defaultResult`, else `ToolCallTimeoutError`. |
-| falsy (default)                | Resolves **immediately** with `defaultResult` (or a canned success block) and emits a one-way notification so the client still runs/renders the tool.                                |
+| `annotations.requiresResponse` | Behaviour                                                                                                                                                |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true`                         | The dispatch **suspends**, relays the call, and resumes with the client's result (`executedBy: "client"`). It waits for as long as it takes — see below. |
+| falsy (default)                | Resolves **immediately** with `defaultResult` (or a canned success block) and emits a one-way notification so the client still runs/renders the tool.    |
 
 `defaultResult` is a seam like the confirmation ones: static blocks or a per-call function on the validated input + ctx, evaluated at the resolve site — so a client tool can compute a call-specific fallback. Either way the result re-enters the loop through the unchanged `DispatchResult → tool_result` path.
+
+**There is no default timeout on a relayed call.** An unanswered call holds the execution open indefinitely, and the session reports `input_required` for as long as it does — the same status an outstanding elicitation produces, on the same `session:channel:status` frame, because both are the same fact: the turn is suspended on a human. A thread list watching that channel can say which conversation is waiting without holding a handle to it.
+
+That is the honest default. A model call that ends in "the browser never answered" is not a result worth inventing, and a timeout picked by the framework would be wrong for a dialog the user left open on another screen. When a tool _does_ have a sensible expiry, say so on the declaration — `responseTimeoutMs` arms the clock and `defaultResult` supplies the answer it resolves with; without `defaultResult` the trip fails the call with `ToolCallTimeoutError`.
 
 `executedBy` on this path is a hardcoded `"client"` — it never reads `annotations.executedBy`, which is absent from the wire annotation subset and stripped at the fold. A client cannot spoof provider or MCP provenance even with a raw payload.
 
@@ -570,21 +574,38 @@ Pair it with `requiresResponse: false`. With several clients answering there is 
 
 A page reload is a genuinely new client and gets a new id, which is right — new DOM, new state, nothing outstanding to inherit.
 
-**What this does not do:** there is no way to aim a tool at a _different_ client than the one that asked. If you have the same conversation open on a laptop and a phone, a call goes to whichever device asked. If that device disconnects mid-turn, the call falls back to its `defaultResult` when it times out.
+**What this does not do:** there is no way to aim a tool at a _different_ client than the one that asked. If you have the same conversation open on a laptop and a phone, a call goes to whichever device asked. If that device disconnects mid-turn, the call stays outstanding and the session stays `input_required` — that tab can still answer it when it reconnects, and nothing else will unless the tool set an expiry.
 
 #### What a handler receives
 
 The second argument carries only what the framework alone knows:
 
-| On `ctx`                   |                                                                                                                |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `toolCallId`, `name`       | Which call this is.                                                                                            |
-| `target`                   | The connection it was addressed to, if any.                                                                    |
-| `signal`                   | Aborted when the tools are torn down — honour it in a long `fetch`.                                            |
-| `log`, `trace`, `metrics`  | The same three facets the server handler gets. Always safe to call; no-ops until you wire a telemetry adapter. |
-| `clientId`, `connectionId` | This client and its current connection. Read `connectionId` when you need it — a reconnect mints a new one.    |
+| On `ctx`                   |                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `toolCallId`, `name`       | Which call this is.                                                                                                       |
+| `sessionId`                | Which conversation asked. Handlers stay bound for every session the client has open, so this is rarely the one on screen. |
+| `target`                   | The connection it was addressed to, if any.                                                                               |
+| `signal`                   | Aborted when the tools are torn down — honour it in a long `fetch`.                                                       |
+| `log`, `trace`, `metrics`  | The same three facets the server handler gets. Always safe to call; no-ops until you wire a telemetry adapter.            |
+| `clientId`, `connectionId` | This client and its current connection. Read `connectionId` when you need it — a reconnect mints a new one.               |
 
 Nothing app-shaped: no router, no store, no injector. A browser handler is written inside your app and already closes over all of it, and a ctx that carries app services stops being a framework contract.
+
+What a closure cannot reach is what is true at the moment the call _arrives_ — the tools were bound when the thread opened, and the user has moved since. `use(tools, { ctx })` runs a contributor per dispatch and merges its result onto the handler's ctx; augment `ToolCtxExtensions` so the slots you add are typed at every handler signature:
+
+```ts
+declare module "@agentick/tool-executor/client" {
+  interface ToolCtxExtensions {
+    foreground: boolean;
+  }
+}
+
+await session.clientToolCalls.use(tools, {
+  ctx: (call) => ({ foreground: call.sessionId === store.threadInView() }),
+});
+```
+
+Framework fields are applied over the contributor's result, so a returned `name` or `sessionId` cannot rewrite the call. A `navigate_to` for a background thread can then toast-with-consent instead of yanking the user out of what they are reading — an app policy, decided in the app, off a fact only the app has.
 
 A UI that draws its **own** confirmation dialog reads the request off `session.elicitations` with `toolConfirmation(elic)` instead of handing the decision to `confirm(policy)`. It is the same reader `confirm` uses, so a dialog gets every field the gate stamped — including the `confirmationPreview` — and `undefined` narrows away everything that is not a confirmation:
 
@@ -603,7 +624,7 @@ Do not run this **and** `confirm(policy)` — both answer the same correlation i
 
 `route` answers a throwing handler with an error result — a suspended call is never left hanging. Fire-and-forget relays carry no correlation id, so they never enter `list()`, but `route` still dispatches their handler.
 
-The pending set is snapshot-first: the executor publishes every outstanding `requiresResponse` call as the channel's opening frame, so a client that connects **mid-call** finds it in `list()` and can answer it, instead of the call hanging until timeout.
+The pending set is snapshot-first: the executor publishes every outstanding `requiresResponse` call as the channel's opening frame, so a client that connects **mid-call** finds it in `list()` and can answer it, instead of the call hanging with nobody left holding it.
 
 ```ts
 calls.list(); // pending calls, each with a bound .respond(result)
@@ -787,7 +808,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - **`taskSupport: "supported"` negotiation.** The `"supported"` branch resolves conservatively (Pattern A outside the model-required path). Per-call capability negotiation isn't built.
 - **Custom-registry parity.** `defineToolExecutor` replicates storage callbacks but not the validation pipeline or confirmation gate; those need a subclass.
 - **No way to withdraw one client tool.** Declaring is an upsert, so a tool stays until the session closes. Nothing needed it yet; a removal verb is a small addition when something does.
-- **No way to target a client other than the one that asked.** A tool call goes to the client whose request started the turn. If two devices share a session and the asking one disconnects mid-turn, the call falls back to its `defaultResult` on timeout.
+- **No way to target a client other than the one that asked.** A tool call goes to the client whose request started the turn. If two devices share a session and the asking one disconnects mid-turn, the call stays outstanding (the session reads `input_required`) until that client comes back and answers it, or the tool's own `responseTimeoutMs` expires.
 - **Snapshot fold granularity.** The opening `tool_call` snapshot frame carries no top-level `toolCallId`/`name`, so a hand-rolled per-call fold that keys on those skips it; the bundled client handle consumes it correctly.
 
 ## Verified by
@@ -801,7 +822,7 @@ Types: `ClientToolCall`, `ClientToolCallHandle`, `ClientToolCallsHandle`, `Clien
 - `src/__tests__/confirmation.spec.ts` + `confirmation-seams.spec.ts` — approve / deny / declined / `always` / `modifiedArguments` / abort / timeout, the wire envelope's `hints.kind` and metadata, `confirmationMessage` (string, sync and async function, default-prompt regression), `confirmationPreview` merging under `metadata.preview`, callable `defaultResult`, and dispatch by alias.
 - `src/__tests__/client-tools.spec.ts` + `pending-snapshot.spec.ts` — async `requiresConfirmation` predicates, `requiresResponse` suspend/relay/resume, fire-and-forget notify, timeout fallback and `ToolCallTimeoutError`, bare-string relay normalization, the unspoofable `executedBy: "client"`, unknown-correlation no-op, the present-but-unresolvable `handlerRef` regression guard, gating before relay, and the mid-call snapshot frame.
 - `src/__tests__/readme-client-tools.spec.ts` — the `readSelection` / `navigateTo` examples on this page, compiled and run against the public `/client` entry with a real zod schema: the handler's input inferred off the schema with no cast, the schema projected to the JSON Schema the wire carries, and neither example carrying a routing rule of its own.
-- `@agentick/transport-in-process`'s `client-tools-e2e.spec.ts` — declaring over a real gateway: an upsert leaving an earlier client's tools standing ([A,B] then [B,C] ⇒ {A,B,C}), a re-declared name replacing in place with no collision, the empty set changing nothing, and an app tool of the same name surviving in its own binding slot. Plus two clients declaring in turn with neither erased.
+- `@agentick/transport-in-process`'s `client-tools-e2e.spec.ts` — declaring over a real gateway: an upsert leaving an earlier client's tools standing ([A,B] then [B,C] ⇒ {A,B,C}), a re-declared name replacing in place with no collision, the empty set changing nothing, and an app tool of the same name surviving in its own binding slot. Plus two clients declaring in turn with neither erased. And the several-threads-open shape: one handle per session id (so the fold is a singleton, and `close()` releases it), a call raised by the thread that is NOT in view dispatched with its own `sessionId`, and the session reporting `input_required` for exactly as long as that call is outstanding — `idle → running → input_required → running → idle` on the status channel.
 - `@agentick/client-core`'s `handshake-retry.spec.ts` — the identity round trip: a reconnect re-presenting the SAME claimed client id and being handed a NEW connection id, and the client reporting the id the server BOUND rather than the one it claimed.
 - `src/__tests__/client-tools.spec.ts` — a `createTool` declared with NO handler surviving `toRegistration` with its `handlerRef` still absent, relaying to the tool-call channel rather than failing `ToolHandlerMissing`, doing so as a correlated request (not the one-way notify that answers before any client has run), and the client's reply reaching the model as `executedBy: "client"`.
 - `src/__tests__/create-tool.spec.ts` — the declaration projected off a `createTool` (the handler never reaching the wire), alias resolution, the ctx a handler receives, a handler throw answered rather than hung, and the addressing rule: a call for this client runs, one for another client is SILENT, an unaddressed one runs everywhere, four clients with one addressed produce exactly one answer and three silences, and `self` read at dispatch so a server-rebound id is never stale. Plus the two answers kept apart — an addressed-elsewhere call sends nothing and does not reach `notFound`, while an undeclared tool is answered because nobody has it.

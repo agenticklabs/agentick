@@ -98,6 +98,7 @@ export function makeGatewayHandle(client: InternalClient): GatewayHandle {
       return client.request("gateway/get_app", { appId: id });
     },
     async destroySession(sessionId, opts) {
+      releaseSessionHandle(client, sessionId);
       return client.request("gateway/destroy_session", {
         sessionId,
         reason: opts?.reason,
@@ -156,6 +157,7 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
     // derivation covers. Extending it to the app namespace is a separate change
     // to the derivation, not a rider on this verb.
     async destroySession(sessionId, opts) {
+      releaseSessionHandle(client, sessionId);
       return client.request("app/destroy_session", {
         appId,
         sessionId,
@@ -185,7 +187,43 @@ export function makeAppHandle(client: InternalClient, appId: string): AppHandle 
   };
 }
 
+/**
+ * The open session handles per client, keyed by session id, each with the
+ * teardown for what it opened. A handle owns subscriptions — the tool-call fold,
+ * the status view, every ADR-87 sub-handle — so handing out a second one for the
+ * same session opens a second copy of each, and whichever half of the app holds
+ * the other instance never sees the frames.
+ *
+ * Every way a session ENDS evicts: `close()` here, and `destroySession` from the
+ * app or gateway door via {@link releaseSessionHandle}. A handle left in this map
+ * after its session is gone would be handed to the next caller asking for that
+ * id, holding subscriptions to a session the server has already forgotten.
+ */
+const openSessionHandles = new WeakMap<
+  InternalClient,
+  Map<string, { readonly handle: SessionHandle; readonly release: () => readonly unknown[] }>
+>();
+
+/**
+ * Release the client-side handle for a session that ended from a door other than
+ * `session.close()` — `app.destroySession` / `gateway.destroySession`. Closes
+ * what the handle opened WITHOUT sending `session/close`: the session is already
+ * being destroyed, and a second verb chasing it is a race, not a cleanup.
+ */
+function releaseSessionHandle(client: InternalClient, sessionId: string): void {
+  const entry = openSessionHandles.get(client)?.get(sessionId);
+  if (entry === undefined) return;
+  openSessionHandles.get(client)!.delete(sessionId);
+  entry.release();
+}
+
 export function makeSessionHandle(client: InternalClient, sessionId: string): SessionHandle {
+  const open =
+    openSessionHandles.get(client) ??
+    new Map<string, { handle: SessionHandle; release: () => readonly unknown[] }>();
+  openSessionHandles.set(client, open);
+  const memoized = open.get(sessionId);
+  if (memoized !== undefined) return memoized.handle;
   // Assigned right below the literal, once the sub-handle getters are installed;
   // `close()` reaches it through the closure rather than through `this`.
   let closeSubHandles: SessionSubHandleTeardown;
@@ -194,6 +232,11 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   // sub-handle factories get this view of the client rather than the raw one.
   const handleClient = withMiddlewareTransport(client);
   let statusView: SessionStatusView | undefined;
+  /** Everything this handle opened, released together. Returns the failures. */
+  const release = (): readonly unknown[] => {
+    statusView?.close();
+    return closeSubHandles();
+  };
   // Typed against the hand-written BASE ({@link SessionHandleBase}) so the literal
   // is fully checked. The registered sub-handles (`session.knobs`, …) are attached
   // as getters below (ADR 87); the wire-DERIVED namespace methods
@@ -266,8 +309,8 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
      * runs once and every sub-handle `close()` is itself idempotent.
      */
     async close() {
-      statusView?.close();
-      const failures = closeSubHandles();
+      open.delete(sessionId);
+      const failures = release();
       await client.request("session/close", { sessionId });
       if (failures.length > 0) {
         throw new AggregateError(failures, "session.close(): sub-handle teardown failed");
@@ -295,7 +338,9 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
   // sub-handles and base members are served from `handle` untouched; only
   // unknown namespaces fall through to synthesis. Cast to the mapped
   // `SessionHandle` — the runtime is a superset, the type is the guard.
-  return wrapSessionWireProxy(handle, client, sessionId);
+  const wrapped = wrapSessionWireProxy(handle, client, sessionId);
+  open.set(sessionId, { handle: wrapped, release });
+  return wrapped;
 }
 
 /**

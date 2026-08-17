@@ -725,9 +725,11 @@ that is `idle` and perfectly usable, so folding the ending into the state would 
 healthy session render as broken. A UI raises a toast off the frame and draws the badge
 off the status.
 
-A running session blocked on a **pending elicitation** transitions to `input_required`,
+A running session blocked on a **pending ask** transitions to `input_required`,
 and back to `running` when the last ask is answered — so "action required over there" is a
-frame rather than something a UI can learn only by opening the session. Concurrent asks
+frame rather than something a UI can learn only by opening the session. Two things count
+as an ask, and they are the same blocked state: an outstanding elicitation, and a
+client-handled tool call the browser has not answered yet. Concurrent asks of either kind
 are one blocked state; an ask raised outside an execution does not block an idle session;
 and a turn that ends with asks outstanding still lands on `idle` — the ending beats the
 block.

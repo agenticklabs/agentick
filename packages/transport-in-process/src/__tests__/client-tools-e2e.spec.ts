@@ -19,6 +19,7 @@
 
 // ADR 87 — contributes `session.clientToolCalls` (the folded handle).
 import "@agentick/tool-executor/client";
+import { createTool, type Tool } from "@agentick/tool-executor/client";
 
 import { describe, expect, it } from "vitest";
 
@@ -31,6 +32,7 @@ import {
   jsonSchema,
   toJsonSchema,
   type ClientToolDeclaration,
+  type ContentBlock,
   type ExecutionTarget,
   type JsonRpcId,
   type JsonRpcRequest,
@@ -39,6 +41,7 @@ import {
   type ToolExecutorProtocol,
 } from "@agentick/spec";
 import { dispatchRequest, type DispatchSink } from "@agentick/transport";
+import { waitFor } from "@agentick/utils/testing";
 
 import { inProcessTransport } from "../index.js";
 
@@ -265,5 +268,154 @@ describe("two clients on one session", () => {
 
     expect((await compiledTool(session, "client_a")).length).toBeGreaterThan(0);
     await cleanup();
+  });
+});
+
+/**
+ * A client with SEVERAL threads open — the shape #303 is about. Handlers stay
+ * bound for every session the client has open, so a call raised by the thread
+ * the user is NOT looking at still reaches a handler, and it says which thread
+ * asked. While that call is outstanding the session is `input_required`: the
+ * execution is suspended on a human, and a thread list must be able to say so.
+ */
+describe("several sessions open on one client", () => {
+  const navigateTo = (
+    seen: { sessionId: string; to: unknown }[],
+    gate: () => Promise<void>,
+  ): Tool =>
+    createTool({
+      name: "navigate_to",
+      description: "Take the user somewhere",
+      inputSchema: jsonSchema<{ readonly to: string }>({
+        type: "object",
+        properties: { to: { type: "string" } },
+        required: ["to"],
+      }),
+      handler: async (input, ctx) => {
+        seen.push({ sessionId: ctx.sessionId, to: input.to });
+        await gate();
+        return "navigated";
+      },
+    });
+
+  async function makeTwoSessionStack() {
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    // One turn: call the client tool, then finish on the client's answer.
+    const executor = new FakeLanguageModelExecutor("ct-multi-exec", journal, bus, inbox, {
+      scripted: [
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [
+              {
+                type: "tool_use",
+                toolUseId: "call-1",
+                name: "navigate_to",
+                input: { to: "/jobs" },
+              },
+            ],
+            stopReason: "tool_use",
+            toolCalls: [{ id: "call-1", name: "navigate_to", input: { to: "/jobs" } }],
+          },
+        },
+        {
+          result: {
+            specVersion: "2026-05-08",
+            output: [{ type: "text", text: "done" } satisfies ContentBlock],
+            stopReason: "end",
+          },
+        },
+      ],
+    });
+    await executor.ready;
+
+    const gateway = await createGateway();
+    await gateway.listen();
+    const app = await gateway.createApp({
+      appId: "ct-multi-app",
+      rootElement: null,
+      options: { modelExecutor: executor, compiler: fakeCompiler(), target },
+    });
+    await app.createSession({ sessionId: "thread-a" });
+    await app.createSession({ sessionId: "thread-b" });
+
+    const client = await createClient({ transport: inProcessTransport({ gateway }) });
+    await client.connect();
+    return { client, cleanup: async () => (await client.close(), await gateway.close()) };
+  }
+
+  /** Let the gateway-side subscribe fiber land before anything publishes. */
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+
+  it("returns ONE handle per session, so the tool-call fold is a singleton", async () => {
+    const { client, cleanup } = await makeTwoSessionStack();
+    try {
+      // A second lookup used to build a second handle over the same session: a
+      // second subscription, a second pending set, and whichever half of the
+      // app held the other one never saw the call.
+      // Compared as booleans: handing a session handle to `expect` makes it
+      // enumerate, and enumerating materializes every lazy sub-handle getter.
+      expect(client.session("thread-a") === client.session("thread-a")).toBe(true);
+      expect(client.session("thread-a") === client.session("thread-b")).toBe(false);
+      expect(
+        client.session("thread-a").clientToolCalls === client.session("thread-a").clientToolCalls,
+      ).toBe(true);
+
+      // Closing releases the handle, so a session reopened under the same id is
+      // not served the closed one.
+      const first = client.session("thread-a");
+      await first.close();
+      expect(client.session("thread-a") === first).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("dispatches a call raised by the BACKGROUND session, and holds it at input_required", async () => {
+    const { client, cleanup } = await makeTwoSessionStack();
+    const seen: { sessionId: string; to: unknown }[] = [];
+    let release!: () => void;
+    const answered = new Promise<void>((r) => (release = r));
+
+    try {
+      // Both threads are open and both are bound — the user is looking at A.
+      const a = client.session("thread-a");
+      const b = client.session("thread-b");
+      const tools = [navigateTo(seen, () => answered)];
+      await a.clientToolCalls.use(tools);
+      await b.clientToolCalls.use(tools);
+
+      const frames: string[] = [];
+      b.status.onChange((f) => frames.push(f.status));
+      await settle();
+
+      const turn = b.send({ messages: [{ role: "user", content: "take me there" }] });
+
+      // The suspended call is a session state, not a private detail of the tab
+      // that happens to hold the handler.
+      await waitFor(() => b.status.get() === "input_required", {
+        description: "the session to report it is waiting on the client",
+        timeoutMs: 5_000,
+      });
+      expect(seen).toEqual([{ sessionId: "thread-b", to: "/jobs" }]);
+
+      release();
+      await turn.result;
+      await waitFor(() => b.status.get() === "idle", {
+        description: "the turn to end",
+        timeoutMs: 5_000,
+      });
+
+      // The seed frame first (the subscription opens with the current status),
+      // then the turn: suspended on the client, resumed by its answer, ended.
+      expect(frames).toEqual(["idle", "running", "input_required", "running", "idle"]);
+      // Nothing was asked of thread A, which never left idle.
+      expect(client.session("thread-a").status.get() ?? "idle").toBe("idle");
+    } finally {
+      release();
+      await cleanup();
+    }
   });
 });

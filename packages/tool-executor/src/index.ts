@@ -48,6 +48,7 @@ export {
   TOOL_CALL_CHANNEL,
   TOOL_CALL_CHANNEL_FQN,
   TOOL_CALL_REQUEST_SCHEMA,
+  TOOL_CLIENT_CALL_COMMAND,
   type PendingToolCall,
   type ToolCallRequestPayload,
   type ToolCallResponse,

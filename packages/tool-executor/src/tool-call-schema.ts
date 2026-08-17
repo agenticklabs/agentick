@@ -30,6 +30,16 @@ export const TOOL_CALL_CHANNEL = "tool_call" as const;
 export const TOOL_CALL_CHANNEL_FQN = "session:channel:tool_call" as const;
 
 /**
+ * The client-call OPERATION's event name. Subscribe to its `requested`/
+ * `terminal` pair — not the channel — to count client-handled calls
+ * OUTSTANDING: the channel publishes the ask and nothing else, because the
+ * answer comes back over the inbox. The op pair is balanced on every exit — an
+ * answer, a timeout, an abort, a harness close alike. Twin of
+ * `ELICITATION_ELICIT_COMMAND`, and watched by the same session tracker.
+ */
+export const TOOL_CLIENT_CALL_COMMAND = "tool:command:client-call" as const;
+
+/**
  * Outbound request the executor publishes for a client-handled tool.
  * The correlationId + replyTo travel in the envelope `metadata` (added
  * by `BaseHarness.request`), NOT in this payload.

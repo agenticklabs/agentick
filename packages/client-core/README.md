@@ -152,6 +152,13 @@ const session = app.session("sess-123"); // AppHandle → SessionHandle
 `client.app(id)` and `client.session(id)` are the direct forms — nesting is for
 when you're walking down from a listing.
 
+A session handle is **one per id per client**, whichever door you reach it
+through: `client.session(id)`, `app.session(id)` and a second lookup all return
+the same object. It owns subscriptions — the status view, the tool-call fold,
+every sub-handle — so handing out a second one would open a second copy of each
+and leave whichever half of the app held the other one deaf. `close()` releases
+it, and a lookup after that builds a fresh handle.
+
 | Handle               | Verbs                                                                                                               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `client.gateway()`   | `listApps` · `getApp` · `listSessions` · `destroySession` · `app(id)` · `events`                                    |
@@ -200,7 +207,8 @@ session.status.onChange((frame) => {
 `outcome` (`"succeeded" | "failed" | "aborted"`) rides only the frame that ENDS a run, so
 a toast is a frame and a badge is the status. A turn that failed leaves an `idle`,
 perfectly usable session — which is exactly why the ending is not folded into the state.
-`input_required` means the session is running but blocked on a pending elicitation:
+`input_required` means the session is running but blocked on a pending ask — an
+elicitation, or a client-handled tool call nobody has answered yet:
 "action required" is a frame, not something a UI has to open the session to discover.
 (Not `paused` — that is reserved for an operator stopping a session, which a UI must be
 able to tell apart from waiting on an answer.)
@@ -1105,6 +1113,12 @@ transport changes the `createClient` call and nothing else.
   existing caller's request body is unchanged. What it MEANS is pinned end-to-end
   in [@agentick/transport-in-process](../transport-in-process)'s
   `progress-fan-in-e2e.spec.ts`.
+- `src/__tests__/session-close-teardown.spec.ts` — `session.close()` releasing every
+  sub-handle it BUILT (and never materializing one it did not) before the RPC, a
+  throwing `close()` neither stopping its siblings nor suppressing the RPC, and the
+  one-handle-per-session rule: `close()` and `app`/`gateway` `destroySession` each
+  evict, so the next lookup builds a fresh handle rather than one subscribed to a
+  session the server has forgotten.
 - `src/__tests__/capabilities.spec.ts` — handshake populates capabilities and
   `serverInfo`, `MethodNotFound` degradation on `_extensions/list`, rejection when
   `initialize` fails, clearing on drop, re-handshake on reconnect (and _not_ on the

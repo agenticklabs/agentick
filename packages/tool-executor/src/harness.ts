@@ -25,7 +25,7 @@ import { buildSessionElicit } from "@agentick/elicitation";
 
 import { Cause, Effect, Exit, Option } from "effect";
 import { deriveContext, getContext, runHarnessProtocol, generateId } from "@agentick/runtime";
-import { BaseHarness, type TelemetryRuntime } from "@agentick/runtime";
+import { BaseHarness, type RequestError, type TelemetryRuntime } from "@agentick/runtime";
 import type {
   AbortInput,
   ChannelPublisher,
@@ -92,6 +92,7 @@ import {
 } from "./confirmation-schema.js";
 import {
   TOOL_CALL_CHANNEL,
+  TOOL_CLIENT_CALL_COMMAND,
   type ToolCallRequestPayload,
   type ToolCallSnapshotFrame,
 } from "./tool-call-schema.js";
@@ -1198,9 +1199,18 @@ export class ToolExecutorHarness
         let normalized: NormalizedToolResult;
 
         if (ann?.requiresResponse === true) {
-          const respEffect = this.request<ToolCallRequestPayload, ToolResultInput>(
-            TOOL_CALL_CHANNEL,
-            {
+          // The relay is wrapped in an OPERATION so the suspension has both
+          // edges on the bus: `request` publishes the ask and nothing else,
+          // because the answer returns over the inbox. The op's
+          // requested/terminal pair is what lets the session hold itself at
+          // `input_required` for exactly as long as a client owes an answer —
+          // the same seam `elicitation:command:elicit` gives an ask.
+          const clientCallOp: Operation<ToolCallRequestPayload, ToolResultInput, RequestError> = {
+            opId: `tool:client-call:${input.toolCallId}`,
+            surface: "tool",
+            name: TOOL_CLIENT_CALL_COMMAND,
+            scope: dispatchScope,
+            input: {
               toolCallId: input.toolCallId,
               name: input.name,
               input: validated,
@@ -1210,15 +1220,22 @@ export class ToolExecutorHarness
                 target: ann?.broadcast === true ? undefined : input.context.clientId,
               }),
             },
-            {
+          };
+          const respEffect = this.runOperation(clientCallOp, (relay) =>
+            this.request<ToolCallRequestPayload, ToolResultInput>(TOOL_CALL_CHANNEL, relay, {
               ...omitUndefined({ timeoutMs: ann.responseTimeoutMs ?? input.responseTimeoutMs }),
               signal: controller.signal,
               scope: dispatchScope,
-            },
+            }),
           );
           const resp = yield* Effect.either(respEffect);
           if (resp._tag === "Left") {
-            if (resp.left._tag === "RequestTimeoutError" && ann.defaultResult !== undefined) {
+            // `runOperation` widens the failure channel with `SubstrateError`,
+            // whose `JournalError` member declares `_tag: string` — which
+            // defeats the tag narrowing. A journal failure reaches the abort
+            // branch, which is where an unanswerable relay belongs anyway.
+            const failure = resp.left as RequestError;
+            if (failure._tag === "RequestTimeoutError" && ann.defaultResult !== undefined) {
               // Timeout with an opt-in fallback — resolve with it. The
               // seam is static blocks OR a per-call function on the
               // validated input + ctx (sync or async), evaluated here.
@@ -1228,11 +1245,11 @@ export class ToolExecutorHarness
                   ? yield* Effect.promise(() => Promise.resolve(dr(validated, ctx)))
                   : dr;
               normalized = normalizeToolResult(resolvedDefault);
-            } else if (resp.left._tag === "RequestTimeoutError") {
+            } else if (failure._tag === "RequestTimeoutError") {
               callerSignal?.removeEventListener("abort", onCallerAbort);
               this.inFlight.delete(input.toolCallId);
               return yield* Effect.fail(
-                new ToolCallTimeoutError({ toolName: input.name, ms: resp.left.ms }),
+                new ToolCallTimeoutError({ toolName: input.name, ms: failure.ms }),
               );
             } else {
               // Abort / cancel — the caller signal fired or the request
