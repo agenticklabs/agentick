@@ -53,6 +53,7 @@ import type {
   ElicitationRequest,
   FormElicitationRequest,
   EventBus,
+  EventSurface,
   EventBusFactory,
   ExecutionTarget,
   ExecutorProtocol,
@@ -134,7 +135,7 @@ import {
 } from "@agentick/spec";
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
 import { buildSessionElicit, ELICITATION_ELICIT_COMMAND } from "@agentick/elicitation";
-import { withScope } from "@agentick/tool-executor";
+import { withScope, TOOL_CLIENT_CALL_COMMAND } from "@agentick/tool-executor";
 import {
   effectiveModelInfo,
   modelFactsOf,
@@ -2435,10 +2436,13 @@ export class SessionHarness<P = unknown>
    * on the status channel rather than something a UI learns only by opening the
    * session. NOT `paused`, which is reserved for an operator stopping a session.
    *
-   * Subscribes to the elicit OPERATION rather than the elicitation CHANNEL
-   * because only the op has both edges — see {@link ELICITATION_ELICIT_COMMAND}.
-   * Tracked as a SET of op ids so concurrent asks are one blocked state and a
-   * replayed terminal cannot drive the count negative.
+   * TWO kinds of ask block a session, and they are the same blocked state: an
+   * elicitation, and a client-handled tool call the browser has not answered
+   * yet. Both subscribe to the OPERATION rather than the channel because only
+   * the op has both edges — see {@link ELICITATION_ELICIT_COMMAND} and
+   * {@link TOOL_CLIENT_CALL_COMMAND}. Op ids from both land in ONE set, so
+   * concurrent asks of either kind are one blocked state and a replayed
+   * terminal cannot drive the count negative.
    *
    * Both flips are guarded on the current status, which is what enforces the
    * rules: an ask raised outside an execution never blocks an idle session, and
@@ -2447,32 +2451,37 @@ export class SessionHarness<P = unknown>
    */
   private trackBlockedOnInput(): void {
     const outstanding = new Set<string>();
-    const fiber = Effect.runFork(
-      Stream.runForEach(
-        this.bus.subscribe({
-          surface: "elicitation",
-          name: { exact: ELICITATION_ELICIT_COMMAND },
-          phase: ["requested", "terminal"],
-          scope: { sessionId: this.runtime.id },
-        }),
-        (event) =>
-          Effect.sync(() => {
-            const opId = (event as { opId?: string }).opId;
-            if (opId === undefined) return;
-            if (event.phase === "requested") outstanding.add(opId);
-            else outstanding.delete(opId);
+    const fold = (event: ProtocolEvent): void => {
+      const opId = (event as { opId?: string }).opId;
+      if (opId === undefined) return;
+      if (event.phase === "requested") outstanding.add(opId);
+      else outstanding.delete(opId);
 
-            const status = this.runtime.status();
-            if (outstanding.size > 0 && status === "running") {
-              this.runtime.setStatus("input_required");
-            } else if (outstanding.size === 0 && status === "input_required") {
-              this.runtime.setStatus("running");
-            }
+      const status = this.runtime.status();
+      if (outstanding.size > 0 && status === "running") {
+        this.runtime.setStatus("input_required");
+      } else if (outstanding.size === 0 && status === "input_required") {
+        this.runtime.setStatus("running");
+      }
+    };
+    const watch = (surface: EventSurface, name: string): Fiber.RuntimeFiber<void, unknown> =>
+      Effect.runFork(
+        Stream.runForEach(
+          this.bus.subscribe({
+            surface,
+            name: { exact: name },
+            phase: ["requested", "terminal"],
+            scope: { sessionId: this.runtime.id },
           }),
-      ),
-    );
+          (event) => Effect.sync(() => fold(event)),
+        ),
+      );
+    const fibers = [
+      watch("elicitation", ELICITATION_ELICIT_COMMAND),
+      watch("tool", TOOL_CLIENT_CALL_COMMAND),
+    ];
     this.onClose(() => {
-      void Effect.runPromise(Fiber.interrupt(fiber));
+      for (const fiber of fibers) void Effect.runPromise(Fiber.interrupt(fiber));
     });
   }
 

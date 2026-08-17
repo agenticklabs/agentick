@@ -66,6 +66,7 @@ function ctx(): Parameters<typeof readSelection.handler>[1] {
   return {
     toolCallId: "tc-1",
     name: "read_selection",
+    sessionId: "s1",
     signal: new AbortController().signal,
     clientId: "c1",
     connectionId: "conn-A",

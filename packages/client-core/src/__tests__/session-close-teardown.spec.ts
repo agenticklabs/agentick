@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { makeSessionHandle } from "../handles.js";
+import { makeAppHandle, makeGatewayHandle, makeSessionHandle } from "../handles.js";
 import { registerSessionHandleExtension } from "../session-handle-extensions.js";
 
 type InternalClientArg = Parameters<typeof makeSessionHandle>[0];
@@ -120,5 +120,44 @@ describe("session.close() tears down every BUILT sub-handle", () => {
     const session = makeSessionHandle(client, "s1");
     void slot(session, "closeless");
     await expect(session.close()).resolves.toBeUndefined();
+  });
+});
+
+describe("destroying a session releases its handle from the other doors too", () => {
+  it("app.destroySession closes what the handle opened, and the next lookup is fresh", async () => {
+    const fold = foldHandle();
+    registerSessionHandleExtension("destroyed", fold.factory);
+
+    const { client, request } = fakeClient();
+    const session = makeSessionHandle(client, "s1");
+    void slot(session, "destroyed");
+
+    await makeAppHandle(client, "app1").destroySession("s1");
+
+    // No `session/close` chasing a session that is already being destroyed —
+    // and the subscription the handle opened is not left running.
+    expect(fold.state.closes).toBe(1);
+    expect(request).toHaveBeenCalledWith("app/destroy_session", {
+      appId: "app1",
+      sessionId: "s1",
+      reason: undefined,
+    });
+    // Compared as a boolean: handing the PROXY to `expect` makes it enumerate,
+    // which materializes the lazy getters this suite is about.
+    expect(makeSessionHandle(client, "s1") === session).toBe(false);
+  });
+
+  it("gateway.destroySession does the same", async () => {
+    const fold = foldHandle();
+    registerSessionHandleExtension("destroyed-gw", fold.factory);
+
+    const { client } = fakeClient();
+    const session = makeSessionHandle(client, "s2");
+    void slot(session, "destroyed-gw");
+
+    await makeGatewayHandle(client).destroySession("s2");
+
+    expect(fold.state.closes).toBe(1);
+    expect(makeSessionHandle(client, "s2") === session).toBe(false);
   });
 });

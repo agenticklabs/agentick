@@ -13,8 +13,8 @@
 import type { ClientRuntimeContext, ToolResultInput, Unsubscribe } from "@agentick/spec";
 import { reasonOf } from "@agentick/utils";
 
-import type { ClientToolCallHandle } from "./client-tool-calls.js";
-import type { Tool, ToolCtx } from "./create-tool.js";
+import type { ClientToolCall, ClientToolCallHandle } from "./client-tool-calls.js";
+import type { Tool, ToolCtx, ToolCtxExtensions } from "./create-tool.js";
 
 /**
  * This client's own id, read at DISPATCH time rather than captured — the
@@ -33,6 +33,16 @@ export interface UseClientToolsOptions {
    * into three warnings about a working system.
    */
   readonly notFound?: (input: unknown, ctx: ToolCtx) => ToolResultInput | Promise<ToolResultInput>;
+  /**
+   * Fills the adopter's own {@link ToolCtxExtensions} slots, evaluated PER
+   * DISPATCH against the call. Read the app's state at the moment the call
+   * arrives — which session is in view, who is signed in — rather than at the
+   * moment the tools were bound, which is a different answer.
+   *
+   * Framework fields (`toolCallId`, `name`, `sessionId`, `signal`, …) are
+   * applied over the result: ctx is extended here, never rewritten.
+   */
+  readonly ctx?: (call: ClientToolCall) => ToolCtxExtensions;
 }
 
 /** Resolves a tool by the name (or alias) a call arrived under. */
@@ -78,7 +88,7 @@ export async function dispatchClientToolCall(
   // rediscover.
   if (call.target !== undefined && call.target !== self()) return DECLINED;
 
-  const ctx = clientToolCtx(call, runtime, signal);
+  const ctx = clientToolCtx(call, runtime, signal, opts.ctx);
 
   const run =
     tool !== undefined
@@ -142,12 +152,15 @@ export function clientToolCtx(
   call: ClientToolCallHandle,
   runtime: ClientRuntimeContext,
   signal: AbortSignal,
+  contribute?: (call: ClientToolCall) => ToolCtxExtensions,
 ): ToolCtx {
   return {
     ...runtime,
+    ...contribute?.(call),
     activeSpan: () => runtime.activeSpan(),
     toolCallId: call.toolCallId,
     name: call.name,
+    sessionId: call.sessionId,
     ...(call.target !== undefined ? { target: call.target } : {}),
     signal,
   };

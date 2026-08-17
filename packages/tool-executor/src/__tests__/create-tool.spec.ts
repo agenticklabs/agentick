@@ -33,6 +33,7 @@ function call(name: string, input: unknown = {}, target?: string): ClientToolCal
   return {
     toolCallId: "tc-1",
     name,
+    sessionId: "s1",
     input,
     target,
     correlationId: "corr-1",

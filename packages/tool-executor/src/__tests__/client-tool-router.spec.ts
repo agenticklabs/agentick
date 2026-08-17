@@ -608,3 +608,96 @@ describe("clientToolCalls.route — a failing handler still answers", () => {
     handle.close();
   });
 });
+
+describe("a call names the session that asked", () => {
+  it("carries sessionId onto the pending call and onto the handler's ctx", async () => {
+    const stream = pushStream();
+    const { client } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "thread-b");
+    const seenCtx: ToolCtx[] = [];
+    const pending: (string | undefined)[] = [];
+    handle.route({
+      navigate_to: (_input, ctx) => {
+        seenCtx.push(ctx);
+        // Read while the call is still outstanding — answering removes it.
+        pending.push(handle.list()[0]?.sessionId);
+        return "navigated";
+      },
+    });
+
+    stream.emit(toolCall("navigate_to", { to: "/jobs" }), "corr:b");
+    await waitFor(() => seenCtx.length === 1);
+
+    // A client holds handlers for every session it has open, so "which thread
+    // is this?" is the question the handler answers first.
+    expect(seenCtx[0]!.sessionId).toBe("thread-b");
+    expect(pending).toEqual(["thread-b"]);
+    handle.close();
+  });
+});
+
+describe("clientToolCalls.use — the per-call ctx contributor", () => {
+  it("evaluates the contributor at DISPATCH, so the handler reads what is true now", async () => {
+    const stream = pushStream();
+    const { client } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "thread-b");
+    const seenCtx: ToolCtx[] = [];
+    // What the app knows and the framework cannot: which thread the user is
+    // looking at. It changes while the tools stay bound.
+    let inView = "thread-b";
+
+    await handle.use(
+      [
+        createTool({
+          name: "navigate_to",
+          description: "d",
+          inputSchema: jsonSchema({ type: "object" }),
+          handler: (_input, ctx) => {
+            seenCtx.push(ctx);
+            return "navigated";
+          },
+        }),
+      ] as never,
+      { ctx: (call) => ({ foreground: call.sessionId === inView }) },
+    );
+
+    stream.emit(toolCall("navigate_to", {}, "tc-1"), "corr:1");
+    await waitFor(() => seenCtx.length === 1);
+    inView = "thread-a";
+    stream.emit(toolCall("navigate_to", {}, "tc-2"), "corr:2");
+    await waitFor(() => seenCtx.length === 2);
+
+    const foreground = seenCtx.map((c) => (c as unknown as { foreground: boolean }).foreground);
+    expect(foreground).toEqual([true, false]);
+    handle.close();
+  });
+
+  it("never lets a contributed key shadow a framework field", async () => {
+    const stream = pushStream();
+    const { client } = stubClient(stream);
+    const handle = clientToolCallsHandle(client, "thread-b");
+    const seenCtx: ToolCtx[] = [];
+
+    await handle.use(
+      [
+        createTool({
+          name: "navigate_to",
+          description: "d",
+          inputSchema: jsonSchema({ type: "object" }),
+          handler: (_input, ctx) => {
+            seenCtx.push(ctx);
+            return "navigated";
+          },
+        }),
+      ] as never,
+      { ctx: () => ({ name: "HIJACKED", sessionId: "HIJACKED" }) as never },
+    );
+
+    stream.emit(toolCall("navigate_to", {}), "corr:1");
+    await waitFor(() => seenCtx.length === 1);
+
+    expect(seenCtx[0]!.name).toBe("navigate_to");
+    expect(seenCtx[0]!.sessionId).toBe("thread-b");
+    handle.close();
+  });
+});

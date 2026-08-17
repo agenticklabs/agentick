@@ -90,6 +90,12 @@ interface EnvelopeWithMetadata extends EventEnvelope {
 export interface ClientToolCall {
   readonly toolCallId: string;
   readonly name: string;
+  /**
+   * The session this call belongs to. A client holds handlers for every session
+   * it has open, so the handler needs to know which one is asking before it can
+   * decide whether the call is for the view the user is looking at.
+   */
+  readonly sessionId: string;
   /** The VALIDATED input from the relay payload (post inputSchema validation). */
   readonly input: unknown;
   /**
@@ -277,7 +283,7 @@ export function clientToolCallsHandle(
         // already have run before the socket dropped.
         pending.clear();
         for (const req of snapshot.requests) {
-          const call = parseSnapshotCall(req);
+          const call = parseSnapshotCall(req, sessionId);
           if (call && (call.target === undefined || call.target === selfId())) {
             pending.set(req.correlationId, wrap(call));
           }
@@ -285,7 +291,7 @@ export function clientToolCallsHandle(
         notify();
         continue;
       }
-      const parsed = parseLiveCall(env);
+      const parsed = parseLiveCall(env, sessionId);
       if (parsed) ingest(wrap(parsed));
     }
   })().catch(() => {
@@ -436,7 +442,7 @@ function asSnapshotFrame(
 }
 
 /** Build a pending call off a snapshot {@link PendingToolCall} (always correlated). */
-function parseSnapshotCall(req: PendingToolCall): ClientToolCall | undefined {
+function parseSnapshotCall(req: PendingToolCall, sessionId: string): ClientToolCall | undefined {
   const p = req.payload as
     | {
         readonly toolCallId?: unknown;
@@ -449,6 +455,7 @@ function parseSnapshotCall(req: PendingToolCall): ClientToolCall | undefined {
   return {
     toolCallId: p.toolCallId,
     name: p.name,
+    sessionId,
     input: p.input,
     target: typeof p.target === "string" ? p.target : undefined,
     correlationId: req.correlationId,
@@ -457,7 +464,7 @@ function parseSnapshotCall(req: PendingToolCall): ClientToolCall | undefined {
 }
 
 /** Build a call off a live relay envelope (correlationId may be absent). */
-function parseLiveCall(env: EnvelopeWithMetadata): ClientToolCall | undefined {
+function parseLiveCall(env: EnvelopeWithMetadata, sessionId: string): ClientToolCall | undefined {
   const p = env.payload as
     | {
         readonly toolCallId?: unknown;
@@ -471,6 +478,7 @@ function parseLiveCall(env: EnvelopeWithMetadata): ClientToolCall | undefined {
   return {
     toolCallId: p.toolCallId,
     name: p.name,
+    sessionId,
     input: p.input,
     target: typeof p.target === "string" ? p.target : undefined,
     correlationId: typeof correlationId === "string" ? correlationId : undefined,

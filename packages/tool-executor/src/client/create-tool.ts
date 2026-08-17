@@ -30,6 +30,9 @@ import {
  *   interface ToolCtxExtensions { elicit: ClientElicitor }
  * }
  * ```
+ *
+ * An adopter augments the same interface and fills the slot per call with
+ * `use(tools, { ctx })` — see `UseClientToolsOptions.ctx`.
  */
 export interface ToolCtxExtensions {}
 
@@ -45,6 +48,12 @@ export interface ToolCtxExtensions {}
 export interface ToolCtx extends ClientRuntimeContext, ToolCtxExtensions {
   readonly toolCallId: string;
   readonly name: string;
+  /**
+   * The session that asked. Handlers stay bound for every session the client
+   * has open, so "which session is this?" is the question a handler answers
+   * before deciding whether to act on the view the user is looking at.
+   */
+  readonly sessionId: string;
   /**
    * The client this call was addressed to — whoever asked for the turn.
    * `undefined` when the execution had no asking client (a cron run, a spawn).
