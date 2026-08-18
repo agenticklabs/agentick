@@ -24,6 +24,16 @@ symptom). The doctrine set alongside ADR 101 names the end-state:
 **isolation is a property of which bus you attach to, authorized once at
 attachment — never a per-event identity check.**
 
+The 2026-08-18 production outage added the performance half of the
+argument. Because every subscription attaches at the root of the fan-in
+tree, dispatch cost concentrates there: each append is tested against
+every subscriber (`events × subscribers`), and under connector churn the
+subscriber population saturated the event loop for minutes at a time
+(captured live — `wakeSubscribers`/matcher frames at ~98% busy). Targeted
+wake and the `sub/subscribe` teardown fix (next.129/130) removed the
+constant factors; the topology this ADR describes removes the product
+itself, factoring `E×S` into per-node sums where both terms are small.
+
 ## The claim, generalized
 
 Tenancy was the motivating case, but it is one instance of a pattern the
