@@ -1,5 +1,17 @@
 # @agentick/mcp
 
+## 0.15.4
+
+### Patch Changes
+
+- 0028c73: Sessions count activity on every inbound message (both transports), so the idle
+  reaper no longer force-closes live in-process sessions at 30 minutes of age.
+  `sessions.maxSessions` is implemented (default 1000): at the cap the
+  least-recently-active session is evicted through the full close chain; new
+  clients are never rejected.
+  - @agentick/kernel@0.15.4
+  - @agentick/shared@0.15.4
+
 ## 0.15.3
 
 ### Patch Changes
