@@ -277,13 +277,12 @@ export abstract class BaseConnectionContext {
       }
     }
     this.subscriptions.clear();
-    for (const abort of this.inFlight.values()) {
-      try {
-        abort();
-      } catch {
-        /* swallow */
-      }
-    }
+    // In-flight RPCs are NOT aborted on connection close — aborts are
+    // explicit (`notifications/cancelled`). A disconnect (browser refresh,
+    // network drop) must not kill a running execution: the session carries
+    // on, results persist, and the reconnecting client finds them. What a
+    // dead connection loses is only its OBSERVATION of the work — the
+    // response/notification writes fall on a closed wire and are swallowed.
     this.inFlight.clear();
     try {
       await this.closeWire();
