@@ -1,6 +1,6 @@
 {
   "name": "@agentick/cluster-net",
-  "version": "1.0.0-next.129",
+  "version": "1.0.0-next.130",
   "description": "TCP + Unix-socket cluster transport for Agentick v2. Concrete wire impl built on `@agentick/cluster-broker` + Node's `net` module. Ships `tcpTransport` / `tcpMembership` / `defineTcpCluster` (Phase 4b), plus `unixTransport` / `unixMembership` / `defineUnixCluster` (Phase 4d). Auto-elect first-to-bind; multiplexed transport+membership over ONE connection per node; length-prefix framing via cluster-broker-next.",
   "keywords": [
     "agentick",
