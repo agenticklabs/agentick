@@ -1,6 +1,6 @@
 {
   "name": "@agentick/eval",
-  "version": "0.15.3",
+  "version": "0.15.4",
   "description": "Testing-shaped eval framework for Agentick. defineEval(...) returns a callable with runtime parameterization; .matrix(axes) runs cartesian parameter sweeps — e.g. the same document/expected pairs across multiple models — and reports per-cell results.",
   "keywords": [
     "agent",
