@@ -155,19 +155,49 @@ async function* onlyOwnedBy(
  * escalation gets shipped. Its natural home is the authorizer's existing scope
  * label (`AuthorizeInput.scope`), asked once at subscribe time.
  */
+interface OpenedScope {
+  readonly iterable: AsyncIterable<EventEnvelope>;
+  /**
+   * Release the ROOT bus iterator NOW. `busAsyncIterator.return()` interrupts
+   * the producer fiber and resolves any pending pull immediately — which the
+   * generator wrappers (`onlyOwnedBy`/`onlyInTree`/`withSnapshots`) cannot do:
+   * an async generator's `return()` queues behind its suspended inner await,
+   * so tearing down from the OUTSIDE hangs until the next event arrives.
+   */
+  readonly closeRoot: () => Promise<void>;
+}
+
+function rooted(
+  events: AsyncIterable<EventEnvelope>,
+  wrap?: (inner: AsyncIterable<EventEnvelope>) => AsyncIterable<EventEnvelope>,
+): OpenedScope {
+  const root = events[Symbol.asyncIterator]();
+  const single: AsyncIterable<EventEnvelope> = { [Symbol.asyncIterator]: () => root };
+  return {
+    iterable: wrap ? wrap(single) : single,
+    closeRoot: async () => {
+      await root.return?.();
+    },
+  };
+}
+
 function openScopeEvents(
   gateway: GatewayHarnessProtocol,
   params: SubscribeParams,
   principal: string | undefined,
-): AsyncIterable<EventEnvelope> | null {
+): OpenedScope | null {
   const scope = params.scope;
   if (scope.kind === "gateway") {
-    return onlyOwnedBy(gateway.events(params.query) as AsyncIterable<EventEnvelope>, principal);
+    return rooted(gateway.events(params.query) as AsyncIterable<EventEnvelope>, (inner) =>
+      onlyOwnedBy(inner, principal),
+    );
   }
   if (scope.kind === "app") {
     const app = gateway.app(scope.id);
     if (!app) return null;
-    return onlyOwnedBy(app.events(params.query) as AsyncIterable<EventEnvelope>, principal);
+    return rooted(app.events(params.query) as AsyncIterable<EventEnvelope>, (inner) =>
+      onlyOwnedBy(inner, principal),
+    );
   }
   if (scope.kind === "session") {
     const app = ownerApp(gateway, scope.id);
@@ -176,12 +206,14 @@ function openScopeEvents(
       ...(params.query ?? {}),
       scope: { ...(params.query?.scope ?? {}), sessionId: scope.id },
     };
-    return app.events(query) as AsyncIterable<EventEnvelope>;
+    return rooted(app.events(query) as AsyncIterable<EventEnvelope>);
   }
   if (scope.kind === "session-tree") {
     const app = ownerApp(gateway, scope.id);
     if (!app) return null;
-    return onlyInTree(app.events(params.query) as AsyncIterable<EventEnvelope>, app, scope.id);
+    return rooted(app.events(params.query) as AsyncIterable<EventEnvelope>, (inner) =>
+      onlyInTree(inner, app, scope.id),
+    );
   }
   return null;
 }
@@ -276,8 +308,8 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // tiny overlap (a delta counted in both the snapshot version and the
       // live tail) is absorbed by the client's idempotent, version-gated
       // reducer.
-      let iterable = openScopeEvents(ctx.gateway, params, ctx.principal);
-      if (!iterable) {
+      const opened = openScopeEvents(ctx.gateway, params, ctx.principal);
+      if (!opened) {
         // Name the thing that is missing. Not cosmetic: a client deciding
         // whether to re-ask needs to tell "this scope is not here (yet)" from
         // "refused", and it reads that off the JSON-RPC code — SessionNotFound
@@ -302,9 +334,8 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // tree member (root first) for a session-tree scope; live deltas follow on
       // the same stream.
       const snapEnvelopes = await resolveChannelSnapshots(ctx.gateway, params);
-      if (snapEnvelopes.length > 0) {
-        iterable = withSnapshots(snapEnvelopes, iterable);
-      }
+      const iterable =
+        snapEnvelopes.length > 0 ? withSnapshots(snapEnvelopes, opened.iterable) : opened.iterable;
 
       // The id is the CLIENT's, adopted verbatim (`SubscribeParams.
       // subscriptionId`). That is what makes the drain below race-free: the
@@ -316,9 +347,17 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // the POST body while notifications ride a separate SSE GET, two
       // connections with no ordering relation. A collision on this connection
       // throws InvalidParams out of `registerSubscription`.
+      // Teardown MUST release the root bus iterator, not merely flag the
+      // drain: the drain parks inside `await next()`, and a flag is only
+      // observed when the next MATCHING event arrives — which for an idle or
+      // dead session is never. Every client refresh re-subscribes under fresh
+      // ids while the old connection's flag-only cleanup left its bus
+      // subscriber parked forever: the unbounded subscriber growth behind the
+      // 2026-08-18 event-loop saturation outage.
       let cancelled = false;
       const sub = ctx.wire.registerSubscription(params.subscriptionId, async () => {
         cancelled = true;
+        await opened.closeRoot();
       });
 
       // Drain the iterable in the background; per-event fan-out via
