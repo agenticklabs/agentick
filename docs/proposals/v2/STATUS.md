@@ -2206,6 +2206,45 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-18 — sessions hibernate and resume; both reapers proven in prod (next.128, v1 0.15.4)
+
+Driven by a production FD-exhaustion incident (external MCP connectors:
+handshake, one call, never DELETE; default 30-min TTL, no cap; plus a
+default nofile ulimit — task starved accepts while serving held sockets).
+
+- **v2 residency (next.128).** The opt-in reaper
+  (`sessions.{maxActive,idleTimeout}`) is now safe to enable:
+  `session/send`/`dispatch` to a paged-out session transparently resume
+  through `app:command:resume-session` (guardable; rides
+  createSessionBody so LRU accounting and building single-flight are
+  inherited; eviction keeps the CREATE CALL for exact replay). All other
+  verbs stay live-only — a reconnecting UI subscribing to fifty threads
+  must not page fifty back in. Eviction stamps `hibernated` (the status
+  union's first writer; `isTerminalSessionStatus` keeps prune and the
+  resume gate agreeing); wire `session/close` routes through new
+  `app.closeSession` (the old direct close left a registry corpse that
+  createSession's fast path handed back). Security: the dispatch gate
+  resolves the owning principal from the durable RECORD when the live
+  walk misses — transparent resume would otherwise skip the
+  same-principal rule, and `app/create_session` could stamp over a
+  dormant session's principal. OPEN: `requiredScopes` is not persisted
+  on SessionRecord — scope ceiling unenforceable while paged
+  (TODO(dispatch-gate-ceiling-when-paged)).
+- **v1 `@agentick/mcp` 0.15.4 (master).** Activity now counts on every
+  inbound message via the one choke point both transports share — the
+  30-min reaper was executing live in-process sessions at 30 min of AGE
+  (agents silently lost every tool). `sessions.maxSessions` implemented
+  (default 1000, evict least-recently-active through the full close
+  chain; newcomers never rejected).
+- **Error messages clamp at 2KB** (`causeMessage` funnel) — Gemini
+  echoed a rejected image's entire base64 into `message`.
+- Environment: a master↔feat/v2 branch round-trip leaves stale dist
+  files the build does not clean — `verify:publish` caught
+  `client/dist/client.js` importing v1's `@agentick/shared`; fix is
+  rm dist + `--force` rebuild. CodeArtifact's upstream metadata lags
+  fresh npmjs publishes per-package; `npm view <pkg>@<ver>` against the
+  CodeArtifact registry forces the fetch and repairs the doc.
+
 ### 2026-08-16 — emitter stamping, client-call op, ADR 102 draft (shipped next.125)
 
 Three landings in one arc (#305, #306; cut 1.0.0-next.125):
