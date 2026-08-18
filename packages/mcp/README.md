@@ -829,7 +829,7 @@ const server = new MCPServer({
 });
 ```
 
-Idle sweeps happen automatically. Active sessions are extended on every request. Eviction closes the SDK `Server` for that session gracefully.
+Idle sweeps happen automatically. Every message a session processes extends it, on any transport — in-process and stdio sessions are kept alive by their own traffic, not just HTTP requests. At `maxSessions` a new client evicts the least-recently-active session rather than being rejected. Eviction closes the SDK `Server` for that session gracefully.
 
 ### Lifecycle
 
