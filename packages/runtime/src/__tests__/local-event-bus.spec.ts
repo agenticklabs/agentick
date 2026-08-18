@@ -293,6 +293,61 @@ describe("LocalEventBus — fan-in writes / isolated reads (multi-tenant composi
   });
 });
 
+describe("LocalEventBus — targeted wake", () => {
+  it("delivers matching events while non-matching subscribers stay parked", async () => {
+    const bus = new LocalEventBus({ batch: {} });
+    const toolSub = Effect.runFork(
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "tool" }), 1)),
+    );
+    const sessionSub = Effect.runFork(
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "session" }), 1)),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await Effect.runPromise(bus.append(ev("t1", { surface: "tool", name: "tool:x" })));
+    const toolEvents = await Effect.runPromise(Fiber.join(toolSub));
+    expect(Array.from(Chunk.toReadonlyArray(toolEvents)).map((e) => e.id)).toEqual(["t1"]);
+
+    await Effect.runPromise(bus.append(ev("s1")));
+    const sessionEvents = await Effect.runPromise(Fiber.join(sessionSub));
+    expect(Array.from(Chunk.toReadonlyArray(sessionEvents)).map((e) => e.id)).toEqual(["s1"]);
+  });
+
+  it("parked non-matching subscriber survives ring wrap without CursorEvictedError", async () => {
+    const bus = new LocalEventBus({ batch: {}, capacity: 8, defaultRetention: { maxEvents: 8 } });
+    const toolSub = Effect.runFork(
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "tool" }), 1)),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    // Wrap the ring several times over with events the subscriber's
+    // query rejects. Under an indiscriminate wake the subscriber kept
+    // up by being woken per append; targeted wake must keep its cursor
+    // current in place, or the wrap strands it past retention.
+    for (let i = 0; i < 40; i++) {
+      await Effect.runPromise(bus.append(ev(`s${i}`)));
+    }
+
+    await Effect.runPromise(bus.append(ev("t1", { surface: "tool", name: "tool:x" })));
+    const events = await Effect.runPromise(Fiber.join(toolSub));
+    expect(Array.from(Chunk.toReadonlyArray(events)).map((e) => e.id)).toEqual(["t1"]);
+  });
+
+  it("batch append wakes a subscriber when any event in the batch matches", async () => {
+    const bus = new LocalEventBus({ batch: {} });
+    const toolSub = Effect.runFork(
+      Stream.runCollect(Stream.take(bus.subscribe({ surface: "tool" }), 1)),
+    );
+    await new Promise((r) => setImmediate(r));
+
+    await Effect.runPromise(
+      bus.appendBatch([ev("s1"), ev("t1", { surface: "tool", name: "tool:x" }), ev("s2")]),
+    );
+    const events = await Effect.runPromise(Fiber.join(toolSub));
+    expect(Array.from(Chunk.toReadonlyArray(events)).map((e) => e.id)).toEqual(["t1"]);
+  });
+});
+
 function ev(id: string, partial: Partial<ProtocolEvent> = {}): ProtocolEvent {
   return {
     id,

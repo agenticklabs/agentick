@@ -597,17 +597,35 @@ export class LocalEventBus implements EventBus {
   }
 
   /**
-   * Wake every subscriber whose read loop is parked at head. Called
-   * by every append (single or batch) after the ring buffer is
-   * mutated.
+   * Wake parked subscribers whose matcher matches at least one of the
+   * just-appended events. Called by every append (single or batch)
+   * after the ring buffer is mutated.
+   *
+   * Non-matching parked subscribers skip the fiber wake entirely:
+   * their cursor advances to head in place. A parked subscriber is by
+   * construction caught up (pullOne parks only at head), so the
+   * appended events are exactly its unseen range — and every one was
+   * just tested against its matcher. An indiscriminate wake here is
+   * O(subscribers) fiber wake/park round-trips per append, which
+   * saturates the event loop under high subscriber counts.
    */
-  private wakeSubscribers(): void {
+  private wakeSubscribers(appended: ReadonlyArray<ProtocolEvent>): void {
     for (const sub of this.subscribers.values()) {
       if (sub.closed) continue;
       const fn = sub.resolveWake;
-      if (fn) {
+      if (!fn) continue;
+      let matched = false;
+      for (const event of appended) {
+        if (sub.matcher(event)) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
         sub.resolveWake = undefined;
         fn();
+      } else {
+        sub.cursor = this.head;
       }
     }
   }
@@ -693,7 +711,7 @@ export class LocalEventBus implements EventBus {
    */
   private dispatchOneInternal(event: ProtocolEvent): Effect.Effect<void, never, never> {
     this.writeRing(event);
-    this.wakeSubscribers();
+    this.wakeSubscribers([event]);
     return this.upstream?.append(event) ?? Effect.void;
   }
 
@@ -708,7 +726,7 @@ export class LocalEventBus implements EventBus {
     if (events.length === 0) return Effect.void;
 
     for (const event of events) this.writeRing(event);
-    this.wakeSubscribers();
+    this.wakeSubscribers(events);
 
     if (!this.upstream) return Effect.void;
     const up = this.upstream;
