@@ -1,0 +1,337 @@
+/**
+ * Session residency — what happens to a session between "live" and "gone".
+ *
+ * The reaper (`sessions: { maxActive, idleTimeout }`) pages sessions out to
+ * bound memory. That is only safe if the three facts below hold, and none of
+ * them did:
+ *
+ *   1. A paged-out session can be brought BACK by id (`resumeSession`) — from
+ *      the app's own paged state, or from the durable record alone.
+ *   2. A page-out is recorded as `hibernated`, not `closed`. The durable record
+ *      is the truth a thread list renders and the store's prune sweep reads; a
+ *      dormant session must not look ended, and must not be garbage-collected.
+ *   3. Ending a session through the app door (`closeSession`) actually removes
+ *      it, so reopening the id yields a LIVE session rather than the corpse.
+ *
+ * Real app / session / compiler throughout — only the model executor is a fake.
+ */
+
+import React from "react";
+import { describe, expect, it } from "vitest";
+
+import { FakeLanguageModelExecutor } from "@agentick/model-executor";
+import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { InMemorySessionStore } from "@agentick/session";
+import { MemoryTimelineStore } from "@agentick/timeline";
+import type { CreateSessionInput, ExecutionTarget } from "@agentick/spec";
+
+import { createApp } from "../react.js";
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function mkTarget(): ExecutionTarget {
+  return {
+    kind: "language-model",
+    provider: "mock",
+    modelId: "mock-v1",
+    capabilities: { supportsTools: true, supportsStreaming: true },
+  };
+}
+
+function plainScript(text = "ok") {
+  return [
+    {
+      result: {
+        specVersion: "2026-05-08" as const,
+        output: [{ type: "text" as const, text }],
+        stopReason: "end" as const,
+        usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      },
+    },
+  ];
+}
+
+function PlainAgent(): React.ReactElement {
+  return React.createElement(
+    "section" as never,
+    { id: "system", audience: "model" },
+    "You are a helpful agent.",
+  );
+}
+
+async function mkSubstrate(name: string) {
+  const journal = new MemoryJournal();
+  const bus = new LocalEventBus();
+  const inbox = new LocalInbox();
+  const executor = new FakeLanguageModelExecutor(name, journal, bus, inbox, {
+    scripted: plainScript(),
+  });
+  await executor.ready;
+  return { journal, bus, inbox, executor };
+}
+
+/** An app with a one-session live cap and its own durable stores. */
+async function mkApp(name: string, sessionStore = new InMemorySessionStore()) {
+  const { journal, bus, inbox, executor } = await mkSubstrate(name);
+  const app = await createApp(React.createElement(PlainAgent), {
+    modelExecutor: executor,
+    target: mkTarget(),
+    journal,
+    bus,
+    inbox,
+    sessions: { maxActive: 1, store: sessionStore },
+    timeline: { store: new MemoryTimelineStore() },
+  });
+  return { app, sessionStore };
+}
+
+const say = (text: string) => ({ messages: [{ role: "user" as const, content: text }] });
+
+// ===========================================================================
+// Page-out is recorded as hibernation
+// ===========================================================================
+
+describe("a paged-out session is hibernated, not closed", () => {
+  it("stamps `hibernated` on eviction and `closed` on a genuine close", async () => {
+    const { app } = await mkApp("residency-status");
+
+    await app.createSession({ sessionId: "evicted", eager: true });
+    // Over the cap → the LRU victim is paged out.
+    await app.createSession({ sessionId: "closed", eager: true });
+    expect(app.getSession("evicted")).toBeUndefined();
+
+    expect((await app.getSessionRecord("evicted"))?.status).toBe("hibernated");
+
+    await app.closeSession("closed");
+    expect((await app.getSessionRecord("closed"))?.status).toBe("closed");
+
+    await app.closeApp();
+  });
+
+  it("keeps a hibernated record out of the store's prune sweep", async () => {
+    const store = new InMemorySessionStore();
+    const { app } = await mkApp("residency-prune", store);
+
+    await app.createSession({ sessionId: "dormant", eager: true });
+    await app.createSession({ sessionId: "ended", eager: true }); // evicts `dormant`
+    await app.closeSession("ended");
+
+    // A cutoff in the future makes every record old enough — so what survives
+    // is decided by status alone.
+    await store.prune(Date.now() + 60_000, {});
+
+    expect((await store.get("dormant", {}))?.status).toBe("hibernated");
+    expect(await store.get("ended", {})).toBeUndefined();
+
+    await app.closeApp();
+  });
+});
+
+// ===========================================================================
+// Resume
+// ===========================================================================
+
+describe("resumeSession brings a paged-out session back", () => {
+  it("remounts it live, idle, and able to run another turn", async () => {
+    const { app } = await mkApp("residency-resume");
+
+    const first = await app.createSession({ sessionId: "A" });
+    await (
+      await first.send(say("hi"))
+    ).result;
+    await app.createSession({ sessionId: "B" }); // evicts A
+    expect(app.getSession("A")).toBeUndefined();
+
+    const resumed = await app.resumeSession("A");
+    expect(resumed).toBeDefined();
+    expect(app.getSession("A") === resumed).toBe(true);
+    expect(resumed!.status).toBe("idle");
+
+    const res = await (await resumed!.send(say("again"))).result;
+    expect(res.response).toContain("ok");
+
+    // The durable record is the SAME session's, carried across the page-out:
+    // two turns, not a fresh conversation.
+    expect((await app.getSessionRecord("A"))?.executionCount).toBe(2);
+
+    await app.closeApp();
+  });
+
+  it("replays the create call, so the resumed session keeps its identity", async () => {
+    const { app } = await mkApp("residency-identity");
+
+    await app.createSession({
+      sessionId: "owned",
+      principal: "user-1",
+      requiredScopes: ["tenant:acme"],
+      metadata: { thread: "t-9" },
+    });
+    await app.createSession({ sessionId: "other" }); // evicts `owned`
+
+    const resumed = await app.resumeSession("owned");
+    expect(resumed).toBeDefined();
+    expect(resumed!.principal).toBe("user-1");
+    // The scope ceiling is construction-bound and absent from the record —
+    // replaying the create call is the only thing that brings it back.
+    expect((resumed as { requiredScopes?: readonly string[] }).requiredScopes).toEqual([
+      "tenant:acme",
+    ]);
+    expect((await app.getSessionRecord("owned"))?.principal).toBe("user-1");
+
+    await app.closeApp();
+  });
+
+  it("single-flights concurrent resumes of one id onto ONE construction", async () => {
+    const { app } = await mkApp("residency-single-flight");
+
+    let constructions = 0;
+    app.onSessionCreate(async (input: CreateSessionInput) => {
+      if (input.sessionId === "A") constructions++;
+    });
+
+    await app.createSession({ sessionId: "A" });
+    expect(constructions).toBe(1);
+    await app.createSession({ sessionId: "B" }); // evicts A
+
+    const [one, two] = await Promise.all([app.resumeSession("A"), app.resumeSession("A")]);
+    expect(one === two).toBe(true);
+    expect(constructions).toBe(2); // the resume built once, not twice
+
+    await app.closeApp();
+  });
+
+  it("resumes from the durable record alone when nothing was paged out", async () => {
+    // A record with no in-process paged state is the cross-restart shape: the
+    // store is the resume index, and the app rebuilds from its own defaults.
+    const store = new InMemorySessionStore();
+    const now = Date.now();
+    await store.put(
+      {
+        id: "from-record",
+        createdAt: now,
+        updatedAt: now,
+        status: "hibernated",
+        executionCount: 3,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          reasoningTokens: 0,
+          cachedInputTokens: 0,
+          cacheCreationTokens: 0,
+        },
+        principal: "user-7",
+      },
+      {},
+    );
+    const { app } = await mkApp("residency-record", store);
+
+    const resumed = await app.resumeSession("from-record");
+    expect(resumed).toBeDefined();
+    expect(resumed!.status).toBe("idle");
+    // Hydration adopted the record rather than overwriting it with a blank one.
+    const record = await app.getSessionRecord("from-record");
+    expect(record?.executionCount).toBe(3);
+    expect(record?.principal).toBe("user-7");
+
+    await app.closeApp();
+  });
+
+  it("refuses to resume an id it has never seen, or one that is over", async () => {
+    const { app } = await mkApp("residency-refuse");
+
+    expect(await app.resumeSession("never-existed")).toBeUndefined();
+
+    const s = await app.createSession({ sessionId: "ended", eager: true });
+    void s;
+    await app.closeSession("ended");
+    expect(await app.resumeSession("ended")).toBeUndefined();
+
+    await app.closeApp();
+  });
+
+  it("does not resurrect a session the reaper merely collected", async () => {
+    // The LRU sweep can reach a session whose harness was closed directly — a
+    // corpse still holding a registry slot. Paging that out must not record it
+    // as resumable, or the reaper hands back a session somebody ended.
+    const { app } = await mkApp("residency-corpse");
+
+    const dead = await app.createSession({ sessionId: "gone" });
+    await dead.close();
+    await app.createSession({ sessionId: "live" }); // the sweep collects `gone`
+
+    expect(app.getSession("gone")).toBeUndefined();
+    expect(await app.resumeSession("gone")).toBeUndefined();
+
+    await app.closeApp();
+  });
+
+  it("does not resurrect a destroyed session", async () => {
+    const { app } = await mkApp("residency-destroy");
+
+    await app.createSession({ sessionId: "doomed", eager: true });
+    await app.createSession({ sessionId: "keeper" }); // evicts `doomed`
+    await app.destroySession("doomed");
+
+    expect(await app.resumeSession("doomed")).toBeUndefined();
+
+    await app.closeApp();
+  });
+});
+
+// ===========================================================================
+// Close through the app door
+// ===========================================================================
+
+describe("closeSession leaves nothing behind", () => {
+  it("drops the live registry entry, so reopening the id yields a LIVE session", async () => {
+    const { app } = await mkApp("residency-close");
+
+    const dead = await app.createSession({ sessionId: "reopened" });
+    await app.closeSession("reopened");
+    expect(app.getSession("reopened")).toBeUndefined();
+
+    const fresh = await app.createSession({ sessionId: "reopened" });
+    expect(fresh === dead).toBe(false);
+    expect(fresh.status).toBe("idle");
+    expect((await (await fresh.send(say("hi"))).result).response).toContain("ok");
+
+    await app.closeApp();
+  });
+
+  it("recovers from a session closed BEHIND the app's back", async () => {
+    // POSITIVE CONTROL for the registry leak: `session.close()` ends the
+    // session without telling the app, which used to leave the entry in place —
+    // `createSession` with that id then handed back the closed harness, whose
+    // every verb throws. The reopen must produce a live replacement instead.
+    const { app } = await mkApp("residency-direct-close");
+
+    const dead = await app.createSession({ sessionId: "direct" });
+    await dead.close();
+    expect(dead.status).toBe("closed");
+
+    const fresh = await app.createSession({ sessionId: "direct" });
+    expect(fresh === dead).toBe(false);
+    expect(fresh.status).toBe("idle");
+    expect((await (await fresh.send(say("hi"))).result).response).toContain("ok");
+
+    await app.closeApp();
+  });
+
+  it("ends a session that is only paged out, without bringing it back", async () => {
+    const { app } = await mkApp("residency-close-paged");
+
+    await app.createSession({ sessionId: "dormant", eager: true });
+    await app.createSession({ sessionId: "other" }); // evicts `dormant`
+
+    await app.closeSession("dormant");
+
+    expect(app.getSession("dormant")).toBeUndefined(); // no remount happened
+    expect((await app.getSessionRecord("dormant"))?.status).toBe("closed");
+    expect(await app.resumeSession("dormant")).toBeUndefined();
+
+    await app.closeApp();
+  });
+});

@@ -88,6 +88,7 @@ import {
   isLoopExecutorFactory,
   isCompilerFactory,
   isRunnerBindable,
+  isTerminalSessionStatus,
   isTerminalTaskStatus,
   isToolExecutorFactory,
   sessionKeysetPage,
@@ -797,6 +798,42 @@ interface InternalSessionEntry<P> {
   readonly originCallId?: string;
   lastActiveAt?: number;
   ephemeral: boolean;
+  /**
+   * The call this session was built from, held so a page-out can be undone.
+   * Rebuilding from the durable record alone would produce a DIFFERENT session
+   * — the record carries no root element, props, per-session tools or scope
+   * ceiling — so eviction keeps the arguments and resume replays them.
+   */
+  readonly build: SessionBuildCall<P>;
+}
+
+/** The `(input, overrides)` pair {@link AppHarness.buildSession} was called with. */
+interface SessionBuildCall<P> {
+  readonly input: CreateSessionInput<P>;
+  readonly overrides: SessionBuildOverrides;
+}
+
+/** Construction facts the spawn flow supplies out of band — see `buildSession`. */
+interface SessionBuildOverrides {
+  readonly agent?: unknown;
+  readonly parentSessionId?: string;
+  /** SP5 — the child's spawn lineage, forwarded onto the session. */
+  readonly spawnPath?: readonly string[];
+  /** SP6 — the parent's construction signal, fanned into the child. */
+  readonly signal?: AbortSignal;
+  /** EX1 — the origin edge: which execution (and call) spawned the child. */
+  readonly originExecutionId?: string;
+  readonly originCallId?: string;
+}
+
+/**
+ * A session this app paged out — everything needed to bring it back. The
+ * snapshot restores the bridge values (knobs, state); the build call restores
+ * the session's identity and shape.
+ */
+interface PagedSession<P> {
+  readonly build: SessionBuildCall<P>;
+  readonly snapshot?: SessionSnapshot;
 }
 
 // ============================================================================
@@ -905,15 +942,17 @@ export class AppHarness<P = unknown>
    */
   private readonly building = new Map<string, Promise<SessionHarnessProtocol<P>>>();
   /**
-   * Eviction snapshots, by session id — captured on `disposeSession(id, "evict")`
-   * and applied via `session.restore()` on the next reopen, so knob / state
-   * bridge values survive a page-out. App-scoped so it outlives the harness.
+   * Paged-out sessions, by id — written by `disposeSession(id, "evict")` and
+   * consumed by {@link resumeSession} / the next same-id create, which replays
+   * the build call and fans the snapshot back in through `session.restore()`.
+   * App-scoped so it outlives the harness it was taken from.
    *
    * TODO(eviction-durable-snapshot): in-memory only — fixes single-node
    * eviction. Cross-restart / cross-node durability is the data-layer Phase 4
-   * extension (store-backed), not built here.
+   * extension (store-backed), not built here; a resume that finds no entry here
+   * falls back to the durable record and the app's own defaults.
    */
-  private readonly evictionSnapshots = new Map<string, SessionSnapshot>();
+  private readonly paged = new Map<string, PagedSession<P>>();
   private _closed = false;
 
   /**
@@ -1772,15 +1811,83 @@ export class AppHarness<P = unknown>
     );
   }
 
-  // TODO(session-direct-close-registry): a session closed DIRECTLY
-  // (`session.close()`, the wire's `session/close`) keeps its live registry
-  // entry — only `disposeSession` removes it — so `getSession` can hand back a
-  // closed harness and the LRU cap counts a session that is already gone. The
-  // fix is a session→app close notification, which is a change to close's
-  // plumbing and so out of destroy's scope (destroy disposes through
-  // `disposeSession`, which is correct today).
   getSession(sessionId: string): SessionHarnessProtocol<P> | undefined {
     return this.registry.get(sessionId)?.session;
+  }
+
+  /**
+   * Bring a paged-out or persisted session back — see
+   * {@link AppHarnessProtocol.resumeSession}.
+   *
+   * Its own op (`app:command:resume-session`) rather than a flag on create, for
+   * the reason destroy has one: a guard should be able to refuse "rehydrate this
+   * session" — the expensive, memory-shaped decision the reaper exists to
+   * control — without refusing to open new sessions.
+   */
+  resumeSession(sessionId: string): Promise<SessionHarnessProtocol<P> | undefined> {
+    const op: Operation<{ sessionId: string }, SessionHarnessProtocol<P> | undefined> = {
+      opId: `app:resume-session:${generateId()}`,
+      surface: "app",
+      name: "app:command:resume-session",
+      scope: { sessionId },
+      input: { sessionId },
+    };
+    return this.runWithTelemetry(
+      this.runOperation(op, (i) =>
+        Effect.tryPromise({
+          try: () => this.resumeSessionBody(i.sessionId),
+          catch: (cause): AppError => mapAppError(cause),
+        }),
+      ),
+    );
+  }
+
+  /**
+   * Live → paged → durable, in that order. Construction runs through the same
+   * {@link createSessionBody} every other door takes, so the resumed session
+   * gets the registry entry, the LRU accounting, and the single-flight that
+   * collapses two concurrent resumes of one id onto one build.
+   */
+  private async resumeSessionBody(
+    sessionId: string,
+  ): Promise<SessionHarnessProtocol<P> | undefined> {
+    const live = this.registry.get(sessionId);
+    if (live !== undefined) {
+      this.touchActivity(sessionId);
+      return live.session;
+    }
+    const pagedOut = this.paged.get(sessionId);
+    if (pagedOut !== undefined) {
+      return this.createSessionBody(pagedOut.build.input, false, pagedOut.build.overrides);
+    }
+    const record = await this.sessionStore.get(sessionId, this.storeCtx());
+    if (record === undefined || isTerminalSessionStatus(record.status)) return undefined;
+    // Cross-restart resume: the record is all that is left, so the session is
+    // rebuilt from this app's defaults and hydrated from it — `principal`,
+    // `metadata` and the app-owned descriptive slots all ride the record through
+    // genesis. The scope ceiling does NOT: it is construction-bound and nothing
+    // persists it (see `findRecordPrincipal` in the wire dispatch gate).
+    return this.createSessionBody({ sessionId }, false);
+  }
+
+  /**
+   * End a session through the app door — see
+   * {@link AppHarnessProtocol.closeSession}. Live sessions take the shared
+   * {@link disposeSession} teardown (registry removal + `onSessionClose`); a
+   * session that is only paged out is ended in the durable record, since there
+   * is no harness left to tear down and bringing one back to close it would be
+   * work in service of a no-op.
+   */
+  async closeSession(sessionId: string): Promise<void> {
+    if (this.registry.has(sessionId)) {
+      await this.disposeSession(sessionId, "close");
+      return;
+    }
+    this.paged.delete(sessionId);
+    const storeCtx = this.storeCtx();
+    const record = await this.sessionStore.get(sessionId, storeCtx);
+    if (record === undefined || isTerminalSessionStatus(record.status)) return;
+    await this.sessionStore.put({ ...record, status: "closed", updatedAt: Date.now() }, storeCtx);
   }
 
   /**
@@ -2100,17 +2207,7 @@ export class AppHarness<P = unknown>
   private async createSessionBody(
     input: CreateSessionInput<P>,
     ephemeral: boolean,
-    overrides: {
-      readonly agent?: unknown;
-      readonly parentSessionId?: string;
-      /** SP5 — the child's spawn lineage, forwarded onto the session. */
-      readonly spawnPath?: readonly string[];
-      /** SP6 — the parent's construction signal, fanned into the child. */
-      readonly signal?: AbortSignal;
-      /** EX1 — the origin edge: which execution (and call) spawned the child. */
-      readonly originExecutionId?: string;
-      readonly originCallId?: string;
-    } = {},
+    overrides: SessionBuildOverrides = {},
   ): Promise<SessionHarnessProtocol<P>> {
     // Construction single-flight for durable, explicitly-id'd sessions: a
     // concurrent same-id reopen collapses onto the first build rather than
@@ -2159,14 +2256,7 @@ export class AppHarness<P = unknown>
   private async buildSession(
     input: CreateSessionInput<P>,
     ephemeral: boolean,
-    overrides: {
-      readonly agent?: unknown;
-      readonly parentSessionId?: string;
-      readonly spawnPath?: readonly string[];
-      readonly signal?: AbortSignal;
-      readonly originExecutionId?: string;
-      readonly originCallId?: string;
-    },
+    overrides: SessionBuildOverrides,
     claimed: unknown[],
   ): Promise<SessionHarnessProtocol<P>> {
     this.assertOpen();
@@ -2222,11 +2312,17 @@ export class AppHarness<P = unknown>
     // store holds entries — is the fresh-construction path below, which
     // hydrates via `session.timeline` options.
     const existing = this.registry.get(sessionId);
-    if (existing !== undefined) {
+    if (existing !== undefined && existing.session.status !== "closed") {
       // A repeat open is activity — keep it warm against LRU / idle eviction.
       this.touchActivity(sessionId);
       return existing.session as SessionHarnessProtocol<P>;
     }
+    // A registered but CLOSED entry is a corpse: someone called `session.close()`
+    // on the harness directly, which ends the session without telling the app.
+    // Reopening the id must not hand that back, so the entry is disposed (a
+    // second close is a no-op; the registry drop is the point) and construction
+    // continues into a live replacement.
+    if (existing !== undefined) await this.disposeSession(sessionId, "close");
 
     // ADR 76 tier 3 + ADR 83 amendment — ONE construction-fold value. Snapshot
     // the app's RESOLVED interceptors NOW (captures boot-time `app.use()` /
@@ -2728,10 +2824,10 @@ export class AppHarness<P = unknown>
     // / state bridge values back in through the SAME SnapshotCapable machinery
     // the cold snapshot→restore path uses. Keyed by session id, so a fork /
     // spawn-inherit (new id) never finds one — the fork law is untouched.
-    const evictionSnapshot = this.evictionSnapshots.get(sessionId);
-    if (evictionSnapshot !== undefined) {
-      this.evictionSnapshots.delete(sessionId);
-      await session.restore({ snapshot: evictionSnapshot });
+    const pagedOut = this.paged.get(sessionId);
+    if (pagedOut !== undefined) {
+      this.paged.delete(sessionId);
+      if (pagedOut.snapshot !== undefined) await session.restore({ snapshot: pagedOut.snapshot });
     }
 
     // C-core (three-audiences-plan §C) — late-bind the session's `send` into
@@ -2804,6 +2900,9 @@ export class AppHarness<P = unknown>
       metadata: input.metadata ?? {},
       createdAt: Date.now(),
       ephemeral,
+      // The RESHAPED input — what actually built this session, so a resume
+      // replays the same construction rather than the caller's first draft.
+      build: { input: { ...input, sessionId }, overrides },
       ...omitUndefined({
         parentSessionId: overrides.parentSessionId,
         // EX1 — the live half of the origin edge. Held on the entry so the
@@ -3066,10 +3165,10 @@ export class AppHarness<P = unknown>
     const existed = (await this.sessionStore.get(sessionId, storeCtx)) !== undefined;
     await this.sessionStore.delete(sessionId, storeCtx);
 
-    // Destroy is terminal — drop any eviction snapshot so a later create of the
-    // same id starts fresh rather than resurrecting paged-out bridge state.
-    this.evictionSnapshots.delete(sessionId);
-    for (const entry of subtree) this.evictionSnapshots.delete(entry.id);
+    // Destroy is terminal — drop any paged-out state so a later create of the
+    // same id starts fresh rather than resurrecting a destroyed session.
+    this.paged.delete(sessionId);
+    for (const entry of subtree) this.paged.delete(entry.id);
 
     return {
       sessionId,
@@ -3362,12 +3461,19 @@ export class AppHarness<P = unknown>
       // Snapshot BEFORE close so a reopen of this id can restore knob / state
       // bridge values. Captured inside the published teardown, so the disposal
       // barrier a same-id reopen awaits also covers the snapshot.
-      if (reason === "evict") {
+      //
+      // An already-closed session is a CORPSE being collected, not a live one
+      // being paged — the sweep may reach one whose harness was closed directly.
+      // Recording it as resumable would let the reaper resurrect a session
+      // somebody ended.
+      if (reason === "evict" && entry.session.status !== "closed") {
+        let snapshot: SessionSnapshot | undefined;
         try {
-          this.evictionSnapshots.set(sessionId, await entry.session.snapshot());
+          snapshot = await entry.session.snapshot();
         } catch {
-          // best effort — a snapshot failure must not block page-out
+          // best effort — a snapshot failure costs bridge state, not the resume
         }
+        this.paged.set(sessionId, { build: entry.build, ...omitUndefined({ snapshot }) });
       }
       try {
         // ADR 92 Family 2 §5 — eviction routes THROUGH `session:command:close`,

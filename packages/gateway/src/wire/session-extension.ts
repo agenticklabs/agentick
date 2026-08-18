@@ -15,6 +15,8 @@
 import {
   defineWireExtension,
   findSession,
+  findSessionOrResume,
+  findSessionOwner,
   progressEventQuery,
   toClientToolRegistration,
   type AppHarnessProtocol,
@@ -93,8 +95,16 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
   namespace: "session",
   version: "1.0.0",
   methods: {
+    // One of the two verbs that may REMOUNT a paged-out session (see
+    // `findSessionOrResume`): a client sending into a conversation the reaper
+    // paged out is asking for work on it, and answering 404 would make eviction
+    // visible as data loss.
+    //
+    // TODO(resume-ctx-app): `ctx.app` is resolved by the dispatcher's LIVE walk,
+    // so it is undefined for the send that did the remounting — `fanIn` loses
+    // descendant progress frames for that one turn, then behaves normally.
     "session/send": async (params, ctx) => {
-      const sess = ctx.session ?? findSession(ctx, params.sessionId);
+      const sess = ctx.session ?? (await findSessionOrResume(ctx, params.sessionId));
       const progressToken = params._meta?.progressToken;
 
       const handle = await sess.send({
@@ -256,8 +266,10 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       const sess = ctx.session ?? findSession(ctx, sessionId);
       return { input: await sess.project() };
     },
+    // Remounts like `session/send` does, and for the same reason: dispatching a
+    // tool is work asked of the session, not an observation of it.
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {
-      const sess = ctx.session ?? findSession(ctx, sessionId);
+      const sess = ctx.session ?? (await findSessionOrResume(ctx, sessionId));
       const content = await sess.tools.dispatch(tool, input as Record<string, unknown>);
       return { content };
     },
@@ -304,9 +316,13 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       await sess.abort(reason, cascade === true ? { cascade: true } : undefined);
       return null;
     },
+    // Through the OWNING APP, not `sess.close()`: closing the harness directly
+    // ends the session but leaves the app's live registry holding it, so the
+    // next `create_session` with that id hands back the dead one. One door for
+    // teardown — `ctx.session` is deliberately not used, since the app is the
+    // half of the pair this verb needs.
     "session/close": async ({ sessionId }, ctx) => {
-      const sess = ctx.session ?? findSession(ctx, sessionId);
-      await sess.close();
+      await findSessionOwner(ctx, sessionId).app.closeSession(sessionId);
       return null;
     },
     "session/respond_to_elicitation": async (params, ctx) => {

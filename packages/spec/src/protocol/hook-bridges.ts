@@ -418,9 +418,17 @@ export type SessionStatus =
    */
   | "input_required"
   | "paused"
+  /**
+   * Paged out — the live harness is gone but the session is not over. Written
+   * by `session.close({ reason: "evicted" })`, which is what the app's memory
+   * cap and idle sweep pass. A resume brings it back to `idle`; the store's
+   * prune sweep passes over it.
+   */
   | "hibernated"
   | "completed"
   | "failed"
+  /** Hung up. The durable record survives as history; the session does not. */
+  | "closed"
   | (string & {});
 
 // ============================================================================

@@ -642,7 +642,7 @@ session.hooks.onBeforeSessionClose((input) =>
 );
 ```
 
-`close` carries its provenance. `{ reason: "closed" }` is a real session end; `{ reason: "evicted" }` is what the app's idle sweep and memory cap pass, and it is transparent **paging** — the durable record and the timeline store survive, the session reconstructs on its next open, and app-level close handlers do not fire. Page-out and hangup take the same code path; the record tells them apart, not the control flow.
+`close` carries its provenance. `{ reason: "closed" }` is a real session end and comes to rest on the `closed` status; `{ reason: "evicted" }` is what the app's idle sweep and memory cap pass, and it is transparent **paging** — it comes to rest on `hibernated`, the durable record and the timeline store survive, the session reconstructs on its next open, and app-level close handlers do not fire. Page-out and hangup take the same code path; the status and the record tell them apart, not the control flow.
 
 > [!IMPORTANT]
 > These operations are hookable but **not** wire-addressable. `SendInput` carries non-serializable per-call overrides (a live executor, an `AbortSignal`, tool registrations with real handlers), and `spawn` takes an agent root in and hands a live session out — none of that has a wire form. The gateway exposes the serializable porcelain (`session/send`, `session/respond_to_elicitation`) instead.
@@ -713,7 +713,7 @@ reads the same fact synchronously. See `@agentick/client-core` for the client si
 ```ts
 interface SessionStatusFrame {
   sessionId: string;
-  status: SessionStatus; // idle · running · input_required · failed · closed
+  status: SessionStatus; // idle · running · input_required · hibernated · failed · closed
   executionId?: string; // the turn in flight, when there is one
   outcome?: "succeeded" | "failed" | "aborted";
 }

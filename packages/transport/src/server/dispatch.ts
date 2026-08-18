@@ -500,6 +500,15 @@ async function authorizeDispatch(
   // via other params (a future app/run_once) must route through the
   // same resolution or the ceiling won't see them.
   const targetSession = sessionId ? findSessionOrUndef(host, sessionId)?.session : undefined;
+  // OWNERSHIP OUTLIVES LIVENESS. A session that is closed, paged out by the
+  // reaper, or held only in a durable store from a previous process resolves to
+  // nothing above — and a target the gate cannot see is a target the
+  // same-principal rule cannot defend. It is reachable, though: `session/send`
+  // remounts it and `app/create_session` re-opens it by id. So when the live
+  // walk misses, the owning principal comes from the durable record.
+  const targetPrincipal =
+    targetSession?.principal ??
+    (sessionId ? await findRecordPrincipal(host, sessionId) : undefined);
   // #199 — the target session's scope CEILING is structural (resource-
   // declared, like its principal) and checked BEFORE policy AND before
   // the no-authorizer short-circuit: no authorizer — including an
@@ -524,7 +533,7 @@ async function authorizeDispatch(
 
   const target =
     sessionId !== undefined
-      ? { sessionId, ...omitUndefined({ principal: targetSession?.principal }) }
+      ? { sessionId, ...omitUndefined({ principal: targetPrincipal }) }
       : undefined;
   const authInput = (scope: string) => ({
     scope,
@@ -751,6 +760,29 @@ function findSessionOrUndef(
   for (const app of host.apps()) {
     const sess = app.getSession(sessionId);
     if (sess) return { session: sess, app };
+  }
+  return undefined;
+}
+
+/**
+ * The owning principal of a session no app holds live — read from the durable
+ * records, which outlive the harness. The gate's fallback, so ownership is
+ * enforced on a paged-out or historical session exactly as on a live one.
+ *
+ * TODO(dispatch-gate-ceiling-when-paged): the other half of a session's
+ * structural identity — `requiredScopes` — is construction-bound and NOT on the
+ * record, so the scope ceiling cannot be checked while the session is down. A
+ * remount restores it (the app replays the create call), leaving only the
+ * request that did the remounting unchecked. Closing this means persisting the
+ * ceiling on `SessionRecord` alongside `principal`.
+ */
+async function findRecordPrincipal(
+  host: GatewayHarnessProtocol,
+  sessionId: string,
+): Promise<string | undefined> {
+  for (const app of host.apps()) {
+    const record = await app.getSessionRecord?.(sessionId);
+    if (record) return record.principal;
   }
   return undefined;
 }

@@ -83,6 +83,7 @@ import type {
   SendTelemetry,
   SessionAbortOptions,
   SessionCloseInput,
+  SessionCloseReason,
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
@@ -1816,10 +1817,9 @@ export class SessionHarness<P = unknown>
    * record by their provenance, not by taking different code paths.
    */
   async close(opts?: SessionCloseInput): Promise<void> {
+    const reason = opts?.reason ?? "closed";
     await runHarnessProtocol(
-      this.sessionOp("close", { reason: opts?.reason ?? "closed" }, () =>
-        Effect.promise(() => this.closeBody()),
-      ),
+      this.sessionOp("close", { reason }, () => Effect.promise(() => this.closeBody(reason))),
     );
   }
 
@@ -1830,14 +1830,23 @@ export class SessionHarness<P = unknown>
    * fails to shut down cannot leave this session's substrate addresses claimed
    * and collide with the next create-or-resume of the same id.
    */
-  private async closeBody(): Promise<void> {
+  private async closeBody(reason: SessionCloseReason): Promise<void> {
+    this.terminalStatus = reason === "evicted" ? "hibernated" : "closed";
     await super.close();
   }
+
+  /**
+   * What the durable record says once this session is down — set by
+   * {@link closeBody} and read by {@link teardown}, whose signature the base
+   * class fixes. A page-out lands on `hibernated`, which is not an ending: the
+   * record stays out of the store's prune sweep and a resume can pick it up.
+   */
+  private terminalStatus: SessionStatus = "closed";
 
   protected override async teardown(): Promise<void> {
     if (this._closed) return;
     this._closed = true;
-    this.runtime.setStatus("closed" as never);
+    this.runtime.setStatus(this.terminalStatus);
     // ADR 89 §4 — unhook the lifecycle forwarders from the (app-shared)
     // loop + tool executor before the mount goes away.
     this.lifecycleProjection?.dispose();

@@ -226,4 +226,57 @@ describe("session-principal — stamped at creation, read by the gate (ADR 48)",
 
     await gateway.close();
   });
+
+  it("(5) ownership outlives liveness — the gate reads it off the durable record", async () => {
+    // A session the reaper paged out is not in any live registry, so the gate
+    // used to resolve NO target for it and the same-principal rule went quiet —
+    // on exactly the verb (`session/send`) that brings the session back. The
+    // owning principal now comes from the durable record when the live walk
+    // misses, so a paged-out session is defended like a live one.
+    const gateway = await createGateway({
+      authorizer: staticAuthorizer({ grants: { userA: ["*"], userB: ["*"] } }),
+    });
+    await gateway.listen();
+    const base = mkAppOptions();
+    await base.executor.ready;
+    const app = await gateway.createApp({
+      rootElement: NULL_ROOT,
+      options: {
+        compiler: base.compiler,
+        // A real model, because the owner's control call must actually RUN the
+        // turn the remount exists to serve.
+        modelExecutor: base.executor,
+        sessions: { maxActive: 1 },
+      },
+    });
+
+    const session = await app.createSession({ principal: "userB", eager: true });
+    await app.createSession({ principal: "userB" }); // over the cap → pages the first out
+    expect(app.getSession(session.id)).toBeUndefined();
+
+    const send = { sessionId: session.id, messages: [{ role: "user", content: "hi" }] };
+
+    const denied = await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 1, method: "session/send", params: send },
+      stubSink(),
+      { identity: IDENTITY_A },
+    );
+    expect("error" in denied && denied.error).toBeTruthy();
+    // Denied BEFORE any work: the remount must not happen for a caller who
+    // does not own the session.
+    expect(app.getSession(session.id)).toBeUndefined();
+
+    // Control — the owner reaches it, and the session comes back.
+    const allowed = await dispatchRequest(
+      gateway,
+      { jsonrpc: "2.0", id: 2, method: "session/send", params: send },
+      stubSink(),
+      { identity: IDENTITY_B },
+    );
+    expect("result" in allowed).toBe(true);
+    expect(app.getSession(session.id)).toBeDefined();
+
+    await gateway.close();
+  });
 });

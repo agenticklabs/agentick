@@ -8,7 +8,7 @@
  * (`record.id`), the `matchQuery` predicate (the scope-shaped `appId` /
  * `parentSessionId` dims via the shared `matchesScope`, plus a status
  * set-membership check and an `updatedAfter` recency bound), and the
- * `prunePredicate` (closed-and-old). The `Map` mechanics, fresh-array `list`,
+ * `prunePredicate` (ended-and-old). The `Map` mechanics, fresh-array `list`,
  * idempotent delete, and predicate-driven prune are the generic's.
  *
  * This is the store the app uses when no durable one is injected, and the
@@ -33,7 +33,7 @@ import type {
   SessionStoreQuery,
   StoreCtx,
 } from "@agentick/spec";
-import { sessionKeysetPage, sortSessionRecords } from "@agentick/spec";
+import { isTerminalSessionStatus, sessionKeysetPage, sortSessionRecords } from "@agentick/spec";
 import { MemoryCollection } from "@agentick/store";
 import { matchesScope } from "@agentick/utils";
 
@@ -46,18 +46,13 @@ function statusMatches(record: SessionRecord, query: SessionStoreQuery): boolean
 }
 
 /**
- * Session-terminal statuses eligible for prune. `close()` lands a session on
- * `"closed"`; a completed/failed session is likewise done. In-flight
- * (`idle` / `running` / `paused` / `hibernated`) records are never pruned no
- * matter how old.
+ * `true` when a record whose session has ENDED was last touched before the
+ * cutoff. A dormant session — `idle` / `running` / `paused` / `hibernated` — is
+ * never pruned no matter how old: a paged-out session's record is the index its
+ * resume goes through, and deleting it would make the reaper destructive.
  */
-function isClosed(record: SessionRecord): boolean {
-  return record.status === "closed" || record.status === "completed" || record.status === "failed";
-}
-
-/** `true` when a closed record was last touched before the cutoff. */
 function isPrunable(record: SessionRecord, before: number): boolean {
-  return isClosed(record) && record.updatedAt < before;
+  return isTerminalSessionStatus(record.status) && record.updatedAt < before;
 }
 
 export class InMemorySessionStore implements SessionStore {

@@ -768,6 +768,51 @@ export interface AppHarnessProtocol<P = unknown> {
   getSession(sessionId: string): SessionHarnessProtocol<P> | undefined;
 
   /**
+   * Bring a session back — the door for a caller holding only an id, when the
+   * live registry has none.
+   *
+   * `getSession` answers "is this mounted"; this answers "can this be mounted
+   * again, and if so, mount it." Two sources, tried in that order:
+   *
+   *   1. a session this app PAGED OUT (`sessions.maxActive` / `idleTimeout`) —
+   *      remounted from the create input it was built with, so the resumed
+   *      session is the same session: same principal, same scope ceiling, same
+   *      root element and props, with its knob / state bridges restored from the
+   *      eviction snapshot;
+   *   2. a durable {@link SessionRecord} whose status is not terminal — the
+   *      cross-restart resume the store exists to index, rebuilt from the app's
+   *      own defaults and hydrated from the record.
+   *
+   * `undefined` for an id this app cannot bring back: never opened here, or
+   * genuinely over (closed / completed / failed). Resume never CREATES — an
+   * unknown id resolves to nothing rather than a blank session, which is what
+   * lets the wire tell "paged out" apart from "no such session".
+   *
+   * Concurrency-safe: same-id calls collapse onto one construction, so two sends
+   * arriving together against a paged-out session remount it once.
+   */
+  resumeSession(sessionId: string): Promise<SessionHarnessProtocol<P> | undefined>;
+
+  /**
+   * End a session and drop it from the live registry — the app-door twin of
+   * `session.close()`, and the one every remote / non-owner caller should use.
+   *
+   * Closing the harness directly ends the session but leaves the app holding a
+   * dead entry: `getSession` keeps handing it back, the LRU cap keeps counting
+   * it, and `createSession` with the same id returns the corpse. This verb runs
+   * the same teardown with the registry bookkeeping attached.
+   *
+   * Reaches a session that is only PAGED OUT as well: the paged state is
+   * dropped and the durable record is stamped closed, so a hibernated session
+   * can be ended without first bringing it back.
+   *
+   * Idempotent — an unknown or already-closed id is success, not a fault. The
+   * durable {@link SessionRecord} survives as history (use
+   * {@link destroySession} to delete it).
+   */
+  closeSession(sessionId: string): Promise<void>;
+
+  /**
    * Enumerate the durable session registry — the {@link SessionStore} (E11).
    * Returns {@link SessionRecord}s (the superset: every non-ephemeral session
    * ever, including closed ones the live registry dropped), filtered by app /

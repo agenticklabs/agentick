@@ -219,6 +219,7 @@ Four verbs, strictly increasing in what they take away. Each rung does everythin
 | `session.abort()`                    | that session's current execution | nothing                    | keep running   | untouched      |
 | `session.abort(reason, { cascade })` | ⤷ plus every live descendant's   | nothing                    | keep running   | untouched      |
 | `session.close()`                    | that session's current execution | the session + its children | ABANDONED      | survives       |
+| `app.closeSession(id)`               | ⤷ the same, through the app door | ⤷ plus the registry entry  | ABANDONED      | survives       |
 | `app.destroySession(id)`             | the whole live subtree's         | the whole live subtree     | CANCELLED      | DELETED        |
 
 The two abort rungs are the only reversible ones: the session stays open, addressable, and immediately sendable again. Cascade is **scope, not kind** — each aborted execution mints the same ordinary `loop:abort` operation it always did, so a guard watching aborts sees the ops it already knew, just more of them.
@@ -236,6 +237,8 @@ Two removal verbs, deliberately far apart.
 
 `session.close()` is the gentle one — hang up. The session ends, its durable record survives as history on a `closed` status, and its **detached** tasks keep running: they were spawned to outlive the conversation.
 
+Reach it as `app.closeSession(id)` whenever the app is holding the session for you — which is every session it created. Closing the harness directly ends the session but leaves the app's live registry pointing at the corpse: `getSession` keeps handing it back, the LRU cap keeps counting it, and `createSession` with the same id returns the dead one. Same teardown, plus the bookkeeping. It also reaches a session that is only paged out, ending it in the durable record without bringing it back first, and it is idempotent for an id that is already gone.
+
 `app.destroySession(id)` deletes the thread. It is transitive and it is the strongest form:
 
 ```ts
@@ -252,7 +255,7 @@ The abort pass is the same registry walk `session.abort({ cascade: true })` runs
 
 **Descendant records are not deleted** — only the named one. Whether deleting a parent cascades to its children's rows is your store's decision (a SQL `ON DELETE CASCADE` is exactly where that belongs), and so is what deletion MEANS at all: `SessionStore.delete` may soft-flag or hard-remove. That is why the result reports whether a record `existed`, and makes no claim about what happened to it.
 
-Over the wire it is `app/destroy_session`, and it is ownership-gated twice: once by the dispatch gate on the live session's principal, once by the handler on the durable record's — because a session that is no longer live has no live target for the gate to read.
+Over the wire it is `app/destroy_session`, and it is ownership-gated twice: once by the dispatch gate, once by the handler on the durable record's principal. Belt and braces rather than redundancy — the gate resolves the target from the live session and falls back to the durable record when there is none, so ownership is enforced on a paged-out or historical session too, and the handler's check holds even for a caller that reached the verb some other way.
 
 A client holding a session id with no app id beside it — from a cross-app listing — reaches the same verb through [`gateway.destroySession(id)`](../gateway#reaching-a-session-without-naming-its-app), which resolves the owning app itself and reports which one it was.
 
@@ -336,7 +339,19 @@ const app = await createApp(<Agent />, {
 > [!IMPORTANT]
 > **Eviction is paging, not deletion.** The live harness is torn down; the durable record and timeline store survive. The next `createSession(sameId)` reconstructs and rehydrates it, so eviction is invisible to correctness — _provided_ the backing is durable. Without a durable timeline store, a paged-out session reopens with an empty conversation.
 
-A `getSession(id)` handle captured before an eviction points at the closed instance; re-fetch after the window. Activity is any operation scoped to the session, tracked off the shared bus — so a session constructed with its **own** bus factory (a multi-tenant isolation lever) is not activity-tracked, and should be paired with an explicit `session.close()` rather than idle eviction.
+A paged-out session is recorded as **`hibernated`**, which is a state and not an ending: it keeps the session out of the store's prune sweep, tells a thread list "dormant" rather than "over", and rides the `session:channel:status` channel like every other transition. `closed` is reserved for a session that actually ended.
+
+Bring one back with `app.resumeSession(id)`:
+
+```ts
+const session = await app.resumeSession("chat-1"); // undefined if it cannot come back
+```
+
+Resume replays the create call the session was built with, so the remounted session is the SAME session — same principal, same scope ceiling, same root element and props — with its knob / state bridges restored from the eviction snapshot. A session this process never held resumes from the durable record alone (the cross-restart shape), rebuilt from the app's defaults and hydrated from the record. `undefined` means it cannot come back: an id never opened here, or one whose session genuinely ended. Concurrent resumes of one id collapse onto a single remount.
+
+Over the wire this is automatic: `session/send` and `session/dispatch` remount a paged-out session rather than answering `SessionNotFoundError`. Observation verbs (`sub/subscribe`, `session/compile`, …) deliberately do not — a UI that reconnects and subscribes to fifty threads must not page all fifty back in.
+
+A `getSession(id)` handle captured before an eviction points at the closed instance; re-fetch (or `resumeSession`) after the window. Activity is any operation scoped to the session, tracked off the shared bus — so a session constructed with its **own** bus factory (a multi-tenant isolation lever) is not activity-tracked, and should be paired with an explicit `app.closeSession(id)` rather than idle eviction.
 
 Both the LRU page-out and the idle sweep call `session.close({ reason: "evicted" })` — the same operation an explicit teardown runs, not a path around it. So a `onBeforeSessionClose` observer sees page-outs, and the audit trail tells a page-out from a hangup by the record's `reason`, not by which code path ran.
 
@@ -536,6 +551,8 @@ Every session the app creates gets it, spawned and forked children included. Whe
 | `createSession(input?)`           | A session bound to this app; opening an existing id resumes |
 | `runOnce(input)`                  | One execution in an ephemeral session                       |
 | `getSession(id)`                  | The live session, or `undefined`                            |
+| `resumeSession(id)`               | Remount a paged-out / persisted session, or `undefined`     |
+| `closeSession(id)`                | End a session through the app door — registry entry too     |
 | `listSessions(query?)`            | Durable records — the queryable superset (bounded snapshot) |
 | `pageSessions(query?, page?)`     | One page of the same registry; the store's cursor, or ours  |
 | `getSessionRecord(id)`            | One durable record, closed sessions included                |
@@ -594,6 +611,7 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - `src/__tests__/lifecycle-operations.spec.tsx` — the spawn and close envelopes end to end: spawn emits both operations with the child-create carrying `{ sessionId, parentSessionId, spawnPath }` and naming the spawn as its parent op, a spawn adds no host-create record, a fork adds snapshot + restore records, a guard veto at either layer creates no child, a spawn-only guard leaves host `createSession` alone, and close stays out of the journal while a veto leaves the session usable.
 - `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` firing on dispatch, `createSession({ hooks })` composing app-outer, `onAfter*` transforms flowing through, and no-hooks being behavior-preserving.
 - `src/__tests__/session-eviction.spec.tsx` — `maxActive` evicting the least-recently-active session (LRU order proven via a send that refreshes an older one), `idleTimeout` paging out a quiet session on the sweep, an evicted session reopening with its timeline rehydrated, and an in-flight execution never being evicted.
+- `src/__tests__/session-residency.spec.tsx` — the states between live and gone: a page-out stamping `hibernated` where a genuine close stamps `closed`, the store's prune sweep passing over a hibernated record and taking the closed one, `resumeSession` remounting a paged-out session idle and able to run another turn with its identity (principal, scope ceiling) replayed from the create call, a resume from the durable record alone adopting rather than blanking it, two concurrent resumes collapsing onto ONE construction, `undefined` for an id never opened / already ended / destroyed, and `closeSession` dropping the registry entry — including after a `session.close()` behind the app's back — so reopening the id yields a live session rather than the corpse.
 - `src/__tests__/app-signal.spec.tsx` — an aborted app signal refusing new work at the edge, fanning into every session so a post-abort `send` resolves `aborted` with 0 ticks, and tearing down an in-flight execution.
 - `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling failing a too-deep spawn (configured cap and the default chain), `spawnPath` landing on the record, the loop scope, and the handle stream, and a parent close or abort disposing its children with no registry leak.
 - `src/__tests__/destroy-session.spec.tsx` — destroy aborting a grandchild held mid-tool and disposing the whole subtree, cancelling a detached task the same setup under `close()` leaves running, calling `SessionStore.delete` exactly once by id while a bystander's record survives, reaching a closed session's record, and staying silent (not faulting) on a second destroy.

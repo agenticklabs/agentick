@@ -54,6 +54,7 @@ import type {
   SectionNode,
   SemanticContentBlock,
   SemanticNode,
+  SessionStatus,
   SpecFeatureName,
   StateChangeBlock,
   SystemEventBlock,
@@ -441,6 +442,23 @@ export function isTerminalTaskStatus(status: TaskStatus): boolean {
     status === "cancelled" ||
     status === "interrupted"
   );
+}
+
+// ============================================================================
+// SessionStatus — the terminal partition
+// ============================================================================
+
+/**
+ * True for a session status that ENDS the session — `closed` (hangup),
+ * `completed`, `failed`. The complement is a session that still has a life to
+ * return to, including `hibernated`: a paged-out session is dormant, not over.
+ *
+ * The partition the durable record is read through: the store prunes only
+ * terminal records, and the app resumes only non-terminal ones. Both readers
+ * must agree, or a record the reaper considers alive is one the GC deletes.
+ */
+export function isTerminalSessionStatus(status: SessionStatus): boolean {
+  return status === "closed" || status === "completed" || status === "failed";
 }
 
 // ============================================================================
