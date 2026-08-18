@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "../../transport/index.js";
 import { MCPServer } from "../server.js";
@@ -38,6 +38,16 @@ function createTestResource(): MCPStaticResource {
       contents: [{ uri: "db://schema/users", text: "CREATE TABLE users (id INT)" }],
     }),
   };
+}
+
+async function connectInProcessClient(
+  server: MCPServer,
+): Promise<{ client: Client; sessionId: string }> {
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  const client = new Client({ name: "test-client", version: "1.0.0" });
+  await client.connect(clientTransport);
+  return { client, sessionId: serverTransport.sessionId! };
 }
 
 async function createConnectedPair(
@@ -1279,17 +1289,117 @@ describe("MCPServer", () => {
       await server.close();
     });
 
-    it("enforces maxSessions default of 1000", () => {
+    it("evicts the least-recently-active session at maxSessions", async () => {
+      vi.useFakeTimers();
+      try {
+        const server = new MCPServer({
+          name: "test",
+          version: "1.0.0",
+          sessions: { maxSessions: 2 },
+        });
+        const closeEvents: any[] = [];
+        server.on("mcp:session:closed", (e) => closeEvents.push(e));
+
+        const first = await connectInProcessClient(server);
+        const second = await connectInProcessClient(server);
+
+        await vi.advanceTimersByTimeAsync(1000);
+        await second.client.ping();
+
+        const third = await connectInProcessClient(server);
+        await vi.advanceTimersByTimeAsync(10);
+
+        expect(
+          server
+            .getActiveSessions()
+            .map((s) => s.sessionId)
+            .sort(),
+        ).toEqual([second.sessionId, third.sessionId].sort());
+        expect(closeEvents).toEqual([
+          { sessionId: first.sessionId, reason: "max sessions reached" },
+        ]);
+
+        // The close chain ran end to end: the evicted client's transport is gone.
+        await expect(first.client.ping()).rejects.toThrow(/Not connected/);
+        await expect(third.client.ping()).resolves.toBeDefined();
+
+        await second.client.close();
+        await third.client.close();
+        await server.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("evicts nothing while under maxSessions", async () => {
       const server = new MCPServer({
         name: "test",
         version: "1.0.0",
-        sessions: { maxSessions: 5 },
+        sessions: { maxSessions: 3 },
       });
+      const closeEvents: any[] = [];
+      server.on("mcp:session:closed", (e) => closeEvents.push(e));
 
-      const sessions = server.getActiveSessions();
-      expect(sessions).toHaveLength(0);
+      const first = await connectInProcessClient(server);
+      const second = await connectInProcessClient(server);
 
-      server.close();
+      expect(server.getActiveSessions()).toHaveLength(2);
+      expect(closeEvents).toEqual([]);
+
+      await first.client.close();
+      await second.client.close();
+      await server.close();
+    });
+
+    it("keeps an in-process session alive while it is exchanging messages", async () => {
+      vi.useFakeTimers();
+      try {
+        const server = new MCPServer({
+          name: "test",
+          version: "1.0.0",
+          sessions: { idleTtlMs: 60_000, cleanupIntervalMs: 10_000 },
+        });
+
+        const { client, sessionId } = await connectInProcessClient(server);
+
+        for (let i = 0; i < 5; i++) {
+          await vi.advanceTimersByTimeAsync(20_000);
+          await client.ping();
+        }
+
+        expect(server.getActiveSessions().map((s) => s.sessionId)).toEqual([sessionId]);
+
+        await client.close();
+        await server.close();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("reaps an idle in-process session at the TTL", async () => {
+      vi.useFakeTimers();
+      try {
+        const server = new MCPServer({
+          name: "test",
+          version: "1.0.0",
+          sessions: { idleTtlMs: 60_000, cleanupIntervalMs: 10_000 },
+        });
+        const timeoutEvents: any[] = [];
+        server.on("mcp:session:idle-timeout", (e) => timeoutEvents.push(e));
+
+        const { client } = await connectInProcessClient(server);
+        expect(server.getActiveSessions()).toHaveLength(1);
+
+        await vi.advanceTimersByTimeAsync(80_000);
+
+        expect(server.getActiveSessions()).toHaveLength(0);
+        expect(timeoutEvents).toHaveLength(1);
+
+        await client.close();
+        await server.close();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("cleans up idle sessions after TTL", async () => {

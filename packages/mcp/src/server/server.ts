@@ -119,6 +119,9 @@ export class SessionNotFoundError extends Error {
 // Internal State
 // ============================================================================
 
+/** Concurrent-session ceiling when `sessions.maxSessions` is unset. */
+const DEFAULT_MAX_SESSIONS = 1000;
+
 /** A live client session — one SDK Server + one Transport per MCP client. */
 interface ManagedSession {
   sessionId: string;
@@ -284,6 +287,7 @@ export class MCPServer {
 
     const sdkServer = this.createSDKServer();
     await sdkServer.connect(transport);
+    this.trackActivityOnInboundMessages(transport);
 
     const sessionId = transport.sessionId ?? uuidv7();
     // Propagate the generated session id back to the transport so per-request
@@ -292,7 +296,7 @@ export class MCPServer {
     if (!transport.sessionId) {
       transport.sessionId = sessionId;
     }
-    this.sessions.set(sessionId, {
+    this.registerSession({
       sessionId,
       sdkServer,
       transport,
@@ -300,11 +304,6 @@ export class MCPServer {
       lastActivityAt: Date.now(),
       transportType,
     });
-
-    this.installRootsListChangedHandler(sdkServer, sessionId);
-
-    log.info({ sessionId, transport: transportType }, "Session created");
-    this.emit("mcp:session:created", { sessionId });
   }
 
   /**
@@ -400,7 +399,7 @@ export class MCPServer {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => uuidv7(),
       onsessioninitialized: (newSessionId) => {
-        this.sessions.set(newSessionId, {
+        this.registerSession({
           sessionId: newSessionId,
           sdkServer,
           transport,
@@ -408,9 +407,6 @@ export class MCPServer {
           lastActivityAt: Date.now(),
           transportType: "streamable-http",
         });
-        this.installRootsListChangedHandler(sdkServer, newSessionId);
-        log.info({ sessionId: newSessionId, transport: "streamable-http" }, "Session created");
-        this.emit("mcp:session:created", { sessionId: newSessionId });
       },
     });
 
@@ -424,6 +420,7 @@ export class MCPServer {
     };
 
     await sdkServer.connect(transport);
+    this.trackActivityOnInboundMessages(transport);
     await transport.handleRequest(req, res, await this.parsedBody(req));
   }
 
@@ -1455,6 +1452,57 @@ export class MCPServer {
   // Internal: Session Management
   // ══════════════════════════════════════════════════════════════════════════
 
+  private registerSession(session: ManagedSession): void {
+    this.evictUntilUnderCap();
+    this.sessions.set(session.sessionId, session);
+    this.installRootsListChangedHandler(session.sdkServer, session.sessionId);
+    log.info({ sessionId: session.sessionId, transport: session.transportType }, "Session created");
+    this.emit("mcp:session:created", { sessionId: session.sessionId });
+  }
+
+  /**
+   * Mark the session live on every inbound message, whichever transport it
+   * arrived on. Wraps the `onmessage` handler the SDK installs during
+   * `connect()` — the one point both the in-process and HTTP doors share.
+   */
+  private trackActivityOnInboundMessages(transport: Transport): void {
+    const deliver = transport.onmessage;
+    transport.onmessage = (message, extra) => {
+      const sessionId = transport.sessionId;
+      const session = sessionId ? this.sessions.get(sessionId) : undefined;
+      if (session) session.lastActivityAt = Date.now();
+      deliver?.(message, extra);
+    };
+  }
+
+  private evictUntilUnderCap(): void {
+    const maxSessions = this.options.sessions?.maxSessions ?? DEFAULT_MAX_SESSIONS;
+
+    while (this.sessions.size >= maxSessions) {
+      const stalest = this.leastRecentlyActiveSession();
+      if (!stalest) return;
+      log.info({ sessionId: stalest, maxSessions }, "Session evicted (max sessions reached)");
+      this.closeSession(stalest, "max sessions reached");
+    }
+  }
+
+  private leastRecentlyActiveSession(): string | undefined {
+    let stalest: ManagedSession | undefined;
+    for (const session of this.sessions.values()) {
+      if (!stalest || session.lastActivityAt < stalest.lastActivityAt) stalest = session;
+    }
+    return stalest?.sessionId;
+  }
+
+  private closeSession(sessionId: string, reason: string): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    this.sessions.delete(sessionId);
+    this.rootsCache.delete(sessionId);
+    session.sdkServer.close().catch(() => {});
+    this.emit("mcp:session:closed", { sessionId, reason });
+  }
+
   private startSessionCleanup(): void {
     const intervalMs = this.options.sessions?.cleanupIntervalMs ?? 60_000;
     const ttlMs = this.options.sessions?.idleTtlMs ?? 30 * 60_000;
@@ -1462,19 +1510,11 @@ export class MCPServer {
     this.cleanupTimer = setInterval(() => {
       const now = Date.now();
       for (const [sessionId, session] of this.sessions) {
-        if (now - session.lastActivityAt > ttlMs) {
-          this.sessions.delete(sessionId);
-          this.rootsCache.delete(sessionId);
-          session.sdkServer.close().catch(() => {});
-          log.info(
-            { sessionId, idleMs: now - session.lastActivityAt },
-            "Session evicted (idle timeout)",
-          );
-          this.emit("mcp:session:idle-timeout", {
-            sessionId,
-            idleMs: now - session.lastActivityAt,
-          });
-          this.emit("mcp:session:closed", { sessionId, reason: "idle timeout" });
+        const idleMs = now - session.lastActivityAt;
+        if (idleMs > ttlMs) {
+          log.info({ sessionId, idleMs }, "Session evicted (idle timeout)");
+          this.emit("mcp:session:idle-timeout", { sessionId, idleMs });
+          this.closeSession(sessionId, "idle timeout");
         }
       }
     }, intervalMs);

@@ -224,8 +224,14 @@ export interface MCPServerOptions {
   };
 
   sessions?: {
+    /** Idle time before a session is evicted. Default: 30 minutes. */
     idleTtlMs?: number;
+    /**
+     * Hard cap on concurrent sessions. Default: 1000. Reaching the cap evicts
+     * the least-recently-active session — a new client is never rejected.
+     */
     maxSessions?: number;
+    /** Idle sweep interval. Default: 60 seconds. */
     cleanupIntervalMs?: number;
   };
 

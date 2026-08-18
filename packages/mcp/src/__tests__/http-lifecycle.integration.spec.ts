@@ -284,6 +284,39 @@ describe("handleHTTPRequest — full lifecycle", () => {
     expect(r1.json().result.content[0].text).toBe("from-1");
     expect(r2.json().result.content[0].text).toBe("from-2");
   });
+
+  it("reaps an idle streamable-http session at the TTL", async () => {
+    await startServer({
+      name: "test",
+      version: "1.0.0",
+      sessions: { idleTtlMs: 50, cleanupIntervalMs: 25 },
+    });
+
+    await initSession();
+    expect(server!.getActiveSessions()).toHaveLength(1);
+
+    await new Promise((r) => setTimeout(r, 150));
+
+    expect(server!.getActiveSessions()).toHaveLength(0);
+  });
+
+  it("keeps a streamable-http session alive while it is making requests", async () => {
+    await startServer({
+      name: "test",
+      version: "1.0.0",
+      sessions: { idleTtlMs: 200, cleanupIntervalMs: 25 },
+    });
+
+    const sessionId = await initSession();
+
+    for (let i = 0; i < 8; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      const res = await mcpRequest("tools/list", {}, sessionId, i + 2);
+      expect(res.status).toBe(200);
+    }
+
+    expect(server!.getActiveSessions().map((s) => s.sessionId)).toEqual([sessionId]);
+  });
 });
 
 // ============================================================================
