@@ -237,27 +237,38 @@ const WithBlocks = () => (
 > [!NOTE]
 > `<code>`, `<image>`, `<audio>`, `<video>`, and `<text>` are handled by the compiler but are **not** declared in the JSX namespace — TypeScript keeps React's built-in HTML/SVG typings for those tag names and declaration merging can't override them. Use the PascalCase wrappers `<Code>`, `<Image>`, `<Audio>`, `<Video>`, `<Text>`, which emit byte-identical IR. `<json>`, `<document>`, `<csv>`, `<xml-block>`, `<reasoning>`, `<custom>`, and `<content>` have no such collision and stay lowercase — no wrapper is minted where none is forced.
 
-### Event blocks
+### Events
 
-An `event`-role message records something that happened. Its contents are the three event blocks — lowercase, since none collide:
+An event records something that happened — structured, so the formatter derives the text and the same event renders identically whether authored in JSX or replayed from a store. **The preferred way is the PascalCase components**, one tag per event:
 
 ```tsx
-import { Event } from "@agentick/compiler-react";
+import { SystemEvent, UserAction, StateChange } from "@agentick/compiler-react";
 
-<Event>
-  <system_event event="compaction" source="timeline" data={{ summary }} />
-</Event>;
+<SystemEvent event="compaction" source="timeline" data={{ summary }} />
+<UserAction action="approved_invoice" actor="ryan" target="inv-482" />
+<StateChange entity="job-113" field="status" from="draft" to="active" />
 ```
 
-| Intrinsic        | Fields                                       |
-| ---------------- | -------------------------------------------- |
-| `<system_event>` | `event`, `source?`, `data?`                  |
-| `<user_action>`  | `action`, `actor?`, `target?`, `details?`    |
-| `<state_change>` | `entity`, `field?`, `from`, `to`, `trigger?` |
+| Component       | Fields                                       |
+| --------------- | -------------------------------------------- |
+| `<SystemEvent>` | `event`, `source?`, `data?`                  |
+| `<UserAction>`  | `action`, `actor?`, `target?`, `details?`    |
+| `<StateChange>` | `entity`, `field?`, `from`, `to`, `trigger?` |
 
-An event carries **structure**; the formatter derives the text — identifiers become attributes, the payload becomes child elements. That is what makes an event authored here and the same event replayed from a store render identically.
+Each is **position-aware**: at the top level it forms its own `event`-role entry; inside any message it contributes just its block. Both positions produce what you meant, so batching several records into one entry is the same components inside `<Event>`:
 
-Every block also accepts `text`, which replaces the derived body. Reach for it to override a rendering, not to supply one: a hand-written `text` is a rendering frozen into the durable timeline. See [@agentick/formatters](../formatters#event-blocks--structure-in-text-out).
+```tsx
+<Event>
+  <SystemEvent event="job-sync" source="scheduler" />
+  <StateChange entity="job-113" field="status" from="draft" to="active" />
+</Event>
+```
+
+The escape hatches, when you need a lower rung:
+
+- **The intrinsics** — `<system_event>` / `<user_action>` / `<state_change>` are the underscored wire records the components lower to, 1:1. Same fields; write them when you want the record spelled literally.
+- **Replay** — a stored entry passes through verbatim, without re-authoring: `<Event key={entry.id} {...entry} />` (its `content` array rides the `content` prop untouched).
+- **`text`** — every event accepts a `text` field that replaces the derived body. Reach for it to override a rendering, not to supply one: a hand-written `text` is a rendering frozen into the durable timeline. See [@agentick/formatters](../formatters#event-blocks--structure-in-text-out).
 
 ## Reading live facts during render
 

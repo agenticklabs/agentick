@@ -61,6 +61,24 @@ describe("event components — position aware", () => {
     ]);
   });
 
+  it("replay door: <Event {...entry}/> passes stored content through verbatim", () => {
+    const entry = {
+      id: "e-1",
+      role: "event",
+      content: [
+        { type: "system_event", event: "compaction", source: "timeline", data: { entries: 42 } },
+        { type: "state_change", entity: "job-113", from: "draft", to: "active" },
+      ],
+    };
+    const { tree } = renderAndCollect(
+      <Event key={entry.id} {...(entry as unknown as Record<string, unknown>)} />,
+    );
+    expect(tree.context.entries).toHaveLength(1);
+    const out = tree.context.entries[0]!;
+    expect(out.role).toBe("event");
+    expect(out.content).toEqual(entry.content);
+  });
+
   it("inside a non-event message, contributes the block to THAT entry", () => {
     const { tree } = renderAndCollect(
       <User>

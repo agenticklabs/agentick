@@ -193,26 +193,43 @@ Typed content blocks for composing rich message content:
 | `<Event>`     | Event entry — see event blocks below   |
 | `<Grounding>` | Semantic wrapper for grounding context |
 
-#### Event Blocks
+#### Events
 
-The contents of an `event`-role message. Lowercase intrinsics — no PascalCase
-wrapper, because none of the three collide with an HTML or SVG element.
+The preferred authoring surface is the PascalCase components — position-aware
+(via `MessageScopeContext`): at the top level each forms its own `event`-role
+entry; inside any message it contributes just its block.
 
-| Intrinsic        | Shape                                        |
-| ---------------- | -------------------------------------------- |
-| `<system_event>` | `event`, `source?`, `data?`                  |
-| `<user_action>`  | `action`, `actor?`, `target?`, `details?`    |
-| `<state_change>` | `entity`, `field?`, `from`, `to`, `trigger?` |
-
-An event carries structure; the formatter derives the text. Authoring `text` by
-hand freezes a rendering into the durable timeline, so reach for it only to
-override the derived body:
+| Component       | Shape                                        |
+| --------------- | -------------------------------------------- |
+| `<SystemEvent>` | `event`, `source?`, `data?`                  |
+| `<UserAction>`  | `action`, `actor?`, `target?`, `details?`    |
+| `<StateChange>` | `entity`, `field?`, `from`, `to`, `trigger?` |
 
 ```tsx
+<SystemEvent event="compaction" source="timeline" data={{ summary }} />
+
 <Event>
-  <system_event event="compaction" source="timeline" data={{ summary }} />
+  <SystemEvent event="job-sync" />
+  <StateChange entity="job-113" field="status" from="draft" to="active" />
 </Event>
 ```
+
+Escape hatches: the underscored intrinsics (`<system_event>` etc. — the wire
+records the components lower to, 1:1, non-colliding by construction);
+`<Event key={entry.id} {...entry} />` for verbatim replay of a stored entry;
+and the `text` field, which replaces the formatter-derived body — authoring
+`text` by hand freezes a rendering into the durable timeline, so reach for it
+only to override.
+
+#### Application-defined tags
+
+Any lowercase JSX tag containing a hyphen is the application's semantic tag
+(the custom-elements rule): `<relevant-context source="rag">…</relevant-context>`
+typechecks with zero declaration and lowers to a `<custom>` block in every
+formatter. Single-word unknown tags stay reserved (typo safety +
+wrapper-component passthrough). Content blocks are parents, never children —
+a native block inside a custom tag's subtree drops with a `BLOCK_NOT_NESTABLE`
+diagnostic; place it as a sibling.
 
 #### Model selection
 
