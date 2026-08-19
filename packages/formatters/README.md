@@ -201,9 +201,12 @@ The rules:
   object and function props are ignored.
 - **Children render normally, then get wrapped.** Text, nested custom tags,
   and semantic HTML (`<strong>`, lists, headings) all keep their usual
-  rendering inside the tag. Native content blocks (`<image>`, `<code>`) are
-  the current boundary: they do not embed inside a custom tag's subtree —
-  place them as siblings.
+  rendering inside the tag.
+- **Content blocks are parents, never children.** A native block's
+  (`<image>`, `<code>`) only home is a message's content array — the shape
+  every provider wire takes — so one inside a custom tag's subtree is
+  unrepresentable by design: it is dropped with a `BLOCK_NOT_NESTABLE`
+  diagnostic. Place it as a sibling.
 
 ### Event blocks — structure in, text out
 

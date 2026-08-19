@@ -236,6 +236,19 @@ describe("block contributors — jsx-drift fields land", () => {
     });
   });
 
+  it("a native block inside a custom tag drops LOUDLY — BLOCK_NOT_NESTABLE diagnostic", () => {
+    const { tree, diagnostics } = run(
+      el("message", { role: "user" }, [
+        el("relevant-context", { source: "rag" }, [
+          el("about-user", {}, [createTextInstance("kept")]),
+          el("code", { language: "ts", text: "const x = 1;" }),
+        ]),
+      ]),
+    ) as { tree: unknown; diagnostics?: readonly { code?: string }[] };
+    void tree;
+    expect((diagnostics ?? []).some((d) => d.code === "BLOCK_NOT_NESTABLE")).toBe(true);
+  });
+
   it("single-word unknown intrinsics remain transparent passthrough", () => {
     const { tree } = run(
       el("message", { role: "user" }, [el("about", {}, [createTextInstance("just words")])]),

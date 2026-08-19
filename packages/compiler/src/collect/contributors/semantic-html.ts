@@ -72,6 +72,7 @@ export function makeSemanticContributor(
   return {
     type,
     contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[] {
+      const diagnostics: IRFragment[] = [];
       const node: SemanticNode = {
         semantic: options.semantic,
         ...(options.propsMapper
@@ -80,9 +81,9 @@ export function makeSemanticContributor(
               return p !== undefined ? { props: p } : {};
             })()
           : {}),
-        children: collectSemanticChildren(instance, ctx),
+        children: collectSemanticChildren(instance, ctx, diagnostics),
       };
-      return [{ kind: "semantic-node", node }];
+      return [{ kind: "semantic-node", node }, ...diagnostics];
     },
   };
 }
@@ -92,16 +93,16 @@ export function makeSemanticContributor(
  * Bare text instances become `{ text }` leaves; nested semantic
  * contributors recursively produce their own subtrees.
  *
- * Anything that isn't text or a semantic-node fragment is dropped here
- * (it's surfaced upstream by the enclosing section/message contributor
- * via the normal fold path). Semantic HTML can't contain native
- * ContentBlocks inline — the inline/block distinction means an `<image>`
- * inside `<strong>` is a misuse, and silently dropping it is safer than
- * crashing.
+ * Content blocks are parents, never children: a block's only home is
+ * `MessageEntry.content` (the shape every provider wire takes), so a native
+ * ContentBlock inside a semantic subtree is unrepresentable by design. The
+ * drop is loud — a `BLOCK_NOT_NESTABLE` diagnostic lands in
+ * `outDiagnostics` for the calling contributor to surface.
  */
 export function collectSemanticChildren(
   parent: HostInstance,
   ctx: CollectContext,
+  outDiagnostics?: IRFragment[],
 ): readonly SemanticNode[] {
   if (parent.kind !== "element") return [];
   const out: SemanticNode[] = [];
@@ -127,11 +128,22 @@ export function collectSemanticChildren(
       // ContentBlock with a faithful node form, so convert rather than drop.
       if (frag.kind === "content-block" && frag.block.type === "custom") {
         out.push(customNode(frag.block));
+        continue;
       }
-      // TODO(custom-tag-block-children): other native ContentBlocks (<code>,
-      // <image>) inside a custom tag's subtree are still dropped here —
-      // SemanticNode has no block leaf. Documented as the boundary in
-      // packages/formatters/README.md §Application-defined tags.
+      // Content blocks are parents, never children — a block's only home is
+      // MessageEntry.content, because that is the shape every provider wire
+      // takes. A native block inside a semantic subtree is unrepresentable
+      // BY DESIGN; the drop stays, but it is loud.
+      if (frag.kind === "content-block") {
+        outDiagnostics?.push({
+          kind: "diagnostic",
+          diagnostic: {
+            severity: "warning",
+            code: "BLOCK_NOT_NESTABLE",
+            message: `content block "${frag.block.type}" cannot nest inside structured content — content blocks are direct children of a message; place it as a sibling`,
+          },
+        });
+      }
     }
   }
   return out;

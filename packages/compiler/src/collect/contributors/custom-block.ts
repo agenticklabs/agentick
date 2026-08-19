@@ -84,20 +84,20 @@ export const customBlockContributor: Contributor = {
     // them with `collectText` is what flattened a nested custom to bare words.
     // The node form nests; the block form is the leaf.
     if (props.content === undefined && instance.children.some((c) => !isTextInstance(c))) {
-      return [
-        {
-          kind: "semantic-node",
-          node: {
-            semantic: "custom",
-            props: omitUndefined({
-              tag: props.tag,
-              attrs: props.attrs,
-              selfClosing: props.selfClosing,
-            }),
-            children: collectSemanticChildren(instance, ctx),
-          },
+      const diagnostics: IRFragment[] = [];
+      const node: IRFragment = {
+        kind: "semantic-node",
+        node: {
+          semantic: "custom",
+          props: omitUndefined({
+            tag: props.tag,
+            attrs: props.attrs,
+            selfClosing: props.selfClosing,
+          }),
+          children: collectSemanticChildren(instance, ctx, diagnostics),
         },
-      ];
+      };
+      return [node, ...diagnostics];
     }
     const content = props.content ?? ctx.collectText(instance);
     const block: CustomContentBlock = {
