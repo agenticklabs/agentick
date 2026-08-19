@@ -1,6 +1,6 @@
 {
   "name": "@agentick/transport-websocket",
-  "version": "1.0.0-next.133",
+  "version": "1.0.0-next.135",
   "description": "WebSocket transport for agentick — JSON-RPC 2.0 over WS, with subprotocol negotiation (`agentick-rpc-v1`), cursor-aware reconnect that replays each still-open subscription from its last-seen cursor, and ingress identity pinned once at the upgrade. Client uses native `globalThis.WebSocket` (Node 22+, browser, Bun, Deno, edge); server uses the `ws` library (no native WS server in Node).",
   "keywords": [
     "agent",
