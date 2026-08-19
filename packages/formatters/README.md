@@ -168,6 +168,43 @@ attributes too — the node and block paths share one `renderAttrs`, after a lon
 run of the two disagreeing (one fix aligned them on the tag and left the node
 path silently dropping `attrs`).
 
+### Application-defined tags — a hyphen makes it yours
+
+You rarely write `{ type: "custom" }` by hand. In JSX, **any lowercase tag
+containing a hyphen is an application-defined tag** — the web platform's
+custom-elements rule, imported:
+
+```tsx
+<relevant-context source="rag" limit={3}>
+  <about-user name="ryan">prefers terse answers</about-user>
+</relevant-context>
+```
+
+typechecks with zero declaration and renders — in every dialect — as:
+
+```
+<relevant-context source="rag" limit="3">
+  <about-user name="ryan">prefers terse answers</about-user>
+</relevant-context>
+```
+
+The rules:
+
+- **A hyphen makes it yours.** Hyphenated names can never collide with a
+  framework intrinsic (which are single words, or registered explicitly), so
+  your tags are forward-compatible by construction.
+- **Single-word tags stay reserved.** `<about>` is a type error and an unknown
+  single-word tag at runtime is transparent passthrough (its children pool
+  upward, the tag contributes nothing) — this is what keeps `<mesage>` a
+  compile error instead of a silent prompt bug.
+- **Attrs are the primitive props, stringified.** `limit={3}` → `limit="3"`;
+  object and function props are ignored.
+- **Children render normally, then get wrapped.** Text, nested custom tags,
+  and semantic HTML (`<strong>`, lists, headings) all keep their usual
+  rendering inside the tag. Native content blocks (`<image>`, `<code>`) are
+  the current boundary: they do not embed inside a custom tag's subtree —
+  place them as siblings.
+
 ### Event blocks — structure in, text out
 
 ```ts

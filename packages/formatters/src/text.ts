@@ -14,7 +14,11 @@ import type {
 } from "@agentick/spec";
 
 import { createFormatter } from "./create-formatter.js";
+import { renderCustomBlock, renderCustomTag } from "./custom-block.js";
 import { renderEventPlain } from "./event-block.js";
+
+// Plain text escapes nothing — there is no syntax to protect.
+const plainEscapers = { attr: (s: string) => s, content: (c: string) => c };
 
 function formatNode(node: SemanticNode): string {
   if (node.text !== undefined && node.semantic === undefined) {
@@ -59,6 +63,17 @@ function formatNode(node: SemanticNode): string {
     case "inline-block":
       // No wrapping in plain text.
       return child;
+    case "custom":
+      // The tag survives even in plain text — a custom tag's whole purpose
+      // is the tagged region; dropping it here left the block form and the
+      // node form disagreeing about what a custom tag renders as.
+      return renderCustomTag(
+        String(node.props?.tag ?? "custom"),
+        node.props?.attrs,
+        child,
+        node.props?.selfClosing === true,
+        plainEscapers,
+      );
     default:
       return child;
   }
@@ -133,7 +148,7 @@ function blockToText(block: ContentBlock): string {
     case "state_change":
       return renderEventPlain(block);
     case "custom":
-      return block.content;
+      return renderCustomBlock(block, plainEscapers);
     default:
       return "";
   }

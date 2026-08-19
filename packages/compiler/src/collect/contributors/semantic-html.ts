@@ -128,6 +128,10 @@ export function collectSemanticChildren(
       if (frag.kind === "content-block" && frag.block.type === "custom") {
         out.push(customNode(frag.block));
       }
+      // TODO(custom-tag-block-children): other native ContentBlocks (<code>,
+      // <image>) inside a custom tag's subtree are still dropped here —
+      // SemanticNode has no block leaf. Documented as the boundary in
+      // packages/formatters/README.md §Application-defined tags.
     }
   }
   return out;

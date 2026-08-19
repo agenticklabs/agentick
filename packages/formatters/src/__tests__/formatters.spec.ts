@@ -274,6 +274,23 @@ describe("custom content blocks — the tag is the whole point", () => {
   it("markdown carries them too", () => {
     expect(mdNode(node)).toContain('<memory-kind kind="episodic">');
   });
+
+  // Plain text was the last dialect dropping the tag — the block form
+  // returned bare `content` and the node form fell through `default` to bare
+  // children. A custom tag's whole purpose is the tagged region; that holds
+  // in every dialect.
+  const txtText = (b: unknown) => textFormatter.blocksToText!([b as never]);
+  const txtNode = (n: unknown) => rendered(textFormatter, n);
+
+  it("text emits the custom tag with attributes on the block form", () => {
+    expect(txtText(block)).toBe(
+      '<memory-kind kind="episodic" weight="0.8">episodic recall</memory-kind>',
+    );
+  });
+
+  it("text emits the custom tag on the nested node form", () => {
+    expect(txtNode(node)).toContain('<memory-kind kind="episodic">episodic recall</memory-kind>');
+  });
 });
 
 describe("builtInFormatters", () => {
