@@ -346,6 +346,22 @@ declare module "react" {
         readonly children?: ReactChildren;
         readonly key?: ReactKey;
       };
+
+      // ────────── Application-defined tags (custom elements rule) ──────────
+
+      /**
+       * Any lowercase tag containing a hyphen is an application-defined
+       * semantic tag — the web platform's custom-elements rule, imported:
+       * hyphenated names can never collide with framework intrinsics, so
+       * `<relevant-context source="rag">…</relevant-context>` typechecks
+       * without ceremony and lowers to a `<custom tag="relevant-context">`
+       * content block (attrs = the primitive props, stringified; object and
+       * function props are ignored). Single-word tags stay reserved: a typo
+       * like `<mesage>` is still a compile error.
+       */
+      readonly [customTag: `${string}-${string}`]: {
+        readonly [attr: string]: unknown;
+      };
     }
   }
 }

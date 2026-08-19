@@ -191,6 +191,59 @@ describe("block contributors — jsx-drift fields land", () => {
     });
   });
 
+  it("hyphenated intrinsic lowers as a custom block (tag = element name, attrs = primitive props)", () => {
+    const { tree } = run(
+      el("message", { role: "user" }, [
+        el("relevant-context", { source: "rag", limit: 3, fresh: true, skipped: { deep: 1 } }, [
+          createTextInstance("the retrieved facts"),
+        ]),
+      ]),
+    );
+    const custom = tree.context.entries[0]!.content[0];
+    expect(custom).toMatchObject({
+      type: "custom",
+      tag: "relevant-context",
+      content: "the retrieved facts",
+      attrs: { source: "rag", limit: "3", fresh: "true" },
+    });
+  });
+
+  it("hyphenated intrinsics nest — child tags survive as structure, not scraped words", () => {
+    const { tree } = run(
+      el("message", { role: "user" }, [
+        el("relevant-context", { source: "rag" }, [
+          el("about-user", { name: "ryan" }, [createTextInstance("prefers terse")]),
+        ]),
+      ]),
+    );
+    interface Node {
+      semantic?: string;
+      props?: { tag?: string; attrs?: Record<string, string> };
+      children?: readonly Node[];
+      text?: string;
+    }
+    const custom = tree.context.entries[0]!.content[0] as { semanticNode?: Node };
+    // The coalesced block carries a root wrapper node; its first child is
+    // the outer custom tag.
+    expect(custom.semanticNode?.children?.[0]).toMatchObject({
+      semantic: "custom",
+      props: { tag: "relevant-context", attrs: { source: "rag" } },
+    });
+    expect(custom.semanticNode?.children?.[0]?.children?.[0]).toMatchObject({
+      semantic: "custom",
+      props: { tag: "about-user", attrs: { name: "ryan" } },
+      children: [{ text: "prefers terse" }],
+    });
+  });
+
+  it("single-word unknown intrinsics remain transparent passthrough", () => {
+    const { tree } = run(
+      el("message", { role: "user" }, [el("about", {}, [createTextInstance("just words")])]),
+    );
+    const first = tree.context.entries[0]!.content[0];
+    expect(first).toMatchObject({ type: "text", text: "just words" });
+  });
+
   it("media forwards shared BaseContentBlock fields (metadata / providerMetadata)", () => {
     const { tree } = run(
       el("message", { role: "user" }, [

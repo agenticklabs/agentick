@@ -38,6 +38,32 @@ type _conformance = Exhausted<
   UnhandledSpecKeys<CustomContentBlock, CustomForwarded, CustomSupplied>
 >;
 
+/**
+ * The custom-elements rule, imported from the web platform: a lowercase
+ * intrinsic containing a hyphen is an application-defined tag, forever
+ * collision-free with framework intrinsics (which are single words or
+ * registered explicitly). `<relevant-context source="rag">` is sugar for
+ * `<custom tag="relevant-context" attrs={{source: "rag"}}>`.
+ */
+export function isCustomTagType(type: unknown): type is string {
+  return typeof type === "string" && type.includes("-");
+}
+
+/** Re-shape a hyphenated intrinsic as the `<custom>` contributor's input. */
+export function asCustomTagInstance(instance: ElementInstance): ElementInstance {
+  const attrs: Record<string, string> = {};
+  for (const [key, value] of Object.entries(instance.props)) {
+    if (key === "children" || key === "key") continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      attrs[key] = String(value);
+    }
+  }
+  return {
+    ...instance,
+    props: { tag: instance.type as string, attrs },
+  };
+}
+
 export const customBlockContributor: Contributor = {
   type: "custom",
   contribute(instance: ElementInstance, ctx: CollectContext): readonly IRFragment[] {

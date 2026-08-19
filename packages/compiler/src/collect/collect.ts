@@ -49,6 +49,11 @@ import {
   type DefaultProjection,
   type ProjectionSources,
 } from "./projection.js";
+import {
+  asCustomTagInstance,
+  customBlockContributor,
+  isCustomTagType,
+} from "./contributors/custom-block.js";
 
 /** One contribution inside a content container, before coalescing. */
 type Item =
@@ -204,6 +209,12 @@ function makeContextFactory(
 
     const contributor = registry.lookup(instance.type);
     if (!contributor) {
+      // Hyphenated intrinsic = application-defined tag (the custom-elements
+      // rule) — lowered as a <custom> block so the structure reaches the
+      // prompt instead of dissolving into passthrough.
+      if (isCustomTagType(instance.type)) {
+        return customBlockContributor.contribute(asCustomTagInstance(instance), make(scope));
+      }
       // No contributor — passthrough: walk children and pool their
       // contributions. This handles Fragment naturally and lets
       // unknown wrapper components compose transparently.
@@ -268,6 +279,20 @@ function makeContextFactory(
       }
       const contributor = registry.lookup(child.type);
       if (!contributor) {
+        // Hyphenated intrinsic = application-defined tag — same lowering as
+        // the top-level walk, so custom tags nest inside messages/sections.
+        if (isCustomTagType(child.type)) {
+          const customFrags = customBlockContributor.contribute(
+            asCustomTagInstance(child),
+            make(scope),
+          );
+          for (const f of customFrags) {
+            if (f.kind === "content-block") items.push({ kind: "block", value: f.block });
+            else if (f.kind === "semantic-node") items.push({ kind: "semantic", value: f.node });
+            else if (f.kind === "diagnostic" && outbound) outbound.push(f);
+          }
+          continue;
+        }
         // Wrapper component without a contributor — fold children.
         gatherItems(child, scope, outbound, items);
         continue;
