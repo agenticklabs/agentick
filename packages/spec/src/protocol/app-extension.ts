@@ -202,6 +202,19 @@ export interface BaseInstaller {
   readonly interceptors: InstallerInterceptors;
 
   /**
+   * Register command hooks on the HOST harness — the imperative twin of the
+   * adopter `hooks` config bag (ADR 80/83). Keys are the derived hook names
+   * (`onBefore<Command>` / `onAfter<Command>` / bare `on<Command>` for the
+   * full-middleware form). The precise bag type (`CommandHooks`) is
+   * runtime-owned — middleware is a function type the spec firewall cannot
+   * carry — so the parameter is structurally loose here; annotate the bag as
+   * `CommandHooks` at the call site for typing. Hooks COMPOSE with adopter
+   * config hooks; they never override. Session-installer registrations detach
+   * when the session closes; the returned unsubscribe detaches earlier.
+   */
+  hook(hooks: Record<string, unknown>): Unsubscribe;
+
+  /**
    * Register a sub-harness under the given slot name. Slot lookup uses
    * last-writer-wins — framework defaults install first; adopter
    * overrides replace them. Returns an unsubscribe that removes the

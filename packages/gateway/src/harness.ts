@@ -698,6 +698,9 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
         inheritedInterceptors: this.resolvedInterceptors(),
         interceptorParent: this,
       },
+      hook(hooks): Unsubscribe {
+        return self.hook(hooks as Parameters<typeof self.hook>[0]);
+      },
       gateway: host,
       registerNamespace(name, value): Unsubscribe {
         if (Object.prototype.hasOwnProperty.call(self._bridges, name)) {

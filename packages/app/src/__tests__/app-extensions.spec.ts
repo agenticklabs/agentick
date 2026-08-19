@@ -204,6 +204,44 @@ describe("AppExtension — installer surfaces", () => {
     await app.closeApp();
   });
 
+  it("installer.hook registers command hooks on the app cascade", async () => {
+    const seen: string[] = [];
+    const ext: AppExtension = {
+      name: "hooker",
+      target: "app",
+      install(installer: AppInstaller) {
+        installer.hook({
+          onBeforeToolDispatch: (input: unknown) => {
+            seen.push((input as { name: string }).name);
+          },
+        });
+        installer.registerToolHandler("ext.handlers/ping", async () => [
+          { type: "text", text: "pong" },
+        ]);
+        installer.registerExtensionTool({
+          declaration: {
+            id: "ping",
+            name: "ping",
+            description: "ping",
+            inputSchema: jsonSchema({ type: "object" }),
+            exposure: ["dispatch"],
+            handlerRef: "ext.handlers/ping",
+          },
+          handlerRef: "ext.handlers/ping",
+          binding: { scope: "extension", extensionName: "hooker", level: "app" },
+        });
+      },
+    };
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      extensions: [ext],
+    });
+    const session = await app.createSession();
+    await session.tools.dispatch("ping", {});
+    expect(seen).toEqual(["ping"]);
+    await app.closeApp();
+  });
+
   it("subscribeBus delivers events to the listener", async () => {
     const events: string[] = [];
     const ext: AppExtension = {

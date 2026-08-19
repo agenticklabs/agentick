@@ -48,6 +48,7 @@ function stubAppInstaller(hostId = "app-test"): {
     // ADR 93 landmine 11 — a real host hands its resolved cascade here; this
     // stub contributes none, which is what an isolated extension test wants.
     interceptors: {},
+    hook: () => () => {},
     registerNamespace: (name, harness) => {
       bridges.set(name, harness);
       return () => {

@@ -1532,6 +1532,9 @@ export class AppHarness<P = unknown>
         inheritedInterceptors: this.resolvedInterceptors(),
         interceptorParent: this,
       },
+      hook(hooks): Unsubscribe {
+        return self.hook(hooks as CommandHooks);
+      },
       registerNamespace(name, harness): Unsubscribe {
         const prior = self.extensionBridges.get(name);
         self.extensionBridges.set(name, harness);
@@ -1645,6 +1648,14 @@ export class AppHarness<P = unknown>
       // what closes the escape that let a subscription fire, a credentials
       // mutation, or a timeline append run outside `app.guard()`.
       interceptors: { inheritedInterceptors, interceptorParent: this },
+      // Registers on the APP cascade (the session harness does not exist yet at
+      // install time); auto-detached when this session closes so a per-session
+      // extension's hooks do not outlive it.
+      hook(hooks): Unsubscribe {
+        const unsub = self.hook(hooks as CommandHooks);
+        closeHandlers.push(unsub);
+        return unsub;
+      },
       // ADR 48 — the session's identity at install time, so an extension can
       // construct per-session, tier-scoped backing stores keyed by principal /
       // adopter routing metadata. Omitted keys stay absent (principal-less /

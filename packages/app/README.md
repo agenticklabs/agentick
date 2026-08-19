@@ -130,6 +130,42 @@ const app = await createApp(<Agent />, {
 
 App extensions install once at construction; session extensions re-install per session. The `target` field routes each one — you never sort them yourself. Order is install order, and a slot-name collision is last-writer-wins, so an adopter extension listed after a framework default overrides it.
 
+#### What an extension can do — the installer surface
+
+`install(installer)` receives the host's registration surface. The parts every extension author reaches for:
+
+```ts
+export function withAuditedTools(): AppExtension {
+  return {
+    name: "audited-tools",
+    target: "app",
+    install(installer) {
+      // Ship a tool to every session this app constructs.
+      installer.registerToolHandler("audit.handlers/report", reportHandler);
+      installer.registerExtensionTool(
+        toRegistration(reportDeclaration, {
+          scope: "extension",
+          extensionName: "audited-tools",
+          level: "app",
+        }),
+      );
+
+      // Register command hooks — the imperative twin of `createApp({ hooks })`.
+      // Same derived names, composes with adopter hooks, never overrides them.
+      installer.hook({
+        onBeforeToolDispatch: (input) => audit.record(input),
+      });
+
+      // Reach a live session later (handlers run mid-session; the host handle
+      // resolves by id). Sessions don't exist yet at install time — late-bind.
+      const session = installer.app.getSession?.(sessionId);
+    },
+  };
+}
+```
+
+Session extensions get the same surface plus session identity (`sessionId`, `principal`, `metadata`) and the session-owned bridges (`elicitation`, `tasks`, `resources`); hooks they register detach automatically when their session closes. For host bridges the session constructs _after_ installs run (`timeline`, …), hold `installer.getNamespace` and read at use time, never at install — see the ordering note on `SessionInstaller`.
+
 ### Genesis — what a session opens on
 
 A store-bearing namespace carries a `hydrate` seam, and the app is what runs it. Three laws are worth knowing because they are the ones that bite:
