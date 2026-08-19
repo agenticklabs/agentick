@@ -25,6 +25,8 @@ export type { OutputProps } from "./output.js";
 // Semantic role + block wrappers — short aliases over the intrinsics.
 export { System, User, Assistant, Event, Grounding, Paragraph, H1, H2, H3 } from "./semantic.js";
 export type { GroundingProps } from "./semantic.js";
+export { SystemEvent, UserAction, StateChange } from "./event.js";
+export type { SystemEventProps, UserActionProps, StateChangeProps } from "./event.js";
 export { Text, Code, Image, Audio, Video } from "./content-blocks.js";
 
 // Tree-side guard example — a component that gates the model's tool calls

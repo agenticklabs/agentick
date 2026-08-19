@@ -37,7 +37,23 @@ export interface MessageProps {
   readonly children?: ReactNode;
 }
 
+/**
+ * True inside any `<Message>` (and its role sugars). Position-aware
+ * components read it to decide entry vs block: `<SystemEvent>` at the top
+ * level forms its own event entry; inside a message it contributes just the
+ * block. Both readings produce what the author meant — the context is what
+ * lets one component serve both positions without double-wrapping.
+ */
+export const MessageScopeContext = React.createContext(false);
+
 export function Message(props: MessageProps): React.ReactElement {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return React.createElement("message" as any, props);
+  const { children, ...rest } = props;
+  return React.createElement(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    "message" as any,
+    rest,
+    children === undefined
+      ? undefined
+      : React.createElement(MessageScopeContext.Provider, { value: true }, children),
+  );
 }
