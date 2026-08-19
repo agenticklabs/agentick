@@ -140,7 +140,7 @@ function escapeNonHtmlTags(text) {
   // Only keep tags that are EXACTLY lowercase standard HTML.
   // PascalCase like <Section>, <Message>, <Timeline> must be escaped —
   // Vue treats those as component references and will infinite-loop or error.
-  return text.replace(/<(\/?)([\w.-]+)([\s>\/])/g, (match, slash, tagName, after) => {
+  return text.replace(/<(\/?)([\w.-]+)([\s>/])/g, (match, slash, tagName, after) => {
     // Only preserve if tag name is EXACTLY in the HTML set (case-sensitive)
     if (HTML_TAGS.has(tagName)) {
       return match; // Keep valid HTML
@@ -179,6 +179,27 @@ function processFile(filePath) {
     parts[i] = parts[i].replace(/\{\{/g, "&#123;&#123;");
     parts[i] = parts[i].replace(/\}\}/g, "&#125;&#125;");
   }
+  // README cross-package links (`[spec](../spec)`) point at package DIRS.
+  // On the generated site the right target is the sibling package's API
+  // index — same path with a trailing slash so VitePress resolves the dir.
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i].replace(/\]\((\.\/)?(\.\.\/[a-z0-9-]+)(#[^)]*)?\)/g, "]($2/$3)");
+  }
+
+  // Inline code spans keep their bytes raw above — but Vue still parses
+  // {{ }} inside them (inline code is not v-pre'd on this pipeline). The
+  // VitePress-sanctioned escape: replace the span with <code v-pre>.
+  for (let i = 1; i < parts.length; i += 2) {
+    const seg = parts[i];
+    if (seg.startsWith("`") && !seg.startsWith("```") && seg.includes("{{")) {
+      const inner = seg
+        .slice(1, -1)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      parts[i] = `<code v-pre>${inner}</code>`;
+    }
+  }
   body = parts.join("");
 
   // Marker goes AFTER frontmatter — VitePress requires --- to be the first line
@@ -200,6 +221,13 @@ function processDirectory(dirPath) {
 }
 
 function replaceIndex(apiDir) {
+  // Generated from what typedoc actually emitted — a hardcoded table rots
+  // (the previous one still listed the v1 package set).
+  const scopeDir = join(apiDir, "@agentick");
+  const packages = readdirSync(scopeDir)
+    .filter((entry) => statSync(join(scopeDir, entry)).isDirectory())
+    .sort();
+  const rows = packages.map((name) => `| [@agentick/${name}](./@agentick/${name}/) |`).join("\n");
   const indexPath = join(apiDir, "index.md");
   writeFileSync(
     indexPath,
@@ -210,57 +238,13 @@ ${PROCESSED_MARKER}
 
 # API Reference
 
-Auto-generated API documentation for all agentick packages.
+Auto-generated API documentation for the agentick packages.
 
 Browse the sidebar to explore types, functions, and classes from each package.
 
-## Core
-
-| Package | Description |
-|---------|-------------|
-| [@agentick/core](./@agentick/core/) | Reconciler, hooks, JSX, compiler |
-| [@agentick/kernel](./@agentick/kernel/) | Procedures, execution, context |
-| [@agentick/shared](./@agentick/shared/) | Wire types, blocks, messages |
-
-## Agent
-
-| Package | Description |
-|---------|-------------|
-| [@agentick/agent](./@agentick/agent/) | High-level agent factory |
-| [@agentick/guardrails](./@agentick/guardrails/) | Guard system |
-
-## Adapters
-
-| Package | Description |
-|---------|-------------|
-| [@agentick/openai](./@agentick/openai/) | OpenAI adapter |
-| [@agentick/google](./@agentick/google/) | Google Gemini adapter |
-| [@agentick/ai-sdk](./@agentick/ai-sdk/) | Vercel AI SDK adapter |
-
-## Server
-
-| Package | Description |
-|---------|-------------|
-| [@agentick/gateway](./@agentick/gateway/) | Multi-session management |
-| [@agentick/server](./@agentick/server/) | Transport server |
-| [@agentick/express](./@agentick/express/) | Express.js integration |
-| [@agentick/nestjs](./@agentick/nestjs/) | NestJS module |
-
-## Client
-
-| Package | Description |
-|---------|-------------|
-| [@agentick/client](./@agentick/client/) | Browser/Node client |
-| [@agentick/react](./@agentick/react/) | React hooks & components |
-| [@agentick/angular](./@agentick/angular/) | Angular services & utilities |
-| [@agentick/cli](./@agentick/cli/) | Terminal client |
-| [@agentick/client-multiplexer](./@agentick/client-multiplexer/) | Multi-tab multiplexer |
-
-## DevTools
-
-| Package | Description |
-|---------|-------------|
-| [@agentick/devtools](./@agentick/devtools/) | Inspector & debugging |
+| Package |
+|---------|
+${rows}
 `,
   );
 }

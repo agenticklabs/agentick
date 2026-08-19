@@ -178,9 +178,23 @@ export default defineConfig({
   description: "The component framework for AI.",
   base: "/agentick/",
 
+  // _media holds files README doc-links pointed at (internal design docs,
+  // STATUS logs). They are link targets, not pages — compiling them as pages
+  // is what let a raw `{{` inside an internal log kill the whole build.
+  srcExclude: ["api/_media/**"],
+
   // Ignore dead links in auto-generated API docs (TypeDoc cross-references to
   // packages not included in documentation, like _media/nestjs)
-  ignoreDeadLinks: [/\/_media\//, /\.md$/],
+  ignoreDeadLinks: [
+    /\/_media\//,
+    /\.md$/,
+    /\.\.\/[a-z0-9-]+\/?(index)?(#.*)?$/,
+    // Intra-package source-dir links in READMEs (`./src/server`).
+    /^\.\/src\//,
+    // v1-era API references in legacy prose docs — the docs content is being
+    // rewritten wholesale for v2; these pages go with it.
+    /\/api\/@agentick\/core\//,
+  ],
 
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/agentick/logo.svg" }],
@@ -246,6 +260,7 @@ export default defineConfig({
       { text: "Docs", link: "/docs/getting-started" },
       { text: "v2 (preview)", link: "/docs/v2/" },
       { text: "API", link: "/api/" },
+      { text: "Blog", link: "/blog/" },
       {
         text: "GitHub",
         link: "https://github.com/agenticklabs/agentick",

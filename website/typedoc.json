@@ -58,7 +58,11 @@
     "../packages/cluster-redis"
   ],
   "out": "api",
-  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "plugin": [
+    "typedoc-plugin-markdown",
+    "typedoc-vitepress-theme",
+    "./scripts/typedoc-media-guard.js"
+  ],
   "readme": "none",
   "entryFileName": "index",
   "hideGenerator": true,
@@ -82,5 +86,6 @@
     "excludeProtected": true,
     "disableSources": false,
     "sourceLinkTemplate": "https://github.com/agenticklabs/agentick/blob/master/{path}#L{line}"
-  }
+  },
+  "exclude": ["**/node_modules/**"]
 }
