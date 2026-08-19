@@ -62,9 +62,29 @@ describe("MALFORMED_FUNCTION_CALL — the adapter", () => {
       adapter.normalize(malformedResponse());
     } catch (err) {
       // The offending text is the point — it is what tells you the model wrote
-      // Python instead of a function call.
-      expect((err as Error).message).toBe(FINISH_MESSAGE);
+      // Python instead of a function call. The reason prefixes it and the
+      // candidate inventory follows, so an EMPTY finishMessage (which Google
+      // ships often) still leaves evidence.
+      expect((err as Error).message).toContain("MALFORMED_FUNCTION_CALL");
+      expect((err as Error).message).toContain(FINISH_MESSAGE);
       expect((err as Error).message).toContain("default_api.knowify__query");
+      return;
+    }
+    throw new Error("expected normalize to raise");
+  });
+
+  it("an EMPTY finishMessage still carries the candidate inventory as evidence", () => {
+    const response = malformedResponse();
+    (response.candidates![0] as { finishMessage?: string }).finishMessage = undefined;
+    try {
+      adapter.normalize(response);
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).toContain("MALFORMED_FUNCTION_CALL");
+      // Part inventory + the text the model DID emit before dying.
+      expect(message).toContain('"parts":["text"]');
+      expect(message).toContain("pulling up her schedule");
+      expect(message).toContain("gemini-2.5-flash");
       return;
     }
     throw new Error("expected normalize to raise");
@@ -124,7 +144,10 @@ describe("MALFORMED_FUNCTION_CALL — through the executor", () => {
         }
         await stream.result;
       })(),
-    ).rejects.toMatchObject({ _tag: "MalformedModelOutput", message: FINISH_MESSAGE });
+    ).rejects.toMatchObject({
+      _tag: "MalformedModelOutput",
+      message: expect.stringContaining(FINISH_MESSAGE),
+    });
   });
 
   it("non-streaming: run() fails the terminal with MalformedModelOutput, not NormalizationFailed", async () => {
@@ -135,7 +158,7 @@ describe("MALFORMED_FUNCTION_CALL — through the executor", () => {
     const terminal = await exec.run({ compiled: emptyTree(), target: mkTarget(), tools: [] });
     expect(terminal).toMatchObject({
       outcome: "failed",
-      error: { _tag: "MalformedModelOutput", message: FINISH_MESSAGE },
+      error: { _tag: "MalformedModelOutput", message: expect.stringContaining(FINISH_MESSAGE) },
     });
   });
 });

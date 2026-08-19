@@ -488,7 +488,19 @@ export function google(
     finalizeStream(accum: StreamAccumulatorView): readonly AdapterDelta[] {
       const state = getGoogleState(accum);
       if (isMalformedToolCallReason(state.finishReasonRaw)) {
-        throw malformedToolCall(state.finishReasonRaw!, state.finishMessageRaw);
+        throw malformedToolCall(
+          state.finishReasonRaw!,
+          state.finishMessageRaw,
+          omitUndefined({
+            streamed: true,
+            toolCalls: accum.toolCalls.size > 0 ? [...accum.toolCalls.keys()] : undefined,
+            signaturesCaptured:
+              state.thoughtSignatureByCallId.size > 0
+                ? state.thoughtSignatureByCallId.size
+                : undefined,
+            lastBlockKind: state.activeKind ?? undefined,
+          }),
+        );
       }
       if (state.finishReasonRaw && accum.stopReason === "end") {
         accum.stopReason = mapFinishReason(state.finishReasonRaw);
@@ -1244,6 +1256,7 @@ function normalizeImpl(input: NormalizeInput<unknown>): LanguageModelExecutionRe
     throw malformedToolCall(
       candidate!.finishReason!,
       (candidate as { finishMessage?: unknown }).finishMessage as string | undefined,
+      candidateDetail(raw),
     );
   }
   const output: ContentBlock[] = [];
@@ -1497,15 +1510,47 @@ function isMalformedToolCallReason(reason: FinishReason | string | null | undefi
 
 /**
  * Gemini's `finishMessage` for a malformed function call contains the OFFENDING
- * TEXT the model emitted — the whole diagnostic. It rides `cause`, so the
- * family's `causeMessage` fold puts it on the error's `message` verbatim, where
- * `stopMessage` used to carry it.
+ * TEXT the model emitted — when Google supplies it, which it often does not.
+ * `detail` carries what the throw site could see instead (candidate part
+ * inventory, accumulated tool calls, signature counts), so a bare
+ * "MALFORMED_FUNCTION_CALL" in a client stops being the entire evidence.
+ * Everything rides `cause`, so the family's `causeMessage` fold puts it on the
+ * error's `message` (clamped at 2KB by `clampErrorDetail`).
  */
 function malformedToolCall(
   reason: FinishReason | string,
   finishMessage: string | null | undefined,
+  detail?: Record<string, unknown>,
 ): MalformedModelOutput {
-  return new MalformedModelOutput({ cause: new Error(finishMessage || String(reason)) });
+  const parts = [String(reason)];
+  if (finishMessage) parts.push(finishMessage);
+  if (detail && Object.keys(detail).length > 0) parts.push(JSON.stringify(detail));
+  return new MalformedModelOutput({ cause: new Error(parts.join(" | ")) });
+}
+
+/** Compact inventory of a response candidate — the malformed-call evidence. */
+function candidateDetail(raw: GenerateContentResponse): Record<string, unknown> {
+  const candidate = raw.candidates?.[0];
+  const parts = candidate?.content?.parts ?? [];
+  const kinds: string[] = [];
+  let textSnippet = "";
+  for (const part of parts) {
+    if (typeof part.text === "string") {
+      kinds.push((part as { thought?: boolean }).thought === true ? "thought" : "text");
+      if (textSnippet.length < 500) textSnippet += part.text;
+    } else if (part.functionCall) {
+      const sig = (part as { thoughtSignature?: string }).thoughtSignature;
+      kinds.push(`functionCall:${part.functionCall.name ?? "?"}${sig ? "" : ":no-sig"}`);
+    } else {
+      kinds.push(Object.keys(part)[0] ?? "unknown");
+    }
+  }
+  return omitUndefined({
+    parts: kinds.length > 0 ? kinds : undefined,
+    text: textSnippet ? textSnippet.slice(0, 500) : undefined,
+    blockReason: raw.promptFeedback?.blockReason,
+    model: (raw as { modelVersion?: string }).modelVersion,
+  });
 }
 
 // ============================================================================
