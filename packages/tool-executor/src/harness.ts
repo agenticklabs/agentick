@@ -286,25 +286,26 @@ export class ToolExecutorHarness
 
   /**
    * The host-door dispatch behind `session.tools.dispatch` (the sole home of the
-   * former `session.dispatch` body). Stamps `via: "dispatch"` provenance and a
-   * generated `host:` toolCallId, so a host invocation journals identically to
-   * the pre-handle path. Pattern A by default (awaits a returned `TaskHandle`);
+   * former `session.dispatch` body). Stamps `via: "dispatch"` provenance (or the
+   * caller's `opts.via` claim — see `DispatchOptions.via`) and a generated
+   * `host:` toolCallId, so a host invocation journals identically to the
+   * pre-handle path. Pattern A by default (awaits a returned `TaskHandle`);
    * opt into Pattern B with `{ task: "ref" }`.
    */
   private async hostDispatch(
     name: string,
     input: unknown,
     opts?: import("@agentick/spec").DispatchOptions,
-  ): Promise<readonly ContentBlock[]> {
+  ): Promise<readonly ContentBlock[] | DispatchResult> {
     const result = await this.dispatch({
       toolCallId: `host:${generateId()}`,
       name,
       input,
       // NOT AN EVENT SCOPE — the call's data context. `scopeId` IS the session id here.
-      context: { via: "dispatch", sessionId: this.scopeId },
+      context: { via: opts?.via ?? "dispatch", sessionId: this.scopeId },
       ...(opts?.task !== undefined ? { task: opts.task } : {}),
     });
-    return result.content;
+    return opts?.envelope ? result : result.content;
   }
 
   /**

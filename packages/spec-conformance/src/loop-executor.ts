@@ -150,7 +150,7 @@ function stubToolExecutor(): ToolExecutorProtocol {
       list: () => [],
       get: () => undefined,
       has: () => false,
-      dispatch: async () => [],
+      dispatch: (async () => []) as unknown as import("@agentick/spec").ToolsHandle["dispatch"],
       subscribe: () => () => {},
       subscribeAll: () => () => {},
     },

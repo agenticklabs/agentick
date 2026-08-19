@@ -29,6 +29,7 @@
 import type {
   ContentBlock,
   DispatchOptions,
+  DispatchResult,
   ToolDeclaration,
   ToolHandle,
   ToolInfo,
@@ -48,10 +49,15 @@ export interface ToolsHandleDeps {
   /** Highest-precedence registration for a name (name-then-alias) — `registry.get`. */
   getSync(name: string): ToolRegistration | undefined;
   /**
-   * Host-door dispatch (`via: "dispatch"`), returning the tool's content blocks.
-   * Supplied by the harness (it owns the provenance-stamping DispatchInput).
+   * Host-door dispatch (`via: "dispatch"`), returning the tool's content blocks
+   * — or the full {@link DispatchResult} under `{ envelope: true }`. Supplied by
+   * the harness (it owns the provenance-stamping DispatchInput).
    */
-  dispatch(name: string, input: unknown, opts?: DispatchOptions): Promise<readonly ContentBlock[]>;
+  dispatch(
+    name: string,
+    input: unknown,
+    opts?: DispatchOptions,
+  ): Promise<readonly ContentBlock[] | DispatchResult>;
   /** Registry change subscription: `listener(name)`, or `listener(undefined)` for bulk. */
   subscribe(listener: (name: string | undefined) => void): () => void;
 }
@@ -85,13 +91,14 @@ export function createToolsHandle(deps: ToolsHandleDeps): ToolsHandle {
       return {
         name: canonical,
         info: toToolInfo(reg.declaration),
-        dispatch: (input, opts) => deps.dispatch(canonical, input, opts),
+        dispatch: ((input, opts) =>
+          deps.dispatch(canonical, input, opts)) as ToolHandle["dispatch"],
       };
     },
     // Alias-aware existence — `getSync` resolves name-then-alias (registry.has
     // is exact-name only), so `has(alias)` agrees with `get`/`dispatch`.
     has: (name) => deps.getSync(name) !== undefined,
-    dispatch: (name, input, opts) => deps.dispatch(name, input, opts),
+    dispatch: ((name, input, opts) => deps.dispatch(name, input, opts)) as ToolsHandle["dispatch"],
     subscribe: (name, listener) =>
       deps.subscribe((changed) => {
         // A single-name change hits only that name; a bulk change (undefined)

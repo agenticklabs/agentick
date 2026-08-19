@@ -76,6 +76,43 @@ describe("ToolExecutorHarness — dispatch idempotency (ADR 51)", () => {
   });
 });
 
+describe("ToolExecutorHarness — host door via override (DispatchOptions.via)", () => {
+  it("tools.dispatch reaches a model-only tool with { via: 'model' } and refuses without", async () => {
+    const { harness } = await createTestHarness({
+      tools: [echoReg("model_only", ["model"])],
+      handlers: [
+        {
+          handlerRef: "h.model_only",
+          handler: async () => [{ type: "text", text: "ran" }],
+        },
+      ],
+    });
+    await expect(harness.tools.dispatch("model_only", {})).rejects.toThrow(/not exposed/);
+    const blocks = await harness.tools.dispatch("model_only", {}, { via: "model" });
+    expect(blocks).toEqual([{ type: "text", text: "ran" }]);
+  });
+
+  it("{ envelope: true } resolves with the full DispatchResult — typed output and error flag intact", async () => {
+    const { harness } = await createTestHarness({
+      tools: [echoReg("typed", ["model", "dispatch"])],
+      handlers: [
+        {
+          handlerRef: "h.typed",
+          handler: async () => ({
+            content: [{ type: "text", text: "4102" }],
+            structuredContent: { total: 4102 },
+            isError: false,
+          }),
+        },
+      ],
+    });
+    const result = await harness.tools.dispatch("typed", {}, { envelope: true });
+    expect(result.structuredContent).toEqual({ total: 4102 });
+    expect(result.content).toEqual([{ type: "text", text: "4102" }]);
+    expect(result.name).toBe("typed");
+  });
+});
+
 describe("ToolExecutorHarness — dispatch happy path", () => {
   it("invokes the handler with validated input + use deps", async () => {
     const seen: unknown[] = [];

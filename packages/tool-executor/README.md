@@ -96,7 +96,45 @@ Subscriptions fire only from registration mutations (`register` / `unregister` /
 
 **Aliases.** `ToolDeclaration.aliases` gives a tool alternate dispatch names. Lookup is exact-name first, then an alias index built at register time, so `dispatch("ls", …)` reaches `list_directory` and an alias can never shadow a real tool.
 
-**On handler ctx.** The same handle rides every dispatch as `ctx.tools` (#273), so a handler composes sibling tools — code-mode executors, orchestrator tools — through the identical journaled door and `"dispatch"` exposure gate as host code. Nothing weaker rides on ctx: a `["model"]`-only tool rejects from a handler exactly as it does from the host. Composition policy (recursion, budgets) belongs to guards at the dispatch seam. A sub-dispatch currently journals as a fresh host-door call; nesting under the calling tool's span is the open half of #273.
+**On handler ctx.** The same handle rides every dispatch as `ctx.tools` (#273), so a handler composes sibling tools — code-mode executors, orchestrator tools — through the identical journaled door and `"dispatch"` exposure gate as host code. Nothing weaker rides on ctx by default: a `["model"]`-only tool rejects from a handler exactly as it does from the host, unless the caller claims the model door (below). Composition policy (recursion, budgets) belongs to guards at the dispatch seam. A sub-dispatch currently journals as a fresh host-door call; nesting under the calling tool's span is the open half of #273.
+
+### `DispatchOptions` — claiming a door, keeping the envelope
+
+Two per-call options change what a host-door dispatch means and returns:
+
+- **`via: "model" | "dispatch"`** — the door this call claims, checked against the declaration's `exposure`. Default `"dispatch"`. Pass `"model"` when the call is model-originated in substance but reaches the executor through the host door — a relay tool executing a call the model asked for. `via` is provenance, not an authentication boundary: everything holding the handle is in-process and equally trusted; the check keeps doors honest.
+- **`envelope: true`** — resolve with the full `DispatchResult` instead of content blocks alone: the typed `structuredContent` (validated against the tool's `outputSchema`) and the domain-error `isError` flag, both of which the blocks-only shape drops.
+
+Together they are what an **orchestrating tool** needs — the worked example being a code-execution tool whose generated programs call sibling tools as typed functions:
+
+```ts
+const execute_code = createTool({
+  name: "execute_code",
+  description: "Run a program; every reachable tool is in scope as a typed function.",
+  inputSchema: z.object({ source: z.string() }),
+  handler: async ({ source }, { ctx }) => {
+    // The live surface, resolved per call — dynamically registered tools included.
+    const names = ctx.tools!.list({ exposure: "model" }).map((t) => t.name);
+
+    const bindings = Object.fromEntries(
+      names.map((name) => [
+        name,
+        async (input: unknown) => {
+          // The program executes the model's intent → claim the model door.
+          // The envelope keeps the tool's typed output and error flag.
+          const r = await ctx.tools!.dispatch(name, input, { via: "model", envelope: true });
+          if (r.isError) throw new Error(r.content.map(textOf).join("\n"));
+          return r.structuredContent ?? r.content;
+        },
+      ]),
+    );
+
+    return runInSandbox(source, bindings); // your runtime
+  },
+});
+```
+
+A tool that declares an `outputSchema` hands programs a **validated, typed value** (`r.structuredContent`) instead of prose to re-parse — declare one on any tool you expect code to compose over. Errors become ordinary exceptions the program can `try/catch`. Confirmation, validation, journaling, and client relay all still apply per inner call: the bindings are the same pipeline, not a bypass.
 
 ## Handler results — one currency, two failure channels
 

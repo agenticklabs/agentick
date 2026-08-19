@@ -260,6 +260,26 @@ export interface DispatchResult {
  */
 export interface DispatchOptions {
   readonly task?: "auto" | "ref" | "inline";
+  /**
+   * The door this dispatch claims — checked against the declaration's
+   * {@link ToolExposure} exactly like any other dispatch. Default `"dispatch"`
+   * (the host door). Pass `"model"` when the call is model-originated in
+   * substance but reaches the executor through the host door — the paradigm
+   * case is a search-and-dispatch tool relaying a call the model asked for.
+   *
+   * `via` is PROVENANCE, not an authenticated boundary: everything holding
+   * this handle runs in-process and is equally trusted; the exposure check
+   * exists to keep doors honest, not to keep callers out.
+   */
+  readonly via?: "model" | "dispatch";
+  /**
+   * Resolve with the full {@link DispatchResult} instead of content blocks
+   * alone. Off by default — blocks are the curated currency; the envelope is
+   * for callers composing on TYPED outputs (`structuredContent` against the
+   * tool's `outputSchema`) or branching on the domain-error flag, which the
+   * blocks-only shape silently drops.
+   */
+  readonly envelope?: boolean;
 }
 
 /**
@@ -290,7 +310,14 @@ export interface ToolInfo {
 export interface ToolHandle {
   readonly name: string;
   readonly info: ToolInfo;
-  dispatch(input: unknown, opts?: DispatchOptions): Promise<readonly ContentBlock[]>;
+  dispatch(
+    input: unknown,
+    opts: DispatchOptions & { readonly envelope: true },
+  ): Promise<DispatchResult>;
+  dispatch(
+    input: unknown,
+    opts?: DispatchOptions & { readonly envelope?: false },
+  ): Promise<readonly ContentBlock[]>;
 }
 
 /**
@@ -316,10 +343,21 @@ export interface ToolsHandle {
   /**
    * Invoke a tool by name without the model (host door). Auto-validates input
    * against the tool's schema, resolves by name then alias, and returns the
-   * tool's content blocks. Replaces `session.dispatch`. Throws
-   * `ToolExecutorError` on validation/permission/handler failure.
+   * tool's content blocks — or, with `{ envelope: true }`, the full
+   * {@link DispatchResult} (typed `structuredContent`, domain-error flag).
+   * Replaces `session.dispatch`. Throws `ToolExecutorError` on
+   * validation/permission/handler failure.
    */
-  dispatch(name: string, input: unknown, opts?: DispatchOptions): Promise<readonly ContentBlock[]>;
+  dispatch(
+    name: string,
+    input: unknown,
+    opts: DispatchOptions & { readonly envelope: true },
+  ): Promise<DispatchResult>;
+  dispatch(
+    name: string,
+    input: unknown,
+    opts?: DispatchOptions & { readonly envelope?: false },
+  ): Promise<readonly ContentBlock[]>;
   /** Fire when the named tool's registrations change (declaration / presence). */
   subscribe(name: string, listener: () => void): Unsubscribe;
   /** Fire on any registry topology change (add / remove of any tool). */
