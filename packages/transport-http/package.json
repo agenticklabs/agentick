@@ -1,6 +1,6 @@
 {
   "name": "@agentick/transport-http",
-  "version": "1.0.0-next.135",
+  "version": "1.0.0-next.136",
   "description": "Streamable HTTP transport for agentick per MCP 2025-03-26 — JSON-RPC 2.0 over a single endpoint that serves request/response (application/json) and streaming responses (text/event-stream) on the same POST, plus a persistent GET for notification fan-in. Universal `fetch` on the client (Node 22+, browser, Bun, Deno, edge); Node `http.Server` on the server.",
   "keywords": [
     "agent",

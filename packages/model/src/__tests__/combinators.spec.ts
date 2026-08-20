@@ -67,6 +67,27 @@ describe("withFallback", () => {
     expect(result.output[0]).toMatchObject({ text: "beta:b" });
   });
 
+  it("a degraded call stamps `fallback` finishMetadata; a healthy one stamps nothing", async () => {
+    const primary = scriptedAdapter("a", { provider: "alpha", failures: 99, tagOutput: true });
+    const secondary = scriptedAdapter("b", { provider: "beta", failures: 0, tagOutput: true });
+    const degraded = await generate({
+      model: withFallback(primary, secondary),
+      messages: MESSAGES,
+    });
+    expect(degraded.finishMetadata?.["fallback"]).toMatchObject({ provider: "beta" });
+
+    const healthyPrimary = scriptedAdapter("a", {
+      provider: "alpha",
+      failures: 0,
+      tagOutput: true,
+    });
+    const healthy = await generate({
+      model: withFallback(healthyPrimary, secondary),
+      messages: MESSAGES,
+    });
+    expect(healthy.finishMetadata?.["fallback"]).toBeUndefined();
+  });
+
   it("primary serves when healthy — secondary untouched", async () => {
     const primary = scriptedAdapter("a", { provider: "alpha", failures: 0, tagOutput: true });
     const secondary = scriptedAdapter("b", { provider: "beta", failures: 0, tagOutput: true });

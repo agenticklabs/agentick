@@ -262,6 +262,26 @@ export function withFallback(
 
     normalize: (raw: FallbackRaw): LanguageModelExecutionResult => raw.adapter.normalize(raw.raw),
 
+    // Forward the serving adapter's metadata, and stamp the degradation when a
+    // non-first adapter served: the executor merges this into the result's
+    // `finishMetadata`, which is where an adopter audits (or renders) that a
+    // fallback engaged. Absent when the first adapter served — presence IS the
+    // signal.
+    extractMetadata: (raw: FallbackRaw): Readonly<Record<string, unknown>> | undefined => {
+      const inner = raw.adapter.extractMetadata?.(raw.raw);
+      if (raw.adapter === first) return inner;
+      return {
+        ...(inner ?? {}),
+        fallback: {
+          provider: raw.adapter.provider,
+          ...(raw.adapter.target.modelId !== undefined
+            ? { modelId: raw.adapter.target.modelId }
+            : {}),
+          ...(first.target.modelId !== undefined ? { primary: first.target.modelId } : {}),
+        },
+      };
+    },
+
     ...(first.project ? { project: (input: ProjectInput) => first.project!(input) } : {}),
     ...(first.adapterTransforms
       ? { adapterTransforms: (): readonly DeltaTransform[] => first.adapterTransforms!() }

@@ -120,7 +120,22 @@ export async function generate<TRaw, TChunk>(
   });
   let raw: TRaw = await adapter.send(request, options.signal);
   if (adapter.postProcessForNormalize) raw = adapter.postProcessForNormalize(raw);
-  return adapter.normalize(raw);
+  return withExtractedMetadata(adapter, raw, adapter.normalize(raw));
+}
+
+/**
+ * Executor parity: merge `extractMetadata` into `finishMetadata`. Without this
+ * the ladder's lower rungs silently dropped provider metadata the full
+ * executor surfaces.
+ */
+function withExtractedMetadata<TRaw>(
+  adapter: { extractMetadata?(raw: TRaw): Readonly<Record<string, unknown>> | undefined },
+  raw: TRaw,
+  result: LanguageModelExecutionResult,
+): LanguageModelExecutionResult {
+  const extracted = adapter.extractMetadata?.(raw);
+  if (extracted === undefined) return result;
+  return { ...result, finishMetadata: { ...(result.finishMetadata ?? {}), ...extracted } };
 }
 
 /**
@@ -196,7 +211,7 @@ export function generateStream<TRaw, TChunk>(
 
       let raw = adapter.reconstructRaw(accum, accum.modelSeen);
       if (adapter.postProcessForNormalize) raw = adapter.postProcessForNormalize(raw);
-      resolveResult(adapter.normalize(raw));
+      resolveResult(withExtractedMetadata(adapter, raw, adapter.normalize(raw)));
     } catch (cause) {
       rejectResult(cause);
       throw cause;
