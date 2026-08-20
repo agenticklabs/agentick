@@ -37,7 +37,6 @@
  * @see docs/proposals/v2/blueprint/49-stores-not-snapshots.md
  */
 
-import React from "react";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -46,11 +45,10 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { ElicitationHarness } from "@agentick/elicitation";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
-import { CompilerHarness } from "@agentick/compiler-react";
-import { Timeline } from "@agentick/timeline/react";
 import type { TimelineStore } from "@agentick/timeline";
 import { stubStoreCtx } from "@agentick/store";
 import type {
+  CompilerFactory,
   ExecutionTarget,
   ExecutorFx,
   ExecutorTerminal,
@@ -87,6 +85,18 @@ export interface KillResumeAcceptanceOptions {
    * state. See the module doc for the per-pole contract.
    */
   readonly makeStore: () => TimelineStore | Promise<TimelineStore>;
+  /**
+   * The compiler under test. Every substrate that claims to run agentick
+   * runs THIS suite — the resume pipe is only proven if hydrated history
+   * reaches the model through the compiler an adopter actually ships.
+   */
+  readonly compiler: CompilerFactory;
+  /**
+   * Root element for {@link KillResumeAcceptanceOptions.compiler}'s
+   * substrate, rendering the session timeline. Opaque here — a React
+   * element, an Angular component type, an IR thunk.
+   */
+  readonly agent: unknown;
   /**
    * Skip the whole suite (registers it as skipped, never constructs a
    * store). For backings that may be absent in the test env — e.g. a
@@ -219,11 +229,6 @@ function spyReplyExec(text: string): SpyLanguageModelExecutor {
   );
 }
 
-/** The resume agent renders the persisted conversation into model context. */
-function ResumeAgent(): React.JSX.Element {
-  return <Timeline />;
-}
-
 /** All USER-message text the model saw in a projected input. */
 function userText(input: LanguageModelInput | undefined): string {
   if (!input) return "";
@@ -235,6 +240,15 @@ function userText(input: LanguageModelInput | undefined): string {
     .join(" ");
 }
 
+/**
+ * `ready` lives on the runtime's `BaseHarness`, not on `CompilerProtocol` —
+ * a factory-built compiler may be either.
+ */
+async function harnessReady(harness: unknown): Promise<void> {
+  const ready = (harness as { readonly ready?: unknown }).ready;
+  if (ready instanceof Promise) await ready;
+}
+
 interface Rig {
   readonly session: SessionHarness;
   close(): Promise<void>;
@@ -243,19 +257,22 @@ interface Rig {
 /**
  * Build a real SessionHarness over the injected store. Mirrors the
  * construction in `timeline-durability.spec.ts` — a full harness stack —
- * parameterized to accept the store + a specific executor + the resume
- * agent (which renders `<Timeline/>` so hydrated history reaches the
- * model).
+ * parameterized to accept the store + a specific executor + the compiler
+ * and root element under test (which must render the session timeline, so
+ * hydrated history reaches the model).
  */
-async function mkSession(opts: {
+async function buildRig(opts: {
   sessionId: string;
   store: TimelineStore;
   executor: FakeLanguageModelExecutor;
+  compiler: CompilerFactory;
+  agent: unknown;
 }): Promise<Rig> {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const compiler = new CompilerHarness(`kr-r-${Math.random()}`, journal, bus, inbox);
+  const scopeId = `kr-r-${Math.random()}`;
+  const compiler = opts.compiler({ scopeId, journal, bus, inbox });
   const loop = new LoopExecutorHarness(`kr-l-${Math.random()}`, journal, bus, inbox);
   const elicitation = new ElicitationHarness(`kr-e-${Math.random()}`, journal, bus, inbox);
   const tools = new ToolExecutorHarness(`kr-t-${Math.random()}`, journal, bus, inbox, {
@@ -263,7 +280,7 @@ async function mkSession(opts: {
     elicitation,
   });
   await Promise.all([
-    compiler.ready,
+    harnessReady(compiler),
     loop.ready,
     tools.ready,
     elicitation.ready,
@@ -272,7 +289,7 @@ async function mkSession(opts: {
 
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId: opts.sessionId,
-    agent: <ResumeAgent />,
+    agent: opts.agent,
     compiler,
     loop,
     modelExecutor: opts.executor,
@@ -298,6 +315,11 @@ async function mkSession(opts: {
 
 export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void {
   const suite = opts.skip ? describe.skip : describe;
+  const mkSession = (args: {
+    sessionId: string;
+    store: TimelineStore;
+    executor: FakeLanguageModelExecutor;
+  }): Promise<Rig> => buildRig({ ...args, compiler: opts.compiler, agent: opts.agent });
 
   suite(`kill-and-resume acceptance — ${opts.label} (ADR 49)`, () => {
     it("real kill→resume: a completed turn survives a fresh open on the same backing", async () => {

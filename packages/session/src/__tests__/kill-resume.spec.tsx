@@ -26,21 +26,34 @@ import { join } from "node:path";
 import { afterAll } from "vitest";
 
 import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline";
+import { Timeline } from "@agentick/timeline/react";
+import { reactCompiler } from "@agentick/compiler-react";
 import { fsTimelineStore } from "@agentick/timeline-fs";
 import { postgresTimelineStore } from "@agentick/timeline-postgres";
 import { runKillResumeAcceptance } from "../testing/index.js";
+
+/**
+ * The substrate under test. `@agentick/session` itself is React-free — the
+ * acceptance vehicle takes the compiler and root element, so an Angular or
+ * imperative compiler runs the same suite from its own package.
+ */
+const substrate = { compiler: reactCompiler(), agent: <Timeline /> };
 
 // ── memory ──────────────────────────────────────────────────────────────
 // One shared instance — a second makeStore() is the same durable object,
 // modelling a resume within the same process against in-memory durability.
 const memoryStore = new MemoryTimelineStore();
-runKillResumeAcceptance({ label: "memory", makeStore: () => memoryStore });
+runKillResumeAcceptance({ ...substrate, label: "memory", makeStore: () => memoryStore });
 
 // ── fs ──────────────────────────────────────────────────────────────────
 // One shared temp dir for the whole file; each makeStore() is a fresh
 // adapter over the SAME dir (the filesystem is the shared backing).
 const fsDir = mkdtempSync(join(tmpdir(), "agentick-kill-resume-"));
-runKillResumeAcceptance({ label: "fs", makeStore: () => fsTimelineStore({ dir: fsDir }) });
+runKillResumeAcceptance({
+  ...substrate,
+  label: "fs",
+  makeStore: () => fsTimelineStore({ dir: fsDir }),
+});
 afterAll(() => {
   rmSync(fsDir, { recursive: true, force: true });
 });
@@ -65,7 +78,7 @@ async function makePgStore(): Promise<TimelineStore> {
   });
 }
 
-runKillResumeAcceptance({ label: "postgres", makeStore: makePgStore, skip: !pgUrl });
+runKillResumeAcceptance({ ...substrate, label: "postgres", makeStore: makePgStore, skip: !pgUrl });
 
 afterAll(async () => {
   if (pgPool) {

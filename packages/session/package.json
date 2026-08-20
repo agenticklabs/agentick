@@ -82,8 +82,7 @@
     "@agentick/timeline": "workspace:*",
     "@agentick/tool-executor": "workspace:*",
     "@agentick/utils": "workspace:*",
-    "effect": "^3.22.0",
-    "react": "^19.2.4"
+    "effect": "^3.22.0"
   },
   "devDependencies": {
     "@agentick/compiler-react": "workspace:*",
@@ -93,17 +92,13 @@
     "@agentick/timeline-postgres": "workspace:*",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.2.5",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "react": "^19.2.4"
   },
   "peerDependencies": {
-    "@agentick/compiler-react": "workspace:*",
-    "react": "^19.0.0",
     "vitest": "^4.0.0"
   },
   "peerDependenciesMeta": {
-    "@agentick/compiler-react": {
-      "optional": true
-    },
     "vitest": {
       "optional": true
     }

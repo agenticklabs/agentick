@@ -1514,9 +1514,6 @@ importers:
       effect:
         specifier: ^3.22.0
         version: 3.22.0
-      react:
-        specifier: ^19.2.4
-        version: 19.2.4
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
@@ -1545,6 +1542,9 @@ importers:
       pg:
         specifier: ^8.13.1
         version: 8.22.0
+      react:
+        specifier: ^19.2.4
+        version: 19.2.4
 
   packages/skills:
     dependencies:
