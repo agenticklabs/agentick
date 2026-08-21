@@ -13,4 +13,5 @@ export * from "./paginate.js";
 export * from "./predicates.js";
 export * from "./resolvable.js";
 export * from "./split-message.js";
+export * from "./streaming.js";
 export * from "./id.js";

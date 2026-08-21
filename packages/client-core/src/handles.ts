@@ -34,13 +34,14 @@ import type {
   SessionHandleBase,
   SessionPageRequest,
   StreamEvent,
+  StreamPipeToOptions,
   SubscriptionScope,
   SubscriptionStream,
   WireMethod,
 } from "@agentick/spec";
 import type { Cursor } from "@agentick/spec";
 import { isProgressEventName } from "@agentick/spec";
-import { omitUndefined } from "@agentick/utils";
+import { omitUndefined, pipeAsyncIterableTo, readableFromAsyncIterable } from "@agentick/utils";
 import { onLog as onLogFn, onProgress as onProgressFn } from "./signals.js";
 import { channelView as channelViewFn } from "./channel-view.js";
 import { sessionStatusView, type SessionStatusView } from "./session-status-view.js";
@@ -558,6 +559,16 @@ function createSessionExecutionHandle<P>(
         }
         yield event;
       }
+    },
+    // The web-streams twin of `events()`, identical to the server handle:
+    // `readable()` bridges into `pipeThrough`/`tee`; `pipeTo` drains to a
+    // WritableStream with backpressure. Both draw from the same progress
+    // stream `events()` does — read a handle through one of them, not several.
+    readable(): ReadableStream<StreamEvent> {
+      return readableFromAsyncIterable(this.events());
+    },
+    pipeTo(destination: WritableStream<StreamEvent>, options?: StreamPipeToOptions): Promise<void> {
+      return pipeAsyncIterableTo(this.events(), destination, options);
     },
   };
 }

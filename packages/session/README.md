@@ -90,6 +90,20 @@ await events;
 
 Events carry a dense, monotonic per-session `sequence`, so a UI can order, replay, or de-duplicate them. `handle.abort("user cancelled")` tears the in-flight execution down structurally; the result settles with `stopReason: "aborted"`. A `timeoutMs` on the send does the same on expiry with `stopReason: "timeout"`. `session.abort(reason)` is the same cancellation for a caller holding the session rather than the handle.
 
+### The same stream, as web streams — `readable()` / `pipeTo()`
+
+`events()` is the async-iterable view; `readable()` is the same stream as a WHATWG `ReadableStream<StreamEvent>` — the bridge to `pipeThrough`, `tee`, and manual backpressure. `pipeTo(destination)` drains the run into any `WritableStream<StreamEvent>`, and the destination's backpressure **is** the pacing mechanism: a slow sink's `write()` gates the drain, so a rate-limited target (a chat surface editing a message) needs no extra buffering. This is the same web-streams-with-backpressure model the [`live`](../live) package uses for media.
+
+```ts
+// Ship an execution straight to a rate-limited sink (e.g. a connector's thread writer).
+await handle.pipeTo(sink, { throttleMs: 300 }); // throttleMs is optional smoothing on top of backpressure
+
+// Or take the ReadableStream and compose transforms.
+handle.readable().pipeThrough(myTransform).pipeTo(sink);
+```
+
+`throttleMs` enforces a minimum gap between writes for a sink that prefers cadence over raw token rate; omit it and backpressure alone paces. The remaining `pipeTo` options mirror `ReadableStream.prototype.pipeTo` (`signal`, `preventClose`, …). `readable()`/`pipeTo()` draw from the same underlying queue as `events()` — consume a handle through one of them, not several at once.
+
 ### How far an abort reaches
 
 `abort()` stops one execution. `abort(reason, { cascade: true })` stops the session's whole live spawn subtree — every descendant's current execution, deepest-first, so a child stops before the parent waiting on it unwinds:

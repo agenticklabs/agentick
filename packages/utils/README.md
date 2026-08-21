@@ -407,41 +407,44 @@ expect(await drained).toMatchObject({ status: "cancelled" });
 
 ### `@agentick/utils`
 
-| Export                                                                                      | Kind      | Purpose                                                      |
-| ------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------ |
-| `isString` · `isNumber` · `isBoolean` · `isNull` · `isUndefined` · `isFunction` · `isArray` | predicate | one canonical `typeof` / `Array.isArray` check per concept   |
-| `isDate` · `isRegExp` · `isMap` · `isSet`                                                   | predicate | `instanceof` checks for the built-ins                        |
-| `isDefined<T>`                                                                              | predicate | not `null` and not `undefined`                               |
-| `isFalsey`                                                                                  | predicate | `false \| 0 \| "" \| null \| undefined`                      |
-| `isObject`                                                                                  | predicate | key/value bag — not array, not null, not a function          |
-| `isPlainObject`                                                                             | predicate | POJO only — prototype is `Object.prototype` or `null`        |
-| `isThenable`                                                                                | predicate | duck-typed `PromiseLike`; matches cross-realm thenables      |
-| `isEqual(a, b)`                                                                             | function  | deep structural equality (JSON shapes + `Date` + `RegExp`)   |
-| `mergeLayered<T>(...layers)`                                                                | function  | variadic cascade deep-merge, least → most specific           |
-| `foldLayer<T>(acc, layer)`                                                                  | function  | the single-layer step, for custom folds                      |
-| `append<T>` · `prepend<T>` · `replace<T>` · `omit`                                          | strategy  | per-field opt-out of the default merge rules                 |
-| `isMergeStrategy`                                                                           | guard     | true when a value carries a strategy marker                  |
-| `Layer<T>` · `MergeStrategy<T>`                                                             | type      | one cascade layer; a symbol-wrapped field value              |
-| `omitUndefined(obj)` · `OmitUndefined<T>`                                                   | function  | drop `undefined`-valued keys at a boundary (shallow)         |
-| `resolveSync(v)` · `resolveAsync(v)`                                                        | function  | resolve a `Resolvable` / `ResolvableAsync` to its value      |
-| `Resolvable<T>` · `ResolvableAsync<T>`                                                      | type      | literal-or-thunk config value                                |
-| `mapConcurrent(items, n, fn)`                                                               | function  | bounded-concurrency map; input order preserved               |
-| `mergeAbortSignals(...signals)`                                                             | function  | one signal that fires on the first source abort              |
-| `reasonOf(value)`                                                                           | function  | unknown → single-line reason string                          |
-| `reasonOfCause<E>(cause)`                                                                   | function  | Effect `Cause` → single-line reason string                   |
-| `causeValue<E>(cause)`                                                                      | function  | Effect `Cause` → the originating value, unstringified        |
-| `unwrapExit<A, E>(exit)`                                                                    | function  | `Exit` → value, or rethrow preserving typed-failure identity |
-| `liftToEffect(fn, errorMap?)`                                                               | function  | sync/async/Effect function → Effect-returning; idempotent    |
-| `applyJsonPatch<T>(doc, ops)`                                                               | function  | RFC 6902 apply, copy-on-write                                |
-| `JsonPatchOp` · `JsonPatchError`                                                            | type      | one operation; the throw on an inapplicable patch            |
-| `matchesScope<S>(filter, scope)`                                                            | function  | partial-filter match over any object shape                   |
-| `compileScopeMatcher<S>(filter)`                                                            | function  | the same match, filter keys pre-extracted for hot paths      |
-| `matchesAddressFilter` · `matchesEventFilter`                                               | function  | address- and event-shaped routing predicates                 |
-| `AddressFilterShape` · `EventFilterShape` · `EventLike`                                     | type      | the structural filter shapes those two take                  |
-| `generateId()`                                                                              | function  | lexicographically sortable, monotonic-within-ms id           |
-| `splitMessage(text, options)` · `SplitOptions`                                              | function  | chunk text to a hard cap on semantic boundaries              |
-| `cartesian(axes)`                                                                           | function  | full product of axis values, one record per cell             |
-| `paginate(all, cursor, pageSize?)` · `Page<T>` · `DEFAULT_PAGE_SIZE`                        | function  | one page of a list + the cursor that follows it              |
+| Export                                                                                      | Kind      | Purpose                                                             |
+| ------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------- |
+| `isString` · `isNumber` · `isBoolean` · `isNull` · `isUndefined` · `isFunction` · `isArray` | predicate | one canonical `typeof` / `Array.isArray` check per concept          |
+| `isDate` · `isRegExp` · `isMap` · `isSet`                                                   | predicate | `instanceof` checks for the built-ins                               |
+| `isDefined<T>`                                                                              | predicate | not `null` and not `undefined`                                      |
+| `isFalsey`                                                                                  | predicate | `false \| 0 \| "" \| null \| undefined`                             |
+| `isObject`                                                                                  | predicate | key/value bag — not array, not null, not a function                 |
+| `isPlainObject`                                                                             | predicate | POJO only — prototype is `Object.prototype` or `null`               |
+| `isThenable`                                                                                | predicate | duck-typed `PromiseLike`; matches cross-realm thenables             |
+| `isEqual(a, b)`                                                                             | function  | deep structural equality (JSON shapes + `Date` + `RegExp`)          |
+| `mergeLayered<T>(...layers)`                                                                | function  | variadic cascade deep-merge, least → most specific                  |
+| `foldLayer<T>(acc, layer)`                                                                  | function  | the single-layer step, for custom folds                             |
+| `append<T>` · `prepend<T>` · `replace<T>` · `omit`                                          | strategy  | per-field opt-out of the default merge rules                        |
+| `isMergeStrategy`                                                                           | guard     | true when a value carries a strategy marker                         |
+| `Layer<T>` · `MergeStrategy<T>`                                                             | type      | one cascade layer; a symbol-wrapped field value                     |
+| `omitUndefined(obj)` · `OmitUndefined<T>`                                                   | function  | drop `undefined`-valued keys at a boundary (shallow)                |
+| `resolveSync(v)` · `resolveAsync(v)`                                                        | function  | resolve a `Resolvable` / `ResolvableAsync` to its value             |
+| `Resolvable<T>` · `ResolvableAsync<T>`                                                      | type      | literal-or-thunk config value                                       |
+| `mapConcurrent(items, n, fn)`                                                               | function  | bounded-concurrency map; input order preserved                      |
+| `mergeAbortSignals(...signals)`                                                             | function  | one signal that fires on the first source abort                     |
+| `reasonOf(value)`                                                                           | function  | unknown → single-line reason string                                 |
+| `reasonOfCause<E>(cause)`                                                                   | function  | Effect `Cause` → single-line reason string                          |
+| `causeValue<E>(cause)`                                                                      | function  | Effect `Cause` → the originating value, unstringified               |
+| `unwrapExit<A, E>(exit)`                                                                    | function  | `Exit` → value, or rethrow preserving typed-failure identity        |
+| `liftToEffect(fn, errorMap?)`                                                               | function  | sync/async/Effect function → Effect-returning; idempotent           |
+| `applyJsonPatch<T>(doc, ops)`                                                               | function  | RFC 6902 apply, copy-on-write                                       |
+| `JsonPatchOp` · `JsonPatchError`                                                            | type      | one operation; the throw on an inapplicable patch                   |
+| `matchesScope<S>(filter, scope)`                                                            | function  | partial-filter match over any object shape                          |
+| `compileScopeMatcher<S>(filter)`                                                            | function  | the same match, filter keys pre-extracted for hot paths             |
+| `matchesAddressFilter` · `matchesEventFilter`                                               | function  | address- and event-shaped routing predicates                        |
+| `AddressFilterShape` · `EventFilterShape` · `EventLike`                                     | type      | the structural filter shapes those two take                         |
+| `generateId()`                                                                              | function  | lexicographically sortable, monotonic-within-ms id                  |
+| `splitMessage(text, options)` · `SplitOptions`                                              | function  | chunk text to a hard cap on semantic boundaries                     |
+| `cartesian(axes)`                                                                           | function  | full product of axis values, one record per cell                    |
+| `paginate(all, cursor, pageSize?)` · `Page<T>` · `DEFAULT_PAGE_SIZE`                        | function  | one page of a list + the cursor that follows it                     |
+| `readableFromAsyncIterable<T>(iterable)`                                                    | function  | async iterable → WHATWG `ReadableStream`, pull-based backpressure   |
+| `pipeAsyncIterableTo<T>(iterable, dest, opts?)` · `PipeAsyncIterableOptions`                | function  | drain an async iterable into a `WritableStream`; `throttleMs` paces |
+| `throttle<T>(ms)`                                                                           | function  | pass-through `TransformStream` enforcing a min gap between chunks   |
 
 ### `@agentick/utils/testing`
 

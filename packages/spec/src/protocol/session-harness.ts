@@ -575,7 +575,41 @@ export interface SessionExecutionHandle<T = unknown> {
    * The event stream — `for await (const ev of handle.events())`.
    */
   events(): AsyncIterable<StreamEvent>;
+  /**
+   * The same event stream as a WHATWG {@link ReadableStream} — the bridge to
+   * the web-streams ecosystem (`pipeThrough` transforms, `tee`, manual
+   * backpressure-aware reads). Backed by the same underlying queue as
+   * {@link events}; consuming one draws from the shared queue, so read a handle
+   * through `readable()` OR `events()`, not both at once.
+   */
+  readable(): ReadableStream<StreamEvent>;
+  /**
+   * Pipe the event stream to a WHATWG {@link WritableStream}, honoring the
+   * destination's backpressure — a slow sink's `write()` gates the drain, and
+   * that IS the pacing mechanism (a rate-limited sink needs no extra config).
+   * Sugar over `readable().pipeTo(destination, options)`.
+   *
+   * `throttleMs` optionally enforces a minimum gap between writes (a
+   * `smoothStream`-style cadence) on top of backpressure; omit it and
+   * backpressure alone paces. The remaining options mirror
+   * `ReadableStream.prototype.pipeTo`.
+   */
+  pipeTo(destination: WritableStream<StreamEvent>, options?: StreamPipeToOptions): Promise<void>;
   abort(reason?: string): Promise<void>;
+}
+
+/**
+ * Options for {@link SessionExecutionHandle.pipeTo}. Mirrors the standard
+ * `StreamPipeOptions` (`preventClose`/`preventAbort`/`preventCancel`/`signal`)
+ * and adds `throttleMs` — a minimum inter-write gap for rate-limited sinks.
+ */
+export interface StreamPipeToOptions {
+  readonly preventClose?: boolean;
+  readonly preventAbort?: boolean;
+  readonly preventCancel?: boolean;
+  readonly signal?: AbortSignal;
+  /** Minimum milliseconds between writes to the destination. Omit for backpressure-only pacing. */
+  readonly throttleMs?: number;
 }
 
 // ============================================================================

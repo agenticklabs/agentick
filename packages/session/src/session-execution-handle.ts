@@ -22,7 +22,13 @@
  */
 
 import { generateId } from "@agentick/runtime";
-import type { SendResult, SessionExecutionHandle, StreamEvent } from "@agentick/spec";
+import type {
+  SendResult,
+  SessionExecutionHandle,
+  StreamEvent,
+  StreamPipeToOptions,
+} from "@agentick/spec";
+import { pipeAsyncIterableTo, readableFromAsyncIterable } from "@agentick/utils";
 
 /**
  * Loose shape — what the caller passes to `emit`. The handle fills in
@@ -141,6 +147,9 @@ export function createSessionExecutionHandle(args: SessionExecutionHandleArgs): 
     // queue/resolvers via `makeAsyncIterator`. The handle is not itself
     // iterable; `events()` is the one way to consume the stream.
     events: () => ({ [Symbol.asyncIterator]: makeAsyncIterator }),
+    readable: () => readableFromAsyncIterable({ [Symbol.asyncIterator]: makeAsyncIterator }),
+    pipeTo: (destination: WritableStream<StreamEvent>, options?: StreamPipeToOptions) =>
+      pipeAsyncIterableTo({ [Symbol.asyncIterator]: makeAsyncIterator }, destination, options),
     abort: async (reason) => {
       if (status === "running") status = "aborted";
       await abort(reason);

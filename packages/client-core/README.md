@@ -67,6 +67,8 @@ await client.close();
 
 `run.abort(reason?)` issues `session/abort` and closes the progress stream. `client.session(id).abort(reason?, { cascade: true })` sends the same verb with the wider scope — the session's live spawn subtree stops too, and nothing is disposed or deleted. See the [cancellation ladder](../app#the-cancellation-ladder).
 
+The run handle carries the same `readable()` / `pipeTo()` web-streams surface as the server-side `SessionExecutionHandle` — `run.readable()` is a WHATWG `ReadableStream<StreamEvent>` for `pipeThrough`/`tee`, and `run.pipeTo(sink, { throttleMs? })` drains the live turn into any `WritableStream` with backpressure. Both use only Web Streams globals, so they run unchanged in the browser. A UI streaming a reply into a rate-limited widget pipes to a sink whose `write()` paces itself; nothing else buffers.
+
 ### One token, two producers
 
 The gateway multiplexes two producers onto a turn's progress token: the execution's own events, and the `ctx.progress(...)` **signals** its tools emit. Both arrive on `run.events()`, and both are members of the `StreamEvent` union — a signal under `type: "progress"`. One `switch`, no shape guards:
