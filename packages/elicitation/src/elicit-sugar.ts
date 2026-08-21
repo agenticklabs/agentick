@@ -8,7 +8,8 @@
  * the same surface regardless of which factory produced their ctx.
  *
  * Coverage parity with the MCP-server sugar:
- *   - Form mode: text, confirm, boolean, number, select, multiSelect.
+ *   - Form mode: text, confirm, boolean, number, select, multiSelect,
+ *     and `form` (whole-object, Standard-Schema-driven).
  *   - URL mode: url, tryUrl.
  *   - Deferred-auth: requireUrls → throws `UrlElicitationRequired`.
  *   - try* variants for every throwing form-mode method.
@@ -325,7 +326,7 @@ export function buildSessionElicit(options: BuildSessionElicitOptions): Elicit {
  * @see docs/proposals/v2/blueprint/69-request-escalation.md
  */
 export function buildElicitSugar(elicit: ElicitFn): Elicit {
-  async function form<T>(
+  async function runForm<T>(
     message: string,
     schema: StandardSchemaV1<unknown, T>,
     timeoutMs?: ElicitTimeoutOption,
@@ -351,27 +352,30 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
     // ─────────── Form mode — throwing variants ───────────
     async text(message, opts) {
       const schema = stringSchema(opts);
-      return unwrapAccept(await form(message, schema, opts?.timeoutMs));
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
     },
     async select(message, choices, opts) {
       const schema = enumSchema(choices, opts);
-      return unwrapAccept(await form(message, schema, opts?.timeoutMs));
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
     },
     async multiSelect(message, choices, opts) {
       const schema = multiEnumSchema(choices, opts);
-      return unwrapAccept(await form(message, schema, opts?.timeoutMs));
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
     },
     async confirm(message, opts) {
       const schema = booleanSchema(opts);
-      return unwrapAccept(await form(message, schema, opts?.timeoutMs));
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
     },
     async boolean(message, opts) {
       const schema = booleanSchema(opts);
-      return unwrapAccept(await form(message, schema, opts?.timeoutMs));
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
     },
     async number(message, opts) {
       const schema = numberSchema(opts);
-      return unwrapAccept(await form(message, schema, opts?.timeoutMs));
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
+    },
+    async form(message, schema, opts) {
+      return unwrapAccept(await runForm(message, schema, opts?.timeoutMs));
     },
 
     // ─────────── URL mode ───────────
@@ -405,22 +409,25 @@ export function buildElicitSugar(elicit: ElicitFn): Elicit {
 
     // ─────────── try* variants — non-throwing ───────────
     async tryText(message, opts) {
-      return asOutcome(await form(message, stringSchema(opts), opts?.timeoutMs));
+      return asOutcome(await runForm(message, stringSchema(opts), opts?.timeoutMs));
     },
     async trySelect(message, choices, opts) {
-      return asOutcome(await form(message, enumSchema(choices, opts), opts?.timeoutMs));
+      return asOutcome(await runForm(message, enumSchema(choices, opts), opts?.timeoutMs));
     },
     async tryMultiSelect(message, choices, opts) {
-      return asOutcome(await form(message, multiEnumSchema(choices, opts), opts?.timeoutMs));
+      return asOutcome(await runForm(message, multiEnumSchema(choices, opts), opts?.timeoutMs));
     },
     async tryConfirm(message, opts) {
-      return asOutcome(await form(message, booleanSchema(opts), opts?.timeoutMs));
+      return asOutcome(await runForm(message, booleanSchema(opts), opts?.timeoutMs));
     },
     async tryNumber(message, opts) {
-      return asOutcome(await form(message, numberSchema(opts), opts?.timeoutMs));
+      return asOutcome(await runForm(message, numberSchema(opts), opts?.timeoutMs));
     },
     async tryBoolean(message, opts) {
-      return asOutcome(await form(message, booleanSchema(opts), opts?.timeoutMs));
+      return asOutcome(await runForm(message, booleanSchema(opts), opts?.timeoutMs));
+    },
+    async tryForm(message, schema, opts) {
+      return asOutcome(await runForm(message, schema, opts?.timeoutMs));
     },
     async tryUrl(spec) {
       const elicitationId = `el-${generateId()}`;

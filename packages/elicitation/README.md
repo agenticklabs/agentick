@@ -50,10 +50,18 @@ const replicas = await elicit.number("How many replicas?", { min: 1, max: 10, in
 const scopes = await elicit.multiSelect("Which scopes?", ["read", "write", "admin"] as const);
 const proceed = await elicit.confirm("Proceed?");
 
+// The whole answer at once — the general shape the single-field methods sugar.
+const owner = await elicit.form(
+  "Who should own this?",
+  z.object({ name: z.string(), email: z.string().email() }),
+);
+
 await elicit.url({ message: "Sign in to GitHub", url: authorizeUrl });
 ```
 
 `select` and `multiSelect` are `const`-generic, so `target` is `"staging" | "prod"` — not `string`.
+
+`form(message, schema)` is the general case the others are single-field shortcuts over: hand it any Standard Schema and its JSON shape becomes the request schema, so a multi-field answer comes back in one round-trip, validated against that schema and typed from it. Reach for it when the answer has several fields, or when you already hold a schema rather than a fixed field type — a model-authored `ask_user`, a plugin asking for a config object. (A live schema carries a `validate()` function, so `form` is in-process only; it cannot cross a forked task's process boundary, where the single-field helpers — whose schema is rebuilt on the far side — are the path.)
 
 Every option a method takes reaches the client as JSON Schema, so a UI can render the field rather than guess at it: `pattern` / `format` / `minLength` / `maxLength` on `text`, `minimum` / `maximum` and `type: "integer"` on `number`, `enum` on `select`, `minItems` / `maxItems` on `multiSelect`, and `default` throughout. `labels` becomes `enumNames`, positionally aligned with `enum` and falling back to the raw option for anything unlabelled. The schema describes the **value** being asked for (`{ type: "string", … }`), which is exactly what the client accepts with — `handle.accept(value)` takes the bare answer, and the same schema re-validates it server-side. The MCP projection wraps that identical property in the single-key flat object its wire demands; the shape vocabulary (`textProp`, `enumProp`, …) is shared between them.
 
@@ -72,7 +80,7 @@ switch (outcome.status) {
 }
 ```
 
-Every throwing form-mode method has one: `tryText`, `trySelect`, `tryMultiSelect`, `tryConfirm`, `tryNumber`, `tryBoolean`, `tryUrl`. `canDoForm()` / `canDoUrl()` probe what the current transport supports.
+Every throwing form-mode method has one: `tryText`, `trySelect`, `tryMultiSelect`, `tryConfirm`, `tryNumber`, `tryBoolean`, `tryForm`, `tryUrl`. `canDoForm()` / `canDoUrl()` probe what the current transport supports.
 
 **Deferred auth.** `requireUrls([...])` throws `UrlElicitationRequired` carrying the URLs a caller must walk before retrying. It is the OAuth pattern as a single statement: the handler detects "I need consent first", packages the URLs, and never returns.
 
@@ -92,7 +100,7 @@ const elicit = buildSessionElicit({ harness }); // harness: ElicitationHarnessPr
 
 ## The raw call — arbitrary schemas, one union
 
-Under the sugar is `elicit(request, opts)`: any Standard Schema, any hints, and a result union with no exceptions in it.
+`form` / `tryForm` already sugar the common arbitrary-schema case (a whole object, accept/decline/cancel). Drop to the raw `elicit(request, opts)` when you also need `hints`, domain `metadata`, `url` mode, a per-call `timeoutMs` / `signal`, or the full `failed` discrimination — any Standard Schema, any hints, and a result union with no exceptions in it.
 
 ```ts
 import { z } from "zod";

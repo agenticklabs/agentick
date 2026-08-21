@@ -15,7 +15,8 @@
 
 import { afterEach, describe, expect, it } from "vitest";
 import { Chunk, Effect, Stream } from "effect";
-import type { Elicit, ProtocolEvent } from "@agentick/spec";
+import { jsonSchema } from "@agentick/spec";
+import type { Elicit, ProtocolEvent, StandardSchemaV1 } from "@agentick/spec";
 import type { LocalEventBus } from "@agentick/runtime";
 
 import { ELICITATION_CHANNEL_FQN } from "../channel.js";
@@ -293,5 +294,66 @@ describe("elicit sugar — accepted values are still validated", () => {
       ["a"],
     );
     expect(result).toEqual({ status: "fulfilled", value: { status: "accept", value: ["a"] } });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// form — the whole-object ask the single-field helpers are shortcuts over
+// ---------------------------------------------------------------------------
+
+interface Person {
+  readonly name: string;
+  readonly age: number;
+}
+
+const PERSON_SHAPE = {
+  type: "object",
+  properties: { name: { type: "string" }, age: { type: "number" } },
+  required: ["name", "age"],
+} as const;
+
+/** A caller-supplied (e.g. model-authored) object schema, validator and all. */
+function personSchema(): StandardSchemaV1<unknown, Person> {
+  return jsonSchema<Person>(PERSON_SHAPE, {
+    vendor: "test:person",
+    validator: (raw) => {
+      const o = raw as Record<string, unknown>;
+      if (typeof o?.name !== "string") return { issues: [{ message: "name must be a string" }] };
+      if (typeof o?.age !== "number") return { issues: [{ message: "age must be a number" }] };
+      return { value: { name: o.name, age: o.age } };
+    },
+  });
+}
+
+describe("elicit sugar — form() carries a whole-object schema", () => {
+  it("sends the object schema verbatim and round-trips the whole value", async () => {
+    const f = await withElicit();
+    const { schema, result } = await ask(f, (e) => e.form("Who are you?", personSchema()), {
+      name: "Ada",
+      age: 36,
+    });
+    expect(schema).toEqual(PERSON_SHAPE);
+    expect(result).toEqual({ status: "fulfilled", value: { name: "Ada", age: 36 } });
+  });
+
+  it("validates the accepted object — a bad field fails the ask, it does not resolve", async () => {
+    const f = await withElicit();
+    const { result } = await ask(f, (e) => e.form("Who?", personSchema()), {
+      name: "Ada",
+      age: "old",
+    });
+    expect(rejectionText(result)).toContain("schema_violation");
+  });
+
+  it("tryForm returns an accept outcome carrying the object", async () => {
+    const f = await withElicit();
+    const { result } = await ask(f, (e) => e.tryForm("Who?", personSchema()), {
+      name: "Grace",
+      age: 40,
+    });
+    expect(result).toEqual({
+      status: "fulfilled",
+      value: { status: "accept", value: { name: "Grace", age: 40 } },
+    });
   });
 });

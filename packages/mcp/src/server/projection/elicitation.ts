@@ -14,15 +14,14 @@
  *
  * Coverage:
  *   - Form-mode (#171d.2.1): text, confirm, boolean, number, select,
- *     multiSelect.
+ *     multiSelect, and `form` (whole-object, Standard-Schema-driven —
+ *     the general shape the single-field helpers wrap).
  *   - URL mode (#171d.2.2): `url(spec)` — single URL consent;
  *     `requireUrls(specs)` — throws `UrlElicitationRequired` (-32042
  *     JSON-RPC) for the OAuth-style deferred-auth retry pattern.
  *   - `try*` variants for every throwing form-mode method + `tryUrl`.
  *
  * Deferred to #171d.2.3:
- *   - Schema-flatness validation, `object<T>(message, schema)` for
- *     Standard-Schema-driven custom shapes.
  *   - Per-call `timeoutMs` enforcement (server-side AbortController
  *     wiring).
  */
@@ -34,9 +33,11 @@ import {
   ElicitationDeclined,
   ElicitationNotSupported,
   UrlElicitationRequired,
+  toJsonSchema,
   type Elicit,
   type ElicitOutcome,
   type ElicitTimeoutOption,
+  type StandardSchemaV1,
   type UrlElicitOutcome,
   type UrlElicitSpec,
   type UrlElicitationSpec,
@@ -219,6 +220,29 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     return { status: result.action };
   }
 
+  // The whole-object form: the model (or caller) hands a Standard Schema; its
+  // JSON shape IS the `requestedSchema`, and the client's whole `content` object
+  // comes back validated by it — no single-key wrapping, no pluck.
+  async function validatedForm<T>(
+    message: string,
+    schema: StandardSchemaV1<unknown, T>,
+    timeoutMs?: ElicitTimeoutOption,
+  ): Promise<FormRoundTripResult & { readonly value?: T }> {
+    ensureFormMode();
+    const requestedSchema = toJsonSchema(schema) as unknown as FlatProperty;
+    const result = await sendFormElicit(options.sdkServer, message, requestedSchema, timeoutMs);
+    if (result.action !== "accept") return result;
+    const verdict = await schema["~standard"].validate(result.content ?? {});
+    if ("issues" in verdict && verdict.issues && verdict.issues.length > 0) {
+      throw new Error(
+        `elicit form: client response failed schema validation: ${verdict.issues
+          .map((i) => i.message)
+          .join("; ")}`,
+      );
+    }
+    return { ...result, value: (verdict as { readonly value: T }).value };
+  }
+
   return {
     // ─────────── Form mode — throwing variants ───────────
     text(message, opts) {
@@ -254,6 +278,17 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     number(message, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleField<number>(message, "value", numberProp(propOpts), timeoutMs);
+    },
+    async form(message, schema, opts) {
+      const result = await validatedForm(message, schema, opts?.timeoutMs);
+      switch (result.action) {
+        case "accept":
+          return result.value!;
+        case "decline":
+          throw new ElicitationDeclined();
+        case "cancel":
+          throw new ElicitationCancelled();
+      }
     },
 
     // ─────────── URL mode ───────────
@@ -315,6 +350,12 @@ export function buildMcpElicit(options: BuildMcpElicitOptions): Elicit {
     tryBoolean(message, opts) {
       const { timeoutMs, ...propOpts } = opts ?? {};
       return singleFieldTry<boolean>(message, "value", booleanProp(propOpts), timeoutMs);
+    },
+    async tryForm(message, schema, opts) {
+      const result = await validatedForm(message, schema, opts?.timeoutMs);
+      return result.action === "accept"
+        ? { status: "accept", value: result.value! }
+        : { status: result.action };
     },
     async tryUrl(spec) {
       ensureUrlMode();

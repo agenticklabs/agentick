@@ -25,6 +25,7 @@
  *     sugar wraps.
  */
 
+import type { StandardSchemaV1 } from "../data/standard-schema.js";
 import type { ElicitationRequest, ElicitationResult } from "./elicitation-harness.js";
 
 // ============================================================================
@@ -181,6 +182,27 @@ export interface Elicit {
     opts?: { readonly default?: boolean; readonly timeoutMs?: ElicitTimeoutOption },
   ): Promise<boolean>;
 
+  /**
+   * Ask for a whole structured answer at once, validated by `schema`.
+   *
+   * The general form the typed helpers ({@link text}, {@link select},
+   * {@link number}, …) are single-field shortcuts over. Reach for this when the
+   * answer has several fields, or when the caller already holds a schema rather
+   * than a fixed field type — a model-authored `ask_user`, a plugin asking for a
+   * config object. Throws on decline/cancel (use {@link tryForm} to handle those
+   * as outcomes).
+   *
+   * A live `StandardSchemaV1` carries a `validate()` function, so this cannot
+   * cross a forked task's process boundary — it is in-process only. The scalar
+   * helpers, whose schema is reconstructed on the far side, are the
+   * cross-process path.
+   */
+  form<T>(
+    message: string,
+    schema: StandardSchemaV1<unknown, T>,
+    opts?: { readonly timeoutMs?: ElicitTimeoutOption },
+  ): Promise<T>;
+
   // ── URL mode — out-of-band consent ─────────────────────────────────
 
   /**
@@ -234,6 +256,12 @@ export interface Elicit {
     message: string,
     opts?: Parameters<Elicit["boolean"]>[1],
   ): Promise<ElicitOutcome<boolean>>;
+  /** {@link form} without the throw: decline/cancel come back as outcomes. */
+  tryForm<T>(
+    message: string,
+    schema: StandardSchemaV1<unknown, T>,
+    opts?: { readonly timeoutMs?: ElicitTimeoutOption },
+  ): Promise<ElicitOutcome<T>>;
   tryUrl(spec: UrlElicitSpec): Promise<UrlElicitOutcome>;
 
   // ── Capability probes ──────────────────────────────────────────────
