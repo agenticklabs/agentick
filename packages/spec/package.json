@@ -1,6 +1,6 @@
 {
   "name": "@agentick/spec",
-  "version": "1.0.0-next.136",
+  "version": "1.0.0-next.137",
   "description": "Canonical contract types and protocol interfaces for Agentick v2. Effect-typed, browser-safe. The firewall between compiler, runtime, executor, and topology wrappers.",
   "keywords": [
     "agent",
