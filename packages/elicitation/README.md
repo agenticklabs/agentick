@@ -61,6 +61,16 @@ await elicit.url({ message: "Sign in to GitHub", url: authorizeUrl });
 
 `select` and `multiSelect` are `const`-generic, so `target` is `"staging" | "prod"` — not `string`.
 
+**Field annotations.** Every form-mode method (and every property of a `form` schema) takes three optional presentation keys, orthogonal to the field's type: `hint` (a short qualifier shown inline with the label), `info` (longer help for a tooltip — a renderer falls back to JSON Schema `description` when it is absent), and `placeholder` (ghost text inside the control). They ride the field's JSON Schema and affect nothing but rendering. Together with the two JSON Schema keywords a caller sets directly — `title` (the label) and `description` (help) — they are the full label/help vocabulary a client draws a field header from.
+
+```ts
+const email = await elicit.text("Sign-up", {
+  hint: "optional",
+  info: "We only use it to send the receipt.",
+  placeholder: "name@example.com",
+});
+```
+
 `form(message, schema)` is the general case the others are single-field shortcuts over: hand it any Standard Schema and its JSON shape becomes the request schema, so a multi-field answer comes back in one round-trip, validated against that schema and typed from it. Reach for it when the answer has several fields, or when you already hold a schema rather than a fixed field type — a model-authored `ask_user`, a plugin asking for a config object. (A live schema carries a `validate()` function, so `form` is in-process only; it cannot cross a forked task's process boundary, where the single-field helpers — whose schema is rebuilt on the far side — are the path.)
 
 Every option a method takes reaches the client as JSON Schema, so a UI can render the field rather than guess at it: `pattern` / `format` / `minLength` / `maxLength` on `text`, `minimum` / `maximum` and `type: "integer"` on `number`, `enum` on `select`, `minItems` / `maxItems` on `multiSelect`, and `default` throughout. `labels` becomes `enumNames`, positionally aligned with `enum` and falling back to the raw option for anything unlabelled. The schema describes the **value** being asked for (`{ type: "string", … }`), which is exactly what the client accepts with — `handle.accept(value)` takes the bare answer, and the same schema re-validates it server-side. The MCP projection wraps that identical property in the single-key flat object its wire demands; the shape vocabulary (`textProp`, `enumProp`, …) is shared between them.

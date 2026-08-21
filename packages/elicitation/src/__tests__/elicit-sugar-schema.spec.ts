@@ -169,6 +169,38 @@ describe("elicit sugar — the wire schema carries the real flat shape", () => {
     expect(schema).toEqual({ type: "boolean", default: false });
     expect(result).toEqual({ status: "fulfilled", value: false });
   });
+
+  it("carries hint / info / placeholder annotations onto the field schema", async () => {
+    const f = await withElicit();
+    const { schema } = await ask(
+      f,
+      (e) =>
+        e.text("Your email?", {
+          hint: "optional",
+          info: "We only use it to reach you.",
+          placeholder: "name@example.com",
+        }),
+      "a@b.co",
+    );
+    expect(schema).toEqual({
+      type: "string",
+      hint: "optional",
+      info: "We only use it to reach you.",
+      placeholder: "name@example.com",
+    });
+  });
+
+  it("annotations ride every field type, on the outer schema", async () => {
+    const f = await withElicit();
+    const { schema } = await ask(
+      f,
+      (e) => e.multiSelect("Regions?", ["us", "eu"] as const, { hint: "pick a few", min: 1 }),
+      ["us"],
+    );
+    // On the ARRAY, never the item enum.
+    expect(schema).toMatchObject({ type: "array", hint: "pick a few" });
+    expect((schema["items"] as Record<string, unknown>)["hint"]).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -120,11 +120,27 @@ export type ElicitTimeoutOption = number | "never";
  * `sdkServer.request` for MCP server; local `ElicitationHarness.elicit`
  * for in-process flows).
  */
+/**
+ * Presentation annotations any field can carry, orthogonal to its type — the
+ * label/help gaps JSON Schema's `title`/`description` leave. A subscriber
+ * renders them beside the control; none affects validation.
+ *
+ *   - `hint` — a short qualifier shown inline with the label ("(optional)").
+ *   - `info` — longer help for a tooltip/info affordance; a renderer falls back
+ *     to JSON Schema `description` when this is absent.
+ *   - `placeholder` — ghost text inside the control before an answer is given.
+ */
+export interface ElicitFieldAnnotations {
+  readonly hint?: string;
+  readonly info?: string;
+  readonly placeholder?: string;
+}
+
 export interface Elicit {
   /** Free-text input. Throws on decline/cancel. */
   text(
     message: string,
-    opts?: {
+    opts?: ElicitFieldAnnotations & {
       readonly default?: string;
       readonly pattern?: string;
       readonly format?: "email" | "uri" | "date" | "date-time";
@@ -138,7 +154,7 @@ export interface Elicit {
   select<const T extends readonly string[]>(
     message: string,
     options: T,
-    opts?: {
+    opts?: ElicitFieldAnnotations & {
       readonly default?: T[number];
       readonly labels?: Partial<Record<T[number], string>>;
       readonly timeoutMs?: ElicitTimeoutOption;
@@ -149,7 +165,7 @@ export interface Elicit {
   multiSelect<const T extends readonly string[]>(
     message: string,
     options: T,
-    opts?: {
+    opts?: ElicitFieldAnnotations & {
       readonly default?: ReadonlyArray<T[number]>;
       readonly min?: number;
       readonly max?: number;
@@ -161,13 +177,16 @@ export interface Elicit {
   /** Yes/no confirmation. */
   confirm(
     message: string,
-    opts?: { readonly default?: boolean; readonly timeoutMs?: ElicitTimeoutOption },
+    opts?: ElicitFieldAnnotations & {
+      readonly default?: boolean;
+      readonly timeoutMs?: ElicitTimeoutOption;
+    },
   ): Promise<boolean>;
 
   /** Numeric input with optional bounds + integer constraint. */
   number(
     message: string,
-    opts?: {
+    opts?: ElicitFieldAnnotations & {
       readonly min?: number;
       readonly max?: number;
       readonly integer?: boolean;
@@ -179,7 +198,10 @@ export interface Elicit {
   /** Boolean toggle (semantically distinct from {@link confirm} in some UIs). */
   boolean(
     message: string,
-    opts?: { readonly default?: boolean; readonly timeoutMs?: ElicitTimeoutOption },
+    opts?: ElicitFieldAnnotations & {
+      readonly default?: boolean;
+      readonly timeoutMs?: ElicitTimeoutOption;
+    },
   ): Promise<boolean>;
 
   /**

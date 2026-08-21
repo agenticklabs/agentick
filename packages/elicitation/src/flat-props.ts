@@ -28,8 +28,18 @@
  * @verifiedBy ./__tests__/elicit-sugar-schema.spec.ts
  */
 
+import type { ElicitFieldAnnotations as FieldAnnotations } from "@agentick/spec";
+
 /** A single JSON Schema fragment describing one form field. */
 export type FlatProperty = Readonly<Record<string, unknown>>;
+
+/** Stamp the {@link FieldAnnotations} onto a built property, if any were given. */
+function annotate(out: Record<string, unknown>, opts?: FieldAnnotations): Record<string, unknown> {
+  if (opts?.hint !== undefined) out["hint"] = opts.hint;
+  if (opts?.info !== undefined) out["info"] = opts.info;
+  if (opts?.placeholder !== undefined) out["placeholder"] = opts.placeholder;
+  return out;
+}
 
 /**
  * Wrap named properties in the flat object schema MCP's
@@ -45,39 +55,43 @@ export function flatObjectSchema(properties: Readonly<Record<string, FlatPropert
   };
 }
 
-export function textProp(opts?: {
-  default?: string;
-  pattern?: string;
-  format?: "email" | "uri" | "date" | "date-time";
-  minLength?: number;
-  maxLength?: number;
-}): FlatProperty {
+export function textProp(
+  opts?: FieldAnnotations & {
+    default?: string;
+    pattern?: string;
+    format?: "email" | "uri" | "date" | "date-time";
+    minLength?: number;
+    maxLength?: number;
+  },
+): FlatProperty {
   const out: Record<string, unknown> = { type: "string" };
   if (opts?.default !== undefined) out["default"] = opts.default;
   if (opts?.pattern !== undefined) out["pattern"] = opts.pattern;
   if (opts?.format !== undefined) out["format"] = opts.format;
   if (opts?.minLength !== undefined) out["minLength"] = opts.minLength;
   if (opts?.maxLength !== undefined) out["maxLength"] = opts.maxLength;
-  return out;
+  return annotate(out, opts);
 }
 
-export function numberProp(opts?: {
-  min?: number;
-  max?: number;
-  integer?: boolean;
-  default?: number;
-}): FlatProperty {
+export function numberProp(
+  opts?: FieldAnnotations & {
+    min?: number;
+    max?: number;
+    integer?: boolean;
+    default?: number;
+  },
+): FlatProperty {
   const out: Record<string, unknown> = { type: opts?.integer ? "integer" : "number" };
   if (opts?.min !== undefined) out["minimum"] = opts.min;
   if (opts?.max !== undefined) out["maximum"] = opts.max;
   if (opts?.default !== undefined) out["default"] = opts.default;
-  return out;
+  return annotate(out, opts);
 }
 
-export function booleanProp(opts?: { default?: boolean }): FlatProperty {
+export function booleanProp(opts?: FieldAnnotations & { default?: boolean }): FlatProperty {
   const out: Record<string, unknown> = { type: "boolean" };
   if (opts?.default !== undefined) out["default"] = opts.default;
-  return out;
+  return annotate(out, opts);
 }
 
 /**
@@ -87,28 +101,30 @@ export function booleanProp(opts?: { default?: boolean }): FlatProperty {
  */
 export function enumProp<T extends readonly string[]>(
   options: T,
-  opts?: { default?: T[number]; labels?: Partial<Record<T[number], string>> },
+  opts?: FieldAnnotations & { default?: T[number]; labels?: Partial<Record<T[number], string>> },
 ): FlatProperty {
   const out: Record<string, unknown> = { type: "string", enum: options };
   if (opts?.default !== undefined) out["default"] = opts.default;
   if (opts?.labels) out["enumNames"] = options.map((o) => opts.labels?.[o as T[number]] ?? o);
-  return out;
+  return annotate(out, opts);
 }
 
 /** Multi-select — an array whose items are the {@link enumProp} choices. */
 export function multiEnumProp<T extends readonly string[]>(
   options: T,
-  opts?: {
+  opts?: FieldAnnotations & {
     default?: ReadonlyArray<T[number]>;
     min?: number;
     max?: number;
     labels?: Partial<Record<T[number], string>>;
   },
 ): FlatProperty {
+  // Annotations belong on the ARRAY field, not its item enum — the items carry
+  // only the choices and their labels.
   const itemSchema = enumProp(options, opts?.labels ? { labels: opts.labels } : undefined);
   const out: Record<string, unknown> = { type: "array", items: itemSchema, uniqueItems: true };
   if (opts?.default !== undefined) out["default"] = opts.default;
   if (opts?.min !== undefined) out["minItems"] = opts.min;
   if (opts?.max !== undefined) out["maxItems"] = opts.max;
-  return out;
+  return annotate(out, opts);
 }
