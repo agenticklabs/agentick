@@ -108,11 +108,11 @@
     "@agentick/runtime": "workspace:*",
     "@agentick/spec": "workspace:*",
     "@agentick/store": "workspace:*",
+    "@agentick/utils": "workspace:*",
     "effect": "^3.22.0"
   },
   "devDependencies": {
     "@agentick/spec-conformance": "workspace:*",
-    "@agentick/utils": "workspace:*",
     "@types/react": "^19.2.5"
   },
   "peerDependencies": {
