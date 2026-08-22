@@ -429,6 +429,46 @@ describe("app.destroySession — the durable scopes", () => {
 
     await app.closeApp();
   });
+
+  it("frees the scopes of a CLOSED session — the terminal record is rebuilt to be destroyed", async () => {
+    // The divergence from resume, pinned: resumeSessionBody refuses terminal
+    // records; destroySessionBody deliberately does not, because
+    // close-then-destroy must not leak the conversation. A refactor that
+    // "unifies" the two rebuild paths by adding the terminal filter here
+    // reintroduces the leak with a green suite — except for this test.
+    const stores = mkStores();
+    const app = await mkApp({ sessionStore: new InMemorySessionStore(), stores });
+    const session = await app.createSession({ sessionId: "hung-up", eager: true });
+    await fillScopes(session, "TERMINAL");
+    await session.close();
+    expect((await residueFor(stores, "hung-up")).timeline.length).toBe(1);
+
+    await app.destroySession("hung-up");
+
+    expect(await residueFor(stores, "hung-up")).toEqual({ timeline: [], knobs: [], state: [] });
+    await app.closeApp();
+  });
+
+  it("a failed drop fails the destroy — no deletion is reported that did not happen", async () => {
+    class FailingDeleteTimelineStore extends MemoryTimelineStore {
+      override delete(): Promise<never> {
+        return Promise.reject(new Error("drop boom"));
+      }
+    }
+    const stores = { ...mkStores(), timeline: new FailingDeleteTimelineStore() };
+    const app = await mkApp({ sessionStore: new InMemorySessionStore(), stores });
+    const session = await app.createSession({ sessionId: "undroppable", eager: true });
+    await fillScopes(session, "STUCK");
+
+    await expect(app.destroySession("undroppable")).rejects.toThrow("drop boom");
+
+    // Record-deleted-LAST failure posture: the session is still findable and
+    // re-destroyable, never an orphan scope with no record pointing at it.
+    expect(app.getSession("undroppable")).toBeDefined();
+    expect(await app.getSessionRecord("undroppable")).toBeDefined();
+    expect((await residueFor(stores, "undroppable")).timeline.length).toBe(1);
+    await app.closeApp();
+  });
 });
 
 // ---------------------------------------------------------------------------
