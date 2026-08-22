@@ -1,6 +1,6 @@
 {
   "name": "@agentick/store",
-  "version": "1.0.0-next.139",
+  "version": "1.0.0-next.140",
   "description": "Generic store substrate for Agentick v2 — the `MemoryCollection<T, Q>` in-memory collection-store generic and the `runStoreConformance` shared conformance skeleton. Parameterize one generic (backend / keyOf / matchQuery / prunePredicate) to get a store-backed harness's default backing; no hand-rolled `Map` per harness. Implements the `CollectionStore<T, Q>` port from `@agentick/spec`. Bundled into the agentick metapackage; not published independently.",
   "keywords": [
     "agentick",
