@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox-docker",
-  "version": "1.0.0-next.140",
+  "version": "1.0.0-next.141",
   "description": "Docker SandboxProvider — one container per sandbox, exec via docker exec (streamed), fs via docker exec, atomic editFile via applyEdits, coarse egress via NetworkMode. Capability-tier: no runtime mounts (ADR 59).",
   "files": [
     "dist"
