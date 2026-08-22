@@ -159,10 +159,11 @@ would a live one.
 
 ## 4. Scope
 
-- **Root sessions only.** `§4` ratifies spawned children as _process-bound_ — a
-  child's build call (component ref, props, runner/model overrides) is not durable,
-  so a crashed sub-agent execution can be marked `interrupted` but not re-driven.
-  Resume targets sessions with a durable recipe.
+- **Root sessions in v1; the graph resumes recursively — see §8.** A sub-agent is a
+  normal session with a `parentSessionId`, so resume is recursive by construction.
+  What `checkpointing.md §4` ratifies as _process-bound_ is a per-_spawn_ property
+  (an arbitrary in-memory `agent` component + non-serializable props + a random
+  child id), not a blanket limit on sub-sessions — §8 scopes it.
 - **Last-partial-tick idempotency is deferred** — resume re-enters at the last
   _committed_ tick boundary (the flush barrier guarantees those are clean); a tool
   call that fired but did not commit may re-fire. Per-tool idempotency key is the
@@ -211,3 +212,51 @@ budget forces `drop` without a re-drive.
 
 Everything else — detection, the loop's execution-id adoption, the timeline fold,
 the ADR-68 reconciliation template — already exists.
+
+## 8. Recursive resume down the sub-agent graph
+
+A sub-agent is a normal session with a `parentSessionId` and a `spawnPath` lineage,
+so resume is recursive — but the **direction is forced by the dependency structure,
+not chosen**.
+
+**Top-down control, anchored at roots.** A child is only reconstructible through its
+parent: the spawn recipe lives in the parent's execution, and an _awaited_ child's
+result has no consumer until the parent re-drives (the await-point is an in-memory
+fiber that died with the process). So the resume driver starts at **roots** (and
+detached tasks, below) — never at an awaited leaf in isolation, which would produce
+a result nobody is waiting for.
+
+**Depth-first completion, self-organized by awaits.** A re-driven parent, on
+re-reaching its spawn, **re-attaches to the child by its stable id** (open-or-
+rehydrate, not a fresh mint); the child's own interrupted execution resumes; and
+because the parent _awaits_ it, the child completes first. Depth-first order falls
+out of the await graph — there is no depth-first scheduler to write.
+
+**Detached children (tasks) resume independently.** A task is not awaited, so no
+parent pulls it — the reconcile resumes it on its own, order-free. Tasks are the
+bottom-up-resumable nodes, and — durable by design, their input already persisted —
+the natural first node to ship.
+
+**No double-drive.** The reconcile marks the _whole_ graph `interrupted`, but the
+driver only _starts_ roots + detached tasks; awaited children are pulled in exactly
+once by their parent's re-attach. The `parentSessionId` + awaited/detached flag is
+what tells the driver which children to skip (the parent brings them) versus resume
+directly.
+
+**The one mechanism to nail: re-spawn = re-attach-by-stable-id**, not a fresh send —
+find the child, adopt its interrupted execution, await its result. `SpawnInput.
+sessionId` already carries a stable id ("Generated if omitted"); deriving it from
+`parentExecutionId + originCallId` makes the re-attach deterministic and the
+re-spawn idempotent.
+
+**Enabling constraints — §4's "process-bound" scoped, not forbidden.** A child is
+resumable when its spawn is _durable_: a **derived stable id**, and either a
+**same-image** agent (`SpawnInput.agent` defaults to the parent's root — free) or a
+**named** agent (a serializable descriptor). An arbitrary in-memory `agent`
+component + non-serializable `initialProps` remain unresumable — that residue is a
+per-spawn property, not a blanket limit on sub-sessions.
+
+**Idempotency compounds with depth.** The last-partial-tick caveat (§4) exists at
+every level; a crash deep in the tree makes each ancestor's re-drive best-effort.
+Stable-id re-attach contains it (re-open, not re-create); per-tool idempotency keys
+matter more the deeper the graph.
