@@ -410,6 +410,39 @@ A `getSession(id)` handle captured before an eviction points at the closed insta
 
 Every eviction — LRU, idle sweep, or `evictSession` — runs `session:snapshot` then `session.close({ reason: "evicted" })`, the same operations an explicit checkpoint and teardown run, not a path around them. So an `onBeforeSessionClose` observer sees evictions (and a guard on it, checking `reason === "evicted"`, is how you pin a session in memory), and the audit trail tells an eviction from a hangup by the record's `reason`, not by which code path ran. A flush that fails aborts the eviction and leaves the session live: an unmount behind an un-flushed tail would lose data.
 
+### A turn a crash interrupted
+
+Eviction is an orderly exit. A process that dies mid-turn is not: it leaves a record still saying `running`, naming a turn that never finished. `onInterruptedExecution` is where you decide what happens to that turn.
+
+```tsx
+const app = await createApp(<Agent />, {
+  model,
+  sessions: { store: pgSessionStore },
+  onInterruptedExecution: ({ executionId, attempt }) => (attempt > 3 ? "drop" : "resume"),
+});
+```
+
+It receives `{ session, executionId, attempt }` — the reconciled record (already `idle`, carrying `interruptedExecutionId`), the id of the turn that died, and how many consecutive times that same turn has been found interrupted — and may be async. It fires **once per detection**, on the resume path only: `app.resumeSession(id)`, including the automatic remount a wire `session/send` performs. A `createSession` with an existing id rehydrates the session but runs no detection, and neither does a destroy-rebuild. `"resume"` re-drives the turn; `"drop"` leaves it on the record as history. Absent, the default is `drop`: the crash is recorded honestly, nothing re-runs.
+
+Detection reads two signals, and only their conjunction is a crash. The record's `running` is the **candidate** — eviction refuses an in-flight session, so nothing but a crash leaves that behind. The timeline's turn boundary is **authoritative**: a boundary present means the turn actually finished and only the record's idle-write was lost, so nothing is marked, the callback never fires, and the turn is never run twice. Detection is `running` **only** — `paused`, `input_required` and `hibernated` are legitimate persisted waits, and a record in one of them does not reach the callback even while it names a live execution.
+
+`attempt` is the crash-loop budget, per execution rather than per session. A resume keeps the crashed execution's own id, so a turn that dies the same way twice arrives at `attempt: 2`, while a different execution resets it to 1; completing the execution clears both it and `interruptedExecutionId`. That is what makes `attempt > 3 ? "drop" : "resume"` a real circuit breaker, and it is only as good as the store under it: an adapter that drops `interruptedExecutionId` or `resumeAttempts` on the round trip resets the budget on every boot.
+
+> [!WARNING]
+> A policy that **throws** rejects `resumeSession` — deliberately, because silently downgrading an adopter bug to `drop` would hide it. The session still opened and is live: the mark and the build ran before the callback, so a retry returns it. What the throw costs is this boot's automatic re-drive, not the session, and the interruption survives on the record for a manual one.
+
+A `"resume"` re-drives the turn through [@agentick/session](../session#re-driving-an-interrupted-execution)'s `resumeExecution` and resolves at **acceptance** — `resumeSession` never blocks on a whole model call. The re-driven turn announces itself through the normal handle, bus and status machinery, and its failure lands where any turn's does.
+
+**Sweeping at boot.** The record store is the queryable half, so recovering what a dead process left behind is a list plus a resume:
+
+```ts
+for (const record of await app.listSessions({ status: "running" })) {
+  await app.resumeSession(record.id); // detection and your policy run inside
+}
+```
+
+How many of those run at once, and which node in a multi-process deployment owns a given crashed session, are deliberately not the framework's call — that ownership decision is what the callback is for.
+
 ### App-wide `signal`
 
 One `AbortSignal` fans into every session. It is `closeApp()` in **abort shape** — a cascading cancel, not a teardown (the substrate survives):
@@ -569,6 +602,7 @@ await app.closeApp(); // closes the cluster too
 | `guards`                    | `CommandGuards`                                        | Declarative per-verb admission verdicts                                                  |
 | `extensions`                | `Extension[]`                                          | The dynamic composition array; routed by `target`                                        |
 | `sessions`                  | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable resume index, live-registry bounds, spawn ceiling                                |
+| `onInterruptedExecution`    | `(i) => "resume" \| "drop"` (async ok)                 | Policy for a turn a crash left mid-flight; absent = `drop`. See above                    |
 | `signal`                    | `AbortSignal`                                          | App-wide cascading cancel                                                                |
 | `cluster`                   | `ClusterFactory`                                       | Substrate fusion across nodes                                                            |
 | `bus` / `inbox` / `journal` | instance \| factory                                    | Substrate overrides                                                                      |
@@ -657,6 +691,8 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - **No double-wrap detection.** Pass the same substrate instance to two `createApp({ cluster })` calls and the local bus gets two subscriptions per cluster event — double delivery, with nothing to warn you.
 - **No mid-flight cluster swap.** Replacing a cluster means closing the app and constructing a new one.
 - **No per-session namespace override.** Namespace configuration is app-wide; `createSession` takes no `timeline` override.
+- **The interruption mark has a best-effort window.** A crash between construction's record write-back and the mark landing loses the evidence, and the turn is never detected as interrupted. The loss is silent-drop-shaped rather than run-twice-shaped, which is the tradeoff taken deliberately.
+- **`resumeAttempts` is not in the store conformance suite.** The two resume slots are documented obligations on an adapter; nothing yet fails an adapter that drops them on the round trip.
 - **`onSessionClose` does not fire on eviction.** Leaving memory is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run. Observe evictions on `onBeforeSessionClose` instead, where the reason is `"evicted"`.
 
 ## Verified by
@@ -667,6 +703,9 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` firing on dispatch, `createSession({ hooks })` composing app-outer, `onAfter*` transforms flowing through, and no-hooks being behavior-preserving.
 - `src/__tests__/session-eviction.spec.tsx` — `maxActive` evicting the least-recently-active session (LRU order proven via a send that refreshes an older one), `idleTimeout` evicting a quiet session on the sweep, an evicted session reopening with its timeline rehydrated, an in-flight execution never being evicted, an evict→resume reading exactly what a fresh app over the same stores reads, no field of the app retaining the evicted session, and `evictSession` as the manual caller of all of it.
 - `src/__tests__/session-residency.spec.tsx` — the states between live and gone: an eviction stamping `hibernated` where a genuine close stamps `closed`, the store's prune sweep passing over a hibernated record and taking the closed one, `resumeSession` rebuilding an evicted session idle and able to run another turn with its identity (principal, metadata) read back off the record while the construction-bound scope ceiling does not survive, a resume from a record written by a previous process adopting rather than blanking it, two concurrent resumes collapsing onto ONE construction, `undefined` for an id never opened / already ended / destroyed, and `closeSession` dropping the registry entry — including after a `session.close()` behind the app's back — so reopening the id yields a live session rather than the corpse.
+- `src/__tests__/interrupted-callback.spec.tsx` — the crash-detection seam: the callback firing exactly once with the marked record when a `running` record is resumed, staying quiet for a clean record, for the non-`running` waits that carry a live execution id, and for `running` with no id at all; a present turn boundary meaning the turn finished, so no mark and no callback; a throwing policy rejecting the resume rather than being swallowed; a `drop` leaving `interruptedExecutionId` on the record as history; and the mark surviving a store whose unmarked writes complete late, so construction's write-back cannot clobber it.
+- `src/__tests__/reconcile-interrupted.spec.ts` — the mark itself: recorded additively over an idle, cleared record, `resumeAttempts` incrementing for a re-crash of the same execution and resetting to 1 for a different one.
+- `src/__tests__/execution-resume.spec.tsx` — the re-drive end to end: a crashed turn completing under its **original** execution id with ticks continuing at 2 rather than restarting at 1, its input not re-appended, its `executionCount` not bumped, and completion clearing both resume slots off the durable record; a `drop` running nothing and leaving honest history; and a manual `resumeExecution` of the now-finished execution refusing.
 - `src/__tests__/app-signal.spec.tsx` — an aborted app signal refusing new work at the edge, fanning into every session so a post-abort `send` resolves `aborted` with 0 ticks, and tearing down an in-flight execution.
 - `src/__tests__/spawn-hardening.spec.tsx` — the depth ceiling failing a too-deep spawn (configured cap and the default chain), `spawnPath` landing on the record, the loop scope, and the handle stream, and a parent close or abort disposing its children with no registry leak.
 - `src/__tests__/destroy-session.spec.tsx` — destroy aborting a grandchild held mid-tool and disposing the whole subtree, cancelling a detached task the same setup under `close()` leaves running, calling `SessionStore.delete` exactly once by id while a bystander's record survives, reaching a closed session's record, and staying silent (not faulting) on a second destroy.

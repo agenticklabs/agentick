@@ -77,6 +77,27 @@ Steps 1–5 are the body of the `loop:tick` command. Its terminal is the tick ba
 
 Model resolution is per tick, in precedence order **tree-declared `<Model>` > send-level > session default**. When the tree's IR carries a model declaration, the loop resolves it through the caller-supplied `resolveModel` and runs that executor and target for the tick; `decl.parameters` overlay the compiled tree's generation config. A tick that resolves no model at all fails the execution with `NoModelForExecutionError` — model-less sessions are legal, model-less _ticks_ are not.
 
+### Starting partway through — `startTickIndex`
+
+A run normally starts its tick counter at 0. `startTickIndex` starts it somewhere else, which is how a turn that a crash interrupted is finished rather than restarted:
+
+```ts
+import type { RunExecutionInput } from "@agentick/spec";
+
+declare const input: RunExecutionInput;
+
+const terminal = await loop.runExecution({
+  ...input,
+  executionId: "exec-1", // the SAME execution, continued
+  startTickIndex: 3, // three ticks are already durable
+  maxTicks: 8,
+});
+```
+
+The next tick stamps `tickIndex: 4`, and `maxTicks` remains the **execution's** total budget rather than a fresh allowance — the run above gets 5 more ticks, not 8. The terminal's `ticks` reports the execution total for the same reason. Absent, it is 0.
+
+Callers do not usually write this: [@agentick/session](../session#re-driving-an-interrupted-execution)'s `resumeExecution` supplies the seed, reading it off the timeline's own execution cursor.
+
 ## The continuation gate
 
 The loop's own disposition is intrinsic and dumb: `stopReason === "tool_use"` with pending tool calls means keep ticking, anything else means stop. It rides the settled `TickResult` as `shouldContinue`.
@@ -408,6 +429,7 @@ Every apply call is a no-op, on both the Promise facade and the `fx` twins. Noth
 - **`ExecutionRunResult.outputs`** is threaded through the type and never populated.
 - **A cost rollup carries one currency.** A tick priced in a second currency counts toward `unpricedTicks` rather than being summed in — it stays fully priced in its own `byModel` bucket. Per-currency buckets are unbuilt; summing across currencies is the same class of lie as summing unpriced ticks as zero.
 - **No `maxCost` bound.** `maxTicks` caps a run by count, not by spend. The stamped per-tick `Cost` is the input such a bound needs, so it is a small addition rather than a subsystem — but it is not here.
+- **`startTickIndex` has no unit coverage here.** The seed is exercised end to end in [@agentick/app](../app) (`execution-resume.spec.tsx`), where a turn whose last durable tick was 1 continues at tick 2 under its original execution id. That a seeded run consumes the _remainder_ of `maxTicks` rather than a fresh allowance follows from the shared counter but is not asserted on its own.
 - **No `ctx.log` in the tick body.** The log facet is threaded into the tool executor and the session but not the loop, so decisions like the structured-output strategy fallback are silent rather than warned.
 
 ## Verified by

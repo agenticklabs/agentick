@@ -60,6 +60,19 @@ await session.timeline.history({ limit: 50 }); // the durable log's LAST 50
 await session.timeline.compact(strategy); // rewrite the projection
 ```
 
+### Coordinates, not entries — `executionCursor`
+
+What durable footprint did one execution leave? Only the log knows, and it answers in coordinates rather than entries:
+
+```ts
+session.timeline.executionCursor("exec:9f21b4");
+// { lastTickIndex: 2, boundary: "succeeded" } · { lastTickIndex: 1 } · undefined
+```
+
+`lastTickIndex` is the highest tick stamped on that execution's persisted entries — 0 when its entries carry no tick provenance, which is a real case (caller input alone). `boundary` is the turn's outcome and is present **only** once the turn ended; absent means in flight, or interrupted and never finished. `undefined` for the whole cursor means the persisted log has no trace of that execution.
+
+It is derived from the harness's own persisted tier, so nothing outside this package scans entries to compute coordinates. It is also O(persisted entries) per call: a boot-time question, not a hot-path API. [@agentick/session](../session#re-driving-an-interrupted-execution) reads it to seed a re-driven turn's ticks, and [@agentick/app](../app#a-turn-a-crash-interrupted) reads `boundary` as the authoritative half of its crash detection.
+
 ### Reading it from a component — `useTimeline`
 
 `useTimeline()` is the same projection snapshot, as a hook. That's enough to build your own `<Timeline>` — map the entries and render whatever you want:
@@ -628,17 +641,18 @@ Definition slots: `store` · `hydrate` · `compact` · `generate` · `writePolic
 
 ### `session.timeline`
 
-| Method                                  | Returns                                                                    |
-| --------------------------------------- | -------------------------------------------------------------------------- |
-| `read()`                                | Projection snapshot `{ entries, version }`                                 |
-| `readPersisted()`                       | The uncompacted durable log                                                |
-| `trailingInput()`                       | Input entries after the last assistant entry                               |
-| `inputEntryCount()`                     | Count of input entries in the persisted log                                |
-| `append(...entries)`                    | Append to log + projection atomically                                      |
-| `compact(strategy?)`                    | Rewrite the projection; no-arg runs the bound default                      |
-| `history({ fromSeq?, toSeq?, limit? })` | Seq-tagged durable page (a bare `limit` is the tail); flushes writes first |
-| `endTurn(input)`                        | Emit the turn-boundary record                                              |
-| `subscribe(fn)`                         | Fires on any projection or log mutation                                    |
+| Method                                  | Returns                                                                     |
+| --------------------------------------- | --------------------------------------------------------------------------- |
+| `read()`                                | Projection snapshot `{ entries, version }`                                  |
+| `readPersisted()`                       | The uncompacted durable log                                                 |
+| `trailingInput()`                       | Input entries after the last assistant entry                                |
+| `inputEntryCount()`                     | Count of input entries in the persisted log                                 |
+| `append(...entries)`                    | Append to log + projection atomically                                       |
+| `compact(strategy?)`                    | Rewrite the projection; no-arg runs the bound default                       |
+| `history({ fromSeq?, toSeq?, limit? })` | Seq-tagged durable page (a bare `limit` is the tail); flushes writes first  |
+| `endTurn(input)`                        | Emit the turn-boundary record                                               |
+| `executionCursor(executionId)`          | One execution's durable coordinates, or `undefined` if the log never saw it |
+| `subscribe(fn)`                         | Fires on any projection or log mutation                                     |
 
 Addressable verbs, enumerable via `timeline:commands`: `timeline:append`, `timeline:compact`, `timeline:replaceProjection`, `timeline:resetProjection`, `timeline:history`. Two are wire-exposable and therefore grantable — `timeline:compact` and `timeline:history`; the rest are reachable only from the trusted domains (in-process, inbox, cluster).
 
@@ -700,6 +714,7 @@ That enumeration is itself a wire door: `await client.session(id).timeline.comma
 ## Verified by
 
 - `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection invariants, inbox addressability, and the checkpoint contract: the harness is `CheckpointCapable`, the store outlives the harness (`persist` → `hydrate` on a fresh instance), `hydrate` replaces the projection with the scope's contents, a store-less harness does both without effect, and a rejected `persist` propagates so the caller cannot unmount behind it.
+- `conformance.ts` also pins `executionCursor`: `undefined` for an execution the log never saw, `lastTickIndex` as the max of **this** execution's ticks with a sibling's never leaking in, `boundary` absent in flight and present after `endTurn`, and an execution whose only entry carries no tick provenance registering at tick 0.
 - `src/__tests__/harness-store.spec.ts` — write-behind and write-through, flush barrier and idempotence, hydration on resume, typed store failures, cursored `history()`, `turnBoundaries: false`, and that compaction never touches the store.
 - `src/__tests__/compact-default.spec.ts` — construction-bound default strategy, call-site override, typed rejection with neither, the bare `timeline:compact` verb, verb enumeration.
 - `src/__tests__/definition.spec.ts` — `defineTimeline` identity + non-enumerable brand, inertness (no store touched, no hydrator run), the inline-bag equivalence, and `defineTimelineStore` under the full store conformance suite plus its loud failure on a `fromSeq` query without `history`.

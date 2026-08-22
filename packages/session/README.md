@@ -744,6 +744,25 @@ harness, where the same state one level down is already called `input_required`.
 
 Records are written off the critical path — one write per status transition, never read back during render. `title`, `description` and `metadata` are yours: the framework stores them and is blind to their semantics. There is no `currentTick` on a record, because a tick is execution-local. `InMemorySessionStore` is the bundled default; any adapter that passes `runSessionStoreConformance` swaps in.
 
+### Re-driving an interrupted execution
+
+A process that died mid-turn leaves a session whose record still says `running`. `resumeExecution(executionId)` finishes that turn — a **stripped send**: it adopts the crashed execution's own id rather than minting one, appends no input (the interrupted attempt's messages are already on the timeline), does not bump `executionCount` (the same turn, not a new one), and seeds the tick counter past the last tick the timeline committed.
+
+```ts
+const handle = await session.resumeExecution("exec:9f21b4"); // resolves at ACCEPTANCE
+await handle.result; // the turn itself, if you want to wait for it
+```
+
+It is the ordinary execution handle, so `.result` and `.events()` behave exactly as they do for a send — but the call resolves as soon as the turn is accepted, never blocking on the model.
+
+Two refusals, both loud rather than guessed: `SessionBusyError` when an execution already holds the session, since a re-drive would collide with it; and a throw when the timeline shows this execution already reached a turn boundary. A finished turn is never run twice, and that guard sits on the manual door as well as the automatic one.
+
+The tick seed comes from `session.timeline.executionCursor(id)` — coordinates, never a store read (see [@agentick/timeline](../timeline#sessiontimeline)). `maxTicks` remains the **execution's** total budget rather than a fresh allowance, so a re-driven run gets the remainder and its terminal `ticks` reports the execution total.
+
+Steering composes over a recovering turn with no new rules, because a resume runs the same execution core under the same reservation: a plain `send()` arriving mid-recovery **steers** the re-driven turn, and one carrying structured output **queues** behind it, exactly as [above](#steering--a-send-during-a-running-execution-joins-it).
+
+`resumeExecution` and `flushRecordWrites()` — the barrier that drains the record's write-behind before a caller writes that record directly — live on the concrete `SessionHarness` rather than the protocol, because [@agentick/app](../app#a-turn-a-crash-interrupted) constructs every session it registers and is the caller for both. Deciding _whether_ to re-drive is the app's `onInterruptedExecution` policy; this is the mechanism it invokes.
+
 ## Building a session yourself
 
 The reference implementation takes its **substrate positionally** — journal, bus, inbox, typically inherited from the app — and everything else in an options bag. The positional shape keeps "substrate flows from the parent by default" visible at every call site.
@@ -835,10 +854,13 @@ const session = factory({
 | `fork(input?)`                 | An unbound same-image child with the parent's state copied     |
 | `reflect(input)`               | One more turn with an appended instruction; `output` → `data`  |
 | `snapshot()` / `restore()`     | Flush every store-backed layer / read it back; both `void`     |
+| `resumeExecution(id)`\*        | Re-drive a crashed turn under its own id; resolves at accept   |
 | `close(opts?)`                 | Teardown; `{ reason: "evicted" }` is a checkpoint, not an end  |
 | `channel(name)`                | Per-channel publish/subscribe plus correlated request/response |
 | `interceptEscalation(handler)` | Mediate a descendant's input request; returns an `Unsubscribe` |
 | `use` / `guard` / `hook`       | Session-scoped interceptors and the command hook surface       |
+
+\* On the concrete `SessionHarness`, not `SessionHarnessProtocol` — as is `flushRecordWrites()`. Both are the app's to call.
 
 ### `@agentick/session/testing`
 
@@ -867,6 +889,7 @@ const session = factory({
 - **Restore is latest-only, and there is no consistency point across harnesses.** Each harness reads the newest state in its own store; independent stores mean a crash can leave one flushed and another not, and point-in-time restore of a whole session is a stated non-goal. A journal-derived store is the opt-in answer for a layer that needs one.
 - **`setSessionMeta` targets live sessions only.** Editing a closed session's record needs a read-modify-write path against the store.
 - **A queued send is invisible to clients.** `onBusy: "queue"` defers a racing send server-side and `"steer"` enqueues onto a per-execution queue, but neither is readable, so a UI cannot show what a send is waiting behind or cancel it. The first consumer to port onto `onBusy` had to drop its queued-messages bar. Closing it wants the `timeline:history` shape — a grant-gated declared read plus `added`/`removed` notifications — and a `dequeue` verb beside it.
+- **A re-driven turn takes the session's default `maxTicks`.** The crashed send's per-call bounds (`maxTicks`, `timeoutMs`, `signal`, per-call model override) are not persisted, so `resumeExecution` runs under the session defaults. The budget is still the execution's total rather than a fresh allowance — but it is the default's total, not the original call's.
 - **`defineSession` has no inbox dispatch.** A callback-built session stores an escalation interceptor for protocol conformance but never consults it, and every inbox message rejects. Escalation and task-wake work on `SessionHarness` only.
 
 ## Verified by
@@ -885,6 +908,7 @@ const session = factory({
 - `src/__tests__/snapshot-command.spec.tsx` — the hook quartet: derived names, before/after firing in order around a void `snapshot()`, the before-hook vetoing the capture, and the restore pair firing around `restore()`.
 - `src/__tests__/timeline-durability.spec.ts` — hydration from an injected store before the first render, the flush barrier at execution end, and a buffered write failure rejecting the send with `TimelineWriteFailed` and landing `status: "failed"`.
 - `src/__tests__/kill-resume.spec.tsx` + `src/testing/kill-resume-acceptance.ts` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings: a completed turn surviving a fresh open on the same backing, the hydrated turn reaching the MODEL rather than only the timeline, `send()` not resolving before the store holds the turn, a delete leaving the next open empty, and `restore()` re-reading the store idempotently.
+- `resumeExecution` is verified where the crash can be staged end to end, in [@agentick/app](../app) (`execution-resume.spec.tsx`): a crashed turn completing under its **original** execution id with ticks continuing rather than restarting, its input not re-appended and its `executionCount` not bumped, and the manual door refusing an execution the timeline shows already finished.
 - `src/__tests__/session-store.spec.ts` — `InMemorySessionStore` under the full store conformance suite: round-trip, upsert, filtering by app / status / parent / recency, enumerate-all, delete, and prune-of-closed.
 - `src/__tests__/escalation.spec.ts` — a task's `ctx.elicit` resolving terminally at its root session with the answer round-tripping and the task state machine flipping, the interactive-versus-detached guard, a real two-session chain forwarding by `parentSessionId`, interception in all three modes (answer without touching the client, deny by throwing, fall through), lineage order in the forwarded envelope, and a forked child's escalation composing the same chain across processes.
 - `src/__tests__/task-wake.spec.ts` — an unobserved completion synthesizing a real journaled execution with task-wake provenance, an in-band result read consuming the wake so nothing is synthesized, and a wake arriving during a running execution steering into it.
