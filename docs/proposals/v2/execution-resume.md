@@ -122,6 +122,13 @@ history, and a retry returns that live session. Net: a throwing policy is an
 BLOCK opening until the policy is fixed would require marking AFTER the decision, or
 disposing the session on throw — a different shape; called out here, not assumed.)
 
+In one line, the composition with keep-on-drop: **a throw is a loud effective-drop —
+history preserved, only this boot's automatic re-drive forfeited, the manual path
+intact.** It satisfies the failure posture (fail loud, leave operable, lose nothing
+irreversible); the alternatives fail it — a `running` record while nothing runs is
+the dishonesty the reconcile exists to fix and re-fires the callback every open (a
+crash-loop of the policy, unbudgeted), and dispose-on-throw bricks the session.
+
 The three hazards of naive auto-resume are _handled here_, not ignored:
 
 - **crash-loop** — the callback drops once `attempt` exceeds its budget; a poisoned

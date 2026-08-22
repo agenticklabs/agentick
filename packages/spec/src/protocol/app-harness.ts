@@ -802,6 +802,14 @@ export interface AppHarnessProtocol<P = unknown> {
    *
    * Concurrency-safe: same-id calls collapse onto one construction, so two sends
    * arriving together against an evicted session remount it once.
+   *
+   * REJECTION SEMANTICS — the honest oddity: if an `onInterruptedExecution` policy
+   * throws (execution-resume.md §3.2), this REJECTS, but the rejection signals the
+   * POLICY failed, not the resume. The session already opened, is live, and a retry
+   * returns it (the mark + build ran before the callback). Side-effect-persisted-
+   * despite-reject is deliberate — the same posture as a rejected persist leaving an
+   * evict retryable. A throwing policy forfeits only this boot's automatic re-drive;
+   * the interruption history survives for a manual resume.
    */
   resumeSession(sessionId: string): Promise<SessionHarnessProtocol<P> | undefined>;
 
