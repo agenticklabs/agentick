@@ -112,6 +112,16 @@ being present — and **only on the resume/create path, never on a destroy-rebui
 There is no per-execution record: `executionId` plus the timeline's
 `(lastCommittedTick, lastSeq)` are the coordinates a re-drive reads (§3.4).
 
+A callback that **throws rejects the resume** — deliberately loud, the same posture
+as a rejected persist aborting an evict; an adopter policy bug surfaces rather than
+being silently swallowed to `drop`. Because the mark (§3.1) runs in the shared
+rebuild BEFORE the callback — and rebuild also registers the session — a throw
+leaves the session **live and `idle`** with the interruption recorded as honest
+history, and a retry returns that live session. Net: a throwing policy is an
+**effective drop, loudly surfaced** — not an un-openable session. (Making a throw
+BLOCK opening until the policy is fixed would require marking AFTER the decision, or
+disposing the session on throw — a different shape; called out here, not assumed.)
+
 The three hazards of naive auto-resume are _handled here_, not ignored:
 
 - **crash-loop** — the callback drops once `attempt` exceeds its budget; a poisoned
