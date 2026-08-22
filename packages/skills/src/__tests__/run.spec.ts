@@ -72,6 +72,8 @@ function stubRunner(opts: { readonly result?: SendResult; readonly reject?: unkn
           ? Promise.reject(opts.reject)
           : Promise.resolve(opts.result ?? mkSendResult()),
       events: async function* () {},
+      readable: () => new ReadableStream(),
+      pipeTo: async () => {},
       abort: async () => {},
     };
     // Prevent unhandled-rejection noise on the reject path (the test awaits it
