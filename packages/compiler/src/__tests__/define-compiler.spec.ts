@@ -42,7 +42,7 @@ const fakeRenderTreeResult = (_mountId: string): RenderTreeResult => ({
 describe("defineCompiler — factory shape", () => {
   it("returns a CompilerFactory (passes marker)", () => {
     const factory = defineCompiler({
-      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }) as MountResult,
+      mount: async () => ({ mountId: "m_1" }) as MountResult,
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });
@@ -54,7 +54,7 @@ describe("defineCompiler — factory shape", () => {
     const factory = defineCompiler({
       mount: async () => {
         events.push("mount");
-        return { mountId: "m_1", restoredFromSnapshot: false };
+        return { mountId: "m_1" };
       },
       unmount: async () => {
         events.push("unmount");
@@ -72,7 +72,6 @@ describe("defineCompiler — factory shape", () => {
     });
     const m = await r.mount(mountInput());
     expect(m.mountId).toBe("m_1");
-    expect(m.restoredFromSnapshot).toBe(false);
     const tree = await r.renderTree(renderInput());
     expect(tree.iterations).toBe(1);
     await r.unmount({ mountId: m.mountId });
@@ -93,7 +92,7 @@ describe("defineCompiler — standalone construction (no deps)", () => {
   // the fallback substrate actually working (run-time).
   it("constructs with NO deps — the local-substrate fallback", async () => {
     const factory = defineCompiler({
-      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+      mount: async () => ({ mountId: "m_1" }),
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });
@@ -104,7 +103,7 @@ describe("defineCompiler — standalone construction (no deps)", () => {
 
   it("the fallback substrate is live — envelopes flow on the private bus", async () => {
     const factory = defineCompiler({
-      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+      mount: async () => ({ mountId: "m_1" }),
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });
@@ -122,9 +121,9 @@ describe("defineCompiler — standalone construction (no deps)", () => {
 });
 
 describe("defineCompiler — defaults + envelopes", () => {
-  it("unconfigured snapshot/renderToString reject; rerender/restore no-op", async () => {
+  it("unconfigured renderToString rejects; rerender no-ops", async () => {
     const factory = defineCompiler({
-      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+      mount: async () => ({ mountId: "m_1" }),
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });
@@ -135,16 +134,14 @@ describe("defineCompiler — defaults + envelopes", () => {
       inbox: new LocalInbox(),
     });
     await expect(r.renderToString({ mountId: "m_1" })).rejects.toBeDefined();
-    await expect(r.snapshot({ mountId: "m_1" })).rejects.toBeDefined();
-    // No-op defaults resolve without error.
+    // No-op default resolves without error.
     await expect(r.rerender({ mountId: "m_1", element: null })).resolves.toBeUndefined();
-    await expect(r.restore({ mountId: "m_1", snapshot: {} as never })).resolves.toBeUndefined();
   });
 
   it("mount + renderTree + unmount emit envelopes on the supplied bus", async () => {
     const bus = new LocalEventBus();
     const factory = defineCompiler({
-      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+      mount: async () => ({ mountId: "m_1" }),
       unmount: async () => {},
       renderTree: async (i) => fakeRenderTreeResult(i.mountId),
     });

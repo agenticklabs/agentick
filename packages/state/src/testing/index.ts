@@ -24,7 +24,7 @@ export interface StubStateHarnessOptions {
 
 /**
  * Build a {@link StateHarness} with its own in-memory substrate.
- * `initial` seeds entries eagerly via `importSnapshot`.
+ * `initial` seeds entries eagerly via `seed`.
  */
 export function stubStateHarness(
   initial: Readonly<Record<string, unknown>> = {},
@@ -38,7 +38,7 @@ export function stubStateHarness(
     options.store !== undefined ? { store: options.store } : {},
   );
   if (Object.keys(initial).length > 0) {
-    harness.importSnapshot(initial);
+    harness.seed(initial);
   }
   return harness;
 }

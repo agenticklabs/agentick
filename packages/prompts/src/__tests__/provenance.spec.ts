@@ -209,7 +209,7 @@ describe("prompts — materialization provenance", () => {
 });
 
 describe("prompts — declared version rides the record", () => {
-  it("survives register → get → list → snapshot → import", async () => {
+  it("survives register → get → list → the record slice", async () => {
     const h = await makeHarness();
     await h.register({
       declaration: { name: "p", description: "d", template: "body", version: "1.4.0" },
@@ -217,16 +217,10 @@ describe("prompts — declared version rides the record", () => {
 
     expect(h.get("p")?.version).toBe("1.4.0");
     expect(h.list()[0]?.version).toBe("1.4.0");
-
-    const snapshot = h.exportSnapshot();
-    expect(snapshot.p?.version).toBe("1.4.0");
-
-    const restored = await makeHarness();
-    restored.importSnapshot(snapshot);
-    expect(restored.get("p")?.version).toBe("1.4.0");
+    // The record is what the store and the wire carry — the version must be on it.
+    expect(h.record("p")?.version).toBe("1.4.0");
 
     await h.close();
-    await restored.close();
   });
 
   it("update patches the version and leaves it alone when the patch is silent", async () => {

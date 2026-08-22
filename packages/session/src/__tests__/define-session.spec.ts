@@ -6,11 +6,9 @@ import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import {
   isSessionHarnessFactory,
-  SPEC_VERSION,
   type ApplyResult,
   type SendInput,
   type SessionExecutionHandle,
-  type SessionSnapshot,
 } from "@agentick/spec";
 
 import { defineSession } from "../define-session.js";
@@ -20,16 +18,10 @@ function fakeHandle(): SessionExecutionHandle {
   return { executionId: "e_x", result: Promise.resolve({} as any) } as SessionExecutionHandle;
 }
 
-function fakeSnapshot(): SessionSnapshot {
-  return {
-    specVersion: SPEC_VERSION,
-    id: "s_test",
-    status: "idle",
-    currentTick: 0,
-    bridges: { timeline: { persisted: [], projection: [] }, knobs: {} },
-    usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-  };
-}
+let flushes = 0;
+const fakeSnapshot = async (): Promise<void> => {
+  flushes += 1;
+};
 
 const okApply = async (): Promise<ApplyResult> => ({ appendedEntryIds: ["id_1"] });
 
@@ -67,8 +59,9 @@ describe("defineSession — factory shape", () => {
     expect(sendResult.executionId).toBe("e_x");
     expect(seenSend?.messages?.[0]?.content).toBe("hi");
 
-    const snap = await session.snapshot();
-    expect(snap.id).toBe("s_test");
+    const before = flushes;
+    await expect(session.snapshot()).resolves.toBeUndefined();
+    expect(flushes).toBe(before + 1);
   });
 });
 
@@ -138,7 +131,7 @@ describe("defineSession — standalone construction (no deps)", () => {
     const session = factory();
     const sendResult = await session.send({ messages: [{ role: "user", content: "hi" }] });
     expect(sendResult.executionId).toBe("e_x");
-    await expect(session.snapshot()).resolves.toMatchObject({ id: "s_test" });
+    await expect(session.snapshot()).resolves.toBeUndefined();
   });
 
   it("two dep-less calls mint distinct sessions on distinct scopes", async () => {

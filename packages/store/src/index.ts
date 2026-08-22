@@ -52,10 +52,8 @@ export { View, type ViewConfig } from "./view.js";
 export {
   LogView,
   type LogViewConfig,
-  type LogViewSnapshot,
   type LogViewReadSnapshot,
   type LogProjectionMeta,
-  type LogViewImportMode,
 } from "./log-view.js";
 export { JournalProjectedStore, type JournalProjectedConfig } from "./journal-projected.js";
 export { IdempotentCollectionStore, idempotentWrite } from "./idempotent-write.js";

@@ -6,9 +6,7 @@
  * implementation. Nine barrels, re-exported flat (import from `@agentick/spec`,
  * not from a subpath):
  *
- *   - `version.ts`         `SPEC_VERSION` — stamped onto every `RenderedTree` /
- *                          `SessionSnapshot` so a restore can refuse a shape it
- *                          doesn't understand.
+ *   - `version.ts`         `SPEC_VERSION` — stamped onto every `RenderedTree`.
  *   - `data/`              the wire shapes that cross a harness boundary —
  *                          content blocks, semantic nodes, context entries,
  *                          declarations, `RenderedTree`, operations + events +

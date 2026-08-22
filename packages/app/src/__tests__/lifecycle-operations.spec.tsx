@@ -353,7 +353,7 @@ describe("session teardown runs as session:command:close", () => {
     expect(terminalOf(events, CLOSE_OP)?.outcome).toBe("vetoed");
     // Still usable — teardown never ran.
     expect(app.getSession("s-held")).toBeDefined();
-    await expect(s.snapshot()).resolves.toBeDefined();
+    await expect(s.snapshot()).resolves.toBeUndefined();
   });
 });
 

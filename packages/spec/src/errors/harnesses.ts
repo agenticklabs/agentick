@@ -243,25 +243,6 @@ export class InvalidElement extends ReconcileError {
 }
 registerAgentickError("InvalidElement", InvalidElement);
 
-export class SnapshotIncompatible extends ReconcileError {
-  readonly _tag = "SnapshotIncompatible" as const;
-  readonly specVersion: string;
-  readonly reason?: string;
-  constructor(args: {
-    readonly specVersion: string;
-    readonly reason?: string;
-    readonly cause?: unknown;
-  }) {
-    super(
-      `snapshot incompatible (specVersion=${args.specVersion})${args.reason ? `: ${args.reason}` : ""}`,
-      { cause: args.cause },
-    );
-    this.specVersion = args.specVersion;
-    if (args.reason !== undefined) this.reason = args.reason;
-  }
-}
-registerAgentickError("SnapshotIncompatible", SnapshotIncompatible);
-
 export class BridgeUnavailable extends ReconcileError {
   readonly _tag = "BridgeUnavailable" as const;
   readonly bridge: string;
@@ -292,7 +273,6 @@ export type ReconcileErrorChannel =
   | MaxIterationsExceeded
   | UnstableTree
   | InvalidElement
-  | SnapshotIncompatible
   | BridgeUnavailable
   | FormatterFailed;
 

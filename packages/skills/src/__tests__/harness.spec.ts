@@ -90,22 +90,15 @@ describe("SkillsHarness — declared version rides the record", () => {
     return h;
   };
 
-  it("survives register → get → list → snapshot → import", async () => {
+  it("survives register → get → list → search", async () => {
     const h = await mk();
     await h.register({ name: "s", description: "d", content: "body", version: "1.4.0" });
 
     expect(h.get("s")?.version).toBe("1.4.0");
     expect(h.list()[0]?.version).toBe("1.4.0");
-
-    const snapshot = h.exportSnapshot();
-    expect(snapshot.s?.version).toBe("1.4.0");
-
-    const restored = await mk();
-    restored.importSnapshot(snapshot);
-    expect(restored.get("s")?.version).toBe("1.4.0");
+    expect(h.search({ query: "s" })[0]?.version).toBe("1.4.0");
 
     await h.close();
-    await restored.close();
   });
 
   it("is absent when undeclared, patchable, and untouched by a silent patch", async () => {

@@ -17,7 +17,7 @@
  * from `register`/`registerTemplate`/`<Resource>` tree-mounts are registry-only
  * and re-mount on restart. So — unlike prompts — NOT every declaration is stored.
  * This store is therefore the durable-source backing, NOT a snapshot: the
- * resources harness stays deliberately NOT `SnapshotCapable`. Durability = the
+ * resources harness holds no snapshot pair. Durability = the
  * store reloads declarations from its `ResourceLoader` source on restart; the
  * transient bindings re-mount from the tree.
  *

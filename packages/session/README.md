@@ -376,41 +376,29 @@ session.hooks.onBeforeSessionSend((input) => {
 
 The wake carries bounded completion metadata — task id, terminal status, duration — and never raw output. Whether a task wakes at all, and with what message, is a task-level policy (`wake` per task, or `tasks.defaultWake` app-wide) in [@agentick/tasks](../tasks); the session owns only the receive-and-send half.
 
-## Snapshot and restore
+## Checkpoint and rehydrate
 
-`snapshot()` captures the whole session; `restore()` puts it back. Neither method knows the name of a single layer: both fold **every** snapshot-capable surface generically, keyed under `bridges`.
-
-```ts
-const snap = await session.snapshot();
-snap.bridges.timeline; // persisted log + projection
-snap.bridges.knobs; // knob values
-snap.bridges.state; // K/V state
-// …plus any installed extension that can snapshot — zero session change
-
-await session.restore({ snapshot: snap });
-```
-
-Add a snapshot-capable extension (sandbox, subscriptions, your own) and it round-trips automatically. One authoritative payload per layer, so nothing can diverge from a denormalized copy.
-
-Both are commands, so the hook quartet falls out for free: `onAfterSessionSnapshot` transforms the captured snapshot on its way out (the redaction seam), `onBeforeSessionSnapshot` can veto the capture, and the restore pair mirrors them.
+`snapshot()` is the **flush barrier** and `restore()` is the **rehydrate**. Neither carries a payload, and neither knows the name of a single layer: both fan out generically over the bridge bag, and each harness deals with its own store.
 
 ```ts
-session.hooks.onAfterSessionSnapshot((snap) => ({ ...snap, metadata: redact(snap.metadata) }));
+await session.snapshot(); // every store-backed harness flushes its own writes
+await session.restore(); // …and reads its own scope back
 ```
 
-**Schema evolution is a callback at the decision point.** A snapshot whose `specVersion` differs from the running version is a migration event. Supply one function and own any version dispatch inside it; supply none and a skew throws `SnapshotVersionMismatch` rather than applying a stale shape.
+A harness opts in by implementing `persist(ctx)` / `hydrate(ctx)` — the timeline flushes its log, knobs and state flush their cells, and an extension you write flushes wherever it keeps its data. No value crosses the seam, so nothing can diverge from a denormalized copy and nothing serializes a whole conversation through memory at a checkpoint.
 
-```tsx
-import { createApp } from "@agentick/app/react";
+A rejected `persist` rejects `snapshot()`. That is deliberate: a failed flush must never be followed by an unmount, or the un-flushed tail becomes the framework's fault.
 
-const app = await createApp(<Agent />, {
-  model,
-  migrateSnapshot: (snap, { from, to }) => upgrade(snap, from, to),
+Both are commands, so the hook quartet falls out for free — `onBeforeSessionSnapshot` can veto (which is how a pin holds a session open against the eviction sweep), and the restore pair mirrors it.
+
+```ts
+session.hooks.onBeforeSessionSnapshot(() => {
+  if (draining) throw new Error("hold");
 });
 ```
 
 > [!NOTE]
-> This is distinct from resume. A durable `TimelineStore` hydrates the conversation at open, and `createSession` with a known id is create-and-resume. `snapshot()`/`restore()` is the on-demand full-session capture and transplant — it moves knobs, state and every extension too, and it is what a fork is built on.
+> Resume is the same path. A durable store hydrates its harness at open, and `createSession` with a known id is create-and-resume; evict → resume, restart → resume and an explicit `restore()` all run this one fan-out. The session's own accounting — usage, per-model breakdown, cost — rides the durable `SessionRecord`, not a payload.
 
 ## Seeing what a tick would send
 
@@ -893,7 +881,7 @@ const session = factory({
 - `src/__tests__/tool-restriction.spec.ts` — only allowlisted tools reach the model, the unrestricted control, the dispatch door unaffected, additivity with `tools`, the terminal tool's exemption, and an empty allowlist resolving strategy as if no tools were mounted.
 - `src/__tests__/model-facade.spec.ts` — `setModel` swapping the default (the next send uses the new executor), `setTarget` swapping only the target, `onBeforeSessionSetModel` vetoing, a `use` transform and a `guard` veto registered once still applying across an executor swap, the adapter overload via the injected builder, `ModelExecutorBuilderMissingError` without one, identical veto input for both overload forms, and per-send override precedence.
 - `src/__tests__/session-hooks.spec.ts` — hook-name derivation agreement, `onBeforeSessionSend` and `onBeforeSessionAppend` firing on their verbs, and `onAfterSessionSend` seeing the handle.
-- `src/__tests__/snapshot-command.spec.tsx` — the hook quartet, after-snapshot redaction, before-snapshot veto, the generic fold picking up a fake snapshot-capable extension and restoring it with zero session change, and the migration seam — applied on a version skew, `SnapshotVersionMismatch` without one.
+- `src/__tests__/snapshot-command.spec.tsx` — the hook quartet: derived names, before/after firing in order around a void `snapshot()`, the before-hook vetoing the capture, and the restore pair firing around `restore()`.
 - `src/__tests__/snapshot-restore.spec.tsx` — the compiler-level bridge fold: data cache, knob and state round-trip, rehydration onto a fresh mount, and survival of a JSON round-trip.
 - `src/__tests__/timeline-durability.spec.ts` — hydration from an injected store before the first render, the flush barrier at execution end, and a buffered write failure rejecting the send with `TimelineWriteFailed` and landing `status: "failed"`.
 - `src/__tests__/kill-resume.spec.ts` + `src/testing/kill-resume-acceptance.tsx` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings, which also proves a `snapshot()` → `restore()` transplant into a fresh storeless session.

@@ -10,11 +10,11 @@
  * Kafka + ksqlDB); LSM/WAL + compaction; git's object-db vs working-tree
  * split. The novel piece is that the projection function is allowed to
  * be non-deterministic (an LLM-driven compaction), with strategy
- * metadata recorded on the snapshot as projection provenance.
+ * metadata recorded as projection provenance.
  *
- *   Log         — `_persisted` — append-only, the durable record of
- *                  every entry ever appended. Survives hibernate/restore
- *                  as the source of truth. Readable via `readPersisted`
+ *   Log         — append-only, the durable record of every entry ever
+ *                  appended. The source of truth, durable in the harness's
+ *                  own store. Readable via `readPersisted`
  *                  for tooling / custom compactors; subscribe to its
  *                  changes via the bus (`surface: "timeline"`,
  *                  `name: "timeline:append"`).
@@ -39,7 +39,6 @@ import type { TimelineWriteFailed } from "../errors/lifecycle.js";
 import type { HarnessFx } from "./middleware.js";
 import type { MessageTimelineEntry, TimelineEntry } from "./session-harness.js";
 import type { Unsubscribe } from "./inbox.js";
-import type { SnapshotCapable } from "./hook-bridges.js";
 
 // ============================================================================
 // Public snapshot shape (what `read()` returns)
@@ -173,7 +172,7 @@ export interface CompactGenerateResult {
  * factories at `@agentick/timeline/strategies` (`fromHandler`,
  * `rollingSummary`, `slidingWindow`, adopter-defined) — NOT `withX`
  * session extensions; a strategy is a portable configured value.
- * The `metadata` field is preserved on the snapshot as PROVENANCE — what
+ * The `metadata` field is preserved as PROVENANCE — what
  * shaped the projection last (read by tooling / a later `compact`).
  */
 /**
@@ -208,72 +207,28 @@ export interface CompactStrategy {
   readonly shouldCompact?: (ctx: CompactDecisionCtx) => boolean;
   /**
    * Stable metadata describing the strategy (model id, sliding-window
-   * size, etc). Recorded on the snapshot as projection provenance.
+   * size, etc). Recorded as projection provenance.
    */
   readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Provenance of the last projection fold — see
+ * {@link TimelineHarnessProtocol.lastCompaction}. `strategyMetadata` is the
+ * {@link CompactStrategy.metadata} the strategy declared, carried verbatim.
+ */
+export interface TimelineProjectionMeta {
+  readonly at: number;
+  readonly source: "persisted" | "projection";
+  readonly entriesBefore: number;
+  readonly entriesAfter: number;
+  readonly strategyMetadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface CompactResult {
   readonly entriesBefore: number;
   readonly entriesAfter: number;
   readonly source: "persisted" | "projection";
-}
-
-// ============================================================================
-// Snapshot (this harness's slice). Step 6 (ADR 27) is BUILT: the session
-// harness's `snapshot()` / `restore()` fold every `SnapshotCapable` bridge
-// generically (feature-detection via `isSnapshotCapable`), landing this slice
-// under `SessionSnapshot.bridges.timeline`. No hardcoded slot names.
-// ============================================================================
-
-export interface TimelineHarnessSnapshot {
-  /**
-   * Append-only log entries in order.
-   *
-   * TODO(adr-93-d1b / data-layer §2.7): this field is the "god-blob" §2.7 wants
-   * gone — the log belongs in the store, not in a snapshot. It survives because
-   * it is currently the ONLY transport for a cross-store TRANSPLANT (a fork or a
-   * cross-node move into a session with a different id AND a different store,
-   * where store+hydrate cannot supply the log). Removing it requires a transplant
-   * mechanism first. See the note on `LogView._persisted`.
-   */
-  readonly persisted: readonly TimelineEntry[];
-  /** The projection at snapshot time (may equal `persisted` if no compaction). */
-  readonly projection: readonly TimelineEntry[];
-  readonly persistedVersion: number;
-  readonly projectionVersion: number;
-  /** Provenance of the last `compact` / `replaceProjection`, if any. */
-  readonly lastCompaction?: {
-    readonly at: number;
-    readonly source: "persisted" | "projection";
-    readonly entriesBefore: number;
-    readonly entriesAfter: number;
-    readonly strategyMetadata?: Readonly<Record<string, unknown>>;
-  };
-}
-
-/**
- * Hydration mode for {@link TimelineHarnessProtocol.importSnapshot}.
- *
- *   - "as-is"            (default) — fastest; trust the snapshot's
- *                        projection and persisted as written. No
- *                        recomputation; subscribers fire once.
- *   - "persisted-only"   — restore the persisted log; discard the
- *                        snapshot's projection; projection initializes
- *                        as a live mirror of persisted (caller can
- *                        re-run `compact` later if desired).
- *
- * **`"rehydrate"` is GONE (ADR 93).** Re-running a compaction strategy to
- * rebuild a projection was `importSnapshot` doing genesis's job. RESUME is
- * `store` + `hydrate` — the durable log is the authority and the definition's
- * genesis seam shapes what the session opens on; projection shaping folds into
- * `hydrate` / `compact`. `importSnapshot` is now purely a TRANSPLANT verb (fork,
- * cross-node move), which is all it was ever needed for.
- */
-export type TimelineImportMode = "as-is" | "persisted-only";
-
-export interface TimelineImportSnapshotOptions {
-  readonly mode?: TimelineImportMode;
 }
 
 // ============================================================================
@@ -322,7 +277,7 @@ export interface TimelineHarnessFx extends HarnessFx {
   ): Effect.Effect<void, TimelineWriteFailed | SubstrateError, never>;
 }
 
-export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarnessSnapshot> {
+export interface TimelineHarnessProtocol {
   /**
    * The Effect-canonical composable surface (ADR 77). Callers already inside a
    * fiber — the loop's tick, the session's applicator — MUST reach through this
@@ -382,6 +337,14 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    */
   readPersisted(): readonly TimelineEntry[];
 
+  /**
+   * Provenance of the divergence the current projection carries — what the last
+   * `compact` / {@link replaceProjection} folded, and the strategy metadata it
+   * declared. `undefined` when the projection mirrors the log
+   * ({@link resetProjection} clears it).
+   */
+  lastCompaction(): TimelineProjectionMeta | undefined;
+
   // ─────────── Async surface (Operations) ───────────
 
   /**
@@ -413,7 +376,7 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    * Run a strategy that produces a new projection. The log is
    * untouched. After completion, the projection equals the strategy's
    * output; subscribers fire; `lastCompaction` metadata records the
-   * strategy's `metadata` for snapshot fidelity.
+   * strategy's `metadata` as provenance.
    *
    * No-arg is the **signal form** (ADR 51): it runs the
    * construction-bound default strategy (`defineTimeline({ compact })`)
@@ -476,20 +439,6 @@ export interface TimelineHarnessProtocol extends SnapshotCapable<TimelineHarness
    * Subscribers fire once with the restored projection.
    */
   resetProjection(): Promise<void>;
-
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): TimelineHarnessSnapshot;
-
-  /**
-   * Restore from a snapshot — the TRANSPLANT verb (fork, cross-node move). See
-   * {@link TimelineImportMode} for the two projection modes. RESUME is NOT this:
-   * resume is `store` + the definition's `hydrate` genesis seam (ADR 93).
-   */
-  importSnapshot(
-    snapshot: TimelineHarnessSnapshot,
-    options?: TimelineImportSnapshotOptions,
-  ): Promise<void>;
 
   // ─────────── Lifecycle ───────────
 

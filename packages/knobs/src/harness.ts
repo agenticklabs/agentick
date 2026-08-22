@@ -26,17 +26,16 @@
  *
  * Checkpoint — `persist()` flushes the value store, `hydrate()` rebuilds the
  * projection from it (checkpointing §3.2). Descriptors are never persisted;
- * components re-declare them on remount. The residual `exportSnapshot()` /
- * `importSnapshot()` pair coexists until the Phase-4 sweep.
+ * components re-declare them on remount.
  *
  * Layer chain (ADR 34 cascade) — the harness optionally resolves over an
  * ordered `[parent, self]` chain: a read-only fallback `parentLayer`
  * shadowed by this (self) layer. Reads (`get` / `has` / `list`) fall
  * through to the parent when self has no entry; self always shadows
  * parent by id. Writes (`set` / `register`) mutate SELF ONLY — the parent
- * is never touched. Critically, `exportSnapshot()` captures the SELF layer
- * ONLY: a session snapshot must not embed inherited (app-scoped) state,
- * which is snapshotted at the parent's own scope. Today the parent is
+ * is never touched. Critically, the checkpoint covers the SELF layer ONLY:
+ * a session must not flush inherited (app-scoped) state, which checkpoints at
+ * the parent's own scope. Today the parent is
  * absent everywhere (the session constructs its knobs with
  * `parentLayer` undefined), so the chain is just `[self]` and behavior is
  * byte-identical to a single layer — the seam merely lets a future app
@@ -259,7 +258,7 @@ export class KnobsHarness
     // Wire the StateDelta (ADR 73) projection onto the view's change stream:
     // each single write emits a semantic ChangeEvent; this projection derives
     // the JSON-Patch op. Decoupled so additional projections attach to the same
-    // stream without touching the mutation logic. (Bulk paths — importSnapshot's
+    // stream without touching the mutation logic. (Bulk paths — hydrate's
     // replace — are change-silent; the harness emits its own snapshot frame.)
     this.view.onChange((change) => this.projectStateDelta(change));
   }
@@ -341,29 +340,16 @@ export class KnobsHarness
     return this.view.onChange((c) => listener(toValueChange(c, (e) => e.value)));
   }
 
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): Readonly<Record<string, KnobPrimitive>> {
-    const out: Record<string, KnobPrimitive> = {};
-    for (const { id, value } of this.view.listSync()) out[id] = value;
-    return out;
-  }
-
-  importSnapshot(values: Readonly<Record<string, KnobPrimitive>>): void {
-    // Wholesale replace via the view: keys absent from `values` are dropped from
-    // BOTH the cache and the store; the snapshot's cells write through. The view
-    // updates the whole cache FIRST then batch-pings the union — so invalidate
-    // `listCache` BEFORE `replace` and a `useSyncExternalStore` consumer reading
-    // during a ping sees the complete post-import list. `replace` is
-    // change-SILENT; the single snapshot frame below IS the wire delta (not N
-    // per-key deltas).
-    //
-    // TODO(store-phase-4): dead once the sweep deletes `SnapshotCapable` — the
-    // session fold already routes this harness through `persist`/`hydrate`.
-    const entries = Object.entries(values).map(([id, value]) => this.cell(id, value));
+  /**
+   * Install caller-supplied values — the construction seed
+   * (`withKnobs({ initial })`, `CreateSessionInput.initialKnobs`). UPSERT, not
+   * replace: a knob the seed does not name keeps whatever `hydrate` loaded, and
+   * each seeded cell writes through so it is durable like any other write.
+   */
+  seed(values: Readonly<Record<string, KnobPrimitive>>): void {
     this.listCache = null;
-    this.view.replace(entries, this.storeCtx());
-    this.publishStateFrame(this.freshStateFrame());
+    const ctx = this.storeCtx();
+    for (const [id, value] of Object.entries(values)) this.view.write(this.cell(id, value), ctx);
   }
 
   // ─────────── Checkpoint (CheckpointCapable) ───────────
@@ -385,9 +371,9 @@ export class KnobsHarness
    * `useSyncExternalStore` consumer reading during the ping sees the hydrated
    * list.
    *
-   * Emits the `knobs-state` snapshot frame, exactly as `importSnapshot` does:
-   * a resumed session's subscribers hold pre-hydrate state and a wholesale
-   * rebuild is one aggregate frame, never N per-key deltas.
+   * Emits the `knobs-state` snapshot frame: a resumed session's subscribers
+   * hold pre-hydrate state and a wholesale rebuild is one aggregate frame,
+   * never N per-key deltas.
    */
   async hydrate(ctx: HydrateCtx): Promise<void> {
     this.listCache = null;
@@ -449,9 +435,16 @@ export class KnobsHarness
     return {
       kind: "snapshot",
       version: this.stateVersion,
-      values: this.exportSnapshot(),
+      values: this.currentValues(),
       descriptors: this.wireDescriptors(),
     };
+  }
+
+  /** Every knob id → its current value, self layer only. */
+  private currentValues(): Readonly<Record<string, KnobPrimitive>> {
+    const out: Record<string, KnobPrimitive> = {};
+    for (const { id, value } of this.view.listSync()) out[id] = value;
+    return out;
   }
 
   /**

@@ -480,14 +480,6 @@ export interface SessionAbortParams extends WireRequestParams {
 
 export type SessionAbortResult = null;
 
-export interface SessionSnapshotParams extends WireRequestParams {
-  readonly sessionId: string;
-}
-
-export interface SessionSnapshotResult {
-  readonly snapshot: unknown;
-}
-
 export interface SessionRebindParams extends WireRequestParams {
   readonly sessionId: string;
   /** Opaque to spec — adopter-typed; ADR 34 will tighten when auth lands. */
@@ -895,7 +887,6 @@ export interface WireMethods {
   "session/list_tools": { params: SessionListToolsParams; result: SessionListToolsResult };
   "session/abort": { params: SessionAbortParams; result: SessionAbortResult };
   "session/model_info": { params: SessionModelInfoParams; result: SessionModelInfoResult };
-  "session/snapshot": { params: SessionSnapshotParams; result: SessionSnapshotResult };
   "session/rebind": { params: SessionRebindParams; result: SessionRebindResult };
   "session/close": { params: SessionCloseParams; result: SessionCloseResult };
   "session/respond_to_elicitation": {

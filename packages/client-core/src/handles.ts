@@ -277,10 +277,6 @@ export function makeSessionHandle(client: InternalClient, sessionId: string): Se
         ...(opts?.cascade !== undefined ? { cascade: opts.cascade } : {}),
       });
     },
-    async snapshot(): Promise<unknown> {
-      const result = await client.request("session/snapshot", { sessionId });
-      return result.snapshot;
-    },
     async dryRun() {
       return client.request("session/dry_run", { sessionId });
     },

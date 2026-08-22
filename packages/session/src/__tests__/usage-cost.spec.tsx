@@ -142,6 +142,7 @@ async function mkSession(
   loopFactory: LoopExecutorFactory,
   store = new InMemorySessionStore(),
   telemetryProvider?: SpyTelemetryProvider,
+  sessionIdOverride?: string,
 ) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
@@ -174,7 +175,7 @@ async function mkSession(
     (loop as unknown as { ready: Promise<unknown> }).ready,
   ]);
 
-  const sessionId = `s-${Math.random()}`;
+  const sessionId = sessionIdOverride ?? `s-${Math.random()}`;
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId,
     agent: React.createElement(Agent),
@@ -440,56 +441,51 @@ describe("usage-cost §7 — execution and turn levels", () => {
 // Durability
 // ---------------------------------------------------------------------------
 
-describe("usage-cost — the accounting survives snapshot → restore", () => {
-  it("byModel + cost round-trip a snapshot into a fresh session", async () => {
-    const { session } = await mkSession(
+describe("usage-cost — the accounting survives evict → resume", () => {
+  it("a resumed session adopts the record's totals and accumulates onto them", async () => {
+    // The blob is gone (checkpointing §5): `usage` / `byModel` / `cost` live on
+    // the durable `SessionRecord`, and `SessionRuntime.hydrate()` adopts them
+    // when a session opens on an id the registry already holds. What proves the
+    // adoption happened is that the SECOND turn's cost SUMS onto the first's —
+    // a session that restarted from zero would report only the second turn.
+    const store = new InMemorySessionStore();
+    const sessionId = `s-resume-${Math.random()}`;
+
+    const first = await mkSession(
       scriptedLoop([
         { usage: usage(100, 10), model: OPUS, cost: priced(900, "opus@1") },
         { usage: usage(20, 2), model: HAIKU, cost: priced(25, "haiku@1") },
       ]),
+      store,
+      undefined,
+      sessionId,
     );
-    await send(session);
-    const snap = await session.snapshot();
-    expect(Object.keys(snap.byModel!).sort()).toEqual([
+    await send(first.session);
+    await first.session.snapshot();
+    const before = (await first.record())!;
+    expect(Object.keys(before.byModel!).sort()).toEqual([
       "anthropic/claude-haiku",
       "anthropic/claude-opus",
     ]);
-    expect(snap.cost).toMatchObject({ kind: "complete", amountMicros: 925 });
+    expect(before.cost).toMatchObject({ kind: "complete", amountMicros: 925 });
+    await first.session.close();
 
-    const { session: restored, record: restoredRecord } = await mkSession(scriptedLoop([]));
-    await restored.restore({ snapshot: snap });
-
-    const after = await restored.snapshot();
-    expect(after.usage).toMatchObject(usage(120, 12));
-    expect(after.byModel).toEqual(snap.byModel);
-    expect(after.cost).toEqual(snap.cost);
-
-    // And it reaches the durable record on the next status transition.
-    await send(restored);
-    expect((await restoredRecord())!.cost).toEqual(snap.cost);
-
-    await session.close();
-    await restored.close();
-  });
-
-  it("restoring an UNPRICED snapshot clears a stale cost rather than preserving it", async () => {
-    const { session: priced1 } = await mkSession(
-      scriptedLoop([{ usage: usage(10, 1), model: OPUS, cost: priced(100, "opus@1") }]),
+    // ── Resume: same id, same store, a fresh harness. ──
+    const second = await mkSession(
+      scriptedLoop([{ usage: usage(1, 1), model: OPUS, cost: priced(75, "opus@1") }]),
+      store,
+      undefined,
+      sessionId,
     );
-    await send(priced1);
+    await send(second.session);
+    const after = (await second.record())!;
 
-    const { session: unpriced } = await mkSession(
-      scriptedLoop([{ usage: usage(10, 1), model: OPUS }]),
-    );
-    await send(unpriced);
-    const unpricedSnap = await unpriced.snapshot();
+    expect(after.usage).toMatchObject(usage(121, 13));
+    expect(after.byModel!["anthropic/claude-opus"]!.usage).toMatchObject(usage(101, 11));
+    expect(after.byModel!["anthropic/claude-haiku"]!.usage).toMatchObject(usage(20, 2));
+    expect(after.cost).toMatchObject({ kind: "complete", amountMicros: 1000 });
 
-    await priced1.restore({ snapshot: unpricedSnap });
-    const after = await priced1.snapshot();
-    expect(after.cost).toMatchObject({ kind: "partial", unpricedTicks: 1, pricedTicks: 0 });
-
-    await priced1.close();
-    await unpriced.close();
+    await second.session.close();
   });
 });
 

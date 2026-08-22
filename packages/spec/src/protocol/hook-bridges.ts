@@ -102,48 +102,6 @@ export interface HookBridges {
 }
 
 // ============================================================================
-// SnapshotCapable — marker interface for harnesses with snapshot support
-// ============================================================================
-
-/**
- * Harnesses whose protocol extends this declare that they round-trip
- * their state through `exportSnapshot()` / `importSnapshot()`. The
- * compiler harness iterates over `HookBridges` slots at snapshot time
- * and feature-tests for this contract; no harness-specific knowledge
- * lives in the compiler.
- *
- * Concrete harness protocols MAY add optional parameters to
- * `importSnapshot` (e.g., a hydration mode) — adding optional
- * parameters to an inherited method is structurally compatible.
- *
- * @see docs/proposals/v2/blueprint/27-modular-built-ins.md
- */
-export interface SnapshotCapable<TSnapshot = unknown> {
-  exportSnapshot(): TSnapshot;
-  importSnapshot(snapshot: TSnapshot): void | Promise<void>;
-}
-
-/**
- * Runtime feature-detection for {@link SnapshotCapable}. The composition
- * root (the session harness's snapshot/restore fold, the compiler
- * harness's mount snapshot) scans a bridge bag and picks up any slot that
- * duck-types to the contract — no hardcoded slot names, per ADR 27. A
- * harness need only expose `exportSnapshot` + `importSnapshot` (declaring
- * `SnapshotCapable<T>` on its protocol is the typed way; a bare duck-type
- * like `InMemoryDataBridge` still works).
- *
- * Sibling to {@link isChannelSnapshotProvider} in `../data/channels.ts`.
- */
-export function isSnapshotCapable(x: unknown): x is SnapshotCapable {
-  return (
-    x !== null &&
-    typeof x === "object" &&
-    typeof (x as { exportSnapshot?: unknown }).exportSnapshot === "function" &&
-    typeof (x as { importSnapshot?: unknown }).importSnapshot === "function"
-  );
-}
-
-// ============================================================================
 // CheckpointCapable — the leaf hook for store-backed harnesses
 // ============================================================================
 
@@ -180,7 +138,6 @@ export interface HydrateCtx {
  * A rejected `persist` aborts the caller's operation (a failed flush must
  * never be followed by an unmount); a rejected `hydrate` fails the resume.
  *
- * Feature-detected exactly as {@link SnapshotCapable}, which it supersedes.
  *
  * @see docs/proposals/v2/checkpointing.md §3.2
  */
@@ -274,7 +231,7 @@ export function isBranchCapable(x: unknown): x is BranchCapable {
  *   - In-memory: a `Map<key, Entry>` where Entry tracks
  *     pending Promise / fulfilled value / rejected error.
  *   - Durable: write-through to a persistent KV; the cache survives
- *     hibernation via `CompilerSnapshot.dataCache`.
+ *     a resume — a TTL'd cache refetches instead.
  *
  * Implementations MUST be deterministic on repeated keys within one
  * mount session — same key → same fetcher → same cached value.

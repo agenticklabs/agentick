@@ -466,19 +466,6 @@ describe("CodeHarness — budgets", () => {
   });
 });
 
-describe("CodeHarness — what it deliberately is not", () => {
-  it("is NOT SnapshotCapable — carries no export/importSnapshot", async () => {
-    // A context holds live provider resources that no snapshot can carry, so
-    // the harness must not advertise a capability it would have to fake on
-    // restore. Programs are journaled; contexts are not.
-    const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
-    const probe = harness as unknown as Record<string, unknown>;
-    expect(probe.exportSnapshot).toBeUndefined();
-    expect(probe.importSnapshot).toBeUndefined();
-    await close();
-  });
-});
-
 describe("defineCode", () => {
   it("is identity plus a non-enumerable brand", () => {
     const runtime = fakeCode();

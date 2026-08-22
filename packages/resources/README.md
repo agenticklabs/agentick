@@ -255,7 +255,7 @@ await resources.reload(); // → { added: ["db://doc"], updated: [] }
 `reload()` upserts every loader's items into store, catalog, and sidecar, and fires `list_changed` once. `read()` also does lookup-on-miss: an unresolved uri asks each loader for that exact key and re-attaches the resolver on a hit.
 
 > [!IMPORTANT]
-> Store-backed is not snapshot-backed. There is no `exportSnapshot` / `importSnapshot` here, on purpose — a resolver is a live function and does not serialize. `hydrate()` mirrors the store's declarations back into the catalog so a restored resource is still _listed_, but `read()` throws `ResourceNotFound` until the loaders re-run and re-attach a resolver, exactly as a restored prompt has no content until it is re-registered.
+> Store-backed does not mean payload-backed. There are no checkpoint hooks here, on purpose — a resolver is a live function and does not serialize. `hydrate()` mirrors the store's declarations back into the catalog so a restored resource is still _listed_, but `read()` throws `ResourceNotFound` until the loaders re-run and re-attach a resolver, exactly as a restored prompt has no content until it is re-registered.
 
 The store is one collection discriminated by `kind`: fixed resources key by `uri`, templates by `uriTemplate`. A durable adapter — Postgres, a filesystem source — implements the same `ResourceStore` port and proves itself against `runResourceStoreConformance`. There is deliberately no URL loader: a JSON source cannot carry a resolver function, and a resource without a resolver can never be read.
 

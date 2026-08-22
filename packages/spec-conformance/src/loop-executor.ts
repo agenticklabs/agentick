@@ -73,7 +73,7 @@ function stubCompiler(tree: RenderedTree): CompilerProtocol {
       ...stubHarnessFx(),
       renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "stub-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree, diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -82,14 +82,6 @@ function stubCompiler(tree: RenderedTree): CompilerProtocol {
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: "2026-05-08",
-      mountId: "stub-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 

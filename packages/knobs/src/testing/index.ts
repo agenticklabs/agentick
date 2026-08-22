@@ -16,7 +16,7 @@ import { KnobsHarness, type KnobsHarnessOptions } from "../harness.js";
 
 /**
  * Build a {@link KnobsHarness} with its own in-memory substrate
- * (journal/bus/inbox). `initial` seeds values eagerly via `importSnapshot`.
+ * (journal/bus/inbox). `initial` seeds values eagerly via `seed`.
  *
  * `opts.store` + `opts.scope` are what a checkpoint test needs: pass one store
  * and one scope to two successive stubs and `persist()` on the first is visible
@@ -35,7 +35,7 @@ export function stubKnobsHarness(
     opts.store !== undefined ? { store: opts.store } : {},
   );
   if (Object.keys(initial).length > 0) {
-    harness.importSnapshot(initial);
+    harness.seed(initial);
   }
   return harness;
 }

@@ -235,22 +235,6 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
     });
   });
 
-  describe("SkillsHarness — snapshot / restore", () => {
-    it("export → import round-trips", async () => {
-      const h1 = await deps.make();
-      await h1.register({ name: "a", description: "A", content: "aa" });
-      await h1.register({ name: "b", description: "B", content: "bb" });
-      const snap = h1.exportSnapshot();
-      await h1.close();
-
-      const h2 = await deps.make();
-      h2.importSnapshot(snap);
-      expect(h2.get("a")?.content).toBe("aa");
-      expect(h2.get("b")?.description).toBe("B");
-      await h2.close();
-    });
-  });
-
   /**
    * `Skill.version` — a DECLARED CONTRACT every implementation must satisfy
    * (#249), not a field that happens to survive.
@@ -258,16 +242,16 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
    * `skills:run` copies this string verbatim into the provenance stamp on every
    * message it composes, so a timeline entry answers "which revision of this
    * skill produced this" on its own. An implementation that drops `version`
-   * anywhere along register → read → enumerate → snapshot breaks that for every
-   * skill it holds, and nothing else fails — the run still works, the messages
-   * still arrive, the provenance is just quietly wrong.
+   * anywhere along register → read → enumerate breaks that for every skill it
+   * holds, and nothing else fails — the run still works, the messages still
+   * arrive, the provenance is just quietly wrong.
    *
    * Absence is equally contractual: the framework never computes a version, so a
    * skill that declared none must read back declaring none. An implementation
    * that defaults it invents history.
    */
   describe("SkillsHarness — declared version is a contract", () => {
-    it("survives register → get → list → snapshot → import, and stays absent when undeclared", async () => {
+    it("survives register → get → list → search, and stays absent when undeclared", async () => {
       const h = await deps.make();
       await h.register({ name: "v", description: "V", content: "body", version: "1.4.0" });
       await h.register({ name: "none", description: "N", content: "body" });
@@ -275,15 +259,9 @@ export function runSkillsHarnessConformance(deps: SkillsHarnessFactoryDeps): voi
       expect(h.get("v")?.version).toBe("1.4.0");
       expect(h.get("none")?.version).toBeUndefined();
       expect(h.list().find((s) => s.name === "v")?.version).toBe("1.4.0");
-
-      const snap = h.exportSnapshot();
+      expect(h.search({ query: "v" }).find((s) => s.name === "v")?.version).toBe("1.4.0");
+      expect(h.search({ query: "none" }).find((s) => s.name === "none")?.version).toBeUndefined();
       await h.close();
-
-      const restored = await deps.make();
-      restored.importSnapshot(snap);
-      expect(restored.get("v")?.version).toBe("1.4.0");
-      expect(restored.get("none")?.version).toBeUndefined();
-      await restored.close();
     });
 
     it("update patches the version, and a patch that omits it leaves it alone", async () => {

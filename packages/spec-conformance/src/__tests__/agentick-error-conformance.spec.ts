@@ -66,7 +66,6 @@ const EXPECTED: ReadonlyArray<readonly [string, () => AgentickError]> = [
   ["MaxIterationsExceeded", () => new Errors.MaxIterationsExceeded({ iterations: 100 })],
   ["UnstableTree", () => new Errors.UnstableTree({ iterations: 100 })],
   ["InvalidElement", () => new Errors.InvalidElement({ reason: "test" })],
-  ["SnapshotIncompatible", () => new Errors.SnapshotIncompatible({ specVersion: "2026" })],
   ["BridgeUnavailable", () => new Errors.BridgeUnavailable({ bridge: "b1", hook: "useX" })],
   ["FormatterFailed", () => new Errors.FormatterFailed({ cause: new Error("test") })],
   ["ProviderRejected", () => new Errors.ProviderRejected({ status: 500 })],

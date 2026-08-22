@@ -43,15 +43,12 @@ import type {
   CompilerFx,
   CompilerInboxMessage,
   CompilerProtocol,
-  CompilerSnapshot,
   RenderContext,
   RenderTreeInput,
   RenderTreeResult,
   RenderToStringInput,
   RenderToStringResult,
   RerenderInput,
-  RestoreInput,
-  SnapshotInput,
   SubstrateError,
   UnmountInput,
 } from "@agentick/spec";
@@ -61,7 +58,6 @@ import {
   NotMounted,
   ReconcileError,
   RenderFailed,
-  SPEC_VERSION,
 } from "@agentick/spec";
 import { BaseHarness, type BaseHarnessOptions } from "@agentick/runtime";
 
@@ -108,7 +104,6 @@ import {
 interface MountState {
   readonly mountId: string;
   element: ReactNode;
-  elementVersion?: string;
   readonly bridges: HookBridges;
   readonly container: CompilerContainer;
   readonly compiler: Compiler;
@@ -282,7 +277,6 @@ export class CompilerHarness
         return this.runOperation(op, (i) =>
           Effect.sync(() => {
             state.element = i.element as ReactNode;
-            if (i.elementVersion !== undefined) state.elementVersion = i.elementVersion;
             this.renderOnce(state);
             this.maybeWarnSuspense(i.element);
           }),
@@ -430,39 +424,6 @@ export class CompilerHarness
     this.mountGen.set(input.mountId, (this.mountGen.get(input.mountId) ?? 0) + 1);
   }
 
-  async snapshot(input: SnapshotInput): Promise<CompilerSnapshot> {
-    const state = this.mountState(input.mountId);
-    // Per ADR 27: bridge state is captured generically by iterating
-    // every slot on `HookBridges` and feature-testing for
-    // `SnapshotCapable`. No harness-specific knowledge in the
-    // compiler. Component-local hook state (raw `useState` /
-    // `useReducer`) is NOT captured by design — see ADR 22 §D1.
-    // Components persisting state across hibernation use
-    // `useSessionState(key, initial)` to land values in the StateHarness.
-    const bridges = captureBridgeSnapshots(state.bridges);
-    const dataCache =
-      state.bridges.data instanceof InMemoryDataBridge ? state.bridges.data.exportSnapshot() : [];
-    return {
-      specVersion: SPEC_VERSION,
-      mountId: state.mountId,
-      ...omitUndefined({ elementVersion: state.elementVersion }),
-      bridges: bridges as CompilerSnapshot["bridges"],
-      dataCache,
-      subscriptions: [],
-    };
-  }
-
-  async restore(input: RestoreInput): Promise<void> {
-    const state = this.mounts.get(input.mountId);
-    if (!state) return;
-    if (input.elementVersion !== undefined) state.elementVersion = input.elementVersion;
-    // Apply bridge state from the snapshot before the next renderTree.
-    if (state.bridges.data instanceof InMemoryDataBridge) {
-      state.bridges.data.importSnapshot(input.snapshot.dataCache);
-    }
-    await applyBridgeSnapshots(state.bridges, input.snapshot.bridges);
-  }
-
   // ──────────────────────── inbox dispatch ────────────────────────
 
   // ADR 51 status — ZERO compiler verbs are declarable commands today;
@@ -543,7 +504,6 @@ export class CompilerHarness
     const state: MountState = {
       mountId: input.mountId,
       element: input.element as ReactNode,
-      ...omitUndefined({ elementVersion: input.elementVersion }),
       bridges: input.bridges,
       container,
       compiler: null as unknown as Compiler,
@@ -580,19 +540,6 @@ export class CompilerHarness
     (state as { root: FiberRoot }).root = compiler.createRoot();
     this.mounts.set(input.mountId, state);
 
-    // Apply snapshot BEFORE the initial render so useData / useKnob /
-    // useSessionState hooks see restored values on first invocation.
-    const restoredFromSnapshot = input.snapshot !== undefined;
-    if (input.snapshot) {
-      if (state.bridges.data instanceof InMemoryDataBridge) {
-        state.bridges.data.importSnapshot(input.snapshot.dataCache);
-      }
-      await applyBridgeSnapshots(state.bridges, input.snapshot.bridges);
-    }
-
-    // First render — populates the host tree and lets sync components
-    // commit. With a restored snapshot, useData hits cached values
-    // immediately (no fetch starts on first render).
     this.renderOnce(state);
     // ADR 54 (a) — flush passive effects so useEffect-registered
     // lifecycle listeners (useOnTickEnd, useContextInfo, …) are LIVE
@@ -608,7 +555,7 @@ export class CompilerHarness
     // IR with no way for us to clean that up. Warn loudly once.
     this.maybeWarnSuspense(input.element);
 
-    return { mountId: input.mountId, restoredFromSnapshot };
+    return { mountId: input.mountId };
   }
 
   /**
@@ -1019,58 +966,6 @@ export class CompilerHarness
     }
     return undefined;
   }
-}
-
-/**
- * Iterate every slot on `bridges` and capture its snapshot if the slot
- * exposes the `SnapshotCapable` contract (`exportSnapshot()`).
- * Generic — no harness-specific knowledge. Per ADR 27, any harness
- * that extends `SnapshotCapable<T>` on its protocol gets its snapshot
- * captured automatically; impls that happen to expose `exportSnapshot`
- * without declaring it on the protocol (like `InMemoryDataBridge`)
- * still work via runtime feature detection.
- *
- * The `data` slot is excluded here because the compiler keeps its
- * snapshot in the top-level `dataCache` field for back-compat — see
- * `CompilerSnapshot` in `@agentick/spec`.
- */
-function captureBridgeSnapshots(bridges: HookBridges): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [name, bridge] of Object.entries(bridges)) {
-    if (name === "data") continue; // captured separately as dataCache
-    if (bridge === null || bridge === undefined) continue;
-    const exportFn = (bridge as { exportSnapshot?: () => unknown }).exportSnapshot;
-    if (typeof exportFn === "function") {
-      out[name] = exportFn.call(bridge);
-    }
-  }
-  return out;
-}
-
-/**
- * Apply per-slot snapshot payloads to the bridges. Iterates entries in
- * the snapshot map; for each bridge that exposes `importSnapshot`,
- * invokes it with the recorded value. Async-aware — `importSnapshot`
- * may return a Promise (e.g., TimelineHarness) and we await all
- * concurrently for restore-before-render ordering.
- */
-async function applyBridgeSnapshots(
-  bridges: HookBridges,
-  snapshotBridges: Readonly<Record<string, unknown>> | undefined,
-): Promise<void> {
-  if (!snapshotBridges) return;
-  const pending: Promise<unknown>[] = [];
-  for (const [name, value] of Object.entries(snapshotBridges)) {
-    if (value === undefined) continue;
-    const bridge = (bridges as unknown as Record<string, unknown>)[name];
-    if (bridge === null || bridge === undefined) continue;
-    const importFn = (bridge as { importSnapshot?: (s: unknown) => unknown }).importSnapshot;
-    if (typeof importFn === "function") {
-      const result = importFn.call(bridge, value);
-      if (result instanceof Promise) pending.push(result);
-    }
-  }
-  if (pending.length > 0) await Promise.all(pending);
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

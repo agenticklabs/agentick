@@ -115,7 +115,7 @@ export interface SessionHookBridges extends HookBridges {
    * a gate's value is a knob value — so this is a runtime transport
    * property on the bridge bundle, NOT a typed `HookBridges` harness
    * slot and NOT snapshot-captured (the controller exposes no
-   * `exportSnapshot`). It rides the existing `BridgeContext` so
+   * `persist`). It rides the existing `BridgeContext` so
    * `useGate` and the programmatic `session.gates` converge on ONE
    * controller (unified registry).
    */
@@ -364,7 +364,7 @@ export function buildSessionBridges(
   // Lifecycle: the harness owns an inbox registration; staple it onto the bundle
   // (a runtime-only, non-typed property — NOT a bridge slot) so the session's
   // close-loop (which closes any bridge value exposing `.close()`) tears it down.
-  // It is not SnapshotCapable, so the snapshot/restore fan-out skips it.
+  // It is not CheckpointCapable, so the checkpoint fan-out skips it.
   (base as unknown as { gatesHarness: GatesHarness }).gatesHarness = gatesHarness;
 
   if (options.extensionBridges && options.extensionBridges.size > 0) {

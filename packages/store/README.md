@@ -194,7 +194,7 @@ The two tiers are the point. **persisted** is append-only ground truth that only
 
 `writePolicy` picks the tradeoff. Under `"behind"`, appends buffer and a single-flight pump drains off the critical path; **the pump never rejects** — a failed batch latches into an error that only `flush()` surfaces, so an un-awaited pump can't become an unhandled rejection. The latched error is left set: a view that has diverged from its store cannot silently recover. Under `"through"`, each append awaits the store inline and rejects with the same wrapped error.
 
-`exportSnapshot()` / `importSnapshot()` round-trip both tiers, both version counters, and the last-compaction provenance. Import takes `mode: "as-is"` (trust the snapshot's projection verbatim) or `"reset-projection"` (restore only the durable log and re-mirror).
+`lastCompaction()` reads back the provenance of the divergence the projection currently carries — what the last fold covered and the strategy metadata it declared. `resetProjection()` clears it along with the divergence.
 
 ## Observing a store you don't exclusively own
 
@@ -284,7 +284,7 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 | `stubStoreCtx(overrides?)`                                                                               | A minimal `StoreCtx` for tests and conformance.                                          |
 | `MemoryCollectionConfig` / `MemoryLogConfig` / `ViewConfig` / `LogViewConfig` / `JournalProjectedConfig` | Construction types.                                                                      |
 | `CollectionChangeEvent<T>`                                                                               | The `onChange` delta, `{ key, value?, prev? }`.                                          |
-| `LogViewSnapshot` / `LogViewReadSnapshot` / `LogProjectionMeta` / `LogViewImportMode`                    | `LogView` data types.                                                                    |
+| `LogViewReadSnapshot` / `LogProjectionMeta`                                                              | `LogView` data types.                                                                    |
 
 ### `MemoryCollection`
 
@@ -329,17 +329,17 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 
 ### `LogView`
 
-| Member                                          | Behavior                                                     |
-| ----------------------------------------------- | ------------------------------------------------------------ |
-| `append(entries, ctx)`                          | Both tiers synchronously, then per `writePolicy`             |
-| `read()` / `readPersisted()`                    | The projection tier / the durable log tier                   |
-| `snapshot()`                                    | `{ entries, version }`, identity-stable until a mutation     |
-| `subscribe(fn)`                                 | Keyless render pings                                         |
-| `replaceProjection(entries, meta?)`             | Compaction target — projection tier only                     |
-| `resetProjection()`                             | Re-mirror the durable log; clears provenance                 |
-| `hydrate(ctx)`                                  | Load the durable log into both tiers (resume)                |
-| `flush()`                                       | Write-behind barrier; throws the wrapped error, left latched |
-| `exportSnapshot()` / `importSnapshot(s, opts?)` | Both tiers, versions, provenance                             |
+| Member                              | Behavior                                                     |
+| ----------------------------------- | ------------------------------------------------------------ |
+| `append(entries, ctx)`              | Both tiers synchronously, then per `writePolicy`             |
+| `read()` / `readPersisted()`        | The projection tier / the durable log tier                   |
+| `snapshot()`                        | `{ entries, version }`, identity-stable until a mutation     |
+| `subscribe(fn)`                     | Keyless render pings                                         |
+| `replaceProjection(entries, meta?)` | Compaction target — projection tier only                     |
+| `resetProjection()`                 | Re-mirror the durable log; clears provenance                 |
+| `hydrate(ctx)`                      | Load the durable log into both tiers (resume)                |
+| `flush()`                           | Write-behind barrier; throws the wrapped error, left latched |
+| `lastCompaction()`                  | Provenance of the current projection divergence              |
 
 ### `@agentick/store/testing`
 

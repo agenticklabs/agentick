@@ -3,7 +3,7 @@
  *
  * `TimelineHarness` is {@link CheckpointCapable}, so `session.snapshot()` fans
  * out `persist` (the flush barrier) and `session.restore()` fans out `hydrate`
- * (the store read) instead of routing the log through `SessionSnapshot.bridges`.
+ * (the store read) — no payload ever carried the log.
  * What these pin:
  *
  *   1. the snapshot carries NO timeline payload — the durable log is the store's;
@@ -103,15 +103,13 @@ async function mkSession(sessionId: string, store: TimelineStore): Promise<Rig> 
 }
 
 describe("SessionHarness — timeline checkpoint fold (checkpointing §3.2)", () => {
-  it("snapshot() flushes the log to the store and carries no timeline payload", async () => {
+  it("snapshot() flushes the log to the store", async () => {
     const store = new MemoryTimelineStore();
     const rig = await mkSession("cp-flush", store);
 
     await rig.session.timeline.append(entry("m1"), entry("m2"));
-    const snap = await rig.session.snapshot();
+    await rig.session.snapshot();
 
-    // The migrated bridge is excluded from the blob — the log is the store's.
-    expect(snap.bridges.timeline).toBeUndefined();
     expect(ids(await store.read("cp-flush:timeline", { sessionId: "cp-flush" }))).toEqual([
       "m1",
       "m2",
@@ -132,9 +130,9 @@ describe("SessionHarness — timeline checkpoint fold (checkpointing §3.2)", ()
     expect(ids(reader.session.timeline.readPersisted())).toEqual(["m1"]);
 
     await writer.session.timeline.append(entry("m2"));
-    const snap = await writer.session.snapshot();
+    await writer.session.snapshot();
 
-    await reader.session.restore({ snapshot: snap });
+    await reader.session.restore();
     expect(ids(reader.session.timeline.readPersisted())).toEqual(["m1", "m2"]);
     expect(ids(reader.session.timeline.read().entries)).toEqual(["m1", "m2"]);
 
@@ -148,11 +146,11 @@ describe("SessionHarness — timeline checkpoint fold (checkpointing §3.2)", ()
     const store = new MemoryTimelineStore();
     const a = await mkSession("cp-evict", store);
     await a.session.timeline.append(entry("m1"), entry("m2"));
-    const snap = await a.session.snapshot();
+    await a.session.snapshot();
     await a.close();
 
     const b = await mkSession("cp-evict", store);
-    await b.session.restore({ snapshot: snap });
+    await b.session.restore();
     expect(ids(b.session.timeline.readPersisted())).toEqual(["m1", "m2"]);
     await b.close();
   });

@@ -51,7 +51,7 @@ function mkStubCompiler(): CompilerProtocol {
       guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "tf-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "tf-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -60,14 +60,6 @@ function mkStubCompiler(): CompilerProtocol {
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "tf-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 

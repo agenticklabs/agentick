@@ -17,10 +17,9 @@
  *                     with zero routing code.
  *
  * Checkpoint — `persist()` flushes write-behind to the store, `hydrate()`
- * rebuilds the projection from it (checkpointing §3.2). The residual
- * `exportSnapshot()` / `importSnapshot()` pair no longer runs on resume: the
- * session fold gives CheckpointCapable precedence. `branch()` copies another
- * session's partition onto this one — the fork transport (checkpointing §5).
+ * rebuilds the projection from it (checkpointing §3.2). `branch()` copies
+ * another session's partition onto this one — the fork transport
+ * (checkpointing §5).
  *
  * Storification (data-layer plan §3.5) — the near-identical twin of knobs.
  * State is store-derived AND store-persisted: a durable {@link StateStore}
@@ -250,29 +249,15 @@ export class StateHarness
     return this.view.onChange((c) => listener(toValueChange(c, (e) => e.value)));
   }
 
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): Readonly<Record<string, unknown>> {
-    const out: Record<string, unknown> = {};
-    for (const { key, value } of this.view.listSync()) out[key] = value;
-    return out;
-  }
-
-  importSnapshot(values: Readonly<Record<string, unknown>>): void {
-    // Wholesale replace via the view: keys absent from `values` are dropped from
-    // BOTH the cache and the store; the snapshot's cells write through. The view
-    // updates the whole cache FIRST then batch-pings the union (drops ∪ upserts),
-    // and is change-SILENT (state has no channel, so no per-key deltas anyway).
-    //
-    // TODO(checkpoint-sweep): superseded by `hydrate()` — the session fold gives
-    // CheckpointCapable precedence, so this no longer runs on resume. It dies
-    // with `SnapshotCapable` in the Phase-4 sweep (checkpointing §5); the one
-    // live caller left is `withState({ initial })`.
-    const entries: StateListEntry[] = Object.entries(values).map(([key, value]) => ({
-      key,
-      value,
-    }));
-    this.view.replace(entries, this.storeCtx());
+  /**
+   * Install caller-supplied entries — the construction seed
+   * (`withState({ initial })`, `CreateSessionInput.initialState`). UPSERT, not
+   * replace: a key the seed does not name keeps whatever `hydrate` loaded, and
+   * each seeded cell writes through so it is durable like any other write.
+   */
+  seed(values: Readonly<Record<string, unknown>>): void {
+    const ctx = this.storeCtx();
+    for (const [key, value] of Object.entries(values)) this.view.write({ key, value }, ctx);
   }
 
   // ─────────── Checkpoint (CheckpointCapable) ───────────
@@ -288,8 +273,8 @@ export class StateHarness
 
   /**
    * Rebuild the sync projection from this harness's partition of the store.
-   * Pings every touched key and emits no typed change — `importSnapshot`'s
-   * notification behavior exactly.
+   * Pings every touched key and emits no typed change — a wholesale rebuild is
+   * not N deltas.
    *
    * The partition key is this harness's own `scopeId`, NOT
    * `ctx.storeCtx.sessionId`, which on this path carries the SESSION harness's
@@ -351,14 +336,14 @@ export class StateHarness
   // TODO(state-deltas): project a `state` snapshot+delta channel like
   // KnobsHarness does (packages/knobs/src/channel.ts, ADR 73) — as a
   // SUBSCRIBER of `this.view.onChange`, exactly as knobs' `projectStateDelta`
-  // now does: `changeKind(change)` → add/replace/remove op, `importSnapshot`
+  // now does: `changeKind(change)` → add/replace/remove op, `hydrate`
   // → a full snapshot frame; consumers apply with `applyJsonPatch`. The view's
   // stream is ENTRY-typed (`{ key, value }`), so a `set(key, undefined)` carries
   // a present entry (add/update classifies correctly) — the far-side wire codec
   // must still encode the unwrapped `undefined` value explicitly (JSON `null` or
-  // a presence flag) so the key is not dropped on apply. A shared "SnapshotCapable
-  // reactive harness projects snapshot+deltas from its change stream" mixin would
-  // DRY knobs + state.
+  // a presence flag) so the key is not dropped on apply. A shared "a harness
+  // projects snapshot+deltas from its change stream" mixin would DRY knobs +
+  // state.
 }
 
 // ============================================================================

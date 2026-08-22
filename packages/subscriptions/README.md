@@ -31,10 +31,9 @@ Four moving parts:
    (re-declaration aborts the prior controller);
    `dispatch(id, event)` fires it; `invoker(id)` resolves the bound invocation
    without the operation envelope; `list()` is what drivers read;
-   `subscribe(fn)` notifies drivers of intent changes. Intents are
-   JSON-serializable and snapshot via `exportSnapshot()`; handlers are not — on
-   restore, intents come back as **pending** (no handler) and get promoted to
-   **live** when the JSX re-declares them with a freshly-bound handler.
+   `subscribe(fn)` notifies drivers of intent changes. An intent lives exactly
+   as long as its declaration: a handler is a live function that no store can
+   hold, so a resumed session re-renders and re-declares, handler and all.
 2. **The harness** (`harness.ts`) — `SubscriptionsHarness`, a `BaseHarness`
    declaring one verb, `subscriptions:dispatch`. `withSubscriptions` injects
    its `runDispatch` into the bridge so **every fire is an operation** —
@@ -196,8 +195,7 @@ the body fails and the terminal records it.
   omitted (the bare bridge) `dispatch` invokes the handler directly, exactly as
   before. Surface: `declare(intent, handler): Unsubscribe` · `list()` ·
   `dispatch(id, event, { metadata? })` · `invoker(id)` ·
-  `subscribe(fn): Unsubscribe` · `exportSnapshot()` · `importSnapshot(intents)`
-  · `harness?`.
+  `subscribe(fn): Unsubscribe` · `harness?`.
 - **`SubscriptionsHarness`** — the `BaseHarness` declaring
   `subscriptions:dispatch`. Constructed by `withSubscriptions` against the
   installer substrate with `{ resolveInvoker }` (the construction-bound
@@ -244,9 +242,9 @@ call `bridge.dispatch(id, …)`.
 is free-form: stamp a tenant id or source protocol on the fire and read it off
 `ctx.metadata` in the handler to route a single intent across tenants.
 
-**Persisted intents.** Feed a previously-persisted intent list through
-`withSubscriptions({ initialize })` (or `importSnapshot`); they land as pending
-and promote to live when the JSX re-declares them.
+**Intents an adopter owns.** `withSubscriptions({ initialize })` runs against
+the bridge at install, so an adopter that keeps its own durable intent list can
+re-`declare` each one with a freshly-bound handler before the first render.
 
 ## Status & roadmap
 

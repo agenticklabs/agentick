@@ -269,39 +269,12 @@ describe("genesis — the ctx.store facet (ADR 91/93)", () => {
   });
 });
 
-describe("genesis — fork / spawn never re-runs it (ADR 93 landmine 1)", () => {
-  it("a child seeded from the parent's IMAGE is restored, not re-hydrated", async () => {
-    let hydratorRuns = 0;
-    const definition = defineSkills({
-      hydrate: async () => {
-        hydratorRuns += 1;
-        return [skill("from-source")];
-      },
-    });
-
-    const parent = await harness(definition);
-    await parent.hydrate();
-    expect(hydratorRuns).toBe(1);
-    await parent.register(skill("added-live"));
-
-    // A fork inherits the parent's image. The child harness is constructed from
-    // the SAME definition — the genesis-vs-restore choice belongs to the layer
-    // that knows lineage, so a fork imports the snapshot and never calls
-    // `hydrate()`.
-    const child = await harness(definition);
-    child.importSnapshot(parent.exportSnapshot());
-
-    expect(hydratorRuns).toBe(1);
-    expect(child.list().map((s) => s.name)).toEqual(["added-live", "from-source"]);
-    await parent.close();
-    await child.close();
-  });
-
-  it("a re-hydrated child would DUPLICATE nothing but would restamp — which is why it must not run", async () => {
+describe("genesis — re-running it overwrites live edits (ADR 93 landmine 1)", () => {
+  it("a second hydrate DUPLICATES nothing but RESTAMPS — which is why the caller owns when it runs", async () => {
     // Genesis is idempotent by KEY (the view is keyed by name), so the harm of a
-    // double genesis is divergence, not duplication: a fork's inherited live
-    // edits would be silently overwritten by the source. Pin that the seed does
-    // overwrite, so the fork law is load-bearing rather than decorative.
+    // double genesis is divergence, not duplication: live edits are silently
+    // overwritten by the source. Pin that the seed does overwrite, so the
+    // session's control over when genesis runs is load-bearing.
     const h = await harness({ hydrate: hydrateFrom([{ ...skill("x"), content: "FROM-SOURCE" }]) });
     await h.hydrate();
     await h.update({ name: "x", content: "EDITED-LIVE" });

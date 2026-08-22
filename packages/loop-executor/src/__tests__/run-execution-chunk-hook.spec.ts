@@ -48,7 +48,7 @@ const stubCompiler = (): CompilerProtocol =>
       guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "chunk-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "chunk-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     unmount: async () => undefined,

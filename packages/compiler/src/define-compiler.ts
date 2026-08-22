@@ -59,14 +59,11 @@ import type {
   CompilerFactoryDeps,
   CompilerFx,
   CompilerProtocol,
-  CompilerSnapshot,
   RenderToStringInput,
   RenderToStringResult,
   RenderTreeInput,
   RenderTreeResult,
   RerenderInput,
-  RestoreInput,
-  SnapshotInput,
   SubstrateError,
   UnmountInput,
 } from "@agentick/spec";
@@ -85,8 +82,6 @@ export interface DefineCompilerInput {
   // ── Optional: secondary surfaces ─────────────────────────────────────
   readonly rerender?: (input: RerenderInput) => Promise<void>;
   readonly renderToString?: (input: RenderToStringInput) => Promise<RenderToStringResult>;
-  readonly snapshot?: (input: SnapshotInput) => Promise<CompilerSnapshot>;
-  readonly restore?: (input: RestoreInput) => Promise<void>;
 }
 
 export function defineCompiler(spec: DefineCompilerInput): CompilerFactory {
@@ -205,18 +200,6 @@ class CallbackCompiler extends BaseHarness<"compiler"> implements CompilerProtoc
     return runHarnessProtocol(
       this.runOperation(op, (i) => Effect.promise(() => this.spec.unmount(i))),
     );
-  }
-
-  snapshot(input: SnapshotInput): Promise<CompilerSnapshot> {
-    if (!this.spec.snapshot) {
-      return Promise.reject(new Error("defineCompiler: snapshot() not configured"));
-    }
-    return this.spec.snapshot(input);
-  }
-
-  restore(input: RestoreInput): Promise<void> {
-    if (!this.spec.restore) return Promise.resolve();
-    return this.spec.restore(input);
   }
 
   // ──────── inbox dispatch (deferred) ────────

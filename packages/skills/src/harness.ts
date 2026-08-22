@@ -3,7 +3,6 @@
  *
  * Per ADR 32, this is a Shape 1 harness extension:
  *   - Audit envelopes for every register / update / remove
- *   - Snapshot/restore via `SnapshotCapable` feature detection
  *   - Inbox-addressable for cross-actor mutations (cluster peers,
  *     admin dashboards, sibling harnesses) — the mutation verbs are
  *     declared commands (ADR 51): `skills:register` / `skills:update`
@@ -196,8 +195,8 @@ export class SkillsHarness
    * §3.5 P5) — ONE primitive that collapses the two fields this used to
    * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
    * `KeyedNotifier` for render pings). `get` / `has` / `list` / `search` read it
-   * during render (sync, never async-through-the-store); `exportSnapshot`
-   * materializes it synchronously; `applyRegister` / `applyUpdate` / `applyRemove`
+   * during render (sync, never async-through-the-store); `applyRegister` /
+   * `applyUpdate` / `applyRemove`
    * write through it (sync cache first, durable store off the critical path via
    * the `query`/`mutate` seam) and each single write pings the key. Skills are
    * whole serializable records (the cache value IS the stored `Skill`), so the
@@ -654,34 +653,11 @@ export class SkillsHarness
     return this.view.subscribeAll(listener);
   }
 
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): Readonly<Record<string, Skill>> {
-    // Reads the sync view cache — MUST stay synchronous: the generic
-    // `captureBridgeSnapshots` invokes this un-awaited (SnapshotCapable). Skills
-    // are whole records (no augmentation to strip), so the cell IS the snapshot.
-    const out: Record<string, Skill> = {};
-    for (const skill of this.view.listSync()) out[skill.name] = skill;
-    return out;
-  }
-
-  importSnapshot(snapshot: Readonly<Record<string, Skill>>): void {
-    // Wholesale replace via the view: keys absent from the snapshot are dropped
-    // from BOTH the cache and the store; each snapshot cell writes through. The
-    // view mutates the whole cache FIRST then batch-pings the union (drops ∪
-    // upserts), so invalidate `listCache` BEFORE `replace` and a subscriber
-    // reading during a ping sees the complete post-import list. `replace` is
-    // change-SILENT (skills has no per-key change channel). NOTE: the old
-    // `notifier.notifyAll()` fired the wildcard once; `replace` pings each
-    // touched key, which fires the keyed bucket AND the wildcard per key — a
-    // superset (more precise), never fewer.
-    //
-    // TODO(store-phase-4): `importSnapshot` is still the snapshot-based resume
-    // path for a session restored from an IMAGE. Genesis (`hydrate()`) is the
-    // store-authority path; the Phase-4 manifest sweep retires this one.
-    this.listCache = null;
-    this.view.replace(Object.values(snapshot), this.storeCtx());
-  }
+  // TODO(phase-5-storify): an IMPERATIVE `skills.register()` is durable only
+  // when the definition configures a hydrator (`hydrate: hydrateFromStore()`) —
+  // without one, a resumed session opens on whatever the tree re-declares and
+  // the imperative registration is gone. Phase 5 storifies the definition
+  // libraries so the store read is the default, not a policy opt-in.
 
   // ─────────── Genesis (ADR 93) ───────────
 

@@ -129,7 +129,7 @@ function mkStubCompiler(modelRefs: readonly (string | undefined)[] = []): Compil
       guard: () => () => {},
       renderTree: () => Effect.sync(() => ({ tree: treeFor(), diagnostics: [], iterations: 1 })),
     },
-    mount: async () => ({ mountId: "cost-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "cost-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: treeFor(), diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -138,14 +138,6 @@ function mkStubCompiler(modelRefs: readonly (string | undefined)[] = []): Compil
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "cost-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 

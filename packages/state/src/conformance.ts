@@ -146,28 +146,28 @@ export function runStateHarnessConformance(deps: StateHarnessFactoryDeps): void 
     });
   });
 
-  describe("StateHarness — snapshot/restore", () => {
-    it("exportSnapshot returns current entries", async () => {
-      const h = await deps.make();
-      await h.set({ key: "a", value: 1 });
-      await h.set({ key: "b", value: "two" });
-      expect(h.exportSnapshot()).toMatchObject({ a: 1, b: "two" });
-      await h.close();
-    });
-
-    it("importSnapshot replaces entries and fires subscribers for changed keys", async () => {
+  describe("StateHarness — construction seed", () => {
+    it("seed upserts entries and fires subscribers for the keys it touched", async () => {
       const h = await deps.make();
       await h.set({ key: "a", value: 1 });
       let aChanges = 0;
       let cChanges = 0;
       h.subscribe("a", () => aChanges++);
       h.subscribe("c", () => cChanges++);
-      h.importSnapshot({ a: 1, b: 2, c: 3 });
-      // `a` is in both old + new; `c` is new — both notified.
+      h.seed({ a: 9, c: 3 });
       expect(aChanges).toBeGreaterThan(0);
       expect(cChanges).toBe(1);
-      expect(h.get("a")).toBe(1);
+      expect(h.get("a")).toBe(9);
       expect(h.get("c")).toBe(3);
+      await h.close();
+    });
+
+    it("seed UPSERTS — a key it does not name keeps its value", async () => {
+      const h = await deps.make();
+      await h.set({ key: "kept", value: "yes" });
+      h.seed({ added: 1 });
+      expect(h.get("kept")).toBe("yes");
+      expect(h.get("added")).toBe(1);
       await h.close();
     });
   });
@@ -195,17 +195,23 @@ export function runStateHarnessConformance(deps: StateHarnessFactoryDeps): void 
       await second.close();
     });
 
-    it("everything importSnapshot restored round-trips through the store instead", async () => {
+    it("a seeded cell is durable like any other write", async () => {
       const store = createStateStore();
       const first = await makeOverStore(store, "cp-parity");
-      first.importSnapshot({ a: 1, b: "two", c: { nested: true } });
+      first.seed({ a: 1, b: "two", c: { nested: true } });
       await first.persist(ctx("cp-parity"));
       await first.close();
 
       const second = await makeOverStore(store, "cp-parity");
       await second.hydrate(ctx("cp-parity"));
 
-      expect(second.exportSnapshot()).toEqual({ a: 1, b: "two", c: { nested: true } });
+      expect(second.list()).toEqual(
+        expect.arrayContaining([
+          { key: "a", value: 1 },
+          { key: "b", value: "two" },
+          { key: "c", value: { nested: true } },
+        ]),
+      );
       await second.close();
     });
 

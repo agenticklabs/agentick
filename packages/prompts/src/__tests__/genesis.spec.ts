@@ -260,39 +260,6 @@ describe("genesis — the ctx.store facet (ADR 91/93)", () => {
   });
 });
 
-describe("genesis — fork / spawn never re-runs it (ADR 93 landmine 1)", () => {
-  it("a child seeded from the parent's IMAGE is restored, not re-hydrated", async () => {
-    let hydratorRuns = 0;
-    const definition = definePrompts({
-      hydrate: async () => {
-        hydratorRuns += 1;
-        return [prompt("from-source")];
-      },
-    });
-
-    const parent = await harness(definition);
-    await parent.hydrate();
-    expect(hydratorRuns).toBe(1);
-    await parent.register(prompt("added-live"));
-
-    // A fork inherits the parent's image: the child imports the snapshot and never
-    // calls `hydrate()`. The genesis-vs-restore choice belongs to the layer that
-    // knows lineage.
-    const child = await harness(definition);
-    child.importSnapshot(parent.exportSnapshot());
-
-    expect(hydratorRuns).toBe(1);
-    expect(
-      child
-        .list()
-        .map((d) => d.name)
-        .sort(),
-    ).toEqual(["added-live", "from-source"]);
-    await parent.close();
-    await child.close();
-  });
-});
-
 describe("definition hooks:/guards: — drop-layer keys reach the discriminated ops", () => {
   it("hooks: { onBeforeRegister } fires on prompts:register", async () => {
     const seen: string[] = [];

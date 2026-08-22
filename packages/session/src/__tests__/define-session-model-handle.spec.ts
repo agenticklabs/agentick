@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import { SPEC_VERSION, type ApplyResult, type SessionExecutionHandle } from "@agentick/spec";
+import type { ApplyResult, SessionExecutionHandle } from "@agentick/spec";
 import type { RegisteredModel } from "@agentick/spec";
 
 import { defineSession } from "../define-session.js";
@@ -39,14 +39,6 @@ const okApply = async (): Promise<ApplyResult> => ({ appendedEntryIds: ["id_1"] 
 function modellessSession(scopeId: string) {
   const factory = defineSession({
     send: async () => fakeHandle(),
-    snapshot: () => ({
-      specVersion: SPEC_VERSION,
-      id: scopeId,
-      status: "idle" as const,
-      currentTick: 0,
-      bridges: { timeline: { persisted: [], projection: [] }, knobs: {} },
-      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-    }),
     applyExecutorResult: okApply,
     applyToolResults: okApply,
     appendEntry: okApply,

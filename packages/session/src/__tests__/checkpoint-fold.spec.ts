@@ -1,8 +1,8 @@
 /**
- * Phase 1 of the checkpointing model (docs/proposals/v2/checkpointing.md §3.2):
- * `session:snapshot` fans out `CheckpointCapable.persist` before composing the
- * legacy blob, `session:restore` fans out `hydrate`, and `SnapshotCapable`-only
- * bridges keep their blob round-trip while the two contracts coexist.
+ * The checkpointing model (docs/proposals/v2/checkpointing.md §3.2):
+ * `session:snapshot` fans `CheckpointCapable.persist` out over the bridge bag
+ * and `session:restore` fans `hydrate` out over it. No value crosses the seam
+ * in either direction.
  *
  * GENESIS runs the same `hydrate` fan-out at construction (checkpointing §4 —
  * build-then-hydrate IS resume), so a fresh session has already hydrated once
@@ -17,13 +17,7 @@ import { ElicitationHarness } from "@agentick/elicitation";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
-import type {
-  CheckpointCapable,
-  ExecutionTarget,
-  HydrateCtx,
-  PersistCtx,
-  SnapshotCapable,
-} from "@agentick/spec";
+import type { CheckpointCapable, ExecutionTarget, HydrateCtx, PersistCtx } from "@agentick/spec";
 
 import { SessionHarness } from "../harness.js";
 
@@ -58,28 +52,6 @@ class FakeCheckpointBridge implements CheckpointCapable {
     if (this.hydrateError) throw this.hydrateError;
     this.hydrated.push(ctx);
     this.log.push(`hydrate:${this.label}`);
-  }
-}
-
-/** A migrated harness that still duck-types the legacy contract. */
-class FakeMigratedBridge extends FakeCheckpointBridge implements SnapshotCapable<{ v: number }> {
-  imports = 0;
-  exportSnapshot(): { v: number } {
-    return { v: 1 };
-  }
-  importSnapshot(_snapshot: { v: number }): void {
-    this.imports += 1;
-  }
-}
-
-/** The unmigrated shape — blob in, blob out. */
-class FakeCounterBridge implements SnapshotCapable<{ count: number }> {
-  count = 0;
-  exportSnapshot(): { count: number } {
-    return { count: this.count };
-  }
-  importSnapshot(snapshot: { count: number }): void {
-    this.count = snapshot.count;
   }
 }
 
@@ -121,7 +93,7 @@ async function mkSession(id: string, ext?: ReadonlyMap<string, unknown>) {
   return { session, tools };
 }
 
-describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", () => {
+describe("SessionHarness — CheckpointCapable fold", () => {
   it("snapshot() awaits persist on every CheckpointCapable bridge, in bag order", async () => {
     const log: string[] = [];
     const first = new FakeCheckpointBridge("first", log);
@@ -145,64 +117,6 @@ describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", ()
     await tools.close();
   });
 
-  it("a CheckpointCapable bridge is excluded from the legacy bridges blob even when it exports a snapshot", async () => {
-    const migrated = new FakeMigratedBridge("migrated");
-    const { session, tools } = await mkSession(
-      "cp-exclude",
-      new Map<string, unknown>([["migrated", migrated]]),
-    );
-
-    const snap = await session.snapshot();
-
-    expect(migrated.persisted).toHaveLength(1);
-    expect(snap.bridges).not.toHaveProperty("migrated");
-    await session.close();
-    await tools.close();
-  });
-
-  it("a SnapshotCapable-only bridge still round-trips through the blob", async () => {
-    const src = new FakeCounterBridge();
-    src.count = 7;
-    const { session: source, tools: t1 } = await mkSession(
-      "cp-legacy-src",
-      new Map<string, unknown>([["counter", src]]),
-    );
-    const snap = await source.snapshot();
-    expect(snap.bridges.counter).toEqual({ count: 7 });
-    await source.close();
-    await t1.close();
-
-    const dest = new FakeCounterBridge();
-    const { session: destination, tools: t2 } = await mkSession(
-      "cp-legacy-dest",
-      new Map<string, unknown>([["counter", dest]]),
-    );
-    await destination.restore({ snapshot: { ...snap, id: "cp-legacy-dest" } });
-
-    expect(dest.count).toBe(7);
-    await destination.close();
-    await t2.close();
-  });
-
-  it("restore() hydrates CheckpointCapable bridges and never calls their importSnapshot", async () => {
-    const migrated = new FakeMigratedBridge("migrated");
-    const { session, tools } = await mkSession(
-      "cp-hydrate",
-      new Map<string, unknown>([["migrated", migrated]]),
-    );
-    const snap = await session.snapshot();
-    expect(migrated.hydrated).toHaveLength(1); // genesis
-
-    await session.restore({
-      snapshot: { ...snap, bridges: { ...snap.bridges, migrated: { v: 99 } } },
-    });
-
-    expect(migrated.hydrated).toHaveLength(2);
-    expect(migrated.imports).toBe(0);
-    await session.close();
-    await tools.close();
-  });
-
   it("a rejected persist propagates out of snapshot() and leaves the session usable", async () => {
     const bridge = new FakeCheckpointBridge("flaky");
     bridge.persistError = new Error("flush failed");
@@ -215,7 +129,7 @@ describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", ()
     expect(session.status).toBe("idle");
 
     bridge.persistError = undefined;
-    await expect(session.snapshot()).resolves.toBeDefined();
+    await expect(session.snapshot()).resolves.toBeUndefined();
     await session.close();
     await tools.close();
   });
@@ -226,10 +140,10 @@ describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", ()
       "cp-hydrate-fail",
       new Map<string, unknown>([["flaky", bridge]]),
     );
-    const snap = await session.snapshot();
+    await session.snapshot();
     bridge.hydrateError = new Error("load failed");
 
-    await expect(session.restore({ snapshot: snap })).rejects.toThrow(/load failed/);
+    await expect(session.restore()).rejects.toThrow(/load failed/);
     await session.close();
     await tools.close();
   });
@@ -244,11 +158,10 @@ describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", ()
       await session.send({ messages: [{ role: "user", content: "hi" }] })
     ).result;
 
-    const snap = await session.snapshot();
+    await session.snapshot();
 
     expect(bridge.persisted[0]?.sessionId).toBe("cp-ctx");
-    expect(bridge.persisted[0]?.tick).toBe(snap.currentTick);
-    expect(snap.currentTick).toBeGreaterThan(0);
+    expect(bridge.persisted[0]?.tick).toBeGreaterThan(0);
     await session.close();
     await tools.close();
   });

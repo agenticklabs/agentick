@@ -5,7 +5,7 @@
  * {@link View} stays the render read cache. These tests pin the
  * additive contract: every value mutation writes through (view + store),
  * `hydrate()` rebuilds the view from a pre-seeded store, and
- * `importSnapshot`/`exportSnapshot` coexist with the store (import
+ * the construction `seed` writes through to the store (a seed
  * write-through; export round-trips). State is the knobs twin, plus one wrinkle
  * of its own: `unknown` values, so a `set(key, undefined)` must round-trip as a
  * PRESENT key (not an absent one).
@@ -181,7 +181,7 @@ describe("StateHarness — hydrate() from a pre-seeded store", () => {
     await harness.close();
   });
 
-  it("emits NO typed change — a wholesale rebuild is not N deltas (importSnapshot's rule)", async () => {
+  it("emits NO typed change — a wholesale rebuild is not N deltas", async () => {
     const store = createStateStore();
     await store.put({ scope: SCOPE, key: "x", value: 7 }, stubStoreCtx());
     const harness = await makeHarness(store);
@@ -263,18 +263,16 @@ describe("StateHarness — persist/hydrate across harness instances (the store o
   });
 });
 
-describe("StateHarness — importSnapshot / exportSnapshot coexist with the store", () => {
-  it("importSnapshot populates BOTH the projection and the store", async () => {
+describe("StateHarness — the construction seed writes through", () => {
+  it("seed populates BOTH the projection and the store", async () => {
     const store = createStateStore();
     const harness = await makeHarness(store);
 
-    harness.importSnapshot({ a: 1, b: "two", c: true });
+    harness.seed({ a: 1, b: "two", c: true });
 
-    // Projection.
     expect(harness.get("a")).toBe(1);
     expect(harness.get("b")).toBe("two");
     expect(harness.get("c")).toBe(true);
-    // Store write-through.
     expect(await store.get(stateStoreKey(SCOPE, "a"), stubStoreCtx())).toEqual({
       scope: SCOPE,
       key: "a",
@@ -285,65 +283,26 @@ describe("StateHarness — importSnapshot / exportSnapshot coexist with the stor
       key: "b",
       value: "two",
     });
-    expect(await store.get(stateStoreKey(SCOPE, "c"), stubStoreCtx())).toEqual({
-      scope: SCOPE,
-      key: "c",
-      value: true,
-    });
     await harness.close();
   });
 
-  it("importSnapshot drops keys absent from the new snapshot (projection + store)", async () => {
+  it("seed UPSERTS — a hydrated key the seed does not name survives it", async () => {
+    // The create-call seed runs AFTER the hydrate fan-out, so replace semantics
+    // would silently wipe everything the store just restored.
     const store = createStateStore();
-    const harness = await makeHarness(store);
-    harness.importSnapshot({ keep: 1, drop: 2 });
-
-    harness.importSnapshot({ keep: 9 });
-
-    expect(harness.has("drop")).toBe(false);
-    expect(harness.get("keep")).toBe(9);
-    expect(await store.get(stateStoreKey(SCOPE, "drop"), stubStoreCtx())).toBeUndefined();
-    expect(await store.get(stateStoreKey(SCOPE, "keep"), stubStoreCtx())).toEqual({
-      scope: SCOPE,
-      key: "keep",
-      value: 9,
-    });
-    await harness.close();
-  });
-
-  it("exportSnapshot round-trips through importSnapshot", async () => {
-    const source = await makeHarness();
-    await source.set({ key: "a", value: 1 });
-    await source.set({ key: "b", value: "two" });
-    const snap = source.exportSnapshot();
-
-    const store = createStateStore();
-    const restored = await makeHarness(store);
-    restored.importSnapshot(snap);
-
-    expect(restored.exportSnapshot()).toEqual({ a: 1, b: "two" });
-    expect(await store.get(stateStoreKey(SCOPE, "a"), stubStoreCtx())).toEqual({
-      scope: SCOPE,
-      key: "a",
-      value: 1,
-    });
-    expect(await store.get(stateStoreKey(SCOPE, "b"), stubStoreCtx())).toEqual({
-      scope: SCOPE,
-      key: "b",
-      value: "two",
-    });
-    await source.close();
-    await restored.close();
-  });
-
-  it("a store-hydrated projection is re-exportable (store → projection → snapshot)", async () => {
-    const store = createStateStore();
-    await store.put({ scope: SCOPE, key: "k", value: "v" }, stubStoreCtx());
+    await store.put({ scope: SCOPE, key: "durable", value: "kept" }, stubStoreCtx());
     const harness = await makeHarness(store);
     await harness.hydrate(hydrateCtx());
 
-    // The snapshot path reads the projection, which the store just filled.
-    expect(harness.exportSnapshot()).toEqual({ k: "v" });
+    harness.seed({ fromCreate: 9 });
+
+    expect(harness.get("durable")).toBe("kept");
+    expect(harness.get("fromCreate")).toBe(9);
+    expect(await store.get(stateStoreKey(SCOPE, "durable"), stubStoreCtx())).toEqual({
+      scope: SCOPE,
+      key: "durable",
+      value: "kept",
+    });
     await harness.close();
   });
 });

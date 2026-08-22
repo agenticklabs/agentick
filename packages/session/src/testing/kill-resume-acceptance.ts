@@ -56,7 +56,6 @@ import type {
   LanguageModelInput,
   ProjectInput,
   RunInput,
-  SessionSnapshot,
   TimelineEntry,
 } from "@agentick/spec";
 
@@ -64,8 +63,8 @@ import { SessionHarness } from "../harness.js";
 
 /**
  * The durable persisted log, read from the LIVE handle. The timeline is
- * CheckpointCapable (checkpointing §3.2): it persists to its own store and is
- * excluded from the snapshot blob, so the blob is no longer a read surface.
+ * CheckpointCapable (checkpointing §3.2): it persists to its own store, which
+ * is the only read surface there is — no value crosses the checkpoint seam.
  */
 function persistedOf(session: SessionHarness): readonly TimelineEntry[] {
   return session.timeline.readPersisted();
@@ -429,10 +428,10 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
     });
 
     it("restore() re-hydrates the timeline from its store, idempotently", async () => {
-      // The blob no longer transports the timeline (checkpointing §3.2/§5) —
-      // the store is the sole carrier. `makeStore()` shares one durable
-      // backing, so the destination hydrates at construction; restore() must
-      // re-hydrate to the same result: store as authority, no duplication.
+      // Nothing transports the timeline but its store (checkpointing §3.2/§5).
+      // `makeStore()` shares one durable backing, so the destination hydrates
+      // at construction; restore() must re-hydrate to the same result: store as
+      // authority, no duplication.
       const sessionId = `kr-roundtrip-${Math.random().toString(36).slice(2)}`;
 
       // ── Source session: run a turn; the flush barrier lands it in storeA. ──
@@ -443,14 +442,8 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
           messages: [{ role: "user", content: [{ type: "text", text: "remember: PLUM" }] }],
         })
       ).result;
-      const snap = await src.session.snapshot();
+      await expect(src.session.snapshot()).resolves.toBeUndefined();
       await src.close();
-
-      // The residual snapshot survives the spec firewall (JSON round-trip) and
-      // carries NO timeline — a CheckpointCapable bridge is excluded.
-      const wire: SessionSnapshot = JSON.parse(JSON.stringify(snap));
-      expect(wire).toEqual(snap);
-      expect(wire.bridges.timeline).toBeUndefined();
 
       // ── Destination: SAME id, same durable backing — construction hydrates
       // the prior turn (pin 1); restore() re-hydrates to the same result. ──
@@ -459,7 +452,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const hydrated = persistedOf(dest.session).length;
       expect(hydrated).toBeGreaterThanOrEqual(2);
 
-      await dest.session.restore({ snapshot: wire });
+      await dest.session.restore();
       const restored = persistedOf(dest.session);
       expect(restored.length).toBe(hydrated);
       expect(JSON.stringify(restored)).toContain("remember: PLUM");

@@ -18,7 +18,7 @@
  *   - timeline.ts          TimelineEntry
  *   - knobs.ts             KnobDeclaration, KnobState
  *   - subscriptions.ts     SubscriptionIntent
- *   - compiler-snapshot.ts CompilerSnapshot
+ *   - compiler-diagnostics.ts  diagnostics + subscription intents
  *   - session-record.ts    SessionRecord
  *
  * @see docs/proposals/v2/blueprint/02-data-model.md
@@ -53,7 +53,7 @@ export * from "./execution-result.js";
 export * from "./execution-target.js";
 export * from "./model-facts.js";
 export * from "./usage-cost.js";
-export * from "./compiler-snapshot.js";
+export * from "./compiler-diagnostics.js";
 export * from "./tool-handler.js";
 export * from "./tool-result.js";
 export * from "./tool-output-bound.js";

@@ -114,7 +114,7 @@ describe("model-less app (no model / modelExecutor at construction)", () => {
     await app.closeApp();
   });
 
-  it("dispatch and snapshot work model-less (no model needed for either)", async () => {
+  it("dispatch and checkpoint work model-less (no model needed for either)", async () => {
     const app = await createApp(React.createElement(MinimalAgent), {});
     const session = await app.createSession();
 
@@ -124,9 +124,9 @@ describe("model-less app (no model / modelExecutor at construction)", () => {
     // model (it fails with a tool-resolution error, NOT NoModelForExecutionError).
     expect((dispatched as { _tag?: string })._tag).not.toBe("NoModelForExecutionError");
 
-    // Snapshot/restore round-trips without a model.
-    const snap = await session.snapshot();
-    expect(snap).toBeDefined();
+    // Checkpoint + rehydrate need no model.
+    await expect(session.snapshot()).resolves.toBeUndefined();
+    await expect(session.restore()).resolves.toBeUndefined();
 
     await app.closeApp();
   });

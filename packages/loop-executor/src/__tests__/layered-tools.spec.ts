@@ -81,7 +81,7 @@ function mkCompiler(tools: readonly ToolDeclaration[]): CompilerProtocol {
       guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "stub-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: mkTree(), diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -90,14 +90,6 @@ function mkCompiler(tools: readonly ToolDeclaration[]): CompilerProtocol {
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "stub-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 
@@ -340,7 +332,7 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
         guard: () => () => {},
         renderTree: () => Effect.succeed(renderResult()),
       },
-      mount: async () => ({ mountId: "m_5", restoredFromSnapshot: false }),
+      mount: async () => ({ mountId: "m_5" }),
       rerender: async () => undefined,
       renderTree: async () => renderResult(),
       renderToString: async () => ({
@@ -349,14 +341,6 @@ describe("LoopExecutorHarness — layered tools (#138)", () => {
         iterations: 1,
       }),
       unmount: async () => undefined,
-      snapshot: async () => ({
-        specVersion: SPEC_VERSION,
-        mountId: "m_5",
-        dataCache: [],
-        bridges: {},
-        subscriptions: [],
-      }),
-      restore: async () => undefined,
     };
     const executor = new FakeLanguageModelExecutor("lt_exec", sub.journal, sub.bus, sub.inbox);
 

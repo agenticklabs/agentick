@@ -565,7 +565,7 @@ await app.closeApp(); // closes the cluster too
 | `costResolver`              | `(input) => RateCard \| Cost \| undefined`             | Pricing seam; wins over a model's declared `rates`. See below                            |
 | _namespace slots_           | e.g. `timeline`                                        | Contributed by namespace packages; not declared here                                     |
 
-Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, `streaming`, `narrate`, `migrateSnapshot`, `initialProps`, `initialKnobs`, `target`, `interceptorParent`, and the failed-tick recovery pair `tickFailurePolicy` / `maxConsecutiveFailedTicks` (ADR 99) — flat shortcuts that cascade like `defaultMaxTicks`, with `session.*` longhand winning; semantics in [@agentick/session](../session#retrying-a-failed-tick).
+Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, `streaming`, `narrate`, `initialProps`, `initialKnobs`, `target`, `interceptorParent`, and the failed-tick recovery pair `tickFailurePolicy` / `maxConsecutiveFailedTicks` (ADR 99) — flat shortcuts that cascade like `defaultMaxTicks`, with `session.*` longhand winning; semantics in [@agentick/session](../session#retrying-a-failed-tick).
 
 #### `costResolver` — the pricing seam
 

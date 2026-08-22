@@ -56,7 +56,7 @@ export function withState(options: WithStateOptions = {}): SessionExtension {
       await harness.ready;
 
       if (options.initial && Object.keys(options.initial).length > 0) {
-        harness.importSnapshot(options.initial);
+        harness.seed(options.initial);
       }
 
       installer.registerNamespace("state", harness);

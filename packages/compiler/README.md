@@ -185,7 +185,7 @@ import { defineCompiler } from "@agentick/compiler";
 import { SPEC_VERSION } from "@agentick/spec";
 
 export const myCompiler = defineCompiler({
-  mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }),
+  mount: async () => ({ mountId: "m_1" }),
   unmount: async () => {},
   renderTree: async () => ({
     tree: { specVersion: SPEC_VERSION, context: { entries: [] } },

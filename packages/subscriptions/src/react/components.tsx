@@ -6,10 +6,9 @@
  *   2. Calls `bridge.declare(intent, handler)` on mount.
  *   3. Returns the unsubscribe handle via `useOnUnmount`.
  *
- * The bridge owns intent storage. The snapshot picks intents up via
- * `bridge.exportSnapshot()`. Hibernate-resume restores intents via
- * `importSnapshot`; the JSX rerenders, components re-declare with
- * freshly-bound handlers, pending intents are promoted to live.
+ * The bridge owns intent storage. An intent lives as long as its
+ * declaration: a resumed session re-renders and re-declares, handler
+ * and all.
  *
  * Components render nothing visible — they're declarative side-effects
  * over the bridge surface.

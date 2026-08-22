@@ -171,28 +171,4 @@ describe("CompilerHarness — end-to-end", () => {
     );
     expect(ack.messageId).toBe("msg_recompile_1");
   });
-
-  it("snapshot returns a spec-shaped payload", async () => {
-    const { harness } = await makeHarness();
-    const bridges = fakeBridges({ knobs: { mood: "curious" } });
-    await harness.mount({
-      mountId: "m_5",
-      sessionId: "s_5",
-      element: React.createElement("message", { role: "user" }, "snap"),
-      bridges,
-      elementVersion: "sha:abc",
-    });
-
-    const snap = await harness.snapshot({ mountId: "m_5" });
-    expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(snap.mountId).toBe("m_5");
-    expect(snap.elementVersion).toBe("sha:abc");
-    // `knobs` slot on bridges is augmented by @agentick/knobs.
-    // This test file doesn't import knobs-next, so the augmentation
-    // isn't visible at typecheck — index through the broad shape.
-    expect((snap.bridges as Record<string, unknown>).knobs).toEqual({ mood: "curious" });
-    // Round-trips through JSON without losing information (spec firewall).
-    const round = JSON.parse(JSON.stringify(snap));
-    expect(round).toEqual(snap);
-  });
 });

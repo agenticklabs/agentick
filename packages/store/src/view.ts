@@ -4,8 +4,7 @@
  * store-backed harness re-hand-rolled into a `CollectionProjection` + a
  * `KeyedNotifier` + a `ChangeNotifier`:
  *
- *   1. a sync read cache (the render pass + the sync `exportSnapshot` cannot
- *      await — Phase-3 finding),
+ *   1. a sync read cache (the render pass cannot await — Phase-3 finding),
  *   2. write-through to the async store off the critical path, and
  *   3. two notify seams — bare render PINGS ({@link KeyedNotifier}) and typed
  *      push DELTAS ({@link ChangeNotifier}, carrying `{ key, value?, prev? }`).
@@ -38,8 +37,8 @@
  *   full snapshot), not by N spurious deltas on the change stream. Batching the
  *   pings to the end also preserves the invariant that a subscriber which reads
  *   during a ping sees the COMPLETE post-mutation state (not a half-applied
- *   cache) — the guarantee the hand-rolled `importSnapshot`/`hydrate` gave by
- *   doing all cache writes before any `fireListeners`.
+ *   cache) — the guarantee the hand-rolled bulk paths gave by doing all cache
+ *   writes before any `fireListeners`.
  *
  * `StoreCtx` threads the runtime scope across the Effect→Promise boundary; the
  * view is Promise-shaped and never reads ambient context. Store writes go

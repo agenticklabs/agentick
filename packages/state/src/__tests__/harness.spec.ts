@@ -112,23 +112,6 @@ describe("StateHarness — inbox addressability", () => {
   });
 });
 
-describe("StateHarness — snapshot round-trip", () => {
-  it("exportSnapshot / importSnapshot preserves entries", async () => {
-    const { harness } = await makeHarness();
-    await harness.set({ key: "a", value: 1 });
-    await harness.set({ key: "b", value: { nested: true } });
-    const snap = harness.exportSnapshot();
-
-    const { harness: restored } = await makeHarness("restored");
-    restored.importSnapshot(snap);
-    expect(restored.get("a")).toBe(1);
-    expect(restored.get("b")).toEqual({ nested: true });
-
-    await harness.close();
-    await restored.close();
-  });
-});
-
 // ============================================================================
 // Conformance suite
 // ============================================================================

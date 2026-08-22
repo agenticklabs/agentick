@@ -55,7 +55,7 @@ function stubCompiler(): CompilerProtocol {
       guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "c-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "c-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -64,14 +64,6 @@ function stubCompiler(): CompilerProtocol {
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "c-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   } as unknown as CompilerProtocol;
 }
 

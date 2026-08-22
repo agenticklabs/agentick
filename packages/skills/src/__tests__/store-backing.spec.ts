@@ -3,8 +3,8 @@
  *
  * Proves the harness is store-DERIVED and store-PERSISTED: mutations land in the
  * injected {@link SkillStore}; the source surface (`reload` / `resolve`) FEEDS the
- * store; `search` filters correctly through the sync projection; and the sync
- * `exportSnapshot` COEXISTS with the store (Phase-4 sweep deletes it later).
+ * store; `search` filters correctly through the sync projection; and a fresh
+ * harness over the same store reopens on it via `hydrateFromStore()`.
  *
  * Also runs {@link runSkillStoreConformance} against {@link InMemorySkillStore}.
  */
@@ -131,7 +131,7 @@ describe("SkillsHarness — store backing", () => {
     await h.close();
   });
 
-  it("exportSnapshot coexists with the store and round-trips through hydrate()", async () => {
+  it("a register writes through to the store, and hydrateFromStore() reopens on it", async () => {
     // A shared store: h1 writes, a fresh h2 over the SAME store hydrates from it.
     const store = new InMemorySkillStore();
     const h1 = makeHarness(store);
@@ -139,10 +139,12 @@ describe("SkillsHarness — store backing", () => {
     await h1.register({ name: "a", description: "A", content: "aa" });
     await h1.register({ name: "b", description: "B", content: "bb" });
 
-    // Sync exportSnapshot (SnapshotCapable) materializes the projection.
-    const snap = h1.exportSnapshot();
-    expect(Object.keys(snap).sort()).toEqual(["a", "b"]);
-    expect(snap.a?.content).toBe("aa");
+    expect(
+      h1
+        .list()
+        .map((s) => s.name)
+        .sort(),
+    ).toEqual(["a", "b"]);
     await h1.close();
 
     // A resumed harness asks for the store read explicitly — skills names no

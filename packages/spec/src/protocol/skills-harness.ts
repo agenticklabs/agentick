@@ -213,13 +213,6 @@ export interface SkillsHarnessProtocol extends HarnessEdge<SkillsFx> {
   //
   // BOTH faces come from `HarnessEdge<SkillsFx>`: `register` / `update` /
   // `remove` as the Promise facade, and `fx` as the Effect-canonical twin.
-
-  // ─── Snapshot / restore (SnapshotCapable feature) ──────────────
-
-  /** Export every skill for hibernate / cross-session transfer. */
-  exportSnapshot(): Readonly<Record<string, Skill>>;
-  /** Import a snapshot — replaces the current cache wholesale. */
-  importSnapshot(snapshot: Readonly<Record<string, Skill>>): void;
 }
 
 /**

@@ -7,7 +7,7 @@
  * injected {@link PromptStore}; the non-serializable `{ template, render }`
  * augmentation stays in the harness sidecar and NEVER reaches the store; loaders
  * (`reload` / `resolve`) FEED both; `invoke`/`get` COMBINE the two halves back
- * into a full declaration; and the sync `exportSnapshot` drops fns exactly as
+ * into a full declaration; and the sync `record` read drops fns exactly as
  * before (Phase-4 sweep deletes it later).
  *
  * Also runs {@link runPromptStoreConformance} against {@link InMemoryPromptStore}.
@@ -139,7 +139,7 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
     await h.close();
   });
 
-  it("exportSnapshot drops fns; hydrate() restores records only (sidecar empty)", async () => {
+  it("the record drops fns; hydrate() restores records only (sidecar empty)", async () => {
     // A shared store: h1 writes, a fresh h2 over the SAME store hydrates from it.
     const store = new InMemoryPromptStore();
     const h1 = makeHarness(store);
@@ -153,14 +153,12 @@ describe("PromptsHarness — store backing (the augmentation split)", () => {
       },
     });
 
-    // Sync exportSnapshot (SnapshotCapable) materializes the projection records.
-    const snap = h1.exportSnapshot();
-    expect(snap.p).toEqual({
+    expect(h1.record("p")).toEqual({
       name: "p",
       description: "P",
       arguments: [{ name: "x", required: true }],
     });
-    expect(snap.p).not.toHaveProperty("template");
+    expect(h1.record("p")).not.toHaveProperty("template");
     await h1.close();
 
     // A resumed harness asks for the store read explicitly — prompts names no

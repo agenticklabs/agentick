@@ -21,7 +21,7 @@
  * **Still deliberately NOT snapshot-visible (ADR 27).** A gate owns no
  * independent state — the gate's value IS a knob value, snapshot-captured by
  * `KnobsHarness`. So the harness does not augment `HookBridges` and is not
- * `SnapshotCapable`; it is a pure verb surface. See {@link augment}.
+ * checkpoint hooks; it is a pure verb surface. See {@link augment}.
  *
  * The four declared commands (ALL `exposure: "wire"`) delegate straight to the
  * controller:

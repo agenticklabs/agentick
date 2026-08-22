@@ -10,7 +10,6 @@ import {
   MaxIterationsExceeded,
   NotMounted,
   RenderFailed,
-  SnapshotIncompatible,
   UnstableTree,
 } from "../index.js";
 
@@ -23,22 +22,17 @@ import type {
   LifecycleProjectionTarget,
   LoopBridge,
   MountInput,
-  MountResult,
   ReconcileDiagnostic,
   ReconcileError,
   CompilerInboxMessage,
   CompilerProtocol,
-  CompilerSnapshot,
   RenderTreeInput,
   RenderTreeResult,
   RenderToStringInput,
   RenderToStringPayload,
   RenderToStringResult,
   RerenderInput,
-  RestoreInput,
   SessionBridge,
-  SnapshotInput,
-  SubscriptionIntent,
   UnmountInput,
 } from "../index.js";
 
@@ -52,11 +46,6 @@ describe("@agentick/spec — compiler protocol", () => {
         bridges: fakeBridges(),
       };
       expect(input.mountId).toBe("m_1");
-    });
-
-    it("MountResult reports restore status", () => {
-      const result: MountResult = { mountId: "m_1", restoredFromSnapshot: true };
-      expect(result.restoredFromSnapshot).toBe(true);
     });
   });
 
@@ -109,7 +98,7 @@ describe("@agentick/spec — compiler protocol", () => {
     });
   });
 
-  describe("rerender / dispatchLifecycle / unmount / snapshot / restore", () => {
+  describe("rerender / dispatchLifecycle / unmount", () => {
     it("RerenderInput carries new element + optional version", () => {
       const input: RerenderInput = {
         mountId: "m_1",
@@ -158,41 +147,9 @@ describe("@agentick/spec — compiler protocol", () => {
       }
     });
 
-    it("UnmountInput / SnapshotInput / RestoreInput are mount-scoped", () => {
+    it("UnmountInput is mount-scoped", () => {
       const u: UnmountInput = { mountId: "m_1" };
-      const s: SnapshotInput = { mountId: "m_1" };
-      const r: RestoreInput = {
-        mountId: "m_1",
-        snapshot: emptySnapshot("m_1"),
-      };
-      expect([u, s, r].map((x) => x.mountId)).toEqual(["m_1", "m_1", "m_1"]);
-    });
-  });
-
-  describe("CompilerSnapshot", () => {
-    it("survives JSON round-trip", () => {
-      // Per ADR 27, per-bridge state lives in `bridges` (an opaque map
-      // keyed by HookBridges slot). Knobs/state/timeline payloads land
-      // here at runtime via SnapshotCapable feature-detection. Spec's
-      // own typecheck only sees the foundational slots, so the test
-      // exercises the un-augmented shape.
-      const snap: CompilerSnapshot = {
-        specVersion: "2026-05-01",
-        mountId: "m_1",
-        elementVersion: "v1",
-        bridges: {},
-        dataCache: [{ key: "user/42", value: { name: "x" }, fetchedAt: 1 }],
-        subscriptions: [
-          {
-            id: "cron.daily",
-            kind: "cron",
-            config: { expr: "0 0 * * *" },
-          } satisfies SubscriptionIntent,
-        ],
-      };
-      const round = JSON.parse(JSON.stringify(snap)) as CompilerSnapshot;
-      expect(round.mountId).toBe(snap.mountId);
-      expect(round.dataCache[0]?.key).toBe("user/42");
+      expect(u.mountId).toBe("m_1");
     });
   });
 
@@ -206,11 +163,10 @@ describe("@agentick/spec — compiler protocol", () => {
         new MaxIterationsExceeded({ iterations: 10 }),
         new UnstableTree({ iterations: 10 }),
         new InvalidElement({ reason: "not a react element" }),
-        new SnapshotIncompatible({ specVersion: "2025-01-01" }),
         new BridgeUnavailable({ bridge: "mcp", hook: "useMCP" }),
         new FormatterFailed({ cause: "missing renderer" }),
       ];
-      expect(errs).toHaveLength(10);
+      expect(errs).toHaveLength(9);
     });
   });
 
@@ -235,11 +191,10 @@ describe("@agentick/spec — compiler protocol", () => {
         "missing-bridge",
         "formatter-error",
         "render-error",
-        "snapshot-incompatible",
         "unstable-tree",
         "error-boundary-active",
       ];
-      expect(codes).toHaveLength(9);
+      expect(codes).toHaveLength(8);
     });
   });
 
@@ -304,16 +259,8 @@ describe("@agentick/spec — compiler protocol", () => {
     it("requires the documented methods", () => {
       // Compile-time check via a structural type guard.
       type Required = keyof CompilerProtocol;
-      const required: Required[] = [
-        "mount",
-        "rerender",
-        "renderTree",
-        "renderToString",
-        "unmount",
-        "snapshot",
-        "restore",
-      ];
-      expect(required).toHaveLength(7);
+      const required: Required[] = ["mount", "rerender", "renderTree", "renderToString", "unmount"];
+      expect(required).toHaveLength(5);
     });
 
     it("lifecycle projection is an OPTIONAL capability, not a protocol method (ADR 89 §4)", () => {
@@ -355,15 +302,5 @@ function fakeBridges(): HookBridges {
       stopAfterTick: () => {},
     },
     session: { id: "s_1", status: "running" },
-  };
-}
-
-function emptySnapshot(mountId: string): CompilerSnapshot {
-  return {
-    specVersion: "2026-05-01",
-    mountId,
-    bridges: {},
-    dataCache: [],
-    subscriptions: [],
   };
 }

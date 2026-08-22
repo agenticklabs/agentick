@@ -11,8 +11,8 @@
  * and the default impl handles a lot of plumbing. `defineSession` is
  * for the cases where that plumbing is the wrong fit.
  *
- * Required callbacks: `send`, `snapshot`, and the state applicator
- * triple (`applyExecutorResult`/`applyToolResults`/`appendEntry`).
+ * Required callbacks: `send` and the state applicator triple
+ * (`applyExecutorResult`/`applyToolResults`/`appendEntry`).
  * Other methods (including the optional `close`) default to throwing
  * "method not configured" — adopters override what they need.
  *
@@ -23,7 +23,6 @@
  * ```ts
  * const mySession = defineSession<MyProps>({
  *   async send(input) { ... },
- *   snapshot() { ... },
  *   async close() { ... },
  *   async applyExecutorResult(input) { ... },
  *   async applyToolResults(input) { ... },
@@ -67,7 +66,6 @@ import type {
   NotifyTickEndInput,
   Operation,
   OperationJournal,
-  RestoreSnapshotInput,
   SendInput,
   SessionError,
   SessionExecutionHandle,
@@ -75,7 +73,6 @@ import type {
   SessionHarnessFactory,
   SessionHarnessFactoryDeps,
   SessionHarnessProtocol,
-  SessionSnapshot,
   ForkInput,
   SpawnInput,
   TickEndForwardDecision,
@@ -106,13 +103,18 @@ import type { ModelSelectionHandle } from "./model-facade.js";
 export interface DefineSessionInput<P = unknown> {
   // ── Required: lifecycle + core verbs ─────────────────────────────────
   readonly send: (input: SendInput<P>) => Promise<SessionExecutionHandle>;
-  readonly snapshot: () => SessionSnapshot | Promise<SessionSnapshot>;
   /**
-   * Restore a previously captured snapshot. Optional — omit to get a
-   * façade that rejects `restore()` with "not configured" (a callback
-   * session that captures state but can't take it back).
+   * Flush this session's durable state to wherever it lives — the checkpoint
+   * barrier. Optional; omit and `snapshot()` resolves as a no-op (a callback
+   * session with nothing write-behind to drain).
    */
-  readonly restore?: (input: RestoreSnapshotInput) => Promise<void>;
+  readonly snapshot?: () => Promise<void>;
+  /**
+   * Rehydrate this session from wherever its state lives. Optional — omit to
+   * get a façade that rejects `restore()` with "not configured" (a callback
+   * session that checkpoints but cannot reopen).
+   */
+  readonly restore?: () => Promise<void>;
   /**
    * Cancel the current execution. Optional — omit to get a façade that
    * rejects `abort()` with "not configured" (a callback session that runs
@@ -345,12 +347,12 @@ class CallbackSessionHarness<P = unknown>
     throw unsupportedPreview("prepareRequest");
   }
 
-  async snapshot(): Promise<SessionSnapshot> {
-    return this.spec.snapshot();
+  async snapshot(): Promise<void> {
+    await this.spec.snapshot?.();
   }
 
-  restore(input: RestoreSnapshotInput): Promise<void> {
-    if (this.spec.restore) return this.spec.restore(input);
+  restore(): Promise<void> {
+    if (this.spec.restore) return this.spec.restore();
     return Promise.reject(
       new ExecutionFailed({
         cause: new Error("defineSession: restore() not configured"),

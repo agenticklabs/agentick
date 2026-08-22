@@ -25,7 +25,7 @@
  * can, because nothing here is render-read — the credentials surface is
  * Promise-typed CRUD consumed off the render path (a tool handler, a gateway
  * verb resolver), and the slot is intentionally absent from any snapshot
- * (credentials is not `SnapshotCapable`). So the taxonomy is not "every
+ * (credentials holds no checkpoint hooks). So the taxonomy is not "every
  * store-backed harness holds a `View`", but "every SYNC-READ harness does";
  * the async-only, never-rendered harness reads the store directly. Adding a
  * `View` here would be dead weight — a cache no synchronous caller ever reads.

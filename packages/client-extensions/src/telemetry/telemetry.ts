@@ -34,7 +34,7 @@ export interface TelemetryOptions {
   readonly adapter: TelemetryAdapter;
   /**
    * Per-method sampler. Return `false` to skip span creation entirely
-   * for noisy methods (e.g., `session/snapshot`). Default: sample all.
+   * for noisy methods (e.g., `session/dry_run`). Default: sample all.
    */
   readonly sample?: (method: string) => boolean;
   /**

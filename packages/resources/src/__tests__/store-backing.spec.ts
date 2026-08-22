@@ -9,7 +9,6 @@
  *     sidecar), NEVER the store.
  *   - `resolverFor` semantics unchanged: fixed-first, then template-match.
  *   - `snapshot()` folds durable + transient declarations into one catalog.
- *   - the harness is NOT `SnapshotCapable` (no export/importSnapshot).
  *
  * Also runs {@link runResourceStoreConformance} against {@link InMemoryResourceStore}.
  */
@@ -200,13 +199,5 @@ describe("ResourcesHarness — store backing (durable / transient / sidecar spli
     await h2.reload();
     expect(await h2.read("db://doc")).toEqual([text("db://doc", "content")]);
     await h2.close();
-  });
-
-  it("is NOT SnapshotCapable — carries no export/importSnapshot", async () => {
-    const h = makeHarness(new InMemoryResourceStore());
-    await h.ready;
-    expect((h as unknown as { exportSnapshot?: unknown }).exportSnapshot).toBeUndefined();
-    expect((h as unknown as { importSnapshot?: unknown }).importSnapshot).toBeUndefined();
-    await h.close();
   });
 });

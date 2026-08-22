@@ -59,8 +59,8 @@ import type { LogStore, StoreCtx } from "@agentick/spec";
 import { createNotifier, type Notifier, type Unsubscribe } from "@agentick/pubsub";
 
 /**
- * Provenance of the last {@link LogView.replaceProjection} — recorded on the
- * snapshot so a later restore can describe / replay the projection divergence.
+ * Provenance of the last {@link LogView.replaceProjection} — read back through
+ * {@link LogView.lastCompaction} to describe the current projection divergence.
  * `source` names which tier the projection was folded from; `strategyMetadata`
  * is opaque adopter metadata (a compaction strategy id, a window size, …).
  */
@@ -78,34 +78,6 @@ export interface LogViewReadSnapshot<T> {
   /** Monotonic counter; bumps on every projection mutation. */
   readonly version: number;
 }
-
-/**
- * The serializable both-tiers snapshot {@link LogView.exportSnapshot} produces
- * and {@link LogView.importSnapshot} restores — the durable log, the projection,
- * both version counters, and the last-projection provenance. Generic over `T`;
- * `LogViewSnapshot<TimelineEntry>` is structurally the timeline harness's own
- * snapshot shape.
- */
-export interface LogViewSnapshot<T> {
-  /** Append-only log entries in order. */
-  readonly persisted: readonly T[];
-  /** The projection at snapshot time (may equal `persisted` if never diverged). */
-  readonly projection: readonly T[];
-  readonly persistedVersion: number;
-  readonly projectionVersion: number;
-  /** Provenance of the last `replaceProjection`, if any. */
-  readonly lastCompaction?: LogProjectionMeta;
-}
-
-/**
- * How {@link LogView.importSnapshot} treats the snapshot's projection tier:
- *   - `"as-is"` (default) — trust the snapshot's projection + version + last
- *     provenance verbatim (fastest; no recomputation).
- *   - `"reset-projection"` — restore only the durable log; the projection
- *     re-initializes as a live mirror of persisted (the caller re-runs its own
- *     projection build afterwards if desired).
- */
-export type LogViewImportMode = "as-is" | "reset-projection";
 
 export interface LogViewConfig<T> {
   readonly store: LogStore<T>;
@@ -128,17 +100,16 @@ export interface LogViewConfig<T> {
 
 export class LogView<T> {
   // ─── Two tiers ───
-  // TODO(adr-93-d1b / data-layer §2.7): drop `_persisted` — the harness should
-  // hold only the bounded projection and read the log through the store
-  // (`readPersisted()` becomes an async store read). BLOCKED, not forgotten:
-  // `exportSnapshot()` is SYNC, so a harness with no log tier cannot put
-  // `persisted` on its snapshot — and the snapshot is today the ONLY transport
-  // for a cross-store TRANSPLANT. See the kill/resume acceptance case
-  // "snapshot→restore round-trip" (packages/session/src/testing/
-  // kill-resume-acceptance.tsx): the destination session has a DISTINCT id AND a
-  // DISTINCT store, so store+hydrate cannot supply the log. Landing §2.7 needs a
-  // transplant story first (a store-to-store log copy verb, or fork sharing the
-  // parent's logKey) — a design decision above this file's pay grade.
+  // TODO(data-layer §2.7 / Phase 6b): drop `_persisted` — hold only the bounded
+  // projection and read the log through the store. The TRANSPLANT blocker is
+  // GONE (store-layer `branch` is the fork transport; the snapshot payload is
+  // deleted). What blocks it now is the SYNC read surface built on this array:
+  // `readPersisted()`, `trailingInput()` and `inputEntryCount()` are sync
+  // protocol reads of the whole log, and the session's tick loop calls
+  // `inputEntryCount()` every tick — going async would turn a memory read into a
+  // per-tick full-log store read. Landing §2.7 needs the read surface redesigned
+  // first (a maintained input counter + a bounded tail read), not just this
+  // field removed.
   /** The durable, append-only log — the source of truth. */
   private _persisted: T[] = [];
   /** The materialized projection — the read surface; diverges on compaction. */
@@ -194,6 +165,16 @@ export class LogView<T> {
   /** The durable, append-only log tier. */
   readPersisted(): readonly T[] {
     return this._persisted;
+  }
+
+  /**
+   * Provenance of the divergence the current projection carries — what the last
+   * {@link replaceProjection} / {@link commitCompaction} folded, and the
+   * strategy metadata it declared. `undefined` when the projection mirrors the
+   * log ({@link resetProjection} clears it).
+   */
+  lastCompaction(): LogProjectionMeta | undefined {
+    return this._lastCompaction;
   }
 
   /** Identity-stable render snapshot (`{ entries, version }`). */
@@ -332,48 +313,6 @@ export class LogView<T> {
    * provenance, refreshes the snapshot, and pings.
    */
   resetProjection(): void {
-    this._projection = [...this._persisted];
-    this._projectionVersion += 1;
-    this._lastCompaction = undefined;
-    this.refreshSnapshot();
-    this.notify();
-  }
-
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): LogViewSnapshot<T> {
-    return {
-      persisted: [...this._persisted],
-      projection: [...this._projection],
-      persistedVersion: this._persistedVersion,
-      projectionVersion: this._projectionVersion,
-      ...(this._lastCompaction !== undefined ? { lastCompaction: this._lastCompaction } : {}),
-    };
-  }
-
-  /**
-   * Restore both tiers from a snapshot. The durable log is restored on EVERY
-   * mode; {@link LogViewImportMode} selects how the projection is treated.
-   * Synchronous — subscribers fire once at the end (the post-mutation state is
-   * fully applied before any ping).
-   */
-  importSnapshot(snap: LogViewSnapshot<T>, opts?: { readonly mode?: LogViewImportMode }): void {
-    const mode = opts?.mode ?? "as-is";
-
-    // Restore the durable log on every mode.
-    this._persisted = [...snap.persisted];
-    this._persistedVersion = snap.persistedVersion;
-
-    if (mode === "as-is") {
-      this._projection = [...snap.projection];
-      this._projectionVersion = snap.projectionVersion;
-      this._lastCompaction = snap.lastCompaction;
-      this.refreshSnapshot();
-      this.notify();
-      return;
-    }
-
-    // "reset-projection" — the projection re-initializes as a live mirror.
     this._projection = [...this._persisted];
     this._projectionVersion += 1;
     this._lastCompaction = undefined;

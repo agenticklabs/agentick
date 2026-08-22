@@ -16,7 +16,7 @@
  *     canonical guard);
  *   - a NAMED ref is copied verbatim and side-cars nothing;
  *   - `get`/`list` re-join the split back into the author's shape;
- *   - `update` / `remove` / `importSnapshot` / genesis each keep the two halves in
+ *   - `update` / `remove` / genesis each keep the two halves in
  *     step;
  *   - a wire-delivered `complete` is stripped at RUNTIME, not just by the type.
  */
@@ -100,7 +100,7 @@ describe("PromptsHarness — inline resolvers stay out of durability", () => {
     // The RECORD is where `completeRef` is typed — and the record is what a client
     // reads (`prompts:get` / `prompts:list` project this slice onto the wire). An
     // in-process reader has the resolver itself and needs no ref.
-    const args = h.exportSnapshot()[NAME].arguments ?? [];
+    const args = h.record(NAME)?.arguments ?? [];
     expect(args.map((a) => a.completeRef)).toEqual([
       promptCompletionRef(NAME, "job"),
       promptCompletionRef(NAME, "phase"),
@@ -242,25 +242,19 @@ describe("PromptsHarness — the split stays in step", () => {
     expect(h.get(NAME)?.arguments?.[0].complete).toBeUndefined();
   });
 
-  it("importSnapshot clears resolvers but keeps the projectable metadata", async () => {
+  it("the record slice carries no resolver but keeps the projectable metadata", async () => {
     const h = makeHarness();
     await h.ready;
     await h.register({ declaration: referencePrompt() });
 
-    const snapshot = h.exportSnapshot();
-    expect(JSON.stringify(snapshot)).not.toContain('complete"');
-
-    const restored = makeHarness();
-    await restored.ready;
-    restored.importSnapshot(snapshot);
-    // The fn did not survive — and a DERIVED ref with no sidecar restores to no
-    // `complete` rather than an address nothing answers to.
-    expect(restored.get(NAME)?.arguments?.[1].complete).toBeUndefined();
-    // What a palette still reads, off the record slice it reads everything from:
-    // the ref and the dependency.
-    const record = restored.exportSnapshot()[NAME].arguments?.[1];
-    expect(record?.completeRef).toBe(promptCompletionRef(NAME, "phase"));
-    expect(record?.completeRequires).toEqual(["job"]);
+    // The record is what crosses the store and the wire — the resolver fn is
+    // sidecar-only and never reaches it.
+    const record = h.record(NAME);
+    expect(JSON.stringify(record)).not.toContain('complete"');
+    // What a palette still reads, off the record slice it reads everything
+    // from: the ref and the dependency.
+    expect(record?.arguments?.[1].completeRef).toBe(promptCompletionRef(NAME, "phase"));
+    expect(record?.arguments?.[1].completeRequires).toEqual(["job"]);
   });
 
   it("genesis seeds the sidecar the same way register does", async () => {
@@ -277,8 +271,8 @@ describe("PromptsHarness — the split stays in step", () => {
 
     expect(h.get(NAME)?.arguments?.[1].complete).toBe(phases);
     // Genesis is a SEED — no store write — so the record's shape is only
-    // observable through the view. `exportSnapshot` materializes it.
-    const record = h.exportSnapshot()[NAME].arguments?.[1];
+    // observable through the view.
+    const record = h.record(NAME)?.arguments?.[1];
     expect(record?.completeRef).toBe(promptCompletionRef(NAME, "phase"));
     expect(record?.completeRequires).toEqual(["job"]);
   });

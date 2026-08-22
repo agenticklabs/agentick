@@ -48,7 +48,7 @@ export function timelineCompiler(): ReturnType<typeof defineCompiler> {
   return defineCompiler({
     mount: async (input) => {
       bridges = input.bridges;
-      return { mountId: "timeline-compiler-mount", restoredFromSnapshot: false };
+      return { mountId: "timeline-compiler-mount" };
     },
     unmount: async () => {},
     renderTree: async () => {

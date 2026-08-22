@@ -250,14 +250,14 @@ describe("reasoning content survives the fold onto the timeline", () => {
       { store: timelineStore, sessionId },
     );
     await send(session);
-    const snapshot = await session.snapshot();
+    await session.snapshot();
     await session.close();
 
     const { session: restored } = await mkSession(scriptedLoop([]), new InMemorySessionStore(), {
       store: timelineStore,
       sessionId,
     });
-    await restored.restore({ snapshot });
+    await restored.restore();
 
     const reasoning = assistantContent(restored)!.find(
       (b) => b.type === "reasoning",

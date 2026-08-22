@@ -1231,7 +1231,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
    * spread merges with no adapter.
    *
    * Sync-only write sites that cannot reach a fiber (`hydrate`,
-   * `importSnapshot`, `app/run.ts`) keep the base {@link storeCtx} — they carry
+   * `hydrate`, `app/run.ts`) keep the base {@link storeCtx} — they carry
    * no live op to enrich from.
    */
   protected storeCtxEffect(): Effect.Effect<StoreCtx> {

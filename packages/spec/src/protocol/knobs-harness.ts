@@ -27,19 +27,7 @@ import type { ContentBlock } from "../data/content-blocks.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { Unsubscribe } from "./inbox.js";
 import type { HarnessEdge } from "./promise-view.js";
-import type {
-  KnobDescriptor,
-  KnobPrimitive,
-  KnobRegistration,
-  SnapshotCapable,
-} from "./hook-bridges.js";
-
-/**
- * Snapshot payload for {@link KnobsHarnessProtocol.exportSnapshot}.
- * Map of knob id → current value. Descriptor metadata is NOT included —
- * descriptors come from re-rendering the JSX tree, not from the snapshot.
- */
-export type KnobsHarnessSnapshot = Readonly<Record<string, KnobPrimitive>>;
+import type { KnobDescriptor, KnobPrimitive, KnobRegistration } from "./hook-bridges.js";
 
 // ============================================================================
 // Operation inputs
@@ -134,8 +122,7 @@ export interface KnobsFx extends HarnessFx {
 // Protocol
 // ============================================================================
 
-export interface KnobsHarnessProtocol
-  extends SnapshotCapable<KnobsHarnessSnapshot>, HarnessEdge<KnobsFx> {
+export interface KnobsHarnessProtocol extends HarnessEdge<KnobsFx> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `knobs:{id}` — admin actors send mutations addressed here.
@@ -176,6 +163,15 @@ export interface KnobsHarnessProtocol
   // fiber; only the adopter edge takes the Promise face. This protocol used to
   // declare the facade ALONE, which is what put every gate transition's knob
   // write outside its tick — see the {@link HarnessEdge} docblock.
+
+  // ─────────── Construction seed ───────────
+
+  /**
+   * Install caller-supplied values — the construction seed
+   * (`withKnobs({ initial })`, `CreateSessionInput.initialKnobs`). UPSERT, not
+   * replace: a knob the seed does not name keeps whatever `hydrate` loaded.
+   */
+  seed(values: Readonly<Record<string, KnobPrimitive>>): void;
 
   // ─────────── Lifecycle ───────────
 

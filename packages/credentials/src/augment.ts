@@ -25,7 +25,7 @@
  * the wire-extensions framework (#280) and resolves server-side; the
  * response carries status, never tokens.
  *
- * **NOT `SnapshotCapable`.** The session snapshot/restore machinery
+ * **NOT `CheckpointCapable`.** The session checkpoint machinery
  * (`compiler-react` iterates `HookBridges` via feature detection
  * for `snapshot()` / `restore()`) intentionally skips this slot —
  * credentials must never enter a serialized session snapshot. Tokens

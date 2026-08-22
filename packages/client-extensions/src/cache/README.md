@@ -26,7 +26,7 @@ Most agentick methods mutate state or return per-call-distinct results:
 - `session/send` — runs an execution; result is unique per call
 - `session/dispatch` — invokes a tool; side effects matter
 - `app/create_session` — creates state
-- `session/snapshot` — returns current state (changes constantly)
+- `session/dry_run` — renders the tree fresh (changes constantly)
 
 Caching these silently would corrupt adopter applications. The cache
 is opt-in per method so adopters think about each one explicitly:

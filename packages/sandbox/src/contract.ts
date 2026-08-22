@@ -191,9 +191,9 @@ export interface SandboxProvider {
   readonly name: string;
   create(options: SandboxCreateOptions): Promise<SandboxHandle>;
   /**
-   * Optional: restore a sandbox from a prior snapshot. Implementations
-   * MAY no-op (or throw `SnapshotIncompatibleError`) when persistence
-   * isn't supported — the bridge falls back to `create()`.
+   * Optional: restore a sandbox from a prior provider checkpoint.
+   * Implementations MAY no-op (or throw) when persistence isn't
+   * supported — the bridge falls back to `create()`.
    *
    * TODO(#223): hibernate/restore deferred — no provider has a real
    * checkpoint yet (ADR 59). The bridge only ever calls `create`;

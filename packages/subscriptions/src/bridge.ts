@@ -8,11 +8,8 @@
  * fires. The bridge invokes the handler with a `SubscriptionCtx`
  * carrying an AbortSignal that re-declarations cancel.
  *
- * Snapshot/restore: intents are JSON-serializable; handlers are not.
- * On restore, the bridge re-imports the intent list as "pending"
- * (no handler yet) and components re-declare with freshly-bound
- * handlers on the next render — pending intents get promoted to
- * live.
+ * Intents live only as long as their declaration: a resumed session
+ * re-declares them on its first render, handler and all.
  *
  * @see docs/proposals/v2/blueprint/22-state-formatters-reconciler-shape.md
  */
@@ -121,8 +118,6 @@ export interface SubscriptionBridge {
    */
   invoker(id: string): SubscriptionInvoker | undefined;
   subscribe(listener: () => void): Unsubscribe;
-  exportSnapshot(): readonly SubscriptionIntent[];
-  importSnapshot(intents: readonly SubscriptionIntent[]): void;
   /**
    * The operation harness wrapping dispatch, when one was installed
    * (`withSubscriptions` always installs one). The registration point for
@@ -172,7 +167,6 @@ export function createSubscriptionBridge(
   options: CreateSubscriptionBridgeOptions = {},
 ): SubscriptionBridge {
   const live = new Map<string, LiveEntry>();
-  const pending = new Map<string, SubscriptionIntent>();
   const listeners = createNotifier();
   const sessionId = options.sessionId ?? "app";
   const runDispatch = options.runDispatch;
@@ -204,7 +198,6 @@ export function createSubscriptionBridge(
       // Re-declaration aborts any prior controller.
       const prior = live.get(intent.id);
       if (prior) prior.controller.abort();
-      pending.delete(intent.id);
       const controller = new AbortController();
       const entry: LiveEntry = { intent, handler, controller };
       live.set(intent.id, entry);
@@ -221,7 +214,6 @@ export function createSubscriptionBridge(
     list(): readonly SubscriptionIntent[] {
       const out: SubscriptionIntent[] = [];
       for (const e of live.values()) out.push(e.intent);
-      for (const i of pending.values()) out.push(i);
       return out;
     },
     async dispatch(id, event, opts): Promise<void> {
@@ -244,31 +236,6 @@ export function createSubscriptionBridge(
     },
     subscribe(listener): Unsubscribe {
       return listeners.subscribe(listener);
-    },
-    exportSnapshot(): readonly SubscriptionIntent[] {
-      const seen = new Set<string>();
-      const out: SubscriptionIntent[] = [];
-      for (const e of live.values()) {
-        if (!seen.has(e.intent.id)) {
-          seen.add(e.intent.id);
-          out.push(e.intent);
-        }
-      }
-      for (const i of pending.values()) {
-        if (!seen.has(i.id)) {
-          seen.add(i.id);
-          out.push(i);
-        }
-      }
-      return out;
-    },
-    importSnapshot(intents): void {
-      pending.clear();
-      for (const intent of intents) {
-        if (live.has(intent.id)) continue;
-        pending.set(intent.id, intent);
-      }
-      notify();
     },
   };
 }

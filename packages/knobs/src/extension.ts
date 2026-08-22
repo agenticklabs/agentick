@@ -70,10 +70,8 @@ export function withKnobs(options: WithKnobsOptions = {}): SessionExtension {
       );
       await harness.ready;
 
-      // Seed initial values if supplied. Goes through `importSnapshot`
-      // so subscribers fire and `listCache` invalidates correctly.
       if (options.initial && Object.keys(options.initial).length > 0) {
-        harness.importSnapshot(options.initial);
+        harness.seed(options.initial);
       }
 
       installer.registerNamespace("knobs", harness);

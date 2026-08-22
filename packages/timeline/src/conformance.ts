@@ -11,7 +11,6 @@
  *   - replaceProjection writes to projection ONLY
  *   - resetProjection rebuilds projection as a mirror of log
  *   - snapshot round-trip preserves log + projection + provenance
- *   - importSnapshot mode "persisted-only" discards projection
  *   - GENESIS (ADR 93, optional section): the hydrator seeds and is never
  *     re-appended; a throwing hydrator surfaces typed
  */
@@ -198,17 +197,17 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       await h.close();
     });
 
-    it("compact() records lastCompaction on the snapshot", async () => {
+    it("compact() records lastCompaction as projection provenance", async () => {
       const h = await deps.make();
       await h.append(messageEntry("e1", "a"));
       await h.append(messageEntry("e2", "b"));
       await h.compact(summarizeCompact());
-      const snap = h.exportSnapshot();
-      expect(snap.lastCompaction).toBeDefined();
-      expect(snap.lastCompaction!.source).toBe("persisted");
-      expect(snap.lastCompaction!.entriesBefore).toBe(2);
-      expect(snap.lastCompaction!.entriesAfter).toBe(1);
-      expect(snap.lastCompaction!.strategyMetadata).toEqual({ strategy: "summarize" });
+      const meta = h.lastCompaction();
+      expect(meta).toBeDefined();
+      expect(meta!.source).toBe("persisted");
+      expect(meta!.entriesBefore).toBe(2);
+      expect(meta!.entriesAfter).toBe(1);
+      expect(meta!.strategyMetadata).toEqual({ strategy: "summarize" });
       await h.close();
     });
 
@@ -261,93 +260,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       await h.append(messageEntry("e1", "a"));
       await h.compact(summarizeCompact());
-      expect(h.exportSnapshot().lastCompaction).toBeDefined();
+      expect(h.lastCompaction()).toBeDefined();
       await h.resetProjection();
-      expect(h.exportSnapshot().lastCompaction).toBeUndefined();
-      await h.close();
-    });
-  });
-
-  describe("TimelineHarness — snapshot / restore", () => {
-    it("exportSnapshot captures log + projection + versions + provenance", async () => {
-      const h = await deps.make();
-      const e1 = messageEntry("e1", "a");
-      const e2 = messageEntry("e2", "b");
-      await h.append(e1);
-      await h.append(e2);
-      await h.compact(summarizeCompact());
-
-      const snap = h.exportSnapshot();
-      expect(snap.persisted.slice(0, 2)).toEqual([e1, e2]);
-      expect(snap.persisted).toHaveLength(3);
-      expect(snap.projection).toHaveLength(1);
-      expect(snap.persistedVersion).toBe(3);
-      expect(snap.projectionVersion).toBeGreaterThanOrEqual(3);
-      expect(snap.lastCompaction).toBeDefined();
-      await h.close();
-    });
-
-    it("importSnapshot 'as-is' restores everything verbatim", async () => {
-      const h = await deps.make();
-      const e1 = messageEntry("e1", "a");
-      await h.importSnapshot({
-        persisted: [e1],
-        projection: [messageEntry("custom-projection", "x")],
-        persistedVersion: 1,
-        projectionVersion: 5,
-      });
-      expect(h.readPersisted()).toEqual([e1]);
-      expect(h.read().entries[0]?.kind).toBe("message");
-      expect((h.read().entries[0] as { message: { id: string } }).message.id).toBe(
-        "custom-projection",
-      );
-      await h.close();
-    });
-
-    it("importSnapshot 'persisted-only' discards the snapshot projection", async () => {
-      const h = await deps.make();
-      const e1 = messageEntry("e1", "a");
-      await h.importSnapshot(
-        {
-          persisted: [e1],
-          projection: [messageEntry("ignored", "x")],
-          persistedVersion: 1,
-          projectionVersion: 5,
-          lastCompaction: {
-            at: Date.now(),
-            source: "persisted",
-            entriesBefore: 1,
-            entriesAfter: 1,
-          },
-        },
-        { mode: "persisted-only" },
-      );
-      expect(h.read().entries).toEqual([e1]);
-      expect(h.exportSnapshot().lastCompaction).toBeUndefined();
-      await h.close();
-    });
-
-    it("importSnapshot preserves projection provenance without re-running a strategy", async () => {
-      // ADR 93: `"rehydrate"` is gone — importSnapshot is a TRANSPLANT verb, not
-      // a resume path. The provenance rides through as DATA for tooling; nothing
-      // re-executes a compaction on restore.
-      const h = await deps.make();
-      const snapshot = {
-        persisted: [messageEntry("e1", "a"), messageEntry("e2", "b")],
-        projection: [messageEntry("summary", "[2 entries summarized]")],
-        persistedVersion: 2,
-        projectionVersion: 5,
-        lastCompaction: {
-          at: 1234,
-          source: "persisted" as const,
-          entriesBefore: 2,
-          entriesAfter: 1,
-          strategyMetadata: { strategy: "summarize" },
-        },
-      };
-      await h.importSnapshot(snapshot);
-      expect(h.read().entries).toHaveLength(1);
-      expect(h.exportSnapshot().lastCompaction).toEqual(snapshot.lastCompaction);
+      expect(h.lastCompaction()).toBeUndefined();
       await h.close();
     });
   });

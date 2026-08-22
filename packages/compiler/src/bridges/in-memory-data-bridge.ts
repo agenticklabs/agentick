@@ -15,13 +15,7 @@
  * @see packages/spec/src/protocol/hook-bridges.ts
  */
 
-import type {
-  DataBridge,
-  DataCacheEntry,
-  DataEntry,
-  DataResolveOptions,
-  Unsubscribe,
-} from "@agentick/spec";
+import type { DataBridge, DataEntry, DataResolveOptions, Unsubscribe } from "@agentick/spec";
 import { createKeyedNotifier, type KeyedNotifier } from "@agentick/pubsub";
 import { omitUndefined } from "@agentick/utils";
 
@@ -214,49 +208,6 @@ export class InMemoryDataBridge implements DataBridge {
     const keys = [...this.cache.keys()];
     this.cache.clear();
     for (const k of keys) this.notifyKey(k);
-  }
-
-  /**
-   * Export the fulfilled cache entries as `DataCacheEntry[]` for
-   * inclusion in a `CompilerSnapshot`. Pending and rejected entries
-   * are skipped — re-fetching is safer than persisting partial state.
-   */
-  exportSnapshot(): readonly DataCacheEntry[] {
-    const out: DataCacheEntry[] = [];
-    for (const [key, entry] of this.cache) {
-      if (entry.status !== "fulfilled") continue;
-      out.push({
-        key,
-        value: entry.value,
-        fetchedAt: entry.fetchedAt,
-        ...omitUndefined({ ttl: entry.ttl, tag: entry.tag }),
-      });
-    }
-    return out;
-  }
-
-  /**
-   * Replace the cache with entries from a `CompilerSnapshot`. Existing
-   * pending fetches are dropped (the snapshot represents the
-   * authoritative state). TTL is honored — stale entries are skipped.
-   */
-  importSnapshot(entries: readonly DataCacheEntry[]): void {
-    const existingKeys = [...this.cache.keys()];
-    this.cache.clear();
-    this.pendingPromises.clear();
-    const now = Date.now();
-    for (const e of entries) {
-      if (e.ttl !== undefined && now - e.fetchedAt >= e.ttl) continue;
-      this.cache.set(e.key, {
-        status: "fulfilled",
-        value: e.value,
-        fetchedAt: e.fetchedAt,
-        ...omitUndefined({ ttl: e.ttl, tag: e.tag }),
-      });
-    }
-    // Notify keys that changed: union of old keys + new keys.
-    const newKeys = new Set([...existingKeys, ...this.cache.keys()]);
-    for (const k of newKeys) this.notifyKey(k);
   }
 
   // ──────── Internals ────────

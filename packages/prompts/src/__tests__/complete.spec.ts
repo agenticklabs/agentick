@@ -36,18 +36,23 @@ import type { CompletionCtx, CompletionResolver, PromptDeclaration } from "@agen
 
 import { foldCompletionValues, promptCompletionRef } from "../completion.js";
 import { definePrompt } from "../define-prompt.js";
-import { PromptsHarness } from "../harness.js";
+import { PromptsHarness, type PromptsHarnessOptions } from "../harness.js";
+import { hydrateFromStore } from "../hydrators.js";
 import { InMemoryPromptStore } from "../store.js";
 
 const NAME = "tm_change_order_actual_cost";
 
-function makeHarness(sessionId = "sess-complete"): PromptsHarness {
+function makeHarness(
+  store: InMemoryPromptStore = new InMemoryPromptStore(),
+  hydrate?: PromptsHarnessOptions["hydrate"],
+  sessionId = "sess-complete",
+): PromptsHarness {
   return new PromptsHarness(
     `complete:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
-    { store: new InMemoryPromptStore(), parentScope: { sessionId } },
+    { store, parentScope: { sessionId }, ...(hydrate ? { hydrate } : {}) },
   );
 }
 
@@ -133,7 +138,7 @@ describe("PromptsHarness.complete — the resolved arm", () => {
       seen.push(ctx);
       return [];
     };
-    const h = makeHarness("sess-trunk");
+    const h = makeHarness(new InMemoryPromptStore(), undefined, "sess-trunk");
     await h.ready;
     await h.register({
       declaration: definePrompt({
@@ -233,21 +238,17 @@ describe("PromptsHarness.complete — the unavailable arm", () => {
     await h.close();
   });
 
-  it("answers unavailable after a restore drops the sidecar", async () => {
-    // `importSnapshot` keeps the records (and their `completeRef`) but clears the
-    // functions, exactly as it keeps no `render`. A derived ref with no sidecar
-    // restores to no `complete` at all, so the door has nothing to offer rather
-    // than an address nothing answers to.
-    const h = makeHarness();
-    await h.ready;
-    await h.register({ declaration: referencePrompt() });
-    h.importSnapshot(h.exportSnapshot());
-
-    expect(await h.complete({ name: NAME, argument: { name: "job", value: "Mil" } })).toEqual({
-      kind: "unavailable",
-    });
-    // A NAMED ref survives the same restore — it was always just a string.
-    await h.register({
+  it("answers unavailable when the record has no sidecar", async () => {
+    // The sidecar (`template` / `render` / an INLINE `complete`) is
+    // harness-local — it never reaches the store, so a harness that opened on
+    // the durable record alone has the `completeRef` and nothing behind it. A
+    // derived ref with no sidecar reads back as no `complete` at all, so the
+    // door has nothing to offer rather than an address nothing answers to.
+    const store = new InMemoryPromptStore();
+    const source = makeHarness(store);
+    await source.ready;
+    await source.register({ declaration: referencePrompt() });
+    await source.register({
       declaration: definePrompt({
         name: "byref",
         description: "…",
@@ -255,7 +256,16 @@ describe("PromptsHarness.complete — the unavailable arm", () => {
         render: () => "…",
       }),
     });
-    h.importSnapshot(h.exportSnapshot());
+    await source.close();
+
+    const h = makeHarness(store, hydrateFromStore());
+    await h.ready;
+    await h.hydrate();
+
+    expect(await h.complete({ name: NAME, argument: { name: "job", value: "Mil" } })).toEqual({
+      kind: "unavailable",
+    });
+    // A NAMED ref survives — it was always just a string on the record.
     expect(await h.complete({ name: "byref", argument: { name: "job", value: "" } })).toEqual({
       kind: "ref",
       completeRef: "knowify.jobs",

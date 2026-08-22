@@ -30,12 +30,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type {
-  HookBridges,
-  LifecycleEvent,
-  CompilerProtocol,
-  CompilerSnapshot,
-} from "@agentick/spec";
+import type { HookBridges, LifecycleEvent, CompilerProtocol } from "@agentick/spec";
 import { NotMounted, supportsLifecycleProjection } from "@agentick/spec";
 
 /**
@@ -92,7 +87,6 @@ export function runCompilerConformance(factory: CompilerConformanceFactory): voi
         bridges: factory.createBridges(),
       });
       expect(result.mountId).toBe("m_1");
-      expect(typeof result.restoredFromSnapshot).toBe("boolean");
     });
 
     it("mount is idempotent on mountId (second call replays cached terminal)", async () => {
@@ -251,37 +245,6 @@ export function runCompilerConformance(factory: CompilerConformanceFactory): voi
           event: { kind: "tick-start", tickId: "t1" },
         }),
       ).rejects.toBeInstanceOf(NotMounted);
-    });
-  });
-
-  describe("CompilerProtocol — snapshot / restore round-trip", () => {
-    it("snapshot returns a spec-shaped payload that JSON-round-trips", async () => {
-      const compiler = await factory.createCompiler();
-      await compiler.mount({
-        mountId: "m_snap",
-        sessionId: "s",
-        element: factory.buildElement({ kind: "fragment" }),
-        bridges: factory.createBridges({ knobs: { mood: "curious" } }),
-        elementVersion: "sha:abc",
-      });
-      const snap = await compiler.snapshot({ mountId: "m_snap" });
-      expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-      expect(snap.mountId).toBe("m_snap");
-      expect(snap.elementVersion).toBe("sha:abc");
-      const round: CompilerSnapshot = JSON.parse(JSON.stringify(snap));
-      expect(round).toEqual(snap);
-    });
-
-    it("restore is callable and does not throw on a fresh snapshot", async () => {
-      const compiler = await factory.createCompiler();
-      await compiler.mount({
-        mountId: "m_restore",
-        sessionId: "s",
-        element: factory.buildElement({ kind: "fragment" }),
-        bridges: factory.createBridges(),
-      });
-      const snap = await compiler.snapshot({ mountId: "m_restore" });
-      await compiler.restore({ mountId: "m_restore", snapshot: snap });
     });
   });
 

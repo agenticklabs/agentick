@@ -138,7 +138,7 @@ describe("LogView — replaceProjection diverges projection from persisted", () 
     });
     expect(ids(v.read())).toEqual(["summary"]);
     expect(ids(v.readPersisted())).toEqual(["a", "b", "c"]);
-    expect(v.exportSnapshot().lastCompaction?.entriesBefore).toBe(3);
+    expect(v.lastCompaction()?.entriesBefore).toBe(3);
   });
 
   it("resetProjection re-mirrors persisted and clears provenance", async () => {
@@ -148,7 +148,7 @@ describe("LogView — replaceProjection diverges projection from persisted", () 
     expect(ids(v.read())).toEqual([]);
     v.resetProjection();
     expect(ids(v.read())).toEqual(["a", "b"]);
-    expect(v.exportSnapshot().lastCompaction).toBeUndefined();
+    expect(v.lastCompaction()).toBeUndefined();
   });
 });
 
@@ -178,44 +178,5 @@ describe("LogView — seed installs both tiers (ADR 93 genesis)", () => {
     await v.flush();
     expect(appends).toEqual([]);
     expect(ids(v.readPersisted())).toEqual(["g1", "g2"]);
-  });
-});
-
-describe("LogView — export/import round-trips", () => {
-  it("as-is restores both tiers, versions, and provenance verbatim", async () => {
-    const { v } = log();
-    await v.append([row("a"), row("b")], stubStoreCtx());
-    v.replaceProjection([row("s")], {
-      at: 7,
-      source: "persisted",
-      entriesBefore: 2,
-      entriesAfter: 1,
-      strategyMetadata: { kind: "test" },
-    });
-    const snap = v.exportSnapshot();
-
-    const { v: restored } = log();
-    restored.importSnapshot(snap, { mode: "as-is" });
-    expect(ids(restored.readPersisted())).toEqual(["a", "b"]);
-    expect(ids(restored.read())).toEqual(["s"]);
-    expect(restored.exportSnapshot().lastCompaction).toEqual(snap.lastCompaction);
-  });
-
-  it("reset-projection restores persisted only; projection re-mirrors it", async () => {
-    const { v } = log();
-    await v.append([row("a"), row("b")], stubStoreCtx());
-    v.replaceProjection([row("s")], {
-      at: 1,
-      source: "persisted",
-      entriesBefore: 2,
-      entriesAfter: 1,
-    });
-    const snap = v.exportSnapshot();
-
-    const { v: restored } = log();
-    restored.importSnapshot(snap, { mode: "reset-projection" });
-    expect(ids(restored.readPersisted())).toEqual(["a", "b"]);
-    expect(ids(restored.read())).toEqual(["a", "b"]); // mirror, not the snapshot's ["s"]
-    expect(restored.exportSnapshot().lastCompaction).toBeUndefined();
   });
 });

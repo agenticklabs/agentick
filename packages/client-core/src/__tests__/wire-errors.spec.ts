@@ -127,7 +127,7 @@ describe("G2-wire-errors — client-side AgentickError rehydration", () => {
     const client = await createClient({ transport });
 
     const caught = await client
-      .request("session/snapshot", { sessionId: "ghost" })
+      .request("session/model_info", { sessionId: "ghost" })
       .catch((e: unknown) => e);
     expect(caught).toBeInstanceOf(SessionNotFoundError);
     expect((caught as SessionNotFoundError).sessionId).toBe("ghost");

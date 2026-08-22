@@ -70,40 +70,6 @@ describe("createSubscriptionBridge — declare/dispatch", () => {
   });
 });
 
-describe("createSubscriptionBridge — snapshot/restore", () => {
-  it("exports and re-imports intents", () => {
-    const bridge = createSubscriptionBridge();
-    bridge.declare(cron("c1", "@hourly"), async () => {});
-    bridge.declare(cron("c2", "@daily"), async () => {});
-    const snap = bridge.exportSnapshot();
-    expect(snap.map((s) => s.id).sort()).toEqual(["c1", "c2"]);
-
-    const next = createSubscriptionBridge();
-    next.importSnapshot(snap);
-    expect(
-      next
-        .list()
-        .map((i) => i.id)
-        .sort(),
-    ).toEqual(["c1", "c2"]);
-  });
-
-  it("pending intents (no handler) reject dispatch", async () => {
-    const bridge = createSubscriptionBridge();
-    bridge.importSnapshot([cron("c1", "@hourly")]);
-    await expect(bridge.dispatch("c1", null)).rejects.toThrow(/no handler/i);
-  });
-
-  it("re-declaring an imported intent promotes pending → live", async () => {
-    const bridge = createSubscriptionBridge();
-    bridge.importSnapshot([cron("c1", "@hourly")]);
-    const handler = vi.fn(async () => {});
-    bridge.declare(cron("c1", "@hourly"), handler);
-    await bridge.dispatch("c1", { firedAt: 1 });
-    expect(handler).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe("createSubscriptionBridge — subscribe", () => {
   it("fires the listener on declare + unregister", () => {
     const bridge = createSubscriptionBridge();

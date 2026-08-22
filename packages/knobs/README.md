@@ -184,7 +184,7 @@ Descriptors are never stored. They are re-declared by the tree on every mount, w
 
 ## State reaches clients as a patch stream
 
-Knob state leaves the session two ways. The coarse way is `exportSnapshot()` — the whole store, re-sent. The fine way is the `knobs-state` channel: one opening `snapshot` frame, then RFC 6902 JSON-Patch `delta` frames, one op per knob that changed.
+Knob state leaves the session over the `knobs-state` channel: one opening `snapshot` frame, then RFC 6902 JSON-Patch `delta` frames, one op per knob that changed. A subscriber seeds from the frame and applies deltas, re-rendering only the branch that moved.
 
 Delta generation needs no diffing. Every mutation already notifies per-id, so a changed knob _is_ a single `add` or `replace` op; only the far side applies a patch.
 
@@ -261,7 +261,7 @@ knobs.close();
 
 `session.knob(name)` returns a `KnobHandle<T>`: `name`, `get()`, `set(value)`, `subscribe(fn)`.
 
-On a `KnobsHarness` instance, additionally: `fx` (the Effect twins), `onChange(fn)` (typed `ChangeEvent` push), `stateSnapshotFrame()`, the checkpoint pair `persist(ctx)` / `hydrate(ctx)`, and the residual `exportSnapshot()` / `importSnapshot()`.
+On a `KnobsHarness` instance, additionally: `fx` (the Effect twins), `onChange(fn)` (typed `ChangeEvent` push), `stateSnapshotFrame()`, the checkpoint pair `persist(ctx)` / `hydrate(ctx)`, the fork hook `branch(ctx)`, and the construction seed `seed(values)`.
 
 ### `@agentick/knobs/react`
 
@@ -323,9 +323,9 @@ Types: `KnobsState`, `KnobsClient`, `KnobsCommandClient`, `KnobsHandle`, `WireKn
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — operation envelopes for `set` / `register` / `dispatch`, inbox addressability over `knobs:{scopeId}`, snapshot round-trip (values only, descriptors re-declared), read-only enforcement by name and in group writes, and layered resolution over a parent (fall-through, self shadowing, self-only writes, self-only `exportSnapshot`).
+- `src/__tests__/harness.spec.ts` — operation envelopes for `set` / `register` / `dispatch`, inbox addressability over `knobs:{scopeId}`, the construction seed upserting rather than replacing, read-only enforcement by name and in group writes, and layered resolution over a parent (fall-through, self shadowing, self-only writes, a self-only state frame).
 - `src/__tests__/integration-with-compiler.spec.tsx` — against the real compiler: descriptor registration and `valueType` inference, value preservation on re-registration, momentary reset at execution end, `<Knobs />` default rendering (including the formatter output and the `knob_set` declaration), inline knobs hidden, the render prop suppressing the default section, and re-render on an external `set`.
-- `src/__tests__/state-channel.spec.ts` — `add` vs `replace` deltas, monotonic gap-free `version`, defaulted `register` emitting while descriptor-only does not, `importSnapshot` emitting a fresh snapshot frame, `stateSnapshotFrame()` not advancing the version, RFC 6901 id escaping, and a snapshot seed plus applied deltas reconstructing the live store.
+- `src/__tests__/state-channel.spec.ts` — `add` vs `replace` deltas, monotonic gap-free `version`, defaulted `register` emitting while descriptor-only does not, `hydrate` emitting a fresh snapshot frame, `stateSnapshotFrame()` not advancing the version, RFC 6901 id escaping, and a snapshot seed plus applied deltas reconstructing the live store.
 - `src/__tests__/descriptors-wire.spec.ts` — the snapshot frame carries declared metadata, strips `validate`/`schema`, and the channel-snapshot provider path returns the descriptor-carrying frame.
 - `src/__tests__/change-stream.spec.ts` — the `onChange` seam: add vs update, defaulted register, dispatch riding the same write path, unsubscribe, and multiple projections on one stream.
 - `src/__tests__/store-backing.spec.ts` — every write path reaching the store, scope partitioning across two harnesses on one store, `hydrate()` repopulating and pinging subscribers, `persist()` awaiting in-flight writes, the values lost when the default per-harness store is used, and export/import coexisting with the store.

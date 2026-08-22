@@ -19,10 +19,9 @@
  * `normalizePromptArguments` performs that split at every declaration-write site;
  * `restorePromptArguments` re-joins it on every read that hands out a full
  * declaration. The two are inverse, with one deliberate asymmetry: a DERIVED ref
- * whose sidecar entry is gone (post-`importSnapshot`) restores to no `complete`
- * at all rather than to a string pointing at nothing — the same honesty
- * `template`/`render` get, where a restored prompt has no content until the
- * adopter re-registers it.
+ * whose sidecar entry is gone restores to no `complete` at all rather than to a
+ * string pointing at nothing — the same honesty `template`/`render` get, where a
+ * prompt whose content has not been re-declared has none until it is.
  *
  * The resolve door itself is `PromptsHarness.complete` — it reads the re-joined
  * declaration, so the three shapes `restorePromptArguments` can hand back (a

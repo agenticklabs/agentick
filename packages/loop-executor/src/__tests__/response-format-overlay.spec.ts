@@ -46,7 +46,7 @@ function mkCompiler(config?: SpecConfig, model?: ModelDeclaration): CompilerProt
   const render = () => ({ tree: mkTree(), diagnostics: [], iterations: 1 });
   return {
     fx: { use: () => () => {}, guard: () => () => {}, renderTree: () => Effect.succeed(render()) },
-    mount: async () => ({ mountId: "rf-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "rf-mount" }),
     rerender: async () => undefined,
     renderTree: async () => render(),
     renderToString: async () => ({
@@ -55,14 +55,6 @@ function mkCompiler(config?: SpecConfig, model?: ModelDeclaration): CompilerProt
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "rf-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 

@@ -20,8 +20,9 @@ import { TimelineHarness, type TimelineHarnessOptions } from "../harness.js";
  * the host AppHarness; this factory is for standalone unit tests
  * where the substrate plumbing isn't exercised.
  *
- * `initial` seeds entries eagerly via `importSnapshot({ mode: "as-is" })` —
- * both log and projection start as a live mirror of the supplied array.
+ * `initial` seeds entries eagerly via the genesis seed law — both log and
+ * projection start as a live mirror of the supplied array, and nothing is
+ * written back to the store.
  *
  * `options` threads through to the harness constructor — pass `{ store }` /
  * `{ writePolicy }` (ADR 49) to exercise durable-backing behavior.
@@ -37,14 +38,7 @@ export function stubTimelineHarness(
     new LocalInbox(),
     options,
   );
-  if (initial.length > 0) {
-    void harness.importSnapshot({
-      persisted: initial,
-      projection: initial,
-      persistedVersion: initial.length,
-      projectionVersion: initial.length,
-    });
-  }
+  if (initial.length > 0) harness.seed(initial);
   return harness;
 }
 

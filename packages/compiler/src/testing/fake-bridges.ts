@@ -40,7 +40,6 @@ import type {
   TimelineHarnessProtocol,
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
-  TimelineHarnessSnapshot,
   CompactStrategy,
   CompactResult,
 } from "@agentick/spec";
@@ -107,6 +106,7 @@ export function fakeTimelineHarness(
       persisted.filter((e) => e.kind === "message" && e.message.role === "user").length,
     endTurn: async () => {},
     readPersisted: () => persisted,
+    lastCompaction: () => undefined,
     // The Effect-canonical twin (ADR 77). A fake that only implements the
     // Promise facade is a fake that cannot be composed in a caller's fiber —
     // which is the whole reason the twin exists.
@@ -152,21 +152,6 @@ export function fakeTimelineHarness(
     resetProjection: async () => {
       projection = [...persisted];
       refresh();
-      notify();
-    },
-    exportSnapshot: (): TimelineHarnessSnapshot => ({
-      persisted: [...persisted],
-      projection: [...projection],
-      persistedVersion: persisted.length,
-      projectionVersion: version,
-    }),
-    importSnapshot: async (snap: TimelineHarnessSnapshot): Promise<void> => {
-      // Mock: rewrite from snapshot.
-      persisted.length = 0;
-      persisted.push(...snap.persisted);
-      projection = [...snap.projection];
-      version = snap.projectionVersion;
-      snapshot = { entries: [...projection], version };
       notify();
     },
     close: async () => {},
@@ -240,14 +225,7 @@ export function fakeKnobsHarness(
     set: async (input: KnobsSetInput) => setValue(input),
     register: async (input: KnobsRegisterInput) => registerKnob(input),
     dispatch: async (input: KnobsDispatchInput) => dispatchKnob(input),
-    exportSnapshot: () => {
-      const out: Record<string, KnobPrimitive> = {};
-      for (const [k, v] of values) out[k] = v;
-      return out;
-    },
-    importSnapshot: (snap: Readonly<Record<string, KnobPrimitive>>) => {
-      values.clear();
-      descriptors.clear();
+    seed: (snap: Readonly<Record<string, KnobPrimitive>>) => {
       for (const [k, v] of Object.entries(snap)) {
         values.set(k, v);
         descriptors.set(k, {
@@ -303,17 +281,9 @@ export function mockStateHarness(
     },
     set: async (input: StateSetInput) => setValue(input),
     delete: async (input: StateDeleteInput) => deleteKey(input),
-    exportSnapshot: () => {
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of values) out[k] = v;
-      return out;
-    },
-    importSnapshot: (snap: Readonly<Record<string, unknown>>) => {
-      const before = new Set(values.keys());
-      values.clear();
+    seed: (snap: Readonly<Record<string, unknown>>) => {
       for (const [k, v] of Object.entries(snap)) values.set(k, v);
-      const after = new Set(values.keys());
-      for (const k of new Set([...before, ...after])) fire(k);
+      for (const k of Object.keys(snap)) fire(k);
     },
     close: async () => {},
   };

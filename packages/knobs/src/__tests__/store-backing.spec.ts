@@ -214,12 +214,12 @@ describe("KnobsHarness — durability across harness instances", () => {
   });
 });
 
-describe("KnobsHarness — importSnapshot / exportSnapshot coexist with the store", () => {
-  it("importSnapshot populates BOTH the projection and the store", async () => {
+describe("KnobsHarness — the construction seed writes through", () => {
+  it("seed populates BOTH the projection and the store", async () => {
     const store = createKnobStore();
     const harness = await makeHarness(store);
 
-    harness.importSnapshot({ a: 1, b: "two", c: true });
+    harness.seed({ a: 1, b: "two", c: true });
 
     expect(harness.get("a")).toBe(1);
     expect(harness.get("b")).toBe("two");
@@ -230,25 +230,22 @@ describe("KnobsHarness — importSnapshot / exportSnapshot coexist with the stor
     await harness.close();
   });
 
-  it("everything importSnapshot restored round-trips through the store path instead", async () => {
-    const source = await makeHarness();
-    await source.set({ id: "a", value: 1 });
-    await source.set({ id: "b", value: "two" });
-    await source.register({ id: "b", descriptor: { valueType: "string", description: "second" } });
-    const snap = source.exportSnapshot();
-
+  it("seed UPSERTS — a hydrated knob the seed does not name survives it", async () => {
+    // The create-call seed runs AFTER the hydrate fan-out, so replace semantics
+    // would silently wipe everything the store just restored.
     const shared = createKnobStore();
-    const viaBlob = await makeHarness(shared);
-    viaBlob.importSnapshot(snap);
-    await viaBlob.persist(checkpointCtx());
-    await viaBlob.close();
+    const first = await makeHarness(shared);
+    await first.set({ id: "durable", value: "kept" });
+    await first.persist(checkpointCtx());
+    await first.close();
 
-    const viaStore = await makeHarness(shared);
-    await viaStore.hydrate(checkpointCtx());
+    const second = await makeHarness(shared);
+    await second.hydrate(checkpointCtx());
+    second.seed({ fromCreate: 9 });
 
-    expect(viaStore.exportSnapshot()).toEqual(snap);
-    await source.close();
-    await viaStore.close();
+    expect(second.get("durable")).toBe("kept");
+    expect(second.get("fromCreate")).toBe(9);
+    await second.close();
   });
 });
 

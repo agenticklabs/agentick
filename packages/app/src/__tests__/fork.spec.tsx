@@ -2,11 +2,13 @@
  * `session.fork()` — same-image, copied-state child (C2, three-audiences-plan
  * §C split, item 2).
  *
- * A fork is `spawn` (no send, parent's OWN agent root) + `restore` of the
- * parent's live snapshot. The child copies every SnapshotCapable bridge's state
- * (timeline, knobs, …) + tick/usage accounting, gets its OWN sessionId and spawn
- * lineage, and is ALWAYS returned unbound (never auto-sends). Post-fork the two
- * sessions diverge — a mutation on one is invisible to the other.
+ * A fork is `spawn` (no send, parent's OWN agent root) over a BRANCHED copy of
+ * the parent's durable scopes: the flush barrier lands the parent's writes,
+ * every BranchCapable bridge copies the parent's scope onto the child's at its
+ * own store layer, and the child hydrates on that copy. It gets its OWN
+ * sessionId and spawn lineage, and is ALWAYS returned unbound (never
+ * auto-sends). Post-fork the two sessions diverge — a mutation on one is
+ * invisible to the other.
  *
  * End-to-end through `createApp` (the app is the `SpawnContext` that actually
  * constructs + restores the child). Scripted through the canonical

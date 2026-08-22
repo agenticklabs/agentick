@@ -43,7 +43,7 @@ const stubCompiler = (): CompilerProtocol =>
       guard: () => () => {},
       renderTree: () => Effect.succeed({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "fx-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "fx-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree: EMPTY_TREE, diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -52,14 +52,6 @@ const stubCompiler = (): CompilerProtocol =>
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "fx-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   }) as unknown as CompilerProtocol;
 
 const stubToolExecutor = (): ToolExecutorProtocol =>

@@ -62,7 +62,7 @@ import { stubHarnessFx } from "./harness.js";
 /**
  * The durable persisted timeline log, read from the LIVE handle. The timeline
  * is CheckpointCapable (checkpointing §3.2): it persists to its own store and
- * is excluded from the snapshot blob, so the blob is no longer a read surface.
+ * persists to its own store — the only read surface there is.
  *
  * `@agentick/timeline` augments the `timeline` slot onto
  * {@link SessionHarnessProtocol}; this package is generic infra and must not
@@ -138,7 +138,7 @@ function stubCompiler(): CompilerProtocol {
       ...stubHarnessFx(),
       renderTree: () => Effect.succeed({ tree: mkTree(), diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "stub-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "stub-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({
       tree: mkTree(),
@@ -151,14 +151,6 @@ function stubCompiler(): CompilerProtocol {
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: "2026-05-08",
-      mountId: "stub-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 
@@ -409,66 +401,36 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
     });
   });
 
-  describe("SessionHarnessProtocol — snapshot", () => {
-    it("returns a snapshot with id + currentTick + a generic bridges fold", async () => {
+  describe("SessionHarnessProtocol — checkpoint", () => {
+    it("snapshot() is the flush barrier: it resolves with no payload", async () => {
       const session = await factory({
         harnessId: "session-conf-snap-1",
         deps: defaultSessionConformanceDeps(),
       });
-      const snap = await session.snapshot();
-      expect(snap.id).toBeTruthy();
-      expect(typeof snap.currentTick).toBe("number");
-      // Step 6 (ADR 27) — every sub-harness state lives in the generic
-      // `bridges` map, feature-detected. No hardcoded top-level timeline/knobs.
-      expect(typeof snap.bridges).toBe("object");
-      // A CheckpointCapable timeline persists to its OWN store and is
-      // excluded from the blob (checkpointing §3.2).
-      expect(snap.bridges.timeline).toBeUndefined();
-      expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      // The checkpoint hands nothing back — each CheckpointCapable bridge
+      // flushed to its OWN store, and no value crosses the seam
+      // (checkpointing §3.2).
+      await expect(session.snapshot()).resolves.toBeUndefined();
       await session.close();
     });
 
-    it("snapshot reflects post-send state", async () => {
+    it("restore() re-hydrates from the stores and is idempotent", async () => {
       const session = await factory({
-        harnessId: "session-conf-snap-2",
-        deps: defaultSessionConformanceDeps(),
-      });
-      const before = await session.snapshot();
-      const seenBefore = persistedTimeline(session).length;
-      await (
-        await session.send({ messages: [{ role: "user", content: "x" }] })
-      ).result;
-      const after = await session.snapshot();
-      expect(after.currentTick).toBeGreaterThan(before.currentTick);
-      expect(persistedTimeline(session).length).toBeGreaterThan(seenBefore);
-      await session.close();
-    });
-
-    it("restore fans a snapshot back into a fresh session (generic importSnapshot)", async () => {
-      // Timeline no longer rides the blob (checkpointing §3.2 — same-backing
-      // resume is certified by the kill-resume acceptance and the timeline
-      // conformance checkpoint section). What restore still fans generically
-      // is the residual SnapshotCapable bridges + the session accounting.
-      const src = await factory({
-        harnessId: "session-conf-restore-src",
+        harnessId: "session-conf-restore-1",
         deps: defaultSessionConformanceDeps(undefined, { loop: stubLoop("noted") }),
       });
       await (
-        await src.send({ messages: [{ role: "user", content: "remember-XYZZY" }] })
+        await session.send({ messages: [{ role: "user", content: "remember-XYZZY" }] })
       ).result;
-      const snap = await src.snapshot();
-      expect(snap.currentTick).toBeGreaterThan(0);
-      await src.close();
+      const afterSend = persistedTimeline(session).length;
+      expect(afterSend).toBeGreaterThan(0);
 
-      const dest = await factory({
-        harnessId: "session-conf-restore-dest",
-        deps: defaultSessionConformanceDeps(),
-      });
-      await dest.restore({ snapshot: { ...snap, id: "session-conf-restore-dest" } });
-      const restored = await dest.snapshot();
-      expect(restored.currentTick).toBe(snap.currentTick);
-      expect(restored.usage).toEqual(snap.usage);
-      await dest.close();
+      await session.snapshot();
+      await session.restore();
+      await session.restore();
+      // Store as authority, no duplication: hydrate REPLACES, it never appends.
+      expect(persistedTimeline(session).length).toBe(afterSend);
+      await session.close();
     });
   });
 

@@ -45,7 +45,7 @@ import {
   type BaseHarnessOptions,
   type Unsubscribe,
 } from "@agentick/runtime";
-import { LogView } from "@agentick/store";
+import { LogView, type LogProjectionMeta } from "@agentick/store";
 
 import { MemoryTimelineStore, timelineScopeKey } from "./store.js";
 import { hydrateFromStore } from "./hydrators.js";
@@ -83,8 +83,6 @@ import type {
   TimelineEntry,
   TimelineHarnessProtocol,
   TimelineStore,
-  TimelineHarnessSnapshot,
-  TimelineImportSnapshotOptions,
   TimelineReplaceProjectionInput,
   TimelineSnapshot,
   MessageTimelineEntry,
@@ -604,6 +602,20 @@ export class TimelineHarness
     return this.log.readPersisted();
   }
 
+  lastCompaction(): LogProjectionMeta | undefined {
+    return this.log.lastCompaction();
+  }
+
+  /**
+   * Install entries into both tiers WITHOUT writing them back to the store —
+   * the genesis seed law ({@link hydrate} runs it for a configured hydrator).
+   * Public so a test rig or an adopter driving genesis itself can open a
+   * harness on a known conversation.
+   */
+  seed(entries: readonly TimelineEntry[]): void {
+    this.log.seed(entries);
+  }
+
   // ─────────── Async surface — full Operations ───────────
 
   /**
@@ -1042,32 +1054,6 @@ export class TimelineHarness
       visibility: "log",
     };
     return this.append(entry);
-  }
-
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): TimelineHarnessSnapshot {
-    return this.log.exportSnapshot();
-  }
-
-  async importSnapshot(
-    snapshot: TimelineHarnessSnapshot,
-    options: TimelineImportSnapshotOptions = {},
-  ): Promise<void> {
-    const mode = options.mode ?? "as-is";
-
-    switch (mode) {
-      case "as-is": {
-        // Trust the snapshot's projection verbatim.
-        this.log.importSnapshot(snapshot, { mode: "as-is" });
-        return;
-      }
-      case "persisted-only": {
-        // Restore the durable log; projection re-mirrors persisted.
-        this.log.importSnapshot(snapshot, { mode: "reset-projection" });
-        return;
-      }
-    }
   }
 
   // ─────────── Inbox routing ───────────

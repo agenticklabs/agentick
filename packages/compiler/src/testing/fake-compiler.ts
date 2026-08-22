@@ -48,7 +48,6 @@ export function fakeCompiler(): ReturnType<typeof defineCompiler> {
   return defineCompiler({
     mount: async () => ({
       mountId: "fake-compiler-mount",
-      restoredFromSnapshot: false,
     }),
     unmount: async () => {},
     renderTree: async () =>

@@ -79,7 +79,6 @@ import type {
   OutputSpec,
   RenderContext,
   ResponseFormat,
-  RestoreSnapshotInput,
   SendInput,
   SendMessageInput,
   SendResult,
@@ -91,11 +90,9 @@ import type {
   SessionExecutionHandle,
   SessionHarnessProtocol,
   SessionRunOutcome,
-  SessionSnapshot,
   SessionStatus,
   SessionStatusFrame,
   SessionStore,
-  SnapshotMigration,
   SessionSubstrateParent,
   ForkInput,
   SpawnContext,
@@ -129,16 +126,13 @@ import {
   isBranchCapable,
   isCheckpointCapable,
   isExecuteError,
-  isSnapshotCapable,
   NoModelForExecutionError,
   SESSION_STATUS_CHANNEL,
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   InvalidMediaSource,
   SessionClosedError,
-  SnapshotVersionMismatch,
   SpawnDepthExceededError,
-  SPEC_VERSION,
   TimelineWriteFailed,
 } from "@agentick/spec";
 import { mergeAbortSignals, mergeLayered, omitUndefined } from "@agentick/utils";
@@ -199,14 +193,13 @@ declare module "@agentick/runtime" {
     // as a session command so a model swap is journaled + hookable
     // (`onBeforeSessionSetModel` — "this session may not switch to model X").
     "session:set-model": { input: SetModelInput; output: void };
-    // Recovery pass #1 — snapshot/restore ARE commands (persist/restore hook
-    // quartet). `session:snapshot` mints `onBeforeSessionSnapshot` (veto) +
-    // `onAfterSessionSnapshot` (the v1 `onPersist` augment/redact parity —
-    // transform the output). `session:restore` mints `onBeforeSessionRestore`
-    // (the v1 `onRestore` seam — migration lives at the decision point) +
-    // `onAfterSessionRestore`. Both journal.
-    "session:snapshot": { input: CaptureSnapshotInput; output: SessionSnapshot };
-    "session:restore": { input: RestoreSnapshotInput; output: void };
+    // Recovery pass #1 — checkpoint/rehydrate ARE commands. `session:snapshot`
+    // mints `onBeforeSessionSnapshot` (veto — the pin seam) +
+    // `onAfterSessionSnapshot`; `session:restore` mints
+    // `onBeforeSessionRestore` + `onAfterSessionRestore`. Both journal, and
+    // both carry NO payload: the data never leaves its harness's own store.
+    "session:snapshot": { input: void; output: void };
+    "session:restore": { input: void; output: void };
     // ADR 92 Family 2 §5 — teardown is an op, symmetric with `app:close-app` /
     // `gateway:close`. Mints `onBeforeSessionClose` (the hold-for-drain seam)
     // + `onAfterSessionClose`. BUS-ONLY by policy: the body reaches substrate
@@ -223,14 +216,6 @@ declare module "@agentick/runtime" {
     };
   }
 }
-
-/**
- * Input to the `session:snapshot` command. Empty today — reserved for
- * future capture options (selective bridge capture, redaction hints). The
- * `onBeforeSessionSnapshot` hook receives it; the valuable seam is
- * `onAfterSessionSnapshot` (transform the captured {@link SessionSnapshot}).
- */
-export type CaptureSnapshotInput = Record<string, never>;
 
 // ============================================================================
 // Construction options
@@ -423,16 +408,6 @@ export interface SessionHarnessOptions<P = unknown> {
    * sentence per call). Cascades from the app-level default.
    */
   readonly narrate?: boolean;
-  /**
-   * Snapshot-migration seam (recovery pass #1 — schema evolution). A typed
-   * callback invoked by {@link SessionHarness.restore} when a snapshot's
-   * `specVersion` differs from the running `SPEC_VERSION`, to bring the old
-   * shape up to current. Construction-bound (threaded from the app) because
-   * a given deployment knows how to migrate old snapshots to its own shape.
-   * With none supplied, a version mismatch throws `SnapshotVersionMismatch`
-   * (fail-closed). See {@link SnapshotMigration}.
-   */
-  readonly migrateSnapshot?: SnapshotMigration;
   /**
    * Construction-bound abort signal (PA1 — the app-signal cascade + the
    * per-session `CreateSessionInput.signal`). Merged with each call's
@@ -816,8 +791,6 @@ export class SessionHarness<P = unknown>
   private readonly defaultStreaming: boolean | undefined;
   /** Model-call narration switch (default `true`). See SessionHarnessOptions.narrate. */
   private readonly narrate: boolean;
-  /** Snapshot-migration seam (recovery pass #1). See {@link SnapshotMigration}. */
-  private readonly migrateSnapshot: SnapshotMigration | undefined;
   /**
    * Construction-bound abort signal (PA1 — app-signal cascade). Merged
    * into every send's execution signal, so an abort tears down in-flight
@@ -1110,12 +1083,12 @@ export class SessionHarness<P = unknown>
     // a value the caller passed to THIS create outranks what is durable.
     const seedCreateInputValues = (): void => {
       if (options.initialKnobs) {
-        this.bridges.knobs.importSnapshot(
+        this.bridges.knobs.seed(
           options.initialKnobs as Readonly<Record<string, string | number | boolean>>,
         );
       }
       if (options.initialState) {
-        this.bridges.state.importSnapshot(options.initialState);
+        this.bridges.state.seed(options.initialState);
       }
     };
 
@@ -1177,7 +1150,6 @@ export class SessionHarness<P = unknown>
     this.defaultStreaming = options.defaultStreaming;
     // Narration defaults ON — the token-cost off-switch is opt-out.
     this.narrate = options.narrate ?? true;
-    this.migrateSnapshot = options.migrateSnapshot;
     this.constructionSignal = options.signal;
     this.mountId = `mount:${options.sessionId}`;
 
@@ -1721,21 +1693,19 @@ export class SessionHarness<P = unknown>
     return executor.prepareRequest?.({ targetInput: input, target: model.target });
   }
 
-  snapshot(): Promise<SessionSnapshot> {
+  snapshot(): Promise<void> {
     // Recovery pass #1 — `session:snapshot` command. `onBeforeSessionSnapshot`
-    // (veto) + `onAfterSessionSnapshot` (augment/redact the output — the v1
-    // `onPersist` parity) fire around the capture. The flush barrier runs
-    // FIRST: a rejected `persist` aborts the whole operation, so a failed
+    // (the veto a pin rides) + `onAfterSessionSnapshot` fire around the flush
+    // barrier. A rejected `persist` rejects the whole operation, so a failed
     // flush is never followed by the caller's unmount (checkpointing §3.2).
     return runHarnessProtocol(
-      this.sessionOp("snapshot", {} as CaptureSnapshotInput, () =>
+      this.sessionOp("snapshot", undefined, () =>
         Effect.gen(this, function* () {
           const ctx = yield* this.checkpointCtx();
           yield* Effect.tryPromise({
             try: () => this.persistCheckpointBridges(ctx),
             catch: (cause): SessionError => coerceSessionError(cause),
           });
-          return this.captureSnapshot();
         }),
       ),
     );
@@ -1799,52 +1769,15 @@ export class SessionHarness<P = unknown>
     }
   }
 
-  /**
-   * Step 6 (ADR 27) — the generic per-harness fold. Composes the session
-   * shape from every {@link SnapshotCapable} bridge's `exportSnapshot()`,
-   * feature-detected (no hardcoded slot names), exactly mirroring the
-   * channel {@link snapshotProviders} scan and the compiler's
-   * `captureBridgeSnapshots`. A new SnapshotCapable extension bridge is
-   * picked up automatically — no session change.
-   *
-   * A {@link CheckpointCapable} bridge has already flushed to its own store
-   * and is excluded here — a migrated harness must not also double-write
-   * into the blob.
-   */
-  private captureSnapshot(): SessionSnapshot {
-    const bridges: Record<string, unknown> = {};
-    for (const [name, bridge] of Object.entries(this.bridges)) {
-      if (isCheckpointCapable(bridge)) continue;
-      if (isSnapshotCapable(bridge)) bridges[name] = bridge.exportSnapshot();
-    }
-    return {
-      specVersion: SPEC_VERSION,
-      id: this.runtime.id,
-      status: this.runtime.status(),
-      currentTick: this.runtime.currentTick(),
-      bridges,
-      usage: this.runtime.usage(),
-      // The accounting record travels with the snapshot. A stamped cost that
-      // does not survive a reload defeats the point of stamping it, and the
-      // per-model breakdown is the only thing that makes it recomputable-free.
-      ...omitUndefined({
-        byModel: this.runtime.byModel(),
-        cost: this.runtime.cost(),
-        parentSessionId: this.parentSessionId,
-      }),
-    };
-  }
-
-  restore(input: RestoreSnapshotInput): Promise<void> {
-    // Recovery pass #1 — `session:restore` command. `onBeforeSessionRestore`
-    // + `onAfterSessionRestore` fire around the fan-out; migration runs at
-    // the version-check decision point inside the body.
+  restore(): Promise<void> {
+    // Recovery pass #1 — `session:restore` command. `onBeforeSessionRestore` +
+    // `onAfterSessionRestore` fire around the hydrate fan-out.
     return runHarnessProtocol(
-      this.sessionOp("restore", input, (i) =>
+      this.sessionOp("restore", undefined, () =>
         Effect.gen(this, function* () {
           const ctx = yield* this.checkpointCtx();
           yield* Effect.tryPromise({
-            try: () => this.restoreBody(i, ctx),
+            try: () => this.restoreBody(ctx),
             catch: (cause): SessionError => coerceSessionError(cause),
           });
         }),
@@ -1853,54 +1786,19 @@ export class SessionHarness<P = unknown>
   }
 
   /**
-   * Restore a {@link SessionSnapshot} into this live session (Step 6
-   * symmetric fan-out). Order:
-   *   1. migration seam — if `snapshot.specVersion` ≠ `SPEC_VERSION`, run
-   *      the construction-bound `migrateSnapshot` callback (or throw
-   *      `SnapshotVersionMismatch` when none is set — fail-closed).
-   *   2. checkpoint fan-out — every {@link CheckpointCapable} bridge
-   *      `hydrate`s from its own store, in bag order. Such a bridge ignores
-   *      any residual blob entry for its slot.
-   *   3. bridge fan-out — for every entry in `snapshot.bridges`, if the
-   *      live bridge by that name is {@link SnapshotCapable}, `importSnapshot`
-   *      it. Async-aware (timeline's import is a Promise); awaited together.
-   *   4. accounting — restore the execution-local tick + the aggregate
-   *      usage / per-model breakdown / cost rollup.
+   * Rehydrate this live session: every {@link CheckpointCapable} bridge reads
+   * the latest for its own scope from its own store, in bag order. Accounting
+   * is NOT restored here — `usage` / `byModel` / `cost` live on the durable
+   * `SessionRecord` and are adopted by `SessionRuntime.hydrate()` at genesis,
+   * and `currentTick` is execution-local (it resets per execution and never
+   * enters the record).
    */
-  private async restoreBody(input: RestoreSnapshotInput, ctx: HydrateCtx): Promise<void> {
+  private async restoreBody(ctx: HydrateCtx): Promise<void> {
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "restore" });
     }
     await this._mountReady;
-
-    let snap = input.snapshot;
-    if (snap.specVersion !== SPEC_VERSION) {
-      if (this.migrateSnapshot === undefined) {
-        throw new SnapshotVersionMismatch({ from: snap.specVersion, to: SPEC_VERSION });
-      }
-      snap = await this.migrateSnapshot(snap, { from: snap.specVersion, to: SPEC_VERSION });
-    }
-
-    // Generic fan-out — feature-detected, no hardcoded slot names.
-    const bag = this.bridges as unknown as Record<string, unknown>;
     await this.hydrateCheckpointBridges(ctx);
-    const pending: Promise<unknown>[] = [];
-    for (const [name, value] of Object.entries(snap.bridges)) {
-      if (value === undefined) continue;
-      const bridge = bag[name];
-      if (isCheckpointCapable(bridge)) continue;
-      if (isSnapshotCapable(bridge)) {
-        const result = bridge.importSnapshot(value);
-        if (result instanceof Promise) pending.push(result);
-      }
-    }
-    if (pending.length > 0) await Promise.all(pending);
-
-    // Accounting — restore tick + usage (the session identity the bridge
-    // fold doesn't carry). Status is NOT forced: a restored session resumes
-    // under its own lifecycle, not the snapshot's captured phase.
-    this.runtime.setTick(snap.currentTick);
-    this.runtime.setAccounting(snap.usage, snap.byModel, snap.cost);
   }
 
   /**
@@ -2391,12 +2289,12 @@ export class SessionHarness<P = unknown>
     // complete as of the fork instant (checkpointing §5). `spawn({})` defaults
     // `agent` to `this.agentRoot` (same-image child) and returns the unbound
     // child (no `send`).
-    const snap = await this.snapshot();
-    // C2 — a fork is a same-image copy: the snapshot already fans every
-    // bridge's state into the child, but the record's adopter `metadata` bag is
-    // the arbitrary exception the snapshot does not carry. So when the caller
-    // does NOT override `metadata`, the fork inherits the PARENT's bag (this
-    // session knows its own metadata). An explicit `ForkInput.metadata` wins.
+    await this.snapshot();
+    // C2 — a fork is a same-image copy: the branch fan-out copies every
+    // store-backed bridge's scope onto the child, but the record's adopter
+    // `metadata` bag rides no harness store. So when the caller does NOT
+    // override `metadata`, the fork inherits the PARENT's bag (this session
+    // knows its own metadata). An explicit `ForkInput.metadata` wins.
     // (Spawn does NOT auto-inherit metadata — a spawned child is a NEW session;
     // adopter-selective inheritance rides the `onSessionCreate` reshape arm.)
     const parentMeta =
@@ -2412,10 +2310,9 @@ export class SessionHarness<P = unknown>
     })) as SessionHarnessProtocol<P>;
     // Branch THEN restore. The branch copies this session's durable scopes onto
     // the child's at the store layer; the restore's hydrate fan-out opens the
-    // child on that copy and carries the tick/usage accounting no store holds.
-    // Residual `SnapshotCapable` bridges still ride the blob until the sweep.
+    // child on that copy.
     if (child instanceof SessionHarness) await child.branchCheckpointBridges(this.runtime.id);
-    await child.restore({ snapshot: snap });
+    await child.restore();
     return child;
   }
 
@@ -2671,7 +2568,7 @@ export class SessionHarness<P = unknown>
    * Build (once) the `channel → ChannelSnapshotProvider` index by scanning the
    * session's owned harnesses for one passing {@link isChannelSnapshotProvider}.
    * No hardcoded slot list — any harness that conforms is discovered
-   * generically (mirrors the SnapshotCapable feature-detection pattern).
+   * generically (mirrors the checkpoint feature-detection pattern).
    *
    * The candidate set is every bridge value PLUS `this.toolExecutor`: the tool
    * executor is a session-owned harness held OUTSIDE `bridges` (the `tools`

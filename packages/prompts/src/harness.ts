@@ -3,10 +3,6 @@
  *
  * Per ADR 32, Shape 1 harness:
  *   - Audit envelopes for every register / update / remove / invoke
- *   - Snapshot/restore via `SnapshotCapable` (declarations only —
- *     `template`, `render`, and an argument's inline `complete`
- *     resolver aren't serializable; adopter re-registers content
- *     alongside snapshot load)
  *   - Substrate slot pattern inherited from BaseHarness
  *
  * **Invocation (ADR 51)** — every verb is a DECLARED COMMAND
@@ -74,7 +70,6 @@ import type {
   PromptsInvokeInput,
   PromptsRegisterInput,
   PromptsRemoveInput,
-  PromptsSnapshotEntry,
   PromptsUpdateInput,
   StandardSchemaIssue,
   StandardSchemaV1,
@@ -245,8 +240,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * hand-roll (a `CollectionProjection` for the sync cache + write-through and a
    * `KeyedNotifier` for render pings). Holds the SERIALIZABLE
    * {@link PromptDeclarationRecord} slice. `get` / `has` / `list` read
-   * it during render; `exportSnapshot` materializes it synchronously (records ARE
-   * the snapshot — fns are excluded by construction); the mutation helpers write
+   * it during render; the mutation helpers write
    * through it (sync cache first, durable store off the critical path via the
    * `query`/`mutate` seam) and each single write pings the key. The record slice
    * is a pure-mirror collection (cache value IS the stored record), so the view
@@ -265,8 +259,7 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * The NON-serializable augmentation sidecar (data-layer plan §6-C — the
    * "augmented instance" split). Parallel to {@link view}, keyed by the SAME
    * `name`. Holds `{ template?, render? }` — written at register/update, dropped
-   * at remove, CLEARED on `importSnapshot` (fns can't survive serialization; the
-   * adopter re-registers). NEVER written to the store — the
+   * at remove. NEVER written to the store — the
    * `PromptDeclarationRecord` type makes that a compile-time guarantee, and the
    * {@link View} never touches it (it mirrors the record slice only).
    * Only entries with a defined `template` or `render` are kept (see
@@ -786,6 +779,15 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return this.view.hasSync(name);
   }
 
+  /**
+   * The SERIALIZABLE record slice for `name` — what `prompts:get` projects onto
+   * the wire and what the store round-trips. {@link get} re-joins the
+   * non-serializable `{ template, render, complete }` sidecar on top of it.
+   */
+  record(name: string): PromptDeclarationRecord | undefined {
+    return this.view.getSync(name);
+  }
+
   list(): readonly PromptDeclaration[] {
     if (this.listCache !== null) return this.listCache;
     const out = this.view.listSync().map((r) => this.declarationOf(r.name)!);
@@ -802,43 +804,11 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
     return this.view.subscribeAll(listener);
   }
 
-  // ─────────── Snapshot / restore ───────────
-
-  exportSnapshot(): Readonly<Record<string, PromptsSnapshotEntry>> {
-    // Reads the sync view cache — MUST stay synchronous: the generic
-    // `captureBridgeSnapshots` invokes this un-awaited (SnapshotCapable). The
-    // view holds ONLY records (a `PromptsSnapshotEntry` IS a record), so the
-    // augmentation is dropped by construction — no per-field stripping.
-    const out: Record<string, PromptsSnapshotEntry> = {};
-    for (const record of this.view.listSync()) out[record.name] = record;
-    return out;
-  }
-
-  importSnapshot(snapshot: Readonly<Record<string, PromptsSnapshotEntry>>): void {
-    // Wholesale replace via the view: keys absent from the snapshot are dropped
-    // from BOTH the cache and the store; each snapshot record writes through. The
-    // view mutates the whole cache FIRST then batch-pings the union (drops ∪
-    // upserts), so invalidate `listCache` BEFORE `replace`. `replace` is
-    // change-SILENT (prompts has no per-key change channel). NOTE: the old
-    // `notifier.notifyAll()` fired the wildcard once; `replace` pings each touched
-    // key — the keyed bucket AND the wildcard per key — a superset, never fewer.
-    //
-    // The augmentation sidecar is CLEARED — `template`/`render`/`completions` are
-    // non-serializable, so a restored prompt has no content until the adopter
-    // re-registers it (invoke/render then throw `PromptMissingContent` until they do).
-    // Its arguments keep their `completeRef` / `completeRequires` (records, and the
-    // metadata a palette reads), but an INLINE resolver is gone — `declarationOf`
-    // restores no `complete` for a derived ref with no sidecar rather than handing
-    // back an address nothing answers to.
-    // The `View` is agnostic to the sidecar; the clear is harness-owned.
-    //
-    // TODO(store-phase-4): `importSnapshot` is still the snapshot-based resume
-    // path for a session restored from an IMAGE. Genesis (`hydrate()`) is the
-    // store-authority path; the Phase-4 manifest sweep retires this one.
-    this.listCache = null;
-    this.view.replace(Object.values(snapshot), this.storeCtx());
-    this.augmentations.clear();
-  }
+  // TODO(phase-5-storify): an IMPERATIVE `prompts.register()` is durable only
+  // when the definition configures a hydrator (`hydrate: hydrateFromStore()`) —
+  // and its `{ template, render }` sidecar never was (functions do not
+  // serialize), so content always comes from re-declaration at mount. Phase 5
+  // storifies the definition libraries so the store read is the default.
 
   // ─────────── Genesis (ADR 93) ───────────
 

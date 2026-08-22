@@ -78,7 +78,7 @@ interface PromptsCompleteDoor {
 
 /**
  * Feature-detect the prompts completion door on a session — the same structural
- * detection `SnapshotCapable` gets, for the same reason: the slot is contributed
+ * detection `CheckpointCapable` gets, for the same reason: the slot is contributed
  * by a package this one cannot name, and an adopter's own `Prompts`
  * implementation predating the door is a legitimate runtime state.
  */

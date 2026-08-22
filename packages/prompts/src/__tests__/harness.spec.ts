@@ -289,10 +289,10 @@ describe("PromptsHarness — custom renderer dispatch", () => {
   });
 });
 
-describe("PromptsHarness — snapshot round-trip", () => {
-  it("export + import preserves names + arguments + description (drops template/render)", async () => {
-    const h1 = await makeHarness();
-    await h1.register({
+describe("PromptsHarness — the record slice is the serializable half", () => {
+  it("carries names + arguments + description and drops template/render", async () => {
+    const h = await makeHarness();
+    await h.register({
       declaration: {
         name: "p",
         description: "p-desc",
@@ -300,17 +300,16 @@ describe("PromptsHarness — snapshot round-trip", () => {
         template: "hi",
       },
     });
-    const snapshot = h1.exportSnapshot();
 
-    const h2 = await makeHarness();
-    h2.importSnapshot(snapshot);
-    const decl = h2.get("p");
-    expect(decl?.name).toBe("p");
-    expect(decl?.description).toBe("p-desc");
-    expect(decl?.arguments).toEqual([{ name: "x", required: true }]);
-    // template + render not preserved
-    expect(decl?.template).toBeUndefined();
-    expect(decl?.render).toBeUndefined();
+    const record = h.record("p");
+    expect(record?.name).toBe("p");
+    expect(record?.description).toBe("p-desc");
+    expect(record?.arguments).toEqual([{ name: "x", required: true }]);
+    // The sidecar is harness-local and never reaches the record.
+    expect(record).not.toHaveProperty("template");
+    expect(record).not.toHaveProperty("render");
+    // …while the live read re-joins it.
+    expect(h.get("p")?.template).toBe("hi");
   });
 });
 

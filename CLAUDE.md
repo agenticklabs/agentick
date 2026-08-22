@@ -89,8 +89,8 @@ for the full reasoning. Summary:**
 - **`@agentick/compiler-react` has NO dependency on any harness
   package.** It owns the JSX → IR pipeline and the bridge context
   (`BridgeProvider` / `useBridges`); the reference `InMemoryDataBridge`
-  lives in `@agentick/compiler`. Snapshot/restore iterates `HookBridges`
-  generically via `SnapshotCapable` feature detection — no hardcoded
+  lives in `@agentick/compiler`. The checkpoint fold iterates `HookBridges`
+  generically via `CheckpointCapable` feature detection — no hardcoded
   slot names. Any harness can add a `/react` subpath that depends on
   compiler-react WITHOUT creating a cycle.
 - **Tests live where their dependencies live.** A "knobs work with the

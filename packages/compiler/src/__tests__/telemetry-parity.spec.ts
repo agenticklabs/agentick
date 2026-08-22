@@ -61,7 +61,7 @@ describe("defineCompiler CallbackCompiler — spine telemetry parity (adoptTelem
   it("an interceptor on compiler:mount emits ctx.metrics reaching the meter with { app, op }", async () => {
     const spy = spyTelemetryProvider();
     const compiler = defineCompiler({
-      mount: async () => ({ mountId: "m_1", restoredFromSnapshot: false }) as MountResult,
+      mount: async () => ({ mountId: "m_1" }) as MountResult,
       unmount: async () => {},
       renderTree: async () => fakeRenderTreeResult(),
     })({

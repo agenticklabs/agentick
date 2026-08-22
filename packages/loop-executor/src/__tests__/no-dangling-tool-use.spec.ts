@@ -61,7 +61,7 @@ function mkEmptyCompiler(): CompilerProtocol {
       guard: () => () => {},
       renderTree: () => Effect.succeed({ tree, diagnostics: [], iterations: 1 }),
     },
-    mount: async () => ({ mountId: "nd-mount", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "nd-mount" }),
     rerender: async () => undefined,
     renderTree: async () => ({ tree, diagnostics: [], iterations: 1 }),
     renderToString: async () => ({
@@ -70,14 +70,6 @@ function mkEmptyCompiler(): CompilerProtocol {
       iterations: 1,
     }),
     unmount: async () => undefined,
-    snapshot: async () => ({
-      specVersion: SPEC_VERSION,
-      mountId: "nd-mount",
-      dataCache: [],
-      bridges: {},
-      subscriptions: [],
-    }),
-    restore: async () => undefined,
   };
 }
 

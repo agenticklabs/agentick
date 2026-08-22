@@ -320,7 +320,6 @@ export interface SessionHandleBase extends ResourceHandle, HandleSubscriptions {
   compile(): Promise<unknown>;
   /** Rung 2 alone — the canonical input the model sees. */
   project(): Promise<unknown>;
-  snapshot(): Promise<unknown>;
   /**
    * Rebind the session to a refreshed auth context. Used when a token
    * expires mid-session and the client refreshes without dropping the

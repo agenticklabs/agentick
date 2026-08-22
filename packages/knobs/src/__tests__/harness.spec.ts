@@ -169,37 +169,26 @@ describe("KnobsHarness — inbox addressability", () => {
   });
 });
 
-describe("KnobsHarness — snapshot round-trip", () => {
-  it("exportSnapshot / importSnapshot preserves values + fires subscribers", async () => {
+describe("KnobsHarness — construction seed", () => {
+  it("seed installs values and fires subscribers", async () => {
     const { harness } = await makeHarness();
-    await harness.set({ id: "a", value: 1 });
-    await harness.set({ id: "b", value: "two" });
-    const snap = harness.exportSnapshot();
-    expect(snap).toMatchObject({ a: 1, b: "two" });
-
-    const { harness: restored } = await makeHarness("restored");
     let listenerHits = 0;
-    restored.subscribeAll(() => {
+    harness.subscribeAll(() => {
       listenerHits++;
     });
-    restored.importSnapshot(snap);
-    expect(restored.get("a")).toBe(1);
-    expect(restored.get("b")).toBe("two");
+    harness.seed({ a: 1, b: "two" });
+    expect(harness.get("a")).toBe(1);
+    expect(harness.get("b")).toBe("two");
     expect(listenerHits).toBeGreaterThan(0);
     await harness.close();
-    await restored.close();
   });
 
-  it("descriptors are NOT included in the snapshot (re-declared on remount)", async () => {
+  it("seed UPSERTS — a knob it does not name keeps its value", async () => {
     const { harness } = await makeHarness();
-    await harness.register({
-      id: "mood",
-      descriptor: { description: "current mood", defaultValue: "curious" },
-    });
-    const snap = harness.exportSnapshot();
-    // Snapshot is values only; descriptor metadata is absent.
-    expect(Object.keys(snap)).toEqual(["mood"]);
-    expect(typeof snap.mood).toBe("string");
+    await harness.set({ id: "kept", value: "yes" });
+    harness.seed({ added: 1 });
+    expect(harness.get("kept")).toBe("yes");
+    expect(harness.get("added")).toBe(1);
     await harness.close();
   });
 });
@@ -366,18 +355,18 @@ describe("KnobsHarness — layered resolution over a parent", () => {
     expect(byId.get("parent-only")).toMatchObject({ value: "p" });
   });
 
-  it("exportSnapshot() captures the SELF layer ONLY (never inherited parent state)", async () => {
+  it("the state frame carries the SELF layer ONLY (never inherited parent state)", async () => {
     const { parent, child } = await makeLayered();
     await parent.set({ id: "inherited", value: "from-parent" });
     await child.set({ id: "child-only", value: "mine" });
 
-    const snap = child.exportSnapshot();
-    // The inherited value is readable via get() (fall-through) but MUST
-    // NOT be embedded in the child's snapshot — the parent snapshots at
-    // its own scope; a session snapshot must not carry app-scoped state.
-    expect(snap).toEqual({ "child-only": "mine" });
-    expect("inherited" in snap).toBe(false);
-    // Sanity: fall-through read still works despite the snapshot omission.
+    // The inherited value is readable via get() (fall-through) but MUST NOT be
+    // published as the child's own state — the parent owns its scope, and a
+    // session must never project app-scoped state as its own.
+    const frame = child.stateSnapshotFrame();
+    expect(frame.values).toEqual({ "child-only": "mine" });
+    expect("inherited" in frame.values).toBe(false);
+    // Sanity: fall-through read still works despite the frame omission.
     expect(child.get("inherited")).toBe("from-parent");
   });
 });

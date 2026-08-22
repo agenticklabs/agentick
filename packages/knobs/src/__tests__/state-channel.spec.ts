@@ -109,18 +109,17 @@ describe("KnobsHarness — knobs-state channel", () => {
     await harness.close();
   });
 
-  it("emits a full snapshot frame on importSnapshot (wholesale replace)", async () => {
+  it("emits a full snapshot frame on hydrate (a wholesale rebuild is not N deltas)", async () => {
     const { harness, bus } = await makeHarness();
     await harness.set({ id: "keep", value: 1 });
     const { frames, stop } = await collectFrames(bus);
 
-    harness.importSnapshot({ x: "a", y: 2 });
+    await harness.hydrate({ sessionId: "s", tick: 0, storeCtx: stubStoreCtx() });
     await settle();
     await stop();
 
     const snapshots = frames.filter((f) => f.kind === "snapshot");
     expect(snapshots).toHaveLength(1);
-    expect(snapshots[0]!.values).toEqual({ x: "a", y: 2 });
     await harness.close();
   });
 
@@ -189,7 +188,7 @@ describe("KnobsHarness — knobs-state channel", () => {
     for (const f of frames)
       if (f.kind === "delta") reconstructed = applyJsonPatch(reconstructed, f.ops);
 
-    expect(reconstructed).toEqual(harness.exportSnapshot());
+    expect(reconstructed).toEqual(harness.stateSnapshotFrame().values);
     expect(reconstructed).toEqual({ verbose: true, temperature: 0.2, model: "opus" });
     await harness.close();
   });

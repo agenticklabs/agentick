@@ -79,7 +79,7 @@ export * from "@agentick/client-core";
  * ```ts
  * const client = await createClient({
  *   transport,
- *   telemetry: { adapter, sample: (m) => m !== "session/snapshot" },
+ *   telemetry: { adapter, sample: (m) => m !== "session/dry_run" },
  * });
  * ```
  */

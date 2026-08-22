@@ -1,6 +1,6 @@
 /**
  * `ResourcesHarness` — a read-projection seam, store-BACKED but NOT
- * `SnapshotCapable` (ADR 62 + data-layer plan §6-C, Phase 5 run #9).
+ * checkpoint hooks (ADR 62 + data-layer plan §6-C, Phase 5 run #9).
  *
  * Extends {@link BaseHarness} so the read verbs journal + wire-expose through the
  * substrate's phase contract and the change stream rides the inherited machinery.
@@ -35,9 +35,9 @@
  *      makes that a compile-time guarantee (mirrors prompts' `render`/`template`
  *      sidecar).
  *
- * ## NOT `SnapshotCapable` — store-backed ≠ snapshot-backed
+ * ## Store-backed, hook-less
  *
- * The harness carries NO `exportSnapshot`/`importSnapshot`. Durability = the
+ * The harness carries no checkpoint hooks. Durability = the
  * store reloads durable declarations from its `ResourceLoader` source on restart
  * (`reload()`); transient bindings re-mount from the tree. On restart the catalog
  * projection surfaces the durable declarations (`hydrate()` from the store) but
@@ -151,7 +151,7 @@ export interface ResourcesHarnessOptions extends BaseHarnessOptions<unknown, Res
    * loaders (the source) and `hydrate()` mirrors the store into the catalog
    * projection. **Transient** register / `<Resource>` bindings never touch the
    * store (they re-mount from the tree), so the harness is deliberately NOT
-   * `SnapshotCapable`.
+   * checkpoint hooks.
    */
   readonly store?: ResourceStore;
   /**

@@ -28,7 +28,7 @@ const result = (): RenderTreeResult => ({
 
 function makeCompiler(): CompilerProtocol {
   const factory = defineCompiler({
-    mount: async () => ({ mountId: "m", restoredFromSnapshot: false }),
+    mount: async () => ({ mountId: "m" }),
     unmount: async () => {},
     renderTree: async () => result(),
   });

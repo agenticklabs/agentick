@@ -37,9 +37,8 @@
  *     - `useTransition`, `useDeferredValue`, `startTransition` —
  *       allowed; no effect (the compiler renders synchronously).
  *     - React Server Components — not supported.
- * - **JSON-shaped output.** `RenderedTree`, `CompilerSnapshot`, and
- *   `RenderToStringPayload` cross the spec firewall — no function
- *   references, no live SDK clients.
+ * - **JSON-shaped output.** `RenderedTree` and `RenderToStringPayload`
+ *   cross the spec firewall — no function references, no live SDK clients.
  * - **Bridges, not globals.** Implementations consume `HookBridges`
  *   provided at mount time. Module-level singletons are forbidden.
  * - **Sync render flush.** Implementations SHOULD reconcile
@@ -62,11 +61,7 @@ import type { Effect } from "effect";
 import type { FormatterRef, RenderedTree, ToolPresentation } from "../data/index.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { ReconcileErrorChannel } from "../errors/harnesses.js";
-import type {
-  ReconcileDiagnostic,
-  CompilerSnapshot,
-  RenderToStringPayload,
-} from "../data/compiler-snapshot.js";
+import type { ReconcileDiagnostic, RenderToStringPayload } from "../data/compiler-diagnostics.js";
 import type { HookBridges } from "./hook-bridges.js";
 import type { PromiseView } from "./promise-view.js";
 import type { RenderContext } from "./render-context.js";
@@ -123,27 +118,11 @@ export interface MountInput extends MountScopedInput {
    */
   readonly defaultFormatter?: FormatterRef;
 
-  /**
-   * Optional snapshot to restore before the first render. When
-   * supplied, the harness applies it before processing the first
-   * `renderTree` call.
-   */
-  readonly snapshot?: CompilerSnapshot;
-
-  /**
-   * Optional element version hash. When the runtime later remounts
-   * with a different `elementVersion`, the harness MAY discard a
-   * supplied snapshot.
-   */
-  readonly elementVersion?: string;
-
   readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 export interface MountResult {
   readonly mountId: string;
-  /** True when a supplied snapshot was applied. */
-  readonly restoredFromSnapshot: boolean;
 }
 
 export interface UnmountInput extends MountScopedInput {}
@@ -519,17 +498,6 @@ export interface TreeInterceptionSource {
 }
 
 // ============================================================================
-// snapshot / restore
-// ============================================================================
-
-export interface SnapshotInput extends MountScopedInput {}
-
-export interface RestoreInput extends MountScopedInput {
-  readonly snapshot: CompilerSnapshot;
-  readonly elementVersion?: string;
-}
-
-// ============================================================================
 // Error taxonomy
 // ============================================================================
 
@@ -550,7 +518,6 @@ export {
   ReconcileError,
   type ReconcileErrorChannel,
   RenderFailed,
-  SnapshotIncompatible,
   UnstableTree,
 } from "../errors/harnesses.js";
 
@@ -657,17 +624,6 @@ export interface CompilerProtocol extends PromiseView<Omit<CompilerFx, keyof Har
    * Tear down a mount. Releases hook state and subscription handles.
    */
   unmount(input: UnmountInput): Promise<void>;
-
-  /**
-   * Capture private state for hibernation / persistence.
-   */
-  snapshot(input: SnapshotInput): Promise<CompilerSnapshot>;
-
-  /**
-   * Restore private state from a prior snapshot. The next `renderTree`
-   * call uses the restored state.
-   */
-  restore(input: RestoreInput): Promise<void>;
 }
 
 // ============================================================================

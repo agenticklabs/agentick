@@ -243,7 +243,7 @@ describe("WebSocket reconnect e2e — real wire, server actually goes away", () 
 
     // An RPC against a session that does not exist: whatever the gateway would
     // have answered, the wire dies under it first.
-    const inflight = client.request("session/snapshot", { sessionId: "no-such-session" }).then(
+    const inflight = client.request("session/model_info", { sessionId: "no-such-session" }).then(
       () => "resolved" as const,
       (e: unknown) => e,
     );

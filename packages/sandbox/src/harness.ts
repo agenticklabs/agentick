@@ -651,11 +651,11 @@ export class SandboxHarness extends BaseHarness<"sandbox"> {
   // ──────────────── Session ACL snapshot ────────────────
 
   exportACLSnapshot(): SessionACLSnapshot {
-    return this.sessionACL.exportSnapshot();
+    return this.sessionACL.exportACL();
   }
 
   importACLSnapshot(snap: SessionACLSnapshot): void {
-    this.sessionACL.importSnapshot(snap);
+    this.sessionACL.importACL(snap);
   }
 
   // ──────────────── Inbox ────────────────

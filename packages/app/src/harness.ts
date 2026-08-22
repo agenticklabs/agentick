@@ -71,7 +71,6 @@ import type {
   SessionRecord,
   SessionStore,
   SessionStoreQuery,
-  SnapshotMigration,
 } from "@agentick/spec";
 import {
   InMemoryHandlerResolver,
@@ -604,16 +603,6 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    * { narrate } })`. Equivalent convenience for `session.narrate`.
    */
   readonly narrate?: boolean;
-  /**
-   * App-wide snapshot-migration seam (recovery pass #1 — schema evolution).
-   * Threaded into every session's `migrateSnapshot`, invoked by
-   * `session.restore()` when a snapshot's `specVersion` differs from the
-   * running `SPEC_VERSION`. Convenience for `session.migrateSnapshot`; also
-   * settable via `createApp({ session: { migrateSnapshot } })`. See
-   * {@link SnapshotMigration}.
-   */
-  readonly migrateSnapshot?: SnapshotMigration;
-
   /**
    * App-level tool handlers shared across sessions. Resolver keys are
    * `handlerRef` strings. Each session gets its own
@@ -2844,7 +2833,7 @@ export class AppHarness<P = unknown>
     // was constructed WITHOUT session access (`RunnerBindable` — the skills
     // harness today, for `session.skills.run`). Generic feature-detect over the
     // extension bridge bag, no hardcoded slot names (ADR 27, uniform with the
-    // `SnapshotCapable` fold). Bound AFTER `mountReady` so the first run reaches
+    // checkpoint fold). Bound AFTER `mountReady` so the first run reaches
     // a fully-wired session; the harness gets ONLY the send capability, never
     // the session itself.
     if (sessionExtensionBridges.size > 0) {
@@ -2852,7 +2841,7 @@ export class AppHarness<P = unknown>
         session.send(sendInput as SendInput<P>);
       // C2 (three-audiences-plan §C split, item 3) — the ISOLATED send
       // capability. Each run forks the session (`session.fork()` — a same-image
-      // child with a full copied-state snapshot) and runs the composed send on
+      // child over a branched copy of its scopes) and runs the composed send on
       // that fresh child, so nothing from the isolated run touches THIS
       // session's timeline/state. The child is disposed after the handle
       // settles (registry removal + `session.close()` via `disposeChildSession`,
@@ -3682,9 +3671,6 @@ function mergeSessionDefaults<P>(
   }
   if (fromLong.narrate === undefined && options.narrate !== undefined) {
     merged.narrate = options.narrate;
-  }
-  if (fromLong.migrateSnapshot === undefined && options.migrateSnapshot !== undefined) {
-    merged.migrateSnapshot = options.migrateSnapshot;
   }
   // ADR 93 §"Top-level slots for every namespace" — fold the registered
   // NAMESPACE slots (`createApp({ timeline })`) into the per-session defaults.

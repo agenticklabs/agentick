@@ -1,12 +1,10 @@
 /**
  * Canonical wire channel for KnobsHarness state-sync.
  *
- * Model-visible knob state reaches observers two ways. The coarse way is
- * the harness snapshot (`exportSnapshot()` → the compiler's SnapshotCapable
- * projection): the WHOLE store, re-sent. This channel is the fine way — an
- * initial `snapshot` frame followed by RFC 6902 JSON-Patch `delta` frames,
- * one op per knob that changed. A subscriber seeds from the snapshot and
- * applies deltas, re-rendering only the branch that moved.
+ * Model-visible knob state reaches observers as an initial `snapshot` frame
+ * followed by RFC 6902 JSON-Patch `delta` frames, one op per knob that
+ * changed. A subscriber seeds from the snapshot and applies deltas,
+ * re-rendering only the branch that moved.
  *
  * This is the native form of AG-UI's `StateSnapshot` / `StateDelta` pair
  * (ADR 73): we adopt the snapshot+delta model on our own bus, and the AG-UI

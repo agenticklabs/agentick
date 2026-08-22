@@ -235,30 +235,6 @@ describe("TimelineHarness — inbox addressability", () => {
   });
 });
 
-describe("TimelineHarness — snapshot round-trip across instances", () => {
-  it("exportSnapshot / importSnapshot preserves log + projection across instances", async () => {
-    const { harness } = await makeHarness();
-    await harness.append(messageEntry("e1", "a"));
-    await harness.append(messageEntry("e2", "b"));
-    await harness.compact(
-      fromHandler({
-        handler: async ({ entries }) => [messageEntry("summary", `count=${entries.length}`)],
-        metadata: { kind: "test-summary" },
-      }),
-    );
-    const snap = harness.exportSnapshot();
-
-    const { harness: restored } = await makeHarness("restored");
-    await restored.importSnapshot(snap);
-    expect(restored.readPersisted()).toEqual(snap.persisted);
-    expect(restored.read().entries).toEqual(snap.projection);
-    expect(restored.exportSnapshot().lastCompaction).toEqual(snap.lastCompaction);
-
-    await harness.close();
-    await restored.close();
-  });
-});
-
 describe("TimelineHarness — branch: the fork transport (checkpointing §5)", () => {
   const branchCtx = (fromSessionId: string) => ({
     sessionId: fromSessionId,

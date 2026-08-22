@@ -149,20 +149,17 @@ declare module "@agentick/spec" {
 }
 ```
 
-Required (`readonly timeline:`) for a bundled namespace that is always installed; optional (`readonly sandbox?:`) for anything the adopter opts into. Snapshot and restore walk `HookBridges` generically and feature-test each slot with `isSnapshotCapable` — so declaring `SnapshotCapable<YourSnapshot>` on your protocol is the entire opt-in, and no framework package ever learns your slot name.
+Required (`readonly timeline:`) for a bundled namespace that is always installed; optional (`readonly sandbox?:`) for anything the adopter opts into. The checkpoint fan-out walks `HookBridges` generically and feature-tests each slot with `isCheckpointCapable` — so declaring `CheckpointCapable` on your protocol is the entire opt-in, and no framework package ever learns your slot name. No value crosses the seam: your harness flushes to and reads from its own store.
 
 ```ts
-import { isSnapshotCapable, type SnapshotCapable } from "@agentick/spec";
+import { isCheckpointCapable, type CheckpointCapable } from "@agentick/spec";
 
-export interface BudgetSnapshot {
-  readonly spentUsd: number;
-}
-export interface BudgetProtocol extends SnapshotCapable<BudgetSnapshot> {
+export interface BudgetProtocol extends CheckpointCapable {
   charge(usd: number): void;
 }
 
 declare const bridge: unknown;
-if (isSnapshotCapable(bridge)) await bridge.exportSnapshot();
+if (isCheckpointCapable(bridge)) await bridge.persist(ctx);
 ```
 
 ### `RenderContext` — the facts, not the implementations
@@ -276,7 +273,7 @@ Small, total, and shared — each exists because a second hand-rolled copy would
 | `foldCost` · `mergeCostRollups` · `foldUsageRollup` · `mergeUsageStats` | The usage/cost folds, per-model and honest about gaps                        |
 | `rollupTree(records, rootId)` · `inSpawnTree`                           | Agent-tree cost attribution — a query over `spawnPath`, never a write        |
 
-Plus the guards. `@agentick/spec/guards` narrows every content block (`isTextBlock`, `isToolResultBlock`, `isMediaBlock`, …), every context entry, every event phase and outcome (`isTerminalEvent`, `isVetoed`, `isDeferred`, …), every lifecycle event kind, and every declaration kind — and feature-detects optional capabilities (`supportsLifecycleProjection`, `supportsTreeInterception`, `isSnapshotCapable`, `hasFeature`).
+Plus the guards. `@agentick/spec/guards` narrows every content block (`isTextBlock`, `isToolResultBlock`, `isMediaBlock`, …), every context entry, every event phase and outcome (`isTerminalEvent`, `isVetoed`, `isDeferred`, …), every lifecycle event kind, and every declaration kind — and feature-detects optional capabilities (`supportsLifecycleProjection`, `supportsTreeInterception`, `hasFeature`).
 
 ```ts
 import { jsonSchema, parseJsonWithSchema, toJsonSchema } from "@agentick/spec";

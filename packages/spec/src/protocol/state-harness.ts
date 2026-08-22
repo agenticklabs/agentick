@@ -22,7 +22,6 @@
 import type { Effect } from "effect";
 
 import type { Unsubscribe } from "./inbox.js";
-import type { SnapshotCapable } from "./hook-bridges.js";
 import type { HarnessFx } from "./middleware.js";
 import type { HarnessEdge } from "./promise-view.js";
 import type { SubstrateError } from "../data/errors.js";
@@ -50,9 +49,6 @@ export interface StateListEntry {
   readonly key: string;
   readonly value: unknown;
 }
-
-/** Snapshot payload — a map of state keys to current values. */
-export type StateHarnessSnapshot = Readonly<Record<string, unknown>>;
 
 // ============================================================================
 // Async surface — the Effect-canonical twin (`.fx`)
@@ -92,8 +88,7 @@ export interface StateFx extends HarnessFx {
 // Protocol
 // ============================================================================
 
-export interface StateHarnessProtocol
-  extends SnapshotCapable<StateHarnessSnapshot>, HarnessEdge<StateFx> {
+export interface StateHarnessProtocol extends HarnessEdge<StateFx> {
   /**
    * Harness identifier. Composes into the inbox address as
    * `state:{id}` — admin actors send mutations addressed here.
@@ -126,10 +121,14 @@ export interface StateHarnessProtocol
   // caller composes `state.fx.set(...)` and stays in the calling fiber, so the
   // op carries the ambient tick; only the adopter edge takes the Promise face.
 
-  // ─────────── Snapshot / restore ───────────
+  // ─────────── Construction seed ───────────
 
-  exportSnapshot(): Readonly<Record<string, unknown>>;
-  importSnapshot(values: Readonly<Record<string, unknown>>): void;
+  /**
+   * Install caller-supplied entries — the construction seed
+   * (`withState({ initial })`, `CreateSessionInput.initialState`). UPSERT, not
+   * replace: a key the seed does not name keeps whatever `hydrate` loaded.
+   */
+  seed(values: Readonly<Record<string, unknown>>): void;
 
   // ─────────── Lifecycle ───────────
 

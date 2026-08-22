@@ -636,7 +636,8 @@ export type SessionSendCapability<P = unknown> = (
  * is constructed without session access. The composition root (the App's
  * session-construction fold) scans the session's extension bridges and, for
  * any that duck-type to this contract, injects the session's own `send` —
- * exactly as {@link SnapshotCapable} is feature-detected for snapshot/restore.
+ * exactly as {@link import("./hook-bridges.js").CheckpointCapable} is
+ * feature-detected for the checkpoint fan-out.
  * No hardcoded slot names, per ADR 27; the skills harness is the first (and,
  * today, only) consumer.
  *
@@ -660,7 +661,7 @@ export interface RunnerBindable {
 
 /**
  * Runtime feature-detection for {@link RunnerBindable}. Sibling to
- * {@link import("./hook-bridges.js").isSnapshotCapable}.
+ * {@link import("./hook-bridges.js").isCheckpointCapable}.
  */
 export function isRunnerBindable(x: unknown): x is RunnerBindable {
   return (
@@ -753,99 +754,6 @@ export interface SessionDryRunResult {
 }
 
 /**
- * Read-only snapshot of session state. Returned by `snapshot()`; consumed
- * by `restore()`. Used by persistence backends + hibernate/restore.
- *
- * ## Generic bridge fold (ADR 27 — "Step 6")
- *
- * The session identity (`id` / `status` / `currentTick` / `usage` / …)
- * lives at the top level; **every serializable sub-harness state lives in
- * `bridges`**, keyed by bridge name. The session does NOT hardcode
- * `timeline`/`knobs` slots — it folds every {@link SnapshotCapable} bridge
- * generically (feature-detection via `isSnapshotCapable`), exactly as the
- * compiler harness folds `CompilerSnapshot.bridges`. A new SnapshotCapable
- * extension harness (sandbox, subscriptions, …) round-trips with ZERO
- * session changes.
- *
- *   - `bridges.timeline` → {@link TimelineHarnessSnapshot} (`.persisted` is
- *     the durable log, `.projection` the compacted view)
- *   - `bridges.knobs`    → the knob value map
- *   - `bridges.state`    → the K/V state map
- *   - `bridges.<ext>`    → any installed SnapshotCapable extension
- *
- * The single authoritative source per bridge avoids the divergence bug a
- * denormalized top-level copy would invite (a hook redacting `bridges.x`
- * but not a top-level `x`).
- */
-export interface SessionSnapshot {
-  readonly specVersion: string;
-  readonly id: string;
-  readonly parentSessionId?: string;
-  readonly status: BridgeSessionStatus;
-  readonly currentTick: number;
-  /**
-   * Per-bridge snapshot payloads, keyed by bridge name. Each value is the
-   * `exportSnapshot()` output of a {@link SnapshotCapable} bridge. Typed
-   * `unknown` because the set of bridges is open (module-augmented per
-   * ADR 27); consumers narrow by name (e.g. `bridges.timeline as
-   * TimelineHarnessSnapshot`).
-   */
-  readonly bridges: Readonly<Record<string, unknown>>;
-  /** Flat token totals across every model. Safe to sum; meaningless to price. */
-  readonly usage: UsageStats;
-  /**
-   * Per-model breakdown, keyed `` `${provider}/${modelId}` ``.
-   *
-   * Snapshotted alongside {@link usage} because a restored session that
-   * kept its token counts and lost its per-model partition can no longer
-   * be priced — the flat bag mixes rate tiers.
-   */
-  readonly byModel?: Readonly<Record<string, import("../data/usage-cost.js").ModelUsage>>;
-  /**
-   * The session's cost, folded from per-tick stamps. Round-tripped
-   * through snapshot/restore: a cost computed at act time that does not
-   * survive a reload defeats the point of computing it at act time.
-   */
-  readonly cost?: import("../data/usage-cost.js").CostRollup;
-  readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-/**
- * Context handed to a {@link SnapshotMigration} — the version skew being
- * bridged. `from` is the snapshot's stored `specVersion`; `to` is the
- * running framework's `SPEC_VERSION`.
- */
-export interface SnapshotMigrationContext {
-  readonly from: string;
-  readonly to: string;
-}
-
-/**
- * The snapshot-migration seam (recovery pass #1 — schema evolution).
- *
- * A typed callback invoked at the restore decision point when a snapshot's
- * `specVersion` differs from the running `SPEC_VERSION`. It returns a
- * snapshot in the CURRENT shape. Per the seam-over-setting rule this is a
- * callback at the decision point, NOT a config subsystem or a version
- * registry — the adopter owns any version-dispatch logic inside the
- * callback (chaining old→new internally if they support multiple skews).
- *
- * Construction-bound (`SessionHarnessOptions.migrateSnapshot`, threaded
- * from `AppHarnessOptions`): a given deployment knows how to bring old
- * snapshots up to its own shape. With none supplied, a version mismatch
- * throws `SnapshotVersionMismatch` (fail-closed — no silent stale apply).
- */
-export type SnapshotMigration = (
-  snapshot: SessionSnapshot,
-  ctx: SnapshotMigrationContext,
-) => SessionSnapshot | Promise<SessionSnapshot>;
-
-/** Input to {@link SessionHarnessProtocol.restore}. */
-export interface RestoreSnapshotInput {
-  readonly snapshot: SessionSnapshot;
-}
-
-/**
  * Why a session is being torn down — the provenance dimension of the
  * `session:close` operation (ADR 92 Family 2 §5).
  *
@@ -891,7 +799,6 @@ export {
   SessionError,
   type SessionErrorChannel,
   SessionTimelineError,
-  SnapshotVersionMismatch,
   SpawnDepthExceededError,
   type StateApplyError,
   type StateApplyErrorChannel,
@@ -1078,15 +985,18 @@ export interface SessionHarnessProtocol<P = unknown> {
   abort(reason?: string, opts?: SessionAbortOptions): Promise<void>;
 
   /**
-   * Capture the current state as a serializable snapshot. Routed through
-   * the `session:snapshot` command, so it mints `onBeforeSessionSnapshot`
-   * (veto/observe) and `onAfterSessionSnapshot` (the v1 `onPersist`
-   * "augment/redact the snapshot" parity — transform the output). Async so
-   * the seam can await; the underlying bridge fold is synchronous.
+   * Checkpoint — the flush barrier. Fans `persist(ctx)` out to every
+   * {@link CheckpointCapable} bridge, so each flushes write-behind to its OWN
+   * store; no value crosses the seam. Routed through the `session:snapshot`
+   * command, minting `onBeforeSessionSnapshot` (veto) /
+   * `onAfterSessionSnapshot`.
+   *
+   * A rejected `persist` rejects this call, so a failed flush is never
+   * followed by the caller's unmount (checkpointing §3.2).
    *
    * @throws {SessionError}
    */
-  snapshot(): Promise<SessionSnapshot>;
+  snapshot(): Promise<void>;
 
   /**
    * Compile what a tick WOULD send, without sending it — the three artifacts
@@ -1130,19 +1040,16 @@ export interface SessionHarnessProtocol<P = unknown> {
   prepareRequest(input: LanguageModelInput): unknown;
 
   /**
-   * Restore a previously captured {@link SessionSnapshot} into this live
-   * session. Fans `importSnapshot()` out to every matching
-   * {@link SnapshotCapable} bridge generically (ADR 27) and restores the
-   * session accounting (tick + usage). Routed through the `session:restore`
-   * command, minting `onBeforeSessionRestore` / `onAfterSessionRestore`.
-   *
-   * A snapshot whose `specVersion` differs from the framework's is run
-   * through the construction-bound `migrateSnapshot` callback first; with
-   * none supplied a mismatch throws `SnapshotVersionMismatch`.
+   * Rehydrate this live session from its stores. Fans `hydrate(ctx)` out to
+   * every {@link CheckpointCapable} bridge, each reading the latest for its own
+   * session scope from its own store — the same fan-out genesis runs, so open,
+   * resume-after-eviction, and explicit restore share ONE store-read path.
+   * Routed through the `session:restore` command, minting
+   * `onBeforeSessionRestore` / `onAfterSessionRestore`.
    *
    * @throws {SessionError}
    */
-  restore(input: RestoreSnapshotInput): Promise<void>;
+  restore(): Promise<void>;
 
   /**
    * Shut down. Future commands fail with `SessionClosedError`. Idempotent.
@@ -1233,12 +1140,12 @@ export interface SessionHarnessProtocol<P = unknown> {
    * Fork this session into a same-image child with a full copy of its state.
    *
    * A fork is a {@link spawn} (no send) of the parent's OWN agent root —
-   * `SpawnInput.agent` defaults to the parent's root — followed by a
-   * {@link restore} of the parent's live {@link snapshot}. The child copies
-   * every {@link SnapshotCapable} bridge's state (timeline, knobs, state,
-   * gates), plus the tick + usage accounting, and gets its own `sessionId`
-   * and spawn lineage (`spawnPath`). It is ALWAYS returned unbound — a fork
-   * never auto-sends; the caller drives it.
+   * `SpawnInput.agent` defaults to the parent's root — over a BRANCHED copy of
+   * the parent's durable scopes: {@link snapshot} flushes, every
+   * `BranchCapable` bridge copies the parent's scope onto the child's at its
+   * own store layer, then {@link restore} opens the child on that copy. The
+   * child gets its own `sessionId` and spawn lineage (`spawnPath`), and is
+   * ALWAYS returned unbound — a fork never auto-sends; the caller drives it.
    *
    * Post-fork the two sessions diverge: a mutation on one (a knob set, a new
    * timeline entry) does NOT reflect on the other. This is the isolation

@@ -41,7 +41,7 @@
  *    `executedBy` precedent) — never a "no-extra-keys" shape check.
  *
  * @see docs/proposals/v2/client-handles.md
- * @see isSnapshotCapable — the feature-detection precedent this mirrors
+ * @see isCheckpointCapable — the feature-detection precedent this mirrors
  */
 
 import type { Unsubscribe } from "@agentick/spec";
@@ -88,7 +88,7 @@ export interface ClientHandle {
  *
  * A profile the way {@link ClientHandle} is a core: plain structural, no brand.
  * Declared on a handle's type for the typed path AND feature-detectable via
- * {@link isEnumerable} (the `isSnapshotCapable` precedent).
+ * {@link isEnumerable} (the `isCheckpointCapable` precedent).
  *
  * Note `iterate BOUNDED, observe UNBOUNDED` (principle #3): `list()` is a
  * bounded synchronous snapshot; ongoing change arrives through
@@ -125,7 +125,7 @@ export interface Respondable<In> {
 // Feature detection — the runtime twin of the typed declaration.
 // ============================================================================
 //
-// Mirrors `isSnapshotCapable` (`@agentick/spec`): the typed declaration on
+// Mirrors `isCheckpointCapable` (`@agentick/spec`): the typed declaration on
 // a handle's protocol is the compile-time path; these duck-typers are the
 // runtime path the conformance suite and generic tooling use to pick a handle's
 // profiles up without hardcoded knowledge. They test ONLY that the required
