@@ -216,6 +216,18 @@ declare module "@agentick/runtime" {
       input: { readonly sessionId: string; readonly reason?: string };
       output: DestroySessionResult;
     };
+    // The residency verbs (checkpointing §4, execution-resume §3.1) — declared
+    // so the operations mint `onBefore/AfterAppEvictSession` and
+    // `onBefore/AfterAppResumeSession`. Observability of the residency cycle
+    // (WHEN a session left memory, WHEN and how fast it came back) lives on
+    // these; VETO of an eviction stays where it was — the `session:close`
+    // guard reading `reason === "evicted"` — so pinning policy and residency
+    // observation remain distinct seams.
+    "app:evict-session": { input: { readonly sessionId: string }; output: void };
+    "app:resume-session": {
+      input: { readonly sessionId: string };
+      output: SessionHarnessProtocol<unknown> | undefined;
+    };
   }
 }
 

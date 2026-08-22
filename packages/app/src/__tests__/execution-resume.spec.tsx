@@ -124,7 +124,7 @@ describe("execution resume — the re-drive (slice 3, end to end)", () => {
     // The re-drive is DETACHED (resumeSession returned at acceptance) — wait
     // for the turn's durable end: the boundary record for the SAME execution.
     await waitFor(() => session!.timeline.executionCursor(CRASHED)?.boundary !== undefined, {
-      timeout: 5000,
+      timeoutMs: 5000,
     });
 
     const cursor = session!.timeline.executionCursor(CRASHED)!;
@@ -173,7 +173,7 @@ describe("execution resume — the re-drive (slice 3, end to end)", () => {
     const { app } = await mkCrashedApp("resume");
     const session = await app.resumeSession("victim");
     await waitFor(() => session!.timeline.executionCursor(CRASHED)?.boundary !== undefined, {
-      timeout: 5000,
+      timeoutMs: 5000,
     });
 
     // The turn completed above; a MANUAL re-drive of the same execution must

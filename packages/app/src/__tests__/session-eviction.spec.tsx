@@ -523,4 +523,47 @@ describe("evictSession — the same operation, invoked by hand", () => {
     await expect(app.evictSession("never-existed")).resolves.toBeUndefined();
     await app.closeApp();
   });
+
+  it("mints the residency hooks: evict and resume are observable at the app door", async () => {
+    // The observation seam for the residency cycle (WHEN a session left
+    // memory, WHEN it came back). Veto stays on the session:close guard —
+    // these exist so a debug/telemetry adopter can watch without patching.
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = new FakeLanguageModelExecutor("hooks-obs", journal, bus, inbox, {
+      scripted: plainScript(),
+    });
+    await executor.ready;
+    const seen: string[] = [];
+    const app = await createApp(React.createElement(PlainAgent), {
+      modelExecutor: executor,
+      target: mkTarget(),
+      journal,
+      bus,
+      inbox,
+      sessions: { store: new InMemorySessionStore() },
+      hooks: {
+        onBeforeAppEvictSession: (input: { sessionId: string }) => {
+          seen.push(`evict:${input.sessionId}`);
+        },
+        onBeforeAppResumeSession: (input: { sessionId: string }) => {
+          seen.push(`resume:${input.sessionId}`);
+        },
+        onAfterAppResumeSession: () => {
+          seen.push("resume:done");
+        },
+      },
+    });
+    const s = await app.createSession({ sessionId: "watched", eager: true });
+    await (
+      await s.send({ messages: [{ role: "user", content: "hi" }] })
+    ).result;
+
+    await app.evictSession("watched");
+    await app.resumeSession("watched");
+
+    expect(seen).toEqual(["evict:watched", "resume:watched", "resume:done"]);
+    await app.closeApp();
+  });
 });
