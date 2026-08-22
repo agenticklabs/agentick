@@ -96,15 +96,21 @@ and is trivially testable:
 
 ```ts
 interface InterruptedExecution {
-  readonly execution: ExecutionRecord; // executionId, lastCommittedTick, lastSeq
-  readonly session: SessionRecord; // sessionId, recipe id, owner/principal
-  readonly attempt: number; // resumeAttempts so far (crash-loop budget)
+  readonly session: SessionRecord; // the reconciled record (status idle, interruptedExecutionId set)
+  readonly executionId: string; // the interrupted execution — there is NO per-execution table
+  readonly attempt: number; // consecutive interruptions of THIS execution (crash-loop budget)
 }
 
 type OnInterruptedExecution = (
   ctx: InterruptedExecution,
 ) => "resume" | "drop" | Promise<"resume" | "drop">;
 ```
+
+The callback **fires once per interruption** — gated on the actual
+`running→interrupted` transition (§3.1), not on `interruptedExecutionId` merely
+being present — and **only on the resume/create path, never on a destroy-rebuild**.
+There is no per-execution record: `executionId` plus the timeline's
+`(lastCommittedTick, lastSeq)` are the coordinates a re-drive reads (§3.4).
 
 The three hazards of naive auto-resume are _handled here_, not ignored:
 
@@ -117,11 +123,25 @@ The three hazards of naive auto-resume are _handled here_, not ignored:
 
 ### 3.3 New persistence — two additive record fields (no new status)
 
-- **`interruptedExecutionId?`** — set by the reconcile as it clears
-  `currentExecutionId`. This is the durable, queryable handle the callback keys on;
-  cleared when the execution is resumed-to-completion or dropped.
-- **`resumeAttempts`** — an integer bumped by the reconcile each time it records an
-  interruption. The crash-loop budget and the callback's `attempt` input.
+- **`interruptedExecutionId?`** — the reconcile moves `currentExecutionId` here on
+  the `running→interrupted` transition; the durable, queryable handle the callback
+  (and a later support tool or a manual `resumeExecution`) keys on. Cleared ONLY
+  when the execution resumes to completion. **A `drop` LEAVES it set** (below).
+- **`resumeAttempts`** — CONSECUTIVE interruptions of the execution named by
+  `interruptedExecutionId`, not of the record: the reconcile **increments** when the
+  crashed id matches the stored one (a re-crash of a resumed execution keeps its id)
+  and **resets to 1** when a _different_ execution is interrupted — a fresh turn (B)
+  after a prior drop (A) must not inherit A's count. Completion clears
+  `interruptedExecutionId` AND zeroes this. The crash-loop budget and the callback's
+  `attempt`.
+
+**Why a `drop` keeps `interruptedExecutionId`.** Clearing on drop conflates two
+different statements — "don't auto-resume NOW" (a policy decision about this boot)
+and "forget this happened" (destroying the record). Keeping it preserves adopter
+optionality: a support tool or a later manual `resumeExecution` can still see WHAT
+was interrupted and act on it — clear-on-drop forecloses that at exactly the moment
+the policy declined to act. And since the callback gate is the transition, not field
+presence, no re-fire guard is needed; the field stands as honest history.
 
 Nothing else about resume is stored — the timeline and the E11 record already carry
 the coordinates, and the session `status` is untouched (§3.1).
