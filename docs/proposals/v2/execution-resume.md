@@ -216,8 +216,11 @@ the ADR-68 reconciliation template — already exists.
 ## 8. Recursive resume down the sub-agent graph
 
 A sub-agent is a normal session with a `parentSessionId` and a `spawnPath` lineage,
-so resume is recursive — but the **direction is forced by the dependency structure,
-not chosen**.
+so resume is recursive. **Everything durable about a child is already uniform with a
+root** — the record, the scopes, the hooks. Resume therefore stays **per-node and
+lazy**: the tree is _data_ (`spawnPath` on each record), not a traversal to drive —
+each node reconciles + resumes when it is opened. The _direction_ below is forced by
+the dependency structure, not chosen.
 
 **Top-down control, anchored at roots.** A child is only reconstructible through its
 parent: the spawn recipe lives in the parent's execution, and an _awaited_ child's
@@ -249,12 +252,16 @@ sessionId` already carries a stable id ("Generated if omitted"); deriving it fro
 `parentExecutionId + originCallId` makes the re-attach deterministic and the
 re-spawn idempotent.
 
-**Enabling constraints — §4's "process-bound" scoped, not forbidden.** A child is
-resumable when its spawn is _durable_: a **derived stable id**, and either a
-**same-image** agent (`SpawnInput.agent` defaults to the parent's root — free) or a
-**named** agent (a serializable descriptor). An arbitrary in-memory `agent`
-component + non-serializable `initialProps` remain unresumable — that residue is a
-per-spawn property, not a blanket limit on sub-sessions.
+**The single gap — `TODO(durable-spawns)`.** Since everything else about a child is
+already uniform with a root, graph resume reduces to **one** trailhead: the child's
+**build call** is not durable — closure-captured spawn args vs the root's catalog
+recipe. Close it with `TODO(durable-spawns)`: a **catalog-registered agent by name**
+
+- **serializable props** on the record (a same-image child — `SpawnInput.agent`
+  defaulting to the parent root — is already covered), plus a **derived stable id** for
+  the re-attach. See [`checkpointing.md`](./checkpointing.md) `§4` (spawns are
+  process-bound) for _why_ the current closure form is not durable — the two docs tell
+  one story, and nothing beyond that trailhead is needed.
 
 **Idempotency compounds with depth.** The last-partial-tick caveat (§4) exists at
 every level; a crash deep in the tree makes each ancestor's re-drive best-effort.
