@@ -548,12 +548,11 @@ describe("evictSession — the same operation, invoked by hand", () => {
         // residency debug) — pin it alongside before/after.
         onAppEvictSession: async (
           input: { sessionId: string },
-          next: (i: { sessionId: string }) => Promise<unknown>,
+          next: (i: { sessionId: string }) => Promise<void>,
         ) => {
           seen.push(`around-start:${input.sessionId}`);
-          const out = await next(input);
+          await next(input);
           seen.push(`around-end:${input.sessionId}`);
-          return out;
         },
         onBeforeAppEvictSession: (input: { sessionId: string }) => {
           seen.push(`evict:${input.sessionId}`);
