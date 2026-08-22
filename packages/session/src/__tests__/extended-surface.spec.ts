@@ -527,6 +527,8 @@ function stubSpawnContext(childExecutionId: string, settle: Promise<unknown>) {
           events: () => ({
             [Symbol.asyncIterator]: () => ({ next: async () => ({ done: true }) }),
           }),
+          readable: () => new ReadableStream(),
+          pipeTo: async () => undefined,
           abort: async () => undefined,
         }),
         close: async () => undefined,

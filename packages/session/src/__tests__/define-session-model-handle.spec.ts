@@ -22,8 +22,16 @@ import type { RegisteredModel } from "@agentick/spec";
 import { defineSession } from "../define-session.js";
 
 function fakeHandle(): SessionExecutionHandle {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { executionId: "e_x", result: Promise.resolve({} as any) } as SessionExecutionHandle;
+  return {
+    executionId: "e_x",
+    status: "completed",
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    result: Promise.resolve({} as any),
+    events: async function* () {},
+    readable: () => new ReadableStream(),
+    pipeTo: async () => {},
+    abort: async () => {},
+  };
 }
 
 const okApply = async (): Promise<ApplyResult> => ({ appendedEntryIds: ["id_1"] });
