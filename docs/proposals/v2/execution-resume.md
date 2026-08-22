@@ -267,3 +267,16 @@ recipe. Close it with `TODO(durable-spawns)`: a **catalog-registered agent by na
 every level; a crash deep in the tree makes each ancestor's re-drive best-effort.
 Stable-id re-attach contains it (re-open, not re-create); per-tool idempotency keys
 matter more the deeper the graph.
+
+## 9. Rollout
+
+The two additive `SessionRecord` fields (`interruptedExecutionId?`,
+`resumeAttempts?`) are durable identity/accounting, so **every durable
+`SessionStore` adapter must persist and round-trip them** — an adapter that drops
+`resumeAttempts` silently resets the crash-loop budget on each reload (a poisoned
+execution then re-drives into the same crash forever). When execution-resume ships
+in a published `next.N`, the live adapter — knowify's `KnowifySessionStore` — needs
+a column / serialization update for both fields in the same bump that adopts it.
+The in-memory and conformance stores get it for free (they persist the whole
+record). See the `NOTE (downstream store adapters)` blocks on the fields in
+`session-store.ts`.
