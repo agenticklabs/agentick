@@ -3056,6 +3056,26 @@ export class SessionHarness<P = unknown>
       }
     }
 
+    return this.runExecutionCore(input, effectiveResponseFormat, outputSpec);
+  }
+
+  /**
+   * The ONE loop-invocation path (execution-resume.md §3.4, commit 2 — a PURE
+   * extraction from {@link sendBody}): reservation, handle wiring, the composed
+   * `loop.fx.runExecution` call, and the settle chain (boundary record, flush
+   * barrier, result assembly). `send` reaches it after minting semantics
+   * (busy-send resolution); the resume re-drive becomes its second caller so
+   * the two can never drift.
+   *
+   * SYNCHRONOUS-ENTRY REQUIREMENT: the caller must invoke this with NO await
+   * between its admission guard passing and this call — the reservation below
+   * must be taken in the same microtask.
+   */
+  private async runExecutionCore(
+    input: SendInput<P>,
+    effectiveResponseFormat: ResponseFormat | undefined,
+    outputSpec: OutputSpec | undefined,
+  ): Promise<SessionExecutionHandle> {
     // SYNCHRONOUS reservation — no await between here and the guard
     // above having passed.
     let reserveResolve!: (h: import("@agentick/spec").SessionExecutionHandle) => void;
@@ -3612,7 +3632,7 @@ export class SessionHarness<P = unknown>
   /**
    * Translate a `LoopExecutionEvent` into the public StreamEvent shape
    * and push it onto the handle's iterator queue. The mapping half of the
-   * run-execution event sink (`loopSink` in {@link sendBody} wraps this in
+   * run-execution event sink (`loopSink` in {@link runExecutionCore} wraps this in
    * an `Effect.sync` for the `commandStream` `.fx` face).
    */
   private buildOnEvent(
