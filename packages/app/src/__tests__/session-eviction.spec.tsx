@@ -583,4 +583,36 @@ describe("evictSession — the same operation, invoked by hand", () => {
     ]);
     await app.closeApp();
   });
+
+  it("the SWEEP's evictions fire the hooks too — triggers are callers of the op", async () => {
+    // The bug this pins: the idle sweep called disposeSession directly,
+    // bypassing app:evict-session — so automatic evictions (the only kind a
+    // deployment ever sees) were invisible to the minted hooks while the
+    // manual verb's fired. Observed in the wild as a silent residency logger.
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = new FakeLanguageModelExecutor("sweep-hooks", journal, bus, inbox, {
+      scripted: plainScript(),
+    });
+    await executor.ready;
+    const evicted: string[] = [];
+    const app = await createApp(React.createElement(PlainAgent), {
+      modelExecutor: executor,
+      target: mkTarget(),
+      journal,
+      bus,
+      inbox,
+      sessions: { store: new InMemorySessionStore(), idleTimeout: 40 },
+      hooks: {
+        onBeforeAppEvictSession: (input: { sessionId: string }) => {
+          evicted.push(input.sessionId);
+        },
+      },
+    });
+    await app.createSession({ sessionId: "swept", eager: true });
+    await waitFor(() => evicted.includes("swept"), { timeoutMs: 2000, pollMs: 10 });
+    expect(app.getSession("swept")).toBeUndefined();
+    await app.closeApp();
+  });
 });

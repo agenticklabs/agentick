@@ -3699,7 +3699,10 @@ export class AppHarness<P = unknown>
         .sort((a, b) => (a.lastActiveAt ?? a.createdAt) - (b.lastActiveAt ?? b.createdAt))[0];
       if (victim === undefined) return; // nothing evictable — soft cap holds
       try {
-        await this.disposeSession(victim.id, "evict");
+        // Through the OPERATION, not the body — triggers are callers of the
+        // same composed op (checkpointing §4), so the LRU's evictions fire the
+        // minted hooks and honor evict-op guards exactly as the manual verb's.
+        await this.evictSession(victim.id);
       } catch {
         return;
       }
@@ -3720,7 +3723,10 @@ export class AppHarness<P = unknown>
     );
     for (const entry of stale) {
       try {
-        await this.disposeSession(entry.id, "evict");
+        // Through the OPERATION — same reason as the LRU path above: the
+        // sweep's evictions must be observable (minted hooks) and guardable,
+        // or "triggers are callers" is a doc claim the automatic callers break.
+        await this.evictSession(entry.id);
       } catch {
         // the session stays live; the next sweep tries again
       }
