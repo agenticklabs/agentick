@@ -1,10 +1,10 @@
 /**
- * `onInterruptedExecution` — the resume-path policy callback (execution-resume.md
- * §3.2, slice 2). A restart that finds a session's durable record still `running`
- * reconciles it to `interrupted` (slice 1) and, on the resume/create path, fires
- * this callback ONCE with the reconciled records to decide re-drive vs. leave. The
- * re-drive itself is slice 3; here we pin the SEAM: fires with the right ctx on a
- * crash, never on a clean record, and a `drop` leaves the honest history.
+ * `onInterruptedExecution` — the resume-path policy callback under TWO-SIGNAL
+ * detection (execution-resume.md §1/§3.2). The record's `running` is the
+ * write-behind candidate; the timeline's turn boundary is authoritative. A crash
+ * (candidate + no boundary) marks the record and fires the callback ONCE; a
+ * finished turn (boundary present) is the don't-run-twice case — clean record,
+ * no callback. The re-drive itself is slice 3.
  */
 
 import React from "react";
@@ -13,12 +13,14 @@ import { describe, expect, it, vi } from "vitest";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemorySessionStore } from "@agentick/session";
+import { MemoryTimelineStore } from "@agentick/timeline";
 import { stubStoreCtx } from "@agentick/store";
 import type {
   ExecutionTarget,
   InterruptedExecution,
   OnInterruptedExecution,
   SessionRecord,
+  TimelineEntry,
   UsageStats,
 } from "@agentick/spec";
 
@@ -43,7 +45,11 @@ function mkTarget(): ExecutionTarget {
 
 const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 } as UsageStats;
 
-async function mkApp(store: InMemorySessionStore, onInterruptedExecution?: OnInterruptedExecution) {
+async function mkApp(
+  store: InMemorySessionStore,
+  onInterruptedExecution?: OnInterruptedExecution,
+  timelineStore?: MemoryTimelineStore,
+) {
   const executor = new FakeLanguageModelExecutor(
     "resume-exec",
     new MemoryJournal(),
@@ -56,6 +62,7 @@ async function mkApp(store: InMemorySessionStore, onInterruptedExecution?: OnInt
     modelExecutor: executor,
     target: mkTarget(),
     sessions: { store },
+    ...(timelineStore !== undefined ? { timeline: { store: timelineStore } } : {}),
     ...(onInterruptedExecution !== undefined ? { onInterruptedExecution } : {}),
   });
 }
@@ -72,7 +79,10 @@ function seed(
 }
 
 describe("onInterruptedExecution — the resume-path callback (slice 2)", () => {
-  it("fires ONCE with the reconciled ctx when resuming a crashed `running` record", async () => {
+  it("fires ONCE with the marked ctx when resuming a crashed `running` record", async () => {
+    // Also the no-entries edge: this execution committed NOTHING to the timeline
+    // (executionCursor === undefined), so only the record proves it existed —
+    // still an interruption (a re-drive would start from tick 0), never a skip.
     const store = new InMemorySessionStore();
     await seed(store, "crashed", { status: "running", currentExecutionId: "exec:99" });
     const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
@@ -112,6 +122,34 @@ describe("onInterruptedExecution — the resume-path callback (slice 2)", () => 
     });
 
     await expect(app.resumeSession("boom")).rejects.toThrow("policy boom");
+
+    await app.closeApp();
+  });
+
+  it("boundary present = the turn FINISHED — no mark, no callback (don't-run-twice)", async () => {
+    // Signal 2 is authoritative: a durable turn boundary for the execution means
+    // only the record's idle-write was lost. The record comes out clean — no
+    // interruption history, no budget, no policy invocation, no re-drive.
+    const store = new InMemorySessionStore();
+    const timelineStore = new MemoryTimelineStore();
+    const boundaryEntry: TimelineEntry = {
+      kind: "boundary",
+      ts: 0,
+      boundary: { executionId: "exec:done", outcome: "succeeded" },
+    };
+    await timelineStore.append("finished:timeline", [boundaryEntry], stubStoreCtx());
+    await seed(store, "finished", { status: "running", currentExecutionId: "exec:done" });
+    const cb = vi.fn((_: InterruptedExecution) => "resume" as const);
+    const app = await mkApp(store, cb, timelineStore);
+
+    await app.resumeSession("finished");
+    expect(cb).not.toHaveBeenCalled();
+
+    const record = await store.get("finished", stubStoreCtx());
+    expect(record?.status).toBe("idle");
+    expect(record?.currentExecutionId).toBeUndefined();
+    expect(record?.interruptedExecutionId).toBeUndefined();
+    expect(record?.resumeAttempts).toBeUndefined();
 
     await app.closeApp();
   });

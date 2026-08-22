@@ -1880,36 +1880,46 @@ export class AppHarness<P = unknown>
     const record = await this.sessionStore.get(sessionId, this.storeCtx());
     if (record === undefined || isTerminalSessionStatus(record.status)) return undefined;
 
-    // rebuildFromRecord marks a crashed `running` record interrupted uniformly
-    // (§3.1). The re-drive DECISION is gated to THIS path (resume/create), never a
-    // destroy-rebuild, and fires ONCE — on the actual `running → interrupted`
-    // transition, not on a lingering `interruptedExecutionId`. Captured BEFORE the
-    // rebuild reconciles the record away.
-    const freshlyInterrupted =
-      record.status === "running" && record.currentExecutionId !== undefined;
-    const { session, record: reconciled } = await this.rebuildFromRecord(record);
-
-    // Build the ctx from the record rebuildFromRecord actually WROTE — one source
-    // of truth, no second derivation the callback could drift from.
-    if (
-      freshlyInterrupted &&
-      reconciled.interruptedExecutionId !== undefined &&
-      this.onInterruptedExecution
-    ) {
-      // A THROWING policy rejects the resume — deliberate and loud (§3.2), the same
-      // posture as a rejected persist aborting an evict: swallowing an adopter bug
-      // to "drop" would hide it. Not caught here on purpose.
-      const decision = await this.onInterruptedExecution({
-        session: reconciled,
-        executionId: reconciled.interruptedExecutionId,
-        attempt: reconciled.resumeAttempts ?? 1,
-      });
-      if (decision === "resume") {
-        await this.resumeInterruptedExecution(session, reconciled.interruptedExecutionId);
+    // Two-signal detection (execution-resume.md §1): the record's `running` is
+    // the write-behind CANDIDATE (signal 1, captured by rebuildFromRecord before
+    // construction erases it); the timeline's turn boundary is AUTHORITATIVE
+    // (signal 2, readable only once the timeline is hydrated). Fires ONCE — on
+    // the actual crash detection, never on a lingering `interruptedExecutionId`.
+    // Gated to THIS path (resume/create), never a destroy-rebuild.
+    const { session, crashedExecutionId } = await this.rebuildFromRecord(record);
+    if (crashedExecutionId !== undefined) {
+      const cursor = session.timeline.executionCursor(crashedExecutionId);
+      if (cursor?.boundary === undefined) {
+        // No boundary = the turn never finished — a real interruption. This
+        // includes `cursor === undefined`: an execution that crashed before
+        // committing ANY entry exists only on the record, and is an
+        // interruption-with-nothing-committed (a re-drive starts from tick 0),
+        // NOT a nothing-to-do. Mark from the PRE-construction record (the
+        // hydrate merge already neutralized the durable FSM; this adds the
+        // crash history + per-execution budget on top).
+        const marked = markInterruptedRecord(record, crashedExecutionId);
+        await this.sessionStore.put(marked, this.storeCtx());
+        if (this.onInterruptedExecution) {
+          // A THROWING policy rejects the resume — deliberate and loud (§3.2),
+          // the same posture as a rejected persist aborting an evict:
+          // swallowing an adopter bug to "drop" would hide it.
+          const decision = await this.onInterruptedExecution({
+            session: marked,
+            executionId: crashedExecutionId,
+            attempt: marked.resumeAttempts ?? 1,
+          });
+          if (decision === "resume") {
+            await this.resumeInterruptedExecution(session, crashedExecutionId);
+          }
+          // "drop" (and the absent-callback default) leave
+          // `interruptedExecutionId` as honest history — it cannot re-fire
+          // (nothing durable says `running` any more) and a support tool or a
+          // manual resume can still act on it.
+        }
       }
-      // "drop" (and the absent-callback default) leave interruptedExecutionId as
-      // honest history — it cannot re-fire (status is now idle) and a support tool
-      // or a manual resume can still act on it.
+      // Boundary present = the turn FINISHED and only the record's idle-write
+      // was lost (the don't-run-twice guard). Construction's hydrate write-back
+      // already made the record honest — no mark, no callback, no re-drive.
     }
     return session;
   }
@@ -1947,31 +1957,33 @@ export class AppHarness<P = unknown>
    * wire dispatch gate, which authorizes off the record's principal rather than
    * the rebuilt harness's).
    */
-  private async rebuildFromRecord(
-    record: SessionRecord,
-  ): Promise<{ readonly session: SessionHarnessProtocol<P>; readonly record: SessionRecord }> {
-    // Boot reconciliation (capability half — execution-resume.md §3.1). A record
-    // still `running` at rebuild time is a crash mid-turn: eviction refuses
-    // in-flight sessions, so nothing else leaves `running` behind. Record the
-    // interruption ADDITIVELY (no session-level `interrupted` status) and persist
-    // it BEFORE the rebuild, so the reconstructed session hydrates the honest
-    // record. Uniform across resume AND destroy; the re-drive callback (gated to
-    // the resume/create path) is a separate slice. Returns the reconciled record
-    // it wrote so the caller is single-sourced with the store (no second
-    // derivation the callback could drift from).
-    const reconciled = reconcileInterruptedRecord(record);
-    if (reconciled !== record) {
-      await this.sessionStore.put(reconciled, this.storeCtx());
-    }
+  private async rebuildFromRecord(record: SessionRecord): Promise<{
+    readonly session: SessionHarnessProtocol<P>;
+    readonly record: SessionRecord;
+    readonly crashedExecutionId: string | undefined;
+  }> {
+    // Crash detection, signal 1 of 2 (execution-resume.md §3.1): a record still
+    // `running` at rebuild time can only be a crash — eviction refuses in-flight
+    // sessions, so nothing else leaves `running` behind. Detection is `running`
+    // ONLY, deliberately: `paused`, `input_required`, and `hibernated` are
+    // legitimate persisted waits, not crashes — do not "complete the matrix".
+    // CAPTURED here because construction erases the evidence: the hydrate merge
+    // writes back fresh `idle` status and wipes `currentExecutionId`. Signal 2
+    // (the timeline boundary — authoritative "did the turn actually finish")
+    // needs the HYDRATED timeline, so the verdict + mark belong to the caller,
+    // after this returns. Destroy ignores the capture: its record is about to
+    // be deleted, and a stale `running` it leaves behind self-heals on the next
+    // resume.
+    const crashedExecutionId = record.status === "running" ? record.currentExecutionId : undefined;
     const session = await this.createSessionBody(
       omitUndefined({
-        sessionId: reconciled.id,
-        principal: reconciled.principal,
-        metadata: reconciled.metadata,
+        sessionId: record.id,
+        principal: record.principal,
+        metadata: record.metadata,
       }) as CreateSessionInput<P>,
       false,
     );
-    return { session, record: reconciled };
+    return { session, record, crashedExecutionId };
   }
 
   /**
@@ -3758,32 +3770,25 @@ function resolveCompiler(
 }
 
 /**
- * Boot-reconciliation mark (execution-resume.md §3.1). A record still `running`
- * at rebuild time is a crash mid-turn — eviction refuses in-flight sessions, so a
- * durable `running` can only be a crash. Record the interruption ADDITIVELY: move
- * `currentExecutionId` → `interruptedExecutionId`, bump `resumeAttempts`, and set
- * `status` back to `idle` (the session is sendable again regardless of any later
- * re-drive decision). Pure — returns the SAME reference unchanged when there is
- * nothing to reconcile, so the caller can skip the durable write.
- *
- * Detection is `running` ONLY, deliberately: `paused` (operator-paused),
- * `input_required` (blocked on a human), and `hibernated` (evicted) are
- * legitimate persisted waits, not crashes — do not "complete the matrix" by
- * folding them in here.
+ * The interruption mark (execution-resume.md §3.1). Applied AFTER the two-signal
+ * detection said "crashed": construction itself has already neutralized the
+ * record's FSM (the hydrate merge writes back fresh `idle` status and wipes
+ * `currentExecutionId`), so this records the crash ADDITIVELY on top —
+ * `interruptedExecutionId` + the per-execution budget. Pure; derive from the
+ * PRE-construction record so the prior budget is read before the merge could
+ * touch it.
  */
-export function reconcileInterruptedRecord(record: SessionRecord): SessionRecord {
-  if (record.status !== "running" || record.currentExecutionId === undefined) return record;
+export function markInterruptedRecord(record: SessionRecord, executionId: string): SessionRecord {
   // Per-EXECUTION crash-loop budget: `resumeAttempts` counts CONSECUTIVE
   // interruptions of the SAME execution. A resume keeps the execution id, so a
-  // re-crash of a resumed execution has `currentExecutionId === interruptedExecutionId`
-  // → increment; a different execution (a fresh turn after a prior drop) → reset to
-  // 1, so B never inherits A's crash count. Completion clears both (slice 3).
-  const consecutive = record.interruptedExecutionId === record.currentExecutionId;
+  // re-crash increments; a different execution resets to 1, so B never inherits
+  // A's crash count. Completion clears both (slice 3).
+  const consecutive = record.interruptedExecutionId === executionId;
   return {
     ...record,
     status: "idle",
     currentExecutionId: undefined,
-    interruptedExecutionId: record.currentExecutionId,
+    interruptedExecutionId: executionId,
     resumeAttempts: consecutive ? (record.resumeAttempts ?? 0) + 1 : 1,
     updatedAt: Date.now(),
   };
