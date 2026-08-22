@@ -11,7 +11,7 @@ function handleWith(events: ReadonlyArray<{ blockIndex: number; delta: string }>
     abort: () => Promise.resolve(),
   });
   for (const e of events)
-    created.emit({ type: "content-delta", blockIndex: e.blockIndex, delta: e.delta });
+    created.emit({ type: "content-delta", blockIndex: e.blockIndex, delta: e.delta, tick: 1 });
   created.close();
   return created.handle;
 }
@@ -38,7 +38,7 @@ describe("SessionExecutionHandle streaming bridges", () => {
 
     expect(events.map((e) => (e as { delta: string }).delta)).toEqual(["he", "llo"]);
     expect(events.every((e) => e.sessionId === "s1" && e.executionId === "e1")).toBe(true);
-    expect(events.map((e) => e.sequence)).toEqual([1, 2]);
+    expect(events.map((e) => (e as { sequence: number }).sequence)).toEqual([1, 2]);
   });
 
   it("pipeTo() drains every event to a WritableStream in order, then closes it", async () => {
