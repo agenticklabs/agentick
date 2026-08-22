@@ -422,6 +422,11 @@ export class ResourcesHarness
    * hydrated resource surfaces in the catalog but `read()` throws
    * `ResourceNotFound` until the loaders re-run (`reload()`) and re-attach the
    * resolver. NOT wired into session resume in this run.
+   *
+   * **Not the checkpoint contract.** `CheckpointCapable` is feature-detected on
+   * `persist` + `hydrate` TOGETHER, so pairing this method with a `persist` enrolls
+   * the harness in the session's restore fold — which would re-run genesis on every
+   * resume. Implement the contract deliberately or leave the pair incomplete.
    */
   async hydrate(): Promise<void> {
     // MERGE the durable declarations into the catalog cache (reconstruct =

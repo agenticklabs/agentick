@@ -7,9 +7,15 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import {
+  LocalEventBus,
+  LocalInbox,
+  MemoryJournal,
+  namespaceSlotAppScopes,
+} from "@agentick/runtime";
 import { stubStoreCtx } from "@agentick/store";
 
+import "../augment.js";
 import { KnobsHarness, type KnobsHarnessOptions } from "../harness.js";
 import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "../store.js";
 import type { CollectionMutation, HydrateCtx, KnobPrimitive, PersistCtx } from "@agentick/spec";
@@ -268,5 +274,20 @@ describe("KnobsHarness — the store seam (query/mutate only)", () => {
 
     expect(second.get("seamed")).toBe("yes");
     await second.close();
+  });
+});
+
+describe("the knobs namespace slot — the app-scoped default store", () => {
+  it("an explicit `store: undefined` does not clobber the app default", () => {
+    // Adopters build config bags out of optional fields, so `{ store: opts.store }`
+    // spreads an explicit `undefined` — which a bare spread would layer OVER the
+    // default, leaving every session on a per-harness store and nothing to
+    // hydrate from after an evict.
+    const fold = namespaceSlotAppScopes()["knobs"]!;
+    const omitted = fold(undefined) as { store?: unknown };
+    const explicitUndefined = fold({ store: undefined }) as { store?: unknown };
+
+    expect(omitted.store).toBeDefined();
+    expect(explicitUndefined.store).toBe(omitted.store);
   });
 });

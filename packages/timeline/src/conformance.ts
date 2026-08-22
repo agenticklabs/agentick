@@ -17,6 +17,8 @@
 
 import { describe, expect, it } from "vitest";
 import type {
+  DropCapable,
+  DropCtx,
   CompactStrategy,
   TimelineEntry,
   TimelineHarnessProtocol,
@@ -24,6 +26,7 @@ import type {
   TimelineStore,
 } from "@agentick/spec";
 import { isCheckpointCapable, TimelineHydrateFailed, TimelineWriteFailed } from "@agentick/spec";
+import { stubStoreCtx } from "@agentick/store";
 import type { TimelineDefinition } from "./definition.js";
 import { MemoryTimelineStore } from "./store.js";
 
@@ -45,8 +48,16 @@ export interface TimelineHarnessFactoryDeps {
   readonly makeFromDefinition?: (
     definition: TimelineDefinition,
     scopeId?: string,
-  ) => Promise<TimelineHarnessProtocol & { hydrate(): Promise<void>; persist(): Promise<void> }>;
+  ) => Promise<
+    TimelineHarnessProtocol & DropCapable & { hydrate(): Promise<void>; persist(): Promise<void> }
+  >;
 }
+
+const dropCtx = (sessionId: string): DropCtx => ({
+  sessionId,
+  tick: 0,
+  storeCtx: stubStoreCtx(),
+});
 
 function messageEntry(id: string, text: string): TimelineEntry {
   return {
@@ -404,6 +415,39 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         await h.append(messageEntry("lost", "one"));
         await expect(h.persist()).rejects.toBeInstanceOf(TimelineWriteFailed);
         await h.close().catch(() => undefined);
+      });
+
+      it("dropScope ENDS the log: a fresh instance on the same scope hydrates nothing", async () => {
+        // The destroy transport (checkpointing §6). The store is shared across
+        // scopes, so the sibling pins that only THIS scope's log is deleted.
+        const store = new MemoryTimelineStore();
+        const doomed = await makeFromDefinition({ store }, "drop-doomed");
+        const bystander = await makeFromDefinition({ store }, "drop-bystander");
+        await doomed.append(messageEntry("d1", "secret"));
+        await bystander.append(messageEntry("b1", "kept"));
+        await doomed.persist();
+        await bystander.persist();
+
+        await doomed.dropScope(dropCtx("drop-doomed"));
+        await doomed.close();
+        await bystander.close();
+
+        const reopened = await makeFromDefinition({ store }, "drop-doomed");
+        await reopened.hydrate();
+        expect(reopened.readPersisted()).toEqual([]);
+        await reopened.close();
+
+        const sibling = await makeFromDefinition({ store }, "drop-bystander");
+        await sibling.hydrate();
+        expect(sibling.readPersisted().map(entryId)).toEqual(["b1"]);
+        await sibling.close();
+      });
+
+      it("dropScope is idempotent — a scope that holds nothing drops cleanly", async () => {
+        const h = await makeFromDefinition({ store: new MemoryTimelineStore() }, "drop-empty");
+        await expect(h.dropScope(dropCtx("drop-empty"))).resolves.toBeUndefined();
+        await expect(h.dropScope(dropCtx("drop-empty"))).resolves.toBeUndefined();
+        await h.close();
       });
     },
   );

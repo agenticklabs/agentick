@@ -427,11 +427,12 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       await p3.close();
     });
 
-    it("restore() re-hydrates the timeline from its store, idempotently", async () => {
-      // Nothing transports the timeline but its store (checkpointing §3.2/§5).
-      // `makeStore()` shares one durable backing, so the destination hydrates
-      // at construction; restore() must re-hydrate to the same result: store as
-      // authority, no duplication.
+    it("restore() re-reads the store: a write landing AFTER construction surfaces", async () => {
+      // Nothing transports the timeline but its store (checkpointing §3.2/§5),
+      // and the destination hydrates once at construction — so a turn written
+      // by a SECOND session after that point is the only thing whose presence
+      // `restore()` alone can explain. Without the second writer this test
+      // passes on construction's read and asserts nothing about restore.
       const sessionId = `kr-roundtrip-${Math.random().toString(36).slice(2)}`;
 
       // ── Source session: run a turn; the flush barrier lands it in storeA. ──
@@ -446,17 +447,37 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       await src.close();
 
       // ── Destination: SAME id, same durable backing — construction hydrates
-      // the prior turn (pin 1); restore() re-hydrates to the same result. ──
+      // the prior turn (pin 1) and NOT the one that has not happened yet. ──
       const storeB = await opts.makeStore();
       const dest = await mkSession({ sessionId, store: storeB, executor: replyExec("answer") });
       const hydrated = persistedOf(dest.session).length;
       expect(hydrated).toBeGreaterThanOrEqual(2);
+      expect(JSON.stringify(persistedOf(dest.session))).not.toContain("remember: QUINCE");
+
+      // ── Second writer, AFTER the destination is open. ──
+      const storeC = await opts.makeStore();
+      const later = await mkSession({
+        sessionId,
+        store: storeC,
+        executor: replyExec("also noted"),
+      });
+      await (
+        await later.session.send({
+          messages: [{ role: "user", content: [{ type: "text", text: "remember: QUINCE" }] }],
+        })
+      ).result;
+      await later.session.snapshot();
+      await later.close();
 
       await dest.session.restore();
       const restored = persistedOf(dest.session);
-      expect(restored.length).toBe(hydrated);
+      expect(restored.length).toBeGreaterThan(hydrated);
       expect(JSON.stringify(restored)).toContain("remember: PLUM");
-      expect(JSON.stringify(restored)).toContain("noted");
+      expect(JSON.stringify(restored)).toContain("remember: QUINCE");
+
+      // Store as authority, no duplication: hydrate REPLACES, it never appends.
+      await dest.session.restore();
+      expect(persistedOf(dest.session).length).toBe(restored.length);
 
       await dest.close();
     });

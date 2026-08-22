@@ -16,7 +16,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { BranchCapable, CheckpointCapable, StateHarnessProtocol } from "@agentick/spec";
+import type {
+  BranchCapable,
+  CheckpointCapable,
+  DropCapable,
+  StateHarnessProtocol,
+} from "@agentick/spec";
 import { stubStoreCtx } from "@agentick/store";
 
 import { createStateStore, stateScope, stateStoreKey, type StateStore } from "./store.js";
@@ -34,7 +39,7 @@ export interface StateHarnessFactoryDeps {
   readonly makeOverStore?: (
     store: StateStore,
     scope: string,
-  ) => Promise<StateHarnessProtocol & CheckpointCapable & BranchCapable>;
+  ) => Promise<StateHarnessProtocol & CheckpointCapable & BranchCapable & DropCapable>;
 }
 
 export function runStateHarnessConformance(deps: StateHarnessFactoryDeps): void {
@@ -240,6 +245,40 @@ export function runStateHarnessConformance(deps: StateHarnessFactoryDeps): void 
       expect(b.get("mode")).toBeUndefined();
       await a.close();
       await b.close();
+    });
+
+    it("dropScope deletes its OWN partition and leaves a sibling scope alone", async () => {
+      // The destroy transport (checkpointing §6). One store, two scopes: after
+      // the drop, a fresh instance on the dropped scope hydrates nothing while
+      // the sibling still hydrates its own cells.
+      const store = createStateStore();
+      const doomed = await makeOverStore(store, "drop-doomed");
+      const bystander = await makeOverStore(store, "drop-bystander");
+      await doomed.set({ key: "secret", value: "classified" });
+      await bystander.set({ key: "secret", value: "kept" });
+      await doomed.persist(ctx("drop-doomed"));
+      await bystander.persist(ctx("drop-bystander"));
+
+      await doomed.dropScope(ctx("drop-doomed"));
+      await doomed.close();
+      await bystander.close();
+
+      const reopened = await makeOverStore(store, "drop-doomed");
+      await reopened.hydrate(ctx("drop-doomed"));
+      expect(reopened.has("secret")).toBe(false);
+      await reopened.close();
+
+      const sibling = await makeOverStore(store, "drop-bystander");
+      await sibling.hydrate(ctx("drop-bystander"));
+      expect(sibling.get("secret")).toBe("kept");
+      await sibling.close();
+    });
+
+    it("dropScope is idempotent — an empty partition drops cleanly", async () => {
+      const h = await makeOverStore(createStateStore(), "drop-empty");
+      await expect(h.dropScope(ctx("drop-empty"))).resolves.toBeUndefined();
+      await expect(h.dropScope(ctx("drop-empty"))).resolves.toBeUndefined();
+      await h.close();
     });
 
     it("persist rejects when the store write fails", async () => {

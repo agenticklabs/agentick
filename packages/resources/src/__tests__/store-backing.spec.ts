@@ -9,6 +9,7 @@
  *     sidecar), NEVER the store.
  *   - `resolverFor` semantics unchanged: fixed-first, then template-match.
  *   - `snapshot()` folds durable + transient declarations into one catalog.
+ *   - the harness is NOT `CheckpointCapable` (genesis `hydrate`, no `persist`).
  *
  * Also runs {@link runResourceStoreConformance} against {@link InMemoryResourceStore}.
  */
@@ -16,6 +17,7 @@
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 import type { ResourceContents, ResourceStore } from "@agentick/spec";
+import { isCheckpointCapable } from "@agentick/spec";
 import { stubStoreCtx } from "@agentick/store";
 
 import { ResourcesHarness } from "../harness.js";
@@ -199,5 +201,17 @@ describe("ResourcesHarness — store backing (durable / transient / sidecar spli
     await h2.reload();
     expect(await h2.read("db://doc")).toEqual([text("db://doc", "content")]);
     await h2.close();
+  });
+
+  it("is NOT CheckpointCapable — genesis hydrate is not the checkpoint contract", async () => {
+    // `hydrate()` here is GENESIS (ADR 93), not the resume half of a checkpoint
+    // pair: the resolver sidecar does not survive it, so a session-driven
+    // restore would surface a catalog whose reads throw. The session's fold is
+    // feature-detected on `persist` + `hydrate` TOGETHER, so adding a `persist`
+    // beside this `hydrate` enrolls the harness silently.
+    const h = makeHarness(new InMemoryResourceStore());
+    await h.ready;
+    expect(isCheckpointCapable(h)).toBe(false);
+    await h.close();
   });
 });

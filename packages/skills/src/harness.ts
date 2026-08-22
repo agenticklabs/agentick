@@ -681,6 +681,11 @@ export class SkillsHarness
    * image. That decision belongs to the session (it knows its lineage), which
    * simply does not install a fresh genesis for a fork.
    *
+   * **Not the checkpoint contract.** `CheckpointCapable` is feature-detected on
+   * `persist` + `hydrate` TOGETHER, so pairing this method with a `persist` enrolls
+   * the harness in the session's restore fold — which would re-run genesis on every
+   * resume. Implement the contract deliberately or leave the pair incomplete.
+   *
    * @throws {SkillsError._tag === "SkillsHydrateFailed"} the hydrator threw;
    *   session creation fails rather than half-genesising the library.
    */

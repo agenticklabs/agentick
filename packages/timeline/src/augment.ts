@@ -18,6 +18,7 @@
  */
 
 import { registerNamespaceSlot } from "@agentick/runtime";
+import { omitUndefined } from "@agentick/utils";
 import type { TimelineHarnessProtocol } from "@agentick/spec";
 import type { TimelineHandle } from "./handle.js";
 import type { TimelineConfig } from "./extension.js";
@@ -74,6 +75,8 @@ registerNamespaceSlot("timeline", {
   appScope: () => {
     const store = new MemoryTimelineStore();
     return (value) =>
-      isTimelineHarnessInstance(value) ? value : { store, ...(value as object | undefined) };
+      isTimelineHarnessInstance(value)
+        ? value
+        : { store, ...omitUndefined((value ?? {}) as object) };
   },
 });

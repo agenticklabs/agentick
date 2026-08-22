@@ -24,7 +24,7 @@ import {
   generateId,
   type Middleware,
 } from "@agentick/runtime";
-import { PromptsHydrateFailed } from "@agentick/spec";
+import { isCheckpointCapable, PromptsHydrateFailed } from "@agentick/spec";
 import type {
   CollectionMutation,
   PromptDeclarationRecord,
@@ -256,6 +256,20 @@ describe("genesis — the ctx.store facet (ADR 91/93)", () => {
     await h.hydrate();
     expect(seen).toEqual(["tenant-a"]);
     expect(h.list().map((d) => d.name)).toEqual(["premium"]);
+    await h.close();
+  });
+});
+
+describe("genesis hydrate is NOT the checkpoint contract", () => {
+  it("the harness is not CheckpointCapable — one `persist` away from silent enrollment", async () => {
+    // The session's checkpoint fold is feature-detected on `persist` + `hydrate`
+    // TOGETHER, and this `hydrate` is GENESIS: it re-seeds from the SOURCE.
+    // Adding a `persist` here enrolls the harness without another line of code,
+    // and every `session.restore()` would then re-run genesis over live state
+    // (skills' "second hydrate RESTAMPS" pins the same hazard). If prompts ever
+    // persists, the checkpoint contract has to be implemented deliberately.
+    const h = await harness({ hydrate: hydrateFrom([prompt("p")]) });
+    expect(isCheckpointCapable(h)).toBe(false);
     await h.close();
   });
 });

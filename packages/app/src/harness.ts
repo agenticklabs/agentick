@@ -1864,15 +1864,23 @@ export class AppHarness<P = unknown>
     }
     const record = await this.sessionStore.get(sessionId, this.storeCtx());
     if (record === undefined || isTerminalSessionStatus(record.status)) return undefined;
-    // The record is all that is left, so the session is rebuilt from this app's
-    // recipe with the serializable half of its original create call read back
-    // off the record (checkpointing §4). The scope ceiling is NOT part of that
-    // half: it is construction-bound and nothing persists it (see
-    // `findRecordPrincipal` in the wire dispatch gate, which authorizes off the
-    // record's principal rather than the rebuilt harness's).
+    return this.rebuildFromRecord(record);
+  }
+
+  /**
+   * Build a session back from the durable record alone — the recovery
+   * construction {@link resumeSessionBody} and destroy's scope-drop share. The
+   * record is all that is left, so the session is rebuilt from this app's recipe
+   * with the serializable half of its original create call read back off the
+   * record (checkpointing §4). The scope ceiling is NOT part of that half: it is
+   * construction-bound and nothing persists it (see `findRecordPrincipal` in the
+   * wire dispatch gate, which authorizes off the record's principal rather than
+   * the rebuilt harness's).
+   */
+  private rebuildFromRecord(record: SessionRecord): Promise<SessionHarnessProtocol<P>> {
     return this.createSessionBody(
       omitUndefined({
-        sessionId,
+        sessionId: record.id,
         principal: record.principal,
         metadata: record.metadata,
       }) as CreateSessionInput<P>,
@@ -3115,24 +3123,47 @@ export class AppHarness<P = unknown>
    *   2. **Cancel detached tasks** — this must happen while the sessions are
    *      still LIVE, because a detached task's only in-process handle is its
    *      owning session's task harness, and step 3 closes that harness.
-   *   3. **Dispose the subtree** through the same `disposeSession("close")` a
+   *   3. **Drop every harness's store scope** — the timeline log, the knob and
+   *      state partitions. A `DropCapable` bridge deletes its OWN scope in its
+   *      OWN store, so this must run while the bridges are still mounted, which
+   *      is why it precedes disposal. Without it the durable record goes and the
+   *      conversation stays, and the next session to reuse the id hydrates it
+   *      back (checkpointing §6).
+   *   4. **Dispose the subtree** through the same `disposeSession("close")` a
    *      genuine session end uses (registry removal, `onSessionClose`, bridge
    *      teardown) — promoted, not duplicated.
-   *   4. **Delete the durable record.**
+   *   5. **Delete the durable record** — the target's and every descendant's.
    *
-   * Idempotent: an unknown id walks an empty subtree, disposes nothing, and
-   * deletes a record that isn't there — reporting all three as facts rather than
-   * raising. Destroy deliberately does NOT `assertOpen()`: refusing to clean up
-   * because the app is already shutting down would be exactly backwards.
+   * A target that is not live has no bridges to drop from, so it is rebuilt
+   * first through the shared {@link rebuildFromRecord} — one recovery path,
+   * teardown included (checkpointing §4). Rebuilding to destroy costs a remount
+   * and is the only way the scopes get named at all.
+   *
+   * Idempotent: an unknown id rebuilds nothing, walks an empty subtree, disposes
+   * nothing, and deletes a record that isn't there — reporting all of it as
+   * facts rather than raising. Destroy deliberately does NOT `assertOpen()`:
+   * refusing to clean up because the app is already shutting down would be
+   * exactly backwards.
    */
   private async destroySessionBody(
     sessionId: string,
     reason: string,
   ): Promise<DestroySessionResult> {
+    // `found` reports the pre-state, so it is read before the resume below can
+    // make a checked-out session live again.
+    const found = this.registry.has(sessionId);
+    if (!found) {
+      // Rebuilt even from a TERMINAL record, which is where this parts company
+      // with resume: a hung-up session's stores are exactly the ones destroy
+      // exists to free.
+      const record = await this.sessionStore.get(sessionId, this.storeCtx());
+      if (record !== undefined) await this.rebuildFromRecord(record);
+    }
+
     // Snapshot the subtree BEFORE any teardown — disposal mutates the registry,
     // so its shape can only be read honestly up front.
     const subtree = this.liveSubtree(sessionId);
-    const found = this.registry.has(sessionId);
+    const descendants = subtree.filter((entry) => entry.id !== sessionId);
 
     // (1) Transitive abort, deepest-first — the shared walk, which
     // `session.abort({ cascade: true })` reaches through the SpawnContext door.
@@ -3141,33 +3172,37 @@ export class AppHarness<P = unknown>
     // (2) Reap detached tasks — precisely the ones `close()` abandons.
     const cancelledDetachedTasks = await this.cancelDetachedTasks(subtree, reason);
 
-    // (3) Dispose. The target's own close cascades to the children it spawned
+    // (3) Free the durable scopes across the whole subtree, while the bridges
+    // that own them are still mounted. A rejection propagates: destroy fails
+    // loudly rather than reporting a deletion that did not happen.
+    for (const entry of subtree) await entry.session.dropScopes();
+
+    // (4) Dispose. The target's own close cascades to the children it spawned
     // (SP6 `disposeChildren`), so the second pass is a no-op for those; it
     // exists for a descendant the registry links to this subtree but the live
     // `_children` chain does not (an intermediate session evicted / already
     // closed leaves its children parented to a gone session).
     await this.disposeSession(sessionId, "close");
-    for (const entry of subtree) {
-      if (entry.id === sessionId) continue;
-      await this.disposeSession(entry.id, "close");
-    }
+    for (const entry of descendants) await this.disposeSession(entry.id, "close");
 
-    // (4) Delete the durable record. `existed` is read first because
+    // (5) Delete the durable records. `existed` is read first because
     // `SessionStore.delete` returns void — what deletion MEANS (soft flag, hard
     // removal, cascade) is the store impl's contract, so the only durable fact
     // this result can assert is whether there was a record to act on. The delete
     // itself is unconditional: a record written between the read and the delete
-    // must not survive destroy.
+    // must not survive destroy. Descendants go too — they were torn down with
+    // the target, so leaving their rows behind would strand them.
     const storeCtx = this.storeCtx();
     const existed = (await this.sessionStore.get(sessionId, storeCtx)) !== undefined;
     await this.sessionStore.delete(sessionId, storeCtx);
+    for (const entry of descendants) await this.sessionStore.delete(entry.id, storeCtx);
 
     return {
       sessionId,
       live: {
         found,
         abortedExecutions,
-        disposedDescendants: subtree.length - (found ? 1 : 0),
+        disposedDescendants: descendants.length,
         cancelledDetachedTasks,
       },
       record: { existed },

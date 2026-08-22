@@ -18,6 +18,8 @@ import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-exe
 import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import type { CheckpointCapable, ExecutionTarget, HydrateCtx, PersistCtx } from "@agentick/spec";
+import { SessionBusyError } from "@agentick/spec";
+import { waitFor } from "@agentick/utils/testing";
 
 import { SessionHarness } from "../harness.js";
 
@@ -55,7 +57,11 @@ class FakeCheckpointBridge implements CheckpointCapable {
   }
 }
 
-async function mkSession(id: string, ext?: ReadonlyMap<string, unknown>) {
+async function mkSession(
+  id: string,
+  ext?: ReadonlyMap<string, unknown>,
+  holdUntil?: Promise<void>,
+) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -74,6 +80,7 @@ async function mkSession(id: string, ext?: ReadonlyMap<string, unknown>) {
         stopReason: "end",
         usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
       },
+      ...(holdUntil !== undefined ? { holdUntil } : {}),
     },
   });
   await Promise.all([compiler.ready, loop.ready, tools.ready, elicitation.ready, executor.ready]);
@@ -144,6 +151,30 @@ describe("SessionHarness — CheckpointCapable fold", () => {
     bridge.hydrateError = new Error("load failed");
 
     await expect(session.restore()).rejects.toThrow(/load failed/);
+    await session.close();
+    await tools.close();
+  });
+
+  it("restore() rejects while an execution is in flight, and succeeds once it settles", async () => {
+    // Hydrate REPLACES each projection, so a restore under a live tick would
+    // swap the timeline out from under a loop that has already read it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { session, tools } = await mkSession("cp-inflight", undefined, held);
+
+    const inFlight = session.send({ messages: [{ role: "user", content: "hi" }] });
+    await waitFor(() => session.hasInFlightExecution);
+
+    await expect(session.restore()).rejects.toBeInstanceOf(SessionBusyError);
+
+    release();
+    await (
+      await inFlight
+    ).result;
+    await expect(session.restore()).resolves.toBeUndefined();
+
     await session.close();
     await tools.close();
   });

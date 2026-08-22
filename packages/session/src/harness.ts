@@ -58,6 +58,7 @@ import type {
   ExecutionTarget,
   ExecutorProtocol,
   BranchCtx,
+  DropCtx,
   HydrateCtx,
   KnobHandle,
   LanguageModelExecutionResult,
@@ -125,12 +126,14 @@ import {
   isChannelSnapshotProvider,
   isBranchCapable,
   isCheckpointCapable,
+  isDropCapable,
   isExecuteError,
   NoModelForExecutionError,
   SESSION_STATUS_CHANNEL,
   SteerCannotCarryStructuredOutput,
   supportsTreeInterception,
   InvalidMediaSource,
+  SessionBusyError,
   SessionClosedError,
   SpawnDepthExceededError,
   TimelineWriteFailed,
@@ -1769,6 +1772,23 @@ export class SessionHarness<P = unknown>
     }
   }
 
+  /**
+   * Delete every {@link DropCapable} bridge's durable scope — the destroy
+   * transport (checkpointing §6). Irreversible, and the counterpart to the
+   * `persist` fan-out: what a checkpoint wrote, this frees.
+   *
+   * Not a command of its own: `app:command:destroy-session` is the operation
+   * (and the guard seam), and this is the teardown step it composes, exactly as
+   * eviction composes `snapshot` + `close`. A rejection propagates, so destroy
+   * fails loudly rather than reporting a deletion that did not happen.
+   */
+  async dropScopes(): Promise<void> {
+    const ctx: DropCtx = this.checkpointCtxFrom(this.storeCtx());
+    for (const bridge of Object.values(this.bridges)) {
+      if (isDropCapable(bridge)) await bridge.dropScope(ctx);
+    }
+  }
+
   restore(): Promise<void> {
     // Recovery pass #1 — `session:restore` command. `onBeforeSessionRestore` +
     // `onAfterSessionRestore` fire around the hydrate fan-out.
@@ -1796,6 +1816,11 @@ export class SessionHarness<P = unknown>
   private async restoreBody(ctx: HydrateCtx): Promise<void> {
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "restore" });
+    }
+    // Hydrate REPLACES each projection, so restoring under a live execution
+    // would swap the timeline out from under a tick that has already read it.
+    if (this.hasInFlightExecution) {
+      throw new SessionBusyError({ reason: "cannot restore while an execution is in flight" });
     }
     await this._mountReady;
     await this.hydrateCheckpointBridges(ctx);

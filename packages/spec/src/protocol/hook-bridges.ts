@@ -186,6 +186,35 @@ export function isBranchCapable(x: unknown): x is BranchCapable {
   );
 }
 
+/** What a drop hook receives — the same scope ctx `hydrate` reads under. */
+export type DropCtx = HydrateCtx;
+
+/**
+ * A store-backed harness that can DELETE its own scope — the destroy transport,
+ * the third direction beside `persist`/`hydrate` and `branch`. Without it,
+ * `app.destroySession` frees the session record and leaves every harness
+ * partition behind forever, and a later session reusing the id hydrates a
+ * conversation that was supposed to be gone.
+ *
+ * Irreversible, and deliberately narrow: a harness deletes its OWN scope in its
+ * OWN store and nothing else. A harness with no durable state does not implement
+ * it.
+ *
+ * @see docs/proposals/v2/checkpointing.md §6
+ */
+export interface DropCapable {
+  dropScope(ctx: DropCtx): Promise<void>;
+}
+
+/** Runtime feature-detection for {@link DropCapable}. */
+export function isDropCapable(x: unknown): x is DropCapable {
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    typeof (x as { dropScope?: unknown }).dropScope === "function"
+  );
+}
+
 // ============================================================================
 // Data bridge — the no-Suspense contract
 // ============================================================================

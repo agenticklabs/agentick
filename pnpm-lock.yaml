@@ -347,6 +347,12 @@ importers:
       '@agentick/skills':
         specifier: workspace:*
         version: link:../skills
+      '@agentick/state':
+        specifier: workspace:*
+        version: link:../state
+      '@agentick/store':
+        specifier: workspace:*
+        version: link:../store
       '@types/react':
         specifier: ^19.2.5
         version: 19.2.13
@@ -4472,6 +4478,7 @@ packages:
   eslint@9.39.2:
     resolution: {integrity: sha512-LEyamqS7W5HB3ujJyvi0HQK/dtVINZvd5mAAp9eT5S/ujByGjiZLCzPcHVzuXbpJDJF/cxwHlfceVUDZ2lnSTw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

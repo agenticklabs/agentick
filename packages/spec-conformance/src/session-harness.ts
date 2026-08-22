@@ -37,45 +37,28 @@ import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 
 import type {
+  CheckpointCapable,
   ContentBlock,
   EventBus,
   ExecutionTarget,
   ExecutionTerminal,
   ExecutorProtocol,
   ExecutorTerminal,
+  HydrateCtx,
   LanguageModelExecutionResult,
   LoopExecutorProtocol,
   MessageInbox,
   OperationJournal,
+  PersistCtx,
   CompilerProtocol,
   RenderedTree,
   SendResult,
   SessionHarnessProtocol,
-  TimelineEntry,
-  TimelineHarnessProtocol,
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION, SessionClosedError } from "@agentick/spec";
 
 import { stubHarnessFx } from "./harness.js";
-
-/**
- * The durable persisted timeline log, read from the LIVE handle. The timeline
- * is CheckpointCapable (checkpointing §3.2): it persists to its own store and
- * persists to its own store — the only read surface there is.
- *
- * `@agentick/timeline` augments the `timeline` slot onto
- * {@link SessionHarnessProtocol}; this package is generic infra and must not
- * depend on a leaf harness to see it, so the slot is feature-detected against
- * the spec-level protocol. A harness without one reads empty and fails the
- * assertions below.
- */
-function persistedTimeline(session: SessionHarnessProtocol<unknown>): readonly TimelineEntry[] {
-  const timeline = (
-    session as { readonly timeline?: Pick<TimelineHarnessProtocol, "readPersisted"> }
-  ).timeline;
-  return timeline?.readPersisted() ?? [];
-}
 
 // ============================================================================
 // Factory contract
@@ -97,6 +80,44 @@ export interface SessionConformanceFactoryDeps {
   readonly target: ExecutionTarget;
   /** Opaque agent root passed to `mount({ element })`. */
   readonly agent: unknown;
+  /**
+   * A {@link CheckpointCapable} bridge the factory MUST install on the
+   * session-under-test's bridge bag. The checkpoint section observes the fan-out
+   * through it rather than through a harness namespace: this suite is generic
+   * infra and names none (ADR 27). Supplied by {@link checkpointProbe}.
+   */
+  readonly checkpointBridge?: CheckpointCapable;
+}
+
+/**
+ * The {@link SessionConformanceFactoryDeps.checkpointBridge} implementation the
+ * suite injects — a counting {@link CheckpointCapable} double. Nothing about it
+ * is namespace-specific, which is the point: any conformant session fans
+ * `persist` / `hydrate` out over whatever is on its bridge bag.
+ */
+export interface CheckpointProbe extends CheckpointCapable {
+  readonly persisted: number;
+  readonly hydrated: number;
+  readonly lastCtx: PersistCtx | HydrateCtx | undefined;
+  persistError: Error | undefined;
+}
+
+export function checkpointProbe(): CheckpointProbe {
+  return {
+    persisted: 0,
+    hydrated: 0,
+    lastCtx: undefined,
+    persistError: undefined,
+    async persist(ctx: PersistCtx): Promise<void> {
+      if (this.persistError) throw this.persistError;
+      (this as { persisted: number }).persisted += 1;
+      (this as { lastCtx: PersistCtx | undefined }).lastCtx = ctx;
+    },
+    async hydrate(ctx: HydrateCtx): Promise<void> {
+      (this as { hydrated: number }).hydrated += 1;
+      (this as { lastCtx: HydrateCtx | undefined }).lastCtx = ctx;
+    },
+  } as CheckpointProbe;
 }
 
 export interface SessionConformanceFactoryInput {
@@ -327,6 +348,9 @@ export function defaultSessionConformanceDeps(
     toolExecutor: overrides.toolExecutor ?? stubToolExecutor(),
     target: overrides.target ?? mkTarget(),
     agent: overrides.agent ?? null,
+    ...(overrides.checkpointBridge !== undefined
+      ? { checkpointBridge: overrides.checkpointBridge }
+      : {}),
   };
 }
 
@@ -365,42 +389,6 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
     });
   });
 
-  describe("SessionHarnessProtocol — timeline", () => {
-    it("appends caller-supplied messages before the execution runs", async () => {
-      const session = await factory({
-        harnessId: "session-conf-tl-1",
-        deps: defaultSessionConformanceDeps(),
-      });
-      await session.send({
-        messages: [
-          { role: "user", content: "first" },
-          { role: "user", content: "second" },
-        ],
-      });
-      const tl = persistedTimeline(session);
-      const userMessages = tl.filter((e) => e.kind === "message" && e.message.role === "user");
-      expect(userMessages.length).toBeGreaterThanOrEqual(2);
-      await session.close();
-    });
-
-    it("appends an assistant message after the loop's applyExecutorResult", async () => {
-      const session = await factory({
-        harnessId: "session-conf-tl-2",
-        deps: defaultSessionConformanceDeps(undefined, {
-          loop: stubLoop("ok"),
-        }),
-      });
-      const handle = await session.send({
-        messages: [{ role: "user", content: "x" }],
-      });
-      await handle.result;
-      const tl = persistedTimeline(session);
-      const assistant = tl.find((e) => e.kind === "message" && e.message.role === "assistant");
-      expect(assistant).toBeDefined();
-      await session.close();
-    });
-  });
-
   describe("SessionHarnessProtocol — checkpoint", () => {
     it("snapshot() is the flush barrier: it resolves with no payload", async () => {
       const session = await factory({
@@ -414,28 +402,63 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
       await session.close();
     });
 
-    it("restore() re-hydrates from the stores and is idempotent", async () => {
+    it("genesis fans hydrate out over every CheckpointCapable bridge", async () => {
+      // Build-then-hydrate IS resume (checkpointing §4), so a session that has
+      // only just opened has already run the fan-out once. This also proves the
+      // factory installed the probe, which the two tests below depend on.
+      const probe = checkpointProbe();
+      const session = await factory({
+        harnessId: "session-conf-genesis-1",
+        deps: defaultSessionConformanceDeps(undefined, { checkpointBridge: probe }),
+      });
+      expect(probe.hydrated).toBe(1);
+      expect(probe.persisted).toBe(0);
+      await session.close();
+    });
+
+    it("snapshot() fans persist out, carrying the session scope", async () => {
+      const probe = checkpointProbe();
+      const session = await factory({
+        harnessId: "session-conf-snap-2",
+        deps: defaultSessionConformanceDeps(undefined, { checkpointBridge: probe }),
+      });
+      await session.snapshot();
+      expect(probe.persisted).toBe(1);
+      expect(probe.lastCtx?.sessionId).toBe("session-conf-snap-2");
+      await session.close();
+    });
+
+    it("restore() fans hydrate out again, once per call", async () => {
+      const probe = checkpointProbe();
       const session = await factory({
         harnessId: "session-conf-restore-1",
-        deps: defaultSessionConformanceDeps(undefined, { loop: stubLoop("noted") }),
+        deps: defaultSessionConformanceDeps(undefined, { checkpointBridge: probe }),
       });
-      await (
-        await session.send({ messages: [{ role: "user", content: "remember-XYZZY" }] })
-      ).result;
-      const afterSend = persistedTimeline(session).length;
-      expect(afterSend).toBeGreaterThan(0);
+      await session.restore();
+      await session.restore();
+      // One at genesis, one per restore — the hydrate fan-out is the ONLY thing
+      // that can move this counter.
+      expect(probe.hydrated).toBe(3);
+      await session.close();
+    });
 
-      await session.snapshot();
-      await session.restore();
-      await session.restore();
-      // Store as authority, no duplication: hydrate REPLACES, it never appends.
-      expect(persistedTimeline(session).length).toBe(afterSend);
+    it("a rejected persist propagates out of snapshot()", async () => {
+      const probe = checkpointProbe();
+      const session = await factory({
+        harnessId: "session-conf-snap-fail",
+        deps: defaultSessionConformanceDeps(undefined, { checkpointBridge: probe }),
+      });
+      probe.persistError = new Error("flush failed");
+      await expect(session.snapshot()).rejects.toThrow(/flush failed/);
       await session.close();
     });
   });
 
+  // What the applicators land ON the timeline is a session+timeline integration
+  // claim and lives in `@agentick/session` — this suite names no namespace
+  // (ADR 27). What stays here is the applicator's own return contract.
   describe("SessionHarnessProtocol — state applicator", () => {
-    it("appendEntry returns appended ids and timeline reflects the entry", async () => {
+    it("appendEntry reports one appended id per entry", async () => {
       const session = await factory({
         harnessId: "session-conf-apply-1",
         deps: defaultSessionConformanceDeps(),
@@ -446,17 +469,10 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         entry: { role: "user", content },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = persistedTimeline(session);
-      const marker = tl.find(
-        (e) =>
-          e.kind === "message" &&
-          e.message.content.some((b) => b.type === "text" && b.text === "marker"),
-      );
-      expect(marker).toBeDefined();
       await session.close();
     });
 
-    it("applyExecutorResult appends an assistant message with the output", async () => {
+    it("applyExecutorResult reports one appended id", async () => {
       const session = await factory({
         harnessId: "session-conf-apply-2",
         deps: defaultSessionConformanceDeps(),
@@ -472,18 +488,10 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = persistedTimeline(session);
-      const found = tl.find(
-        (e) =>
-          e.kind === "message" &&
-          e.message.role === "assistant" &&
-          e.message.content.some((b) => b.type === "text" && b.text === "from-applicator"),
-      );
-      expect(found).toBeDefined();
       await session.close();
     });
 
-    it("applyToolResults appends one tool message per result", async () => {
+    it("applyToolResults reports one appended id per result", async () => {
       const session = await factory({
         harnessId: "session-conf-apply-3",
         deps: defaultSessionConformanceDeps(),
@@ -510,9 +518,6 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         ],
       });
       expect(res.appendedEntryIds.length).toBe(2);
-      const tl = persistedTimeline(session);
-      const toolMessages = tl.filter((e) => e.kind === "message" && e.message.role === "tool");
-      expect(toolMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();
     });
   });

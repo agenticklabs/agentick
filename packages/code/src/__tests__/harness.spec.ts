@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Chunk, Effect, Fiber, Stream } from "effect";
 import { deriveHookNames, type MemoryJournal } from "@agentick/runtime";
 import type { EventQuery, ProtocolEvent, SessionInstaller } from "@agentick/spec";
+import { isCheckpointCapable } from "@agentick/spec";
 
 import { fakeCodeHarness } from "../testing/fake-code-harness.js";
 import { fakeCode, fakeProgram } from "../testing/fake-code.js";
@@ -462,6 +463,19 @@ describe("CodeHarness — budgets", () => {
     expect(result).toMatchObject({ outcome: "returned", value: "answered" });
     expect(result.stdout).toBe("0123");
     expect(result.truncated).toEqual(["stdout"]);
+    await close();
+  });
+});
+
+describe("CodeHarness — what it deliberately is not", () => {
+  it("is NOT CheckpointCapable — a context holds live provider resources", async () => {
+    // A restore cannot reconstitute a running interpreter's context, so the
+    // harness must not advertise a capability it would have to fake. Programs
+    // are journaled; contexts are not. The session's checkpoint fold is
+    // feature-detected, so ADDING a `persist` beside a `hydrate` here silently
+    // enrolls this harness — deliberate or not.
+    const { harness, close } = await fakeCodeHarness({ runtime: fakeCode() });
+    expect(isCheckpointCapable(harness)).toBe(false);
     await close();
   });
 });

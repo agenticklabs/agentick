@@ -829,6 +829,11 @@ export class PromptsHarness extends BaseHarness<PromptsSurface> implements Promp
    * **Fork/spawn.** Genesis must not run for a child that inherits its parent's
    * image; that decision belongs to the session, which simply does not call this.
    *
+   * **Not the checkpoint contract.** `CheckpointCapable` is feature-detected on
+   * `persist` + `hydrate` TOGETHER, so pairing this method with a `persist` enrolls
+   * the harness in the session's restore fold — which would re-run genesis on every
+   * resume. Implement the contract deliberately or leave the pair incomplete.
+   *
    * @throws {PromptsError._tag === "PromptsHydrateFailed"} the hydrator threw;
    *   session creation fails rather than half-genesising the catalog.
    */

@@ -32,6 +32,7 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () => {
         toolExecutor: deps.toolExecutor,
         target: deps.target,
         agent: deps.agent,
+        ...(deps.checkpointBridge !== undefined ? { checkpointBridge: deps.checkpointBridge } : {}),
       },
     );
 
@@ -43,6 +44,11 @@ describe("SessionHarness — SessionHarnessProtocol conformance", () => {
       modelExecutor: realDeps.modelExecutor,
       toolExecutor: realDeps.toolExecutor,
       target: realDeps.target,
+      // The suite's checkpoint section observes the fan-out through a bridge it
+      // supplies, so the factory's job is to put it on the bag.
+      ...(realDeps.checkpointBridge !== undefined
+        ? { extensionBridges: new Map([["conformanceCheckpoint", realDeps.checkpointBridge]]) }
+        : {}),
     });
     await session.ready;
     await session.mountReady;

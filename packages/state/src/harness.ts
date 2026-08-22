@@ -43,6 +43,8 @@ import type {
   BranchCapable,
   BranchCtx,
   CheckpointCapable,
+  DropCapable,
+  DropCtx,
   CollectionMutation,
   EventBus,
   HydrateCtx,
@@ -92,7 +94,7 @@ export interface StateHarnessOptions extends BaseHarnessOptions<unknown, "state"
 
 export class StateHarness
   extends BaseHarness<"state">
-  implements StateHarnessProtocol, CheckpointCapable, BranchCapable
+  implements StateHarnessProtocol, CheckpointCapable, BranchCapable, DropCapable
 {
   /** The durable truth. Held alongside {@link view} because {@link branch} copies at the store layer. */
   private readonly store: StateStore;
@@ -298,6 +300,19 @@ export class StateHarness
     const source = await this.store.query({ scope: stateScope(ctx.fromSessionId) }, ctx.storeCtx);
     for (const entry of source) {
       await this.store.mutate({ put: { ...entry, scope: this.scopeId } }, ctx.storeCtx);
+    }
+  }
+
+  /**
+   * Delete this harness's partition — the destroy transport (checkpointing §6).
+   * The store is shared app-wide, so only the cells this scope owns go; a
+   * sibling session's partition is untouched. The projection is left alone
+   * because destroy unmounts the session immediately after.
+   */
+  async dropScope(ctx: DropCtx): Promise<void> {
+    const mine = await this.store.query({ scope: this.scopeId }, ctx.storeCtx);
+    for (const entry of mine) {
+      await this.store.mutate({ delete: stateStoreKey(this.scopeId, entry.key) }, ctx.storeCtx);
     }
   }
 

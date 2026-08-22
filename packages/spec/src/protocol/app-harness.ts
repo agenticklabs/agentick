@@ -207,7 +207,8 @@ export interface DestroySessionResult {
     readonly abortedExecutions: number;
     /**
      * Live descendants torn down with the target — the transitive spawn subtree
-     * as the registry knew it at act time. Excludes the target itself.
+     * as the registry knew it at act time. Excludes the target itself. Their
+     * store scopes and durable records are deleted along with the target's.
      */
     readonly disposedDescendants: number;
     /**
@@ -616,7 +617,8 @@ export interface AppHarnessProtocol<P = unknown> {
    * {@link SessionRecord} survives as history, and its DETACHED tasks keep
    * running by contract (ADR 68). `destroySession` is the other end: the
    * session and its live spawn subtree are torn down, the work they were doing
-   * is cancelled, and the durable record is deleted.
+   * is cancelled, and the durable record AND every per-harness store scope are
+   * deleted.
    *
    * In order:
    *   1. **Abort in-flight executions transitively.** `session.abort()` reaches
@@ -625,19 +627,30 @@ export interface AppHarnessProtocol<P = unknown> {
    *      destroy walks the live spawn subtree and aborts each descendant.
    *   2. **Cancel detached tasks** across the subtree. This is precisely what
    *      `close()` abandons; destroy is stronger, so it reaps them.
-   *   3. **Dispose the subtree** through the same teardown a genuine session end
+   *   3. **Drop every store scope** — each {@link DropCapable} bridge deletes
+   *      its OWN scope in its OWN store (timeline log, knob and state
+   *      partitions), across the subtree, while the bridges are still mounted.
+   *      Without this the record goes and the conversation stays, and the next
+   *      session created with that id hydrates it back (checkpointing §6). A
+   *      failed drop fails the destroy.
+   *   4. **Dispose the subtree** through the same teardown a genuine session end
    *      uses (`onSessionClose` fires, live registry entries drop).
-   *   4. **Delete the durable record** — `SessionStore.delete(sessionId)`.
+   *   5. **Delete the durable records** — the target's and every torn-down
+   *      descendant's, via `SessionStore.delete`.
+   *
+   * A target that is not live is REBUILT first, from its durable record through
+   * the same recovery path a send would take: only a live harness can name its
+   * own scopes.
    *
    * **Idempotent.** An unknown / already-destroyed id is SUCCESS, not a fault:
    * the result simply reports `live.found === false` and
    * `record.existed === false`. Callers get facts, not exceptions, for the
    * "already gone" case.
    *
-   * Descendant RECORDS are not deleted — only the named one. Whether a deleted
-   * parent cascades to its children's rows is the store impl's decision (a SQL
-   * `ON DELETE CASCADE` is exactly where that policy belongs), not the
-   * framework's.
+   * A descendant the LIVE registry cannot see (already evicted, or parented to a
+   * session that is gone) is out of reach of the walk; whether a deleted parent
+   * cascades to its rows is the store impl's decision (a SQL `ON DELETE CASCADE`
+   * is exactly where that policy belongs), not the framework's.
    */
   destroySession(sessionId: string, opts?: DestroySessionInput): Promise<DestroySessionResult>;
 

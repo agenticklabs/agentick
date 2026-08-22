@@ -16,6 +16,7 @@
  */
 
 import { registerNamespaceSlot } from "@agentick/runtime";
+import { omitUndefined } from "@agentick/utils";
 import type { KnobsHarnessProtocol } from "@agentick/spec";
 import type { KnobsHandle } from "./handle.js";
 import { createKnobStore, type KnobsDefinition } from "./store.js";
@@ -60,6 +61,6 @@ declare module "@agentick/spec" {
 registerNamespaceSlot("knobs", {
   appScope: () => {
     const store = createKnobStore();
-    return (value) => ({ store, ...(value as object | undefined) });
+    return (value) => ({ store, ...omitUndefined((value ?? {}) as object) });
   },
 });

@@ -261,13 +261,13 @@ for await (const e of client.gateway.app("ernesto").events({ surface: "app" })) 
 
 Four verbs, strictly increasing in what they take away. Each rung does everything the rung above it does, and more:
 
-| verb                                 | cancels                          | disposes                   | detached tasks | durable record |
-| ------------------------------------ | -------------------------------- | -------------------------- | -------------- | -------------- |
-| `session.abort()`                    | that session's current execution | nothing                    | keep running   | untouched      |
-| `session.abort(reason, { cascade })` | ⤷ plus every live descendant's   | nothing                    | keep running   | untouched      |
-| `session.close()`                    | that session's current execution | the session + its children | ABANDONED      | survives       |
-| `app.closeSession(id)`               | ⤷ the same, through the app door | ⤷ plus the registry entry  | ABANDONED      | survives       |
-| `app.destroySession(id)`             | the whole live subtree's         | the whole live subtree     | CANCELLED      | DELETED        |
+| verb                                 | cancels                          | disposes                   | detached tasks | durable record               |
+| ------------------------------------ | -------------------------------- | -------------------------- | -------------- | ---------------------------- |
+| `session.abort()`                    | that session's current execution | nothing                    | keep running   | untouched                    |
+| `session.abort(reason, { cascade })` | ⤷ plus every live descendant's   | nothing                    | keep running   | untouched                    |
+| `session.close()`                    | that session's current execution | the session + its children | ABANDONED      | survives                     |
+| `app.closeSession(id)`               | ⤷ the same, through the app door | ⤷ plus the registry entry  | ABANDONED      | survives                     |
+| `app.destroySession(id)`             | the whole live subtree's         | the whole live subtree     | CANCELLED      | DELETED + store scopes freed |
 
 The two abort rungs are the only reversible ones: the session stays open, addressable, and immediately sendable again. Cascade is **scope, not kind** — each aborted execution mints the same ordinary `loop:abort` operation it always did, so a guard watching aborts sees the ops it already knew, just more of them.
 
@@ -286,7 +286,7 @@ Two removal verbs, deliberately far apart.
 
 Reach it as `app.closeSession(id)` whenever the app is holding the session for you — which is every session it created. Closing the harness directly ends the session but leaves the app's live registry pointing at the corpse: `getSession` keeps handing it back, the LRU cap keeps counting it, and `createSession` with the same id returns the dead one. Same teardown, plus the bookkeeping. It also reaches a session that is only evicted, ending it in the durable record without bringing it back first, and it is idempotent for an id that is already gone.
 
-`app.destroySession(id)` deletes the thread. It is transitive and it is the strongest form:
+`app.destroySession(id)` deletes the thread — the record AND the conversation. It is transitive and it is the strongest form:
 
 ```ts
 const { live, record } = await app.destroySession("chat-1", { reason: "user deleted the thread" });
@@ -298,9 +298,15 @@ record.existed; //  there was a durable record to delete
 
 The abort pass is the same registry walk `session.abort({ cascade: true })` runs — one implementation, two callers — because a bare `session.abort()` reaches only that session's own current execution: a spawned child feels its parent's construction signal without its running execution being cancelled by it.
 
+**Every store scope goes too.** A session's durable identity is its record plus its per-harness store scopes — the timeline log, the knob partition, the state partition. Destroy deletes all of them: each store-backed harness gets a `dropScope` call that removes its OWN scope from its OWN store, across the whole destroyed subtree, before the records are deleted. This is what makes destroy mean what it says. Without it the record would go and the conversation would stay, and the next session created with that id would hydrate a thread you had deleted.
+
+A harness deletes only what it owns, so a sibling session sharing the same app-scoped store is untouched. A harness with no durable state implements nothing and is skipped. If a drop fails, destroy fails — it will not report a deletion that did not happen.
+
+**An evicted target is brought back first.** A checked-out session has no live harnesses, and only a live harness can name its own scopes — so destroy rebuilds it through the same recovery path a send would take, drops, disposes, and deletes. One recovery path, teardown included.
+
 **Idempotent.** Destroying an id that is already gone is a success reporting `live.found: false` / `record.existed: false`. You get facts, not an exception, for the case you were probably racing anyway.
 
-**Descendant records are not deleted** — only the named one. Whether deleting a parent cascades to its children's rows is your store's decision (a SQL `ON DELETE CASCADE` is exactly where that belongs), and so is what deletion MEANS at all: `SessionStore.delete` may soft-flag or hard-remove. That is why the result reports whether a record `existed`, and makes no claim about what happened to it.
+**Descendants go with the target** — their scopes and their records both — for every descendant in the live spawn subtree destroy tore down. A descendant the live registry cannot see (already evicted, parented to a session that is gone) is out of reach of the walk, and whether deleting a parent row cascades to it is your store's decision — a SQL `ON DELETE CASCADE` is exactly where that belongs. So is what deletion MEANS at all: `SessionStore.delete` may soft-flag or hard-remove. That is why the result reports whether a record `existed`, and makes no claim about what happened to it.
 
 Over the wire it is `app/destroy_session`, and it is ownership-gated twice: once by the dispatch gate, once by the handler on the durable record's principal. Belt and braces rather than redundancy — the gate resolves the target from the live session and falls back to the durable record when there is none, so ownership is enforced on an evicted or historical session too, and the handler's check holds even for a caller that reached the verb some other way.
 

@@ -96,6 +96,8 @@
     "@agentick/sandbox": "workspace:*",
     "@agentick/sandbox-local": "workspace:*",
     "@agentick/skills": "workspace:*",
+    "@agentick/state": "workspace:*",
+    "@agentick/store": "workspace:*",
     "@types/react": "^19.2.5",
     "react": "^19.2.4"
   },

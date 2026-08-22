@@ -26,7 +26,7 @@ import {
   generateId,
   type Middleware,
 } from "@agentick/runtime";
-import { SkillsHydrateFailed } from "@agentick/spec";
+import { isCheckpointCapable, SkillsHydrateFailed } from "@agentick/spec";
 import type { CollectionMutation, Skill, SkillStoreQuery, Store } from "@agentick/spec";
 
 import { SkillsHarness, type SkillsHarnessOptions } from "../harness.js";
@@ -281,6 +281,20 @@ describe("genesis — re-running it overwrites live edits (ADR 93 landmine 1)", 
     expect(h.get("x")!.content).toBe("EDITED-LIVE");
     await h.hydrate();
     expect(h.get("x")!.content).toBe("FROM-SOURCE");
+    await h.close();
+  });
+});
+
+describe("genesis hydrate is NOT the checkpoint contract", () => {
+  it("the harness is not CheckpointCapable — one `persist` away from silent enrollment", async () => {
+    // The session's checkpoint fold is feature-detected on `persist` + `hydrate`
+    // TOGETHER, and this `hydrate` is GENESIS. Adding a `persist` here would
+    // enroll the harness without another line of code — and every
+    // `session.restore()` would then re-run genesis, RESTAMPING live edits (see
+    // the test above). If skills ever persists, the checkpoint contract has to
+    // be implemented deliberately, not inherited by name collision.
+    const h = await harness({ hydrate: hydrateFrom([skill("x")]) });
+    expect(isCheckpointCapable(h)).toBe(false);
     await h.close();
   });
 });

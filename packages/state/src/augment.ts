@@ -16,6 +16,7 @@
  */
 
 import { registerNamespaceSlot } from "@agentick/runtime";
+import { omitUndefined } from "@agentick/utils";
 import type { StateHarnessProtocol } from "@agentick/spec";
 import type { StateHandle } from "./handle.js";
 import { createStateStore, type StateDefinition } from "./store.js";
@@ -52,6 +53,6 @@ declare module "@agentick/spec" {
 registerNamespaceSlot("state", {
   appScope: () => {
     const store = createStateStore();
-    return (value) => ({ store, ...(value as object | undefined) });
+    return (value) => ({ store, ...omitUndefined((value ?? {}) as object) });
   },
 });

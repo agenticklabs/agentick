@@ -245,6 +245,13 @@ seam. The fork law retires with the transport that motivated it: under store
 transport, fork = branch the scope, then genesis over the copy — the hydrator
 running in the child is now correct, not a violation.
 
+**The drop hook (amended 2026-08-22 — surfaced by the judge pass).** Copying a
+scope has an inverse, and nothing implemented it: `DropCapable.dropScope(ctx)`
+is the third direction, fanned out by `app.destroySession` over the destroyed
+subtree before the `SessionRecord` goes. Same shape as its three siblings — the
+harness deletes its OWN scope in its OWN store, irreversibly, and the framework
+sequences without seeing data. See §6.
+
 Consequences (the kill list, additive to the sweep's):
 
 - `SessionSnapshot` (spec) — deleted.
@@ -283,9 +290,41 @@ Consequences (the kill list, additive to the sweep's):
 - **Very large sessions stop being special.** Nothing serializes O(session)
   through memory at a checkpoint; timeline flush is incremental by
   construction.
-- **The memory ceiling becomes structural**: RSS = `maxActive`-bounded live
-  tree + flat overhead. The §1 staircase is not tuned away; it has no
-  mechanism left to occur through.
+- **The memory ceiling is structural for the LIVE tier**: RSS = `maxActive`-bounded
+  live tree + flat overhead. The §1 staircase — retention proportional to
+  distinct sessions _touched_ — has no mechanism left to occur through, and the
+  three legs it rests on are each pinned:
+  1. **Evict retains nothing.** Page-out is `persist` + unmount; no app-side
+     field is keyed by an evicted session (`session-eviction.spec.tsx`).
+  2. **Destroy frees the scopes.** `DropCapable.dropScope` deletes each
+     harness's own partition across the destroyed subtree before the record goes
+     (`destroy-session.spec.tsx`). Without it the ceiling would be a lie for the
+     zero-config path: the app-scoped default stores would hold every session
+     ever created, forever, and a same-id create would resurrect a destroyed
+     conversation.
+  3. **With an INJECTED durable store, retention is durable data by design** —
+     a Postgres timeline holding every live session's log is the feature, not a
+     leak, and it is bounded by the adopter's own retention policy.
+
+  What remains, and is deliberate: the zero-config in-memory default stores hold
+  the data of every session that is live or has not been destroyed. That is
+  process-lifetime retention of _real_ session state, and the two verbs that
+  end a session's durable life — `destroySession`, and an adopter's own prune
+  over an injected store — are how it is released. `closeSession` deliberately
+  does not: history is what `close` preserves.
+
+### Judge pass amendment (2026-08-22)
+
+The independent adversarial pass over the branch found exactly this hole and it
+is fixed above: nothing deleted a store scope, so `destroySession` freed the
+`SessionRecord` and left the timeline / knob / state partitions behind — the
+same defect this document was written to kill, relocated one layer down for the
+fourth time (live tree → `paged` map → … → the default stores). The fix is the
+fourth leaf hook, `DropCapable.dropScope(ctx)`, fanned out by destroy exactly as
+`persist` / `hydrate` / `branch` are: the harness deletes its OWN scope in its
+OWN store, and no value crosses the seam. The pins that make the regression
+impossible are "destroy frees the scopes" and "a new session on a destroyed id
+opens EMPTY".
 
 ## 7. Sequencing
 

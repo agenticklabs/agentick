@@ -92,6 +92,8 @@ export {
 export {
   runSessionConformance,
   defaultSessionConformanceDeps,
+  checkpointProbe,
+  type CheckpointProbe,
   type SessionConformanceFactory,
   type SessionConformanceFactoryInput,
   type SessionConformanceFactoryDeps,

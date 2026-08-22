@@ -23,6 +23,10 @@ import { describe, expect, it } from "vitest";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemorySessionStore } from "@agentick/session";
+import { MemoryTimelineStore } from "@agentick/timeline";
+import { createKnobStore } from "@agentick/knobs";
+import { createStateStore } from "@agentick/state";
+import { stubStoreCtx } from "@agentick/store";
 import type {
   ExecutionTarget,
   SessionExecutionHandle,
@@ -129,6 +133,7 @@ async function mkApp(
     agent?: React.ReactElement;
     toolHandlers?: Map<string, ToolHandler>;
     sessionStore?: SessionStore;
+    stores?: DurableStores;
   } = {},
 ) {
   const journal = new MemoryJournal();
@@ -143,7 +148,58 @@ async function mkApp(
     target: mkTarget(),
     ...(opts.toolHandlers !== undefined ? { toolHandlers: opts.toolHandlers } : {}),
     ...(opts.sessionStore !== undefined ? { sessions: { store: opts.sessionStore } } : {}),
+    ...(opts.stores !== undefined
+      ? {
+          timeline: { store: opts.stores.timeline },
+          knobs: { store: opts.stores.knobs },
+          state: { store: opts.stores.state },
+        }
+      : {}),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Durable scopes — the stores destroy has to free (checkpointing §6)
+// ---------------------------------------------------------------------------
+
+interface DurableStores {
+  readonly timeline: MemoryTimelineStore;
+  readonly knobs: ReturnType<typeof createKnobStore>;
+  readonly state: ReturnType<typeof createStateStore>;
+}
+
+/**
+ * The stores injected into the app under test. Injected rather than reached for
+ * through the app, because the pins below read them DIRECTLY: a scope is freed
+ * only if the store that holds it says so.
+ */
+function mkStores(): DurableStores {
+  return {
+    timeline: new MemoryTimelineStore(),
+    knobs: createKnobStore(),
+    state: createStateStore(),
+  };
+}
+
+/** Everything the three stores hold for one session id, across all its scopes. */
+async function residueFor(stores: DurableStores, sessionId: string) {
+  const ctx = stubStoreCtx();
+  return {
+    timeline: await stores.timeline.read(`${sessionId}:timeline`, ctx),
+    knobs: await stores.knobs.query({ scope: `${sessionId}:knobs` }, ctx),
+    state: await stores.state.query({ scope: `${sessionId}:state` }, ctx),
+  };
+}
+
+/** Write one entry into every durable scope a session owns, then flush. */
+async function fillScopes(session: SessionHarnessProtocol, marker: string): Promise<void> {
+  await session.timeline.append({
+    kind: "message",
+    message: { id: `${marker}-m`, role: "user", content: [{ type: "text", text: marker }], ts: 0 },
+  } as never);
+  await session.knobs.set({ id: "secret", value: marker });
+  await session.state.set({ key: "secret", value: marker });
+  await session.snapshot();
 }
 
 /** Narrow the spawn() union: no `send` supplied → a `SessionHarnessProtocol`. */
@@ -276,6 +332,100 @@ describe("app.destroySession — the durable record", () => {
     const result = await app.destroySession("closed-not-gone");
     expect(result.record.existed).toBe(true);
     expect(await app.getSessionRecord("closed-not-gone")).toBeUndefined();
+
+    await app.closeApp();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6 — the durable SCOPES (checkpointing §6)
+// ---------------------------------------------------------------------------
+
+describe("app.destroySession — the durable scopes", () => {
+  it("frees every harness scope: the stores hold nothing for the destroyed id", async () => {
+    const stores = mkStores();
+    const app = await mkApp({ stores });
+    const doomed = await app.createSession({ sessionId: "doomed", eager: true });
+    const bystander = await app.createSession({ sessionId: "bystander", eager: true });
+    await fillScopes(doomed, "CLASSIFIED");
+    await fillScopes(bystander, "KEPT");
+
+    // Precondition: the data destroy is supposed to free is actually there.
+    const before = await residueFor(stores, "doomed");
+    expect(before.timeline.length).toBe(1);
+    expect(before.knobs.length).toBe(1);
+    expect(before.state.length).toBe(1);
+
+    await app.destroySession("doomed");
+
+    expect(await residueFor(stores, "doomed")).toEqual({ timeline: [], knobs: [], state: [] });
+    // Partitioned, not wholesale: the bystander's scopes are untouched.
+    const survivor = await residueFor(stores, "bystander");
+    expect(survivor.timeline.length).toBe(1);
+    expect(survivor.knobs.length).toBe(1);
+    expect(survivor.state.length).toBe(1);
+
+    await app.closeApp();
+  });
+
+  it("id reuse does NOT resurrect: a new session on a destroyed id opens EMPTY", async () => {
+    // The privacy pin. The stores outlive the session by design, so a scope
+    // left behind is a conversation the next holder of that id hydrates back.
+    const stores = mkStores();
+    const app = await mkApp({ stores });
+    const first = await app.createSession({ sessionId: "reused", eager: true });
+    await fillScopes(first, "CLASSIFIED");
+
+    await app.destroySession("reused");
+
+    const second = await app.createSession({ sessionId: "reused", eager: true });
+    expect(second.timeline.readPersisted()).toEqual([]);
+    expect(second.knobs.get("secret")).toBeUndefined();
+    expect(second.state.get("secret")).toBeUndefined();
+
+    await app.closeApp();
+  });
+
+  it("frees the scopes of an EVICTED session, which has no live bridges", async () => {
+    // Destroy rebuilds through the same resume path a send would take — one
+    // recovery path, teardown included (checkpointing §4).
+    const stores = mkStores();
+    const app = await mkApp({ sessionStore: new InMemorySessionStore(), stores });
+    const session = await app.createSession({ sessionId: "checked-out", eager: true });
+    await fillScopes(session, "CLASSIFIED");
+
+    await app.evictSession("checked-out");
+    expect(app.getSession("checked-out")).toBeUndefined();
+
+    const result = await app.destroySession("checked-out");
+    expect(result.live.found).toBe(false); // it really was out of memory
+    expect(result.record.existed).toBe(true);
+    expect(await residueFor(stores, "checked-out")).toEqual({
+      timeline: [],
+      knobs: [],
+      state: [],
+    });
+
+    await app.closeApp();
+  });
+
+  it("frees a live DESCENDANT's scopes and deletes its record too", async () => {
+    const stores = mkStores();
+    const app = await mkApp({ sessionStore: new InMemorySessionStore(), stores });
+    const root = await app.createSession({ sessionId: "sub-root", eager: true });
+    const child = asSession(
+      await root.spawn({ agent: React.createElement(PlainAgent), sessionId: "sub-child" }),
+    );
+    await fillScopes(root, "ROOT");
+    await fillScopes(child, "CHILD");
+    expect((await residueFor(stores, "sub-child")).timeline.length).toBe(1);
+    expect(await app.getSessionRecord("sub-child")).toBeDefined();
+
+    const result = await app.destroySession("sub-root");
+    expect(result.live.disposedDescendants).toBe(1);
+
+    expect(await residueFor(stores, "sub-child")).toEqual({ timeline: [], knobs: [], state: [] });
+    expect(await app.getSessionRecord("sub-child")).toBeUndefined();
 
     await app.closeApp();
   });

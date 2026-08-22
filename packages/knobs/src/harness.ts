@@ -57,6 +57,8 @@ import type {
   BranchCapable,
   BranchCtx,
   CheckpointCapable,
+  DropCapable,
+  DropCtx,
   CollectionMutation,
   ContentBlock,
   EventBus,
@@ -92,7 +94,13 @@ import {
   type KnobsStateSnapshotFrame,
   type WireKnobDescriptor,
 } from "./channel.js";
-import { createKnobStore, knobsScope, type KnobEntry, type KnobStoreQuery } from "./store.js";
+import {
+  createKnobStore,
+  knobsScope,
+  knobStoreKey,
+  type KnobEntry,
+  type KnobStoreQuery,
+} from "./store.js";
 
 // ============================================================================
 // Harness
@@ -144,7 +152,12 @@ export interface KnobsHarnessOptions extends BaseHarnessOptions<unknown, "knobs"
 
 export class KnobsHarness
   extends BaseHarness<"knobs">
-  implements KnobsHarnessProtocol, ChannelSnapshotProvider, CheckpointCapable, BranchCapable
+  implements
+    KnobsHarnessProtocol,
+    ChannelSnapshotProvider,
+    CheckpointCapable,
+    BranchCapable,
+    DropCapable
 {
   /** The durable truth. Held alongside {@link view} because {@link branch} copies at the store layer. */
   private readonly store: Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
@@ -397,6 +410,19 @@ export class KnobsHarness
     const source = await this.store.query({ scope: knobsScope(ctx.fromSessionId) }, ctx.storeCtx);
     for (const entry of source) {
       await this.store.mutate({ put: { ...entry, scope: this.scopeId } }, ctx.storeCtx);
+    }
+  }
+
+  /**
+   * Delete this harness's partition — the destroy transport (checkpointing §6).
+   * The store is shared app-wide, so only the cells this scope owns go; a
+   * sibling session's partition is untouched. The projection is left alone
+   * because destroy unmounts the session immediately after.
+   */
+  async dropScope(ctx: DropCtx): Promise<void> {
+    const mine = await this.store.query({ scope: this.scopeId }, ctx.storeCtx);
+    for (const entry of mine) {
+      await this.store.mutate({ delete: knobStoreKey(this.scopeId, entry.id) }, ctx.storeCtx);
     }
   }
 

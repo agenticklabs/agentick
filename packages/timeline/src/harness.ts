@@ -60,6 +60,8 @@ import type {
   BranchCapable,
   BranchCtx,
   CheckpointCapable,
+  DropCapable,
+  DropCtx,
   TimelineHarnessFx,
   SubstrateError,
   CompactResult,
@@ -252,7 +254,7 @@ const historyRequestSchema: StandardSchemaV1<TimelineHistoryInput> = {
 
 export class TimelineHarness
   extends BaseHarness<"timeline">
-  implements TimelineHarnessProtocol, CheckpointCapable, BranchCapable
+  implements TimelineHarnessProtocol, CheckpointCapable, BranchCapable, DropCapable
 {
   // ─── Storage (the LOG-archetype projection: two tiers + versions +
   // snapshot cache + render pings + the write-behind pump — ADR 49) ───
@@ -727,6 +729,16 @@ export class TimelineHarness
     const source = await this.store.read(timelineScopeKey(ctx.fromSessionId), ctx.storeCtx);
     if (source.length === 0) return;
     await this.store.append(this.scopeId, source, ctx.storeCtx);
+  }
+
+  /**
+   * {@link DropCapable} — end this log's durable life (checkpointing §6). The
+   * destroy transport: without it a destroyed session's conversation survives in
+   * the app-scoped default store and a later session reusing the id hydrates it
+   * back. Idempotent — deleting an absent log resolves.
+   */
+  async dropScope(ctx: DropCtx): Promise<void> {
+    await this.store.delete(this.scopeId, ctx.storeCtx);
   }
 
   /**
