@@ -202,6 +202,40 @@ export interface SessionRecord {
 }
 
 // ============================================================================
+// Execution-resume policy — the crashed-execution decision (execution-resume.md §3.2)
+// ============================================================================
+
+/**
+ * What an {@link OnInterruptedExecution} policy decides about — pure data, no
+ * harness state, so the decision is testable and reaches no store. There is NO
+ * per-execution record: an execution is named by its id plus the timeline
+ * coordinates a re-drive reads.
+ */
+export interface InterruptedExecution {
+  /** The reconciled session record (status `idle`, `interruptedExecutionId` set). */
+  readonly session: SessionRecord;
+  /** The interrupted execution's id (`exec:…`). */
+  readonly executionId: string;
+  /**
+   * Consecutive interruptions of THIS execution — the crash-loop budget
+   * ({@link SessionRecord.resumeAttempts}). A different execution resets it to 1.
+   */
+  readonly attempt: number;
+}
+
+/**
+ * Adopter policy for an execution a boot-time reconcile found crashed
+ * (`running` → `interrupted`). Fires ONCE per transition, on the resume/create
+ * path only — never a destroy-rebuild. `"resume"` re-drives it; `"drop"` leaves it
+ * as honest history. Absent (the default): `drop`. This is where crash-loop
+ * budgeting, multi-node ownership, and product policy live — the framework owns the
+ * capability, the adopter owns the decision.
+ */
+export type OnInterruptedExecution = (
+  interrupted: InterruptedExecution,
+) => "resume" | "drop" | Promise<"resume" | "drop">;
+
+// ============================================================================
 // SessionStoreQuery — the sessions-list query
 // ============================================================================
 

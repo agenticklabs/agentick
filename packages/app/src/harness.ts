@@ -68,6 +68,7 @@ import type {
   InstallerInterceptors,
   CursorPage,
   PageRequest,
+  OnInterruptedExecution,
   SessionRecord,
   SessionStore,
   SessionStoreQuery,
@@ -500,6 +501,16 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
      */
     readonly maxSpawnDepth?: number;
   };
+
+  /**
+   * Policy for an execution a restart found crashed mid-turn (execution-resume.md
+   * §3.2). When a resumed/opened session's durable record is still `running`, the
+   * app reconciles it to `interrupted` (always) and, on the resume/create path,
+   * invokes this callback ONCE to decide re-drive vs. leave-as-history. Absent =
+   * the default `drop`: the crash is recorded honestly, nothing re-drives. This is
+   * where crash-loop budgeting and multi-node ownership live.
+   */
+  readonly onInterruptedExecution?: OnInterruptedExecution;
 
   // ────────── Per-session defaults (constructed per createSession) ──────────
 
@@ -970,6 +981,9 @@ export class AppHarness<P = unknown>
    */
   private readonly taskDefaultWake: TaskWakePolicy | undefined;
 
+  /** Adopter policy for a crashed execution found at boot (execution-resume.md §3.2). */
+  private readonly onInterruptedExecution?: OnInterruptedExecution;
+
   /**
    * App-scoped durable session registry (E11). Constructed ONCE (from
    * `options.sessions.store`, else a node-local `InMemorySessionStore`) and
@@ -1265,6 +1279,7 @@ export class AppHarness<P = unknown>
     // `telemetryRuntime` / `telemetryProvider` are always set before the first
     // session reads them.
     this.telemetryReady = this.initTelemetryExport(telemetry);
+    this.onInterruptedExecution = options.onInterruptedExecution;
 
     // Cascade: longhand (`options.session.*`) wins over shorthand
     // (`options.defaultMaxTicks` / `options.initialProps` /
@@ -1864,7 +1879,62 @@ export class AppHarness<P = unknown>
     }
     const record = await this.sessionStore.get(sessionId, this.storeCtx());
     if (record === undefined || isTerminalSessionStatus(record.status)) return undefined;
-    return this.rebuildFromRecord(record);
+
+    // rebuildFromRecord marks a crashed `running` record interrupted uniformly
+    // (§3.1). The re-drive DECISION is gated to THIS path (resume/create), never a
+    // destroy-rebuild, and fires ONCE — on the actual `running → interrupted`
+    // transition, not on a lingering `interruptedExecutionId`. Captured BEFORE the
+    // rebuild reconciles the record away.
+    const freshlyInterrupted =
+      record.status === "running" && record.currentExecutionId !== undefined;
+    const { session, record: reconciled } = await this.rebuildFromRecord(record);
+
+    // Build the ctx from the record rebuildFromRecord actually WROTE — one source
+    // of truth, no second derivation the callback could drift from.
+    if (
+      freshlyInterrupted &&
+      reconciled.interruptedExecutionId !== undefined &&
+      this.onInterruptedExecution
+    ) {
+      // A THROWING policy rejects the resume — deliberate and loud (§3.2), the same
+      // posture as a rejected persist aborting an evict: swallowing an adopter bug
+      // to "drop" would hide it. Not caught here on purpose.
+      const decision = await this.onInterruptedExecution({
+        session: reconciled,
+        executionId: reconciled.interruptedExecutionId,
+        attempt: reconciled.resumeAttempts ?? 1,
+      });
+      if (decision === "resume") {
+        await this.resumeInterruptedExecution(session, reconciled.interruptedExecutionId);
+      }
+      // "drop" (and the absent-callback default) leave interruptedExecutionId as
+      // honest history — it cannot re-fire (status is now idle) and a support tool
+      // or a manual resume can still act on it.
+    }
+    return session;
+  }
+
+  /**
+   * Re-drive an interrupted execution (execution-resume.md §3.4) — reached when the
+   * adopter's `onInterruptedExecution` returns `"resume"`. SLICE 3 fills this.
+   *
+   * NON-BLOCKING CONTRACT (shape it now so the stub does not calcify): this awaits
+   * only ACCEPTANCE — the stripped send's handle creation — then DETACHES the
+   * completion (the re-driven turn announces through the normal handle/bus
+   * machinery). `resumeSession` must never block on a whole model turn (§3.4). The
+   * re-drive is a stripped send that adopts `executionId` and seeds `currentTick`
+   * from the timeline HARNESS's committed-cursor surface — never a direct store read
+   * (the framework owns hooks/boundaries, not a harness's retention).
+   */
+  private async resumeInterruptedExecution(
+    session: SessionHarnessProtocol<P>,
+    executionId: string,
+  ): Promise<void> {
+    // TODO(execution-resume slice 3): stripped send, adopt executionId, seed
+    // currentTick from the timeline harness cursor, await ACCEPTANCE only, detach
+    // completion. Awaited here for acceptance — never for the turn.
+    void session;
+    void executionId;
   }
 
   /**
@@ -1877,19 +1947,23 @@ export class AppHarness<P = unknown>
    * wire dispatch gate, which authorizes off the record's principal rather than
    * the rebuilt harness's).
    */
-  private async rebuildFromRecord(record: SessionRecord): Promise<SessionHarnessProtocol<P>> {
+  private async rebuildFromRecord(
+    record: SessionRecord,
+  ): Promise<{ readonly session: SessionHarnessProtocol<P>; readonly record: SessionRecord }> {
     // Boot reconciliation (capability half — execution-resume.md §3.1). A record
     // still `running` at rebuild time is a crash mid-turn: eviction refuses
     // in-flight sessions, so nothing else leaves `running` behind. Record the
     // interruption ADDITIVELY (no session-level `interrupted` status) and persist
     // it BEFORE the rebuild, so the reconstructed session hydrates the honest
     // record. Uniform across resume AND destroy; the re-drive callback (gated to
-    // the resume/create path) is a separate slice.
+    // the resume/create path) is a separate slice. Returns the reconciled record
+    // it wrote so the caller is single-sourced with the store (no second
+    // derivation the callback could drift from).
     const reconciled = reconcileInterruptedRecord(record);
     if (reconciled !== record) {
       await this.sessionStore.put(reconciled, this.storeCtx());
     }
-    return this.createSessionBody(
+    const session = await this.createSessionBody(
       omitUndefined({
         sessionId: reconciled.id,
         principal: reconciled.principal,
@@ -1897,6 +1971,7 @@ export class AppHarness<P = unknown>
       }) as CreateSessionInput<P>,
       false,
     );
+    return { session, record: reconciled };
   }
 
   /**
