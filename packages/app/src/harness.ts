@@ -1946,11 +1946,16 @@ export class AppHarness<P = unknown>
     session: SessionHarnessProtocol<P>,
     executionId: string,
   ): Promise<void> {
-    // TODO(execution-resume slice 3): stripped send, adopt executionId, seed
-    // currentTick from the timeline harness cursor, await ACCEPTANCE only, detach
-    // completion. Awaited here for acceptance — never for the turn.
-    void session;
-    void executionId;
+    // Acceptance only (execution-resume.md §3.4): `resumeExecution` resolves at
+    // handle creation — the stripped send is running, announced through the
+    // normal handle/bus machinery — and the TURN is deliberately detached:
+    // `resumeSession` must never block on a whole model call. The re-driven
+    // turn's failure lands where every turn's does (the handle's `.result`,
+    // the boundary record, the status transition), not here.
+    const entry = this.registry.get(session.id);
+    if (entry === undefined) return;
+    const handle = await entry.session.resumeExecution(executionId);
+    void handle.result.catch(() => undefined);
   }
 
   /**

@@ -189,6 +189,8 @@ type SessionRecordPatch = Partial<
     | "byModel"
     | "cost"
     | "currentExecutionId"
+    | "interruptedExecutionId"
+    | "resumeAttempts"
     | "title"
     | "description"
     | "metadata"
@@ -292,6 +294,24 @@ export class SessionRuntime {
    */
   flushRecord(): Promise<void> {
     return this.view.flush();
+  }
+
+  /**
+   * Completion clears the interruption (execution-resume.md §3.3) — keyed to
+   * the SETTLING execution, so a fresh turn ending never erases a DIFFERENT
+   * (dropped) interruption's history, and only the resumed execution reaching
+   * its own end resolves it. Cache-only; the settle's `setStatus`
+   * write-through persists the one record carrying the clear — the same
+   * pattern as the execution-start delta.
+   */
+  clearInterruption(executionId: string): void {
+    if (this.record().interruptedExecutionId !== executionId) return;
+    this.commit(
+      { interruptedExecutionId: undefined, resumeAttempts: undefined },
+      {
+        persist: false,
+      },
+    );
   }
 
   async hydrate(): Promise<void> {

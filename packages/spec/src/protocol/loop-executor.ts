@@ -252,6 +252,16 @@ export interface RunExecutionInput {
   readonly maxTicks: number;
 
   /**
+   * Resume seed (execution-resume.md §3.4): start the tick counter here
+   * instead of 0, so a re-driven execution's ticks continue from its last
+   * committed tick (`tickIndex` stamps resume at `startTickIndex + 1`).
+   * `maxTicks` stays the EXECUTION's total budget — a resumed run gets the
+   * remainder, not a fresh allowance — and the terminal's `ticks` reports the
+   * execution total for the same reason. Absent = 0 (a fresh execution).
+   */
+  readonly startTickIndex?: number;
+
+  /**
    * Hard cap on CONSECUTIVE failed ticks (ADR 99 slice 2), sibling of
    * {@link maxTicks}. Counts ticks whose executor terminal is `failed`;
    * resets on the first success. At the cap the loop stops with

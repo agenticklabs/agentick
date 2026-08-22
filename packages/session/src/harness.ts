@@ -1792,6 +1792,46 @@ export class SessionHarness<P = unknown>
     return this.runtime.flushRecord();
   }
 
+  /**
+   * Re-drive an interrupted execution (execution-resume.md §3.4) — the
+   * stripped send: {@link runExecutionCore} with the crashed execution's OWN id
+   * (the durable identity; the handle is per-invocation), no input append (the
+   * interrupted attempt's input is already on the timeline), no
+   * executionCount bump (same execution, not a new turn), and the tick counter
+   * seeded past the last committed tick via the timeline harness's
+   * {@link ExecutionCursor} — coordinates, never entries. Resolves at
+   * ACCEPTANCE (the handle), never the turn.
+   *
+   * Refuses loudly rather than guessing: busy (a live execution holds the
+   * reservation — re-driving would collide with it) and already-ended (the
+   * cursor carries a boundary — the don't-run-twice guard, one layer in from
+   * the app's detection, so a MANUAL call cannot re-run a finished turn
+   * either). Concrete-class surface, `dropScopes` precedent.
+   */
+  async resumeExecution(executionId: string): Promise<SessionExecutionHandle> {
+    if (this._closed) {
+      throw new SessionClosedError({ attemptedCommand: "resumeExecution" });
+    }
+    if (this._handleReservation !== null) {
+      throw new SessionBusyError({
+        reason: "resumeExecution while an execution holds the reservation",
+      });
+    }
+    const cursor = this.bridges.timeline.executionCursor(executionId);
+    if (cursor?.boundary !== undefined) {
+      throw new Error(
+        `resumeExecution(${executionId}): the execution already ended ` +
+          `(boundary: ${cursor.boundary}) — a finished turn is never re-driven`,
+      );
+    }
+    // SYNCHRONOUS-ENTRY contract: no await between the admission checks above
+    // and the core's reservation.
+    return this.runExecutionCore({}, undefined, undefined, {
+      executionId,
+      seedTickIndex: cursor?.lastTickIndex ?? 0,
+    });
+  }
+
   async dropScopes(): Promise<void> {
     const ctx: DropCtx = this.checkpointCtxFrom(this.storeCtx());
     for (const bridge of Object.values(this.bridges)) {
@@ -3075,6 +3115,7 @@ export class SessionHarness<P = unknown>
     input: SendInput<P>,
     effectiveResponseFormat: ResponseFormat | undefined,
     outputSpec: OutputSpec | undefined,
+    resume?: { readonly executionId: string; readonly seedTickIndex: number },
   ): Promise<SessionExecutionHandle> {
     // SYNCHRONOUS reservation — no await between here and the guard
     // above having passed.
@@ -3114,11 +3155,18 @@ export class SessionHarness<P = unknown>
 
     await this._mountReady;
 
-    const executionId = `exec:${generateId()}`;
+    // A resume ADOPTS the crashed execution's id — the durable identity — and
+    // appends nothing: the interrupted attempt's input is already on the
+    // timeline (re-appending would duplicate entries AND corrupt
+    // executionCursor's lastTickIndex). The handle below is per-INVOCATION
+    // either way; only the id persists across attempts.
+    const executionId = resume?.executionId ?? `exec:${generateId()}`;
 
     // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
     // drain. The first tick's render sees it via <Timeline/>.
-    for (const m of input.messages ?? []) await this.appendInputMessage(m, executionId);
+    if (resume === undefined) {
+      for (const m of input.messages ?? []) await this.appendInputMessage(m, executionId);
+    }
 
     // ADR 53: the first render will include everything appended so far.
     this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
@@ -3132,7 +3180,7 @@ export class SessionHarness<P = unknown>
     // runtime's view; the `setStatus` write-through then persists ONE record
     // capturing the full execution-start delta (count + currentExecutionId +
     // running) — the upsert-on-transition contract.
-    this.runtime.bumpExecutionCount();
+    if (resume === undefined) this.runtime.bumpExecutionCount(); // same execution, not a new turn
     this.runtime.setCurrentExecutionId(executionId);
     this.runtime.setStatus("running");
 
@@ -3191,6 +3239,13 @@ export class SessionHarness<P = unknown>
       this._currentExecutionAbort = null;
       this._handleReservation = null;
       this.runtime.setCurrentExecutionId(null);
+      // Completion resolves the interruption (execution-resume.md §3.3) —
+      // keyed to THIS executionId, so an unrelated fresh turn settling never
+      // erases a different (dropped) interruption's history. Runs in the
+      // SHARED settle so a resumed execution can never drift from a fresh one;
+      // no-op unless this execution was the marked one. Rides the setStatus
+      // write-through below (one persisted record).
+      this.runtime.clearInterruption(executionId);
       this.runtime.setStatus(
         durabilityFailed ? "failed" : "idle",
         durabilityFailed ? "failed" : runOutcome,
@@ -3366,6 +3421,9 @@ export class SessionHarness<P = unknown>
                 // targetForCall) covers the undeclared case.
                 resolveModel: (ref) => this.bridges.models.resolve(ref),
                 maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+                // Resume seed — ticks continue past the last committed tick;
+                // maxTicks above stays the execution's TOTAL budget.
+                ...(resume !== undefined ? { startTickIndex: resume.seedTickIndex } : {}),
                 // ADR 99 slice 2 — the hard backstop under `tickFailurePolicy`.
                 // Absent, the loop's own default (3) applies.
                 ...omitUndefined({ maxConsecutiveFailedTicks: this.maxConsecutiveFailedTicks }),

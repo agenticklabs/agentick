@@ -456,7 +456,10 @@ export class LoopExecutorHarness extends BaseHarness<"loop"> implements LoopExec
       const execSignal = mergeAbortSignals(input.signal, controller.signal);
 
       const acc: TickAccumulator = {
-        ticks: 0,
+        // Resume seed (execution-resume.md §3.4): a re-driven execution's ticks
+        // continue past its last committed tick; maxTicks stays the execution's
+        // TOTAL budget, so the resumed run gets the remainder.
+        ticks: input.startTickIndex ?? 0,
         output: [],
         toolResults: [],
       };
