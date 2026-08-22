@@ -20,8 +20,8 @@
 import { Effect } from "effect";
 import { InMemoryDataBridge, InMemoryModelBridge } from "@agentick/compiler";
 import { ElicitationHarness, buildElicitSugar } from "@agentick/elicitation";
-import { KnobsHarness } from "@agentick/knobs";
-import { StateHarness } from "@agentick/state";
+import { KnobsHarness, type KnobsDefinition } from "@agentick/knobs";
+import { StateHarness, type StateDefinition } from "@agentick/state";
 import { TasksHarness } from "@agentick/tasks";
 import { ResourcesHarness } from "@agentick/resources";
 import { GatesController, GatesHarness, type GateOverrideAudit } from "@agentick/gates";
@@ -183,6 +183,13 @@ export interface BuildSessionBridgesOptions {
    */
   readonly timeline?: TimelineDefinition;
   /**
+   * The knobs / state ADR-93 namespace DEFINITIONS — durability slots, threaded
+   * from `createApp({ knobs })` / `createApp({ state })` the same way
+   * {@link timeline} is. The definition IS the harness's options.
+   */
+  readonly knobs?: KnobsDefinition;
+  readonly state?: StateDefinition;
+  /**
    * Resolved interceptor snapshot (ADR 76 tier 3 + ADR 83 amendment) — the
    * session's `resolvedInterceptors()` (app-inherited incl. the app+session
    * command hooks as op-scoped middleware, plus the session's own), forwarded by
@@ -260,14 +267,14 @@ export function buildSessionBridges(
     // app-scoped KnobsHarness drops in here with no rewrite. Session
     // snapshots capture the self layer only (never inherited app state).
     undefined,
-    sessionScoped(),
+    sessionScoped(options.knobs ?? {}),
   );
   const state = new StateHarness(
     `${store.id}:state`,
     substrate.journal,
     substrate.bus,
     substrate.inbox,
-    sessionScoped(),
+    sessionScoped(options.state ?? {}),
   );
   const elicitation =
     options.elicitation ??

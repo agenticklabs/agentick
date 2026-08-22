@@ -20,7 +20,7 @@
  * @see docs/proposals/v2/data-layer-plan.md §3.5 "The storification model"
  */
 
-import type { KnobPrimitive } from "@agentick/spec";
+import type { CollectionMutation, KnobPrimitive, Store } from "@agentick/spec";
 import { MemoryCollection } from "@agentick/store";
 
 /**
@@ -37,6 +37,19 @@ export interface KnobEntry {
 /** The knob value store's query — one partition of cells. */
 export interface KnobStoreQuery {
   readonly scope: string;
+}
+
+/** The knob value store, at the seam every consumer types against. */
+export type KnobStore = Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
+
+/**
+ * The `knobs` NAMESPACE DEFINITION (ADR 93) — what `createApp({ knobs })` and
+ * `SessionHarnessOptions.knobs` take. Durability only: descriptors are
+ * tree-derived, and knob VALUES are the sole durable state this namespace owns.
+ */
+export interface KnobsDefinition {
+  /** @see KnobsHarnessOptions.store */
+  readonly store?: KnobStore;
 }
 
 /** The store's primary key: knob ids are unique only WITHIN a scope. */

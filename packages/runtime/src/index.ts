@@ -126,7 +126,9 @@ export {
   registerNamespaceSlot,
   registeredNamespaceSlots,
   collectNamespaceSlots,
+  namespaceSlotAppScopes,
   namespaceSlotExtensions,
+  type NamespaceSlotAppScope,
   type NamespaceSlotToExtension,
 } from "./substrate/namespace-slots.js";
 export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";

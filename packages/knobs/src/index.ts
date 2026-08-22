@@ -32,6 +32,8 @@ export {
   knobsScope,
   knobStoreKey,
   type KnobEntry,
+  type KnobsDefinition,
+  type KnobStore,
   type KnobStoreQuery,
 } from "./store.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";

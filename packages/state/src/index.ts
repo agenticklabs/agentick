@@ -24,6 +24,7 @@ export {
   createStateStore,
   stateScope,
   stateStoreKey,
+  type StateDefinition,
   type StateEntry,
   type StateStore,
   type StateStoreQuery,

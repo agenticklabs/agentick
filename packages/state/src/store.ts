@@ -47,6 +47,16 @@ export interface StateStoreQuery {
 export type StateStore = Store<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
 
 /**
+ * The `state` NAMESPACE DEFINITION (ADR 93) — what `createApp({ state })` and
+ * `SessionHarnessOptions.state` take. Durability only: the adopter stash's
+ * values are the whole of this namespace's durable state.
+ */
+export interface StateDefinition {
+  /** @see StateHarnessOptions.store */
+  readonly store?: StateStore;
+}
+
+/**
  * The store's primary key: state keys are unique only WITHIN a scope.
  * `JSON.stringify` of the pair rather than a separator join — both halves are
  * adopter-supplied and may contain any character, so a join is ambiguous and an

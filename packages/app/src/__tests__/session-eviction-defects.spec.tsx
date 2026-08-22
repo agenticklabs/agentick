@@ -11,9 +11,10 @@
  *         (bumped on unmount), so a reopen is a fresh op and `mountBody` re-runs
  *         instead of replaying the first, torn-down mount. Plus construction
  *         single-flight, and the address-by-id handle contract.
- * Leg 2 — knob + `useSessionState` survive evict→reopen: eviction snapshots
- *         before teardown; the reopen spin-up restores via the SnapshotCapable
- *         fan-out. (Interim in-RAM snapshot; durable is data-layer Phase 4.)
+ * Leg 2 — knob + `useSessionState` survive evict→reopen: eviction flushes each
+ *         harness to its OWN store (`persist`), and the reopen's genesis fans
+ *         `hydrate` back out over the same stores. The app retains nothing in
+ *         between (checkpointing §4).
  *
  * Run:
  *   npx vitest run packages/app/src/__tests__/session-eviction-defects.spec.tsx
@@ -274,23 +275,17 @@ describe("LEG 1 — eviction/reopen activation", () => {
 // LEG 2 — knob + session-state loss across evict→reopen
 // ===========================================================================
 
-describe("LEG 2 — state loss on evict→reopen", () => {
+describe("LEG 2 — knob + session-state survive evict→reopen", () => {
   // -------------------------------------------------------------------------
-  // 2a — DEFECT: knob + useSessionState values are lost across evict→reopen.
-  //
-  // CONFIRMED MECHANISM: eviction (`disposeSession(id, "evict")`,
-  // harness.ts:3260) takes NO snapshot before teardown. Reopen genesis
-  // hydrates only `runtime` + `timeline` (harness.ts:1201-1209); the knobs /
-  // state bridges resume ONLY via `importSnapshot`, which the reopen spin-up
-  // path never calls (`initialKnobs`/`initialState` are per-create options,
-  // not a reopen restore). So the reopened session starts with default (empty)
-  // knob/state.
-  //
-  // EXPECTED: the reopened values are LOST. The assertions demand
-  // preservation and therefore FAIL today.
+  // 2a — the fix this file was written to demand. Eviction runs
+  // `session:snapshot` (the `persist` fan-out — each harness flushes to its own
+  // store) before the unmount, and the reopen's genesis runs the `hydrate`
+  // fan-out over those same stores. Both stores are APP-scoped by default, which
+  // is the part that makes it work with no configuration: a per-harness default
+  // store would go to the grave with the harness that owned it.
   // -------------------------------------------------------------------------
-  it("[DEFECT] knob + session-state do not survive evict→reopen", async () => {
-    const { journal, bus, inbox, executor } = await mkExecutor("leg2-loss");
+  it("knob + session-state survive evict→reopen", async () => {
+    const { journal, bus, inbox, executor } = await mkExecutor("leg2-survives");
     const timelineStore = new MemoryTimelineStore();
     const app = await createApp(React.createElement(PlainAgent), {
       modelExecutor: executor,
@@ -317,49 +312,8 @@ describe("LEG 2 — state loss on evict→reopen", () => {
     expect(app.getSession("A")).toBeUndefined();
     const reopened = await app.createSession({ sessionId: "A" });
 
-    // EXPECTED-FAIL: both are lost (undefined), not preserved.
     expect(reopened.knobs.get("verbose")).toBe(true);
     expect(stateOf(reopened).get("count")).toBe(99);
-
-    await app.closeApp();
-  });
-
-  // -------------------------------------------------------------------------
-  // 2b — CONTROL (passes): the cold path snapshot→restore DOES preserve them.
-  //
-  // Establishes the leg-2 asymmetry and the fix shape: `session.snapshot()`
-  // captures every SnapshotCapable bridge generically (harness.ts:1679-1683,
-  // includes knobs + state) and `session.restore()` fans the values back in
-  // (harness.ts:1742-1753). The fix for 2a is to route eviction through this
-  // SAME machinery — snapshot on evict, restore on reopen. GREEN today.
-  // -------------------------------------------------------------------------
-  it("[CONTROL] snapshot→restore preserves knob + session-state", async () => {
-    const { journal, bus, inbox, executor } = await mkExecutor("leg2-coldpath");
-    const app = await createApp(React.createElement(PlainAgent), {
-      modelExecutor: executor,
-      target: mkTarget(),
-      journal,
-      bus,
-      inbox,
-    });
-
-    const a = await app.createSession({ sessionId: "A" });
-    await (
-      await a.send({ messages: [{ role: "user", content: "seed" }] })
-    ).result;
-    await a.knobs.set({ id: "verbose", value: true });
-    await stateOf(a).set({ key: "count", value: 99 });
-
-    const snap = await a.snapshot();
-
-    const b = await app.createSession({ sessionId: "B" });
-    await (
-      await b.send({ messages: [{ role: "user", content: "seed" }] })
-    ).result;
-    await b.restore({ snapshot: snap });
-
-    expect(b.knobs.get("verbose")).toBe(true); // preserved via SnapshotCapable fan-out
-    expect(stateOf(b).get("count")).toBe(99);
 
     await app.closeApp();
   });

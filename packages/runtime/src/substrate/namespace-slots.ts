@@ -24,6 +24,8 @@
  * @verifiedBy packages/runtime/src/__tests__/namespace-slots.spec.ts
  */
 
+import { omitUndefined } from "@agentick/utils";
+
 /**
  * Turn a slot VALUE into the extension that installs it (ADR 93) — the second
  * arm of a slot registration, supplied by EXTENSION-INSTALLED namespaces.
@@ -45,10 +47,30 @@
  */
 export type NamespaceSlotToExtension = (value: unknown) => unknown;
 
-/** A registered slot: its name plus (for extension-installed namespaces) its installer. */
+/**
+ * Build a namespace's APP-SCOPED defaults — the third arm of a slot
+ * registration, supplied by namespaces whose defaults must OUTLIVE one session.
+ *
+ * Called ONCE per app; the returned fold runs per session, merging those
+ * defaults UNDER that session's slot value (adopter wins). A store-backed
+ * namespace defaulting to a per-harness store cannot survive an evict/resume
+ * cycle at all — the checkpoint contract carries no value across the seam, so
+ * `hydrate` reads a store the evicted harness took with it. The app-scoped
+ * default is what makes the one recovery path work zero-config.
+ *
+ * The fold — rather than a plain defaults bag the app merges itself — is what
+ * lets a slot that accepts a LIVE HARNESS as well as a definition (the ADR 42
+ * dichotomy) pass the instance through untouched.
+ *
+ * @see docs/proposals/v2/checkpointing.md §4
+ */
+export type NamespaceSlotAppScope = () => (slotValue: unknown) => unknown;
+
+/** A registered slot: its name plus the optional installer / app-scope arms. */
 interface NamespaceSlot {
   readonly name: string;
   readonly toExtension?: NamespaceSlotToExtension;
+  readonly appScope?: NamespaceSlotAppScope;
 }
 
 /** Registered top-level namespace-config slots, keyed by name, in registration order. */
@@ -72,22 +94,22 @@ const slots = new Map<string, NamespaceSlot>();
  */
 export function registerNamespaceSlot(
   name: string,
-  options?: { readonly toExtension?: NamespaceSlotToExtension },
+  options?: {
+    readonly toExtension?: NamespaceSlotToExtension;
+    readonly appScope?: NamespaceSlotAppScope;
+  },
 ): void {
   const existing = slots.get(name);
-  if (existing !== undefined) {
-    // Idempotent on the NAME, but a later registration may supply the installer
-    // arm a bare earlier one lacked (e.g. `augment.ts` imported before the
-    // extension module finished evaluating). Never downgrade an existing arm.
-    if (options?.toExtension !== undefined && existing.toExtension === undefined) {
-      slots.set(name, { name, toExtension: options.toExtension });
-    }
-    return;
-  }
-  slots.set(
+  // Idempotent on the NAME, but a later registration may supply an arm a bare
+  // earlier one lacked (e.g. `augment.ts` imported before the extension module
+  // finished evaluating). Never downgrade an existing arm.
+  slots.set(name, {
     name,
-    options?.toExtension !== undefined ? { name, toExtension: options.toExtension } : { name },
-  );
+    ...omitUndefined({
+      toExtension: options?.toExtension ?? existing?.toExtension,
+      appScope: options?.appScope ?? existing?.appScope,
+    }),
+  });
 }
 
 /**
@@ -108,11 +130,32 @@ export function registeredNamespaceSlots(): readonly string[] {
  */
 export function collectNamespaceSlots(
   options: Readonly<Record<string, unknown>>,
+  appScopes: Readonly<Record<string, (slotValue: unknown) => unknown>> = {},
 ): Readonly<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
   for (const name of slots.keys()) {
     const value = options[name];
-    if (value !== undefined) out[name] = value;
+    const fold = appScopes[name];
+    if (fold !== undefined) out[name] = fold(value);
+    else if (value !== undefined) out[name] = value;
+  }
+  return out;
+}
+
+/**
+ * Build every registered namespace's app-scoped defaults — called ONCE per app,
+ * at construction. The returned folds are handed back to
+ * {@link collectNamespaceSlots} for each session the app builds, so one store
+ * per namespace serves every session it creates.
+ *
+ * @see NamespaceSlotAppScope
+ */
+export function namespaceSlotAppScopes(): Readonly<
+  Record<string, (slotValue: unknown) => unknown>
+> {
+  const out: Record<string, (slotValue: unknown) => unknown> = {};
+  for (const slot of slots.values()) {
+    if (slot.appScope !== undefined) out[slot.name] = slot.appScope();
   }
   return out;
 }

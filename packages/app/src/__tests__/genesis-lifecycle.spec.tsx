@@ -11,9 +11,12 @@
  *   3. **Typed failure (landmine 2).** A throwing hydrator fails session
  *      CREATION with its typed error — no half-genesis session that only
  *      explodes at the first `send`.
- *   4. **Fork/spawn double-genesis (landmine 1).** `hydrate` runs on CREATE and
- *      RESUME, NEVER on FORK / SPAWN-inherit: a fork inherits its parent's image
- *      via `restore`, so a second genesis would duplicate or diverge it.
+ *   4. **Spawn-inherit skips genesis (landmine 1, as amended).** `hydrate` runs
+ *      on CREATE and RESUME, never on SPAWN-inherit — a spawned child owns no
+ *      durable scope to read. A FORK is the exception that proves it: the fork
+ *      path branches the parent's scope onto the child's, so the child DOES
+ *      genesis, over its own copy (checkpointing §5 — the ADR 93 fork law
+ *      retired with the snapshot-blob transport that motivated it).
  *
  * @see docs/proposals/v2/blueprint/93-namespace-definitions.md
  */
@@ -135,7 +138,7 @@ describe("ADR 93 landmine 2 — genesis ordering + typed failure", () => {
   });
 });
 
-describe("ADR 93 landmine 1 — the fork/spawn law", () => {
+describe("ADR 93 landmine 1 — the fork/spawn law, as amended", () => {
   /** A definition whose hydrator counts its own invocations. */
   function countingDefinition(store: TimelineStore): {
     definition: ReturnType<typeof defineTimeline>;
@@ -154,7 +157,7 @@ describe("ADR 93 landmine 1 — the fork/spawn law", () => {
     };
   }
 
-  it("a FORK does not re-run genesis (it inherits the parent's image)", async () => {
+  it("a FORK branches the parent's scope, then genesises over the COPY", async () => {
     const store = new MemoryTimelineStore();
     await store.append("fork-parent:timeline", [userEntry("p1")], {} as never);
     const { definition, calls } = countingDefinition(store);
@@ -164,9 +167,21 @@ describe("ADR 93 landmine 1 — the fork/spawn law", () => {
     expect(parent.timeline.readPersisted().map(idOf)).toEqual(["p1"]);
 
     const child = await parent.fork({ sessionId: "fork-child" });
-    // THE LAW: no second genesis. The child's entries arrived via `restore`.
-    expect(calls()).toBe(1);
+    // THE LAW (checkpointing §5): the child's log is a store-layer COPY of the
+    // parent's scope, and the hydrator runs over that copy — a second genesis,
+    // against the child's own partition. Under the retired law the child
+    // inherited an image through the snapshot blob and had to skip genesis.
+    expect(calls()).toBe(2);
     expect(child.timeline.readPersisted().map(idOf)).toEqual(["p1"]);
+    // The copy is the CHILD's, in the child's own partition — not a shared read.
+    expect((await store.read("fork-child:timeline", {} as never)).map(idOf)).toEqual(["p1"]);
+
+    // Equal at the fork point, divergent after: an append on one is invisible
+    // to the other, in memory and in the store.
+    await child.timeline.append(userEntry("c1"));
+    await parent.timeline.append(userEntry("q1"));
+    expect(child.timeline.read().entries.map(idOf)).toEqual(["p1", "c1"]);
+    expect(parent.timeline.read().entries.map(idOf)).toEqual(["p1", "q1"]);
     await app.closeApp();
   });
 

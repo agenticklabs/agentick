@@ -3,6 +3,10 @@
  * `session:snapshot` fans out `CheckpointCapable.persist` before composing the
  * legacy blob, `session:restore` fans out `hydrate`, and `SnapshotCapable`-only
  * bridges keep their blob round-trip while the two contracts coexist.
+ *
+ * GENESIS runs the same `hydrate` fan-out at construction (checkpointing §4 —
+ * build-then-hydrate IS resume), so a fresh session has already hydrated once
+ * before any of these verbs is called.
  */
 
 import { describe, expect, it } from "vitest";
@@ -130,6 +134,10 @@ describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", ()
       ]),
     );
 
+    // Genesis already fanned `hydrate` out over both, in the same bag order.
+    expect(log).toEqual(["hydrate:first", "hydrate:second"]);
+    log.length = 0;
+
     await session.snapshot();
 
     expect(log).toEqual(["persist:first", "persist:second"]);
@@ -183,12 +191,13 @@ describe("SessionHarness — CheckpointCapable fold (checkpointing phase 1)", ()
       new Map<string, unknown>([["migrated", migrated]]),
     );
     const snap = await session.snapshot();
+    expect(migrated.hydrated).toHaveLength(1); // genesis
 
     await session.restore({
       snapshot: { ...snap, bridges: { ...snap.bridges, migrated: { v: 99 } } },
     });
 
-    expect(migrated.hydrated).toHaveLength(1);
+    expect(migrated.hydrated).toHaveLength(2);
     expect(migrated.imports).toBe(0);
     await session.close();
     await tools.close();

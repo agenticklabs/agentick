@@ -57,6 +57,7 @@ import type {
   EventBusFactory,
   ExecutionTarget,
   ExecutorProtocol,
+  BranchCtx,
   HydrateCtx,
   KnobHandle,
   LanguageModelExecutionResult,
@@ -99,6 +100,7 @@ import type {
   ForkInput,
   SpawnContext,
   SpawnInput,
+  StoreCtx,
   StateApplyError,
   SubstrateError,
   TickEndForwardDecision,
@@ -124,6 +126,7 @@ import {
   foldUsageRollup,
   HandlerError,
   isChannelSnapshotProvider,
+  isBranchCapable,
   isCheckpointCapable,
   isExecuteError,
   isSnapshotCapable,
@@ -147,9 +150,9 @@ import {
   type LanguageModelAdapter,
   type ModelRegistry,
 } from "@agentick/model";
-import type { KnobsHandle } from "@agentick/knobs";
+import type { KnobsDefinition, KnobsHandle } from "@agentick/knobs";
 import type { GateHandle, GatesHandle } from "@agentick/gates";
-import type { StateHandle } from "@agentick/state";
+import type { StateDefinition, StateHandle } from "@agentick/state";
 import type { TimelineDefinition, TimelineHandle } from "@agentick/timeline";
 
 import { buildSessionBridges, type SessionHookBridges } from "./session-bridges.js";
@@ -307,6 +310,15 @@ export interface SessionHarnessOptions<P = unknown> {
    * SessionDefaults — `createApp({ session: { timeline } })` is GONE.
    */
   readonly timeline?: TimelineDefinition;
+  /**
+   * Knob VALUE durability (ADR 93 slot), threaded to the per-session
+   * `KnobsHarness`. Flows from the top-level `createApp({ knobs })`, whose
+   * default is one app-scoped in-memory store — the lifetime an evict/resume
+   * cycle needs (checkpointing §4).
+   */
+  readonly knobs?: KnobsDefinition;
+  /** Adopter-stash durability (ADR 93 slot). Same shape and lifetime as {@link knobs}. */
+  readonly state?: StateDefinition;
   /** Scope ceiling (#199) — construction-bound, checked at the wire
    *  dispatch gate. See SessionHarnessProtocol.requiredScopes. */
   readonly requiredScopes?: readonly string[];
@@ -1080,6 +1092,7 @@ export class SessionHarness<P = unknown>
             }),
           ...options.timeline,
         },
+        ...omitUndefined({ knobs: options.knobs, state: options.state }),
         // ADR 76 tier 3 + ADR 83 amendment — the session's RESOLVED
         // interceptors (app-inherited incl. the app+session command hooks as
         // op-scoped middleware, plus the session's own), so `session.use()` /
@@ -1092,14 +1105,19 @@ export class SessionHarness<P = unknown>
         interceptorParent: this,
       },
     );
-    if (options.initialKnobs) {
-      this.bridges.knobs.importSnapshot(
-        options.initialKnobs as Readonly<Record<string, string | number | boolean>>,
-      );
-    }
-    if (options.initialState) {
-      this.bridges.state.importSnapshot(options.initialState);
-    }
+    // Create-call seeds, applied AFTER genesis (see `_genesisReady` below): the
+    // hydrate fan-out is store-authoritative and would otherwise wipe them, and
+    // a value the caller passed to THIS create outranks what is durable.
+    const seedCreateInputValues = (): void => {
+      if (options.initialKnobs) {
+        this.bridges.knobs.importSnapshot(
+          options.initialKnobs as Readonly<Record<string, string | number | boolean>>,
+        );
+      }
+      if (options.initialState) {
+        this.bridges.state.importSnapshot(options.initialState);
+      }
+    };
 
     // Expose optional-extension bridges (registered via `installer.registerNamespace`
     // — sandbox, live, credentials, …) as `session.<name>` getters — the server
@@ -1215,19 +1233,24 @@ export class SessionHarness<P = unknown>
 
     // ─── GENESIS (ADR 93) ────────────────────────────────────────────────
     //
-    // Run every store-bearing namespace's `hydrate(ctx)` HERE: after identity
+    // Run every store-backed namespace's `hydrate(ctx)` HERE: after identity
     // stamping (the runtime + bridges exist, so `ctx.sessionId`/`principal` are
     // real), before first render (the mount chains behind this promise, so the
     // first render sees the resumed conversation and Class B state reconstructs
     // from it), and before any append.
     //
-    // **The fork law (landmine 1).** A session that INHERITS its parent's image
-    // — a `spawn()`ed child, and therefore a `fork()` too (a fork is spawn +
-    // restore) — must NOT re-run genesis: the parent's entries arrive via
-    // `restore(snapshot)`, and a second genesis would duplicate them or diverge
-    // from them. Lineage is the discriminator, and only this layer knows it.
-    // Genesis runs on CREATE and RESUME; never on FORK / SPAWN-inherit.
-    // The fork law binds the TIMELINE only. The session's own record hydrates
+    // Genesis IS the {@link CheckpointCapable} hydrate fan-out (checkpointing
+    // §3.2) — opening on what is durable and resuming on it are one operation,
+    // so this is the same fan-out `restore()` runs, over every migrated bridge
+    // rather than the timeline alone. Build-then-hydrate is therefore the whole
+    // of "resume": evict/restart/crash converge on this line.
+    //
+    // **Spawn-inherit skips it.** A `spawn()`ed child takes its parent's IMAGE
+    // and owns no durable scope of its own yet, so a hydrator would run against
+    // a partition nothing wrote. A `fork()` is the exception that proves it —
+    // the fork path BRANCHES the parent's scopes onto the child's and then
+    // hydrates over the copy (checkpointing §5), which is why the ADR 93 fork
+    // law retired with the blob transport. The session's own record hydrates
     // unconditionally: a child's id is new, so its read finds nothing and the
     // step degenerates to the E11 construction upsert.
     const inheritsParentImage =
@@ -1236,11 +1259,10 @@ export class SessionHarness<P = unknown>
       this.runtime.hydrate(),
       inheritsParentImage
         ? Promise.resolve()
-        : // `timeline.hydrate()` is itself a no-op when the definition configures
-          // neither a `store` nor a `hydrate`, so the bundled in-memory default
-          // stays a zero-cost resolved promise.
-          this.bridges.timeline.hydrate(),
-    ]).then(() => {});
+        : this.hydrateCheckpointBridges(this.checkpointCtxFrom(this.storeCtx())),
+    ])
+      .then(seedCreateInputValues)
+      .then(() => {});
 
     // Eagerly mount — the compiler exposes `.ready` for its own
     // inbox registration; our mount is awaited via `_mountReady`. The
@@ -1719,23 +1741,61 @@ export class SessionHarness<P = unknown>
     );
   }
 
-  /**
-   * The checkpoint contract's ctx — built from the ENRICHED store ctx so a
-   * durable store sees the live op's `opId` as its idempotency key.
-   */
-  private checkpointCtx(): Effect.Effect<PersistCtx> {
-    return Effect.map(this.storeCtxEffect(), (storeCtx) => ({
+  /** The checkpoint contract's ctx over a given store ctx (checkpointing §3.2). */
+  private checkpointCtxFrom(storeCtx: StoreCtx): PersistCtx {
+    return {
       sessionId: this.runtime.id,
       tick: this.runtime.currentTick(),
       storeCtx,
       ...omitUndefined({ signal: this.constructionSignal }),
-    }));
+    };
+  }
+
+  /**
+   * The ctx a checkpoint hook running inside a COMMAND receives — built from the
+   * ENRICHED store ctx so a durable store sees the live op's `opId` as its
+   * idempotency key. Genesis and fork build theirs from the base `storeCtx()`:
+   * they carry no live op to enrich from.
+   */
+  private checkpointCtx(): Effect.Effect<PersistCtx> {
+    return Effect.map(this.storeCtxEffect(), (storeCtx) => this.checkpointCtxFrom(storeCtx));
   }
 
   /** Flush every {@link CheckpointCapable} bridge to its own store, in bag order. */
   private async persistCheckpointBridges(ctx: PersistCtx): Promise<void> {
     for (const bridge of Object.values(this.bridges)) {
       if (isCheckpointCapable(bridge)) await bridge.persist(ctx);
+    }
+  }
+
+  /**
+   * Rehydrate every {@link CheckpointCapable} bridge from its own store — the
+   * fan-out genesis and `restore()` share, so a session has ONE store-read path
+   * whether it is being opened, resumed after eviction, or restored explicitly.
+   *
+   * TODO(hydrate-ordering): bag order, no per-harness dependency declaration
+   * (checkpointing §8.3). The first harness whose `hydrate` reads a sibling's
+   * hydrated state is the trigger to introduce an ordering mechanism.
+   */
+  private async hydrateCheckpointBridges(ctx: HydrateCtx): Promise<void> {
+    for (const bridge of Object.values(this.bridges)) {
+      if (isCheckpointCapable(bridge)) await bridge.hydrate(ctx);
+    }
+  }
+
+  /**
+   * Copy `fromSessionId`'s durable scopes onto THIS session's own — the fork
+   * transport (checkpointing §5). Each {@link BranchCapable} bridge copies at
+   * its own store layer; no value crosses the seam, and the caller hydrates
+   * afterwards to open the child on the copy.
+   *
+   * Called on the CHILD by the parent's {@link fork} (private access across
+   * instances of one class), because the scopes being written are the child's.
+   */
+  private async branchCheckpointBridges(fromSessionId: string): Promise<void> {
+    const ctx: BranchCtx = { ...this.checkpointCtxFrom(this.storeCtx()), fromSessionId };
+    for (const bridge of Object.values(this.bridges)) {
+      if (isBranchCapable(bridge)) await bridge.branch(ctx);
     }
   }
 
@@ -1823,12 +1883,7 @@ export class SessionHarness<P = unknown>
 
     // Generic fan-out — feature-detected, no hardcoded slot names.
     const bag = this.bridges as unknown as Record<string, unknown>;
-    // TODO(hydrate-ordering): bag order, no per-harness dependency declaration
-    // (checkpointing §8.3). The first harness whose `hydrate` reads a sibling's
-    // hydrated state is the trigger to introduce an ordering mechanism.
-    for (const bridge of Object.values(bag)) {
-      if (isCheckpointCapable(bridge)) await bridge.hydrate(ctx);
-    }
+    await this.hydrateCheckpointBridges(ctx);
     const pending: Promise<unknown>[] = [];
     for (const [name, value] of Object.entries(snap.bridges)) {
       if (value === undefined) continue;
@@ -2330,20 +2385,12 @@ export class SessionHarness<P = unknown>
   }
 
   async fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
-    // TODO(fork-store-copy): BROKEN for every CheckpointCapable harness. A fork
-    // carries state through the snapshot blob, which a migrated harness no
-    // longer writes to — so the child's `restore` hydrates its OWN (empty)
-    // store scope instead, and also re-runs the genesis the ADR 93 fork law
-    // forbids for an image-inheriting child. checkpointing §5's replacement —
-    // fork as a store-layer scope copy — is not implemented; until it is,
-    // `fork()` loses timeline / knobs / state.
-    //
-    // C2 — a fork is spawn(no send, own agent root) + restore(own snapshot).
-    // Capture BEFORE spawning so the child restores this session's state as of
-    // the fork instant. `spawn({})` defaults `agent` to `this.agentRoot`
-    // (same-image child) and returns the unbound child (no `send`). The
-    // restore fans this session's bridge snapshots into the child's matching
-    // bridges + copies the tick/usage accounting, then the child diverges.
+    // C2 — a fork is spawn(no send, own agent root) + branch + restore.
+    // `snapshot()` FIRST, because it is the flush barrier: every store-backed
+    // bridge drains to its store, so the scopes the child branches from are
+    // complete as of the fork instant (checkpointing §5). `spawn({})` defaults
+    // `agent` to `this.agentRoot` (same-image child) and returns the unbound
+    // child (no `send`).
     const snap = await this.snapshot();
     // C2 — a fork is a same-image copy: the snapshot already fans every
     // bridge's state into the child, but the record's adopter `metadata` bag is
@@ -2363,6 +2410,11 @@ export class SessionHarness<P = unknown>
         maxTicks: input.maxTicks,
       }),
     })) as SessionHarnessProtocol<P>;
+    // Branch THEN restore. The branch copies this session's durable scopes onto
+    // the child's at the store layer; the restore's hydrate fan-out opens the
+    // child on that copy and carries the tick/usage accounting no store holds.
+    // Residual `SnapshotCapable` bridges still ride the blob until the sweep.
+    if (child instanceof SessionHarness) await child.branchCheckpointBridges(this.runtime.id);
     await child.restore({ snapshot: snap });
     return child;
   }

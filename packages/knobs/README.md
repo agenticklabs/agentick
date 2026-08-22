@@ -164,18 +164,19 @@ await Effect.runPromise(
 
 ## Durable values
 
-Values are backed by a `Store` of `{ scope, id, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory.
+Values are backed by a `Store` of `{ scope, id, value }` cells; the synchronous read surface is a cache over it, so reads never await. The store is the `knobs` slot of `createApp`, and it defaults to one in-memory store per app.
 
 ```ts
-import { withKnobs, createKnobStore } from "@agentick/knobs";
+import { createApp } from "agentick";
+import { createKnobStore } from "@agentick/knobs";
 
-const extension = withKnobs({
-  initial: { verbosity: 3 }, // seed at construction
-  store: createKnobStore(), // swap for a durable adapter
+const app = await createApp(Agent, {
+  model,
+  knobs: { store: createKnobStore() }, // swap for a durable adapter
 });
 ```
 
-Checkpointing is two hooks the session fans out — `persist()` flushes every write the harness kicked off the critical path, `hydrate()` rebuilds the read cache from the store. No value crosses that seam, so **durability is exactly the injected store's lifetime**: the default store is created per harness, and a harness rebuilt on resume finds an empty one. Inject a store that outlives the session and values survive eviction, restart, and process death.
+Checkpointing is two hooks the session fans out — `persist()` flushes every write the harness kicked off the critical path, `hydrate()` rebuilds the read cache from the store. No value crosses that seam, so **durability is exactly the store's lifetime**. The app-scoped default outlives any one session, which is what lets an evicted session come back with its knobs; it does not outlive the process. Inject a durable adapter and values survive restart and process death too.
 
 Cells are partitioned by the owning harness scope, so one injected app-scoped adapter backs every session at once without knob ids colliding between them. `hydrate()` reads its own partition and REPLACES the cache with it — the store is the authority.
 
@@ -245,6 +246,7 @@ knobs.close();
 | `KnobsStateFrame` (type) + frame subtypes          | The `snapshot` \| `delta` union on the channel            |
 | `WireKnobDescriptor` (type)                        | `KnobDescriptor` minus `validate` and `schema`            |
 | `KnobEntry` / `KnobStoreQuery` (types)             | The stored `{ scope, id, value }` cell and its query      |
+| `KnobsDefinition` / `KnobStore` (types)            | The `createApp({ knobs })` slot, and its store seam       |
 
 ### `session.knobs`
 

@@ -21,6 +21,8 @@ import { registerNamespaceSlot } from "@agentick/runtime";
 import type { TimelineHarnessProtocol } from "@agentick/spec";
 import type { TimelineHandle } from "./handle.js";
 import type { TimelineConfig } from "./extension.js";
+import { isTimelineHarnessInstance } from "./definition.js";
+import { MemoryTimelineStore } from "./store.js";
 
 // ADR 51 slice 5 (#141) — the wire projection of the ratified VERB-MATRIX rows
 // (`timeline/history`, `timeline/compact`, `timeline/commands`). They live in
@@ -63,4 +65,15 @@ declare module "@agentick/spec" {
 // package. A side effect on import, exactly like the `HookBridges` slot: the
 // metapackage bundles this package, so the slot is always lit for built-ins;
 // an optional package's slot lights up on install + import.
-registerNamespaceSlot("timeline");
+// The `appScope` arm (checkpointing §4) — ONE default log store per APP, shared
+// by every session it creates. Entries are partitioned by log key, so sharing is
+// safe; the lifetime is the point: a per-harness default store leaves an evicted
+// session with nothing to hydrate from. An adopter store, and a live harness,
+// both win outright.
+registerNamespaceSlot("timeline", {
+  appScope: () => {
+    const store = new MemoryTimelineStore();
+    return (value) =>
+      isTimelineHarnessInstance(value) ? value : { store, ...(value as object | undefined) };
+  },
+});

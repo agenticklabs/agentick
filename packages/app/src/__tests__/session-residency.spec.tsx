@@ -1,13 +1,13 @@
 /**
  * Session residency — what happens to a session between "live" and "gone".
  *
- * The reaper (`sessions: { maxActive, idleTimeout }`) pages sessions out to
- * bound memory. That is only safe if the three facts below hold, and none of
- * them did:
+ * The reaper (`sessions: { maxActive, idleTimeout }`) evicts sessions to bound
+ * memory. That is only safe if the three facts below hold, and none of them did:
  *
- *   1. A paged-out session can be brought BACK by id (`resumeSession`) — from
- *      the app's own paged state, or from the durable record alone.
- *   2. A page-out is recorded as `hibernated`, not `closed`. The durable record
+ *   1. An evicted session can be brought BACK by id (`resumeSession`) — from
+ *      the durable record plus the per-harness stores, which is the only
+ *      source there is.
+ *   2. An eviction is recorded as `hibernated`, not `closed`. The durable record
  *      is the truth a thread list renders and the store's prune sweep reads; a
  *      dormant session must not look ended, and must not be garbage-collected.
  *   3. Ending a session through the app door (`closeSession`) actually removes
@@ -93,12 +93,12 @@ const say = (text: string) => ({ messages: [{ role: "user" as const, content: te
 // Page-out is recorded as hibernation
 // ===========================================================================
 
-describe("a paged-out session is hibernated, not closed", () => {
+describe("an evicted session is hibernated, not closed", () => {
   it("stamps `hibernated` on eviction and `closed` on a genuine close", async () => {
     const { app } = await mkApp("residency-status");
 
     await app.createSession({ sessionId: "evicted", eager: true });
-    // Over the cap → the LRU victim is paged out.
+    // Over the cap → the LRU victim is evicted.
     await app.createSession({ sessionId: "closed", eager: true });
     expect(app.getSession("evicted")).toBeUndefined();
 
@@ -133,7 +133,7 @@ describe("a paged-out session is hibernated, not closed", () => {
 // Resume
 // ===========================================================================
 
-describe("resumeSession brings a paged-out session back", () => {
+describe("resumeSession brings an evicted session back", () => {
   it("remounts it live, idle, and able to run another turn", async () => {
     const { app } = await mkApp("residency-resume");
 
@@ -152,14 +152,14 @@ describe("resumeSession brings a paged-out session back", () => {
     const res = await (await resumed!.send(say("again"))).result;
     expect(res.response).toContain("ok");
 
-    // The durable record is the SAME session's, carried across the page-out:
+    // The durable record is the SAME session's, carried across the eviction:
     // two turns, not a fresh conversation.
     expect((await app.getSessionRecord("A"))?.executionCount).toBe(2);
 
     await app.closeApp();
   });
 
-  it("replays the create call, so the resumed session keeps its identity", async () => {
+  it("reads identity back off the RECORD; the scope ceiling does not survive", async () => {
     const { app } = await mkApp("residency-identity");
 
     await app.createSession({
@@ -172,13 +172,16 @@ describe("resumeSession brings a paged-out session back", () => {
 
     const resumed = await app.resumeSession("owned");
     expect(resumed).toBeDefined();
+    // Build-call durability (checkpointing §4): the serializable half of the
+    // create call — id, principal, metadata — persists on the record and is
+    // read back; everything else re-derives from the app recipe.
     expect(resumed!.principal).toBe("user-1");
-    // The scope ceiling is construction-bound and absent from the record —
-    // replaying the create call is the only thing that brings it back.
-    expect((resumed as { requiredScopes?: readonly string[] }).requiredScopes).toEqual([
-      "tenant:acme",
-    ]);
+    expect((await app.getSessionRecord("owned"))?.metadata).toMatchObject({ thread: "t-9" });
     expect((await app.getSessionRecord("owned"))?.principal).toBe("user-1");
+    // The scope ceiling is construction-bound and nothing persists it, so a
+    // rebuilt session does NOT carry it. The wire dispatch gate authorizes off
+    // the record's principal (`findRecordPrincipal`), not this field.
+    expect((resumed as { requiredScopes?: readonly string[] }).requiredScopes).toBeUndefined();
 
     await app.closeApp();
   });
@@ -202,9 +205,10 @@ describe("resumeSession brings a paged-out session back", () => {
     await app.closeApp();
   });
 
-  it("resumes from the durable record alone when nothing was paged out", async () => {
-    // A record with no in-process paged state is the cross-restart shape: the
-    // store is the resume index, and the app rebuilds from its own defaults.
+  it("resumes from a record written by a PREVIOUS process", async () => {
+    // The cross-restart shape — and, since the paged tier is gone, structurally
+    // the same path an evict→resume takes: the store is the resume index, and
+    // the app rebuilds from its own recipe.
     const store = new InMemorySessionStore();
     const now = Date.now();
     await store.put(
@@ -320,8 +324,8 @@ describe("closeSession leaves nothing behind", () => {
     await app.closeApp();
   });
 
-  it("ends a session that is only paged out, without bringing it back", async () => {
-    const { app } = await mkApp("residency-close-paged");
+  it("ends an evicted session without bringing it back", async () => {
+    const { app } = await mkApp("residency-close-evicted");
 
     await app.createSession({ sessionId: "dormant", eager: true });
     await app.createSession({ sessionId: "other" }); // evicts `dormant`

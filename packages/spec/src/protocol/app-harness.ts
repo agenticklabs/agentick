@@ -772,26 +772,49 @@ export interface AppHarnessProtocol<P = unknown> {
    * live registry has none.
    *
    * `getSession` answers "is this mounted"; this answers "can this be mounted
-   * again, and if so, mount it." Two sources, tried in that order:
+   * again, and if so, mount it." There is ONE way it does so, whether the
+   * session was evicted a second ago or the process restarted since: a durable
+   * {@link SessionRecord} whose status is not terminal is rebuilt from the app's
+   * recipe, and each of its harnesses rehydrates from its own store.
    *
-   *   1. a session this app PAGED OUT (`sessions.maxActive` / `idleTimeout`) —
-   *      remounted from the create input it was built with, so the resumed
-   *      session is the same session: same principal, same scope ceiling, same
-   *      root element and props, with its knob / state bridges restored from the
-   *      eviction snapshot;
-   *   2. a durable {@link SessionRecord} whose status is not terminal — the
-   *      cross-restart resume the store exists to index, rebuilt from the app's
-   *      own defaults and hydrated from the record.
+   * What survives is therefore exactly what the record and the stores hold. A
+   * resumed session is NOT byte-identical to the original create call: the root
+   * element and props come from the app, and per-session construction arguments
+   * (extra tools, the scope ceiling) are not persisted.
    *
    * `undefined` for an id this app cannot bring back: never opened here, or
    * genuinely over (closed / completed / failed). Resume never CREATES — an
    * unknown id resolves to nothing rather than a blank session, which is what
-   * lets the wire tell "paged out" apart from "no such session".
+   * lets the wire tell "evicted" apart from "no such session".
    *
    * Concurrency-safe: same-id calls collapse onto one construction, so two sends
-   * arriving together against a paged-out session remount it once.
+   * arriving together against an evicted session remount it once.
    */
   resumeSession(sessionId: string): Promise<SessionHarnessProtocol<P> | undefined>;
+
+  /**
+   * Check a live session out of memory — the public counterpart of
+   * {@link resumeSession}, and the same composed operation the idle sweep and
+   * the `maxActive` LRU run: flush every harness to its own store
+   * (`session:snapshot`), then `session:close({ reason: "evicted" })` and
+   * unmount. The app retains nothing; the next {@link resumeSession} /
+   * same-id `createSession` rebuilds from the record + stores.
+   *
+   * Configuration (`sessions.idleTimeout` / `sessions.maxActive`) governs the
+   * automatic callers only. This is the manual one — for a host that knows a
+   * session is done being active (a UI tab closed, a shift ended) and wants the
+   * memory back before the sweep would take it.
+   *
+   * **Resolves without effect** for an id that is not live, is ephemeral, or has
+   * an execution IN FLIGHT — the last is the hard eviction invariant, identical
+   * to what the sweep does when it meets a busy session, and expressing it as a
+   * refusal would make every caller write the same retry loop. Poll
+   * {@link getSession} if you need to know it happened.
+   *
+   * Rejects only if a harness's flush fails; the session then stays live, since
+   * an unmount behind an un-flushed tail would lose data.
+   */
+  evictSession(sessionId: string): Promise<void>;
 
   /**
    * End a session and drop it from the live registry — the app-door twin of

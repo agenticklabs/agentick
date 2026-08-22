@@ -93,16 +93,17 @@ Two components reading the same key share one cell for the same reason — write
 
 ## Durable values
 
-Values are backed by a `Store` of `{ scope, key, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory. Inject an adapter and state outlives the process — `hydrate()` rebuilds the read cache from the store.
+Values are backed by a `Store` of `{ scope, key, value }` cells; the synchronous read surface is a cache over it, so reads never await. The store is the `state` slot of `createApp`, and it defaults to one in-memory store per app — the lifetime an evicted session needs to come back with its cells. Inject an adapter and state outlives the process too; `hydrate()` rebuilds the read cache from whichever it is.
 
-One injected store backs every session. Cells carry the scope of the harness that wrote them and reads select on it, so two sessions using the same key never see each other's value.
+One store backs every session. Cells carry the scope of the harness that wrote them and reads select on it, so two sessions using the same key never see each other's value.
 
 ```ts
-import { withState, createStateStore } from "@agentick/state";
+import { createApp } from "agentick";
+import { createStateStore } from "@agentick/state";
 
-const extension = withState({
-  initial: { "draft.revisions": 0 }, // seed at construction
-  store: createStateStore(), // swap for a durable adapter
+const app = await createApp(Agent, {
+  model,
+  state: { store: createStateStore() }, // swap for a durable adapter
 });
 ```
 
@@ -146,6 +147,7 @@ state.close();
 | `StateHandle` (type)                     | What `session.state` exposes                               |
 | `StateEntry` / `StateStoreQuery` (types) | The stored `{ scope, key, value }` cell and its query      |
 | `StateStore` (type) / `stateStoreKey()`  | The `Store` seam at state's parameterization, and its key  |
+| `StateDefinition` (type)                 | The `createApp({ state })` slot — durability, nothing else |
 | `stateScope(sessionId)`                  | The store partition a session's state occupies             |
 
 ### `session.state`
