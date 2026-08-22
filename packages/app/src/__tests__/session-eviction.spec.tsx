@@ -544,6 +544,17 @@ describe("evictSession — the same operation, invoked by hand", () => {
       inbox,
       sessions: { store: new InMemorySessionStore() },
       hooks: {
+        // The around form is what a duration-measuring adopter uses (ernesto's
+        // residency debug) — pin it alongside before/after.
+        onAppEvictSession: async (
+          input: { sessionId: string },
+          next: (i: { sessionId: string }) => Promise<unknown>,
+        ) => {
+          seen.push(`around-start:${input.sessionId}`);
+          const out = await next(input);
+          seen.push(`around-end:${input.sessionId}`);
+          return out;
+        },
         onBeforeAppEvictSession: (input: { sessionId: string }) => {
           seen.push(`evict:${input.sessionId}`);
         },
@@ -563,7 +574,13 @@ describe("evictSession — the same operation, invoked by hand", () => {
     await app.evictSession("watched");
     await app.resumeSession("watched");
 
-    expect(seen).toEqual(["evict:watched", "resume:watched", "resume:done"]);
+    expect(seen).toEqual([
+      "around-start:watched",
+      "evict:watched",
+      "around-end:watched",
+      "resume:watched",
+      "resume:done",
+    ]);
     await app.closeApp();
   });
 });
