@@ -2330,6 +2330,14 @@ export class SessionHarness<P = unknown>
   }
 
   async fork(input: ForkInput = {}): Promise<SessionHarnessProtocol<P>> {
+    // TODO(fork-store-copy): BROKEN for every CheckpointCapable harness. A fork
+    // carries state through the snapshot blob, which a migrated harness no
+    // longer writes to — so the child's `restore` hydrates its OWN (empty)
+    // store scope instead, and also re-runs the genesis the ADR 93 fork law
+    // forbids for an image-inheriting child. checkpointing §5's replacement —
+    // fork as a store-layer scope copy — is not implemented; until it is,
+    // `fork()` loses timeline / knobs / state.
+    //
     // C2 — a fork is spawn(no send, own agent root) + restore(own snapshot).
     // Capture BEFORE spawning so the child restores this session's state as of
     // the fork instant. `spawn({})` defaults `agent` to `this.agentRoot`

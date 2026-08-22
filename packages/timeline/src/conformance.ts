@@ -24,7 +24,7 @@ import type {
   TurnBoundaryEntry,
   TimelineStore,
 } from "@agentick/spec";
-import { TimelineHydrateFailed } from "@agentick/spec";
+import { isCheckpointCapable, TimelineHydrateFailed, TimelineWriteFailed } from "@agentick/spec";
 import type { TimelineDefinition } from "./definition.js";
 import { MemoryTimelineStore } from "./store.js";
 
@@ -33,14 +33,20 @@ export interface TimelineHarnessFactoryDeps {
   readonly make: () => Promise<TimelineHarnessProtocol>;
   /**
    * OPTIONAL — construct a harness from an ADR-93 {@link TimelineDefinition},
-   * lighting up the GENESIS conformance section (the seed law, the typed
-   * hydrate failure). Implementations that accept a definition should supply
-   * this; the harness's `hydrate()` must be callable by the caller (the session
-   * drives genesis, so the suite drives it here too).
+   * lighting up the GENESIS and CHECKPOINT conformance sections. Implementations
+   * that accept a definition should supply this; the harness's `hydrate()` and
+   * `persist()` must be callable by the caller (the session drives both, so the
+   * suite drives them here too).
+   *
+   * The same `store` AND the same `scopeId` across two calls is how the suite
+   * models one durable log outliving the harness that wrote it — the
+   * evict→resume shape. The store is keyed by scope, so identity is half the
+   * round-trip and cannot be left to the factory.
    */
   readonly makeFromDefinition?: (
     definition: TimelineDefinition,
-  ) => Promise<TimelineHarnessProtocol & { hydrate(): Promise<void> }>;
+    scopeId?: string,
+  ) => Promise<TimelineHarnessProtocol & { hydrate(): Promise<void>; persist(): Promise<void> }>;
 }
 
 function messageEntry(id: string, text: string): TimelineEntry {
@@ -53,6 +59,10 @@ function messageEntry(id: string, text: string): TimelineEntry {
       ts: Date.now(),
     },
   };
+}
+
+function entryId(entry: TimelineEntry): string {
+  return entry.kind === "message" ? entry.message.id : entry.kind;
 }
 
 function identityCompact(metadata?: Record<string, unknown>): CompactStrategy {
@@ -411,6 +421,74 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         await h.hydrate();
         expect(h.readPersisted()).toEqual([]);
         await h.close();
+      });
+    },
+  );
+
+  // ── CHECKPOINT (checkpointing §3.2) — optional section, same factory ──
+  describe.skipIf(deps.makeFromDefinition === undefined)(
+    "TimelineHarness — checkpoint seam (checkpointing §3.2)",
+    () => {
+      it("is CheckpointCapable — how the session fold finds it", async () => {
+        const h = await makeFromDefinition({ store: new MemoryTimelineStore() });
+        expect(isCheckpointCapable(h)).toBe(true);
+        await h.close();
+      });
+
+      it("THE STORE OUTLIVES THE HARNESS: persist → hydrate on a fresh instance", async () => {
+        // The evict→resume shape. Durability across instances exists ONLY
+        // because the injected store survives the harness that wrote to it —
+        // nothing is retained by, or carried out of, harness A.
+        const store = new MemoryTimelineStore();
+        const scopeId = "checkpoint-round-trip";
+        const a = await makeFromDefinition({ store }, scopeId);
+        await a.append(messageEntry("c1", "one"), messageEntry("c2", "two"));
+        await a.persist();
+        await a.close();
+
+        const b = await makeFromDefinition({ store }, scopeId);
+        expect(b.readPersisted()).toEqual([]);
+        await b.hydrate();
+        expect(b.readPersisted().map(entryId)).toEqual(["c1", "c2"]);
+        expect(b.read().entries.map(entryId)).toEqual(["c1", "c2"]);
+        await b.close();
+      });
+
+      it("hydrate REPLACES the projection with the store's contents for the scope", async () => {
+        // Not a merge and not an append: a diverged projection (a compaction)
+        // rebuilds from the resumed log, and re-hydrating twice is idempotent.
+        const store = new MemoryTimelineStore();
+        const h = await makeFromDefinition({ store });
+        await h.append(messageEntry("r1", "one"));
+        await h.persist();
+        await h.replaceProjection({ entries: [messageEntry("folded", "summary")] });
+        expect(h.read().entries.map(entryId)).toEqual(["folded"]);
+
+        await h.hydrate();
+        expect(h.read().entries.map(entryId)).toEqual(["r1"]);
+        await h.hydrate();
+        expect(h.readPersisted().map(entryId)).toEqual(["r1"]);
+        await h.close();
+      });
+
+      it("a store-less harness persists and hydrates without effect", async () => {
+        const h = await makeFromDefinition({});
+        await h.append(messageEntry("m1", "one"));
+        await h.persist();
+        await h.hydrate();
+        expect(h.readPersisted().map(entryId)).toEqual(["m1"]);
+        await h.close();
+      });
+
+      it("a rejected persist propagates — the caller must not unmount behind it", async () => {
+        const store = new MemoryTimelineStore();
+        const failing: TimelineStore = Object.assign(Object.create(store) as TimelineStore, {
+          append: () => Promise.reject(new Error("store append boom")),
+        });
+        const h = await makeFromDefinition({ store: failing });
+        await h.append(messageEntry("lost", "one"));
+        await expect(h.persist()).rejects.toBeInstanceOf(TimelineWriteFailed);
+        await h.close().catch(() => undefined);
       });
     },
   );

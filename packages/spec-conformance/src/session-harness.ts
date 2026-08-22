@@ -51,9 +51,8 @@ import type {
   RenderedTree,
   SendResult,
   SessionHarnessProtocol,
-  SessionSnapshot,
   TimelineEntry,
-  TimelineHarnessSnapshot,
+  TimelineHarnessProtocol,
   ToolExecutorProtocol,
 } from "@agentick/spec";
 import { SPEC_VERSION, SessionClosedError } from "@agentick/spec";
@@ -61,13 +60,21 @@ import { SPEC_VERSION, SessionClosedError } from "@agentick/spec";
 import { stubHarnessFx } from "./harness.js";
 
 /**
- * The durable persisted timeline log from a snapshot. Post-Step-6 (ADR 27)
- * the timeline lives under the generic `bridges.timeline` fold — a
- * {@link TimelineHarnessSnapshot} — not a top-level `timeline` array. A
- * conformant session harness that owns a timeline bridge MUST expose it here.
+ * The durable persisted timeline log, read from the LIVE handle. The timeline
+ * is CheckpointCapable (checkpointing §3.2): it persists to its own store and
+ * is excluded from the snapshot blob, so the blob is no longer a read surface.
+ *
+ * `@agentick/timeline` augments the `timeline` slot onto
+ * {@link SessionHarnessProtocol}; this package is generic infra and must not
+ * depend on a leaf harness to see it, so the slot is feature-detected against
+ * the spec-level protocol. A harness without one reads empty and fails the
+ * assertions below.
  */
-function persistedTimeline(snap: SessionSnapshot): readonly TimelineEntry[] {
-  return (snap.bridges.timeline as TimelineHarnessSnapshot | undefined)?.persisted ?? [];
+function persistedTimeline(session: SessionHarnessProtocol<unknown>): readonly TimelineEntry[] {
+  const timeline = (
+    session as { readonly timeline?: Pick<TimelineHarnessProtocol, "readPersisted"> }
+  ).timeline;
+  return timeline?.readPersisted() ?? [];
 }
 
 // ============================================================================
@@ -378,7 +385,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
           { role: "user", content: "second" },
         ],
       });
-      const tl = persistedTimeline(await session.snapshot());
+      const tl = persistedTimeline(session);
       const userMessages = tl.filter((e) => e.kind === "message" && e.message.role === "user");
       expect(userMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();
@@ -395,7 +402,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         messages: [{ role: "user", content: "x" }],
       });
       await handle.result;
-      const tl = persistedTimeline(await session.snapshot());
+      const tl = persistedTimeline(session);
       const assistant = tl.find((e) => e.kind === "message" && e.message.role === "assistant");
       expect(assistant).toBeDefined();
       await session.close();
@@ -414,7 +421,9 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
       // Step 6 (ADR 27) — every sub-harness state lives in the generic
       // `bridges` map, feature-detected. No hardcoded top-level timeline/knobs.
       expect(typeof snap.bridges).toBe("object");
-      expect(Array.isArray(persistedTimeline(snap))).toBe(true);
+      // A CheckpointCapable timeline persists to its OWN store and is
+      // excluded from the blob (checkpointing §3.2).
+      expect(snap.bridges.timeline).toBeUndefined();
       expect(snap.specVersion).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       await session.close();
     });
@@ -425,16 +434,21 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         deps: defaultSessionConformanceDeps(),
       });
       const before = await session.snapshot();
+      const seenBefore = persistedTimeline(session).length;
       await (
         await session.send({ messages: [{ role: "user", content: "x" }] })
       ).result;
       const after = await session.snapshot();
-      expect(persistedTimeline(after).length).toBeGreaterThan(persistedTimeline(before).length);
+      expect(after.currentTick).toBeGreaterThan(before.currentTick);
+      expect(persistedTimeline(session).length).toBeGreaterThan(seenBefore);
       await session.close();
     });
 
     it("restore fans a snapshot back into a fresh session (generic importSnapshot)", async () => {
-      // Source: run a turn, capture.
+      // Timeline no longer rides the blob (checkpointing §3.2 — same-backing
+      // resume is certified by the kill-resume acceptance and the timeline
+      // conformance checkpoint section). What restore still fans generically
+      // is the residual SnapshotCapable bridges + the session accounting.
       const src = await factory({
         harnessId: "session-conf-restore-src",
         deps: defaultSessionConformanceDeps(undefined, { loop: stubLoop("noted") }),
@@ -443,19 +457,17 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         await src.send({ messages: [{ role: "user", content: "remember-XYZZY" }] })
       ).result;
       const snap = await src.snapshot();
-      const seen = persistedTimeline(snap).length;
-      expect(seen).toBeGreaterThan(0);
+      expect(snap.currentTick).toBeGreaterThan(0);
       await src.close();
 
-      // Destination: a distinct fresh session; restore transplants state.
       const dest = await factory({
         harnessId: "session-conf-restore-dest",
         deps: defaultSessionConformanceDeps(),
       });
       await dest.restore({ snapshot: { ...snap, id: "session-conf-restore-dest" } });
-      const restored = persistedTimeline(await dest.snapshot());
-      expect(restored.length).toBe(seen);
-      expect(JSON.stringify(restored)).toContain("remember-XYZZY");
+      const restored = await dest.snapshot();
+      expect(restored.currentTick).toBe(snap.currentTick);
+      expect(restored.usage).toEqual(snap.usage);
       await dest.close();
     });
   });
@@ -472,7 +484,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         entry: { role: "user", content },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = persistedTimeline(await session.snapshot());
+      const tl = persistedTimeline(session);
       const marker = tl.find(
         (e) =>
           e.kind === "message" &&
@@ -498,7 +510,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         },
       });
       expect(res.appendedEntryIds.length).toBe(1);
-      const tl = persistedTimeline(await session.snapshot());
+      const tl = persistedTimeline(session);
       const found = tl.find(
         (e) =>
           e.kind === "message" &&
@@ -536,7 +548,7 @@ export function runSessionConformance(factory: SessionConformanceFactory): void 
         ],
       });
       expect(res.appendedEntryIds.length).toBe(2);
-      const tl = persistedTimeline(await session.snapshot());
+      const tl = persistedTimeline(session);
       const toolMessages = tl.filter((e) => e.kind === "message" && e.message.role === "tool");
       expect(toolMessages.length).toBeGreaterThanOrEqual(2);
       await session.close();

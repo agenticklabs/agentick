@@ -223,8 +223,18 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
    * records overlay — a live record the store has not yet seen survives), then
    * ping each loaded key and return the loaded keys. Change-SILENT for the same
    * reason as {@link replace}. A fresh store is empty ⇒ a no-op returning `[]`.
+   *
+   * `replace: true` makes the store the AUTHORITY instead: the cache becomes
+   * exactly the query projection, dropped keys pinged alongside loaded ones.
+   * The drop is cache-ONLY — the records were never in the queried partition,
+   * so there is nothing to delete (unlike {@link replace}, which persists its
+   * deletions).
    */
-  async hydrate(q: Q | undefined, ctx: StoreCtx): Promise<readonly string[]> {
+  async hydrate(
+    q: Q | undefined,
+    ctx: StoreCtx,
+    opts?: { readonly replace?: boolean },
+  ): Promise<readonly string[]> {
     const reconstruct = this.cfg.reconstruct;
     if (reconstruct === undefined) {
       throw new Error(
@@ -232,14 +242,20 @@ export class View<TCache, TStore = TCache, Q = void, M = never> {
       );
     }
     const records = await this.cfg.store.query(q, ctx);
+    const touched = new Set<string>();
+    if (opts?.replace === true) {
+      for (const key of this.cache.keys()) touched.add(key);
+      this.cache.clear();
+    }
     const keys: string[] = [];
     for (const record of records) {
       const item = reconstruct(record);
       const key = this.cfg.keyOf(item);
       this.cache.set(key, item);
       keys.push(key);
+      touched.add(key);
     }
-    for (const key of keys) this.notifier.notify(key);
+    for (const key of touched) this.notifier.notify(key);
     return keys;
   }
 

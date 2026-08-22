@@ -15,9 +15,9 @@
  * configured `withState({ ... })` in `AppHarnessOptions.extensions`.
  */
 
-import type { CollectionMutation, Store, SessionExtension, SessionInstaller } from "@agentick/spec";
+import type { SessionExtension, SessionInstaller } from "@agentick/spec";
 import { StateHarness } from "./harness.js";
-import type { StateEntry, StateStoreQuery } from "./store.js";
+import { stateScope, type StateStore } from "./store.js";
 
 export interface WithStateOptions {
   /** Initial entries seeded at construction. */
@@ -26,10 +26,10 @@ export interface WithStateOptions {
    * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Passed
    * through to the {@link StateHarness}; when omitted the harness defaults to a
    * fresh in-memory store. Inject a durable adapter to make state survive
-   * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
-   * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
+   * restart — one store serves every session, partitioned by the harness scope
+   * each cell carries, and the session's `restore()` fan-out hydrates from it.
    */
-  readonly store?: Store<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
+  readonly store?: StateStore;
 }
 
 // TODO(tools-sweep / three-audiences-plan §D): a `src/tools.ts` shipping
@@ -47,7 +47,7 @@ export function withState(options: WithStateOptions = {}): SessionExtension {
     target: "session",
     install: async (installer: SessionInstaller) => {
       const harness = new StateHarness(
-        `${installer.hostId}:state`,
+        stateScope(installer.hostId),
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,

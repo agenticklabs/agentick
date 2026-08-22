@@ -17,11 +17,40 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { KnobsHarnessProtocol } from "@agentick/spec";
+import type {
+  BranchCapable,
+  CheckpointCapable,
+  CollectionMutation,
+  KnobsHarnessProtocol,
+  Store,
+} from "@agentick/spec";
+import { stubStoreCtx } from "@agentick/store";
+
+import {
+  createKnobStore,
+  knobsScope,
+  knobStoreKey,
+  type KnobEntry,
+  type KnobStoreQuery,
+} from "./store.js";
+
+/** The value store a checkpoint-capable implementation is constructed over. */
+export type KnobsConformanceStore = Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 
 export interface KnobsHarnessFactoryDeps {
   /** Construct a fresh harness. Caller MUST await `harness.ready`. */
   readonly make: () => Promise<KnobsHarnessProtocol>;
+  /**
+   * Construct a harness over a CALLER-OWNED store — the seam the checkpoint and
+   * branch sections need, since durability across instances requires the store
+   * to outlive the harness. Omit it and both sections are skipped (an
+   * implementation with no durable state has nothing to prove); supply it and
+   * the implementation owes both contracts.
+   */
+  readonly makeOverStore?: (
+    store: KnobsConformanceStore,
+    scope: string,
+  ) => Promise<KnobsHarnessProtocol & CheckpointCapable & BranchCapable>;
 }
 
 export function runKnobsHarnessConformance(deps: KnobsHarnessFactoryDeps): void {
@@ -242,6 +271,150 @@ export function runKnobsHarnessConformance(deps: KnobsHarnessFactoryDeps): void 
       expect((result[0] as { text: string }).text).toMatch(/Type mismatch in group "gates"/);
       expect(h.get("a")).toBeUndefined();
       await h.close();
+    });
+  });
+
+  const makeOverStore = deps.makeOverStore;
+  if (makeOverStore === undefined) return;
+
+  describe("KnobsHarness — checkpoint (persist / hydrate)", () => {
+    const ctx = (sessionId: string) => ({ sessionId, tick: 0, storeCtx: stubStoreCtx() });
+
+    it("persist → hydrate round-trips values onto a fresh instance sharing the store", async () => {
+      const store = createKnobStore();
+      const first = await makeOverStore(store, "cp");
+      await first.set({ id: "mood", value: "curious" });
+      await first.set({ id: "limit", value: 42 });
+      await first.persist(ctx("cp"));
+      await first.close();
+
+      const second = await makeOverStore(store, "cp");
+      await second.hydrate(ctx("cp"));
+
+      expect(second.get("mood")).toBe("curious");
+      expect(second.get("limit")).toBe(42);
+      await second.close();
+    });
+
+    it("hydrate REPLACES the projection — the store is the authority", async () => {
+      const store = createKnobStore();
+      const h = await makeOverStore(store, "cp-replace");
+      await h.set({ id: "gone", value: 1 });
+      await h.persist(ctx("cp-replace"));
+      await store.mutate({ delete: knobStoreKey("cp-replace", "gone") }, stubStoreCtx());
+
+      await h.hydrate(ctx("cp-replace"));
+
+      expect(h.has("gone")).toBe(false);
+      await h.close();
+    });
+
+    it("hydrate reads only its own scope's partition", async () => {
+      const store = createKnobStore();
+      const a = await makeOverStore(store, "cp-a");
+      const b = await makeOverStore(store, "cp-b");
+      await a.set({ id: "mood", value: "curious" });
+      await a.persist(ctx("cp-a"));
+
+      await b.hydrate(ctx("cp-b"));
+
+      expect(b.get("mood")).toBeUndefined();
+      await a.close();
+      await b.close();
+    });
+
+    it("persist rejects when the store write fails", async () => {
+      const boom = new Error("store unavailable");
+      const store = createKnobStore();
+      const failing: KnobsConformanceStore = {
+        backend: store.backend,
+        query: (q, c) => store.query(q, c),
+        mutate: () => Promise.reject(boom),
+      };
+      const h = await makeOverStore(failing, "cp-fail");
+      await h.set({ id: "doomed", value: 1 });
+
+      await expect(h.persist(ctx("cp-fail"))).rejects.toBe(boom);
+      await h.close();
+    });
+  });
+
+  describe("KnobsHarness — branch (the fork transport)", () => {
+    const ctx = (sessionId: string, fromSessionId: string) => ({
+      sessionId,
+      fromSessionId,
+      tick: 0,
+      storeCtx: stubStoreCtx(),
+    });
+    const forked = (store: KnobsConformanceStore) => ({
+      parent: makeOverStore(store, knobsScope("parent")),
+      child: makeOverStore(store, knobsScope("child")),
+    });
+
+    it("copies the source scope's cells onto the child, visible after hydrate", async () => {
+      const store = createKnobStore();
+      const { parent, child } = forked(store);
+      const p = await parent;
+      await p.set({ id: "mood", value: "curious" });
+      await p.set({ id: "limit", value: 42 });
+      await p.persist(ctx("parent", "parent"));
+
+      const c = await child;
+      await c.branch(ctx("child", "parent"));
+      await c.hydrate(ctx("child", "parent"));
+
+      expect(c.get("mood")).toBe("curious");
+      expect(c.get("limit")).toBe(42);
+      await p.close();
+      await c.close();
+    });
+
+    it("leaves the parent's own cells untouched", async () => {
+      const store = createKnobStore();
+      const { parent, child } = forked(store);
+      const p = await parent;
+      await p.set({ id: "mood", value: "curious" });
+      await p.persist(ctx("parent", "parent"));
+
+      const c = await child;
+      await c.branch(ctx("child", "parent"));
+      await c.set({ id: "mood", value: "decisive" });
+      await c.persist(ctx("child", "parent"));
+      await p.hydrate(ctx("parent", "parent"));
+
+      expect(p.get("mood")).toBe("curious");
+      await p.close();
+      await c.close();
+    });
+
+    it("is a no-op into a non-empty scope (a retried fork never clobbers)", async () => {
+      const store = createKnobStore();
+      const { parent, child } = forked(store);
+      const p = await parent;
+      await p.set({ id: "mood", value: "curious" });
+      await p.persist(ctx("parent", "parent"));
+
+      const c = await child;
+      await c.branch(ctx("child", "parent"));
+      await c.set({ id: "mood", value: "decisive" });
+      await c.persist(ctx("child", "parent"));
+      await c.branch(ctx("child", "parent"));
+      await c.hydrate(ctx("child", "parent"));
+
+      expect(c.get("mood")).toBe("decisive");
+      await p.close();
+      await c.close();
+    });
+
+    it("resolves without effect when the source scope is empty", async () => {
+      const store = createKnobStore();
+      const c = await makeOverStore(store, knobsScope("child"));
+
+      await c.branch(ctx("child", "never-existed"));
+      await c.hydrate(ctx("child", "never-existed"));
+
+      expect(c.list()).toEqual([]);
+      await c.close();
     });
   });
 }

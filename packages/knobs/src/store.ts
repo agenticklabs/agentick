@@ -12,9 +12,10 @@
  * Keeping the seam lean means a durable adapter (Postgres, …) need only
  * implement `query`/`mutate` (+ optional `watch`) — no profile methods required.
  *
- * `KnobStoreQuery` is intentionally empty: knobs have no scoped read today
- * (`list()` returns every cell), so the query carries no dimensions and the
- * default {@link MemoryCollection} `matchQuery` is `() => true`.
+ * Cells are partitioned by the owning harness `scope`, so ONE app-scoped store
+ * (a Postgres adapter injected once into `withKnobs()`) backs every session
+ * without knob ids colliding across them. `KnobStoreQuery` carries that one
+ * dimension; `hydrate()` reads its own partition.
  *
  * @see docs/proposals/v2/data-layer-plan.md §3.5 "The storification model"
  */
@@ -23,20 +24,34 @@ import type { KnobPrimitive } from "@agentick/spec";
 import { MemoryCollection } from "@agentick/store";
 
 /**
- * A single stored knob cell — the value keyed by its knob id. Descriptors are
- * NOT part of the record (they are re-declared on render).
+ * A single stored knob cell — the value keyed by its knob id within the owning
+ * harness `scope`. Descriptors are NOT part of the record (they are re-declared
+ * on render).
  */
 export interface KnobEntry {
+  readonly scope: string;
   readonly id: string;
   readonly value: KnobPrimitive;
 }
 
+/** The knob value store's query — one partition of cells. */
+export interface KnobStoreQuery {
+  readonly scope: string;
+}
+
+/** The store's primary key: knob ids are unique only WITHIN a scope. */
+export function knobStoreKey(scope: string, id: string): string {
+  return `${scope}/${id}`;
+}
+
 /**
- * The knob value store's query type. Empty — knobs have no scoped/ranged read
- * today (`list()` returns all). A future scoped read would grow this type and
- * the `matchQuery` predicate together.
+ * The store partition a session's knobs occupy — the harness's own `scopeId`.
+ * Single-sourced because `branch()` derives the SOURCE partition from a bare
+ * session id and must land on the same string the source harness wrote under.
  */
-export type KnobStoreQuery = Record<string, never>;
+export function knobsScope(sessionId: string): string {
+  return `${sessionId}:knobs`;
+}
 
 /**
  * The bundled, zero-dependency default knob value store — the generic
@@ -54,7 +69,7 @@ export type KnobStoreQuery = Record<string, never>;
 export function createKnobStore(): MemoryCollection<KnobEntry, KnobStoreQuery> {
   return new MemoryCollection<KnobEntry, KnobStoreQuery>({
     backend: "memory",
-    keyOf: (entry) => entry.id,
-    matchQuery: () => true,
+    keyOf: (entry) => knobStoreKey(entry.scope, entry.id),
+    matchQuery: (entry, query) => query === undefined || entry.scope === query.scope,
   });
 }

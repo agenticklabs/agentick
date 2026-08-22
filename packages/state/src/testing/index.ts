@@ -10,17 +10,32 @@
 import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/runtime";
 
 import { StateHarness } from "../harness.js";
+import type { StateStore } from "../store.js";
+
+/**
+ * How a stub deviates from a self-contained harness. `store` and `scopeId` are
+ * what a checkpoint test needs: two harnesses over ONE store, sharing a scope to
+ * assert durability across instances or differing to assert isolation.
+ */
+export interface StubStateHarnessOptions {
+  readonly store?: StateStore;
+  readonly scopeId?: string;
+}
 
 /**
  * Build a {@link StateHarness} with its own in-memory substrate.
  * `initial` seeds entries eagerly via `importSnapshot`.
  */
-export function stubStateHarness(initial: Readonly<Record<string, unknown>> = {}): StateHarness {
+export function stubStateHarness(
+  initial: Readonly<Record<string, unknown>> = {},
+  options: StubStateHarnessOptions = {},
+): StateHarness {
   const harness = new StateHarness(
-    `stub:${generateId()}`,
+    options.scopeId ?? `stub:${generateId()}`,
     new MemoryJournal({ capacity: 1024 }),
     new LocalEventBus(),
     new LocalInbox(),
+    options.store !== undefined ? { store: options.store } : {},
   );
   if (Object.keys(initial).length > 0) {
     harness.importSnapshot(initial);

@@ -1,26 +1,24 @@
 /**
- * KnobsHarness — store-backing (data-layer plan §3.5, Phase 3 storification).
- *
- * The store holds knob VALUES as durable backing; `values: Map` stays the
- * synchronous render projection. These tests pin the additive contract:
- * every value mutation dual-writes (projection + store), `hydrate()` rebuilds
- * the projection from a pre-seeded store, and `importSnapshot`/`exportSnapshot`
- * coexist with the store (import write-through; export round-trips).
+ * KnobsHarness — store-backing (data-layer plan §3.5, Phase 3 storification)
+ * and the checkpoint contract (checkpointing §3.2): `persist()` is the flush
+ * barrier, `hydrate()` rebuilds the sync projection from the store partition,
+ * and durability across harness instances holds exactly when the injected
+ * store outlives the harness.
  */
 
 import { describe, expect, it } from "vitest";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { stubStoreCtx } from "@agentick/store";
 
-import { MemoryCollection } from "@agentick/store";
-
-import { KnobsHarness } from "../harness.js";
+import { KnobsHarness, type KnobsHarnessOptions } from "../harness.js";
 import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "../store.js";
-import type { KnobPrimitive } from "@agentick/spec";
+import type { CollectionMutation, HydrateCtx, KnobPrimitive, PersistCtx } from "@agentick/spec";
+
+const SCOPE = "store-test";
 
 async function makeHarness(
-  store?: MemoryCollection<KnobEntry, KnobStoreQuery>,
-  scope = "store-test",
+  store?: KnobsHarnessOptions["store"],
+  scope = SCOPE,
 ): Promise<KnobsHarness> {
   const harness = new KnobsHarness(
     scope,
@@ -34,6 +32,15 @@ async function makeHarness(
   return harness;
 }
 
+function checkpointCtx(sessionId = SCOPE): PersistCtx & HydrateCtx {
+  return { sessionId, tick: 0, storeCtx: stubStoreCtx() };
+}
+
+/** A cell as the harness stores it — scope-stamped. */
+function cell(id: string, value: KnobPrimitive, scope = SCOPE): KnobEntry {
+  return { scope, id, value };
+}
+
 describe("KnobsHarness — store write-through", () => {
   it("a value set writes through to the store", async () => {
     const store = createKnobStore();
@@ -42,10 +49,7 @@ describe("KnobsHarness — store write-through", () => {
     await harness.set({ id: "verbose", value: true });
     await harness.set({ id: "limit", value: 42 });
 
-    // Store mirrors the projection (durable truth), keyed by knob id.
-    expect(await store.get("verbose", stubStoreCtx())).toEqual({ id: "verbose", value: true });
-    expect(await store.get("limit", stubStoreCtx())).toEqual({ id: "limit", value: 42 });
-    const listed = await store.list(undefined, stubStoreCtx());
+    const listed = await store.list({ scope: SCOPE }, stubStoreCtx());
     expect(new Map<string, KnobPrimitive>(listed.map((e) => [e.id, e.value]))).toEqual(
       new Map<string, KnobPrimitive>([
         ["verbose", true],
@@ -64,8 +68,7 @@ describe("KnobsHarness — store write-through", () => {
     await harness.set({ id: "mode", value: "draft" });
     await harness.set({ id: "mode", value: "final" });
 
-    expect(await store.get("mode", stubStoreCtx())).toEqual({ id: "mode", value: "final" });
-    expect((await store.list(undefined, stubStoreCtx())).length).toBe(1);
+    expect(await store.list({ scope: SCOPE }, stubStoreCtx())).toEqual([cell("mode", "final")]);
     await harness.close();
   });
 
@@ -84,8 +87,7 @@ describe("KnobsHarness — store write-through", () => {
       descriptor: { valueType: "string" },
     });
 
-    expect(await store.get("mood", stubStoreCtx())).toEqual({ id: "mood", value: "curious" });
-    expect(await store.get("note", stubStoreCtx())).toBeUndefined();
+    expect(await store.list({ scope: SCOPE }, stubStoreCtx())).toEqual([cell("mood", "curious")]);
     await harness.close();
   });
 
@@ -99,24 +101,41 @@ describe("KnobsHarness — store write-through", () => {
 
     await harness.dispatch({ name: "tone", value: "cool" });
 
-    expect(await store.get("tone", stubStoreCtx())).toEqual({ id: "tone", value: "cool" });
+    expect(await store.list({ scope: SCOPE }, stubStoreCtx())).toEqual([cell("tone", "cool")]);
     expect(harness.get("tone")).toBe("cool");
     await harness.close();
+  });
+
+  it("cells are keyed by harness scope, so one store serves many sessions without collision", async () => {
+    const shared = createKnobStore();
+    const a = await makeHarness(shared, "sess-a:knobs");
+    const b = await makeHarness(shared, "sess-b:knobs");
+
+    await a.set({ id: "mood", value: "curious" });
+    await b.set({ id: "mood", value: "decisive" });
+
+    await a.hydrate(checkpointCtx("sess-a"));
+    await b.hydrate(checkpointCtx("sess-b"));
+
+    expect(a.get("mood")).toBe("curious");
+    expect(b.get("mood")).toBe("decisive");
+    await a.close();
+    await b.close();
   });
 });
 
 describe("KnobsHarness — hydrate() from a pre-seeded store", () => {
   it("repopulates the sync projection from the store", async () => {
     const store = createKnobStore();
-    await store.put({ id: "alpha", value: 1 }, stubStoreCtx());
-    await store.put({ id: "beta", value: "two" }, stubStoreCtx());
-    await store.put({ id: "gamma", value: false }, stubStoreCtx());
+    await store.put(cell("alpha", 1), stubStoreCtx());
+    await store.put(cell("beta", "two"), stubStoreCtx());
+    await store.put(cell("gamma", false), stubStoreCtx());
 
     const harness = await makeHarness(store);
     // Before hydrate the projection is empty (store is not the sync read path).
     expect(harness.get("alpha")).toBeUndefined();
 
-    await harness.hydrate();
+    await harness.hydrate(checkpointCtx());
 
     expect(harness.get("alpha")).toBe(1);
     expect(harness.get("beta")).toBe("two");
@@ -128,7 +147,7 @@ describe("KnobsHarness — hydrate() from a pre-seeded store", () => {
 
   it("pings subscribers so a useSyncExternalStore consumer re-reads", async () => {
     const store = createKnobStore();
-    await store.put({ id: "x", value: 7 }, stubStoreCtx());
+    await store.put(cell("x", 7), stubStoreCtx());
     const harness = await makeHarness(store);
 
     let allHits = 0;
@@ -140,25 +159,58 @@ describe("KnobsHarness — hydrate() from a pre-seeded store", () => {
       keyHits++;
     });
 
-    await harness.hydrate();
+    await harness.hydrate(checkpointCtx());
 
     expect(allHits).toBeGreaterThan(0);
     expect(keyHits).toBeGreaterThan(0);
     await harness.close();
   });
+});
 
-  it("merges store cells over the projection (does not clear-first)", async () => {
+describe("KnobsHarness — persist() (the flush barrier)", () => {
+  it("resolves once every in-flight store write has settled", async () => {
+    let settle: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
     const store = createKnobStore();
-    await store.put({ id: "fromStore", value: "s" }, stubStoreCtx());
-    const harness = await makeHarness(store);
-    // A live set the store also has NOT seen wiped by hydrate.
-    await harness.set({ id: "live", value: "l" });
+    const harness = await makeHarness({
+      backend: store.backend,
+      query: (q, c) => store.query(q, c),
+      mutate: async (m, c) => {
+        await gate;
+        return store.mutate(m, c);
+      },
+    });
 
-    await harness.hydrate();
+    await harness.set({ id: "slow", value: 1 });
+    let flushed = false;
+    const barrier = harness.persist(checkpointCtx()).then(() => {
+      flushed = true;
+    });
+    await Promise.resolve();
+    expect(flushed).toBe(false);
 
-    expect(harness.get("live")).toBe("l");
-    expect(harness.get("fromStore")).toBe("s");
+    settle!();
+    await barrier;
+    expect(flushed).toBe(true);
+    expect(await store.list({ scope: SCOPE }, stubStoreCtx())).toEqual([cell("slow", 1)]);
     await harness.close();
+  });
+});
+
+describe("KnobsHarness — durability across harness instances", () => {
+  it("a per-harness default store loses values across instances (the injection seam is load-bearing)", async () => {
+    const first = await makeHarness();
+    await first.set({ id: "mood", value: "curious" });
+    await first.persist(checkpointCtx());
+    await first.close();
+
+    const second = await makeHarness();
+    await second.hydrate(checkpointCtx());
+
+    expect(second.get("mood")).toBeUndefined();
+    await second.close();
   });
 });
 
@@ -169,42 +221,55 @@ describe("KnobsHarness — importSnapshot / exportSnapshot coexist with the stor
 
     harness.importSnapshot({ a: 1, b: "two", c: true });
 
-    // Projection.
     expect(harness.get("a")).toBe(1);
     expect(harness.get("b")).toBe("two");
     expect(harness.get("c")).toBe(true);
-    // Store write-through.
-    expect(await store.get("a", stubStoreCtx())).toEqual({ id: "a", value: 1 });
-    expect(await store.get("b", stubStoreCtx())).toEqual({ id: "b", value: "two" });
-    expect(await store.get("c", stubStoreCtx())).toEqual({ id: "c", value: true });
+    expect(new Set(await store.list({ scope: SCOPE }, stubStoreCtx()))).toEqual(
+      new Set([cell("a", 1), cell("b", "two"), cell("c", true)]),
+    );
     await harness.close();
   });
 
-  it("exportSnapshot round-trips through importSnapshot (values only)", async () => {
+  it("everything importSnapshot restored round-trips through the store path instead", async () => {
     const source = await makeHarness();
     await source.set({ id: "a", value: 1 });
     await source.set({ id: "b", value: "two" });
+    await source.register({ id: "b", descriptor: { valueType: "string", description: "second" } });
     const snap = source.exportSnapshot();
 
-    const store = createKnobStore();
-    const restored = await makeHarness(store);
-    restored.importSnapshot(snap);
+    const shared = createKnobStore();
+    const viaBlob = await makeHarness(shared);
+    viaBlob.importSnapshot(snap);
+    await viaBlob.persist(checkpointCtx());
+    await viaBlob.close();
 
-    expect(restored.exportSnapshot()).toEqual({ a: 1, b: "two" });
-    expect(await store.get("a", stubStoreCtx())).toEqual({ id: "a", value: 1 });
-    expect(await store.get("b", stubStoreCtx())).toEqual({ id: "b", value: "two" });
+    const viaStore = await makeHarness(shared);
+    await viaStore.hydrate(checkpointCtx());
+
+    expect(viaStore.exportSnapshot()).toEqual(snap);
     await source.close();
-    await restored.close();
+    await viaStore.close();
   });
+});
 
-  it("a store-hydrated projection is re-exportable (store → projection → snapshot)", async () => {
-    const store = createKnobStore();
-    await store.put({ id: "k", value: "v" }, stubStoreCtx());
-    const harness = await makeHarness(store);
-    await harness.hydrate();
+describe("KnobsHarness — the store seam (query/mutate only)", () => {
+  it("hydrate/persist drive a seam-only store — no CollectionStore profile methods", async () => {
+    const backing = createKnobStore();
+    const seamOnly = {
+      backend: "seam",
+      query: (q: KnobStoreQuery | undefined, c = stubStoreCtx()) => backing.query(q, c),
+      mutate: (m: CollectionMutation<KnobEntry>, c = stubStoreCtx()) => backing.mutate(m, c),
+    };
 
-    // The snapshot path reads the projection, which the store just filled.
-    expect(harness.exportSnapshot()).toEqual({ k: "v" });
-    await harness.close();
+    const first = await makeHarness(seamOnly);
+    await first.set({ id: "seamed", value: "yes" });
+    await first.persist(checkpointCtx());
+    await first.close();
+
+    const second = await makeHarness(seamOnly);
+    await second.hydrate(checkpointCtx());
+
+    expect(second.get("seamed")).toBe("yes");
+    await second.close();
   });
 });

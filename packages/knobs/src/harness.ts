@@ -24,9 +24,10 @@
  * routes it; the handler runs the same Operation that an in-process
  * call would.
  *
- * Snapshot/restore — `exportSnapshot()` / `importSnapshot()` round-trip
- * the value cells. Descriptors are NOT snapshotted (components re-
- * declare on remount).
+ * Checkpoint — `persist()` flushes the value store, `hydrate()` rebuilds the
+ * projection from it (checkpointing §3.2). Descriptors are never persisted;
+ * components re-declare them on remount. The residual `exportSnapshot()` /
+ * `importSnapshot()` pair coexists until the Phase-4 sweep.
  *
  * Layer chain (ADR 34 cascade) — the harness optionally resolves over an
  * ordered `[parent, self]` chain: a read-only fallback `parentLayer`
@@ -54,9 +55,13 @@ import {
   type Unsubscribe,
 } from "@agentick/runtime";
 import type {
+  BranchCapable,
+  BranchCtx,
+  CheckpointCapable,
   CollectionMutation,
   ContentBlock,
   EventBus,
+  HydrateCtx,
   KnobDescriptor,
   KnobPrimitive,
   KnobRegistration,
@@ -70,6 +75,7 @@ import type {
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
+  PersistCtx,
   Store,
   StoreCtx,
 } from "@agentick/spec";
@@ -87,7 +93,7 @@ import {
   type KnobsStateSnapshotFrame,
   type WireKnobDescriptor,
 } from "./channel.js";
-import { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js";
+import { createKnobStore, knobsScope, type KnobEntry, type KnobStoreQuery } from "./store.js";
 
 // ============================================================================
 // Harness
@@ -124,20 +130,26 @@ export interface KnobsHarnessOptions extends BaseHarnessOptions<unknown, "knobs"
   /**
    * Durable backing for knob VALUES (data-layer plan §3.5, Phase 3). Defaults
    * to a fresh per-harness in-memory {@link createKnobStore}. The store holds
-   * `{ id, value }` cells only — descriptors are tree-derived and never stored.
-   * It is the durable truth; the synchronous {@link View} is its sync
-   * read cache (reads never touch the store). Injecting a durable adapter
-   * (Postgres, …) is how knob values survive process restart; `hydrate()` loads
-   * it back into the view. Typed against the `Store` SEAM — a durable
-   * adapter need only implement `query`/`mutate`.
+   * `{ scope, id, value }` cells only — descriptors are tree-derived and never
+   * stored. It is the durable truth; the synchronous {@link View} is its sync
+   * read cache (reads never touch the store). Typed against the `Store` SEAM —
+   * a durable adapter need only implement `query`/`mutate`.
+   *
+   * The store must OUTLIVE the harness for values to survive an evict/resume
+   * cycle: the checkpoint contract carries no value across the seam, so a
+   * per-harness default store means `hydrate()` finds nothing. Cells are keyed
+   * by harness scope, so ONE injected app-scoped store serves every session.
    */
   readonly store?: Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 }
 
 export class KnobsHarness
   extends BaseHarness<"knobs">
-  implements KnobsHarnessProtocol, ChannelSnapshotProvider
+  implements KnobsHarnessProtocol, ChannelSnapshotProvider, CheckpointCapable, BranchCapable
 {
+  /** The durable truth. Held alongside {@link view} because {@link branch} copies at the store layer. */
+  private readonly store: Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
+
   /**
    * The synchronous {@link View} of the value store — ONE primitive that
    * collapses the three fields this used to hand-roll (a `CollectionProjection`
@@ -211,7 +223,8 @@ export class KnobsHarness
     // new base option would silently vanish — and `parentScope` did exactly that.
     super("knobs", scopeId, journal, bus, inbox, options);
     this.parentLayer = parentLayer;
-    this.view = View.collection(options.store ?? createKnobStore(), (entry) => entry.id);
+    this.store = options.store ?? createKnobStore();
+    this.view = View.collection(this.store, (entry) => entry.id);
     // NO scope factory. The owning session is folded into the resolved op scope from
     // the harness's construction-bound `parentScope` (BaseHarness), so a command that
     // adds no dims of its own declares nothing. Every command here previously carried
@@ -345,41 +358,65 @@ export class KnobsHarness
     // change-SILENT; the single snapshot frame below IS the wire delta (not N
     // per-key deltas).
     //
-    // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
-    // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
-    // store is the authority (and picks up the durable-write flush barrier).
-    // Do NOT wire `hydrate()` into resume while this method still owns it.
-    const entries: KnobEntry[] = Object.entries(values).map(([id, value]) => ({ id, value }));
+    // TODO(store-phase-4): dead once the sweep deletes `SnapshotCapable` — the
+    // session fold already routes this harness through `persist`/`hydrate`.
+    const entries = Object.entries(values).map(([id, value]) => this.cell(id, value));
     this.listCache = null;
     this.view.replace(entries, this.storeCtx());
-    // Wholesale replacement — a fresh full-store frame, not N per-key deltas.
-    this.publishStateFrame({
-      kind: "snapshot",
-      version: ++this.stateVersion,
-      values: { ...values },
-      descriptors: this.wireDescriptors(),
-    });
+    this.publishStateFrame(this.freshStateFrame());
+  }
+
+  // ─────────── Checkpoint (CheckpointCapable) ───────────
+
+  /**
+   * The durability barrier: await every store write this harness kicked off the
+   * critical path and surface the first failure. Rejecting here aborts the
+   * caller's eviction — an un-flushed knob value must never be followed by an
+   * unmount.
+   */
+  async persist(_ctx: PersistCtx): Promise<void> {
+    await this.view.flush();
   }
 
   /**
-   * Load the durable value store into the sync projection — the future
-   * manifest resume path (data-layer plan Phase 4 / BaseHarness §2.3). Reads
-   * every stored cell and mirrors it into `values`, then invalidates the
-   * `list()` cache and pings subscribers so a `useSyncExternalStore` consumer
-   * re-reads. This is a MERGE (store cells overlay the projection), not a
-   * clear-first replace — a fresh session's store is empty ⇒ a no-op.
+   * Rebuild the sync projection from this harness's store partition. REPLACE
+   * semantics — the store is the authority, so a cell it does not hold is
+   * dropped from the projection. Invalidate `listCache` BEFORE the load so a
+   * `useSyncExternalStore` consumer reading during the ping sees the hydrated
+   * list.
    *
-   * NOT wired into session resume in this run: `importSnapshot` remains the
-   * active resume path (the snapshot rides `SessionSnapshot`). `hydrate()` is
-   * the seam the Phase-4 manifest sweep flips to once the store is authority.
+   * Emits the `knobs-state` snapshot frame, exactly as `importSnapshot` does:
+   * a resumed session's subscribers hold pre-hydrate state and a wholesale
+   * rebuild is one aggregate frame, never N per-key deltas.
    */
-  async hydrate(): Promise<void> {
-    // The view merges the store projection into the cache and pings each loaded
-    // key (a MERGE, not clear-first — a fresh store is empty ⇒ a no-op).
-    // Invalidate `listCache` BEFORE the merge+ping so a `useSyncExternalStore`
-    // consumer re-reads the hydrated list. Change-silent — no per-key deltas.
+  async hydrate(ctx: HydrateCtx): Promise<void> {
     this.listCache = null;
-    await this.view.hydrate(undefined, this.storeCtx());
+    await this.view.hydrate({ scope: this.scopeId }, ctx.storeCtx, { replace: true });
+    this.publishStateFrame(this.freshStateFrame());
+  }
+
+  /**
+   * Copy the SOURCE session's cells onto this harness's partition — the fork
+   * transport (checkpointing §5). A store-layer copy: nothing crosses the seam,
+   * and the projection is deliberately left alone because the fork path always
+   * runs `hydrate` after the branch fan-out.
+   *
+   * Idempotent by non-empty partition: a second branch into a scope that
+   * already holds cells resolves without effect, so a retried fork never
+   * clobbers writes the child made after the first one.
+   */
+  async branch(ctx: BranchCtx): Promise<void> {
+    const mine = await this.store.query({ scope: this.scopeId }, ctx.storeCtx);
+    if (mine.length > 0) return;
+    const source = await this.store.query({ scope: knobsScope(ctx.fromSessionId) }, ctx.storeCtx);
+    for (const entry of source) {
+      await this.store.mutate({ put: { ...entry, scope: this.scopeId } }, ctx.storeCtx);
+    }
+  }
+
+  /** The current state as a NEW frame — advances the version (a wholesale rebuild). */
+  private freshStateFrame(): KnobsStateSnapshotFrame {
+    return { ...this.stateSnapshotFrame(), version: ++this.stateVersion };
   }
 
   // ─────────── State channel (ADR 73) ───────────
@@ -500,7 +537,12 @@ export class KnobsHarness
     // read inside the fiber (carrying the live op's `opId`); a direct caller
     // with no fiber falls back to base.
     this.listCache = null;
-    this.view.write({ id: input.id, value: input.value }, ctx);
+    this.view.write(this.cell(input.id, input.value), ctx);
+  }
+
+  /** A stored cell, stamped with this harness's store partition. */
+  private cell(id: string, value: KnobPrimitive): KnobEntry {
+    return { scope: this.scopeId, id, value };
   }
 
   private applyRegister(input: KnobsRegisterInput, ctx: StoreCtx = this.storeCtx()): void {
@@ -513,7 +555,7 @@ export class KnobsHarness
     const applied = !this.view.hasSync(input.id) && defaultValue !== undefined;
     this.listCache = null;
     if (applied) {
-      this.view.write({ id: input.id, value: defaultValue }, ctx);
+      this.view.write(this.cell(input.id, defaultValue), ctx);
     } else {
       this.view.notify(input.id);
     }

@@ -34,3 +34,16 @@ import { MemoryLog } from "@agentick/store";
  * are entirely the generic's.
  */
 export class MemoryTimelineStore extends MemoryLog<TimelineEntry> implements TimelineStore {}
+
+/**
+ * The store key for a session's timeline log — the harness's `scopeId`, which
+ * is what its `LogView` is keyed by.
+ *
+ * A branch reads a log belonging to a session OTHER than its own
+ * (`BranchCtx.fromSessionId`), so the rule that composes the key stops being
+ * the caller's private business and has to be stated once. Composition sites
+ * derive from here rather than re-spelling the template.
+ */
+export function timelineScopeKey(sessionId: string): string {
+  return `${sessionId}:timeline`;
+}

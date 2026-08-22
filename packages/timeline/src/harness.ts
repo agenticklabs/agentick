@@ -47,7 +47,7 @@ import {
 } from "@agentick/runtime";
 import { LogView } from "@agentick/store";
 
-import { MemoryTimelineStore } from "./store.js";
+import { MemoryTimelineStore, timelineScopeKey } from "./store.js";
 import { hydrateFromStore } from "./hydrators.js";
 import type {
   TimelineCompactCtx,
@@ -57,6 +57,9 @@ import type {
   TimelineHydrator,
 } from "./definition.js";
 import type {
+  BranchCapable,
+  BranchCtx,
+  CheckpointCapable,
   TimelineHarnessFx,
   SubstrateError,
   CompactResult,
@@ -249,7 +252,10 @@ const historyRequestSchema: StandardSchemaV1<TimelineHistoryInput> = {
   },
 };
 
-export class TimelineHarness extends BaseHarness<"timeline"> implements TimelineHarnessProtocol {
+export class TimelineHarness
+  extends BaseHarness<"timeline">
+  implements TimelineHarnessProtocol, CheckpointCapable, BranchCapable
+{
   // ─── Storage (the LOG-archetype projection: two tiers + versions +
   // snapshot cache + render pings + the write-behind pump — ADR 49) ───
   //
@@ -677,13 +683,57 @@ export class TimelineHarness extends BaseHarness<"timeline"> implements Timeline
   }
 
   /**
+   * {@link CheckpointCapable} — the flush barrier IS the checkpoint. The
+   * timeline's durable state is its store, so persisting is draining the
+   * write-behind pump into it; nothing is serialized and no value crosses the
+   * seam. A rejection aborts the caller's operation (the session never unmounts
+   * behind a failed flush).
+   *
+   * @see docs/proposals/v2/checkpointing.md §3.2
+   */
+  persist(): Promise<void> {
+    return this.flush();
+  }
+
+  /**
+   * {@link BranchCapable} — the fork transport (checkpointing §5). Copies the
+   * source session's durable log onto THIS harness's scope, so the subsequent
+   * `hydrate` opens the child on its own copy of the parent's conversation.
+   * This is what retires the ADR-93 fork law: a child no longer inherits an
+   * image through a snapshot payload, so it no longer has to skip genesis —
+   * it branches, then genesises over the copy.
+   *
+   * Idempotent by DESTINATION: a scope that already holds entries is left
+   * alone, so a retried fork cannot double the log. A store that does not hold
+   * the source scope — the per-harness in-memory default, where the parent
+   * wrote to a different instance — copies nothing and resolves.
+   *
+   * @see docs/proposals/v2/checkpointing.md §5
+   */
+  async branch(ctx: BranchCtx): Promise<void> {
+    if ((await this.store.read(this.scopeId, ctx.storeCtx)).length > 0) return;
+    const source = await this.store.read(timelineScopeKey(ctx.fromSessionId), ctx.storeCtx);
+    if (source.length === 0) return;
+    await this.store.append(this.scopeId, source, ctx.storeCtx);
+  }
+
+  /**
    * GENESIS (ADR 93) — run the definition's `hydrate(ctx)` and SEED the
    * harness with what it returns. The resume path (ADR 49 §Hydration), now
    * behind an adopter seam instead of a hardcoded full store read.
    *
-   * Called once at session-open: after identity stamping, before first render,
-   * before any append (the session chains this ahead of the compiler mount).
-   * A no-op when the definition configures neither a `store` nor a `hydrate`.
+   * Also the {@link CheckpointCapable} hydrate: opening on what is durable and
+   * resuming on it are the same operation, so there is one store-read path, not
+   * two. REPLACE semantics — both tiers become what the hydrator returned
+   * (`log.seed`), so a projection that had diverged by compaction rebuilds from
+   * the resumed log. The session's `HydrateCtx` is ignored: the store key is
+   * this harness's own composed `scopeId`, not the raw session id (see
+   * `hydrateCtx`).
+   *
+   * Called at session-open — after identity stamping, before first render and
+   * before any append (the session chains this ahead of the compiler mount) —
+   * and again on each `session.restore()`. A no-op when the definition
+   * configures neither a `store` nor a `hydrate`.
    *
    * **The seed law.** The returned entries are SEEDED into both tiers — they are
    * NEVER appended, so nothing is written back to the store. A hydrator reads

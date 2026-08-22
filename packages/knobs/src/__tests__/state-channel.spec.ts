@@ -7,16 +7,28 @@ import { describe, expect, it } from "vitest";
 import { Effect, Fiber, Stream } from "effect";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { applyJsonPatch } from "@agentick/utils";
+import { stubStoreCtx } from "@agentick/store";
 import type { KnobPrimitive } from "@agentick/spec";
 
-import { KnobsHarness } from "../harness.js";
+import { KnobsHarness, type KnobsHarnessOptions } from "../harness.js";
+import { createKnobStore } from "../store.js";
 import { KNOBS_STATE_CHANNEL_FQN, type KnobsStateFrame } from "../channel.js";
 
-async function makeHarness(scope = "test"): Promise<{ harness: KnobsHarness; bus: LocalEventBus }> {
+async function makeHarness(
+  scope = "test",
+  store?: KnobsHarnessOptions["store"],
+): Promise<{ harness: KnobsHarness; bus: LocalEventBus }> {
   const journal = new MemoryJournal({ capacity: 10_000 });
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
-  const harness = new KnobsHarness(scope, journal, bus, inbox);
+  const harness = new KnobsHarness(
+    scope,
+    journal,
+    bus,
+    inbox,
+    undefined,
+    store !== undefined ? { store } : {},
+  );
   await harness.ready;
   return { harness, bus };
 }
@@ -109,6 +121,22 @@ describe("KnobsHarness — knobs-state channel", () => {
     const snapshots = frames.filter((f) => f.kind === "snapshot");
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]!.values).toEqual({ x: "a", y: 2 });
+    await harness.close();
+  });
+
+  it("emits a full snapshot frame on hydrate() so a resumed session's subscribers re-seed", async () => {
+    const store = createKnobStore();
+    await store.put({ scope: "resumed", id: "mood", value: "curious" }, stubStoreCtx());
+    const { harness, bus } = await makeHarness("resumed", store);
+    const { frames, stop } = await collectFrames(bus);
+
+    await harness.hydrate({ sessionId: "resumed", tick: 3, storeCtx: stubStoreCtx() });
+    await settle();
+    await stop();
+
+    const snapshots = frames.filter((f) => f.kind === "snapshot");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.values).toEqual({ mood: "curious" });
     await harness.close();
   });
 

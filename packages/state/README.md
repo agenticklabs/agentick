@@ -93,7 +93,9 @@ Two components reading the same key share one cell for the same reason — write
 
 ## Durable values
 
-Values are backed by a `Store` of `{ key, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory. Inject an adapter and state outlives the process — `hydrate()` merges the store back into the read cache.
+Values are backed by a `Store` of `{ scope, key, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory. Inject an adapter and state outlives the process — `hydrate()` rebuilds the read cache from the store.
+
+One injected store backs every session. Cells carry the scope of the harness that wrote them and reads select on it, so two sessions using the same key never see each other's value.
 
 ```ts
 import { withState, createStateStore } from "@agentick/state";
@@ -104,7 +106,7 @@ const extension = withState({
 });
 ```
 
-`exportSnapshot()` / `importSnapshot()` round-trip the entries for hibernate and resume. `importSnapshot` is a wholesale replace: keys absent from the incoming record are dropped from both the cache and the store.
+`persist()` and `hydrate()` are the checkpoint pair the session fans out on snapshot and restore: `persist` awaits the writes still in flight (rejecting if one failed, which aborts the caller's unmount), `hydrate` replaces the read cache with this scope's cells from the store. `branch()` is the fork transport — it copies a source session's partition onto this one at the store layer and leaves the read cache alone, because a fork always follows it with a `hydrate`. Branching into a partition that already holds cells is a no-op, so a retried fork never clobbers a child that has diverged. `exportSnapshot()` / `importSnapshot()` remain for now but no longer run on resume — the session fold gives the checkpoint hooks precedence.
 
 > [!WARNING]
 > Values are stored as-is with no serialization contract. A function, a class instance, or a live handle is fine in-process and gone after a real snapshot round-trip. If it has to survive a restart, keep it JSON-shaped.
@@ -142,7 +144,9 @@ state.close();
 | `StateHarness` / `StateHarnessOptions`   | The implementation, for direct construction                |
 | `createStateStore()`                     | The bundled in-memory value store                          |
 | `StateHandle` (type)                     | What `session.state` exposes                               |
-| `StateEntry` / `StateStoreQuery` (types) | The stored `{ key, value }` cell and its (empty) query     |
+| `StateEntry` / `StateStoreQuery` (types) | The stored `{ scope, key, value }` cell and its query      |
+| `StateStore` (type) / `stateStoreKey()`  | The `Store` seam at state's parameterization, and its key  |
+| `stateScope(sessionId)`                  | The store partition a session's state occupies             |
 
 ### `session.state`
 
@@ -156,7 +160,7 @@ state.close();
 | `subscribe(key, fn)`  | Fires when that key changes, deletes included    |
 | `subscribeAll(fn)`    | Fires on any entry change                        |
 
-On a `StateHarness` instance, additionally: `onChange(fn)` (typed `ChangeEvent` push — `set` yields add/update, `delete` yields remove), `exportSnapshot()` / `importSnapshot()`, and `hydrate()`.
+On a `StateHarness` instance, additionally: `onChange(fn)` (typed `ChangeEvent` push — `set` yields add/update, `delete` yields remove), the checkpoint pair `persist(ctx)` / `hydrate(ctx)`, the fork hook `branch(ctx)`, and the residual `exportSnapshot()` / `importSnapshot()`.
 
 ### `@agentick/state/react`
 
@@ -193,13 +197,13 @@ On a `StateHarness` instance, additionally: `onChange(fn)` (typed `ChangeEvent` 
 
 - **No live client mirror.** The client handle polls. State has no snapshot-plus-delta channel, so a UI bound to it updates after its own mutations, not when the session mutates a key on its own. The wire codec for such a channel has to encode a present-but-`undefined` value explicitly, or the key vanishes on apply.
 - **No model-facing tools.** There are deliberately no `state_get` / `state_set` tools. Whether session state should ever get a model surface — and how that would relate to knobs — is an open policy question, not a missing feature.
-- **`hydrate()` is not the resume path.** `importSnapshot` still owns session resume; `hydrate()` is tested and reachable but nothing calls it during restore yet.
+- **`exportSnapshot()` / `importSnapshot()` are dead weight.** The checkpoint hooks own resume now; the pair survives only until the sweep that deletes `SnapshotCapable`, and `withState({ initial })` is its last live caller.
 - **`withState()` is not the construction site yet.** Sessions construct their state directly; the extension factory is correct but the wiring point still moves.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — `set` and `delete` emitting `requested → terminal` envelopes, inbox addressability for both verbs, the sync read surface, and snapshot round-trip.
-- `src/__tests__/store-backing.spec.ts` — every `set` / `delete` / `importSnapshot` reaching the store, upsert on re-set, `hydrate()` rebuilding the read cache as a merge and pinging subscribers, `importSnapshot` dropping absent keys from both tiers, and the `undefined`-value round-trip staying a present key through write-through, hydrate, and export/import.
+- `src/__tests__/harness.spec.ts` — `set` and `delete` emitting `requested → terminal` envelopes, inbox addressability for both verbs, the sync read surface, snapshot round-trip, and the conformance suite including its checkpoint section (persist → hydrate on a fresh instance sharing the store, replace semantics, scope partitioning, persist rejection) and branch section (copying the source scope, leaving the parent untouched, no-op into a non-empty scope, an empty source resolving inert).
+- `src/__tests__/store-backing.spec.ts` — every `set` / `delete` / `importSnapshot` reaching the store, upsert on re-set, `hydrate()` replacing the read cache and pinging subscribers without emitting deltas, a sibling scope's cells staying invisible, cells set on one harness reading back on a second sharing the store, `persist()` surfacing a failed store write, `importSnapshot` dropping absent keys from both tiers, and the `undefined`-value round-trip staying a present key.
 - `src/__tests__/change-stream.spec.ts` — the `onChange` seam: add vs update on `set`, remove on `delete`, nothing for a no-op delete, the presence-based discriminator (`set(undefined)` then `set(value)` reads as add then update), unsubscribe, and multiple projections on one stream.
 - `src/__tests__/integration-with-compiler.spec.tsx` — against the real compiler: `useSessionState` seeding on first render, not overwriting an existing value on remount, surviving unmount → remount, and re-rendering on an external `set`.
 - `src/client/__tests__/state-handle.spec.ts` + `session-state.spec.ts` — the eager `state/list` poll seeding `list()`/`get()`, each verb's request shape, fire-and-refetch after a mutation, `refresh()` resolving the fresh snapshot, the zero-arg `subscribe` contract, and `session.state` self-assembling on the client session handle.

@@ -58,18 +58,17 @@ import type {
   RunInput,
   SessionSnapshot,
   TimelineEntry,
-  TimelineHarnessSnapshot,
 } from "@agentick/spec";
 
 import { SessionHarness } from "../harness.js";
 
 /**
- * Extract the durable persisted log from a session snapshot. Post-Step-6
- * the timeline lives under the generic `bridges.timeline` fold (a
- * {@link TimelineHarnessSnapshot}), not a top-level `timeline` array.
+ * The durable persisted log, read from the LIVE handle. The timeline is
+ * CheckpointCapable (checkpointing §3.2): it persists to its own store and is
+ * excluded from the snapshot blob, so the blob is no longer a read surface.
  */
-function persistedOf(snap: SessionSnapshot): readonly TimelineEntry[] {
-  return (snap.bridges.timeline as TimelineHarnessSnapshot | undefined)?.persisted ?? [];
+function persistedOf(session: SessionHarness): readonly TimelineEntry[] {
+  return session.timeline.readPersisted();
 }
 
 // ============================================================================
@@ -341,7 +340,7 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       // Hydration ran before mountReady (mkSession awaits it): the
       // persisted tier already holds the prior turns — the user input
       // + the assistant reply (plus the turn-boundary record).
-      const hydrated = persistedOf(await p2.session.snapshot());
+      const hydrated = persistedOf(p2.session);
       const messages = hydrated.filter((e) => e.kind === "message");
       expect(messages.length).toBeGreaterThanOrEqual(2);
       const text = JSON.stringify(hydrated);
@@ -424,15 +423,19 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       // A fresh open by the same id starts empty — no ghost history.
       const store3 = await opts.makeStore();
       const p3 = await mkSession({ sessionId, store: store3, executor: replyExec("answer") });
-      expect(persistedOf(await p3.session.snapshot())).toEqual([]);
+      expect(persistedOf(p3.session)).toEqual([]);
 
       await p3.close();
     });
 
-    it("snapshot→restore round-trip: a snapshot restores into a fresh session (Step 6 generic fold)", async () => {
+    it("restore() re-hydrates the timeline from its store, idempotently", async () => {
+      // The blob no longer transports the timeline (checkpointing §3.2/§5) —
+      // the store is the sole carrier. `makeStore()` shares one durable
+      // backing, so the destination hydrates at construction; restore() must
+      // re-hydrate to the same result: store as authority, no duplication.
       const sessionId = `kr-roundtrip-${Math.random().toString(36).slice(2)}`;
 
-      // ── Source session: run a turn, capture a snapshot. ──
+      // ── Source session: run a turn; the flush barrier lands it in storeA. ──
       const storeA = await opts.makeStore();
       const src = await mkSession({ sessionId, store: storeA, executor: replyExec("noted") });
       await (
@@ -443,32 +446,22 @@ export function runKillResumeAcceptance(opts: KillResumeAcceptanceOptions): void
       const snap = await src.session.snapshot();
       await src.close();
 
-      // The snapshot survives the spec firewall (JSON round-trip) — the
-      // generic bridge fold is wire-safe.
+      // The residual snapshot survives the spec firewall (JSON round-trip) and
+      // carries NO timeline — a CheckpointCapable bridge is excluded.
       const wire: SessionSnapshot = JSON.parse(JSON.stringify(snap));
       expect(wire).toEqual(snap);
-      expect(persistedOf(wire).length).toBeGreaterThanOrEqual(2);
+      expect(wire.bridges.timeline).toBeUndefined();
 
-      // ── Destination session: DISTINCT id + a store-less timeline (no
-      // open-or-rehydrate), so the ONLY path prior state can arrive is
-      // `restore()` — this exercises the snapshot/restore pipe itself,
-      // independent of the durable-store hydration path. ──
-      const destId = `${sessionId}-dest`;
-      const dest = await mkSession({
-        sessionId: destId,
-        // storeless: distinct backing so nothing hydrates automatically.
-        store: await opts.makeStore(),
-        executor: replyExec("answer"),
-      });
+      // ── Destination: SAME id, same durable backing — construction hydrates
+      // the prior turn (pin 1); restore() re-hydrates to the same result. ──
+      const storeB = await opts.makeStore();
+      const dest = await mkSession({ sessionId, store: storeB, executor: replyExec("answer") });
+      const hydrated = persistedOf(dest.session).length;
+      expect(hydrated).toBeGreaterThanOrEqual(2);
 
-      // Rewrite the snapshot's id to the destination (restore is an
-      // in-place state transplant; identity stays the live session's).
-      await dest.session.restore({ snapshot: { ...wire, id: destId } });
-
-      // The transplanted persisted log is now readable off the destination's
-      // own snapshot — proving the generic importSnapshot fan-out landed the
-      // timeline bridge.
-      const restored = persistedOf(await dest.session.snapshot());
+      await dest.session.restore({ snapshot: wire });
+      const restored = persistedOf(dest.session);
+      expect(restored.length).toBe(hydrated);
       expect(JSON.stringify(restored)).toContain("remember: PLUM");
       expect(JSON.stringify(restored)).toContain("noted");
 

@@ -27,6 +27,12 @@ export {
   type KnobsStateDeltaFrame,
   type WireKnobDescriptor,
 } from "./channel.js";
-export { createKnobStore, type KnobEntry, type KnobStoreQuery } from "./store.js";
+export {
+  createKnobStore,
+  knobsScope,
+  knobStoreKey,
+  type KnobEntry,
+  type KnobStoreQuery,
+} from "./store.js";
 export { withKnobs, type WithKnobsOptions } from "./extension.js";
 export { knobsWireExtension } from "./wire.js";

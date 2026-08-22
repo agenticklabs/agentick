@@ -391,4 +391,16 @@ runKnobsHarnessConformance({
     const { harness } = await makeHarness(`conformance-${generateId()}`);
     return harness;
   },
+  makeOverStore: async (store, scope) => {
+    const harness = new KnobsHarness(
+      scope,
+      new MemoryJournal({ capacity: 10_000 }),
+      new LocalEventBus(),
+      new LocalInbox(),
+      undefined,
+      { store },
+    );
+    await harness.ready;
+    return harness;
+  },
 });

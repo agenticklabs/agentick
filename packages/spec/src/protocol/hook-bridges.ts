@@ -199,6 +199,36 @@ export function isCheckpointCapable(x: unknown): x is CheckpointCapable {
   );
 }
 
+/**
+ * What a branch hook receives: the SOURCE session's id alongside the usual
+ * checkpoint scope. The harness derives both scopes by its own composition
+ * rule and copies at the store layer — no data crosses the seam.
+ */
+export interface BranchCtx extends HydrateCtx {
+  readonly fromSessionId: string;
+}
+
+/**
+ * A store-backed harness that can branch its scope — the fork transport
+ * (checkpointing §5). `branch` copies the source scope's records onto this
+ * harness's own scope in its OWN store (composable from read + append; a
+ * store MAY override with a native copy), then leaves the projection as a
+ * subsequent `hydrate` would find it. A harness without durable state simply
+ * does not implement it.
+ *
+ * @see docs/proposals/v2/checkpointing.md §5
+ */
+export interface BranchCapable {
+  branch(ctx: BranchCtx): Promise<void>;
+}
+
+/** Runtime feature-detection for {@link BranchCapable}. */
+export function isBranchCapable(x: unknown): x is BranchCapable {
+  return (
+    x !== null && typeof x === "object" && typeof (x as { branch?: unknown }).branch === "function"
+  );
+}
+
 // ============================================================================
 // Data bridge — the no-Suspense contract
 // ============================================================================

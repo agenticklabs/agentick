@@ -52,7 +52,7 @@ export { hydrateFromStore, hydrateTail, hydrateProjected } from "./hydrators.js"
 // the port + `SeqTagged` shape now live in `@agentick/spec` (the LOG
 // archetype `TimelineStore extends LogStore<TimelineEntry>`; data-layer plan
 // §6-D).
-export { MemoryTimelineStore } from "./store.js";
+export { MemoryTimelineStore, timelineScopeKey } from "./store.js";
 // Re-exported so store adapters (`@agentick/timeline-fs`,
 // `-postgres`, adopter-written) get the port + entry + seq-tag types from
 // the same package as the harness they back — one dep, not two.

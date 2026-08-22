@@ -8,7 +8,10 @@ import { LocalEventBus, LocalInbox, MemoryJournal, generateId } from "@agentick/
 import type { EventQuery, ProtocolEvent, TimelineEntry } from "@agentick/spec";
 import { progressEventName, timelineEventQuery, TIMELINE_COMPACT_EVENT_NAME } from "@agentick/spec";
 
+import { stubStoreCtx } from "@agentick/store";
+
 import { TimelineHarness } from "../harness.js";
+import { MemoryTimelineStore, timelineScopeKey } from "../store.js";
 import { runTimelineHarnessConformance, messageEntry } from "../conformance.js";
 import type { TimelineDefinition } from "../definition.js";
 import { fromHandler } from "../strategies.js";
@@ -256,6 +259,76 @@ describe("TimelineHarness — snapshot round-trip across instances", () => {
   });
 });
 
+describe("TimelineHarness — branch: the fork transport (checkpointing §5)", () => {
+  const branchCtx = (fromSessionId: string) => ({
+    sessionId: fromSessionId,
+    fromSessionId,
+    tick: 0,
+    storeCtx: stubStoreCtx(),
+  });
+  const idsOf = (entries: readonly TimelineEntry[]): string[] =>
+    entries.map((e) => (e.kind === "message" ? e.message.id : e.kind));
+
+  it("copies the source scope onto its own, and hydrate opens on the copy", async () => {
+    const store = new MemoryTimelineStore();
+    const { harness: parent } = await makeHarness(timelineScopeKey("br-parent"), { store });
+    await parent.append(messageEntry("p1", "one"), messageEntry("p2", "two"));
+    await parent.persist();
+    await parent.close();
+
+    // A DIFFERENT scope over the SAME store — the child of a fork.
+    const { harness: child } = await makeHarness(timelineScopeKey("br-child"), { store });
+    expect(child.readPersisted()).toEqual([]);
+
+    await child.branch(branchCtx("br-parent"));
+    await child.hydrate();
+    expect(idsOf(child.readPersisted())).toEqual(["p1", "p2"]);
+    expect(idsOf(child.read().entries)).toEqual(["p1", "p2"]);
+
+    // The copy is the CHILD's: appending to it leaves the parent's log alone.
+    await child.append(messageEntry("c1", "three"));
+    await child.persist();
+    expect(idsOf(await store.read(timelineScopeKey("br-parent"), stubStoreCtx()))).toEqual([
+      "p1",
+      "p2",
+    ]);
+    await child.close();
+  });
+
+  it("branching into a non-empty scope is a no-op — a retried fork cannot double the log", async () => {
+    const store = new MemoryTimelineStore();
+    const { harness: parent } = await makeHarness(timelineScopeKey("br2-parent"), { store });
+    await parent.append(messageEntry("p1", "one"));
+    await parent.persist();
+    await parent.close();
+
+    const { harness: child } = await makeHarness(timelineScopeKey("br2-child"), { store });
+    await child.branch(branchCtx("br2-parent"));
+    await child.branch(branchCtx("br2-parent"));
+    await child.hydrate();
+    expect(idsOf(child.readPersisted())).toEqual(["p1"]);
+    await child.close();
+  });
+
+  it("an unknown source scope copies nothing", async () => {
+    const store = new MemoryTimelineStore();
+    const { harness } = await makeHarness(timelineScopeKey("br3-child"), { store });
+    await harness.branch(branchCtx("never-existed"));
+    await harness.hydrate();
+    expect(harness.readPersisted()).toEqual([]);
+    await harness.close();
+  });
+
+  it("a store-less harness branches without effect", async () => {
+    // The bundled default store is per-harness, so the source scope cannot be
+    // in it — durability across sessions was never on offer without injection.
+    const { harness } = await makeHarness("br4-child");
+    await harness.branch(branchCtx("br4-parent"));
+    expect(harness.readPersisted()).toEqual([]);
+    await harness.close();
+  });
+});
+
 // ============================================================================
 // Conformance suite
 // ============================================================================
@@ -267,8 +340,11 @@ runTimelineHarnessConformance({
   },
   // ADR 93 — lights up the GENESIS section (the seed law, the typed hydrate
   // failure). The definition IS the harness's options, so this is a pass-through.
-  makeFromDefinition: async (definition) => {
-    const { harness } = await makeHarness(`conformance-genesis-${generateId()}`, definition);
+  makeFromDefinition: async (definition, scopeId) => {
+    const { harness } = await makeHarness(
+      scopeId ?? `conformance-genesis-${generateId()}`,
+      definition,
+    );
     return harness;
   },
 });

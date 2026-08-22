@@ -164,7 +164,7 @@ await Effect.runPromise(
 
 ## Durable values
 
-Values are backed by a `Store` of `{ id, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory. Inject an adapter and knob values outlive the process — `hydrate()` loads the store back into the read cache.
+Values are backed by a `Store` of `{ scope, id, value }` cells; the synchronous read surface is a cache over it, so reads never await. The default store is in-memory.
 
 ```ts
 import { withKnobs, createKnobStore } from "@agentick/knobs";
@@ -175,7 +175,11 @@ const extension = withKnobs({
 });
 ```
 
-Descriptors are never stored. They are re-declared by the tree on every mount, which is why `exportSnapshot()` / `importSnapshot()` round-trip values only.
+Checkpointing is two hooks the session fans out — `persist()` flushes every write the harness kicked off the critical path, `hydrate()` rebuilds the read cache from the store. No value crosses that seam, so **durability is exactly the injected store's lifetime**: the default store is created per harness, and a harness rebuilt on resume finds an empty one. Inject a store that outlives the session and values survive eviction, restart, and process death.
+
+Cells are partitioned by the owning harness scope, so one injected app-scoped adapter backs every session at once without knob ids colliding between them. `hydrate()` reads its own partition and REPLACES the cache with it — the store is the authority.
+
+Descriptors are never stored. They are re-declared by the tree on every mount, which is why the checkpoint carries values only.
 
 ## State reaches clients as a patch stream
 
@@ -240,7 +244,7 @@ knobs.close();
 | `KnobsHandle` (type)                               | What `session.knobs` exposes                              |
 | `KnobsStateFrame` (type) + frame subtypes          | The `snapshot` \| `delta` union on the channel            |
 | `WireKnobDescriptor` (type)                        | `KnobDescriptor` minus `validate` and `schema`            |
-| `KnobEntry` / `KnobStoreQuery` (types)             | The stored `{ id, value }` cell and its (empty) query     |
+| `KnobEntry` / `KnobStoreQuery` (types)             | The stored `{ scope, id, value }` cell and its query      |
 
 ### `session.knobs`
 
@@ -255,7 +259,7 @@ knobs.close();
 
 `session.knob(name)` returns a `KnobHandle<T>`: `name`, `get()`, `set(value)`, `subscribe(fn)`.
 
-On a `KnobsHarness` instance, additionally: `fx` (the Effect twins), `onChange(fn)` (typed `ChangeEvent` push), `stateSnapshotFrame()`, `exportSnapshot()` / `importSnapshot()`, and `hydrate()`.
+On a `KnobsHarness` instance, additionally: `fx` (the Effect twins), `onChange(fn)` (typed `ChangeEvent` push), `stateSnapshotFrame()`, the checkpoint pair `persist(ctx)` / `hydrate(ctx)`, and the residual `exportSnapshot()` / `importSnapshot()`.
 
 ### `@agentick/knobs/react`
 
@@ -322,7 +326,7 @@ Types: `KnobsState`, `KnobsClient`, `KnobsCommandClient`, `KnobsHandle`, `WireKn
 - `src/__tests__/state-channel.spec.ts` — `add` vs `replace` deltas, monotonic gap-free `version`, defaulted `register` emitting while descriptor-only does not, `importSnapshot` emitting a fresh snapshot frame, `stateSnapshotFrame()` not advancing the version, RFC 6901 id escaping, and a snapshot seed plus applied deltas reconstructing the live store.
 - `src/__tests__/descriptors-wire.spec.ts` — the snapshot frame carries declared metadata, strips `validate`/`schema`, and the channel-snapshot provider path returns the descriptor-carrying frame.
 - `src/__tests__/change-stream.spec.ts` — the `onChange` seam: add vs update, defaulted register, dispatch riding the same write path, unsubscribe, and multiple projections on one stream.
-- `src/__tests__/store-backing.spec.ts` — every write path reaching the store, `hydrate()` repopulating and pinging subscribers as a merge, and export/import coexisting with the store.
+- `src/__tests__/store-backing.spec.ts` — every write path reaching the store, scope partitioning across two harnesses on one store, `hydrate()` repopulating and pinging subscribers, `persist()` awaiting in-flight writes, the values lost when the default per-harness store is used, and export/import coexisting with the store.
 - `src/__tests__/fx-surface.spec.ts` — `fx.set` returns an un-run Effect, the plain method is the Promise facade, both drive the same command, twins nest in one `Effect.gen`, and `fx.dispatch` yields the `knob_set` blocks.
 - `src/__tests__/wire.spec.ts` — `knobs/set` resolves the session and calls `set({ id, value })`; an unresolved session id throws.
 - `src/client/__tests__/knobs-handle.spec.ts` + `knobs-handle.conformance.spec.ts` + `knobs-state-view.spec.ts` + `session-knobs.spec.ts` — the write request shape, `list()`/`get()` over descriptors, the snapshot-then-delta CQRS round-trip, the zero-arg `subscribe` contract, the values-only fold, and `session.knobs` self-assembling on the client session handle.

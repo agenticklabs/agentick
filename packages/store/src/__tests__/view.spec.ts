@@ -157,6 +157,27 @@ describe("View — hydrate merges + notifies (change-silent)", () => {
     expect(v.getSync("live")).toEqual({ id: "live", value: "l" });
     expect(v.getSync("fromStore")).toEqual({ id: "fromStore", value: "s" });
   });
+
+  it("replace:true makes the store the authority — a cache-only record is dropped and pinged", async () => {
+    const s = store();
+    await s.put({ id: "fromStore", value: "s" }, stubStoreCtx());
+    const { v } = view(s);
+    v.seedSync({ id: "cacheOnly", value: "c" });
+    const pings: string[] = [];
+    const changes: ChangeEvent<Cell>[] = [];
+    v.onChange((c) => changes.push(c));
+    v.subscribe("cacheOnly", () => pings.push("cacheOnly"));
+    const mutate = vi.spyOn(s, "mutate");
+
+    await v.hydrate(undefined, stubStoreCtx(), { replace: true });
+
+    expect(v.hasSync("cacheOnly")).toBe(false);
+    expect(v.getSync("fromStore")).toEqual({ id: "fromStore", value: "s" });
+    expect(pings).toEqual(["cacheOnly"]);
+    // The drop is cache-only — nothing was deleted from the store.
+    expect(mutate).not.toHaveBeenCalled();
+    expect(changes).toEqual([]);
+  });
 });
 
 describe("View — replace drops + adds (change-silent)", () => {

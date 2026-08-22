@@ -26,12 +26,7 @@ import { LoopExecutorHarness } from "@agentick/loop-executor";
 import { CompilerHarness } from "@agentick/compiler-react";
 import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline";
 import { stubStoreCtx } from "@agentick/store";
-import type {
-  ExecutionTarget,
-  SessionSnapshot,
-  TimelineEntry,
-  TimelineHarnessSnapshot,
-} from "@agentick/spec";
+import type { ExecutionTarget, TimelineEntry } from "@agentick/spec";
 import { TimelineWriteFailed } from "@agentick/spec";
 
 import { SessionHarness } from "../harness.js";
@@ -70,9 +65,13 @@ function entry(id: string): TimelineEntry {
 
 const idOf = (e: TimelineEntry): string => (e as { message: { id: string } }).message.id;
 
-/** Durable persisted log from a snapshot (post-Step-6: under `bridges.timeline`). */
-function persistedOf(snap: SessionSnapshot): readonly TimelineEntry[] {
-  return (snap.bridges.timeline as TimelineHarnessSnapshot | undefined)?.persisted ?? [];
+/**
+ * Durable persisted log, read from the LIVE handle. The timeline is
+ * CheckpointCapable (checkpointing §3.2) — it persists to its own store and is
+ * excluded from the snapshot blob, so the blob is no longer a read surface.
+ */
+function persistedOf(session: SessionHarness): readonly TimelineEntry[] {
+  return session.timeline.readPersisted();
 }
 
 async function mkSession(opts: {
@@ -118,7 +117,7 @@ describe("SessionHarness — open-or-rehydrate (ADR 49 A2.2)", () => {
     });
     await session.mountReady;
 
-    expect(persistedOf(await session.snapshot()).map(idOf)).toEqual(["m1", "m2"]);
+    expect(persistedOf(session).map(idOf)).toEqual(["m1", "m2"]);
     await session.close();
     await tools.close();
   });
@@ -126,7 +125,7 @@ describe("SessionHarness — open-or-rehydrate (ADR 49 A2.2)", () => {
   it("without a store option, constructs empty (no hydration path)", async () => {
     const { session, tools } = await mkSession({ sessionId: "s-fresh" });
     await session.mountReady;
-    expect(persistedOf(await session.snapshot())).toEqual([]);
+    expect(persistedOf(session)).toEqual([]);
     await session.close();
     await tools.close();
   });
@@ -184,7 +183,11 @@ describe("SessionHarness — flush barrier at execution end (ADR 49 A2.2)", () =
     );
     expect(exit).toBeInstanceOf(TimelineWriteFailed);
     // Diverged from the durable log — "failed", never a silent "idle".
-    expect((await session.snapshot()).status).toBe("failed");
+    expect(session.status).toBe("failed");
+    // And it cannot be checkpointed: `snapshot()` fans out `persist`, the
+    // flush barrier is latched, so the operation aborts rather than letting a
+    // caller unmount behind an un-flushed tail (checkpointing §3.2).
+    await expect(session.snapshot()).rejects.toThrow(/timeline write failed/);
     await tools.close();
   });
 });

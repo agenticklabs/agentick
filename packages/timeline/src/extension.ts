@@ -26,6 +26,7 @@ import type { SessionExtension, SessionInstaller, TimelineHarnessProtocol } from
 import { inheritedFrom } from "@agentick/runtime";
 import { TimelineHarness } from "./harness.js";
 import { isTimelineHarnessInstance, type TimelineDefinition } from "./definition.js";
+import { timelineScopeKey } from "./store.js";
 
 /**
  * What `withTimeline` / the `timeline` slot accept — the ADR-42 dichotomy, no
@@ -70,7 +71,7 @@ export function withTimeline(config: TimelineConfig = {}): SessionExtension {
 
       // ── Definition arm: construct THIS session's harness from the plan.
       const harness = new TimelineHarness(
-        `${installer.hostId}:timeline`,
+        timelineScopeKey(installer.hostId),
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,

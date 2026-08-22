@@ -20,4 +20,11 @@ import "./wire-augment.js";
 export { StateHarness, type StateHarnessOptions } from "./harness.js";
 export type { StateHandle } from "./handle.js";
 export { withState, type WithStateOptions } from "./extension.js";
-export { createStateStore, type StateEntry, type StateStoreQuery } from "./store.js";
+export {
+  createStateStore,
+  stateScope,
+  stateStoreKey,
+  type StateEntry,
+  type StateStore,
+  type StateStoreQuery,
+} from "./store.js";

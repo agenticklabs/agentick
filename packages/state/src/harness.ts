@@ -16,20 +16,23 @@
  *                     `state:{scopeId}` (`"state:set"` / `"state:delete"`)
  *                     with zero routing code.
  *
- * Snapshot/restore — `exportSnapshot()` / `importSnapshot()` round-trip
- * the entries. Used by SnapshotHarness for hibernate/resume.
+ * Checkpoint — `persist()` flushes write-behind to the store, `hydrate()`
+ * rebuilds the projection from it (checkpointing §3.2). The residual
+ * `exportSnapshot()` / `importSnapshot()` pair no longer runs on resume: the
+ * session fold gives CheckpointCapable precedence. `branch()` copies another
+ * session's partition onto this one — the fork transport (checkpointing §5).
  *
  * Storification (data-layer plan §3.5) — the near-identical twin of knobs.
- * State is store-derived AND store-persisted: a durable {@link Store}
- * of `{ key, value }` cells is the authority, and a synchronous
+ * State is store-derived AND store-persisted: a durable {@link StateStore}
+ * of `{ scope, key, value }` cells is the authority, and a synchronous
  * {@link View} is its read cache (reads never touch the async store).
  * Every value mutation writes through the view (sync cache first, durable store
  * off the critical path via the `query`/`mutate` seam) AND, in the same call,
  * pings render subscribers and emits the typed change — the sync-cache,
  * write-through, render-ping, and delta-stream machinery all live in the ONE
- * `View` (they were three hand-rolled fields). `hydrate()` reloads the
- * store into the view on resume. State has no client-facing channel, so nothing
- * projects the change stream to the wire today (see the `state-deltas` TODO).
+ * `View` (they were three hand-rolled fields). State has no client-facing
+ * channel, so nothing projects the change stream to the wire today (see the
+ * `state-deltas` TODO).
  *
  * @see docs/proposals/v2/blueprint/26-harness-api-shape.md
  * @see docs/proposals/v2/blueprint/51-invocation-and-authorization.md
@@ -38,13 +41,17 @@
 import { Effect } from "effect";
 import { BaseHarness, type BaseHarnessOptions, type Unsubscribe } from "@agentick/runtime";
 import type {
+  BranchCapable,
+  BranchCtx,
+  CheckpointCapable,
   CollectionMutation,
   EventBus,
+  HydrateCtx,
   MessageEnvelope,
   MessageHandlerError,
   MessageInbox,
   OperationJournal,
-  Store,
+  PersistCtx,
   StateDeleteInput,
   StateHarnessProtocol,
   StateListEntry,
@@ -55,7 +62,14 @@ import type {
 import { HandlerError } from "@agentick/spec";
 import { type ChangeEvent } from "@agentick/pubsub";
 import { View } from "@agentick/store";
-import { createStateStore, type StateEntry, type StateStoreQuery } from "./store.js";
+import {
+  createStateStore,
+  stateScope,
+  stateStoreKey,
+  type StateEntry,
+  type StateStore,
+  type StateStoreQuery,
+} from "./store.js";
 
 /**
  * Construction options for {@link StateHarness}. Minimal — state takes its
@@ -64,17 +78,26 @@ import { createStateStore, type StateEntry, type StateStoreQuery } from "./store
 export interface StateHarnessOptions extends BaseHarnessOptions<unknown, "state"> {
   /**
    * Durable backing for state VALUES (data-layer plan §3.5, Phase 3). Defaults
-   * to a fresh per-harness in-memory {@link createStateStore}. The store holds
-   * `{ key, value }` cells; it is the durable truth, the synchronous
-   * {@link View} is its sync read cache (reads never touch the store).
-   * Injecting a durable adapter (Postgres, …) is how state survives process
-   * restart; `hydrate()` loads it back into the view. Typed against the
-   * `Store` SEAM — a durable adapter need only implement `query`/`mutate`.
+   * to a fresh per-harness in-memory {@link createStateStore}. It is the durable
+   * truth, the synchronous {@link View} is its sync read cache (reads never
+   * touch the store). Injecting a durable adapter (Postgres, …) is how state
+   * survives process restart; {@link StateHarness.hydrate} loads it back into
+   * the view.
+   *
+   * An injected store is expected to OUTLIVE the harness — durability across
+   * instances is the whole point — so it is shared by every session the app
+   * runs. Cells carry their owning `scope` and reads select on it.
    */
-  readonly store?: Store<StateEntry, StateStoreQuery, CollectionMutation<StateEntry>>;
+  readonly store?: StateStore;
 }
 
-export class StateHarness extends BaseHarness<"state"> implements StateHarnessProtocol {
+export class StateHarness
+  extends BaseHarness<"state">
+  implements StateHarnessProtocol, CheckpointCapable, BranchCapable
+{
+  /** The durable truth. Held alongside {@link view} because {@link branch} copies at the store layer. */
+  private readonly store: StateStore;
+
   /**
    * The synchronous {@link View} of the value store — ONE primitive that
    * collapses the three fields this used to hand-roll (a `CollectionProjection`
@@ -88,7 +111,7 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
    * legitimately store `undefined`.
    */
   private readonly view: View<
-    StateEntry,
+    StateListEntry,
     StateEntry,
     StateStoreQuery,
     CollectionMutation<StateEntry>
@@ -128,7 +151,15 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // (`state:set`, …) so `app.guard()` / `createApp({ hooks, guards })` wrap
     // them. State used to construct `super` with no options at all.
     super("state", scopeId, journal, bus, inbox, options);
-    this.view = View.collection(options.store ?? createStateStore(), (entry) => entry.key);
+    this.store = options.store ?? createStateStore();
+    this.view = new View({
+      store: this.store,
+      keyOf: (cell) => cell.key,
+      project: (cell) => ({ scope: scopeId, key: cell.key, value: cell.value }),
+      reconstruct: (entry) => ({ key: entry.key, value: entry.value }),
+      toPut: (entry) => ({ put: entry }),
+      toDelete: (key) => ({ delete: stateStoreKey(scopeId, key) }),
+    });
     // NO scope factory. The owning session is gap-filled by `makeEvent` from the
     // harness's construction-bound `parentScope` (BaseHarness), so a command that
     // adds no dims of its own declares nothing. Every command here previously
@@ -233,32 +264,56 @@ export class StateHarness extends BaseHarness<"state"> implements StateHarnessPr
     // updates the whole cache FIRST then batch-pings the union (drops ∪ upserts),
     // and is change-SILENT (state has no channel, so no per-key deltas anyway).
     //
-    // TODO(store-phase-4): `importSnapshot` is the ACTIVE snapshot-based resume
-    // path. The Phase-4 manifest sweep replaces it with `hydrate()` once the
-    // store is the authority. Do NOT wire `hydrate()` into resume while this
-    // method still owns it.
-    const entries: StateEntry[] = Object.entries(values).map(([key, value]) => ({ key, value }));
+    // TODO(checkpoint-sweep): superseded by `hydrate()` — the session fold gives
+    // CheckpointCapable precedence, so this no longer runs on resume. It dies
+    // with `SnapshotCapable` in the Phase-4 sweep (checkpointing §5); the one
+    // live caller left is `withState({ initial })`.
+    const entries: StateListEntry[] = Object.entries(values).map(([key, value]) => ({
+      key,
+      value,
+    }));
     this.view.replace(entries, this.storeCtx());
   }
 
+  // ─────────── Checkpoint (CheckpointCapable) ───────────
+
   /**
-   * Load the durable value store into the sync projection — the future manifest
-   * resume path (data-layer plan Phase 4 / BaseHarness §2.3). The projection
-   * owns the store→cache merge and returns the keys it loaded; the harness owns
-   * notification (the primitive is a write sink, not a notifier). Pings each
-   * hydrated key so both per-key and wildcard subscribers re-read. This is a
-   * MERGE (store cells overlay the projection), not a clear-first replace — a
-   * fresh session's store is empty ⇒ a no-op.
-   *
-   * NOT wired into session resume in this run: `importSnapshot` remains the
-   * active resume path. `hydrate()` is the seam the Phase-4 manifest sweep flips
-   * to once the store is authority.
+   * The durability barrier: writes go through eagerly and off the critical
+   * path, so this awaits the ones still in flight and rethrows the first that
+   * failed — which is what aborts the caller's unmount (checkpointing §3.2).
    */
-  async hydrate(): Promise<void> {
-    // The view merges the store projection into the cache and pings each loaded
-    // key (a MERGE, not clear-first — a fresh store is empty ⇒ a no-op).
-    // Change-silent.
-    await this.view.hydrate(undefined, this.storeCtx());
+  async persist(_ctx: PersistCtx): Promise<void> {
+    await this.view.flush();
+  }
+
+  /**
+   * Rebuild the sync projection from this harness's partition of the store.
+   * Pings every touched key and emits no typed change — `importSnapshot`'s
+   * notification behavior exactly.
+   *
+   * The partition key is this harness's own `scopeId`, NOT
+   * `ctx.storeCtx.sessionId`, which on this path carries the SESSION harness's
+   * scope id.
+   */
+  async hydrate(ctx: HydrateCtx): Promise<void> {
+    await this.view.hydrate({ scope: this.scopeId }, ctx.storeCtx, { replace: true });
+  }
+
+  /**
+   * Copy the source session's cells onto this harness's own partition — the
+   * fork transport (checkpointing §5). Store-layer only: the projection is left
+   * alone because the fork path always follows `branch` with a `hydrate`.
+   *
+   * Idempotent by a non-empty own partition, so a retried fork does not
+   * overwrite a child that has since diverged.
+   */
+  async branch(ctx: BranchCtx): Promise<void> {
+    const mine = await this.store.query({ scope: this.scopeId }, ctx.storeCtx);
+    if (mine.length > 0) return;
+    const source = await this.store.query({ scope: stateScope(ctx.fromSessionId) }, ctx.storeCtx);
+    for (const entry of source) {
+      await this.store.mutate({ put: { ...entry, scope: this.scopeId } }, ctx.storeCtx);
+    }
   }
 
   // ─────────── Inbox routing ───────────

@@ -33,6 +33,7 @@ import { defineLoop } from "@agentick/loop-executor";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { InMemoryHandlerResolver, ToolExecutorHarness } from "@agentick/tool-executor";
+import { MemoryTimelineStore, type TimelineStore } from "@agentick/timeline";
 import type {
   ContentBlock,
   ExecutionTarget,
@@ -86,7 +87,11 @@ function Agent() {
   return React.createElement("message" as never, { role: "user" }, "hi");
 }
 
-async function mkSession(loopFactory: LoopExecutorFactory, store = new InMemorySessionStore()) {
+async function mkSession(
+  loopFactory: LoopExecutorFactory,
+  store = new InMemorySessionStore(),
+  timeline?: { readonly store: TimelineStore; readonly sessionId: string },
+) {
   const journal = new MemoryJournal();
   const bus = new LocalEventBus();
   const inbox = new LocalInbox();
@@ -116,7 +121,7 @@ async function mkSession(loopFactory: LoopExecutorFactory, store = new InMemoryS
     (loop as unknown as { ready: Promise<unknown> }).ready,
   ]);
 
-  const sessionId = `s-${Math.random()}`;
+  const sessionId = timeline?.sessionId ?? `s-${Math.random()}`;
   const session = new SessionHarness(journal, bus, inbox, {
     sessionId,
     agent: React.createElement(Agent),
@@ -126,6 +131,7 @@ async function mkSession(loopFactory: LoopExecutorFactory, store = new InMemoryS
     toolExecutor: tools,
     target,
     sessionStore: store,
+    ...(timeline ? { timeline: { store: timeline.store } } : {}),
   });
   await session.ready;
   await session.mountReady;
@@ -223,7 +229,14 @@ describe("reasoning content survives the fold onto the timeline", () => {
     await session.close();
   });
 
-  it("survives snapshot → restore — reasoning that vanishes on reload is not persisted", async () => {
+  it("survives checkpoint → resume — reasoning that vanishes on reload is not persisted", async () => {
+    // The timeline is CheckpointCapable (checkpointing §3.2), so the reload is
+    // a real durable round-trip: `snapshot()` flushes to the store, and a fresh
+    // session over the SAME store and id resumes from it. Nothing is carried in
+    // a payload, which is precisely why the blocks have to survive serialization
+    // in the store rather than in a in-memory hand-off.
+    const timelineStore = new MemoryTimelineStore();
+    const sessionId = `s-reasoning-${Math.random()}`;
     const { session } = await mkSession(
       scriptedLoop([
         {
@@ -233,12 +246,17 @@ describe("reasoning content survives the fold onto the timeline", () => {
         },
         { type: "text", text: "answer" },
       ]),
+      new InMemorySessionStore(),
+      { store: timelineStore, sessionId },
     );
     await send(session);
     const snapshot = await session.snapshot();
     await session.close();
 
-    const { session: restored } = await mkSession(scriptedLoop([]));
+    const { session: restored } = await mkSession(scriptedLoop([]), new InMemorySessionStore(), {
+      store: timelineStore,
+      sessionId,
+    });
     await restored.restore({ snapshot });
 
     const reasoning = assistantContent(restored)!.find(

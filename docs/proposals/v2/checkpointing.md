@@ -230,6 +230,17 @@ resolves below or beside the framework:
 | Fork                                                   | Store-layer branch: copy the scope (composable from `list` + `put` on any `CollectionStore`; a store MAY override with a native copy), timeline forks at a cursor on its append-only log. |
 | Leave the store universe (debug dump, env move)        | External tooling iterating the stores. Not a framework verb.                                                                                                                              |
 
+**The branch hook (amended 2026-08-22 — surfaced by implementation).**
+`session.fork()` was the blob's last live consumer: ADR 93's fork law skipped
+child genesis _because_ the parent's entries arrived via `restore(snapshot)`.
+The replacement is the same leaf-hook pattern: optional
+`BranchCapable.branch(ctx)` (`ctx.fromSessionId` + the hydrate ctx), fanned
+out by the fork path exactly as `persist`/`hydrate` are — the harness copies
+the source scope onto its own scope in its OWN store; no data crosses the
+seam. The fork law retires with the transport that motivated it: under store
+transport, fork = branch the scope, then genesis over the copy — the hydrator
+running in the child is now correct, not a violation.
+
 Consequences (the kill list, additive to the sweep's):
 
 - `SessionSnapshot` (spec) — deleted.

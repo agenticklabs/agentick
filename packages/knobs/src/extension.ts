@@ -18,7 +18,7 @@
 
 import type { CollectionMutation, Store, SessionExtension, SessionInstaller } from "@agentick/spec";
 import { KnobsHarness } from "./harness.js";
-import type { KnobEntry, KnobStoreQuery } from "./store.js";
+import { knobsScope, type KnobEntry, type KnobStoreQuery } from "./store.js";
 
 export interface WithKnobsOptions {
   /**
@@ -30,9 +30,10 @@ export interface WithKnobsOptions {
   /**
    * Durable backing for knob VALUES (data-layer plan §3.5, Phase 3). Passed
    * through to the {@link KnobsHarness}; when omitted the harness defaults to a
-   * fresh in-memory store. Inject a durable adapter to make knob values survive
-   * restart. NOTE: session-level hydrate-on-resume is NOT wired here — that is
-   * the Phase-4 manifest concern; `importSnapshot` remains the resume path.
+   * fresh in-memory store, which a rebuilt harness does not share — so knob
+   * values survive an evict/resume cycle exactly when the store injected here
+   * outlives the session. Cells are partitioned by harness scope, so ONE store
+   * passed to one `withKnobs()` correctly backs every session it installs into.
    */
   readonly store?: Store<KnobEntry, KnobStoreQuery, CollectionMutation<KnobEntry>>;
 }
@@ -60,7 +61,7 @@ export function withKnobs(options: WithKnobsOptions = {}): SessionExtension {
     target: "session",
     install: async (installer: SessionInstaller) => {
       const harness = new KnobsHarness(
-        `${installer.hostId}:knobs`,
+        knobsScope(installer.hostId),
         installer.substrate.journal,
         installer.substrate.bus,
         installer.substrate.inbox,
