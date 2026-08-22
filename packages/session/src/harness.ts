@@ -57,6 +57,7 @@ import type {
   EventBusFactory,
   ExecutionTarget,
   ExecutorProtocol,
+  HydrateCtx,
   KnobHandle,
   LanguageModelExecutionResult,
   LoopExecutionEvent,
@@ -71,6 +72,7 @@ import type {
   OperationCtx,
   OperationJournal,
   OperationJournalFactory,
+  PersistCtx,
   ProtocolEvent,
   RegisteredModel,
   OutputSpec,
@@ -122,6 +124,7 @@ import {
   foldUsageRollup,
   HandlerError,
   isChannelSnapshotProvider,
+  isCheckpointCapable,
   isExecuteError,
   isSnapshotCapable,
   NoModelForExecutionError,
@@ -1699,12 +1702,41 @@ export class SessionHarness<P = unknown>
   snapshot(): Promise<SessionSnapshot> {
     // Recovery pass #1 — `session:snapshot` command. `onBeforeSessionSnapshot`
     // (veto) + `onAfterSessionSnapshot` (augment/redact the output — the v1
-    // `onPersist` parity) fire around the sync capture.
+    // `onPersist` parity) fire around the capture. The flush barrier runs
+    // FIRST: a rejected `persist` aborts the whole operation, so a failed
+    // flush is never followed by the caller's unmount (checkpointing §3.2).
     return runHarnessProtocol(
       this.sessionOp("snapshot", {} as CaptureSnapshotInput, () =>
-        Effect.sync((): SessionSnapshot => this.captureSnapshot()),
+        Effect.gen(this, function* () {
+          const ctx = yield* this.checkpointCtx();
+          yield* Effect.tryPromise({
+            try: () => this.persistCheckpointBridges(ctx),
+            catch: (cause): SessionError => coerceSessionError(cause),
+          });
+          return this.captureSnapshot();
+        }),
       ),
     );
+  }
+
+  /**
+   * The checkpoint contract's ctx — built from the ENRICHED store ctx so a
+   * durable store sees the live op's `opId` as its idempotency key.
+   */
+  private checkpointCtx(): Effect.Effect<PersistCtx> {
+    return Effect.map(this.storeCtxEffect(), (storeCtx) => ({
+      sessionId: this.runtime.id,
+      tick: this.runtime.currentTick(),
+      storeCtx,
+      ...omitUndefined({ signal: this.constructionSignal }),
+    }));
+  }
+
+  /** Flush every {@link CheckpointCapable} bridge to its own store, in bag order. */
+  private async persistCheckpointBridges(ctx: PersistCtx): Promise<void> {
+    for (const bridge of Object.values(this.bridges)) {
+      if (isCheckpointCapable(bridge)) await bridge.persist(ctx);
+    }
   }
 
   /**
@@ -1714,10 +1746,15 @@ export class SessionHarness<P = unknown>
    * channel {@link snapshotProviders} scan and the compiler's
    * `captureBridgeSnapshots`. A new SnapshotCapable extension bridge is
    * picked up automatically — no session change.
+   *
+   * A {@link CheckpointCapable} bridge has already flushed to its own store
+   * and is excluded here — a migrated harness must not also double-write
+   * into the blob.
    */
   private captureSnapshot(): SessionSnapshot {
     const bridges: Record<string, unknown> = {};
     for (const [name, bridge] of Object.entries(this.bridges)) {
+      if (isCheckpointCapable(bridge)) continue;
       if (isSnapshotCapable(bridge)) bridges[name] = bridge.exportSnapshot();
     }
     return {
@@ -1744,9 +1781,12 @@ export class SessionHarness<P = unknown>
     // the version-check decision point inside the body.
     return runHarnessProtocol(
       this.sessionOp("restore", input, (i) =>
-        Effect.tryPromise({
-          try: () => this.restoreBody(i),
-          catch: (cause): SessionError => coerceSessionError(cause),
+        Effect.gen(this, function* () {
+          const ctx = yield* this.checkpointCtx();
+          yield* Effect.tryPromise({
+            try: () => this.restoreBody(i, ctx),
+            catch: (cause): SessionError => coerceSessionError(cause),
+          });
         }),
       ),
     );
@@ -1758,13 +1798,16 @@ export class SessionHarness<P = unknown>
    *   1. migration seam — if `snapshot.specVersion` ≠ `SPEC_VERSION`, run
    *      the construction-bound `migrateSnapshot` callback (or throw
    *      `SnapshotVersionMismatch` when none is set — fail-closed).
-   *   2. bridge fan-out — for every entry in `snapshot.bridges`, if the
+   *   2. checkpoint fan-out — every {@link CheckpointCapable} bridge
+   *      `hydrate`s from its own store, in bag order. Such a bridge ignores
+   *      any residual blob entry for its slot.
+   *   3. bridge fan-out — for every entry in `snapshot.bridges`, if the
    *      live bridge by that name is {@link SnapshotCapable}, `importSnapshot`
    *      it. Async-aware (timeline's import is a Promise); awaited together.
-   *   3. accounting — restore the execution-local tick + the aggregate
+   *   4. accounting — restore the execution-local tick + the aggregate
    *      usage / per-model breakdown / cost rollup.
    */
-  private async restoreBody(input: RestoreSnapshotInput): Promise<void> {
+  private async restoreBody(input: RestoreSnapshotInput, ctx: HydrateCtx): Promise<void> {
     if (this._closed) {
       throw new SessionClosedError({ attemptedCommand: "restore" });
     }
@@ -1780,10 +1823,17 @@ export class SessionHarness<P = unknown>
 
     // Generic fan-out — feature-detected, no hardcoded slot names.
     const bag = this.bridges as unknown as Record<string, unknown>;
+    // TODO(hydrate-ordering): bag order, no per-harness dependency declaration
+    // (checkpointing §8.3). The first harness whose `hydrate` reads a sibling's
+    // hydrated state is the trigger to introduce an ordering mechanism.
+    for (const bridge of Object.values(bag)) {
+      if (isCheckpointCapable(bridge)) await bridge.hydrate(ctx);
+    }
     const pending: Promise<unknown>[] = [];
     for (const [name, value] of Object.entries(snap.bridges)) {
       if (value === undefined) continue;
       const bridge = bag[name];
+      if (isCheckpointCapable(bridge)) continue;
       if (isSnapshotCapable(bridge)) {
         const result = bridge.importSnapshot(value);
         if (result instanceof Promise) pending.push(result);

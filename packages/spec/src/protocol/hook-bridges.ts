@@ -21,6 +21,7 @@
 
 import type { Unsubscribe } from "./inbox.js";
 import type { ExecutorProtocol } from "./executor.js";
+import type { StoreCtx } from "./store-ctx.js";
 import type { LanguageModelExecutionResult } from "../data/execution-result.js";
 import type { ExecutionTarget } from "../data/execution-target.js";
 
@@ -139,6 +140,62 @@ export function isSnapshotCapable(x: unknown): x is SnapshotCapable {
     typeof x === "object" &&
     typeof (x as { exportSnapshot?: unknown }).exportSnapshot === "function" &&
     typeof (x as { importSnapshot?: unknown }).importSnapshot === "function"
+  );
+}
+
+// ============================================================================
+// CheckpointCapable — the leaf hook for store-backed harnesses
+// ============================================================================
+
+/**
+ * What a checkpoint hook receives: the store scope key, the epoch stamp a
+ * store SHOULD record so a skewed resume is diagnosable, the store-call
+ * context, and the deadline a shutdown flush honors. There is deliberately
+ * no `reason` — a hook that can see its trigger flushes differently per
+ * trigger, and the single-recovery-path guarantee dies at the leaves.
+ *
+ * @see docs/proposals/v2/checkpointing.md §3.2
+ */
+export interface PersistCtx {
+  readonly sessionId: string;
+  readonly tick: number;
+  readonly storeCtx: StoreCtx;
+  readonly signal?: AbortSignal;
+}
+
+/** The hydrate-side twin of {@link PersistCtx}. */
+export interface HydrateCtx {
+  readonly sessionId: string;
+  readonly tick: number;
+  readonly storeCtx: StoreCtx;
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A harness that owns its durable state in its OWN store. `persist` flushes
+ * write-behind to that store; `hydrate` loads the latest for the session
+ * scope. No value crosses the seam — the composition root sequences the
+ * fan-out and never sees harness state.
+ *
+ * A rejected `persist` aborts the caller's operation (a failed flush must
+ * never be followed by an unmount); a rejected `hydrate` fails the resume.
+ *
+ * Feature-detected exactly as {@link SnapshotCapable}, which it supersedes.
+ *
+ * @see docs/proposals/v2/checkpointing.md §3.2
+ */
+export interface CheckpointCapable {
+  persist(ctx: PersistCtx): Promise<void>;
+  hydrate(ctx: HydrateCtx): Promise<void>;
+}
+
+/** Runtime feature-detection for {@link CheckpointCapable}. */
+export function isCheckpointCapable(x: unknown): x is CheckpointCapable {
+  return (
+    x !== null &&
+    typeof x === "object" &&
+    typeof (x as { persist?: unknown }).persist === "function" &&
+    typeof (x as { hydrate?: unknown }).hydrate === "function"
   );
 }
 
