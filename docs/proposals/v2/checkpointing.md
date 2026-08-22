@@ -128,9 +128,8 @@ harness-voluntary (stamp your own store for diagnosability).
   never be followed by an unmount, or the un-flushed tail becomes the
   framework's fault); a rejected `hydrate` fails the resume to its caller.
 - The framework never sees harness state. Timeline's `persist` = flush pending
-  writes, report log cursor. Knobs' = flush its `CollectionStore`, report
-  cursor. A derivable-by-re-render harness implements neither and rides the
-  manifest's `intents`.
+  writes. Knobs' = flush its `CollectionStore`. A derivable-by-re-render
+  harness implements neither — its declarations regenerate at mount.
 - **No value crosses the seam.** `SessionSnapshot`, `SessionSnapshot.bridges`,
   and both `exportSnapshot`/`importSnapshot` methods are deleted in the sweep
   (they coexist until then, per the plan's migration note).
