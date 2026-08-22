@@ -244,6 +244,21 @@ Consequences (the kill list, additive to the sweep's):
 - `ExecutionRunner.onPersist(session, snapshot)` — already hook-shaped;
   loses its payload parameter (a runner persisting state uses its own store,
   same rule as everyone).
+- **`CompilerSnapshot` + the compiler's bridge fold — deleted, not reshaped.**
+  The compiler harness is a SECOND composition root today: `snapshot()`
+  (`compiler-harness.ts:442`) generically folds the same `SnapshotCapable`
+  bridges the session fold does, into its own blob — and its only caller in
+  the workspace is its own conformance suite; production never invokes it.
+  Under this model there is exactly ONE composition root (the session fold);
+  a harness persists its own state and never folds a sibling's. The
+  compiler's own state needs no hooks: the `useData` cache refetches on
+  resume (persisting a TTL'd cache past its TTL is a defect, not a feature),
+  subscription intents regenerate by re-render at mount, and
+  `mountId`/`elementVersion` skew-guarding has nothing to guard when rebuild
+  always uses the current recipe. `CompilerSnapshot`, `DataCacheEntry`-as-
+  durable, the `define-compiler` snapshot slot, and the conformance section
+  die with it. The compiler is a harness like any other — it was only ever
+  _pretending_ to be an orchestrator.
 
 ## 6. Compounding enablers
 
