@@ -37,12 +37,31 @@ import type { OperationCtx } from "../data/runtime-context.js";
 import type { SubstrateError } from "../data/errors.js";
 import type { TimelineWriteFailed } from "../errors/lifecycle.js";
 import type { HarnessFx } from "./middleware.js";
-import type { MessageTimelineEntry, TimelineEntry } from "./session-harness.js";
+import type { MessageTimelineEntry, TimelineEntry, TurnBoundaryEntry } from "./session-harness.js";
 import type { Unsubscribe } from "./inbox.js";
 
 // ============================================================================
 // Public snapshot shape (what `read()` returns)
 // ============================================================================
+
+/**
+ * One execution's durable footprint, as coordinates (execution-resume.md §3.4).
+ * The two-signal detection reads `boundary` (a present boundary means the turn
+ * FINISHED — only the record's idle-write was lost; never re-drive); the
+ * re-drive seed reads `lastTickIndex`.
+ */
+export interface ExecutionCursor {
+  /**
+   * Highest 1-based `tickIndex` stamped on the execution's persisted entries;
+   * 0 when its entries carry no tick provenance (e.g. only caller input).
+   */
+  readonly lastTickIndex: number;
+  /**
+   * The turn boundary's outcome when the execution ended on the record
+   * (ADR 53). Absent = no boundary — an in-flight or crashed turn.
+   */
+  readonly boundary?: TurnBoundaryEntry["boundary"]["outcome"];
+}
 
 export interface TimelineSnapshot {
   readonly entries: readonly TimelineEntry[];
@@ -336,6 +355,14 @@ export interface TimelineHarnessProtocol {
    * (e.g., writing a custom compaction strategy, exporting audit logs).
    */
   readPersisted(): readonly TimelineEntry[];
+
+  /**
+   * One execution's durable coordinates — the resume seam
+   * (execution-resume.md §3.4). Coordinates out, never entries: the harness
+   * derives them from its own persisted tier, so no consumer scans contents
+   * to compute metadata. `undefined` when the log holds nothing for the id.
+   */
+  executionCursor(executionId: string): ExecutionCursor | undefined;
 
   /**
    * Provenance of the divergence the current projection carries — what the last

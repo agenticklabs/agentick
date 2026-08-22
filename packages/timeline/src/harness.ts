@@ -81,6 +81,7 @@ import type {
   SeqTagged,
   StopCause,
   StandardSchemaV1,
+  ExecutionCursor,
   TimelineAppendInput,
   TimelineEntry,
   TimelineHarnessProtocol,
@@ -602,6 +603,34 @@ export class TimelineHarness
 
   readPersisted(): readonly TimelineEntry[] {
     return this.log.readPersisted();
+  }
+
+  /**
+   * {@link ExecutionCursor} over the persisted tier — the resume seam
+   * (execution-resume.md §3.4). Derived HERE so no consumer scans entries to
+   * compute coordinates; the last matching boundary wins (a re-driven turn's
+   * boundary supersedes provenance an earlier crash left behind).
+   */
+  executionCursor(executionId: string): ExecutionCursor | undefined {
+    let found = false;
+    let lastTickIndex = 0;
+    let boundary: ExecutionCursor["boundary"];
+    for (const entry of this.log.readPersisted()) {
+      if (entry.kind === "boundary") {
+        if (entry.boundary.executionId !== executionId) continue;
+        found = true;
+        boundary = entry.boundary.outcome;
+      } else if (entry.kind === "message") {
+        const meta = entry.message.metadata;
+        if (meta?.executionId !== executionId) continue;
+        found = true;
+        if (meta.tickIndex !== undefined && meta.tickIndex > lastTickIndex) {
+          lastTickIndex = meta.tickIndex;
+        }
+      }
+    }
+    if (!found) return undefined;
+    return { lastTickIndex, ...(boundary !== undefined ? { boundary } : {}) };
   }
 
   lastCompaction(): LogProjectionMeta | undefined {

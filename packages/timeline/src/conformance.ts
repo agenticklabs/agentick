@@ -560,6 +560,53 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     });
   });
 
+  describe("TimelineHarness — executionCursor (execution-resume §3.4)", () => {
+    const tickedEntry = (id: string, executionId: string, tickIndex: number): TimelineEntry => ({
+      kind: "message",
+      message: {
+        id,
+        role: "assistant",
+        content: [{ type: "text", text: id }],
+        ts: 0,
+        metadata: { executionId, tickId: `t-${id}`, tickIndex },
+      },
+    });
+
+    it("returns undefined for an execution the log has never seen", async () => {
+      const h = await deps.make();
+      await h.append(tickedEntry("c0", "exec-other", 1));
+      expect(h.executionCursor("exec-unknown")).toBeUndefined();
+      await h.close();
+    });
+
+    it("lastTickIndex is the max of THIS execution's ticks — a sibling never leaks", async () => {
+      const h = await deps.make();
+      await h.append(
+        tickedEntry("c1", "exec-a", 1),
+        tickedEntry("c2", "exec-a", 2),
+        tickedEntry("c3", "exec-b", 9),
+      );
+      expect(h.executionCursor("exec-a")).toEqual({ lastTickIndex: 2 });
+      await h.close();
+    });
+
+    it("boundary is absent in flight and present after endTurn — the two-signal read", async () => {
+      const h = await deps.make();
+      await h.append(tickedEntry("c4", "exec-c", 1));
+      expect(h.executionCursor("exec-c")?.boundary).toBeUndefined();
+      await h.endTurn({ executionId: "exec-c", outcome: "succeeded" });
+      expect(h.executionCursor("exec-c")).toEqual({ lastTickIndex: 1, boundary: "succeeded" });
+      await h.close();
+    });
+
+    it("entries without tick provenance still register the execution, at tick 0", async () => {
+      const h = await deps.make();
+      await h.endTurn({ executionId: "exec-d", outcome: "aborted" });
+      expect(h.executionCursor("exec-d")).toEqual({ lastTickIndex: 0, boundary: "aborted" });
+      await h.close();
+    });
+  });
+
   describe("TimelineHarness — identity stability", () => {
     it("read() returns same snapshot reference between mutations", async () => {
       const h = await deps.make();

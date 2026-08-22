@@ -21,6 +21,7 @@
 import type { Unsubscribe, MessageTimelineEntry, TimelineEndTurnInput } from "@agentick/spec";
 import type {
   CompactResult,
+  ExecutionCursor,
   CompactStrategy,
   LogHistoryOptions,
   SeqTagged,
@@ -33,6 +34,8 @@ export interface TimelineHandle {
   read(): TimelineSnapshot;
   /** Read the durable append-only log (uncompacted ground truth). */
   readPersisted(): readonly TimelineEntry[];
+  /** One execution's durable coordinates — the resume seam (never entries). */
+  executionCursor(executionId: string): ExecutionCursor | undefined;
   /** Input entries trailing the last assistant entry (ADR 53). */
   trailingInput(): readonly MessageTimelineEntry[];
   /** Count of input entries in the persisted log (live continuation check). */

@@ -85,6 +85,7 @@ export function fakeTimelineHarness(
     id: "mock:timeline",
     ready: Promise.resolve(),
     read: () => snapshot,
+    executionCursor: () => undefined,
     subscribe: (l) => listeners.subscribe(l),
     trailingInput: () => {
       let lastAssistant = -1;

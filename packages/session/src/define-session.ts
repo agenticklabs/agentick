@@ -477,6 +477,7 @@ function noopTimelineHandle(): TimelineHandle {
   return {
     read: () => ({ entries: [], version: 0 }),
     readPersisted: () => [],
+    executionCursor: () => undefined,
     trailingInput: () => [],
     inputEntryCount: () => 0,
     endTurn: async () => {},
