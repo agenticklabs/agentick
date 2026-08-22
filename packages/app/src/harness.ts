@@ -1877,12 +1877,23 @@ export class AppHarness<P = unknown>
    * wire dispatch gate, which authorizes off the record's principal rather than
    * the rebuilt harness's).
    */
-  private rebuildFromRecord(record: SessionRecord): Promise<SessionHarnessProtocol<P>> {
+  private async rebuildFromRecord(record: SessionRecord): Promise<SessionHarnessProtocol<P>> {
+    // Boot reconciliation (capability half — execution-resume.md §3.1). A record
+    // still `running` at rebuild time is a crash mid-turn: eviction refuses
+    // in-flight sessions, so nothing else leaves `running` behind. Record the
+    // interruption ADDITIVELY (no session-level `interrupted` status) and persist
+    // it BEFORE the rebuild, so the reconstructed session hydrates the honest
+    // record. Uniform across resume AND destroy; the re-drive callback (gated to
+    // the resume/create path) is a separate slice.
+    const reconciled = reconcileInterruptedRecord(record);
+    if (reconciled !== record) {
+      await this.sessionStore.put(reconciled, this.storeCtx());
+    }
     return this.createSessionBody(
       omitUndefined({
-        sessionId: record.id,
-        principal: record.principal,
-        metadata: record.metadata,
+        sessionId: reconciled.id,
+        principal: reconciled.principal,
+        metadata: reconciled.metadata,
       }) as CreateSessionInput<P>,
       false,
     );
@@ -3669,6 +3680,38 @@ function resolveCompiler(
       "or a `CompilerFactory` (produced by `defineCompiler(...)` " +
       "or `reactCompiler(...)` etc.).",
   );
+}
+
+/**
+ * Boot-reconciliation mark (execution-resume.md §3.1). A record still `running`
+ * at rebuild time is a crash mid-turn — eviction refuses in-flight sessions, so a
+ * durable `running` can only be a crash. Record the interruption ADDITIVELY: move
+ * `currentExecutionId` → `interruptedExecutionId`, bump `resumeAttempts`, and set
+ * `status` back to `idle` (the session is sendable again regardless of any later
+ * re-drive decision). Pure — returns the SAME reference unchanged when there is
+ * nothing to reconcile, so the caller can skip the durable write.
+ *
+ * Detection is `running` ONLY, deliberately: `paused` (operator-paused),
+ * `input_required` (blocked on a human), and `hibernated` (evicted) are
+ * legitimate persisted waits, not crashes — do not "complete the matrix" by
+ * folding them in here.
+ */
+export function reconcileInterruptedRecord(record: SessionRecord): SessionRecord {
+  if (record.status !== "running" || record.currentExecutionId === undefined) return record;
+  // Per-EXECUTION crash-loop budget: `resumeAttempts` counts CONSECUTIVE
+  // interruptions of the SAME execution. A resume keeps the execution id, so a
+  // re-crash of a resumed execution has `currentExecutionId === interruptedExecutionId`
+  // → increment; a different execution (a fresh turn after a prior drop) → reset to
+  // 1, so B never inherits A's crash count. Completion clears both (slice 3).
+  const consecutive = record.interruptedExecutionId === record.currentExecutionId;
+  return {
+    ...record,
+    status: "idle",
+    currentExecutionId: undefined,
+    interruptedExecutionId: record.currentExecutionId,
+    resumeAttempts: consecutive ? (record.resumeAttempts ?? 0) + 1 : 1,
+    updatedAt: Date.now(),
+  };
 }
 
 /**

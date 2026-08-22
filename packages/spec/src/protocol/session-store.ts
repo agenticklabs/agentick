@@ -126,6 +126,29 @@ export interface SessionRecord {
   // ─── runtime accounting (framework-owned), hierarchy-aware ───
   /** The in-flight execution's id (`exec:${generateId()}`), or absent when idle. */
   readonly currentExecutionId?: string;
+  /**
+   * The execution a boot-time reconcile found `running` and marked interrupted —
+   * a crash mid-turn (a durable `running` can only be a crash: eviction refuses
+   * in-flight sessions). Set as `currentExecutionId` is cleared and `status` goes
+   * to `idle`; the queryable handle a resume policy keys on. Cleared when the
+   * execution is resumed-to-completion or dropped. See `docs/proposals/v2/execution-resume.md`.
+   *
+   * NOTE (downstream store adapters): persist + round-trip this alongside the
+   * other accounting slots — a resume policy reads it off the reloaded record, so
+   * an adapter that drops it cannot answer "was this session interrupted."
+   */
+  readonly interruptedExecutionId?: string;
+  /**
+   * How many times an interruption of this session has been recorded — the
+   * crash-loop budget a resume policy reads (drop a poisoned execution rather
+   * than re-drive it into the same crash). Bumped by the reconcile.
+   *
+   * NOTE (downstream store adapters): persist + round-trip this — an adapter that
+   * drops it silently resets the crash-loop budget on every reload, defeating its
+   * purpose (a poisoned execution re-drives into the same crash forever).
+   * `KnowifySessionStore` is the live adapter that needs the column.
+   */
+  readonly resumeAttempts?: number;
   /** Number of executions started against this session. */
   readonly executionCount: number;
   /**
