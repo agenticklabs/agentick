@@ -310,6 +310,12 @@ windowing.
 
 ## Hibernate / restore mechanics
 
+> **Superseded by [checkpointing.md](../checkpointing.md) (2026-08-20).** The
+> envelope and the single `saveSession` write are gone: a checkpoint fans
+> `persist(ctx)` out to every `CheckpointCapable` bridge, each flushing its own
+> store, and nothing is assembled in memory. The tier model below is unchanged —
+> only the transport between tier 2 and durability was ever the snapshot.
+
 ```
 Hibernate:
   1. Run hibernate-scope interceptors (defer/veto possible).

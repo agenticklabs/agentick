@@ -34,14 +34,15 @@ interface StateBridge {
   has(key: string): boolean;
   list(): readonly string[];
   subscribe(key: string, listener: () => void): Unsubscribe;
-  exportSnapshot(): Readonly<Record<string, unknown>>;
-  importSnapshot(values: Readonly<Record<string, unknown>>): void;
+  persist(ctx: PersistCtx): Promise<void>;
+  hydrate(ctx: HydrateCtx): Promise<void>;
 }
 ```
 
 - Required field on `HookBridges` — every reconciler ships one.
 - Owned by the session across mounts (survives re-mount).
-- Persisted via the existing session snapshot path.
+- Durable through its OWN store, flushed and reread by the session's
+  checkpoint fan-out ([checkpointing.md](../checkpointing.md)).
 - React hook surface: `useSessionState<T>(key, initial)` — same `useSyncExternalStore` pattern as `useKnob`.
 
 **Why not collapse into KnobBridge.** The model-facing `set_knob` tool is a

@@ -218,7 +218,7 @@ const { tree, iterations } = await compiler.renderTree({ mountId, sessionId: "s_
 await compiler.unmount({ mountId });
 ```
 
-Three callbacks are required. The rest have defined fallbacks, and the two that reject rather than no-op do so because a silent empty answer would be worse than a failure:
+Three callbacks are required. The rest have defined fallbacks, and the one that rejects rather than no-ops does so because a silent empty answer would be worse than a failure:
 
 | Callback         | Required | When omitted            |
 | ---------------- | -------- | ----------------------- |
@@ -226,11 +226,11 @@ Three callbacks are required. The rest have defined fallbacks, and the two that 
 | `unmount`        | yes      | —                       |
 | `renderTree`     | yes      | —                       |
 | `rerender`       | no       | resolves, no-op         |
-| `restore`        | no       | resolves, no-op         |
 | `renderToString` | no       | rejects as unconfigured |
-| `snapshot`       | no       | rejects as unconfigured |
 
-`mount`, `renderTree`, `unmount`, and `rerender` each run as an operation on the shared harness protocol, so they emit `compiler:command:*` envelopes on the bus and journal themselves. Your callbacks stay pure business logic. `renderToString` and `snapshot` delegate directly, without an operation.
+`mount`, `renderTree`, `unmount`, and `rerender` each run as an operation on the shared harness protocol, so they emit `compiler:command:*` envelopes on the bus and journal themselves. Your callbacks stay pure business logic. `renderToString` delegates directly, without an operation.
+
+A compiler holds no durable state, so it carries no checkpoint callbacks: the `useData` cache refetches on resume, and everything else a tree declares is re-declared by the next render.
 
 `iterations` on the result is how many render passes ran before the tree stabilized. Your `renderTree` reports it; the protocol also carries a maximum-iteration ceiling that raises a diagnostic when a tree never settles.
 

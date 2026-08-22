@@ -594,7 +594,7 @@ A signal joins the stream when its execution **is** this turn, or when the emitt
 Three things it deliberately is not:
 
 - **Not execution events.** Only signals fan in. What a child surfaces to its parent's event stream is decided at the harness level (`TickEndForwardDecision`), and a second answer at the wire would be a competing one.
-- **Not durable.** Membership reads the live session registry, so a descendant whose ancestor has been paged out is unreachable and its signals do not arrive — the same limitation `abortExecutionTree`'s walk has, for the same reason: a per-event predicate must not do store reads.
+- **Not durable.** Membership reads the live session registry, so a descendant whose ancestor has been evicted is unreachable and its signals do not arrive — the same limitation `abortExecutionTree`'s walk has, for the same reason: a per-event predicate must not do store reads.
 - **Not the default.** Omitting `fanIn` produces a byte-identical request and byte-identical behavior. A UI built against one turn's frames should not start seeing another's because a tool learned to spawn.
 
 ## Watching a session's living subtree

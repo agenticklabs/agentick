@@ -271,7 +271,7 @@ const child = await session.spawn({ agent: <SubAgent />, initialKnobs: { depth: 
 const handle = await session.spawn({ send: { messages: [{ role: "user", content: "audit" }] } });
 ```
 
-`fork()` is spawn plus a restore of the parent's live snapshot: the child copies every snapshot-capable surface (timeline, knobs, state, gates) and the tick/usage accounting, gets its own id and lineage, and is **always returned unbound** — a fork never auto-sends. From that instant the two diverge; a knob set on one is invisible to the other. This is the isolation primitive behind `skills.run(name, { isolate: true })`.
+`fork()` is four steps: `snapshot()` flushes the parent so its stores are complete as of the fork instant, `spawn` mints a same-image child, every bridge implementing `branch(ctx)` copies the parent's scope onto the child's **at the store layer**, and `restore()` opens the child on that copy. Nothing is serialized through memory, and the child owns its data rather than sharing the parent's. It inherits the parent's id lineage and metadata bag, and is **always returned unbound** — a fork never auto-sends. From that instant the two diverge; a knob set on one is invisible to the other. This is the isolation primitive behind `skills.run(name, { isolate: true })`.
 
 ```ts
 const branch = await session.fork();
@@ -389,6 +389,8 @@ A harness opts in by implementing `persist(ctx)` / `hydrate(ctx)` — the timeli
 
 A rejected `persist` rejects `snapshot()`. That is deliberate: a failed flush must never be followed by an unmount, or the un-flushed tail becomes the framework's fault.
 
+Add `branch(ctx)` beside them and the harness joins [`fork()`](#spawn-fork-lineage) too — same shape, one more step: copy `ctx.fromSessionId`'s scope onto this session's, in your own store.
+
 Both are commands, so the hook quartet falls out for free — `onBeforeSessionSnapshot` can veto (which is how a pin holds a session open against the eviction sweep), and the restore pair mirrors it.
 
 ```ts
@@ -415,8 +417,7 @@ const { tree, input, request } = await session.dryRun();
 | `request` | provider-native      | what would go on the wire           |
 
 Nothing is sent, no timeline entry is written, and the tick counter does not
-move — two consecutive dry runs leave `snapshot()` byte-identical, which is what
-`@agentick/app`'s `dry-run.spec.tsx` pins.
+move — two consecutive dry runs leave the durable state untouched.
 
 **It is not free of side effects, and assuming otherwise will mislead you.**
 Answering means rendering, so `useData` fetches, suspense resolves, and lifecycle
@@ -522,7 +523,7 @@ The backward half closes the loop: after each tick the session appends the assis
 
 The assistant entry carries more than tokens. Each tick lands `usage`, the `model` that produced it, and the `cost` the loop stamped **at act time** on the entry's metadata — computed once, against the rate card in force then, and never recomputed. A price published tomorrow cannot reprice yesterday's records, because the record holds a number and a `rateRef`, not a recipe.
 
-Those per-tick facts fold upward, per model, at every level: `SendResult.byModel` / `.cost` for the send, the turn-boundary record for the turn, and `SessionRecord.byModel` / `.cost` for the whole session — all of which survive snapshot and restore. The flat `usage` stays beside them because "how many tokens did this burn" is a real question with a real flat answer; it is just not a priceable one, since a session that changes model mixes rate tiers in one bag.
+Those per-tick facts fold upward, per model, at every level: `SendResult.byModel` / `.cost` for the send, the turn-boundary record for the turn, and `SessionRecord.byModel` / `.cost` for the whole session. The session's own accounting rides the durable record rather than any harness store, so a resumed session adopts its totals and accumulates onto them. The flat `usage` stays beside them because "how many tokens did this burn" is a real question with a real flat answer; it is just not a priceable one, since a session that changes model mixes rate tiers in one bag.
 
 Cost is honest about what it does not know. A tick with no rate card is **unpriced**, and an unpriced tick never folds in as zero:
 
@@ -767,7 +768,7 @@ const session = new SessionHarness(journal, bus, inbox, {
 });
 ```
 
-For a session whose orchestration is fundamentally different — a test double, an alternative topology — `defineSession` builds a conforming session from callbacks. `send`, `snapshot` and the state-applicator triple the loop calls are required; every other verb defaults to throwing "not configured", and `timeline` / `knobs` / `state` default to no-op handles. One deliberate exception: `model.current` READS as `undefined` on a model-less callback session — a model-less session is legal, so the documented `if (session.model.current)` guard runs instead of crashing; only `setModel` / `setTarget` reject.
+For a session whose orchestration is fundamentally different — a test double, an alternative topology — `defineSession` builds a conforming session from callbacks. `send` and the state-applicator triple the loop calls are required; every other verb defaults to throwing "not configured" (`snapshot` is the exception — omit it and the flush is a no-op, since a callback session may have nothing to drain), and `timeline` / `knobs` / `state` default to no-op handles. One deliberate exception: `model.current` READS as `undefined` on a model-less callback session — a model-less session is legal, so the documented `if (session.model.current)` guard runs instead of crashing; only `setModel` / `setTarget` reject.
 
 ```ts
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
@@ -775,7 +776,7 @@ import { defineSession } from "@agentick/session";
 
 const factory = defineSession({
   send: async () => scriptedHandle,
-  snapshot: () => scriptedSnapshot,
+  snapshot: async () => myStore.flush(),
   applyExecutorResult: async () => ({ appendedEntryIds: [] }),
   applyToolResults: async () => ({ appendedEntryIds: [] }),
   appendEntry: async () => ({ appendedEntryIds: [] }),
@@ -826,18 +827,18 @@ const session = factory({
 
 ### Session verbs
 
-| Method                          | Returns                                                        |
-| ------------------------------- | -------------------------------------------------------------- |
-| `status`                        | What the session is doing now — the live twin of the record    |
-| `send(input)`                   | `Promise<SessionExecutionHandle>` — `.result` + `.events()`    |
-| `spawn(input)`                  | A child session, or its handle when `send` is supplied         |
-| `fork(input?)`                  | An unbound same-image child with the parent's state copied     |
-| `reflect(input)`                | One more turn with an appended instruction; `output` → `data`  |
-| `snapshot()` / `restore(input)` | Capture / reapply every snapshot-capable layer                 |
-| `close(opts?)`                  | Teardown; `{ reason: "evicted" }` is paging, not an end        |
-| `channel(name)`                 | Per-channel publish/subscribe plus correlated request/response |
-| `interceptEscalation(handler)`  | Mediate a descendant's input request; returns an `Unsubscribe` |
-| `use` / `guard` / `hook`        | Session-scoped interceptors and the command hook surface       |
+| Method                         | Returns                                                        |
+| ------------------------------ | -------------------------------------------------------------- |
+| `status`                       | What the session is doing now — the live twin of the record    |
+| `send(input)`                  | `Promise<SessionExecutionHandle>` — `.result` + `.events()`    |
+| `spawn(input)`                 | A child session, or its handle when `send` is supplied         |
+| `fork(input?)`                 | An unbound same-image child with the parent's state copied     |
+| `reflect(input)`               | One more turn with an appended instruction; `output` → `data`  |
+| `snapshot()` / `restore()`     | Flush every store-backed layer / read it back; both `void`     |
+| `close(opts?)`                 | Teardown; `{ reason: "evicted" }` is a checkpoint, not an end  |
+| `channel(name)`                | Per-channel publish/subscribe plus correlated request/response |
+| `interceptEscalation(handler)` | Mediate a descendant's input request; returns an `Unsubscribe` |
+| `use` / `guard` / `hook`       | Session-scoped interceptors and the command hook surface       |
 
 ### `@agentick/session/testing`
 
@@ -863,14 +864,14 @@ const session = factory({
 - **Session verbs are not wire-addressable.** They are hookable and journaled, but `SendInput` carries live handlers, an executor and a signal, so no wire command is declared. A designed serializable subset (`messages` + `maxTicks` + `stream`) is future work; the tool-dispatch verb is the natural first one to land.
 - **The telemetry namespace whitelabels session-owned spans only.** App-shared layers carry their own default prefix. Reading the namespace from fiber context is pending; nesting is unaffected either way.
 - **Inbox dispatch is narrow.** A session handles escalation and task-wake messages. Every other message type rejects.
-- **The per-store cursor manifest is not built.** A `SessionRecord` has a slot reserved for per-store cursors, but nothing populates it, so a cross-store restore manifest is still a separate step from in-process `snapshot()`/`restore()`.
+- **Restore is latest-only, and there is no consistency point across harnesses.** Each harness reads the newest state in its own store; independent stores mean a crash can leave one flushed and another not, and point-in-time restore of a whole session is a stated non-goal. A journal-derived store is the opt-in answer for a layer that needs one.
 - **`setSessionMeta` targets live sessions only.** Editing a closed session's record needs a read-modify-write path against the store.
 - **A queued send is invisible to clients.** `onBusy: "queue"` defers a racing send server-side and `"steer"` enqueues onto a per-execution queue, but neither is readable, so a UI cannot show what a send is waiting behind or cancel it. The first consumer to port onto `onBusy` had to drop its queued-messages bar. Closing it wants the `timeline:history` shape — a grant-gated declared read plus `added`/`removed` notifications — and a `dequeue` verb beside it.
 - **`defineSession` has no inbox dispatch.** A callback-built session stores an escalation interceptor for protocol conformance but never consults it, and every inbox message rejects. Escalation and task-wake work on `SessionHarness` only.
 
 ## Verified by
 
-- `@agentick/app` `src/__tests__/dry-run.spec.tsx` — the tree and the model input reach the caller, two dry runs leave `snapshot()` byte-identical, and `compile()` is the rung that needs no model.
+- `@agentick/app` `src/__tests__/dry-run.spec.tsx` — the tree and the model input reach the caller, and `compile()` is the rung that needs no model.
 
 - `src/__tests__/reflect.spec.tsx` — compaction folding through a real `timeline: { compact: rollingSummary(…) }` with its usage and progress frames, and the structured half: an `output` schema returning a validated object, the terminal tool being the only thing a reflection advertises and its choice forced, the native-`json_schema` target taking the directive with no tool at all, `ResponseValidationError` on a violating reply, `StructuredOutputIncomplete` on a reply that never calls the tool, and text-mode carrying neither tools nor directive.
 - `src/__tests__/conformance.spec.ts` — the protocol conformance suite against a real journal, bus and inbox.
@@ -882,9 +883,8 @@ const session = factory({
 - `src/__tests__/model-facade.spec.ts` — `setModel` swapping the default (the next send uses the new executor), `setTarget` swapping only the target, `onBeforeSessionSetModel` vetoing, a `use` transform and a `guard` veto registered once still applying across an executor swap, the adapter overload via the injected builder, `ModelExecutorBuilderMissingError` without one, identical veto input for both overload forms, and per-send override precedence.
 - `src/__tests__/session-hooks.spec.ts` — hook-name derivation agreement, `onBeforeSessionSend` and `onBeforeSessionAppend` firing on their verbs, and `onAfterSessionSend` seeing the handle.
 - `src/__tests__/snapshot-command.spec.tsx` — the hook quartet: derived names, before/after firing in order around a void `snapshot()`, the before-hook vetoing the capture, and the restore pair firing around `restore()`.
-- `src/__tests__/snapshot-restore.spec.tsx` — the compiler-level bridge fold: data cache, knob and state round-trip, rehydration onto a fresh mount, and survival of a JSON round-trip.
 - `src/__tests__/timeline-durability.spec.ts` — hydration from an injected store before the first render, the flush barrier at execution end, and a buffered write failure rejecting the send with `TimelineWriteFailed` and landing `status: "failed"`.
-- `src/__tests__/kill-resume.spec.ts` + `src/testing/kill-resume-acceptance.tsx` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings, which also proves a `snapshot()` → `restore()` transplant into a fresh storeless session.
+- `src/__tests__/kill-resume.spec.tsx` + `src/testing/kill-resume-acceptance.ts` — the end-to-end resume acceptance run against memory, filesystem and Postgres backings: a completed turn surviving a fresh open on the same backing, the hydrated turn reaching the MODEL rather than only the timeline, `send()` not resolving before the store holds the turn, a delete leaving the next open empty, and `restore()` re-reading the store idempotently.
 - `src/__tests__/session-store.spec.ts` — `InMemorySessionStore` under the full store conformance suite: round-trip, upsert, filtering by app / status / parent / recency, enumerate-all, delete, and prune-of-closed.
 - `src/__tests__/escalation.spec.ts` — a task's `ctx.elicit` resolving terminally at its root session with the answer round-tripping and the task state machine flipping, the interactive-versus-detached guard, a real two-session chain forwarding by `parentSessionId`, interception in all three modes (answer without touching the client, deny by throwing, fall through), lineage order in the forwarded envelope, and a forked child's escalation composing the same chain across processes.
 - `src/__tests__/task-wake.spec.ts` — an unobserved completion synthesizing a real journaled execution with task-wake provenance, an in-band result read consuming the wake so nothing is synthesized, and a wake arriving during a running execution steering into it.
@@ -897,5 +897,5 @@ const session = factory({
 - `src/__tests__/channel-snapshot.spec.ts` — a channel opening on its current frame, an unowned channel reporting none, and a pending ask seeding the elicitation channel.
 - `src/__tests__/status-channel.spec.ts` — a real execution bracketed by `running` → `idle` on `session:channel:status` (the running frame naming the turn in flight), `closed` on teardown, the status channel opening on the CURRENT status mid-execution, and `setStatus` calling back on a change but not on a same-value write; the ending riding the end transition for all three outcomes and never the snapshot; and blocked-on-input pausing a running session, resuming on the answer, leaving an idle session alone, and losing to the ending when a turn finishes with an ask outstanding.
 - `src/__tests__/define-session.spec.ts` — the factory marker, delegation to the supplied callbacks, helpful errors from unconfigured verbs, and no-op handles resolving cleanly.
-- `src/__tests__/usage-cost.spec.tsx` — the accounting record end to end: a two-model session partitioned into two `byModel` buckets whose usage sums to the flat total, an unidentified model keyed `unknown` rather than dropped, and the honesty rule in four forms (an unpriced session rolling up `partial` and never a zero `complete`, a mixed run's amount being the priced subset only, a foreign-currency tick counted unpriced in the total yet fully priced in its own bucket, and a session with no usage carrying no `cost` key at all). Plus `cost` + `model` stamped on the assistant entry (and absent, not zero, when unpriced), `SendResult` lifting the loop's own rollup, the turn-boundary record carrying the session-folded one, `byModel` + `cost` round-tripping a snapshot — including a restore that CLEARS a stale cost — and the wire projection: a priced tick's `tick` event carrying `cost` + `model` computed from the target's declared rates, an unpriced one carrying no `cost` key. The metrics mirror gets its own suite against a spy meter: a priced tick recording the cost histogram in micro-units labelled by model + currency, one observation per tick and per model rather than a pre-aggregate, an unpriced tick counting `unpriced` and recording NO cost observation, a mixed run emitting both, token histograms carrying only the kinds actually reported (an unreported kind emitting nothing, not a zero), a tick with no usage emitting nothing at all, labels holding to the bounded set — never `rateRef`, never a session / execution / tick id — the same mirror landing on the REAL loop path (the `.fx` twin, not just the public facade), and a session with no meter wired emitting nothing while its durable accounting lands unchanged.
+- `src/__tests__/usage-cost.spec.tsx` — the accounting record end to end: a two-model session partitioned into two `byModel` buckets whose usage sums to the flat total, an unidentified model keyed `unknown` rather than dropped, and the honesty rule in four forms (an unpriced session rolling up `partial` and never a zero `complete`, a mixed run's amount being the priced subset only, a foreign-currency tick counted unpriced in the total yet fully priced in its own bucket, and a session with no usage carrying no `cost` key at all). Plus `cost` + `model` stamped on the assistant entry (and absent, not zero, when unpriced), `SendResult` lifting the loop's own rollup, the turn-boundary record carrying the session-folded one, `byModel` + `cost` surviving evict → resume off the durable record (a second turn summing onto the first's totals rather than restarting from zero), and the wire projection: a priced tick's `tick` event carrying `cost` + `model` computed from the target's declared rates, an unpriced one carrying no `cost` key. The metrics mirror gets its own suite against a spy meter: a priced tick recording the cost histogram in micro-units labelled by model + currency, one observation per tick and per model rather than a pre-aggregate, an unpriced tick counting `unpriced` and recording NO cost observation, a mixed run emitting both, token histograms carrying only the kinds actually reported (an unreported kind emitting nothing, not a zero), a tick with no usage emitting nothing at all, labels holding to the bounded set — never `rateRef`, never a session / execution / tick id — the same mirror landing on the REAL loop path (the `.fx` twin, not just the public facade), and a session with no meter wired emitting nothing while its durable accounting lands unchanged.
 - Spawn, fork and lifecycle operations are verified where both layers live, in [@agentick/app](../app): `spawn-hardening.spec.tsx` (the depth ceiling and `SpawnDepthExceededError`, `spawnPath` on the record / event scope / handle stream, parent close and abort disposing children), `fork.spec.tsx` (state copy, lineage, divergence), `lifecycle-operations.spec.tsx` (the linked spawn and child-create records, a guard vetoing at either layer, the bus-only close op and its `"evicted"` provenance from both the idle sweep and the memory cap), `set-model.spec.tsx` (the swap end-to-end through `createApp`), `session-principal-lifecycle.spec.tsx` (spawn and fork inheriting the principal), and `cascading-abort.spec.tsx` (`abort({ cascade: true })` over the live subtree deepest-first with nothing disposed, a plain abort leaving a session-scoped child alone but tearing down one spawned inside the aborted execution, and the `originExecutionId` edge `abortExecutionTree` walks). The wire gate engaging on the stamped principal is pinned in [@agentick/transport](../transport) (`session-principal.spec.ts`).

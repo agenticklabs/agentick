@@ -1,7 +1,11 @@
 # Checkpointing — the session is its stores
 
-**Status:** ratified (2026-08-20 judge pass — §8's three open points resolved
-into the body; build-ready). Delta on
+**Status:** implemented — P1–P4 landed on `feat/checkpointing` (#311):
+`97800b8fc` (spec + session: `CheckpointCapable`, the hook fold), `6e6e982d8`
+(timeline / knobs / state / store migrations + `BranchCapable`), `4521f8939`
+(eviction is a checkpoint; the paged tier deleted), `73066ed83` (the sweep —
+value-snapshot apparatus deleted). Ratified 2026-08-20 (judge pass — §8's three
+open points resolved into the body). Delta on
 [`data-layer-plan.md`](data-layer-plan.md) — this doc does not compete with the
 plan; it **promotes Phase 4 (the manifest sweep) and extends it with two
 decisions the plan left open**: eviction unification (§4) and the elimination of

@@ -295,10 +295,10 @@ and the three React components are green.
   sibling proceeds; `bridge.harness` is a working guard-registration handle;
   the bare bridge (no `runDispatch`) still dispatches directly and exposes
   `invoker()`.
-- `src/__tests__/bridge.spec.ts` (10 tests) — declare / list / dispatch,
+- `src/__tests__/bridge.spec.ts` (7 tests) — declare / list / dispatch,
   re-declaration aborting the prior controller, unknown-id dispatch error,
-  metadata propagation onto the ctx, subscriber notification, and
-  export/import snapshot with pending → live promotion.
+  metadata propagation onto the ctx, subscriber notification, and the
+  unsubscribe a declare hands back.
 - `src/__tests__/scheduler.spec.ts` (4 tests) — cron expression evaluation,
   macro handling, live re-evaluation as intents change, and clean detach.
 - `src/react/__tests__/components.spec.tsx` (4 tests) — `<Cron>` / `<Webhook>`

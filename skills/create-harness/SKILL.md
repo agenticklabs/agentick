@@ -52,7 +52,7 @@ Read these end-to-end before writing code. They are the contract.
    - `src/__tests__/integration-with-compiler.spec.tsx` — real-`CompilerHarness` integration
    - `package.json` — `sideEffects`, dual subpaths, optional react peer dep
 
-9. **`packages/state/`** — Second reference. Differs from knobs in: persistence layer (state survives `serialize`/`restore`), simpler async surface. Read for the snapshot/restore contract.
+9. **`packages/state/`** — Second reference. Differs from knobs in: a scope-partitioned store behind the sync cache, simpler async surface. Read for the checkpoint contract (`persist` / `hydrate` / `branch`).
 
 10. **`packages/timeline/`** — Third reference. Differs in: large async surface (append, projection, two-tier log), strategies file (`strategies.ts`) for pluggable behavior. Read if your harness has compositional internals.
 
@@ -101,18 +101,37 @@ Two augmentation patterns:
 
 Default to the handle pattern unless the harness genuinely has nothing to hide. The handle gives you room to add internal lifecycle without breaking adopters.
 
-### Q4. Does it need snapshot/restore?
+### Q4. Does its state need to survive the process?
 
-If state must survive `app.serialize()` / `app.restore()` (i.e., session lives longer than the process), implement `SnapshotCapable`:
+If so, give the harness its OWN store and implement `CheckpointCapable`:
 
 ```ts
-exportSnapshot(): unknown;
-importSnapshot(snapshot: unknown): void;
+persist(ctx: PersistCtx): Promise<void>; // flush write-behind to YOUR store
+hydrate(ctx: HydrateCtx): Promise<void>; // read YOUR store, latest, by session scope
 ```
 
-Per ADR 27, the framework iterates `HookBridges` generically and feature-detects `SnapshotCapable` — no hardcoded slot names. If you implement it, your harness participates automatically.
+No value crosses the seam. The framework iterates `HookBridges` generically and
+feature-detects the pair (no hardcoded slot names, ADR 27), sequences the
+fan-out, and never sees your state. A rejected `persist` aborts the caller's
+eviction; a rejected `hydrate` fails the resume.
 
-Skip it for transient state (per-execution caches, in-flight connection tracking).
+Add `branch(ctx: BranchCtx): Promise<void>` (`BranchCapable`) if `session.fork()`
+should carry your state: copy `ctx.fromSessionId`'s scope onto your own, at the
+store layer, and let the fork's `hydrate` open the child on the copy.
+
+**The store must outlive the session.** A store constructed per harness leaves
+with the evicted session, and `hydrate` finds nothing when it is rebuilt. Build
+it ONCE per app and partition by harness scope — the namespace slot's `appScope`
+arm (`registerNamespaceSlot("x", { appScope })`) is that shape, and an adopter's
+injected store merges over it.
+
+The ctx carries no `reason`: hooks are blind to the trigger so that evict,
+restart and crash stay one recovery path. Policy that DOES need the trigger goes
+on the lifecycle seams instead — `installer.hook({ onBeforeSessionClose })` sees
+`reason: "evicted"`, which is where pinning, draining and audit live.
+
+Skip both for transient state (per-execution caches, in-flight connection
+tracking) and for state that a re-render re-declares.
 
 ### Q5. Does it need a `/react` subpath?
 
@@ -304,9 +323,8 @@ export interface MyThingHarnessProtocol {
   set(input: MyThingSetInput): Promise<void>;
   reset(input: { readonly id: string }): Promise<readonly ContentBlock[]>;
 
-  // Optional: snapshot/restore (SnapshotCapable feature detection).
-  exportSnapshot(): Readonly<Record<string, string>>;
-  importSnapshot(snapshot: Readonly<Record<string, string>>): void;
+  // Optional: the construction seed (`withMyThing({ initial })`).
+  seed(values: Readonly<Record<string, string>>): void;
 }
 ```
 
@@ -425,15 +443,10 @@ export class MyThingHarness extends BaseHarness<"my-thing"> implements MyThingHa
     );
   }
 
-  // ─────────── Snapshot / restore (optional — implements SnapshotCapable) ───────────
+  // ─────────── Construction seed ───────────
 
-  exportSnapshot(): Readonly<Record<string, string>> {
-    return Object.fromEntries(this.values);
-  }
-
-  importSnapshot(snapshot: Readonly<Record<string, string>>): void {
-    this.values.clear();
-    for (const [k, v] of Object.entries(snapshot)) this.values.set(k, v);
+  seed(values: Readonly<Record<string, string>>): void {
+    for (const [k, v] of Object.entries(values)) this.values.set(k, v);
     this.listCache = null;
     for (const l of this.wildcards) l();
   }
@@ -544,7 +557,7 @@ export interface MyThingHandle {
 }
 ```
 
-Structural subset of the protocol. Hides `id`, `ready`, `close`, `exportSnapshot`, `importSnapshot`. No runtime wrapping — the harness class IS a structural `MyThingHandle` because it satisfies the same method shape.
+Structural subset of the protocol. Hides `id`, `ready`, `close`, and the checkpoint hooks. No runtime wrapping — the harness class IS a structural `MyThingHandle` because it satisfies the same method shape.
 
 ### Step 5. Extension factory (`src/extension.ts`)
 
@@ -570,7 +583,7 @@ export function withMyThing(options: WithMyThingOptions = {}): SessionExtension 
       await harness.ready;
 
       if (options.initial) {
-        harness.importSnapshot(options.initial);
+        harness.seed(options.initial);
       }
 
       installer.registerNamespace("myThing", harness);
@@ -692,18 +705,17 @@ export function runMyThingHarnessConformance(deps: MyThingHarnessFactoryDeps): v
     });
   });
 
-  describe("MyThingHarness — snapshot/restore", () => {
-    it("export → import round-trips", async () => {
-      const h1 = await deps.make();
+  describe("MyThingHarness — checkpoint", () => {
+    it("persist → hydrate round-trips through the harness's OWN store", async () => {
+      const store = deps.makeStore();
+      const h1 = await deps.make(store);
       await h1.set({ id: "a", value: "1" });
-      await h1.set({ id: "b", value: "2" });
-      const snap = h1.exportSnapshot();
+      await h1.persist(ctx("sess-1"));
       await h1.close();
 
-      const h2 = await deps.make();
-      h2.importSnapshot(snap);
+      const h2 = await deps.make(store);
+      await h2.hydrate(ctx("sess-1"));
       expect(h2.get("a")).toBe("1");
-      expect(h2.get("b")).toBe("2");
       await h2.close();
     });
   });
@@ -771,7 +783,7 @@ export function stubMyThingHarness(initial: Readonly<Record<string, string>> = {
     new LocalInbox(),
   );
   if (Object.keys(initial).length > 0) {
-    harness.importSnapshot(initial);
+    harness.seed(initial);
   }
   return harness;
 }
@@ -835,7 +847,7 @@ Skip if this is a local module inside an adopter's app — see `create-extension
 
 4. **`list()` returning a fresh array.** Symptom: React infinite re-renders. Always cache; invalidate on mutation.
 
-5. **Hardcoding the slot name in snapshot/restore.** ADR 27 mandates generic iteration with `SnapshotCapable` feature detection. Implement `exportSnapshot`/`importSnapshot` on the harness; the framework finds them. Don't try to hook into snapshot/restore explicitly — the framework iterates `HookBridges` for you.
+5. **Hardcoding the slot name in the checkpoint fold, or returning a payload from it.** ADR 27 mandates generic iteration with `CheckpointCapable` feature detection. Implement `persist`/`hydrate` on the harness and flush to your OWN store; the framework finds them and sequences the fan-out. It never sees your data, and there is no blob to put it in.
 
 6. **React subpath depending on the harness package depending on `compiler-react`.** Cycle. The harness package depends on `@agentick/compiler-react` (for `useBridges`); `@agentick/compiler-react` MUST NOT depend on the harness package. Per ADR 27, compiler-react has no harness deps.
 

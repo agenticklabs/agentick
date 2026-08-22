@@ -154,9 +154,11 @@ Sync reads always traffic in `TCache`; the store only ever sees `TStore`. `seedS
 
 `hydrate` needs `reconstruct` and throws a clear error if the view was built without one.
 
+It merges by default — the store's records overlay the cache, so a live record the store has not seen yet survives. Pass `{ replace: true }` to make the store the **authority** instead: the cache becomes exactly the query projection, and keys the projection lacks are dropped and pinged alongside the loaded ones. The drop is cache-only; those records were never in the queried partition, so there is nothing to delete. That is the option a checkpoint `hydrate(ctx)` wants — the store is what survived, the cache is whatever this instance happened to hold.
+
 ### The durability barrier
 
-Store writes are fire-and-forget on the hot path so a durable-write failure can never crash a mutation whose read path already reflects it. But they are **tracked**, not swallowed: `flush()` awaits every pending write and surfaces the first latched failure, then clears it. That is the seam a graceful shutdown or hibernate needs. It's a no-op against the in-memory default, where writes settle synchronously.
+Store writes are fire-and-forget on the hot path so a durable-write failure can never crash a mutation whose read path already reflects it. But they are **tracked**, not swallowed: `flush()` awaits every pending write and surfaces the first latched failure, then clears it. That is the seam a harness's `persist(ctx)` is: a checkpoint is this barrier, and a failure surfacing here is what stops the caller unmounting over an un-flushed tail. It's a no-op against the in-memory default, where writes settle synchronously.
 
 ## `LogView` — the sync projection of a log
 
@@ -313,19 +315,19 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 
 ### `View`
 
-| Member                                                    | Behavior                                                     |
-| --------------------------------------------------------- | ------------------------------------------------------------ |
-| `View.collection(store, keyOf)`                           | Pure-mirror factory; `project`/`reconstruct` are identity    |
-| `new View(config)`                                        | Full config, including `project` and optional `reconstruct`  |
-| `getSync(key)` / `hasSync(key)` / `listSync()`            | Sync reads; never touch the store                            |
-| `write(item, ctx)`                                        | Cache → store → ping + typed change                          |
-| `deleteSync(key, ctx)`                                    | `boolean`; idempotent; emits a removal on a real delete      |
-| `replace(items, ctx)`                                     | Bulk; cache-first, batched pings, **change-silent**          |
-| `hydrate(q, ctx)`                                         | Merges `store.query`; returns loaded keys; **change-silent** |
-| `seedSync(item, opts?)`                                   | Cache-only adopt: no store write, no change; `{ ping? }`     |
-| `subscribe(key, fn)` / `subscribeAll(fn)` / `notify(key)` | The render-ping seam                                         |
-| `onChange(fn)`                                            | The typed delta seam                                         |
-| `flush()`                                                 | Awaits pending writes; throws then clears a latched failure  |
+| Member                                                    | Behavior                                                                                        |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `View.collection(store, keyOf)`                           | Pure-mirror factory; `project`/`reconstruct` are identity                                       |
+| `new View(config)`                                        | Full config, including `project` and optional `reconstruct`                                     |
+| `getSync(key)` / `hasSync(key)` / `listSync()`            | Sync reads; never touch the store                                                               |
+| `write(item, ctx)`                                        | Cache → store → ping + typed change                                                             |
+| `deleteSync(key, ctx)`                                    | `boolean`; idempotent; emits a removal on a real delete                                         |
+| `replace(items, ctx)`                                     | Bulk; cache-first, batched pings, **change-silent**                                             |
+| `hydrate(q, ctx, opts?)`                                  | Merges `store.query` (`{ replace: true }` — store wins); returns loaded keys; **change-silent** |
+| `seedSync(item, opts?)`                                   | Cache-only adopt: no store write, no change; `{ ping? }`                                        |
+| `subscribe(key, fn)` / `subscribeAll(fn)` / `notify(key)` | The render-ping seam                                                                            |
+| `onChange(fn)`                                            | The typed delta seam                                                                            |
+| `flush()`                                                 | Awaits pending writes; throws then clears a latched failure                                     |
 
 ### `LogView`
 
@@ -337,7 +339,8 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 | `subscribe(fn)`                     | Keyless render pings                                         |
 | `replaceProjection(entries, meta?)` | Compaction target — projection tier only                     |
 | `resetProjection()`                 | Re-mirror the durable log; clears provenance                 |
-| `hydrate(ctx)`                      | Load the durable log into both tiers (resume)                |
+| `seed(entries)`                     | Install genesis into both tiers; never written back          |
+| `commitCompaction(…)`               | Fold the projection and append what it produced              |
 | `flush()`                           | Write-behind barrier; throws the wrapped error, left latched |
 | `lastCompaction()`                  | Provenance of the current projection divergence              |
 
@@ -371,8 +374,8 @@ Because the probes are closures, they accommodate shapes the skeleton knows noth
 
 - `src/__tests__/memory-collection.spec.ts` — upsert and round-trip, unknown-key `undefined`, query filtering, fresh-array `list`, delete reporting prior existence, `prune` presence as a capability signal and its predicate selection; and the full `onChange` seam: insert and overwrite deltas, removal carrying `prev`, silence on a no-op delete and on `prune`, unsubscribe, listener-error isolation, registration-order fan-out.
 - `src/__tests__/memory-log.spec.ts` — append ordering and one `seq` per entry strictly increasing and never reused, empty-batch no-op, defensive-copy reads, per-log isolation, `keys` enumerating only non-empty logs, idempotent `delete`, configurable backend, `history` paging by inclusive `fromSeq` plus `limit`, the inclusive `toSeq` upper bound and the tail anchor (a bare `limit` reads the last n, and the seam query carries the same window), and `prune` by absolute `seq` including that a pruned-to-empty log does not restart its counter.
-- `src/__tests__/view.spec.ts` — sync reads reflecting a write with no await, keyed and wildcard pings, add-then-update by cache presence, `undefined`-value classification, idempotent `deleteSync`, change-silent `hydrate` overlay and `replace` union-ping, the fused case (write persists only the projected record, `seedSync` writes no store and emits no change, `seedSync` pings only with `{ ping: true }`, `hydrate` reconstructs wrappers and throws without `reconstruct`), the `flush` barrier awaiting a deferred write and surfacing then clearing a failure, and that a view drives a store implementing **only** `query`/`mutate`.
-- `src/__tests__/log-view.spec.ts` — both tiers and both versions advancing on append, subscriber pings, snapshot reference stability until mutation, write-behind memory authority with the store landing at `flush` (and `flush` idempotent, and a failed batch surfacing the wrapped error left latched), write-through durability without an explicit flush and rejecting `append` on failure, `replaceProjection` leaving `persisted` untouched, `resetProjection` re-mirroring and clearing provenance, `hydrate` replacing both tiers, and export/import round-trips in both modes.
+- `src/__tests__/view.spec.ts` — sync reads reflecting a write with no await, keyed and wildcard pings, add-then-update by cache presence, `undefined`-value classification, idempotent `deleteSync`, change-silent `hydrate` overlay and `replace` union-ping, `hydrate({ replace: true })` making the store the authority (a cache-only record dropped and pinged, with no store deletion and no change emitted), the fused case (write persists only the projected record, `seedSync` writes no store and emits no change, `seedSync` pings only with `{ ping: true }`, `hydrate` reconstructs wrappers and throws without `reconstruct`), the `flush` barrier awaiting a deferred write and surfacing then clearing a failure, and that a view drives a store implementing **only** `query`/`mutate`.
+- `src/__tests__/log-view.spec.ts` — both tiers and both versions advancing on append, subscriber pings, snapshot reference stability until mutation, write-behind memory authority with the store landing at `flush` (and `flush` idempotent, and a failed batch surfacing the wrapped error left latched), write-through durability without an explicit flush and rejecting `append` on failure, `replaceProjection` leaving `persisted` untouched, `resetProjection` re-mirroring and clearing provenance, and `seed` installing both tiers without writing genesis back to the store.
 - `src/__tests__/idempotent-write.spec.ts` — one effect for a repeated `opId`, distinct `opId`s each passing through, an absent `opId` never deduped, `delete` deduping too, reads never deduped, and the composed backend label.
 - `src/__tests__/journal-projected.spec.ts` — `list` folding the journal while holding no `Map`, `get` picking one folded record, `asOf` time-travel on both, writes as no-ops, and a clear throw when no `journalReader` was threaded.
 - End-to-end proof that these generics back real harnesses lives with those harnesses: [@agentick/tasks](../tasks) and [@agentick/timeline](../timeline) run their own store conformance suites through this skeleton, and the suites in [@agentick/timeline](../timeline) exercise `LogView` under append ordering, write-behind flush, compaction never touching the store, and kill-and-resume.

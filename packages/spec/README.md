@@ -162,6 +162,8 @@ declare const bridge: unknown;
 if (isCheckpointCapable(bridge)) await bridge.persist(ctx);
 ```
 
+`BranchCapable` is the same pattern for `session.fork()`: implement `branch(ctx)` and the fork path calls it, handing you `ctx.fromSessionId` so you can copy that scope onto your own inside your store. Also feature-detected (`isBranchCapable`), also blind to the caller. Skip both interfaces entirely for state a re-render re-declares.
+
 ### `RenderContext` — the facts, not the implementations
 
 The render-**input** twin of `HookBridges`. `HookBridges` carries what a render can call; `RenderContext` carries what is _true_ for the render being produced. Two slots are seeded because the loop and session are their producers and have no package of their own: `contextInfo` (`{ contextWindow?, usedTokens? }`, read by `useContextInfo`) and `activeModel` (`provider` / `modelId` / `capabilities`, read by `useActiveModel` with no dependency on any model package — so a tree can render _for the model it is about to call_).
@@ -503,7 +505,7 @@ Both shapes derive from one underlying run: iterating does not change the summar
 - `src/__tests__/types.spec.ts` — structural assertions across the whole data layer: `EventEnvelope`, `CommandOutcome`, phases, surfaces, verdicts, `Operation`, `EventQuery`, `MessageEnvelope`, the error taxonomies, the default journaling policy, and `StandardSchemaV1`.
 - `src/__tests__/guards.spec.ts` — every narrowing family: content blocks, context entries, event phase and outcome, terminal outcomes, lifecycle kinds, declaration kinds, semantic content, and `hasFeature`.
 - `src/__tests__/rendered-tree.spec.ts` — the compiler-facing shapes (`ContentBlock`, `SemanticNode`, formatter protocol, `RuntimeDeclarations`, `RenderedTree`, `ExecutionResult`, `ExecutionTarget`) and `mergeProviderOptions` semantics.
-- `src/__tests__/compiler-protocol.spec.ts` and `tool-executor-protocol.spec.ts` — mount/render/snapshot I/O, the reconcile-error taxonomy, inbox messages, dispatch and registry I/O, the confirmation flow, and the `DataBridge` / loop / session bridge contracts.
+- `src/__tests__/compiler-protocol.spec.ts` and `tool-executor-protocol.spec.ts` — mount/render I/O, the reconcile-error taxonomy, inbox messages, dispatch and registry I/O, the confirmation flow, and the `DataBridge` / loop / session bridge contracts.
 - `src/__tests__/standard-schema.spec.ts` — `parseJsonWithSchema`: success, JSON-parse failure (`reason: "invalid-json"`, empty issues, `SyntaxError` cause), schema failure (`reason: "schema"` with validator issues), and async validators.
 - `src/__tests__/content-blocks-fold.spec.ts` — exhaustive dispatch in `foldContentBlock` and the explicit fallback in `foldContentBlockWith`.
 - `src/__tests__/tool-result.spec.ts` and `tool-output-bound.spec.ts` — `toContentBlocks` / `normalizeToolResult` / envelope detection; and the output bounder's text, JSON, inline-binary, and recursive paths plus the override, the disable switch, and that truncation is off by default.

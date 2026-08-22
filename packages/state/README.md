@@ -64,7 +64,7 @@ off();
 Both verbs are inbox-addressable at `state:{scopeId}` — `state:set` and `state:delete` — so a message from outside the process runs the identical operation an in-process call would.
 
 > [!IMPORTANT]
-> `get` cannot distinguish "absent" from "present, holding `undefined`" — like `Map.get`. Presence is a `has()` question, and `has()` is a key-membership check all the way down to the stored cell. An `undefined`-valued key survives write-through, `hydrate()`, and export/import as a _present_ key.
+> `get` cannot distinguish "absent" from "present, holding `undefined`" — like `Map.get`. Presence is a `has()` question, and `has()` is a key-membership check all the way down to the stored cell. An `undefined`-valued key survives write-through and `hydrate()` as a _present_ key.
 
 That distinction is why `useSessionState` checks `has()` before seeding, instead of testing the value it reads back.
 
@@ -110,7 +110,7 @@ const app = await createApp(Agent, {
 `persist()` and `hydrate()` are the checkpoint pair the session fans out on snapshot and restore: `persist` awaits the writes still in flight (rejecting if one failed, which aborts the caller's unmount), `hydrate` replaces the read cache with this scope's cells from the store. `branch()` is the fork transport — it copies a source session's partition onto this one at the store layer and leaves the read cache alone, because a fork always follows it with a `hydrate`. Branching into a partition that already holds cells is a no-op, so a retried fork never clobbers a child that has diverged.
 
 > [!WARNING]
-> Values are stored as-is with no serialization contract. A function, a class instance, or a live handle is fine in-process and gone after a real snapshot round-trip. If it has to survive a restart, keep it JSON-shaped.
+> Values are stored as-is with no serialization contract. A function, a class instance, or a live handle is fine in-process and gone once a cell comes back out of a real store. If it has to survive a restart, keep it JSON-shaped.
 
 ## Over the wire
 
@@ -203,7 +203,7 @@ On a `StateHarness` instance, additionally: `onChange(fn)` (typed `ChangeEvent` 
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` — `set` and `delete` emitting `requested → terminal` envelopes, inbox addressability for both verbs, the sync read surface, snapshot round-trip, and the conformance suite including its checkpoint section (persist → hydrate on a fresh instance sharing the store, replace semantics, scope partitioning, persist rejection) and branch section (copying the source scope, leaving the parent untouched, no-op into a non-empty scope, an empty source resolving inert).
+- `src/__tests__/harness.spec.ts` — `set` and `delete` emitting `requested → terminal` envelopes, inbox addressability for both verbs, and the conformance suite: the sync surface, set/subscribe, delete, the construction seed, the checkpoint section (persist → hydrate on a fresh instance sharing the store, replace semantics, scope partitioning, persist rejection) and branch section (copying the source scope, leaving the parent untouched, no-op into a non-empty scope, an empty source resolving inert).
 - `src/__tests__/store-backing.spec.ts` — every `set` / `delete` / `seed` reaching the store, upsert on re-set, `hydrate()` replacing the read cache and pinging subscribers without emitting deltas, a sibling scope's cells staying invisible, cells set on one harness reading back on a second sharing the store, `persist()` surfacing a failed store write, the construction seed upserting over a hydrated cell rather than wiping it, and the `undefined`-value round-trip staying a present key.
 - `src/__tests__/change-stream.spec.ts` — the `onChange` seam: add vs update on `set`, remove on `delete`, nothing for a no-op delete, the presence-based discriminator (`set(undefined)` then `set(value)` reads as add then update), unsubscribe, and multiple projections on one stream.
 - `src/__tests__/integration-with-compiler.spec.tsx` — against the real compiler: `useSessionState` seeding on first render, not overwriting an existing value on remount, surviving unmount → remount, and re-rendering on an external `set`.

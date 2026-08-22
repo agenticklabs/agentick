@@ -452,7 +452,7 @@ Two hydrators ship with the package:
 > [!IMPORTANT]
 > What a hydrator returns is a **seed**, not a write. Genesis entries are never appended, so nothing is written back to the store. A hydrator that returns entries it also appends duplicates the log on every resume — this is the one mistake to know about, and the conformance suite asserts against it.
 >
-> Genesis runs on **create and resume**. It is also skipped for a forked or spawned child, which dates from when a child inherited its parent's conversation through a snapshot payload; that transport is gone, and the replacement is `branch(ctx)` — the child copies the parent's scope in its own store and then genesises over the copy. The session fork path is not wired to it yet (see the gaps below).
+> Genesis runs on **create and resume**, and on a **fork** — the fork path branches the parent's scope onto the child's in the store first (`branch(ctx)`), so the child genesises over its own copy. Only a spawned child skips it: it opens on nothing, so there is no scope to read.
 
 A hydrator that throws fails `createSession` with `TimelineHydrateFailed` — there is no half-hydrated session.
 
@@ -486,6 +486,8 @@ const store = defineTimelineStore({
   history: (key, o) => selectEntryWindow(key, o), // { fromSeq?, toSeq?, limit? }
 });
 ```
+
+A fork branches at this layer and needs no extra verb: the child reads the parent's key and appends it under its own, so the two logs diverge from the fork point with nothing shared. A destination that already holds entries is left alone, which makes the copy idempotent.
 
 `history` is optional in the port but worth implementing: it is what bounded hydration, history paging, and client scroll-back all use. Either way, certify the result with `runTimelineStoreConformance` from `/testing` — the `seq` contract (strictly increasing, never reused, stable across `prune`) is not something types can check.
 
@@ -691,14 +693,13 @@ That enumeration is itself a wire door: `await client.session(id).timeline.comma
 - **`<Timeline>` turn affordances** — trailing-input styling and boundary turn-separators aren't built.
 - **Cursor vs. seq** — the live tail is bus-cursor-ordered while durable history is seq-ordered, and the two are deliberately not unified. Scroll-back grows the head and the fold appends at the tail, so ordinary use never collides; an app that needs an exact interleaving at the seam reconciles it itself.
 - **`useTimeline` has no dedicated suite.** It is exercised through `<Timeline>`, which reads the projection through it; the re-render-on-version-advance path isn't pinned on its own.
-- **Fork does not branch the scope yet.** A snapshot no longer carries the log — the timeline checkpoints to its own store — and `branch(ctx)` is the replacement transport: it copies a source session's scope onto this one so the child opens on its own copy. The harness implements it and it is idempotent by destination, but nothing calls it yet; wiring the session fork path to branch-then-genesis is outstanding, so a fork currently does not carry the parent's conversation.
 - **Per-session definition overrides.** Configuration is app-wide; `createSession` takes no `timeline` override yet.
 - **A guard's `ctx` has no calling principal.** Bridge harnesses aren't principal-stamped, so `ctx.principal` is undefined inside `guards: { history }` and friends — key local rules on `ctx.sessionId`. Cross-principal admission is the wire choke point's job (and is already enforced there), so this bounds how narrow a namespace-local rule can be, not whether tenancy holds.
 - **A read's terminal envelope carries the page.** Operation terminals carry their result, so a large scroll-back page is published to the session bus (journaling is already off for reads). Subscribers on that session see it; another principal cannot. A size-summary projection for read terminals is the fix.
 
 ## Verified by
 
-- `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection invariants, inbox addressability, snapshot round-trip across instances.
+- `src/__tests__/harness.spec.ts` + `conformance.ts` — append/projection invariants, inbox addressability, and the checkpoint contract: the harness is `CheckpointCapable`, the store outlives the harness (`persist` → `hydrate` on a fresh instance), `hydrate` replaces the projection with the scope's contents, a store-less harness does both without effect, and a rejected `persist` propagates so the caller cannot unmount behind it.
 - `src/__tests__/harness-store.spec.ts` — write-behind and write-through, flush barrier and idempotence, hydration on resume, typed store failures, cursored `history()`, `turnBoundaries: false`, and that compaction never touches the store.
 - `src/__tests__/compact-default.spec.ts` — construction-bound default strategy, call-site override, typed rejection with neither, the bare `timeline:compact` verb, verb enumeration.
 - `src/__tests__/definition.spec.ts` — `defineTimeline` identity + non-enumerable brand, inertness (no store touched, no hydrator run), the inline-bag equivalence, and `defineTimelineStore` under the full store conformance suite plus its loud failure on a `fromSeq` query without `history`.

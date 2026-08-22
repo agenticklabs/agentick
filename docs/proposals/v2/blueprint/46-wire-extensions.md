@@ -655,7 +655,7 @@ generic typed primitives from `@agentick/client`).
 in `WireMethods` — `gateway/list_apps`, `gateway/get_app`,
 `app/create_session`, `app/get_session`, `app/list_sessions`,
 `app/run_once`, `app/close`, `session/send`, `session/dispatch`,
-`session/abort`, `session/snapshot`, `session/rebind`,
+`session/abort`, `session/compile`, `session/rebind`,
 `session/close`, `session/respond_to_elicitation`, `subscribe`,
 `unsubscribe`, `auth/refresh`, `auth/completeChallenge`,
 `auth/signOut`, `ping` — get reorganized into framework-supplied

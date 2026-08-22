@@ -145,8 +145,8 @@ app/gateway bridge scoping.
 
 ## 6. Open decisions
 
-- **Snapshot-restore parity** — the server iterates `HookBridges` generically for
-  snapshot/restore via `SnapshotCapable`. Do client sub-handles need an analogous
+- **Checkpoint parity** — the server iterates `HookBridges` generically for
+  persist/hydrate via `CheckpointCapable`. Do client sub-handles need an analogous
   generic capability (e.g. a uniform `close()` so the handle tears down all
   sub-handles)? Leaning: yes, a `Closeable` marker the handle sweeps on `close()`.
 - **Lazy vs eager** — build every registered sub-handle at `makeSessionHandle`, or

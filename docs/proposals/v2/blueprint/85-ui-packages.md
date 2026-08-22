@@ -149,8 +149,9 @@ Live message events (`timeline:append`) already ride the firehose; the only thin
 the firehose can't give you is **history from before you subscribed**. So messages
 = **snapshot bootstrap + delta fold**:
 
-- **Seed** from a timeline snapshot on mount — `session.snapshot()` /
-  `exportSnapshot()` already exist (the timeline is SnapshotCapable).
+- **Seed** from the timeline's own read on mount — `read()` in process,
+  `timeline/history` over the wire. (There is no session-level snapshot value to
+  seed from: `session.snapshot()` is a flush barrier that returns nothing.)
 - **Fold** `timeline:append` (+ compact/replace) deltas demuxed from the firehose.
 
 This is the K8s **list + watch** shape, but with **one** watch (the firehose) and a
@@ -174,7 +175,7 @@ message fold renders appends live and reserves token-by-token for the sender's
 ---
 
 **Historical note — the conversation is the timeline harness** — already an append-only event log
-(a fold), with `exportSnapshot()` (snapshot) and `timeline:append` bus events
+(a fold), with `read()` (the current state) and `timeline:append` bus events
 (deltas). For a **multiplexed / collaborative** UI you must fold the _session's_
 stream (all activity — another client or the agent itself can produce messages),
 NOT your own `send()` handle. `handle.events()` covers one execution; the UI's
@@ -186,7 +187,7 @@ façade that mirrors `knobsStateView`. This does **not exist yet** and is ADR 85
 **enabling dependency**:
 
 - **Server projection (to build):** the timeline harness publishes its channel —
-  a `snapshot` frame from `exportSnapshot()` on subscribe, then `delta` frames
+  a `snapshot` frame from its current projection on subscribe, then `delta` frames
   from `timeline:append`. This is the exact knobs-state pattern (ADR 73) applied
   to the timeline. It lives in `timeline/src/client/` (façade) + a harness-side
   publisher.

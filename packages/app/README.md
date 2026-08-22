@@ -103,6 +103,8 @@ Every slot takes the same two forms and no third: a `defineX(...)` **definition*
 const app = await createApp(<Agent />, { model, timeline: { store } }); // inline bag
 ```
 
+Omit the store and a store-backed slot still gets one: the namespace builds an **app-scoped** default, once per app, keyed by session underneath. That lifetime is the point — a default that lived on the harness would leave with the evicted session, and the rebuild would hydrate from nothing. Your own store is merged over the default, so injecting one wins.
+
 ### `extensions` — the fully-dynamic escape hatch
 
 Slots are declarative and statically typed. `extensions: []` is the array you build at runtime — conditional composition, a slot-less third party, anything assembled in a loop:
@@ -166,20 +168,29 @@ export function withAuditedTools(): AppExtension {
 
 Session extensions get the same surface plus session identity (`sessionId`, `principal`, `metadata`) and the session-owned bridges (`elicitation`, `tasks`, `resources`); hooks they register detach automatically when their session closes. For host bridges the session constructs _after_ installs run (`timeline`, …), hold `installer.getNamespace` and read at use time, never at install — see the ordering note on `SessionInstaller`.
 
+#### Surviving an eviction — two lanes, and they don't mix
+
+**Your state** rides `CheckpointCapable` on your bridge: implement `persist(ctx)` (flush to your own store) and `hydrate(ctx)` (read your scope back), plus `branch(ctx)` if forking should copy it. Feature detection finds them, so there is nothing to register. The ctx deliberately carries no reason — a hook that could see why it was running would flush differently per trigger, and evict / restart / crash would stop being one path.
+
+**Your policy** rides `installer.hook()` on the lifecycle seams. `onBeforeSessionClose` sees `reason: "evicted"`, which is where pinning (veto it), draining (hold it), and audit belong. That layer knows the trigger precisely because it is the layer allowed to care.
+
+One rule decides whether any of it works: **your store must outlive the session.** A store constructed per harness leaves with the evicted session and `hydrate` finds nothing on the way back. Build it once at app scope and key it by session — the [namespace-slot](#namespace-slots--configuring-a-per-session-capability-from-the-app) `appScope` arm is exactly that shape.
+
 ### Genesis — what a session opens on
 
 A store-bearing namespace carries a `hydrate` seam, and the app is what runs it. Three laws are worth knowing because they are the ones that bite:
 
 - **Genesis completes before the first render.** The first compile already sees the resumed conversation — there is no window where the tree renders against an empty log.
 - **A throwing hydrator fails `createSession`** with its typed error (`TimelineHydrateFailed` for the timeline). There is no half-hydrated session that only explodes at the first `send`.
-- **Genesis runs on create and resume, never on fork or spawn.** A forked child inherits its parent's image directly, so a second genesis would duplicate it.
+- **Genesis runs on create and resume, and on a fork — never on a spawn.** A spawned child opens on nothing, so it has no durable scope to read. A fork branches the parent's scopes at the store layer first, so the child genesises over its own copy.
 
 ```tsx
 const app = await createApp(<Agent />, { model, timeline: { store } });
 
 const a = await app.createSession({ sessionId: "chat-1" }); // genesis runs
 const b = await app.createSession({ sessionId: "chat-1" }); // same id, later process → genesis runs
-const child = await a.spawn(<SubAgent />, { messages }); // inherits; no genesis
+const child = await a.spawn({ agent: <SubAgent /> }); // opens empty; no genesis
+const twin = await a.fork(); // branched copy of a's scopes; genesis over the copy
 ```
 
 Create-is-resume: there is no separate `resume` verb. Opening a session id whose durable log exists rehydrates it. Over the wire, `app/create_session` answers `{ sessionId, status }` — so a client that reopens a thread knows immediately whether it is `running` or `input_required` mid-turn, without waiting for a frame (the live feed after that moment is `session.status` — see [@agentick/client-core](../client-core#is-it-running-right-now)).
@@ -639,14 +650,13 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 
 - **No double-wrap detection.** Pass the same substrate instance to two `createApp({ cluster })` calls and the local bus gets two subscriptions per cluster event — double delivery, with nothing to warn you.
 - **No mid-flight cluster swap.** Replacing a cluster means closing the app and constructing a new one.
-- **Namespace slots carry a name only.** The app pulls a slot's value out at the layer that owns the namespace. Extension-installed namespaces (skills, prompts, tasks, sandbox) still need `extensions: []` rather than a top-level slot.
 - **No per-session namespace override.** Namespace configuration is app-wide; `createSession` takes no `timeline` override.
-- **`onSessionClose` does not fire on eviction.** Paging out is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run.
+- **`onSessionClose` does not fire on eviction.** Leaving memory is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run. Observe evictions on `onBeforeSessionClose` instead, where the reason is `"evicted"`.
 
 ## Verified by
 
 - `src/__tests__/app-harness.spec.tsx` — construction, session lifecycle, close cascade, and the durable store: `listSessions` / `getSessionRecord` read it, records mirror lifecycle and execution accounting (status, `executionCount`, `currentExecutionId`, aggregated usage, close → `closed`), `setSessionMeta` sets the app-owned slots, and ephemeral `runOnce` sessions stay out of the list.
-- `src/__tests__/genesis-lifecycle.spec.tsx` — the app-level namespace slot reaching the session's timeline (definition form and inline bag), the genesis and shaping seams riding it, the zero-config default with no slot, genesis completing before first render, `createSession` failing with the typed error on a throwing hydrator, and the fork/spawn law (no re-genesis) against a resume that does re-run it.
+- `src/__tests__/genesis-lifecycle.spec.tsx` — the app-level namespace slot reaching the session's timeline (definition form and inline bag), the genesis and shaping seams riding it, the zero-config default with no slot, genesis completing before first render, `createSession` failing with the typed error on a throwing hydrator, and the genesis law as amended — a spawn runs none, a fork branches the parent's scope and genesises over the copy, a resume re-runs it.
 - `src/__tests__/lifecycle-operations.spec.tsx` — the spawn and close envelopes end to end: spawn emits both operations with the child-create carrying `{ sessionId, parentSessionId, spawnPath }` and naming the spawn as its parent op, a spawn adds no host-create record, a fork adds snapshot + restore records, a guard veto at either layer creates no child, a spawn-only guard leaves host `createSession` alone, and close stays out of the journal while a veto leaves the session usable.
 - `src/__tests__/hooks-cascade.spec.tsx` — `createApp({ hooks })` firing on dispatch, `createSession({ hooks })` composing app-outer, `onAfter*` transforms flowing through, and no-hooks being behavior-preserving.
 - `src/__tests__/session-eviction.spec.tsx` — `maxActive` evicting the least-recently-active session (LRU order proven via a send that refreshes an older one), `idleTimeout` evicting a quiet session on the sweep, an evicted session reopening with its timeline rehydrated, an in-flight execution never being evicted, an evict→resume reading exactly what a fresh app over the same stores reads, no field of the app retaining the evicted session, and `evictSession` as the manual caller of all of it.

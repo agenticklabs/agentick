@@ -172,7 +172,7 @@ export default defineCompletions({
 { name: "job", required: true, complete: "knowify.jobs" }
 ```
 
-A string is durable and a function is not, so the two forms part ways at the store: a named ref persists verbatim, while an inline resolver moves to the same sidecar `render` lives in and the record keeps `completeRef` — `prompt:<promptName>:<argName>`, derived. A resolver from `defineCompletion(name, fn)` is both at once, and keeps the name it already has rather than being aliased under a derived one. The record also carries `completeRequires` for a dependent resolver, so a composer reading `prompts/list` can grey out the phase slot until a job is chosen instead of issuing a request that cannot succeed. `get(name)` re-joins the split and hands back what you declared. A restored snapshot keeps the refs and the dependencies but not the functions, exactly as it keeps no `render`.
+A string is durable and a function is not, so the two forms part ways at the store: a named ref persists verbatim, while an inline resolver moves to the same sidecar `render` lives in and the record keeps `completeRef` — `prompt:<promptName>:<argName>`, derived. A resolver from `defineCompletion(name, fn)` is both at once, and keeps the name it already has rather than being aliased under a derived one. The record also carries `completeRequires` for a dependent resolver, so a composer reading `prompts/list` can grey out the phase slot until a job is chosen instead of issuing a request that cannot succeed. `get(name)` re-joins the split and hands back what you declared. A library rebuilt from the store keeps the refs and the dependencies but not the functions, exactly as it keeps no `render`.
 
 `definePrompt` (singular) is worth the import here: it types `render`'s `args` from the argument list — required arguments as their value, optional ones as the value or `undefined`, and a schema's inferred output where one is declared. **No schema means the argument is a `string`**, which is MCP's shape on the wire; declare a schema when you want anything else.
 
@@ -326,9 +326,9 @@ withPrompts({ store: new InMemoryPromptStore() }); // the implicit default
 
 The type system enforces the split: the store's record type has no `template` or `render` field, so a function reaching durability is a compile error rather than a discipline. `register` and `update` write the record through and re-attach the content to the sidecar; `remove` drops both; every read that hands out a declaration re-joins the two halves.
 
-- `get` / `has` / `list` stay synchronous, served from a view kept in lockstep with the store. Both the sync read surface and the synchronous snapshot export are load-bearing, so the materialized view is required, not incidental.
-- Snapshot export drops the content **by construction** — it materializes the record slice directly rather than stripping fields.
-- A restored library therefore has declarations without content until you re-register it (or seed from a module source). `invoke` and `render` raise `PromptMissingContent` in the gap.
+- `get` / `has` / `list` stay synchronous, served from a view kept in lockstep with the store. The render pass reads it synchronously, so the materialized view is required, not incidental.
+- The store holds the record slice **by construction** — the content never had a field to reach durability through, so nothing has to be stripped.
+- A library rebuilt from the store therefore has declarations without content until you re-register it (or seed from a module source). `invoke` and `render` raise `PromptMissingContent` in the gap.
 
 This is the one real consequence of `hydrateFromStore()`: it brings back the catalog, not the code. Compose it under a module source and last-wins puts the functions back on top:
 

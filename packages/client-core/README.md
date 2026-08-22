@@ -474,7 +474,7 @@ thrown as — the client rehydrates it above the extension pipeline, before your
 import { SessionNotFoundError } from "@agentick/spec";
 
 try {
-  await client.session("nope").snapshot();
+  await client.session("nope").abort();
 } catch (e) {
   if (e instanceof SessionNotFoundError) {
     console.log(e.sessionId); // fields round-trip, not just the message

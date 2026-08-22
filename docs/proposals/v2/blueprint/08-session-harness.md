@@ -240,6 +240,13 @@ needed.
 
 ### `hibernate` / `restore`
 
+> **Superseded by [checkpointing.md](../checkpointing.md) (2026-08-20).** There
+> is no `SessionSnapshot` and no snapshot value anywhere below. `snapshot()` is
+> a flush barrier returning `void` — it fans `persist(ctx)` out to every
+> `CheckpointCapable` bridge, each flushing its OWN store; `restore()` fans out
+> `hydrate(ctx)` the same way. Eviction is `snapshot()` followed by a close
+> stamped `"evicted"`, and the app retains nothing.
+
 Hibernate releases in-memory resources (unmounts React tree, cancels
 active subscriptions on the supervisor side). Persists a
 `SessionSnapshot`. Restore re-mounts the tree from snapshot, re-registers
@@ -627,6 +634,12 @@ If the session is hibernated when an event arrives, the supervisor calls
 
 ## Persistence integration
 
+> **Superseded by [checkpointing.md](../checkpointing.md).** There is no
+> `saveSession(snapshot)` write and no compiler snapshot: the record carries FSM
+> state, identity and accounting, each harness carries its own data in its own
+> store, and a checkpoint is a `persist` fan-out that returns nothing. Restore
+> rebuilds from the app recipe and fans out `hydrate`.
+
 The session participates in persistence through:
 
 ```
@@ -696,6 +709,11 @@ close during running:
 an Effect Semaphore.
 
 ## SessionSnapshot shape
+
+> **Deleted — see [checkpointing.md](../checkpointing.md) §5.** Kept as the
+> record of what the envelope held and where each part went: identity, status
+> and accounting to the `SessionRecord`; knobs, state and timeline to their own
+> stores; subscription intents and the compiler's own state to re-render.
 
 ```ts
 interface SessionSnapshot {

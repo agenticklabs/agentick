@@ -1,6 +1,6 @@
 # ADR 49 — Stores, not snapshots: the v2 durability model
 
-**Status:** Draft · 2026-07-01
+**Status:** Draft · 2026-07-01 · partially superseded (see below)
 **Builds on:** ADR 14 (State tiers), ADR 26 (Harness API shape), ADR 27
 (Modular built-ins), ADR 32 (Extension shape spectrum), ADR 42 (Slot
 dichotomy), ADR 48 (Layered isolation)
@@ -12,6 +12,15 @@ dichotomy), ADR 48 (Layered isolation)
 declaration)
 **Resolves:** A19 (`PersistenceBackend` shapes — by dissolution), L7
 (idempotency-key growth), narrows E11 (restore version migration)
+
+> **Partially superseded by [checkpointing.md](../checkpointing.md)
+> (2026-08-20).** This ADR's thesis stands and was completed: durability is
+> per-harness stores plus re-render. What it deliberately left alone — "no
+> removal of `SnapshotCapable`", the snapshot value as a read projection and a
+> space-movement transport — is what checkpointing removed. Read every
+> `SnapshotCapable` / `SessionSnapshot` mention below as history; the
+> replacement is `CheckpointCapable` (persist/hydrate, no value across the seam)
+> plus `BranchCapable` for fork.
 
 ## TL;DR
 

@@ -380,7 +380,7 @@ function ErrorCorrection() {
 }
 ```
 
-Ordinary `useState` survives across ticks within a mount. For state that survives hibernate and resume, reach for `useSessionState` from [@agentick/state](../state).
+Ordinary `useState` survives across ticks within a mount. For state that survives eviction and resume, reach for `useSessionState` from [@agentick/state](../state).
 
 And stop the loop from an observation:
 
@@ -647,7 +647,7 @@ import { flush, waitFor } from "@agentick/compiler-react/testing";
 
 **Capability surfaces.** Each capability ships its own `/react` subpath that depends on this package: `<Timeline>` and `useTimeline` from [@agentick/timeline](../timeline), `<Knobs>` and `useKnob` from [@agentick/knobs](../knobs), `useSessionState` from [@agentick/state](../state).
 
-**Model-visible vs. internal state.** `useKnob` is model-visible and model-settable — it surfaces in the knob listing and the model can change it. `useSessionState` survives mounts and hibernate but the model never sees it. Both round-trip through snapshot and restore, and this package iterates the bridges generically to do it — it has no hardcoded knowledge of either slot.
+**Model-visible vs. internal state.** `useKnob` is model-visible and model-settable — it surfaces in the knob listing and the model can change it. `useSessionState` survives mounts and eviction but the model never sees it. Neither is this package's to persist: each hook reads and writes its own harness, and that harness checkpoints to its own store. The compiler holds nothing durable.
 
 **Formatters.** [@agentick/formatters](../formatters) owns the IR-to-string pass. Framing rules — how a section is wrapped, how blocks become text — belong to the formatter, not to the renderer.
 

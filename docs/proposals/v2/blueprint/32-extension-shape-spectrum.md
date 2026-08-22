@@ -57,15 +57,15 @@ the `create-harness` skill is ~900 lines for a reason.
 flows through an Operation (`requested → before → terminal` envelopes),
 landing in both the bus (for observers) and the journal (for audit /
 hibernate / restore). Inbox routing for cross-actor messaging.
-Lifecycle handlers + middleware. Snapshot/restore via
-`SnapshotCapable` feature detection.
+Lifecycle handlers + middleware. Checkpointing via
+`CheckpointCapable` feature detection.
 
 **When you pick it.**
 
 - Mutations should appear on `session.events()` so the model or
   admins can see what happened.
-- The harness state needs to survive hibernate/restore via
-  `exportSnapshot()` / `importSnapshot()`.
+- The harness state needs to survive eviction / restart, which means
+  its own store plus `persist(ctx)` / `hydrate(ctx)`.
 - Adopters may want to swap the backend (Redis-backed knobs, Postgres
   timeline, remote sandbox provider, etc.) — the protocol contract
   enables this.

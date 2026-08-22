@@ -174,7 +174,7 @@ After:
   Any harness package can add /react subpath safely (one-way dep).
 ```
 
-The reconciler accesses bridges via `Object.entries(bridges)` and feature-detection (`SnapshotCapable` marker interface), not via hardcoded slot names. It doesn't know whether a given `HookBridges` happens to have `timeline` on it; it just iterates whatever's there.
+The checkpoint fold accesses bridges via `Object.entries(bridges)` and feature-detection (the `CheckpointCapable` marker interface), not via hardcoded slot names. It doesn't know whether a given `HookBridges` happens to have `timeline` on it; it just iterates whatever's there.
 
 The reconciler still hosts the `InMemoryDataBridge` (the reference `DataBridge` impl) and the `BridgeContext` / `BridgeProvider` / `useBridges` (the React glue). It does NOT host any harness-specific hook or component.
 
@@ -248,59 +248,40 @@ The cycle wall we kept hitting was a symptom: any package reconciler-react depen
 
 ## Implementation specifics
 
-### `SnapshotCapable<TSnapshot>` interface
+### `CheckpointCapable` interface
 
-A marker interface in `@agentick/spec` for harnesses with snapshot capability:
+A marker interface in `@agentick/spec` for harnesses that own durable state:
 
 ```ts
-export interface SnapshotCapable<TSnapshot = unknown> {
-  exportSnapshot(): TSnapshot;
-  importSnapshot(snapshot: TSnapshot, options?: unknown): void | Promise<void>;
+export interface CheckpointCapable {
+  persist(ctx: PersistCtx): Promise<void>;
+  hydrate(ctx: HydrateCtx): Promise<void>;
 }
 ```
 
-Harness protocols extend this when they support snapshot/restore:
+Harness protocols extend this when their state must survive the process:
 
 ```ts
-export interface KnobsHarnessProtocol extends SnapshotCapable<
-  Readonly<Record<string, KnobPrimitive>>
-> {
+export interface KnobsHarnessProtocol extends CheckpointCapable {
   // ...
 }
 ```
 
-### Typed cross-harness snapshot
+No type parameter, because no value crosses the seam: each harness flushes to and reads from its OWN store, and the fold never sees harness state. `BranchCapable.branch(ctx)` is the same shape for the fork path (see [checkpointing.md](../checkpointing.md)).
 
-`ReconcilerSnapshot` uses a mapped type over `HookBridges`:
+### Generic checkpoint iteration
 
-```ts
-export interface ReconcilerSnapshot {
-  // ...
-  readonly bridges: {
-    readonly [K in keyof HookBridges]?: HookBridges[K] extends SnapshotCapable<infer S> ? S : never;
-  };
-}
-```
-
-Augmentation-friendly: every harness that augments `HookBridges` and extends `SnapshotCapable<T>` automatically gets its snapshot type included. No central registry, no manual updates.
-
-### Generic snapshot iteration
-
-Reconciler-harness snapshot/restore:
+There is exactly ONE composition root — the session fold. A harness persists its own state and never folds a sibling's:
 
 ```ts
-async snapshot(input): Promise<ReconcilerSnapshot> {
-  const out: Record<string, unknown> = {};
-  for (const [name, bridge] of Object.entries(state.bridges)) {
-    if (isSnapshotCapable(bridge)) {
-      out[name] = bridge.exportSnapshot();
-    }
+async snapshot(): Promise<void> {
+  for (const bridge of Object.values(this.bridges)) {
+    if (isCheckpointCapable(bridge)) await bridge.persist(ctx);
   }
-  return { ..., bridges: out as ReconcilerSnapshot["bridges"] };
 }
 ```
 
-No hardcoded names. Adding a new harness with snapshot support requires zero reconciler changes.
+No hardcoded names. Adding a new store-backed harness requires zero framework changes.
 
 ### Per-harness `/testing` subpath
 

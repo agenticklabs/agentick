@@ -149,11 +149,10 @@ The framework provides **building blocks**, not opinions.
 | `useKnob()`                    | Model-visible, model-settable reactive state                         |
 | `<Knobs />`                    | Knob section + set_knob tool (default, render prop, or provider)     |
 | `useTimeline()`                | Direct read/write access to session timeline                         |
-| `useResolved()`                | Access resolve data on session restore (Layer 2)                     |
 | `use()` on tools               | Bridge render-time context (React Context, hooks) into tool handlers |
 | `<MCP>`                        | Connect to MCP servers (tools + progressive resource discovery)      |
 | `<Sandbox>`                    | Sandboxed execution (provider-backed, tree-scoped tools)             |
-| ExecutionRunner                | Controls how compiled context reaches model and how tools execute    |
+| `use` / `guard` / `hook`       | Interceptors on any operation — the v2 replacement for a runner bag  |
 | `exposure: ["dispatch"]` tools | Visibility: tool hidden from model, only reachable via dispatch      |
 | `dispatch()`                   | Invoke any tool by name/alias without model involvement (Procedure)  |
 
@@ -334,31 +333,20 @@ Session
 └── Execution 3 ...
 ```
 
-### Execution Runner
+### Interceptors — how execution is customized
 
-An `ExecutionRunner` controls how compiled context is consumed and how tool calls execute. It's an optional `AppOptions` field — when omitted, the default behavior applies (model calls tools via tool_use protocol).
+v1's `ExecutionRunner` bag is `[V1-REPLACED]` (ADR 05, ADR 07): every hook it
+carried is an interceptor on an operation that already exists, registered with
+`use` (middleware), `guard` (admission), or `hook` (the minted command hooks) at
+the app or session layer. `transformCompiled` is middleware on `compile`,
+`executeToolCall` is middleware on tool `dispatch`, and the lifecycle callbacks
+are hooks on the session lifecycle commands. App-level and session-level compose,
+app-outer.
 
-```typescript
-const runner: ExecutionRunner = {
-  name: "repl",
-  transformCompiled(compiled, tools) { ... },   // Transform before model call
-  executeToolCall(call, tool, next) { ... },    // Wrap tool execution
-  onSessionInit(session) { ... },               // Once per session lifecycle
-  onPersist(session, snapshot) { ... },         // Augment snapshot
-  onRestore(session, snapshot) { ... },         // Restore runner state
-  onDestroy(session) { ... },                   // Clean up resources
-};
-
-const app = createApp(MyAgent, { model, runner });
-```
-
-All methods are optional. The `transformCompiled` hook runs per-tick, `executeToolCall` runs per tool call, and lifecycle hooks run at session boundaries. Lifecycle hooks receive `SessionRef` (narrow: `id`, `status`, `currentTick`, `snapshot()`) — not the full `Session`.
-
-Runners are inherited by spawned children. Use `SpawnOptions` (3rd arg to `session.spawn()`) to override:
-
-```typescript
-await session.spawn(Agent, { messages }, { runner: replRunner, model: cheapModel });
-```
+Checkpointing is the same story: a layer that needs durable state implements
+`CheckpointCapable` (`persist`/`hydrate`) against its own store — no payload is
+handed to or returned from any lifecycle hook. See
+`docs/proposals/v2/checkpointing.md`.
 
 ### React-like Reconciler
 

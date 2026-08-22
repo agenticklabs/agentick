@@ -226,7 +226,7 @@ Before declaring done, the user should be able to:
 2. **Trigger the capability** end-to-end (mutate state, run a tool, render the contributor)
 3. **Observe envelopes** on the bus (`session.events({ surface: "my-thing" })`) — only applies to harness path
 4. **Run conformance + tests** green — only applies to published path
-5. **Snapshot/restore round-trip** preserves state — only if the harness implements `SnapshotCapable`
+5. **Checkpoint round-trip** (`persist` → `hydrate`) preserves state — only if the harness implements `CheckpointCapable` over its own store
 
 For UI extensions, start the dev server and exercise the feature in a browser before declaring done. Type checks and unit tests verify code correctness, not feature correctness.
 
@@ -260,7 +260,7 @@ After clarifying with the user, you'll have:
 | Mode                         | Local / Published / Local-now-graduate-later                        |
 | React surface                | Yes / No                                                            |
 | App-scoped or session-scoped | App / Session / Both                                                |
-| Snapshot/restore needed      | Yes / No                                                            |
+| Durable state (own store)    | Yes / No                                                            |
 | Conformance suite            | Required (published) / Recommended (local)                          |
 
 Capture these in your first message back to the user as a checklist of what you'll build. Then go.

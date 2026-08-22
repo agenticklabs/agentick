@@ -45,22 +45,22 @@ light on install; `extensions: []` remains the dynamic escape hatch).
 Every slot accepts `definition | live instance` and carries the
 `hooks:`/`guards:` bags.
 
-| Namespace | Slot (config) | Definition | Genesis | Notes |
-| --- | --- | --- | --- | --- |
-| timeline | `app.timeline` | `defineTimeline({ store?, hydrate?, compact?, writePolicy? })` | `hydrate` — default `hydrateFromStore()` (ADR 49 preserved) | proving instance (D1, incl. slot-registration mechanics); §2.7 bounded projection rides along |
-| skills | `app.skills` | `defineSkills({ store?, hydrate? })` | `hydrate` — default none (explicit) | UNIFIES sources: directory/URL/literal become named hydrators (`hydrateFromDirectory`, `composeHydrators`); tiered catalogs are hydrators reading `ctx.principal` |
-| prompts | `app.prompts` | `definePrompts({ store?, hydrate? })` | `hydrate` — default none | kills the withPrompts-lacks-store asymmetry |
-| tasks | `app.tasks` | `defineTasks({ store?, executor?, hydrate? })` | `hydrate` — default none | `hydrate` = pending-task reload on resume (undefined semantics → adopter policy); lands WITH Family 3's async submit |
-| sessions (registry) | `app.sessions` | `defineSessions({ store?, evict? })` | n/a (registry) | `evict(ctx) ⇒ verdict` turns the idle-eviction sweep into a seam |
-| state | `app.state` | `defineState({ store? })` | `hydrate` — default `hydrateFromStore()` | thin member |
-| knobs | `app.knobs` | `defineKnobs({ store?, hydrate? })` | `hydrate` — default `hydrateFromStore()` | thin member |
-| credentials | `app.credentials` | `defineCredentials({ store? })` | none (async-only, no view — deliberate) | mutations are ops under the redaction law (ADR 92 B) |
-| resources | `app.resources` | `defineResources({ hydrate? })` | `hydrate` — default none | fs is the SOURCE (`resourcesFromDirectory`), store stays memory-default; tree-mounts stay tree concerns |
-| sandbox | `app.sandbox` | `defineSandbox({ provider, bootstrap? })` | `bootstrap(ctx)` — imperative | ENVIRONMENT namespace: no store, no hydrate; `ctx.sandbox` = the live handle; gets the standard `hooks:`/`guards:` bags (its ops are already commands); the ACL permission gate ALIGNS as a shipped built-in guard on those ops (the MCP security-pipeline precedent — domain API stays, enforcement path is one), composing with adopter guards under normal ordering; fork semantics (re-bootstrap vs provider clone) = open D-phase question |
-| elicitation | `app.elicitation` | `defineElicitation({})` | none | bags-only member today (`hooks:`/`guards:` on the elicit op); definition exists for consistency + future policy seams |
-| subscriptions | `app.subscriptions` | `defineSubscriptions({ store?, hydrate? })` | `hydrate` — default none | STORE-BEARING (Ryan 2026-07-27): schedules/registrations that don't survive restart are toys; `hydrate` = reload persisted subscriptions on resume; fires already guard-vetoable (ADR 92 A) |
-| live | `app.live` | `defineLive({})` | none (bags-first) | EXPERIMENTAL (Ryan 2026-07-27) — included, surface may churn; hooks/guards on the promoted ops (stop/close; start pending Family 3) |
-| connector | slot via install (optional pkg) | connector's own config | n/a | optional-package mechanism like `app.mcp`; PLACEMENT judged at conversion — connectors are ingress surfaces, gateway slot is the live candidate |
+| Namespace           | Slot (config)                   | Definition                                                     | Genesis                                                     | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| timeline            | `app.timeline`                  | `defineTimeline({ store?, hydrate?, compact?, writePolicy? })` | `hydrate` — default `hydrateFromStore()` (ADR 49 preserved) | proving instance (D1, incl. slot-registration mechanics); §2.7 bounded projection rides along                                                                                                                                                                                                                                                                                                                                                   |
+| skills              | `app.skills`                    | `defineSkills({ store?, hydrate? })`                           | `hydrate` — default none (explicit)                         | UNIFIES sources: directory/URL/literal become named hydrators (`hydrateFromDirectory`, `composeHydrators`); tiered catalogs are hydrators reading `ctx.principal`                                                                                                                                                                                                                                                                               |
+| prompts             | `app.prompts`                   | `definePrompts({ store?, hydrate? })`                          | `hydrate` — default none                                    | kills the withPrompts-lacks-store asymmetry                                                                                                                                                                                                                                                                                                                                                                                                     |
+| tasks               | `app.tasks`                     | `defineTasks({ store?, executor?, hydrate? })`                 | `hydrate` — default none                                    | `hydrate` = pending-task reload on resume (undefined semantics → adopter policy); lands WITH Family 3's async submit                                                                                                                                                                                                                                                                                                                            |
+| sessions (registry) | `app.sessions`                  | `defineSessions({ store?, evict? })`                           | n/a (registry)                                              | `evict(ctx) ⇒ verdict` turns the idle-eviction sweep into a seam                                                                                                                                                                                                                                                                                                                                                                                |
+| state               | `app.state`                     | `defineState({ store? })`                                      | `hydrate` — default `hydrateFromStore()`                    | thin member                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| knobs               | `app.knobs`                     | `defineKnobs({ store?, hydrate? })`                            | `hydrate` — default `hydrateFromStore()`                    | thin member                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| credentials         | `app.credentials`               | `defineCredentials({ store? })`                                | none (async-only, no view — deliberate)                     | mutations are ops under the redaction law (ADR 92 B)                                                                                                                                                                                                                                                                                                                                                                                            |
+| resources           | `app.resources`                 | `defineResources({ hydrate? })`                                | `hydrate` — default none                                    | fs is the SOURCE (`resourcesFromDirectory`), store stays memory-default; tree-mounts stay tree concerns                                                                                                                                                                                                                                                                                                                                         |
+| sandbox             | `app.sandbox`                   | `defineSandbox({ provider, bootstrap? })`                      | `bootstrap(ctx)` — imperative                               | ENVIRONMENT namespace: no store, no hydrate; `ctx.sandbox` = the live handle; gets the standard `hooks:`/`guards:` bags (its ops are already commands); the ACL permission gate ALIGNS as a shipped built-in guard on those ops (the MCP security-pipeline precedent — domain API stays, enforcement path is one), composing with adopter guards under normal ordering; fork semantics (re-bootstrap vs provider clone) = open D-phase question |
+| elicitation         | `app.elicitation`               | `defineElicitation({})`                                        | none                                                        | bags-only member today (`hooks:`/`guards:` on the elicit op); definition exists for consistency + future policy seams                                                                                                                                                                                                                                                                                                                           |
+| subscriptions       | `app.subscriptions`             | `defineSubscriptions({ store?, hydrate? })`                    | `hydrate` — default none                                    | STORE-BEARING (Ryan 2026-07-27): schedules/registrations that don't survive restart are toys; `hydrate` = reload persisted subscriptions on resume; fires already guard-vetoable (ADR 92 A)                                                                                                                                                                                                                                                     |
+| live                | `app.live`                      | `defineLive({})`                                               | none (bags-first)                                           | EXPERIMENTAL (Ryan 2026-07-27) — included, surface may churn; hooks/guards on the promoted ops (stop/close; start pending Family 3)                                                                                                                                                                                                                                                                                                             |
+| connector           | slot via install (optional pkg) | connector's own config                                         | n/a                                                         | optional-package mechanism like `app.mcp`; PLACEMENT judged at conversion — connectors are ingress surfaces, gateway slot is the live candidate                                                                                                                                                                                                                                                                                                 |
 
 **Subscriptions/connector membership rationale (Ryan 2026-07-27):** the
 raw CAPABILITY (send to any session from anywhere — a webhook handler,
@@ -195,7 +195,7 @@ not invoked); **seed-not-append** conformance (genesis entries never
 hit `append`); **cascade-order** test (app guard vetoes before
 definition guard runs; app before wraps definition before; afters
 unwind reverse); ctx.store type-test file (inference + `Derived`
-interplay, `@ts-expect-error` style); example/v2-* packages compile
+interplay, `@ts-expect-error` style); example/v2-\* packages compile
 against the new `AppOptions`; consumer canary = the Knowify bump slice
 verifies `buildErnestoAppConfig` downstream.
 
@@ -217,7 +217,7 @@ every namespace (persisting the catalog ≠ serving files).
 - **ADR 42:** definitions ARE the declarative form; live-instance form
   unchanged; no third form.
 - **ADR 48/51:** genesis runs with the session's derived ctx — principal
-  and identity are simply *there* (the Knowify tiered catalog is the
+  and identity are simply _there_ (the Knowify tiered catalog is the
   proof case).
 
 ## The client read doors (client hydration ≠ agent hydration)
@@ -258,8 +258,8 @@ Same store, different doors, no shared seam:
   `defineTimelineStore`, `hydrate`/`compact` seams with `ctx.store`
   facet + named hydrators, §2.7 bounded projection, the moot-list
   deletions, `AppOptions.timeline` slot. Gate: full suite + kill/resume
-  + a bounded-hydration proof (N-entry store, tail-k hydrator, memory
-  holds k).
+  - a bounded-hydration proof (N-entry store, tail-k hydrator, memory
+    holds k).
 - **D2 — timeline client completion:** `timeline:history` wire grant +
   client scroll-back face (`history` → `prepend`), guard recipe for
   principal scoping documented.
@@ -272,10 +272,12 @@ Same store, different doors, no shared seam:
 
 ## Landmines (named, each with its defusal)
 
-1. **Fork/spawn double-genesis.** `hydrate` must NOT run for forks
-   (a fork inherits the parent's image; re-running genesis duplicates
-   or diverges). Law: hydrate runs on CREATE and RESUME, never on
-   FORK/SPAWN-inherit. Test in D1.
+1. **Fork/spawn double-genesis.** Law: hydrate runs on CREATE and
+   RESUME, never on SPAWN-inherit. Test in D1.
+   **Amended (checkpointing §5):** the fork half retired with the
+   snapshot-blob transport that motivated it. A fork no longer inherits
+   an image — it branches the parent's scope at the store layer and the
+   child genesises over its OWN copy, so hydrate runs there too.
 2. **Genesis/restore ordering.** hydrate runs before first render,
    after identity stamping, before the write pump starts; a hydrator
    throwing = session creation fails typed (no half-genesis session).
