@@ -1782,6 +1782,16 @@ export class SessionHarness<P = unknown>
    * eviction composes `snapshot` + `close`. A rejection propagates, so destroy
    * fails loudly rather than reporting a deletion that did not happen.
    */
+  /**
+   * Drain the record's write-behind (the runtime view's flush) — the ordering
+   * barrier the app's resume path takes before writing the record directly
+   * (the interruption mark). Public on the concrete class, NOT the protocol —
+   * the `dropScopes` precedent: the app constructs every registry entry.
+   */
+  flushRecordWrites(): Promise<void> {
+    return this.runtime.flushRecord();
+  }
+
   async dropScopes(): Promise<void> {
     const ctx: DropCtx = this.checkpointCtxFrom(this.storeCtx());
     for (const bridge of Object.values(this.bridges)) {

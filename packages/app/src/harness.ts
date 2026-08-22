@@ -1897,6 +1897,12 @@ export class AppHarness<P = unknown>
         // NOT a nothing-to-do. Mark from the PRE-construction record (the
         // hydrate merge already neutralized the durable FSM; this adds the
         // crash history + per-execution budget on top).
+        //
+        // ORDERING BARRIER (F1): construction's hydrate write-back is
+        // fire-and-forget through the runtime view; on an async store it can
+        // complete AFTER the direct put below and clobber the mark. Drain it
+        // first — cheap, boot-only, deterministic on every store.
+        await this.registry.get(record.id)?.session.flushRecordWrites();
         const marked = markInterruptedRecord(record, crashedExecutionId);
         await this.sessionStore.put(marked, this.storeCtx());
         if (this.onInterruptedExecution) {

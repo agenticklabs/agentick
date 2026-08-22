@@ -282,6 +282,18 @@ export class SessionRuntime {
    * before it writes. A NEW session (nothing persisted) defers its first write
    * to the first status transition / `setMeta` unless `eager` forces it now.
    */
+  /**
+   * Durability barrier over the record's write-behind — awaits every in-flight
+   * store put (the view's flush) and surfaces a latched failure. The resume
+   * path's ordering guarantee: a caller about to write the record DIRECTLY
+   * (the interruption mark) must drain the fire-and-forget hydrate write-back
+   * first, or an async store can complete it late and clobber the direct write
+   * (execution-resume.md §3.1 — F1).
+   */
+  flushRecord(): Promise<void> {
+    return this.view.flush();
+  }
+
   async hydrate(): Promise<void> {
     const persisted = await this.store?.get(this.id, this.storeCtx());
     if (persisted !== undefined) {

@@ -154,6 +154,74 @@ describe("onInterruptedExecution — the resume-path callback (slice 2)", () => 
     await app.closeApp();
   });
 
+  it("the mark survives an ASYNC store — hydrate's write-back cannot clobber it (F1)", async () => {
+    // InMemory puts apply synchronously at kick time, which HID this race: the
+    // hydrate write-back is fire-and-forget, the mark-put is direct — on a store
+    // whose puts complete out of submission order (pooled SQL), the write-back
+    // can land late and erase the mark. This store completes its FIRST put after
+    // a delay and later puts immediately; the resume path's flush barrier must
+    // make the mark survive anyway.
+    class SlowNeutralizeStore extends InMemorySessionStore {
+      armed = false;
+      // The runtime's write-behind goes through the VIEW → store.mutate({put});
+      // the mark is a direct store.put. While armed, a mutate carrying no mark
+      // (the hydrate write-back's shape) completes LATE — modeling a pooled-SQL
+      // store finishing puts out of submission order.
+      override async mutate(
+        m: Parameters<InMemorySessionStore["mutate"]>[0],
+        ctx: Parameters<InMemorySessionStore["mutate"]>[1],
+      ) {
+        const put = (m as { put?: SessionRecord }).put;
+        if (this.armed && put !== undefined && put.interruptedExecutionId === undefined) {
+          await new Promise((r) => setTimeout(r, 25));
+        }
+        return super.mutate(m, ctx);
+      }
+    }
+    const store = new SlowNeutralizeStore();
+    await seed(store, "racy", { status: "running", currentExecutionId: "exec:r1" });
+    const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
+    const app = await mkApp(store, cb);
+    store.armed = true;
+
+    await app.resumeSession("racy");
+    expect(cb).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 40)); // let any straggler write land
+    const record = await store.get("racy", stubStoreCtx());
+    expect(record?.interruptedExecutionId).toBe("exec:r1");
+
+    await app.closeApp();
+  });
+
+  it("does NOT fire for legitimate non-`running` waits carrying an execution id (running-ONLY)", async () => {
+    // The deliberate-exclusions invariant from slice 1, re-pinned at the seam:
+    // paused / input_required / hibernated are persisted WAITS, not crashes —
+    // a future "complete the matrix" edit must fail here.
+    const store = new InMemorySessionStore();
+    await seed(store, "waiting", { status: "input_required", currentExecutionId: "exec:w1" });
+    const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
+    const app = await mkApp(store, cb);
+
+    await app.resumeSession("waiting");
+    expect(cb).not.toHaveBeenCalled();
+    const record = await store.get("waiting", stubStoreCtx());
+    expect(record?.interruptedExecutionId).toBeUndefined();
+
+    await app.closeApp();
+  });
+
+  it("does NOT fire for `running` without an execution id", async () => {
+    const store = new InMemorySessionStore();
+    await seed(store, "headless", { status: "running" });
+    const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
+    const app = await mkApp(store, cb);
+
+    await app.resumeSession("headless");
+    expect(cb).not.toHaveBeenCalled();
+
+    await app.closeApp();
+  });
+
   it("a `drop` leaves interruptedExecutionId as honest history on the record", async () => {
     const store = new InMemorySessionStore();
     await seed(store, "dropped", { status: "running", currentExecutionId: "exec:7" });
