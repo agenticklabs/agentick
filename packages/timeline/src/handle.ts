@@ -32,8 +32,6 @@ import type {
 export interface TimelineHandle {
   /** Snapshot of the current projection + monotonic version. */
   read(): TimelineSnapshot;
-  /** Read the durable append-only log (uncompacted ground truth). */
-  readPersisted(): readonly TimelineEntry[];
   /** One execution's durable coordinates — the resume seam (never entries). */
   executionCursor(executionId: string): ExecutionCursor | undefined;
   /** Input entries trailing the last assistant entry (ADR 53). */
@@ -65,7 +63,7 @@ export interface TimelineHandle {
    * Cursored, seq-tagged read of the DURABLE log (#187) over the port's seq
    * window. Flushes the write-behind buffer first so the read is complete, then
    * delegates to the store's optional `history`. Throws when the configured store
-   * does not implement cursored reads — use `readPersisted()` for the seq-less
+   * does not implement cursored reads — use the store's read for the seq-less
    * full read.
    *
    * The in-process face of the `timeline:history` command — the same body a

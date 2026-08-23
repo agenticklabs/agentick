@@ -127,13 +127,13 @@ describe("SessionHarness — timeline checkpoint fold (checkpointing §3.2)", ()
     await writer.session.snapshot();
 
     const reader = await mkSession("cp-live", store);
-    expect(ids(reader.session.timeline.readPersisted())).toEqual(["m1"]);
+    expect(ids(reader.session.timeline.read().entries)).toEqual(["m1"]);
 
     await writer.session.timeline.append(entry("m2"));
     await writer.session.snapshot();
 
     await reader.session.restore();
-    expect(ids(reader.session.timeline.readPersisted())).toEqual(["m1", "m2"]);
+    expect(ids(reader.session.timeline.read().entries)).toEqual(["m1", "m2"]);
     expect(ids(reader.session.timeline.read().entries)).toEqual(["m1", "m2"]);
 
     await writer.close();
@@ -151,7 +151,7 @@ describe("SessionHarness — timeline checkpoint fold (checkpointing §3.2)", ()
 
     const b = await mkSession("cp-evict", store);
     await b.session.restore();
-    expect(ids(b.session.timeline.readPersisted())).toEqual(["m1", "m2"]);
+    expect(ids(b.session.timeline.read().entries)).toEqual(["m1", "m2"]);
     await b.close();
   });
 });

@@ -4,9 +4,9 @@
  * Validates the two-tier (log + projection) contract every TimelineHarness
  * implementation must satisfy:
  *
- *   - Sync surface: read / subscribe / readPersisted
+ *   - Sync surface: read / subscribe (the projection; the log's only home is the store — §2.7)
  *   - Async surface: append / compact / replaceProjection / resetProjection
- *   - append writes to BOTH log and projection
+ *   - append writes the projection + the durable store
  *   - compact writes to projection ONLY; log untouched; lastCompaction recorded
  *   - replaceProjection writes to projection ONLY
  *   - resetProjection rebuilds projection as a mirror of log
@@ -59,6 +59,12 @@ const dropCtx = (sessionId: string): DropCtx => ({
   storeCtx: stubStoreCtx(),
 });
 
+/** The durable log, through the cursored read — its only home is the store (§2.7). */
+async function logEntries(h: TimelineHarnessProtocol): Promise<readonly TimelineEntry[]> {
+  const page = await h.history({ limit: 1000 });
+  return page.map((t) => t.entry);
+}
+
 function messageEntry(id: string, text: string): TimelineEntry {
   return {
     kind: "message",
@@ -101,11 +107,11 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       await h.close();
     });
 
-    it("readPersisted() returns the durable log", async () => {
+    it("the durable log is store-resident and pages through history()", async () => {
       const h = await deps.make();
       const e1 = messageEntry("e1", "hello");
       await h.append(e1);
-      expect(h.readPersisted()).toEqual([e1]);
+      expect(await logEntries(h)).toEqual([e1]);
       await h.close();
     });
 
@@ -149,7 +155,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const e2 = messageEntry("e2", "b");
       await h.append(e1);
       await h.append(e2);
-      expect(h.readPersisted()).toEqual([e1, e2]);
+      expect(await logEntries(h)).toEqual([e1, e2]);
       expect(h.read().entries).toEqual([e1, e2]);
       await h.close();
     });
@@ -170,7 +176,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       expect(projAfter).toHaveLength(2);
       expect(projAfter[1]).toEqual(e3);
       // Log has the three appends plus the summary the compaction produced.
-      expect(h.readPersisted()).toHaveLength(4);
+      expect(await logEntries(h)).toHaveLength(4);
       await h.close();
     });
   });
@@ -191,9 +197,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       expect(result.source).toBe("persisted");
 
       // Nothing that was in the log was rewritten or removed…
-      expect(h.readPersisted().slice(0, 3)).toEqual([e1, e2, e3]);
+      expect((await logEntries(h)).slice(0, 3)).toEqual([e1, e2, e3]);
       // …and the summary is now durable rather than a projection-only artifact.
-      expect(h.readPersisted()).toHaveLength(4);
+      expect(await logEntries(h)).toHaveLength(4);
       expect(h.read().entries).toHaveLength(1);
       await h.close();
     });
@@ -247,7 +253,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const replacement = [messageEntry("r1", "replaced")];
       await h.replaceProjection({ entries: replacement });
       expect(h.read().entries).toEqual(replacement);
-      expect(h.readPersisted()).toHaveLength(2);
+      expect(await logEntries(h)).toHaveLength(2);
       await h.close();
     });
 
@@ -294,9 +300,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       it("hydrate() seeds both tiers from the hydrator's return", async () => {
         const seed = [messageEntry("g1", "a"), messageEntry("g2", "b")];
         const h = await makeFromDefinition({ hydrate: async () => seed });
-        expect(h.readPersisted()).toEqual([]);
+        expect(h.read().entries).toEqual([]);
         await h.hydrate();
-        expect(h.readPersisted()).toEqual(seed);
+        expect(h.read().entries).toEqual(seed);
         expect(h.read().entries).toEqual(seed);
         await h.close();
       });
@@ -320,7 +326,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         await h.hydrate();
         await h.flush();
         expect(appended).toEqual([]);
-        expect(h.readPersisted()).toHaveLength(2);
+        expect(h.read().entries).toHaveLength(2);
         // A subsequent real append DOES reach the store — genesis is the only
         // thing exempt.
         await h.append(messageEntry("live", "c"));
@@ -338,14 +344,14 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         });
         await expect(h.hydrate()).rejects.toBeInstanceOf(TimelineHydrateFailed);
         // Nothing was installed — the harness is empty, not partially seeded.
-        expect(h.readPersisted()).toEqual([]);
+        expect(h.read().entries).toEqual([]);
         await h.close();
       });
 
       it("no store and no hydrator ⇒ genesis is a no-op", async () => {
         const h = await makeFromDefinition({});
         await h.hydrate();
-        expect(h.readPersisted()).toEqual([]);
+        expect(h.read().entries).toEqual([]);
         await h.close();
       });
     },
@@ -373,9 +379,9 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         await a.close();
 
         const b = await makeFromDefinition({ store }, scopeId);
-        expect(b.readPersisted()).toEqual([]);
+        expect(b.read().entries).toEqual([]);
         await b.hydrate();
-        expect(b.readPersisted().map(entryId)).toEqual(["c1", "c2"]);
+        expect(b.read().entries.map(entryId)).toEqual(["c1", "c2"]);
         expect(b.read().entries.map(entryId)).toEqual(["c1", "c2"]);
         await b.close();
       });
@@ -393,7 +399,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         await h.hydrate();
         expect(h.read().entries.map(entryId)).toEqual(["r1"]);
         await h.hydrate();
-        expect(h.readPersisted().map(entryId)).toEqual(["r1"]);
+        expect(h.read().entries.map(entryId)).toEqual(["r1"]);
         await h.close();
       });
 
@@ -402,7 +408,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         await h.append(messageEntry("m1", "one"));
         await h.persist();
         await h.hydrate();
-        expect(h.readPersisted().map(entryId)).toEqual(["m1"]);
+        expect(h.read().entries.map(entryId)).toEqual(["m1"]);
         await h.close();
       });
 
@@ -434,12 +440,12 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
 
         const reopened = await makeFromDefinition({ store }, "drop-doomed");
         await reopened.hydrate();
-        expect(reopened.readPersisted()).toEqual([]);
+        expect(reopened.read().entries).toEqual([]);
         await reopened.close();
 
         const sibling = await makeFromDefinition({ store }, "drop-bystander");
         await sibling.hydrate();
-        expect(sibling.readPersisted().map(entryId)).toEqual(["b1"]);
+        expect(sibling.read().entries.map(entryId)).toEqual(["b1"]);
         await sibling.close();
       });
 
@@ -463,7 +469,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
     });
     /** The boundary `endTurn` just appended — narrowed, so a claim can read it. */
     const lastBoundary = (h: TimelineHarnessProtocol): TurnBoundaryEntry["boundary"] => {
-      const persisted = h.readPersisted();
+      const persisted = h.read().entries;
       const entry = persisted[persisted.length - 1]!;
       if (entry.kind !== "boundary") throw new Error("expected a boundary entry");
       return entry.boundary;
@@ -486,7 +492,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
       const h = await deps.make();
       await h.append(userEntry("u1"));
       await h.endTurn({ executionId: "e1", outcome: "succeeded" });
-      const persisted = h.readPersisted();
+      const persisted = h.read().entries;
       const boundary = persisted[persisted.length - 1]!;
       expect(boundary.kind).toBe("boundary");
       if (boundary.kind !== "boundary") throw new Error("unreachable");
@@ -505,7 +511,7 @@ export function runTimelineHarnessConformance(deps: TimelineHarnessFactoryDeps):
         outcome: "failed",
         usage: { inputTokens: 5, outputTokens: 0, totalTokens: 5 },
       });
-      const persisted = h.readPersisted();
+      const persisted = h.read().entries;
       const boundary = persisted[persisted.length - 1]!;
       if (boundary.kind !== "boundary") throw new Error("expected boundary");
       expect(boundary.boundary.outcome).toBe("failed");

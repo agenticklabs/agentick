@@ -476,7 +476,6 @@ function noopTimelineHandle(): TimelineHandle {
   const unsubscribe = () => {};
   return {
     read: () => ({ entries: [], version: 0 }),
-    readPersisted: () => [],
     executionCursor: () => undefined,
     trailingInput: () => [],
     inputEntryCount: () => 0,

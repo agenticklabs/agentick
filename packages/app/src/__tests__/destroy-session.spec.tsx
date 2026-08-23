@@ -379,7 +379,7 @@ describe("app.destroySession — the durable scopes", () => {
     await app.destroySession("reused");
 
     const second = await app.createSession({ sessionId: "reused", eager: true });
-    expect(second.timeline.readPersisted()).toEqual([]);
+    expect(second.timeline.read().entries).toEqual([]);
     expect(second.knobs.get("secret")).toBeUndefined();
     expect(second.state.get("secret")).toBeUndefined();
 

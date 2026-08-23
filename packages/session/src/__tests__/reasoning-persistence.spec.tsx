@@ -144,8 +144,8 @@ const send = async (session: SessionHarness) =>
 /** The assistant entry's content, or `undefined` if the fold produced none. */
 function assistantContent(session: SessionHarness): readonly ContentBlock[] | undefined {
   const entry = session.timeline
-    .readPersisted()
-    .find((e) => e.kind === "message" && e.message.role === "assistant");
+    .read()
+    .entries.find((e) => e.kind === "message" && e.message.role === "assistant");
   return (entry as { message?: { content?: readonly ContentBlock[] } } | undefined)?.message
     ?.content;
 }

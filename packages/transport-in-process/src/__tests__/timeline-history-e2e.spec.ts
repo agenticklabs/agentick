@@ -262,7 +262,7 @@ describe("the read is admitted twice — exposure, then grant", () => {
       );
     expect(codeOf(err)).toBe(ErrorCode.MethodNotFound);
     // …and the log is untouched: an unexposed verb is not reachable, period.
-    expect(session.timeline.readPersisted()).toEqual([]);
+    expect(session.timeline.read().entries).toEqual([]);
 
     await client.close();
     await gateway.close();

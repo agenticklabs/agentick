@@ -17,6 +17,8 @@ import type { CompactStrategy, TimelineEntry } from "@agentick/spec";
 import { CompactStrategyMissing } from "@agentick/spec";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import { TimelineHarness } from "../harness.js";
+import { MemoryTimelineStore } from "../store.js";
+import { stubStoreCtx } from "@agentick/store";
 
 function entry(id: string): TimelineEntry {
   return {
@@ -30,14 +32,27 @@ const summaryStrategy = (marker: string): CompactStrategy => ({
   metadata: { marker },
 });
 
+const testStore = () => new MemoryTimelineStore();
+let lastStore = testStore();
+
 function mkTimeline(compact?: CompactStrategy) {
+  lastStore = testStore();
   return new TimelineHarness(
     "s1:timeline",
     new MemoryJournal(),
     new LocalEventBus(),
     new LocalInbox(),
-    compact !== undefined ? { compact } : {},
+    {
+      store: lastStore,
+      ...(compact !== undefined ? { compact } : {}),
+    },
   );
+}
+
+/** The durable log — its only home is the store (§2.7); flush first. */
+async function logOf(h: TimelineHarness): Promise<readonly TimelineEntry[]> {
+  await h.flush();
+  return lastStore.read("s1:timeline", stubStoreCtx());
 }
 
 const idOf = (e: TimelineEntry): string => (e as { message: { id: string } }).message.id;
@@ -53,7 +68,7 @@ describe("TimelineHarness — construction-bound default compact (ADR 51 signal 
     expect(timeline.read().entries.map(idOf)).toEqual(["default-summary"]);
     // The log is never REWRITTEN, but what the compaction produced is appended
     // to it — a summary is a fact, and the log is what happened.
-    expect(timeline.readPersisted().map(idOf)).toEqual(["a", "b", "default-summary"]);
+    expect((await logOf(timeline)).map(idOf)).toEqual(["a", "b", "default-summary"]);
     await timeline.close();
   });
 
@@ -151,7 +166,7 @@ describe("what a compaction produces is durable", () => {
     expect(tl.read().entries.map(idOf)).toEqual(["S1"]);
     // Before this, `replaceProjection` never reached the store and the summary
     // vanished on restart — which is what forced adopters into a side table.
-    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b", "c", "S1"]);
+    expect((await logOf(tl)).map(idOf)).toEqual(["a", "b", "c", "S1"]);
   });
 
   it("keeps every iteration in the log while the projection stays small", async () => {
@@ -164,7 +179,7 @@ describe("what a compaction produces is durable", () => {
     await tl.compact(summaryStrategy("S2"));
 
     expect(tl.read().entries.map(idOf)).toEqual(["S2"]);
-    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b", "S1", "c", "S2"]);
+    expect((await logOf(tl)).map(idOf)).toEqual(["a", "b", "S1", "c", "S2"]);
   });
 
   it("does not re-append entries the strategy carried through", async () => {
@@ -175,7 +190,7 @@ describe("what a compaction produces is durable", () => {
 
     await tl.compact();
 
-    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b"]);
+    expect((await logOf(tl)).map(idOf)).toEqual(["a", "b"]);
   });
 
   it("a strategy that CLONES entries still does not duplicate the log", async () => {
@@ -188,6 +203,6 @@ describe("what a compaction produces is durable", () => {
 
     await tl.compact();
 
-    expect(tl.readPersisted().map(idOf)).toEqual(["a", "b"]);
+    expect((await logOf(tl)).map(idOf)).toEqual(["a", "b"]);
   });
 });

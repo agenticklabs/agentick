@@ -76,7 +76,7 @@ describe("execution provenance on a user turn", () => {
     const handle = await session.send({ messages: [{ role: "user", content: "hi" }] });
     await handle.result;
 
-    const all = messages(session.timeline.readPersisted());
+    const all = messages(session.timeline.read().entries);
     const user = all.find((m) => m.role === "user");
     const assistant = all.find((m) => m.role === "assistant");
 
@@ -98,7 +98,7 @@ describe("execution provenance on a user turn", () => {
     });
     await handle.result;
 
-    const user = messages(session.timeline.readPersisted()).find((m) => m.role === "user");
+    const user = messages(session.timeline.read().entries).find((m) => m.role === "user");
     expect(user?.metadata).toMatchObject({ source: "cli", executionId: handle.executionId });
 
     await session.close();
@@ -114,7 +114,7 @@ describe("execution provenance on a user turn", () => {
       entry: { role: "user", content: [{ type: "text", text: "seed" }] },
     });
 
-    const user = messages(session.timeline.readPersisted()).find((m) => m.role === "user");
+    const user = messages(session.timeline.read().entries).find((m) => m.role === "user");
     expect(user?.metadata?.executionId).toBeUndefined();
 
     await session.close();

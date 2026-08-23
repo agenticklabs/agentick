@@ -187,7 +187,7 @@ describe("SessionHarness — timeline handle (top-level)", () => {
     // The scripted executor replied — the trailing set is empty.
     expect(session.timeline.trailingInput()).toEqual([]);
     // A turn-boundary RECORD was emitted at execution end.
-    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    const boundaries = session.timeline.read().entries.filter((e) => e.kind === "boundary");
     expect(boundaries.length).toBe(1);
     if (boundaries[0]!.kind === "boundary") {
       expect(boundaries[0]!.boundary.outcome).toBe("succeeded");
@@ -773,7 +773,7 @@ describe("steering — send() during a running execution (ADR 53)", () => {
     expect(users).toHaveLength(2);
     expect(session.timeline.trailingInput()).toEqual([]);
     // Exactly one turn: one boundary record, outcome succeeded.
-    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    const boundaries = session.timeline.read().entries.filter((e) => e.kind === "boundary");
     expect(boundaries).toHaveLength(1);
     await session.close();
     await tools.close();
@@ -790,7 +790,7 @@ describe("send concurrency guards (review findings on ADR 53 join)", () => {
     expect(h2).toBe(h1);
     await h1.result;
     // Exactly one turn ran: one boundary record.
-    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    const boundaries = session.timeline.read().entries.filter((e) => e.kind === "boundary");
     expect(boundaries).toHaveLength(1);
     await session.close();
   });
@@ -802,7 +802,7 @@ describe("send concurrency guards (review findings on ADR 53 join)", () => {
     const h2 = await session.send({ messages: [{ role: "user", content: "second" }] });
     expect(h2).not.toBe(h1);
     await h2.result;
-    const boundaries = session.timeline.readPersisted().filter((e) => e.kind === "boundary");
+    const boundaries = session.timeline.read().entries.filter((e) => e.kind === "boundary");
     expect(boundaries).toHaveLength(2);
     // Nothing trails — both inputs were processed by a live execution.
     expect(session.timeline.trailingInput()).toEqual([]);
@@ -814,8 +814,8 @@ describe("send concurrency guards (review findings on ADR 53 join)", () => {
     const h = await session.send({ messages: [{ role: "user", content: "hi" }] });
     await h.result;
     const assistant = session.timeline
-      .readPersisted()
-      .filter((e) => e.kind === "message" && e.message.role === "assistant");
+      .read()
+      .entries.filter((e) => e.kind === "message" && e.message.role === "assistant");
     expect(assistant).toHaveLength(1);
     if (assistant[0]!.kind !== "message") throw new Error("unreachable");
     const meta = assistant[0]!.message.metadata as {
@@ -918,7 +918,7 @@ const userTextsOf = (session: SessionHarnessProtocol): string[] =>
     .map((b) => b.text);
 
 const boundaryCount = (session: SessionHarnessProtocol): number =>
-  session.timeline.readPersisted().filter((e) => e.kind === "boundary").length;
+  session.timeline.read().entries.filter((e) => e.kind === "boundary").length;
 
 describe("onBusy: steer vs queue", () => {
   it("steer (default) lands in the NEXT tick's compiled context — same execution", async () => {

@@ -62,7 +62,7 @@ describe("ADR 93 — the top-level `timeline` slot", () => {
     const app = await mkApp(defineTimeline({ store }));
     // `createSession` awaits genesis, so the durable log is live on return.
     const session = await app.createSession({ sessionId: "slot-A" });
-    expect(session.timeline.readPersisted().map(idOf)).toEqual(["p1", "p2"]);
+    expect(session.timeline.read().entries.map(idOf)).toEqual(["p1", "p2"]);
     await app.closeApp();
   });
 
@@ -71,7 +71,7 @@ describe("ADR 93 — the top-level `timeline` slot", () => {
     await store.append("slot-B:timeline", [userEntry("p1")], {} as never);
     const app = await mkApp({ store });
     const session = await app.createSession({ sessionId: "slot-B" });
-    expect(session.timeline.readPersisted().map(idOf)).toEqual(["p1"]);
+    expect(session.timeline.read().entries.map(idOf)).toEqual(["p1"]);
     await app.closeApp();
   });
 
@@ -81,7 +81,7 @@ describe("ADR 93 — the top-level `timeline` slot", () => {
     await store.append("slot-C:timeline", many, {} as never);
     const app = await mkApp(defineTimeline({ store, hydrate: hydrateTail(3) }));
     const session = await app.createSession({ sessionId: "slot-C" });
-    expect(session.timeline.readPersisted().map(idOf)).toEqual(["e37", "e38", "e39"]);
+    expect(session.timeline.read().entries.map(idOf)).toEqual(["e37", "e38", "e39"]);
     await app.closeApp();
   });
 
@@ -97,7 +97,7 @@ describe("ADR 93 — the top-level `timeline` slot", () => {
   it("no slot ⇒ an empty in-memory timeline (the zero-config default is unchanged)", async () => {
     const app = await mkApp();
     const session = await app.createSession({ sessionId: "slot-D" });
-    expect(session.timeline.readPersisted()).toEqual([]);
+    expect(session.timeline.read().entries).toEqual([]);
     await app.closeApp();
   });
 });
@@ -120,7 +120,7 @@ describe("ADR 93 landmine 2 — genesis ordering + typed failure", () => {
     await (session as unknown as { mountReady?: Promise<void> }).mountReady;
     order.push("mounted");
     expect(order).toEqual(["genesis", "mounted"]);
-    expect(session.timeline.readPersisted().map(idOf)).toEqual(["resumed"]);
+    expect(session.timeline.read().entries.map(idOf)).toEqual(["resumed"]);
     await app.closeApp();
   });
 
@@ -164,7 +164,7 @@ describe("ADR 93 landmine 1 — the fork/spawn law, as amended", () => {
     const app = await mkApp(definition);
     const parent = await app.createSession({ sessionId: "fork-parent" });
     expect(calls()).toBe(1); // the parent's own CREATE
-    expect(parent.timeline.readPersisted().map(idOf)).toEqual(["p1"]);
+    expect(parent.timeline.read().entries.map(idOf)).toEqual(["p1"]);
 
     const child = await parent.fork({ sessionId: "fork-child" });
     // THE LAW (checkpointing §5): the child's log is a store-layer COPY of the
@@ -172,7 +172,7 @@ describe("ADR 93 landmine 1 — the fork/spawn law, as amended", () => {
     // against the child's own partition. Under the retired law the child
     // inherited an image through the snapshot blob and had to skip genesis.
     expect(calls()).toBe(2);
-    expect(child.timeline.readPersisted().map(idOf)).toEqual(["p1"]);
+    expect(child.timeline.read().entries.map(idOf)).toEqual(["p1"]);
     // The copy is the CHILD's, in the child's own partition — not a shared read.
     expect((await store.read("fork-child:timeline", {} as never)).map(idOf)).toEqual(["p1"]);
 
@@ -199,7 +199,7 @@ describe("ADR 93 landmine 1 — the fork/spawn law, as amended", () => {
     expect(calls()).toBe(1);
     // A spawned child is a NEW session: it inherits no conversation, and it
     // certainly does not re-read the parent's log.
-    expect(child.timeline.readPersisted()).toEqual([]);
+    expect(child.timeline.read().entries).toEqual([]);
     await app.closeApp();
   });
 
@@ -217,7 +217,7 @@ describe("ADR 93 landmine 1 — the fork/spawn law, as amended", () => {
     const appB = await mkApp(second.definition);
     const resumed = await appB.createSession({ sessionId: "resume-A" });
     expect(second.calls()).toBe(1);
-    expect(resumed.timeline.readPersisted().map(idOf)).toEqual(["p1"]);
+    expect(resumed.timeline.read().entries.map(idOf)).toEqual(["p1"]);
     await appB.closeApp();
   });
 });

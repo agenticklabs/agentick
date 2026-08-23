@@ -43,7 +43,7 @@ async function mkSession(sessionId: string): Promise<SessionHarness> {
 }
 
 const persisted = (session: SessionHarness): readonly TimelineEntry[] =>
-  session.timeline.readPersisted();
+  session.timeline.read().entries;
 
 describe("SessionHarness + timeline — send", () => {
   it("appends caller-supplied messages before the execution runs", async () => {

@@ -14,8 +14,8 @@
  *
  *   Log         — append-only, the durable record of every entry ever
  *                  appended. The source of truth, durable in the harness's
- *                  own store. Readable via `readPersisted`
- *                  for tooling / custom compactors; subscribe to its
+ *                  own store — its ONLY home (§2.7: no in-memory mirror).
+ *                  Read it through the store / `history`; subscribe to its
  *                  changes via the bus (`surface: "timeline"`,
  *                  `name: "timeline:append"`).
  *   Projection  — `_projection` — what `read()`/`subscribe()` expose.
@@ -350,13 +350,6 @@ export interface TimelineHarnessProtocol {
   // ─────────── Sync surface (log — for tooling + custom compactors) ───────────
 
   /**
-   * Read the durable log directly. Most consumers want `read()` — the
-   * projection. Use this when you need the uncompacted ground truth
-   * (e.g., writing a custom compaction strategy, exporting audit logs).
-   */
-  readPersisted(): readonly TimelineEntry[];
-
-  /**
    * One execution's durable coordinates — the resume seam
    * (execution-resume.md §3.4). Coordinates out, never entries: the harness
    * derives them from its own persisted tier, so no consumer scans contents
@@ -416,6 +409,16 @@ export interface TimelineHarnessProtocol {
    *   call with no construction-bound default configured.
    */
   compact(strategy?: CompactStrategy): Promise<CompactResult>;
+
+  /**
+   * Cursored, seq-tagged read of the durable log — the async log-read surface
+   * (§2.7: the log's only home is the store; there is no sync whole-log read).
+   * Flushes the write-behind first so the page reflects every append. Throws
+   * when the configured store implements no cursored read.
+   */
+  history(
+    options?: import("./log-store.js").LogHistoryOptions,
+  ): Promise<ReadonlyArray<import("./log-store.js").SeqTagged<TimelineEntry>>>;
 
   /**
    * Whether the resident strategy wants to fold at this size.

@@ -30,12 +30,11 @@ function log(
   };
 }
 
-describe("LogView — append updates projection + persisted + version", () => {
-  it("both tiers reflect the append synchronously; versions bump", async () => {
+describe("LogView — append updates the projection + version (§2.7: no mirror)", () => {
+  it("the projection reflects the append synchronously; the version bumps", async () => {
     const { v } = log();
     await v.append([row("a"), row("b")], stubStoreCtx());
     expect(ids(v.read())).toEqual(["a", "b"]);
-    expect(ids(v.readPersisted())).toEqual(["a", "b"]);
     expect(v.snapshot().version).toBe(1);
     await v.append([row("c")], stubStoreCtx());
     expect(ids(v.read())).toEqual(["a", "b", "c"]);
@@ -69,8 +68,8 @@ describe("LogView — write-behind buffers then flush drains", () => {
     const { v, store } = log();
     await v.append([row("a"), row("b")], stubStoreCtx());
     await v.append([row("c")], stubStoreCtx());
-    // Memory is authoritative before flush.
-    expect(ids(v.readPersisted())).toEqual(["a", "b", "c"]);
+    // Memory (the projection) is authoritative before flush.
+    expect(ids(v.read())).toEqual(["a", "b", "c"]);
     await v.flush();
     expect(ids(await store.read("L", stubStoreCtx()))).toEqual(["a", "b", "c"]);
   });
@@ -121,15 +120,17 @@ describe("LogView — through-policy awaits the store", () => {
       wrapWriteError: (cause) => new Boom(String((cause as Error).message)),
     });
     await expect(v.append([row("a")], stubStoreCtx())).rejects.toBeInstanceOf(Boom);
-    // Memory stayed authoritative (append updates memory before the store).
-    expect(ids(v.readPersisted())).toEqual(["a"]);
+    // Memory stayed authoritative (append updates the projection before the store).
+    expect(ids(v.read())).toEqual(["a"]);
   });
 });
 
-describe("LogView — replaceProjection diverges projection from persisted", () => {
-  it("rewrites only the projection tier; persisted is untouched", async () => {
-    const { v } = log();
+describe("LogView — replaceProjection diverges the projection from the log", () => {
+  it("rewrites only the projection; the durable log is untouched", async () => {
+    const store = new MemoryLog<Row>();
+    const { v } = log(store);
     await v.append([row("a"), row("b"), row("c")], stubStoreCtx());
+    await v.flush();
     v.replaceProjection([row("summary")], {
       at: 1,
       source: "projection",
@@ -137,31 +138,34 @@ describe("LogView — replaceProjection diverges projection from persisted", () 
       entriesAfter: 1,
     });
     expect(ids(v.read())).toEqual(["summary"]);
-    expect(ids(v.readPersisted())).toEqual(["a", "b", "c"]);
+    // The log's only home is the STORE (§2.7) — and it is untouched.
+    expect(ids(await store.read("L", stubStoreCtx()))).toEqual(["a", "b", "c"]);
     expect(v.lastCompaction()?.entriesBefore).toBe(3);
   });
 
-  it("resetProjection re-mirrors persisted and clears provenance", async () => {
+  it("resetProjection re-mirrors the STORE and clears provenance", async () => {
     const { v } = log();
     await v.append([row("a"), row("b")], stubStoreCtx());
     v.replaceProjection([], { at: 1, source: "persisted", entriesBefore: 2, entriesAfter: 0 });
     expect(ids(v.read())).toEqual([]);
-    v.resetProjection();
+    // Async now: the reset READS the log's only home. It also flushes the
+    // write-behind first, so it can never travel back in time behind appends
+    // the projection already showed.
+    await v.resetProjection(stubStoreCtx());
     expect(ids(v.read())).toEqual(["a", "b"]);
     expect(v.lastCompaction()).toBeUndefined();
   });
 });
 
-describe("LogView — seed installs both tiers (ADR 93 genesis)", () => {
-  it("installs the supplied entries into persisted + projection", async () => {
+describe("LogView — seed installs the projection (ADR 93 genesis)", () => {
+  it("installs the supplied entries into the projection", async () => {
     const store = new MemoryLog<Row>();
     await store.append("L", [row("x"), row("y")], stubStoreCtx());
     const { v } = log(store);
-    expect(ids(v.readPersisted())).toEqual([]); // nothing seeded yet
+    expect(ids(v.read())).toEqual([]); // nothing seeded yet
     // Genesis authority is the CALLER's: it reads the store (or folds a
     // journal, or synthesizes) and hands the result to `seed`.
     v.seed(await store.read("L", stubStoreCtx()));
-    expect(ids(v.readPersisted())).toEqual(["x", "y"]);
     expect(ids(v.read())).toEqual(["x", "y"]);
   });
 
@@ -177,6 +181,6 @@ describe("LogView — seed installs both tiers (ADR 93 genesis)", () => {
     v.seed([row("g1"), row("g2")]);
     await v.flush();
     expect(appends).toEqual([]);
-    expect(ids(v.readPersisted())).toEqual(["g1", "g2"]);
+    expect(ids(v.read())).toEqual(["g1", "g2"]);
   });
 });

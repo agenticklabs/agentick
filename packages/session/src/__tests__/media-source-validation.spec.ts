@@ -90,7 +90,7 @@ describe("base64 media sources at the send door", () => {
       }),
     ).rejects.toMatchObject({ _tag: "InvalidMediaSource", blockIndex: 1, blockType: "image" });
 
-    expect(session.timeline.readPersisted()).toHaveLength(0);
+    expect(session.timeline.read().entries).toHaveLength(0);
 
     await session.close();
     await tools.close();
@@ -112,7 +112,7 @@ describe("base64 media sources at the send door", () => {
     });
     await handle.result;
 
-    expect(session.timeline.readPersisted().length).toBeGreaterThan(0);
+    expect(session.timeline.read().entries.length).toBeGreaterThan(0);
 
     await session.close();
     await tools.close();

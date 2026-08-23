@@ -536,7 +536,7 @@ describe("two-tier — oversized tool result is FULL in store + model, BOUNDED a
     });
 
     // The DURABLE store view (source of truth) holds the FULL bytes.
-    const persisted = timeline.readPersisted();
+    const persisted = timeline.read().entries;
     expect(at(persisted, 0, "message", "content", 0, "content", 0, "text")).toBe(full);
 
     // The MODEL view (projection tier — what the next tick renders) is FULL too.

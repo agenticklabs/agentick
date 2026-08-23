@@ -8,7 +8,7 @@
  * so components re-render when the projection's `version` advances.
  *
  * Returns the projection (what's currently model-visible). For the
- * uncompacted durable log, call `bridges.timeline.readPersisted()` via
+ * uncompacted durable log, call `bridges.timeline.read().entries` via
  * `useBridges()`.
  *
  * @see packages/spec/src/protocol/timeline-harness.ts

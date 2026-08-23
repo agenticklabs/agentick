@@ -56,7 +56,7 @@ describe("TimelineHarness — write-behind (default)", () => {
     await h.append(messageEntry("a"), messageEntry("b"));
     await h.append(messageEntry("c"));
     // Memory is authoritative immediately.
-    expect(ids(h.readPersisted())).toEqual(["a", "b", "c"]);
+    expect(ids(h.read().entries)).toEqual(["a", "b", "c"]);
 
     await h.flush();
     expect(ids(await store.read(h.id, stubStoreCtx()))).toEqual(["a", "b", "c"]);
@@ -111,9 +111,9 @@ describe("TimelineHarness — hydrate (resume path)", () => {
     await store.delete("stub-session", stubStoreCtx());
     await store.append(h.id, [messageEntry("x"), messageEntry("y")], stubStoreCtx());
 
-    expect(ids(h.readPersisted())).toEqual([]); // nothing loaded yet
+    expect(ids(h.read().entries)).toEqual([]); // nothing loaded yet
     await h.hydrate();
-    expect(ids(h.readPersisted())).toEqual(["x", "y"]);
+    expect(ids(h.read().entries)).toEqual(["x", "y"]);
     expect(ids(h.read().entries)).toEqual(["x", "y"]);
   });
 });
@@ -179,7 +179,7 @@ describe("TimelineHarness — store failure surfaces", () => {
       .catch((e) => (e as { _tag?: string })._tag);
     expect(tag).toBe("CompactHandlerFailed");
     // The op failed → projection untouched, log intact.
-    expect(ids(h.readPersisted())).toEqual(["a"]);
+    expect(ids(h.read().entries)).toEqual(["a"]);
   });
 });
 
@@ -220,7 +220,7 @@ describe("turnBoundaries: false opt-out (ADR 53)", () => {
     await h.append(messageEntry("m1"));
     await h.endTurn({ executionId: "e1", outcome: "succeeded" });
     await h.flush();
-    expect(h.readPersisted().filter((e) => e.kind === "boundary")).toEqual([]);
+    expect(h.read().entries.filter((e) => e.kind === "boundary")).toEqual([]);
     const loaded = await store.read(h.id.replace(/^timeline:/, ""), stubStoreCtx());
     expect(loaded.filter((e) => e.kind === "boundary")).toEqual([]);
   });

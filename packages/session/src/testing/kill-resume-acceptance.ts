@@ -67,7 +67,9 @@ import { SessionHarness } from "../harness.js";
  * is the only read surface there is — no value crosses the checkpoint seam.
  */
 function persistedOf(session: SessionHarness): readonly TimelineEntry[] {
-  return session.timeline.readPersisted();
+  // Projection read: absent compaction (none in this suite) it IS the log,
+  // whose only home is the store (§2.7 — no in-memory mirror to read).
+  return session.timeline.read().entries;
 }
 
 // ============================================================================

@@ -269,6 +269,61 @@ export class TimelineHarness
   // ─── Durable backing (ADR 49) ───
   /** Append-only durable store for the persisted tier; keyed by scopeId (= sessionId). */
   private readonly store: TimelineStore;
+
+  // ─── Bounded log indexes (§2.7) — the sync reads that used to force a full
+  // in-memory mirror of the log, replaced by structures maintained at the
+  // append choke + rebuilt at seed. Independent of compaction: the projection
+  // may fold; these track the LOG. ───
+  /** Input entries since the last assistant entry — `trailingInput()`. */
+  private tailInput: MessageTimelineEntry[] = [];
+  /** Total input entries appended — `inputEntryCount()` (the tick-loop read). */
+  private inputCount = 0;
+  /** Per-execution coordinates — `executionCursor()`, O(1). */
+  private readonly cursors = new Map<
+    string,
+    { lastTickIndex: number; boundary?: ExecutionCursor["boundary"] }
+  >();
+
+  private rebuildLogIndexes(entries: readonly TimelineEntry[]): void {
+    this.tailInput = [];
+    this.inputCount = 0;
+    this.cursors.clear();
+    for (const e of entries) this.foldLogIndexes(e);
+  }
+
+  /** Fold ONE appended/seeded entry into the bounded indexes. */
+  private foldLogIndexes(e: TimelineEntry): void {
+    if (e.kind === "boundary") {
+      const c = this.cursors.get(e.boundary.executionId);
+      if (c === undefined) {
+        this.cursors.set(e.boundary.executionId, {
+          lastTickIndex: 0,
+          boundary: e.boundary.outcome,
+        });
+      } else {
+        c.boundary = e.boundary.outcome; // last-boundary-wins
+      }
+      return;
+    }
+    if (e.kind !== "message") return;
+    if (e.message.role === "assistant") {
+      this.tailInput = [];
+    } else if (TimelineHarness.isInputEntry(e)) {
+      this.tailInput.push(e);
+      this.inputCount += 1;
+    }
+    const meta = e.message.metadata;
+    if (meta?.executionId !== undefined) {
+      const c = this.cursors.get(meta.executionId);
+      const tick = meta.tickIndex ?? 0;
+      if (c === undefined) {
+        this.cursors.set(meta.executionId, { lastTickIndex: tick });
+      } else if (tick > c.lastTickIndex) {
+        c.lastTickIndex = tick;
+      }
+    }
+  }
+
   /** Emit turn-boundary records (ADR 53). Default true. */
   private readonly turnBoundaries: boolean;
   private readonly writePolicy: "behind" | "through";
@@ -555,7 +610,7 @@ export class TimelineHarness
    * and drops the paging cursor (an in-process caller holds the last `seq`).
    *
    * @throws {Error} the configured store implements no cursored read — use
-   *   `readPersisted()` for the seq-less full read.
+   *   the store's `read` for the seq-less full read.
    */
   async history(options?: TimelineHistoryInput): Promise<ReadonlyArray<SeqTagged<TimelineEntry>>> {
     const page = await this.historyCmd(options ?? {});
@@ -588,7 +643,7 @@ export class TimelineHarness
       throw new Error(
         `TimelineStore "${this.store.backend}" does not implement the optional ` +
           "cursored read (history). Implement it (see runTimelineStoreConformance) " +
-          "or use readPersisted() for the seq-less full read.",
+          "or read the full log through the store (`history` is the cursored door).",
       );
     }
     const entries = await this.store.history(this.scopeId, input, this.storeCtx());
@@ -601,10 +656,6 @@ export class TimelineHarness
     return firstSeq > 0 ? { entries, nextToSeq: firstSeq - 1 } : { entries };
   }
 
-  readPersisted(): readonly TimelineEntry[] {
-    return this.log.readPersisted();
-  }
-
   /**
    * {@link ExecutionCursor} over the persisted tier — the resume seam
    * (execution-resume.md §3.4). Derived HERE so no consumer scans entries to
@@ -612,25 +663,12 @@ export class TimelineHarness
    * boundary supersedes provenance an earlier crash left behind).
    */
   executionCursor(executionId: string): ExecutionCursor | undefined {
-    let found = false;
-    let lastTickIndex = 0;
-    let boundary: ExecutionCursor["boundary"];
-    for (const entry of this.log.readPersisted()) {
-      if (entry.kind === "boundary") {
-        if (entry.boundary.executionId !== executionId) continue;
-        found = true;
-        boundary = entry.boundary.outcome;
-      } else if (entry.kind === "message") {
-        const meta = entry.message.metadata;
-        if (meta?.executionId !== executionId) continue;
-        found = true;
-        if (meta.tickIndex !== undefined && meta.tickIndex > lastTickIndex) {
-          lastTickIndex = meta.tickIndex;
-        }
-      }
-    }
-    if (!found) return undefined;
-    return { lastTickIndex, ...(boundary !== undefined ? { boundary } : {}) };
+    const c = this.cursors.get(executionId);
+    if (c === undefined) return undefined;
+    return {
+      lastTickIndex: c.lastTickIndex,
+      ...(c.boundary !== undefined ? { boundary: c.boundary } : {}),
+    };
   }
 
   lastCompaction(): LogProjectionMeta | undefined {
@@ -645,6 +683,7 @@ export class TimelineHarness
    */
   seed(entries: readonly TimelineEntry[]): void {
     this.log.seed(entries);
+    this.rebuildLogIndexes(entries);
   }
 
   // ─────────── Async surface — full Operations ───────────
@@ -698,6 +737,7 @@ export class TimelineHarness
     // store-write failure is OPERATIONAL, not a defect — the wrapped
     // `TimelineWriteFailed` lands in the error channel so the session barrier
     // can `catchTag` it (same treatment compact() gives its own failure).
+    for (const e of input.entries) this.foldLogIndexes(e);
     return Effect.tryPromise({
       try: () => this.log.append(input.entries, this.storeCtx()),
       catch: (cause) =>
@@ -809,7 +849,7 @@ export class TimelineHarness
     } catch (cause) {
       throw cause instanceof TimelineHydrateFailed ? cause : new TimelineHydrateFailed({ cause });
     }
-    this.log.seed(entries);
+    this.seed(entries);
   }
 
   // TODO(A2.2): on store-write failure the current pump batch is dropped and
@@ -856,7 +896,17 @@ export class TimelineHarness
       // covers a direct body call outside a command scope.
       const ctx = yield* getContext;
       const token = ctx.opId ?? generateId();
-      const sourceEntries = source === "persisted" ? this.log.readPersisted() : this.log.read();
+      // ONE store read serves both the persisted-source fold input and the
+      // known-set below — the log's only home is the store (§2.7). Flush
+      // first: write-behind may lag appends the projection already shows.
+      const logEntries = yield* Effect.tryPromise({
+        try: async () => {
+          await this.log.flush();
+          return this.store.read(this.scopeId, this.storeCtx());
+        },
+        catch: (cause) => new CompactHandlerFailed({ cause }),
+      });
+      const sourceEntries = source === "persisted" ? logEntries : this.log.read();
       const before = sourceEntries.length;
       // The opening frame, from the HARNESS rather than the strategy: a
       // strategy's own first report typically waits on its model's first token,
@@ -898,7 +948,7 @@ export class TimelineHarness
       // the log append-only (this is not a rewrite) and stops the strategy's
       // output being a projection artifact that evaporates on restart, which is
       // what forced every adopter to build a side table for it.
-      const known = new Set(this.log.readPersisted().map(entryKey));
+      const known = new Set(logEntries.map(entryKey));
       const produced = entries.filter((e) => !known.has(entryKey(e)));
       yield* Effect.tryPromise({
         try: () =>
@@ -911,6 +961,7 @@ export class TimelineHarness
           }),
         catch: (cause) => new CompactHandlerFailed({ cause }),
       });
+      for (const e of produced) this.foldLogIndexes(e);
       yield* this.publishProduced(produced, ctx.opId);
       const result: CompactResult = {
         entriesBefore: before,
@@ -985,9 +1036,10 @@ export class TimelineHarness
 
   /** The resetProjection command body (declared in the constructor). */
   private resetProjectionBody(): Effect.Effect<void, never, never> {
-    return Effect.sync(() => {
-      this.log.resetProjection();
-    });
+    // A store-read failure here is a defect, not a typed channel: the command
+    // registry types this verb's error channel `never`, and a projection reset
+    // that cannot read the log has no meaningful partial outcome.
+    return Effect.promise(() => this.log.resetProjection(this.storeCtx())).pipe(Effect.asVoid);
   }
 
   // ─────────── Turn boundaries (ADR 53, simplified) ───────────
@@ -1009,30 +1061,14 @@ export class TimelineHarness
    * the trailing set correctly.
    */
   trailingInput(): readonly MessageTimelineEntry[] {
-    const persisted = this.log.readPersisted();
-    let lastAssistant = -1;
-    for (let i = persisted.length - 1; i >= 0; i--) {
-      const e = persisted[i]!;
-      if (e.kind === "message" && e.message.role === "assistant") {
-        lastAssistant = i;
-        break;
-      }
-    }
-    const out: MessageTimelineEntry[] = [];
-    for (let i = lastAssistant + 1; i < persisted.length; i++) {
-      const e = persisted[i]!;
-      if (TimelineHarness.isInputEntry(e)) out.push(e);
-    }
-    return out;
+    return [...this.tailInput];
   }
 
-  /** Count of input entries in the persisted log — the session's live
-   *  continuation check compares this across ticks. O(n); fine at
-   *  conversation scale, revisit with a counter if it ever shows up. */
+  /** Count of input entries appended to the log — the session's live
+   *  continuation check compares this across ticks. A maintained counter
+   *  (§2.7): the log has no in-memory mirror to scan. */
   inputEntryCount(): number {
-    let n = 0;
-    for (const e of this.log.readPersisted()) if (TimelineHarness.isInputEntry(e)) n++;
-    return n;
+    return this.inputCount;
   }
 
   /**

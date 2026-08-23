@@ -569,7 +569,7 @@ describe("lifecycle projection wiring (ADR 89 §4)", () => {
     // Surface 2 — the durable record. Also confirms the premise: no assistant
     // entry was written, so without the boundary there is nothing on the
     // timeline to say this turn ever happened.
-    const persisted = session.timeline.readPersisted();
+    const persisted = session.timeline.read().entries;
     expect(persisted.some((e) => e.kind === "message" && e.message.role === "assistant")).toBe(
       false,
     );

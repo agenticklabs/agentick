@@ -120,7 +120,7 @@ describe("run({ history }) — timeline seeding (#187)", () => {
     });
     const session = await app.createSession({ sessionId: "seeded-session" });
     await (session as unknown as { mountReady?: Promise<void> }).mountReady;
-    const persisted = session.timeline.readPersisted() as readonly {
+    const persisted = session.timeline.read().entries as readonly {
       message?: { id?: string };
     }[];
     expect(persisted.map((e) => e.message?.id)).toEqual(["h1"]);

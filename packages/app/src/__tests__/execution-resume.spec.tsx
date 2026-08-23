@@ -135,8 +135,8 @@ describe("execution resume — the re-drive (slice 3, end to end)", () => {
 
     // The interrupted attempt's input was NOT re-appended.
     const inputs = session!.timeline
-      .readPersisted()
-      .filter((e) => e.kind === "message" && e.message.role === "user");
+      .read()
+      .entries.filter((e) => e.kind === "message" && e.message.role === "user");
     expect(inputs.length).toBe(1);
 
     // Completion RESOLVED the interruption on the durable record: history +

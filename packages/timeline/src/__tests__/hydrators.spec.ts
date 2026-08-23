@@ -126,7 +126,7 @@ describe("hydrateFromStore — the ADR 49 default", () => {
     spy.calls.length = 0;
     await h.hydrate();
     expect(spy.calls).toEqual(["read"]);
-    expect(h.readPersisted()).toHaveLength(2);
+    expect(h.read().entries).toHaveLength(2);
     await h.close();
   });
 });
@@ -181,7 +181,7 @@ describe("hydrateTail — the BOUNDED-MEMORY proof (ADR 93 D1 gate)", () => {
     spy.calls.length = 0;
     await h.hydrate();
     // The harness holds k, not N — the whole point of the seam.
-    expect(h.readPersisted()).toHaveLength(k);
+    expect(h.read().entries).toHaveLength(k);
     expect(h.read().entries).toHaveLength(k);
     expect(spy.calls).not.toContain("read");
     await h.close();

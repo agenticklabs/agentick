@@ -71,7 +71,7 @@ const idOf = (e: TimelineEntry): string => (e as { message: { id: string } }).me
  * excluded from the snapshot blob, so the blob is no longer a read surface.
  */
 function persistedOf(session: SessionHarness): readonly TimelineEntry[] {
-  return session.timeline.readPersisted();
+  return session.timeline.read().entries;
 }
 
 async function mkSession(opts: {

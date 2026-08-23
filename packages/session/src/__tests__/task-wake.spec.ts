@@ -108,9 +108,9 @@ function assistantTexts(entries: readonly TimelineEntry[]): string[] {
 }
 
 function boundaryCount(session: {
-  timeline: { readPersisted(): readonly TimelineEntry[] };
+  timeline: { read(): { readonly entries: readonly TimelineEntry[] } };
 }): number {
-  return session.timeline.readPersisted().filter((e) => e.kind === "boundary").length;
+  return session.timeline.read().entries.filter((e) => e.kind === "boundary").length;
 }
 
 describe("TASK-WAKE integration — unobserved completion wakes via the real send path", () => {
@@ -237,7 +237,7 @@ describe("TASK-WAKE integration — unobserved completion wakes via the real sen
     // draining to exactly one boundary (no colliding second execution).
     releaseTool();
     await handle.result;
-    await waitForStable(() => session.timeline.readPersisted().length, { stableMs: 60 });
+    await waitForStable(() => session.timeline.read().entries.length, { stableMs: 60 });
 
     expect(wakeEntries(session.timeline.read().entries, taskHandle.taskId)).toHaveLength(1);
     expect(boundaryCount(session)).toBe(1);

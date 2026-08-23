@@ -86,6 +86,7 @@ export function fakeTimelineHarness(
     ready: Promise.resolve(),
     read: () => snapshot,
     executionCursor: () => undefined,
+    history: async () => persisted.map((entry, i) => ({ seq: i + 1, entry })),
     subscribe: (l) => listeners.subscribe(l),
     trailingInput: () => {
       let lastAssistant = -1;
@@ -106,7 +107,6 @@ export function fakeTimelineHarness(
     inputEntryCount: () =>
       persisted.filter((e) => e.kind === "message" && e.message.role === "user").length,
     endTurn: async () => {},
-    readPersisted: () => persisted,
     lastCompaction: () => undefined,
     // The Effect-canonical twin (ADR 77). A fake that only implements the
     // Promise facade is a fake that cannot be composed in a caller's fiber —

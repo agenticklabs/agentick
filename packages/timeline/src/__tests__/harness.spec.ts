@@ -195,7 +195,7 @@ describe("TimelineHarness — inbox addressability", () => {
       }),
     );
     await settle();
-    expect(harness.readPersisted()).toContainEqual(entry);
+    expect(harness.read().entries).toContainEqual(entry);
     await harness.close();
   });
 
@@ -213,7 +213,7 @@ describe("TimelineHarness — inbox addressability", () => {
     await settle();
     expect(harness.read().entries).toEqual(replacement);
     // Log still has the original.
-    expect(harness.readPersisted()).toHaveLength(1);
+    expect(harness.read().entries).toHaveLength(1);
     await harness.close();
   });
 
@@ -254,11 +254,11 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
 
     // A DIFFERENT scope over the SAME store — the child of a fork.
     const { harness: child } = await makeHarness(timelineScopeKey("br-child"), { store });
-    expect(child.readPersisted()).toEqual([]);
+    expect(child.read().entries).toEqual([]);
 
     await child.branch(branchCtx("br-parent"));
     await child.hydrate();
-    expect(idsOf(child.readPersisted())).toEqual(["p1", "p2"]);
+    expect(idsOf(child.read().entries)).toEqual(["p1", "p2"]);
     expect(idsOf(child.read().entries)).toEqual(["p1", "p2"]);
 
     // The copy is the CHILD's: appending to it leaves the parent's log alone.
@@ -282,7 +282,7 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
     await child.branch(branchCtx("br2-parent"));
     await child.branch(branchCtx("br2-parent"));
     await child.hydrate();
-    expect(idsOf(child.readPersisted())).toEqual(["p1"]);
+    expect(idsOf(child.read().entries)).toEqual(["p1"]);
     await child.close();
   });
 
@@ -291,7 +291,7 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
     const { harness } = await makeHarness(timelineScopeKey("br3-child"), { store });
     await harness.branch(branchCtx("never-existed"));
     await harness.hydrate();
-    expect(harness.readPersisted()).toEqual([]);
+    expect(harness.read().entries).toEqual([]);
     await harness.close();
   });
 
@@ -300,7 +300,7 @@ describe("TimelineHarness — branch: the fork transport (checkpointing §5)", (
     // in it — durability across sessions was never on offer without injection.
     const { harness } = await makeHarness("br4-child");
     await harness.branch(branchCtx("br4-parent"));
-    expect(harness.readPersisted()).toEqual([]);
+    expect(harness.read().entries).toEqual([]);
     await harness.close();
   });
 });

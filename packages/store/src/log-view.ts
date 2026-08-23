@@ -14,22 +14,23 @@
  * tick loop. `LogView` is that machine, extracted verbatim and made generic
  * over the entry type `T`.
  *
- * ## Two tiers — durable log + materialized projection
+ * ## One in-memory tier — the projection; the log lives in the store (§2.7)
  *
- *   - **persisted** — the durable, append-only log. Only {@link append} mutates
- *     it; once an entry lands it is never removed or rewritten. The source of
- *     truth for "what happened."
- *   - **projection** — what {@link read} / {@link snapshot} expose. Normally a
- *     live mirror of persisted; {@link replaceProjection} (the compaction
- *     target) and {@link resetProjection} diverge / re-mirror it. Subsequent
- *     appends land at the tail of BOTH tiers — the natural "compacted prefix +
- *     recent" shape. The durable log is never rewritten by a projection
- *     mutation.
+ *   - **the log** — durable, append-only, and held ONLY by the {@link LogStore}.
+ *     {@link append} writes it (per the write policy); once an entry lands it
+ *     is never removed or rewritten. Read it through the store (`read` /
+ *     `history`) — the view keeps NO in-memory mirror of it, so a session's
+ *     RAM is bounded by its projection, not its conversation length.
+ *   - **projection** — what {@link read} / {@link snapshot} expose. Seeded by
+ *     the harness's hydrator, appended at the tail, diverged by
+ *     {@link replaceProjection} (the compaction target), re-mirrored by
+ *     {@link resetProjection} (an async store read). The log is never
+ *     rewritten by a projection mutation.
  *
  * ## The write-behind pump (moves whole)
  *
  * With `writePolicy: "behind"` (memory-authoritative), {@link append} updates
- * both tiers synchronously and buffers the durable write; a single-flight pump
+ * the projection synchronously and buffers the durable write; a single-flight pump
  * drains the buffer to the store off the critical path. **The pump never
  * rejects** — a failed batch is absorbed into a latched `pumpError` so an
  * un-awaited pump can never become an unhandled rejection. {@link flush} is the
@@ -99,22 +100,13 @@ export interface LogViewConfig<T> {
 }
 
 export class LogView<T> {
-  // ─── Two tiers ───
-  // TODO(data-layer §2.7 / Phase 6b): drop `_persisted` — hold only the bounded
-  // projection and read the log through the store. The TRANSPLANT blocker is
-  // GONE (store-layer `branch` is the fork transport; the snapshot payload is
-  // deleted). What blocks it now is the SYNC read surface built on this array:
-  // `readPersisted()`, `trailingInput()` and `inputEntryCount()` are sync
-  // protocol reads of the whole log, and the session's tick loop calls
-  // `inputEntryCount()` every tick — going async would turn a memory read into a
-  // per-tick full-log store read. Landing §2.7 needs the read surface redesigned
-  // first (a maintained input counter + a bounded tail read), not just this
-  // field removed.
-  /** The durable, append-only log — the source of truth. */
-  private _persisted: T[] = [];
+  // ─── One in-memory tier (data-layer §2.7, landed) ───
+  // The durable log's ONLY home is the store; RAM holds the projection. The
+  // sync whole-log reads that used to force a mirror (`readPersisted`,
+  // trailing-input scans, cursor scans) are replaced by maintained bounded
+  // indexes in the consuming harness and async store reads (`history`).
   /** The materialized projection — the read surface; diverges on compaction. */
   private _projection: T[] = [];
-  private _persistedVersion = 0;
   private _projectionVersion = 0;
   private _lastCompaction?: LogProjectionMeta;
 
@@ -160,11 +152,6 @@ export class LogView<T> {
   /** The projection tier — the primary consumer view. */
   read(): readonly T[] {
     return this._projection;
-  }
-
-  /** The durable, append-only log tier. */
-  readPersisted(): readonly T[] {
-    return this._persisted;
   }
 
   /**
@@ -230,7 +217,7 @@ export class LogView<T> {
   }
 
   /**
-   * SEED both in-memory tiers from supplied entries — the genesis path (ADR 93).
+   * SEED the projection from supplied entries — the genesis path (ADR 93).
    *
    * The caller decides WHAT the view opens on (the whole durable log, a bounded
    * tail, a journal fold, synthetic ephemera): genesis authority belongs to the
@@ -241,14 +228,12 @@ export class LogView<T> {
    * back to the store and the write-behind pump is not touched. Re-appending
    * genesis would duplicate the log on every resume.
    *
-   * Replaces persisted + projection with `entries` (the projection reconstructs
-   * by a subsequent projection build / compaction), bumps both versions,
-   * refreshes the snapshot, and pings once.
+   * Replaces the projection with `entries`, bumps the version, refreshes the
+   * snapshot, and pings once. The durable log itself lives in the STORE — the
+   * view holds no second copy of it (data-layer §2.7).
    */
   seed(entries: readonly T[]): void {
-    this._persisted = [...entries];
     this._projection = [...entries];
-    this._persistedVersion += 1;
     this._projectionVersion += 1;
     this.refreshSnapshot();
     this.notify();
@@ -287,9 +272,7 @@ export class LogView<T> {
     ctx: StoreCtx,
     meta?: LogProjectionMeta,
   ): Promise<void> {
-    for (const entry of produced) this._persisted.push(entry);
     this._projection = [...projection];
-    if (produced.length > 0) this._persistedVersion += 1;
     this._projectionVersion += 1;
     this._lastCompaction = meta;
     this.refreshSnapshot();
@@ -309,11 +292,21 @@ export class LogView<T> {
 
   /**
    * Reset the projection to a live mirror of the durable log — clears any
-   * compaction divergence. Bumps the projection version, clears the last
+   * compaction divergence. Reads the STORE (the log's only home), flushing the
+   * write-behind first. Bumps the projection version, clears the last
    * provenance, refreshes the snapshot, and pings.
    */
-  resetProjection(): void {
-    this._projection = [...this._persisted];
+  async resetProjection(ctx: StoreCtx): Promise<void> {
+    // Flush first: with write-behind, the store may lag appends the projection
+    // already shows — a reset must not travel back in time.
+    await this.flush();
+    let entries: readonly T[];
+    try {
+      entries = await this.store.read(this.logKey, ctx);
+    } catch (cause) {
+      throw this.wrapWriteError(cause);
+    }
+    this._projection = [...entries];
     this._projectionVersion += 1;
     this._lastCompaction = undefined;
     this.refreshSnapshot();
@@ -323,11 +316,7 @@ export class LogView<T> {
   // ─────────── Internals ───────────
 
   private applyAppend(entries: readonly T[]): void {
-    for (const entry of entries) {
-      this._persisted.push(entry);
-      this._projection.push(entry);
-    }
-    this._persistedVersion += 1;
+    for (const entry of entries) this._projection.push(entry);
     this._projectionVersion += 1;
     this.refreshSnapshot();
     this.notify();

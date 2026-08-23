@@ -63,7 +63,7 @@ describe("genesis — the seed law (ADR 93 landmine 3)", () => {
     await h.hydrate();
     await h.flush();
     expect(appended).toEqual([]);
-    expect(h.readPersisted()).toHaveLength(2);
+    expect(h.read().entries).toHaveLength(2);
     // A real append still writes through — genesis is the ONLY exemption.
     await h.append(messageEntry("live", "c"));
     await h.flush();
@@ -74,7 +74,7 @@ describe("genesis — the seed law (ADR 93 landmine 3)", () => {
   it("seeds BOTH tiers so the first render sees the resumed conversation", async () => {
     const h = await harness({ hydrate: async () => [messageEntry("g1", "a")] });
     await h.hydrate();
-    expect(h.readPersisted()).toHaveLength(1);
+    expect(h.read().entries).toHaveLength(1);
     expect(h.read().entries).toHaveLength(1);
     // The projection version bumped, so a subscribed renderer re-reads.
     expect(h.read().version).toBeGreaterThan(0);
@@ -84,7 +84,7 @@ describe("genesis — the seed law (ADR 93 landmine 3)", () => {
   it("no store and no hydrator ⇒ genesis is a no-op (the zero-cost default)", async () => {
     const h = await harness();
     await h.hydrate();
-    expect(h.readPersisted()).toEqual([]);
+    expect(h.read().entries).toEqual([]);
     expect(h.read().version).toBe(0);
     await h.close();
   });
@@ -97,7 +97,7 @@ describe("genesis — typed failure (ADR 93 landmine 2)", () => {
     await expect(h.hydrate()).rejects.toBeInstanceOf(TimelineHydrateFailed);
     await expect(h.hydrate()).rejects.toMatchObject({ cause: boom });
     // Nothing was installed — no half-genesis harness.
-    expect(h.readPersisted()).toEqual([]);
+    expect(h.read().entries).toEqual([]);
     await h.close();
   });
 
@@ -146,7 +146,7 @@ describe("genesis — the ctx.store facet (ADR 91/93)", () => {
     );
     await h.ready;
     await h.hydrate();
-    expect(h.readPersisted()).toHaveLength(1);
+    expect(h.read().entries).toHaveLength(1);
     await h.close();
   });
 
@@ -173,8 +173,9 @@ describe("compact — the definition's (entries, ctx) sugar", () => {
     const result = await h.compact();
     expect(result).toMatchObject({ entriesBefore: 2, entriesAfter: 1, source: "persisted" });
     expect(h.read().entries).toHaveLength(1);
-    // Nothing was rewritten; the summary is appended after the two turns.
-    expect(h.readPersisted()).toHaveLength(3);
+    // Nothing was rewritten; the summary is appended after the two turns —
+    // in the LOG, whose only home is the store (§2.7).
+    expect((await h.history({ limit: 100 })).map((t) => t.entry)).toHaveLength(3);
     await h.close();
   });
 
@@ -234,7 +235,7 @@ describe("definition hooks:/guards: — drop-layer keys reach the discriminated 
       }),
     );
     await h.append(messageEntry("a", "1"));
-    expect(h.readPersisted()).toHaveLength(1);
+    expect(h.read().entries).toHaveLength(1);
     // A veto surfaces as the runner's terminal outcome, carrying the reason —
     // assert both, so the test cannot pass on an unrelated rejection.
     await expect(h.append(messageEntry("b", "2"), messageEntry("c", "3"))).rejects.toMatchObject({
@@ -242,7 +243,7 @@ describe("definition hooks:/guards: — drop-layer keys reach the discriminated 
       terminal: { outcome: "vetoed", reason: "batch too large" },
     });
     // The veto held: nothing from the rejected batch landed.
-    expect(h.readPersisted()).toHaveLength(1);
+    expect(h.read().entries).toHaveLength(1);
     await h.close();
   });
 
@@ -308,7 +309,7 @@ describe("cascade ORDER — app wraps definition (ADR 93 §Guards on configs)", 
     });
     // The app guard ran and short-circuited: the definition guard never did.
     expect(order).toEqual(["app-guard"]);
-    expect(h.readPersisted()).toEqual([]);
+    expect(h.read().entries).toEqual([]);
     await h.close();
   });
 

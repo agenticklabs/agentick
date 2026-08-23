@@ -232,7 +232,7 @@ describe("PA2/PA3 — evicted session reopens with state", () => {
 
     // Read the LIVE handle: the durable log IS the timeline's state, so there
     // is no snapshot value to read it out of.
-    const text = JSON.stringify(reopened.timeline.readPersisted());
+    const text = JSON.stringify(reopened.timeline.read().entries);
     expect(text).toContain("REMEMBER-42"); // prior turn survived eviction
 
     await app.closeApp();
@@ -358,7 +358,7 @@ describe("checkpointing §4 — evict and resume are one code path", () => {
     const resumed = await appA.resumeSession("S");
     const afterEvict = {
       knob: resumed!.knobs.get("verbose"),
-      timeline: JSON.stringify(resumed!.timeline.readPersisted()),
+      timeline: JSON.stringify(resumed!.timeline.read().entries),
     };
     await appA.closeApp();
 
@@ -367,7 +367,7 @@ describe("checkpointing §4 — evict and resume are one code path", () => {
     const rebuilt = await appB.createSession({ sessionId: "S" });
     expect({
       knob: rebuilt.knobs.get("verbose"),
-      timeline: JSON.stringify(rebuilt.timeline.readPersisted()),
+      timeline: JSON.stringify(rebuilt.timeline.read().entries),
     }).toEqual(afterEvict);
     expect(afterEvict.timeline).toContain("REMEMBER-7");
     expect(afterEvict.knob).toBe(true);
@@ -444,7 +444,7 @@ describe("evictSession — the same operation, invoked by hand", () => {
 
     const resumed = await app.resumeSession("manual");
     expect(resumed).toBeDefined();
-    expect(JSON.stringify(resumed!.timeline.readPersisted())).toContain("REMEMBER-9");
+    expect(JSON.stringify(resumed!.timeline.read().entries)).toContain("REMEMBER-9");
 
     await app.closeApp();
   });

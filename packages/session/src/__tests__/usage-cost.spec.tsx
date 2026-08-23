@@ -355,7 +355,7 @@ describe("usage-cost §5 — the assistant entry carries cost + model", () => {
     );
     await send(session);
 
-    const entries = session.timeline.readPersisted();
+    const entries = session.timeline.read().entries;
     const assistant = entries.find((e) => e.kind === "message" && e.message.role === "assistant");
     const meta = (assistant as { message: { metadata?: SessionMessageMetadata } }).message
       .metadata!;
@@ -370,7 +370,7 @@ describe("usage-cost §5 — the assistant entry carries cost + model", () => {
     const { session } = await mkSession(scriptedLoop([{ usage: usage(100, 10), model: OPUS }]));
     await send(session);
 
-    const entries = session.timeline.readPersisted();
+    const entries = session.timeline.read().entries;
     const assistant = entries.find((e) => e.kind === "message" && e.message.role === "assistant");
     const meta = (assistant as { message: { metadata?: SessionMessageMetadata } }).message
       .metadata!;
@@ -423,7 +423,7 @@ describe("usage-cost §7 — execution and turn levels", () => {
     );
     await send(session);
 
-    const entries = session.timeline.readPersisted();
+    const entries = session.timeline.read().entries;
     const boundary = entries.find((e) => e.kind === "boundary");
     expect(boundary).toBeDefined();
     const b = (boundary as { boundary: Record<string, unknown> }).boundary;
