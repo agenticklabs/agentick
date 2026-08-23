@@ -1384,9 +1384,17 @@ export class AppHarness<P = unknown>
     }
     if (this.idleTimeout !== undefined) {
       const idle = this.idleTimeout;
-      this.idleSweepTimer = setInterval(() => {
-        void this.sweepIdle(idle);
-      }, idle);
+      // Sweep cadence is DECOUPLED from the window: at interval === window,
+      // eviction latency is [window, 2x window) — observed in production as
+      // "7-8 minutes on a 5-minute timeout". Capping the interval at 60s
+      // tightens latency to window + <=60s; an unref'd timer scanning a Map
+      // once a minute is free.
+      this.idleSweepTimer = setInterval(
+        () => {
+          void this.sweepIdle(idle);
+        },
+        Math.min(idle, 60_000),
+      );
       // Never hold the event loop open for the sweep (Node-only API; guard
       // for non-Node runtimes without `unref`).
       this.idleSweepTimer.unref?.();
