@@ -615,3 +615,114 @@ describe("evictSession — the same operation, invoked by hand", () => {
     await app.closeApp();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Shutdown — the page-out that cannot refuse
+// ---------------------------------------------------------------------------
+
+describe("app shutdown pages out an IN-FLIGHT session", () => {
+  it("aborts the turn into an honest boundary, not a crash the next open must reconcile", async () => {
+    // Where shutdown parts company with eviction: the reaper refuses a session
+    // with live work, but the process is leaving — there is nowhere to stand
+    // still. Draining the abort before the flush is what makes the difference
+    // between a crash and an ending: the tool call is answered, the turn gets
+    // its `aborted` boundary, and the record hibernates with no
+    // `currentExecutionId` — so the next open finds a finished turn rather than
+    // interruption evidence, and `onInterruptedExecution` stays quiet.
+    const sessionStore = new InMemorySessionStore();
+    const timelineStore = new MemoryTimelineStore();
+    const knobStore = createKnobStore();
+    const mk = async (appId: string, scripted: unknown[]) => {
+      const journal = new MemoryJournal();
+      const bus = new LocalEventBus();
+      const inbox = new LocalInbox();
+      const executor = new FakeLanguageModelExecutor(`shutdown-${appId}`, journal, bus, inbox, {
+        scripted: scripted as never,
+      });
+      await executor.ready;
+      return { executor, journal, bus, inbox };
+    };
+
+    let entered!: () => void;
+    const started = new Promise<void>((res) => {
+      entered = res;
+    });
+    const held = new Promise<void>(() => {
+      // never released — the process goes down mid-tool-call
+    });
+    const toolHandlers = new Map<string, (input: unknown) => Promise<ContentBlock[]>>([
+      [
+        "handlers/gate",
+        async () => {
+          entered();
+          await held;
+          return [{ type: "text", text: "released" }];
+        },
+      ],
+    ]);
+
+    const first = await mk("A", gateScript());
+    const app = await createApp(React.createElement(GatedAgent), {
+      modelExecutor: first.executor,
+      target: mkTarget(),
+      journal: first.journal,
+      bus: first.bus,
+      inbox: first.inbox,
+      toolHandlers,
+      sessions: { store: sessionStore },
+      timeline: { store: timelineStore },
+      knobs: { store: knobStore },
+    });
+
+    const s = await app.createSession({ sessionId: "mid-turn" });
+    const handle = await s.send({ messages: [{ role: "user", content: "go" }] });
+    await started;
+
+    // Does not hang, does not refuse — with the tool call still open.
+    await app.closeApp();
+    await handle.result.catch(() => undefined);
+
+    const record = await sessionStore.get("mid-turn", {});
+    expect(record?.status).toBe("hibernated");
+    expect(record?.currentExecutionId).toBeUndefined();
+
+    // The flush caught the whole settled turn, boundary included — no dangling
+    // `tool_use` for the next process to choke on.
+    const persisted = await timelineStore.read("mid-turn:timeline", {});
+    const boundary = persisted.find((e) => e.kind === "boundary");
+    expect(boundary).toBeDefined();
+    expect((boundary as { boundary: { outcome: string } }).boundary.outcome).toBe("aborted");
+
+    // The next process opens it: a resumable, idle thread — and NOT an
+    // interruption, because nothing was left unfinished.
+    const interrupted: unknown[] = [];
+    const second = await mk("B", plainScript("AFTER-RESTART"));
+    const next = await createApp(React.createElement(GatedAgent), {
+      modelExecutor: second.executor,
+      target: mkTarget(),
+      journal: second.journal,
+      bus: second.bus,
+      inbox: second.inbox,
+      toolHandlers,
+      sessions: { store: sessionStore },
+      timeline: { store: timelineStore },
+      knobs: { store: knobStore },
+      onInterruptedExecution: async (info: unknown) => {
+        interrupted.push(info);
+        return "drop" as const;
+      },
+    });
+
+    const resumed = await next.resumeSession("mid-turn");
+    expect(resumed).toBeDefined();
+    expect(interrupted).toEqual([]);
+    expect(resumed!.status).toBe("idle");
+    expect(JSON.stringify(resumed!.timeline.read().entries)).toContain("go");
+    expect(
+      (await (await resumed!.send({ messages: [{ role: "user", content: "again" }] })).result)
+        .response,
+    ).toContain("AFTER-RESTART");
+
+    await next.closeApp();
+  });
+});

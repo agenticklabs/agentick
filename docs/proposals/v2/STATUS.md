@@ -2308,6 +2308,56 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-23 — process shutdown hibernates; `closed` is explicit intent only
+
+Production defect (knowify dock, diagnosed 2026-08-23): the app close
+cascade drained its registry through `disposeSession("close")`, so
+`closeApp` — and the gateway close above it — stamped every mounted
+session's durable record `closed`. `closed` is terminal for the resume
+door, so every deploy silently ended whatever was live. Under the old
+ensure-create client this was invisible (create resurrects a closed id);
+under the doors client, reads never create, so a poisoned thread rendered
+EMPTY over intact timeline data. Roughly half the dock's records were
+`closed` and none had been closed on purpose.
+
+The rule now: **leaving memory is not a lifecycle end, and a process
+going down is leaving memory.** `closed` is reserved for explicit intent
+— `closeSession`, `session.close()`, a `runOnce` teardown, a parent
+disposing a spawned child. Everything else hibernates.
+
+- `SessionCloseReason` gains `"shutdown"` (spec). The mapping in
+  `SessionHarness.closeBody` inverts to `reason === "closed" ? "closed"
+: "hibernated"`, so a future reason defaults to the recoverable side
+  rather than the terminal one.
+- `disposeSession` gains a third mode, `"shutdown"`, which runs the SAME
+  snapshot-then-close pair eviction runs (so knobs / state write-behind
+  land, not just the timeline flush a bare close carries) and is what
+  `closeAppBody` now uses. An EPHEMERAL (`runOnce`) session degrades to
+  `"close"` — no durable record to come back from, and flushing one would
+  only strand scoped rows.
+- It parts company with eviction on refusal: the reaper declines an
+  in-flight session, shutdown cannot. `checkpointForShutdown` aborts the
+  execution, waits it out through `whenQuiescent`, and flushes anyway;
+  the flush is best-effort because the close cascade has nowhere to stand
+  still.
+- `onSessionClose` still fires on shutdown. The doctrine is about the
+  DURABLE RECORD, not the in-process notification — the adopter asked for
+  this teardown and their handler is the last moment they get. Eviction's
+  suppression is unchanged, and the existing `app-harness.spec` pin on
+  "onAppClose fires before sessions are torn down" keeps passing.
+
+**In-flight verdict (measured, not assumed).** A graceful shutdown
+mid-turn does NOT become an interruption for `reconcileInterruption` to
+find — it settles into a finished turn. The drained abort answers the
+pending tool call with an `isError` tool result, writes the turn's
+boundary with `outcome: "aborted"`, and leaves the record `hibernated`
+with `currentExecutionId` cleared and usage folded in. The next open
+therefore resumes into a structurally valid timeline (no dangling
+`tool_use`) at `idle`, takes another send, and `onInterruptedExecution`
+fires zero times — correctly, since nothing was lost. The interruption
+path still owns the case it was built for: a process KILLED rather than
+closed skips the cascade and leaves the `running` record behind.
+
 ### 2026-08-23 — declarative `hooks:` / `guards:` accept a LIST of bags
 
 Every declarative interceptor field now takes one bag OR a readonly list

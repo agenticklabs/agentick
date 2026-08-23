@@ -73,6 +73,7 @@ import type {
   PageRequest,
   OnInterruptedExecution,
   ScopeNodeLease,
+  SessionCloseReason,
   SessionRecord,
   SessionStore,
   SessionStoreQuery,
@@ -862,6 +863,16 @@ interface InternalSessionEntry<P> {
   lastActiveAt?: number;
   ephemeral: boolean;
 }
+
+/** Why `disposeSession` is tearing a session down — see its doc-block. */
+type DisposeReason = "close" | "evict" | "shutdown";
+
+/** The teardown's provenance, as the session's own close verb spells it. */
+const CLOSE_REASON_OF: Record<DisposeReason, SessionCloseReason> = {
+  close: "closed",
+  evict: "evicted",
+  shutdown: "shutdown",
+};
 
 /** Construction facts the spawn flow supplies out of band — see `buildSession`. */
 interface SessionBuildOverrides {
@@ -3299,11 +3310,13 @@ export class AppHarness<P = unknown>
       this.activityUnsub = undefined;
     }
 
-    // Close every registered session. Order isn't load-bearing — each
-    // session unmounts independently.
+    // Page every registered session out. Order isn't load-bearing — each
+    // session unmounts independently. `"shutdown"`, not `"close"`: the process
+    // is leaving memory, which is not a lifecycle end, so the durable records
+    // must stay resumable rather than reading as sessions somebody hung up on.
     const sessionIds = Array.from(this.registry.keys());
     for (const id of sessionIds) {
-      await this.disposeSession(id);
+      await this.disposeSession(id, "shutdown");
     }
 
     // Tear down shared sub-harnesses last so their inboxes are still
@@ -3659,9 +3672,11 @@ export class AppHarness<P = unknown>
   /**
    * Tear down a live session and drop it from the live registry.
    *
-   * `reason: "close"` (default) is a genuine session end — `closeApp`,
-   * `runOnce` auto-dispose, or explicit teardown — and fires the app-level
-   * `onSessionClose` handlers ("session ended" analytics / cleanup).
+   * `reason: "close"` (default) is a genuine session end — `closeSession`,
+   * `runOnce` auto-dispose, or a parent disposing a spawned child — and fires
+   * the app-level `onSessionClose` handlers ("session ended" analytics /
+   * cleanup). It is the only reason that stamps the durable record `closed`,
+   * which the resume door treats as terminal.
    *
    * `reason: "evict"` is a CHECKPOINT: `session:snapshot` (which fans `persist`
    * out over every store-backed bridge — the flush barrier) followed by
@@ -3673,15 +3688,21 @@ export class AppHarness<P = unknown>
    * OWN close handlers (bridge / extension teardown) run either way, since
    * `session.close()` is called both times.
    *
+   * `reason: "shutdown"` is `closeApp` draining the registry, and it is the
+   * SAME checkpoint: leaving memory is not a lifecycle end, so the record
+   * hibernates and the next process resumes it. It parts company with eviction
+   * on refusal — the process is going away, so an in-flight execution cannot
+   * veto the page-out. It is aborted, drained, and persisted anyway. An
+   * EPHEMERAL (`runOnce`) session has no durable record to come back from, so
+   * shutting one down is a genuine close.
+   *
    * A rejected flush ABORTS the eviction and rejects to the caller: the session
    * stays live rather than unmounting behind an un-flushed tail. Automatic
    * callers (the sweep, the LRU) absorb that rejection; `evictSession` surfaces
-   * it to whoever asked.
+   * it to whoever asked. Shutdown has nowhere to stand still, so its flush is
+   * best-effort.
    */
-  private async disposeSession(
-    sessionId: string,
-    reason: "close" | "evict" = "close",
-  ): Promise<void> {
+  private async disposeSession(sessionId: string, reason: DisposeReason = "close"): Promise<void> {
     const entry = this.registry.get(sessionId);
     if (!entry) {
       // No live entry — either never opened, or a disposal is already in flight
@@ -3690,7 +3711,8 @@ export class AppHarness<P = unknown>
       await this.disposing.get(sessionId);
       return;
     }
-    if (reason === "evict") {
+    const mode: DisposeReason = reason === "shutdown" && entry.ephemeral ? "close" : reason;
+    if (mode === "evict") {
       if (!this.isEvictable(entry)) return;
       // The flush barrier, BEFORE the registry drop — an aborted eviction must
       // leave the session exactly as it found it. An already-closed session is a
@@ -3704,6 +3726,7 @@ export class AppHarness<P = unknown>
       // mid-send, and the entry we drop is the one we flushed.
       if (this.registry.get(sessionId) !== entry || !this.isEvictable(entry)) return;
     }
+    if (mode === "shutdown") await this.checkpointForShutdown(entry);
     this.registry.delete(sessionId);
 
     // The teardown that actually RELEASES the inbox addresses (session.close →
@@ -3716,7 +3739,7 @@ export class AppHarness<P = unknown>
         // ADR 92 Family 2 §5 — eviction routes THROUGH `session:command:close`,
         // not around it. Page-out and hangup are the same teardown; the audit
         // record tells them apart by provenance, not by code path.
-        await entry.session.close({ reason: reason === "evict" ? "evicted" : "closed" });
+        await entry.session.close({ reason: CLOSE_REASON_OF[mode] });
       } catch {
         // best effort — already-closed sessions throw; ignore
       }
@@ -3726,8 +3749,10 @@ export class AppHarness<P = unknown>
         // best effort
       }
       // Eviction is a checkpoint, not a lifecycle end — suppress the app-level
-      // "session closed" notification (PA2/PA3). A genuine close fires it.
-      if (reason === "evict") return;
+      // "session closed" notification (PA2/PA3). Shutdown fires it: the record
+      // hibernates, but the adopter asked for this teardown and their handler
+      // is the last in-process moment they get.
+      if (mode === "evict") return;
       // Fire onSessionClose handlers (informational, return value
       // ignored). Errors swallowed — handlers don't block teardown.
       for (const h of this.sessionCloseHandlers) {
@@ -3745,6 +3770,29 @@ export class AppHarness<P = unknown>
       // Clear only if still ours — a fresh dispose of the same id must not wipe it.
       if (this.disposing.get(sessionId) === teardown) this.disposing.delete(sessionId);
     }
+  }
+
+  /**
+   * Drain and flush a session the process is walking away from. Unlike
+   * eviction this cannot decline: an in-flight execution is aborted and waited
+   * out, so the flush that follows covers a settled session rather than racing
+   * a running tick.
+   *
+   * Draining before the flush is what makes a graceful shutdown an ENDING
+   * rather than a crash: the pending tool call is answered, the turn commits
+   * its `aborted` boundary, and the record hibernates with no
+   * `currentExecutionId` — so the next open finds a finished turn and
+   * {@link reconcileInterruption} correctly stays quiet. A process that is
+   * killed instead of closed never reaches here, and leaves the `running`
+   * record that path exists for.
+   */
+  private async checkpointForShutdown(entry: InternalSessionEntry<P>): Promise<void> {
+    if (entry.session.status === "closed") return;
+    if (entry.session.hasInFlightExecution) {
+      await entry.session.abort("shutdown").catch(() => undefined);
+      await entry.session.whenQuiescent().catch(() => undefined);
+    }
+    await entry.session.snapshot().catch(() => undefined);
   }
 
   /**

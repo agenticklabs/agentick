@@ -152,4 +152,48 @@ describe("residency hooks through the gateway door + wire send", () => {
     expect(app.getSession("sw1")).toBeUndefined();
     await gateway.close();
   });
+
+  it("gateway close hibernates what its apps were hosting; an ended session stays ended", async () => {
+    // The deploy shape: the gateway's close cascades to `closeApp`, which pages
+    // its registry out. Anything mounted must come back, so only the session
+    // somebody actually hung up on may read as `closed`.
+    const journal = new MemoryJournal();
+    const bus = new LocalEventBus();
+    const inbox = new LocalInbox();
+    const executor = new FakeLanguageModelExecutor("gw-shutdown", journal, bus, inbox, {
+      scripted: {
+        result: {
+          specVersion: SPEC_VERSION,
+          output: [{ type: "text", text: "ok" }],
+          stopReason: "end",
+          usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+        },
+      },
+    });
+    await executor.ready;
+
+    const gateway = new GatewayHarness({ journal, bus, inbox });
+    await gateway.listen();
+    const app = await gateway.createApp({
+      appId: "shutdown-cascade",
+      rootElement: NULL_ROOT,
+      options: {
+        compiler: new CompilerHarness("r-shutdown", journal, bus, inbox),
+        modelExecutor: executor,
+        target,
+        journal,
+        bus,
+        inbox,
+      },
+    });
+
+    await app.createSession({ sessionId: "mounted", eager: true });
+    await app.createSession({ sessionId: "hungup", eager: true });
+    await app.closeSession("hungup");
+
+    await gateway.close();
+
+    expect((await app.getSessionRecord("mounted"))?.status).toBe("hibernated");
+    expect((await app.getSessionRecord("hungup"))?.status).toBe("closed");
+  });
 });

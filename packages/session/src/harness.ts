@@ -1920,15 +1920,17 @@ export class SessionHarness<P = unknown>
    * and collide with the next create-or-resume of the same id.
    */
   private async closeBody(reason: SessionCloseReason): Promise<void> {
-    this.terminalStatus = reason === "evicted" ? "hibernated" : "closed";
+    this.terminalStatus = reason === "closed" ? "closed" : "hibernated";
     await super.close();
   }
 
   /**
    * What the durable record says once this session is down — set by
    * {@link closeBody} and read by {@link teardown}, whose signature the base
-   * class fixes. A page-out lands on `hibernated`, which is not an ending: the
-   * record stays out of the store's prune sweep and a resume can pick it up.
+   * class fixes. `closed` is TERMINAL (the resume door refuses it), so only an
+   * explicit `"closed"` earns it; a page-out or a process shutdown lands on
+   * `hibernated`, which is not an ending — the record stays out of the store's
+   * prune sweep and a resume can pick it up.
    */
   private terminalStatus: SessionStatus = "closed";
 

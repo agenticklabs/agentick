@@ -12,6 +12,10 @@
  *      dormant session must not look ended, and must not be garbage-collected.
  *   3. Ending a session through the app door (`closeSession`) actually removes
  *      it, so reopening the id yields a LIVE session rather than the corpse.
+ *   4. Process shutdown is a page-out, not an ending: `closeApp` hibernates
+ *      what it was hosting, so the next process resumes it. `closed` is
+ *      terminal for the resume door, so only explicit intent may stamp it —
+ *      otherwise every deploy silently ends whatever was mounted.
  *
  * Real app / session / compiler throughout — only the model executor is a fake.
  */
@@ -21,6 +25,7 @@ import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { createKnobStore } from "@agentick/knobs";
 import { InMemorySessionStore } from "@agentick/session";
 import { MemoryTimelineStore } from "@agentick/timeline";
 import type { CreateSessionInput, ExecutionTarget } from "@agentick/spec";
@@ -72,8 +77,16 @@ async function mkSubstrate(name: string) {
   return { journal, bus, inbox, executor };
 }
 
+/** The durable half of a session — shared between apps to model a restart. */
+interface Stores {
+  readonly sessionStore?: InMemorySessionStore;
+  readonly timelineStore?: MemoryTimelineStore;
+  readonly knobStore?: ReturnType<typeof createKnobStore>;
+}
+
 /** An app with a one-session live cap and its own durable stores. */
-async function mkApp(name: string, sessionStore = new InMemorySessionStore()) {
+async function mkApp(name: string, stores: Stores = {}) {
+  const sessionStore = stores.sessionStore ?? new InMemorySessionStore();
   const { journal, bus, inbox, executor } = await mkSubstrate(name);
   const app = await createApp(React.createElement(PlainAgent), {
     modelExecutor: executor,
@@ -82,7 +95,8 @@ async function mkApp(name: string, sessionStore = new InMemorySessionStore()) {
     bus,
     inbox,
     sessions: { maxActive: 1, store: sessionStore },
-    timeline: { store: new MemoryTimelineStore() },
+    timeline: { store: stores.timelineStore ?? new MemoryTimelineStore() },
+    knobs: { store: stores.knobStore ?? createKnobStore() },
   });
   return { app, sessionStore };
 }
@@ -108,11 +122,13 @@ describe("an evicted session is hibernated, not closed", () => {
     expect((await app.getSessionRecord("closed"))?.status).toBe("closed");
 
     await app.closeApp();
+    // Shutdown does not revise a session somebody actually ended.
+    expect((await app.getSessionRecord("closed"))?.status).toBe("closed");
   });
 
   it("keeps a hibernated record out of the store's prune sweep", async () => {
     const store = new InMemorySessionStore();
-    const { app } = await mkApp("residency-prune", store);
+    const { app } = await mkApp("residency-prune", { sessionStore: store });
 
     await app.createSession({ sessionId: "dormant", eager: true });
     await app.createSession({ sessionId: "ended", eager: true }); // evicts `dormant`
@@ -230,7 +246,7 @@ describe("resumeSession brings an evicted session back", () => {
       },
       {},
     );
-    const { app } = await mkApp("residency-record", store);
+    const { app } = await mkApp("residency-record", { sessionStore: store });
 
     const resumed = await app.resumeSession("from-record");
     expect(resumed).toBeDefined();
@@ -324,6 +340,24 @@ describe("closeSession leaves nothing behind", () => {
     await app.closeApp();
   });
 
+  it("survives the app shutdown that follows it", async () => {
+    // Explicit intent is the ONLY thing that stamps `closed`, and shutdown must
+    // not weaken it either: a session ended before the process went down is
+    // still ended when it comes back up.
+    const store = new InMemorySessionStore();
+    const { app } = await mkApp("residency-close-then-shutdown", { sessionStore: store });
+
+    await app.createSession({ sessionId: "hungup", eager: true });
+    await app.closeSession("hungup");
+    await app.closeApp();
+
+    expect((await store.get("hungup", {}))?.status).toBe("closed");
+
+    const { app: next } = await mkApp("residency-close-then-shutdown-2", { sessionStore: store });
+    expect(await next.resumeSession("hungup")).toBeUndefined();
+    await next.closeApp();
+  });
+
   it("ends an evicted session without bringing it back", async () => {
     const { app } = await mkApp("residency-close-evicted");
 
@@ -337,5 +371,62 @@ describe("closeSession leaves nothing behind", () => {
     expect(await app.resumeSession("dormant")).toBeUndefined();
 
     await app.closeApp();
+  });
+});
+
+// ===========================================================================
+// Process shutdown
+// ===========================================================================
+
+describe("app shutdown hibernates its live sessions", () => {
+  it("stamps `hibernated`, and the next process resumes and runs a turn", async () => {
+    // The production defect: `closeApp` drained its registry through the
+    // genuine-close path, so every deploy stamped whatever was mounted
+    // `closed` — terminal for the resume door — and the thread rendered empty
+    // over intact timeline data.
+    const stores = {
+      sessionStore: new InMemorySessionStore(),
+      timelineStore: new MemoryTimelineStore(),
+      knobStore: createKnobStore(),
+    };
+    const { app } = await mkApp("shutdown-first", stores);
+
+    const s = await app.createSession({ sessionId: "mounted" });
+    await (
+      await s.send(say("REMEMBER-4"))
+    ).result;
+    await s.knobs.set({ id: "verbose", value: true });
+
+    await app.closeApp();
+    expect((await stores.sessionStore.get("mounted", {}))?.status).toBe("hibernated");
+
+    const { app: next } = await mkApp("shutdown-second", stores);
+    const resumed = await next.resumeSession("mounted");
+    expect(resumed).toBeDefined();
+    expect(JSON.stringify(resumed!.timeline.read().entries)).toContain("REMEMBER-4");
+    // Shutdown runs the same `session:snapshot` eviction does, so the
+    // write-behind cells land too — not just the timeline flush close carries.
+    expect(resumed!.knobs.get("verbose")).toBe(true);
+    expect((await (await resumed!.send(say("again"))).result).response).toContain("ok");
+
+    await next.closeApp();
+  });
+
+  it("still fires `onSessionClose` — the record hibernates, the handler runs", async () => {
+    // The doctrine is about the DURABLE record, not the in-process
+    // notification: the adopter asked for this teardown, and their handler is
+    // the last moment they get before the process leaves.
+    const store = new InMemorySessionStore();
+    const { app } = await mkApp("shutdown-handlers", { sessionStore: store });
+    const seen: string[] = [];
+    app.onSessionClose(({ sessionId }: { sessionId: string }) => {
+      seen.push(sessionId);
+    });
+
+    await app.createSession({ sessionId: "paged", eager: true });
+    await app.closeApp();
+
+    expect(seen).toEqual(["paged"]);
+    expect((await store.get("paged", {}))?.status).toBe("hibernated");
   });
 });

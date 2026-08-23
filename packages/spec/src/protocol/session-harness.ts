@@ -757,20 +757,26 @@ export interface SessionDryRunResult {
  * Why a session is being torn down — the provenance dimension of the
  * `session:close` operation (ADR 92 Family 2 §5).
  *
- *   `"closed"`  — a genuine session END: explicit teardown, app shutdown, a
- *                 `runOnce` auto-dispose, a parent disposing a spawned child.
- *                 The app-level `onSessionClose` handlers fire.
- *   `"evicted"` — transparent PAGING: the app's soft LRU cap or idle sweep is
- *                 releasing memory. The durable `SessionRecord` + timeline
- *                 store survive and the session reconstructs on its next open,
- *                 so this is not a lifecycle end and `onSessionClose` does NOT
- *                 fire.
+ *   `"closed"`   — a genuine session END: explicit teardown, a `runOnce`
+ *                  auto-dispose, a parent disposing a spawned child. The
+ *                  app-level `onSessionClose` handlers fire.
+ *   `"evicted"`  — transparent PAGING: the app's soft LRU cap or idle sweep is
+ *                  releasing memory. The durable `SessionRecord` + timeline
+ *                  store survive and the session reconstructs on its next open,
+ *                  so this is not a lifecycle end and `onSessionClose` does NOT
+ *                  fire.
+ *   `"shutdown"` — the PROCESS is leaving: `closeApp` (and the gateway close
+ *                  above it) draining its registry. Leaving memory is not a
+ *                  lifecycle end, so this lands where eviction lands — the one
+ *                  difference being that shutdown cannot refuse an in-flight
+ *                  session, it aborts the execution and pages out anyway.
  *
- * Facts, never decisions — nothing branches on it inside the close body; it
- * exists so an operator reading the journal can tell a real hangup from a
- * memory-pressure page-out.
+ * The status a torn-down session's record settles on is the ONE thing that
+ * reads this: `"closed"` is terminal (the resume door refuses it), so it is
+ * reserved for explicit intent, and every other reason lands on `hibernated`.
+ * Otherwise these are facts for an operator reading the journal, not decisions.
  */
-export type SessionCloseReason = "closed" | "evicted";
+export type SessionCloseReason = "closed" | "evicted" | "shutdown";
 
 /** Input to the `session:close` command. */
 export interface SessionCloseInput {
