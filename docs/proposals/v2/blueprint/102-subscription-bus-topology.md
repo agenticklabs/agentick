@@ -1,6 +1,6 @@
 # ADR 102 — Attachment is authorization (the bus tree is the scope model)
 
-**Status:** DRAFT 2026-08-16 (Fable, with Ryan) — generalized same day from a tenancy-only draft at Ryan's direction
+**Status:** ACCEPTED 2026-08-22 (ratified by Ryan; drafted 2026-08-16, generalized same day from a tenancy-only draft at Ryan's direction). First implementation arc: `docs/proposals/v2/session-doors.md` slice 2 (stages 1–3; stage 4 deferred to arena).
 **Depends on:** ADR 31 (harness hierarchy, fan-in bus factories), ADR 48 (principal), ADR 101 (status channel — the first ambient-tier consumer).
 **Supersedes when accepted:** the `onlyOwnedBy` arrival filter (#299 interim), the tenancy half of #297, the `session`-scope query-filter emulation.
 **Related:** #304 (unstamped emitters — becomes defense-in-depth, not load-bearing), `docs/proposals/v2/arena.md` (rooms), `session/send` `fanIn` (an existing instance of this model).
@@ -173,19 +173,31 @@ discipline to get wrong).
 4. Grants for non-default paths via the authorizer scope label — closes
    #297 (operator) and opens rooms without further framework work.
 
-## Open questions
+## Resolved questions (ratified 2026-08-22)
 
-- **Attachment-set surface list**: which surfaces are control-plane is a
-  host-owned allowlist today; does an extension get to register surfaces
-  (harness-owned, like channel names)?
-- **Wire surface for lateral nodes**: `sub/subscribe` today names scopes by
-  kind (`gateway`/`app`/`session`); attaching to `room:*` wants a
-  path-shaped scope on the wire. One new scope kind (`node`, carrying the
-  path) or widen the existing shape?
+- **Attachment-set surface list**: host-owned allowlist now; extension
+  registration of control-plane surfaces waits for a third consumer.
+- **Wire surface for lateral nodes**: a new `node` scope kind carrying the
+  path — widening the existing kinds would smear path semantics over
+  shapes that don't want them.
 - **Principal-less callers** (dev mode, in-process tests): resolution
-  returns `[]` → they attach at the root and see everything, matching
-  today's no-auth behavior — confirm this is the wanted default rather
-  than fail-closed.
-- **Node GC vs durable cursors**: closing an idle node discards its ring;
-  a subscriber reattaching later seeds from snapshots (status channel)
-  rather than replay. Acceptable, or should nodes linger for a TTL?
+  returns `[]` → root attachment, see everything. Ratified as the local/
+  no-auth pole's correct default; fail-closed there breaks every
+  in-process test.
+- **Node GC vs durable cursors**: refcount-close discards the ring;
+  re-attachers seed from snapshots (the status-channel model). A linger
+  TTL is a tuning knob added only if reattach churn shows up in practice.
+
+## Stage-3 amendment (session-doors arc)
+
+`session` scope resolves uniformly as **own-node attachment + sessionId
+topic query** — not an attachment to the session's own bus, which only
+exists while the session is live. One shape serves live, evicted, and
+nonexistent (speculative client-minted ids: the doors arc's draft flow
+mint → subscribe → send). Topic selection within your own subtree chooses
+WHAT you hear and never inspects WHOSE frame arrived, so the
+no-per-event-filter doctrine holds; isolation stays topological — an id
+that materializes under another principal's node never transits yours.
+`session-tree` keeps the root-session-bus attachment (tree reachability
+from spawn-time parenting) and therefore remains live-only until a
+consumer needs it cold.
