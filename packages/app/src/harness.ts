@@ -993,6 +993,17 @@ export class AppHarness<P = unknown>
    */
   private readonly disposing = new Map<string, Promise<void>>();
   /**
+   * In-flight resume OPS, by session id. A cold open's reader fan-out (history
+   * page + catalog polls + seen-mark) joins the first caller's op instead of
+   * minting its own: one op, one journal entry, one hook firing, one span per
+   * rebuild — so the around-form `onAppResumeSession` means "a rebuild
+   * happened," not "someone asked." Construction was already single-flighted
+   * below this ({@link building}); this collapses the OP. PROCESS-LOCAL by
+   * design: cross-node double-mount is governed by session affinity (the
+   * single-home assumption), not by this map.
+   */
+  private readonly resumingOps = new Map<string, Promise<SessionHarnessProtocol<P> | undefined>>();
+  /**
    * In-flight construction single-flight, by session id. Two concurrent
    * same-id `createSession` calls after an eviction would otherwise both
    * construct and collide on the shared inbox addresses. The first build
@@ -1948,6 +1959,8 @@ export class AppHarness<P = unknown>
    * control — without refusing to open new sessions.
    */
   resumeSession(sessionId: string): Promise<SessionHarnessProtocol<P> | undefined> {
+    const joined = this.resumingOps.get(sessionId);
+    if (joined !== undefined) return joined;
     const op: Operation<{ sessionId: string }, SessionHarnessProtocol<P> | undefined> = {
       opId: `app:resume-session:${generateId()}`,
       surface: "app",
@@ -1955,14 +1968,16 @@ export class AppHarness<P = unknown>
       scope: { sessionId },
       input: { sessionId },
     };
-    return this.runWithTelemetry(
+    const run = this.runWithTelemetry(
       this.runOperation(op, (i) =>
         Effect.tryPromise({
           try: () => this.resumeSessionBody(i.sessionId),
           catch: (cause): AppError => mapAppError(cause),
         }),
       ),
-    );
+    ).finally(() => this.resumingOps.delete(sessionId));
+    this.resumingOps.set(sessionId, run);
+    return run;
   }
 
   /**

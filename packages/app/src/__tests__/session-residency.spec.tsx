@@ -202,21 +202,40 @@ describe("resumeSession brings an evicted session back", () => {
     await app.closeApp();
   });
 
-  it("single-flights concurrent resumes of one id onto ONE construction", async () => {
+  it("single-flights concurrent resumes of one id onto ONE construction AND one op", async () => {
     const { app } = await mkApp("residency-single-flight");
 
     let constructions = 0;
     app.onSessionCreate(async (input: CreateSessionInput) => {
       if (input.sessionId === "A") constructions++;
     });
+    // The around-form is the truthy resume signal (README gotcha), so a reader
+    // fan-out joining one op must fire it ONCE — hook firings ≡ rebuilds, and a
+    // dashboard counting resumes is not inflated by how many verbs asked.
+    let resumes = 0;
+    app.hook({
+      onAppResumeSession: async (
+        input: { sessionId: string },
+        next: (i: { sessionId: string }) => Promise<unknown>,
+      ) => {
+        const session = await next(input);
+        if (session !== undefined) resumes++;
+        return session;
+      },
+    });
 
     await app.createSession({ sessionId: "A" });
     expect(constructions).toBe(1);
     await app.createSession({ sessionId: "B" }); // evicts A
 
-    const [one, two] = await Promise.all([app.resumeSession("A"), app.resumeSession("A")]);
-    expect(one === two).toBe(true);
-    expect(constructions).toBe(2); // the resume built once, not twice
+    const [one, two, three] = await Promise.all([
+      app.resumeSession("A"),
+      app.resumeSession("A"),
+      app.resumeSession("A"),
+    ]);
+    expect(one === two && two === three).toBe(true);
+    expect(constructions).toBe(2); // the resume built once, not thrice
+    expect(resumes).toBe(1); // ...and ran ONE op: joiners share it
 
     await app.closeApp();
   });
