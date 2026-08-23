@@ -19,6 +19,8 @@ import type {
   WireExtensionContext,
 } from "@agentick/spec";
 
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
+
 import { liveWireExtension } from "../wire.js";
 
 const SESSION_ID = "sess-1";
@@ -51,10 +53,7 @@ function stubGateway(session: SessionHarnessProtocol | undefined): GatewayHarnes
   const app = {
     getSession: (id: string) => (session && id === SESSION_ID ? session : undefined),
   } as unknown as AppHarnessProtocol;
-  return {
-    apps: () => [app],
-    app: () => app,
-  } as unknown as GatewayHarnessProtocol;
+  return fakeGatewayHarness({ apps: [app] });
 }
 
 function stubCtx(gateway: GatewayHarnessProtocol): WireExtensionContext {

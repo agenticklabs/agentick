@@ -72,19 +72,21 @@ const NO_VALUES: CompletionResult = { values: [] };
  * pulling its harness. Spec owns the shapes both sides speak, so the narrowest
  * possible contract is the whole contract.
  */
-interface PromptsCompleteDoor {
+interface PromptsCompleteCapable {
   complete(input: PromptsCompleteInput): Promise<PromptsCompleteOutcome>;
 }
 
 /**
- * Feature-detect the prompts completion door on a session — the same structural
+ * Feature-detect the prompts completion surface on a session — the same structural
  * detection `CheckpointCapable` gets, for the same reason: the slot is contributed
  * by a package this one cannot name, and an adopter's own `Prompts`
- * implementation predating the door is a legitimate runtime state.
+ * implementation predating the slot is a legitimate runtime state.
  */
-function promptsDoorOf(session: SessionHarnessProtocol): PromptsCompleteDoor | undefined {
+function promptsCompleteCapableOf(
+  session: SessionHarnessProtocol,
+): PromptsCompleteCapable | undefined {
   const candidate = (session as { readonly prompts?: unknown }).prompts as
-    | PromptsCompleteDoor
+    | PromptsCompleteCapable
     | undefined;
   return typeof candidate?.complete === "function" ? candidate : undefined;
 }
@@ -101,7 +103,7 @@ export const completionsWireExtension: WireExtension = defineWireExtension({
 
       // No prompts surface on this session — a question this deployment cannot
       // answer, which is silence rather than a protocol error.
-      const prompts = promptsDoorOf(session);
+      const prompts = promptsCompleteCapableOf(session);
       if (prompts === undefined) return NO_VALUES;
 
       // HOP 1 — ask the declaration's own side. An inline resolver runs there and

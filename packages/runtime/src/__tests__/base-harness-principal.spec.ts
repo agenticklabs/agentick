@@ -20,6 +20,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Stream } from "effect";
 import type {
+  EventScope,
   MessageEnvelope,
   MessageHandlerError,
   Operation,
@@ -31,6 +32,8 @@ import { LocalInbox } from "../substrate/local-inbox.js";
 import { MemoryJournal } from "../substrate/memory-journal.js";
 
 const OP_NAME = "tool:test:run";
+const CHANNEL = "elicitation";
+const CHANNEL_EVENT = `session:channel:${CHANNEL}`;
 
 class PrincipalTestHarness extends BaseHarness<"tool"> {
   constructor(
@@ -52,6 +55,17 @@ class PrincipalTestHarness extends BaseHarness<"tool"> {
   /** Expose the protected field so we can assert impls can read it. */
   readPrincipal(): string | undefined {
     return this.principal;
+  }
+
+  /** Publish a request frame. The reply never comes; the short bound frees it. */
+  async ask(scope?: EventScope): Promise<void> {
+    const effect = this.request(CHANNEL, { q: 1 }, { timeoutMs: 5, ...(scope ? { scope } : {}) });
+    await Effect.runPromise(Effect.either(effect));
+  }
+
+  /** Publish a notify frame — the fire-and-forget twin of {@link ask}. */
+  async tell(scope?: EventScope): Promise<void> {
+    await Effect.runPromise(this.notifyChannel(CHANNEL, { n: 1 }, scope ? { scope } : {}));
   }
 
   /** Run a trivial op whose scope optionally carries its OWN principal. */
@@ -82,6 +96,19 @@ async function principalsOnEvents(bus: LocalEventBus): Promise<(string | undefin
     ),
   );
   return [...events].map((e: ProtocolEvent) => e.scope.principal);
+}
+
+/** Collect the channel frames published on {@link CHANNEL} (replay from cursor 0). */
+async function channelFrames(bus: LocalEventBus, count: number): Promise<ProtocolEvent[]> {
+  const events = await Effect.runPromise(
+    Stream.runCollect(
+      Stream.take(
+        bus.subscribe({ name: { exact: CHANNEL_EVENT } }, { fromCursor: { value: 0 } }),
+        count,
+      ),
+    ),
+  );
+  return [...events];
 }
 
 describe("BaseHarness — principal (ADR 48)", () => {
@@ -141,6 +168,32 @@ describe("BaseHarness — principal (ADR 48)", () => {
     // Harness wins on every event — the op's claim is discarded.
     expect(principals.every((p) => p === "harness-principal")).toBe(true);
     expect(principals).not.toContain("spoofed-principal");
+  });
+
+  it("stamps the harness principal onto channel request + notify frames", async () => {
+    const bus = new LocalEventBus({ batch: {} });
+    const h = new PrincipalTestHarness("h6", new MemoryJournal(), bus, new LocalInbox(), "acme/u1");
+
+    await h.ask({ sessionId: "s1" });
+    await h.tell({ sessionId: "s1" });
+    const frames = await channelFrames(bus, 2);
+
+    // `ask` then `tell` — the request frame and its fire-and-forget twin.
+    expect(frames.map((e) => e.payload)).toEqual([{ q: 1 }, { n: 1 }]);
+    expect(frames.map((e) => e.scope)).toEqual([
+      { sessionId: "s1", principal: "acme/u1" },
+      { sessionId: "s1", principal: "acme/u1" },
+    ]);
+  });
+
+  it("principal-less harness leaves channel frames unstamped", async () => {
+    const bus = new LocalEventBus({ batch: {} });
+    const h = new PrincipalTestHarness("h7", new MemoryJournal(), bus, new LocalInbox());
+
+    await h.ask({ sessionId: "s1" });
+    const [frame] = await channelFrames(bus, 1);
+
+    expect(frame!.scope).toEqual({ sessionId: "s1" });
   });
 
   it("principal-less harness relays the op scope untouched", async () => {

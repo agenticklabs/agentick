@@ -24,6 +24,8 @@ import type {
   WireExtensionContext,
 } from "@agentick/spec";
 
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
+
 import { subscriptionsWireExtension } from "../subscriptions-extension.js";
 
 const SESSION_ID = "sess-1";
@@ -57,16 +59,10 @@ function stubGateway(session: SessionHarnessProtocol): GatewayHarnessProtocol {
     getSession: (id: string) => (id === SESSION_ID ? session : undefined),
     events: () => emptyLive(),
   } as unknown as AppHarnessProtocol;
-  return {
-    apps: () => [app],
-    app: () => app,
-    events: () => emptyLive(),
-    // No identity on this ctx, so the caller owns the root: it reads
-    // `gateway.events` directly and every session is inside its attachment.
-    // The snapshot splice is what is under test.
-    attachableNodesFor: () => [[]],
-    sessionNodeFor: () => [],
-  } as unknown as GatewayHarnessProtocol;
+  // No identity on this ctx, so the caller owns the root: it reads
+  // `gateway.events` directly and every session is inside its attachment. The
+  // snapshot splice is what is under test.
+  return fakeGatewayHarness({ apps: [app], events: () => emptyLive() });
 }
 
 /** Wire ctx with a transport that records every published envelope. */

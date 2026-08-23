@@ -28,7 +28,6 @@ import {
   TIMELINE_APPEND_EVENT_NAME,
   type BoundedContentMarker,
   type ContentBlock,
-  type GatewayHarnessProtocol,
   type JsonRpcRequest,
   type ToolOutputBounder,
   type WireExtension,
@@ -37,6 +36,7 @@ import {
 } from "@agentick/spec";
 import { createWireExtensionRegistry } from "@agentick/gateway";
 import { stubTimelineHarness } from "@agentick/timeline/testing";
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
 
 import { dispatchRequest, type DispatchHost, type DispatchSink } from "../server/dispatch.js";
 import { projectClientNotification, projectClientResult } from "../server/client-projection.js";
@@ -293,22 +293,10 @@ function fakeGateway(
   const registry: WireExtensionRegistry = createWireExtensionRegistry();
   for (const ext of extensions) registry.register(ext);
   registry.seal();
-  return {
-    id: "fake-gateway",
-    metadata: {},
-    ready: Promise.resolve(),
-    app: () => undefined,
-    apps: () => [],
-    listen: async () => {},
-    close: async () => {},
-    authorize: () => Promise.resolve({ allowed: true }),
-    accept: () => Promise.resolve(),
-    events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
-    runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
-      run(),
+  return fakeGatewayHarness({
     wireExtensions: () => registry,
     ...(opts.clientProjection ? { clientProjection: opts.clientProjection } : {}),
-  } as unknown as GatewayHarnessProtocol;
+  });
 }
 
 function spySink(): DispatchSink & {

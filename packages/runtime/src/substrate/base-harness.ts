@@ -1646,22 +1646,26 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       phase: "terminal",
       timestamp: Date.now(),
       ...(parentOpId !== undefined ? { parentOpId } : {}),
-      // The SAME merge `makeEvent` performs — gap-filling `parentScope`,
-      // authoritative `principal`. Duplicated shape, not duplicated policy: the
-      // signal family bypasses the operation runner entirely (bus-only, no
-      // journal), so it has to stamp for itself or emit events a session-scoped
-      // subscriber cannot match.
-      scope:
-        this.parentScope !== undefined || this.principal !== undefined
-          ? omitUndefined({
-              ...this.parentScope,
-              ...omitUndefined(scope),
-              ...(this.principal !== undefined ? { principal: this.principal } : {}),
-            })
-          : scope,
+      scope: this.stampScope(scope),
       payload,
     } as ProtocolEvent;
     return this.bus.append(envelope);
+  }
+
+  /**
+   * Gap-fill {@link parentScope} and assert the construction-bound
+   * {@link principal} over a caller-supplied scope — the merge `makeEvent`
+   * performs, for the emitters that bypass the operation runner (the signal
+   * family and the channel frames) and so must stamp for themselves or emit
+   * events a session-scoped subscriber cannot match.
+   */
+  protected stampScope(scope: EventScope): EventScope {
+    if (this.parentScope === undefined && this.principal === undefined) return scope;
+    return omitUndefined({
+      ...this.parentScope,
+      ...omitUndefined(scope),
+      ...(this.principal !== undefined ? { principal: this.principal } : {}),
+    });
   }
 
   // ──────── ② Inbox dispatch ────────
@@ -2135,15 +2139,13 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       snapshot: { correlationId, replyTo, channel, payload },
       ...omitUndefined({ timeoutMs: opts.timeoutMs, signal: opts.signal }),
     });
-    // Scope on the published envelope. Subscribers filter on
-    // `scope.sessionId` etc.; harnesses that publish from within a
-    // session pass `opts.scope` explicitly (e.g., ElicitationHarness
-    // stamps its parent sessionId). Defaults to empty when the caller
-    // doesn't supply one — per ADR 45 / #294 there's no longer an
-    // implicit "captured at construction" fallback. Effect-typed
-    // call sites should `yield* getContext` to populate scope if
-    // they need it.
-    const scope: EventScope = opts.scope ?? {};
+    // Subscribers filter on `scope.sessionId` etc.; harnesses that publish from
+    // within a session pass `opts.scope` explicitly (e.g., ElicitationHarness
+    // stamps its parent sessionId). Defaults to empty when the caller doesn't
+    // supply one — per ADR 45 / #294 there's no longer an implicit "captured at
+    // construction" fallback. Effect-typed call sites should `yield* getContext`
+    // to populate scope if they need it.
+    const scope = this.stampScope(opts.scope ?? {});
     // Publish the request envelope on the bus. The channel name pattern
     // matches `ChannelHandle.publish` — `session:channel:<channel>`.
     const fullName = `session:channel:${channel}`;
@@ -2193,7 +2195,7 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     payload: TReq,
     opts: { readonly scope?: EventScope } = {},
   ): Effect.Effect<void, never, never> {
-    const scope: EventScope = opts.scope ?? {};
+    const scope = this.stampScope(opts.scope ?? {});
     const fullName = `session:channel:${channel}`;
     const envelope: ProtocolEvent = {
       id: generateId(),

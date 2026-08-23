@@ -16,13 +16,13 @@ import {
   type AppHarnessProtocol,
   type AuthorizeInput,
   type Authorizer,
-  type GatewayHarnessProtocol,
   type IngressIdentity,
   type JsonRpcRequest,
   type SessionHarnessProtocol,
   type WireExtension,
 } from "@agentick/spec";
 import { createWireExtensionRegistry } from "@agentick/gateway";
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
 
 import { dispatchRequest, type DispatchHost, type DispatchSink } from "../server/dispatch.js";
 
@@ -93,12 +93,11 @@ function host(
     id: "app-1",
     getSession: (id: string) => sessions.get(id),
   } as unknown as AppHarnessProtocol;
-  return {
+  return fakeGatewayHarness({
     id: "gw",
-    apps: () => [app],
-    app: () => app,
+    apps: [app],
     wireExtensions: () => registry,
-    authorizer,
+    ...(authorizer ? { authorizer } : {}),
     // ADR 84 §5 — `authorizeDispatch` routes its policy calls through
     // `host.authorize`, the real gateway's hookable `authorizer:authorize` op.
     // This fake mirrors that: delegate to the same authorizer so the `seen`
@@ -106,9 +105,7 @@ function host(
     // `authorizer` is undefined (the no-authorizer guard returns first).
     authorize: (input: AuthorizeInput) =>
       authorizer ? authorizer.authorize(input) : Promise.resolve({ allowed: true }),
-    runWireDispatch: (_m: unknown, _p: unknown, _ctx: unknown, run: () => Promise<unknown>) =>
-      run(),
-  } as unknown as GatewayHarnessProtocol;
+  });
 }
 
 const principal: IngressIdentity = { principal: "p", scopes: [] };

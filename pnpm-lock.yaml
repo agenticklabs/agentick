@@ -719,6 +719,10 @@ importers:
       vitest:
         specifier: ^4.0.0
         version: 4.0.18(@opentelemetry/api@1.9.0)(@types/node@25.0.9)(happy-dom@17.6.3)(jiti@2.6.1)(msw@2.14.6(@types/node@25.0.9)(typescript@7.0.2))(tsx@4.21.0)(yaml@2.8.4)
+    devDependencies:
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
 
   packages/connector:
     dependencies:
@@ -991,6 +995,9 @@ importers:
       '@agentick/model-executor':
         specifier: workspace:*
         version: link:../model-executor
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
       '@agentick/transport-in-process':
         specifier: workspace:*
         version: link:../transport-in-process
@@ -1737,6 +1744,9 @@ importers:
       '@agentick/elicitation':
         specifier: workspace:*
         version: link:../elicitation
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
 
   packages/tasks-store-postgres:
     dependencies:
@@ -1939,6 +1949,9 @@ importers:
       '@agentick/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@agentick/spec-conformance':
+        specifier: workspace:*
+        version: link:../spec-conformance
       '@agentick/timeline':
         specifier: workspace:*
         version: link:../timeline

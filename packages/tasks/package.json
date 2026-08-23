@@ -99,6 +99,7 @@
   },
   "devDependencies": {
     "@agentick/elicitation": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
     "@agentick/utils": "workspace:*"
   },
   "peerDependencies": {

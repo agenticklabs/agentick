@@ -21,6 +21,8 @@
 import { describe, expect, it } from "vitest";
 import type { GatewayHarnessProtocol, ServerTransport } from "@agentick/spec";
 
+import { fakeGatewayHarness } from "./fake-gateway-harness.js";
+
 /**
  * Produce a fresh {@link ServerTransport} to exercise. Any wire config
  * (port/path/tls) is closed over here — the suite only supplies the host.
@@ -28,14 +30,13 @@ import type { GatewayHarnessProtocol, ServerTransport } from "@agentick/spec";
 export type ServerTransportConformanceFactory = () => ServerTransport;
 
 /**
- * A minimal stand-in for the dispatch host. The abstract contract only
- * requires that `listen` accept + retain whatever host it is handed; the
- * suite never invokes host methods, so a cast-through placeholder suffices
- * (real host wiring is a per-transport concern, verified where the transport
- * actually routes frames).
+ * A minimal stand-in for the dispatch host. The abstract contract only requires
+ * that `listen` accept + retain whatever host it is handed; the suite never
+ * invokes host methods (real host wiring is a per-transport concern, verified
+ * where the transport actually routes frames).
  */
 function fakeHost(): GatewayHarnessProtocol {
-  return { id: "conformance-host" } as unknown as GatewayHarnessProtocol;
+  return fakeGatewayHarness({ id: "conformance-host" });
 }
 
 export function runServerTransportConformance(

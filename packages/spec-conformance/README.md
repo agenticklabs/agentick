@@ -113,6 +113,17 @@ const mcpCtx = fakeToolHandlerCtx({
 
 Use it in every test that needs a ctx rather than hand-rolling one. When the canonical shape gains a required field, one edit here propagates; hand-rolled literals each break independently.
 
+`fakeGatewayHarness(options?)` builds a complete `GatewayHarnessProtocol` for tests that need a gateway only as a collaborator — a wire method resolving a session, a transport dispatcher routing a frame. `apps` takes the array and powers `apps()` / `app(id)` / `appForSession(id)` / `destroySession(id)` together; every protocol member is overridable by its real signature.
+
+```ts
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
+
+const gateway = fakeGatewayHarness({ apps: [app] });
+const authorizing = fakeGatewayHarness({ apps: [app], authorizer, wireExtensions: () => registry });
+```
+
+Reach for it instead of `as unknown as GatewayHarnessProtocol`, which pins nothing: a protocol member added later leaves every cast-through double silently missing it, failing at runtime in whichever test happens to reach the member. Typed against spec, the same addition breaks compilation once, here. `attachScopeNode` needs a `bus` option or its own override — it throws rather than leasing a node over a bus that does not exist.
+
 `defaultSessionConformanceDeps(...)` is the matching fixture for the session suite — a full stub dependency set (journal, bus, inbox, compiler, loop, model executor, tool executor, target, agent root) that a factory can use wholesale or override field by field.
 
 ## Patterns

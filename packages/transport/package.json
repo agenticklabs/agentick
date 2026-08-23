@@ -101,6 +101,7 @@
     "@agentick/gateway": "workspace:*",
     "@agentick/model-executor": "workspace:*",
     "@agentick/runtime": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
     "@agentick/timeline": "workspace:*",
     "effect": "^3.22.0",
     "typescript": "^5.7.3",

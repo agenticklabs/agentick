@@ -101,6 +101,7 @@
     "@agentick/compiler": "workspace:*",
     "@agentick/gateway": "workspace:*",
     "@agentick/model-executor": "workspace:*",
+    "@agentick/spec-conformance": "workspace:*",
     "@agentick/transport-in-process": "workspace:*"
   },
   "engines": {

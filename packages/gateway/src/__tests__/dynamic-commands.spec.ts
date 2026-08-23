@@ -20,6 +20,7 @@ import {
   type WireExtensionContext,
 } from "@agentick/spec";
 import { stubInbox, type StubInboxCall } from "@agentick/runtime/testing";
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
 import { waitFor } from "@agentick/utils/testing";
 
 import { fakeWireCtx } from "./fake-wire-ctx.js";
@@ -213,9 +214,9 @@ describe("progress rides any command", () => {
   function gatewayEmitting(envelope: ProtocolEvent) {
     const queries: EventQuery[] = [];
     let returned = false;
-    const gateway = {
-      events(query: EventQuery) {
-        queries.push(query);
+    const gateway = fakeGatewayHarness({
+      events(query?: EventQuery) {
+        queries.push(query ?? {});
         return {
           async *[Symbol.asyncIterator]() {
             yield envelope;
@@ -224,7 +225,7 @@ describe("progress rides any command", () => {
           },
         };
       },
-    } as unknown as GatewayHarnessProtocol;
+    });
     return { gateway, queries, stopped: () => returned };
   }
 

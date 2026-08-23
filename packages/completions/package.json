@@ -92,6 +92,9 @@
     "@agentick/spec": "workspace:*",
     "effect": "^3.22.0"
   },
+  "devDependencies": {
+    "@agentick/spec-conformance": "workspace:*"
+  },
   "peerDependencies": {
     "vitest": "^4.0.0"
   },

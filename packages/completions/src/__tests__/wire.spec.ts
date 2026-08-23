@@ -30,19 +30,20 @@ import type {
   AppHarnessProtocol,
   Completions,
   CompletionsResolveInput,
-  GatewayHarnessProtocol,
   PromptsCompleteInput,
   PromptsCompleteOutcome,
   SessionHarnessProtocol,
   WireExtensionContext,
 } from "@agentick/spec";
 
+import { fakeGatewayHarness } from "@agentick/spec-conformance";
+
 import { completionsWireExtension } from "../wire.js";
 
 const SESSION_ID = "sess-1";
 
 interface StubParts {
-  /** What the prompts door answers, or a throw. */
+  /** What the prompts completion surface answers, or a throw. */
   readonly outcome?: PromptsCompleteOutcome | (() => never);
   /** Present only when the session mounts the completions namespace. */
   readonly registry?: Partial<Completions>;
@@ -73,7 +74,7 @@ function stubCtx(session: SessionHarnessProtocol | undefined): WireExtensionCont
     getSession: (id: string) => (session && id === SESSION_ID ? session : undefined),
   } as unknown as AppHarnessProtocol;
   return {
-    gateway: { apps: () => [app], app: () => app } as unknown as GatewayHarnessProtocol,
+    gateway: fakeGatewayHarness({ apps: [app] }),
   } as unknown as WireExtensionContext;
 }
 
@@ -87,7 +88,7 @@ const PHASE_PARAMS = {
   context: { arguments: { job: "Miller Residence" } },
 } as const;
 
-describe("completions/complete — hop 1, the prompts door", () => {
+describe("completions/complete — hop 1, the prompts completion surface", () => {
   it("passes a resolved outcome straight through, ref and context intact", async () => {
     const calls: unknown[] = [];
     const result = await complete(
