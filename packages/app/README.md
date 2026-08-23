@@ -694,6 +694,7 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - **The interruption mark has a best-effort window.** A crash between construction's record write-back and the mark landing loses the evidence, and the turn is never detected as interrupted. The loss is silent-drop-shaped rather than run-twice-shaped, which is the tradeoff taken deliberately.
 - **`resumeAttempts` is not in the store conformance suite.** The two resume slots are documented obligations on an adapter; nothing yet fails an adapter that drops them on the round trip.
 - **`onSessionClose` does not fire on eviction.** Leaving memory is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run. Observe evictions on `onBeforeSessionClose` instead, where the reason is `"evicted"`.
+- **`onBeforeAppResumeSession` counts attempts, not resumes.** The wire's resolution walks every app asking "can you resume this id?", so the before-hook fires once per app asked — including apps that answer nothing, and ids that resume nowhere. The truthy signal is the around form: `onAppResumeSession` observing a session out of `next()` is a resume that actually happened. Telemetry and dashboards key on the around form; the before form is only right when attempts are the thing being measured.
 
 ## Verified by
 
