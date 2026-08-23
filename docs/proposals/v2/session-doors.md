@@ -122,17 +122,19 @@ scope); addresses within your scope may be speculative**:
 - **Another principal's session** (shared visibility): the durable-record
   gate (`findRecordPrincipal`), as before.
 
-**The receipt mechanism exists** — `onlyOwnedBy`
-(`gateway/src/wire/subscriptions-extension.ts`): envelopes naming a
-sessionId must carry a matching `scope.principal` stamp or are dropped at
-delivery, and UNSTAMPED session envelopes fail closed (emitter stamping
-landed in #304). It is documented as the #297 interim whose structural
-end-state is bus-topology attachment. Two gaps this slice closes:
+**The receipt mechanism exists** — and as of ADR 102 stage 2 it is the
+attachment itself (`gateway/src/wire/subscriptions-extension.ts`): a
+`gateway`/`app` subscription attaches to the caller's scope nodes, so a
+frame from outside that subtree never transits it. The `onlyOwnedBy`
+arrival filter this replaced is deleted, and with it the fail-closed
+dependency on emitter stamping (#304). Two gaps this slice closes:
 
-- The `session`/`session-tree` scope paths currently bypass `onlyOwnedBy`
-  ("bounded by an id the caller named" — id-as-capability). Client-minted
-  speculative ids invalidate that assumption, so the wrapper extends to
-  those paths — which also hardens the existing path against id leakage.
+- The `session`/`session-tree` scope paths are still a query over the
+  owning app's bus ("bounded by an id the caller named" —
+  id-as-capability), which client-minted speculative ids invalidate. The
+  fix is the stage-3 amendment below: own-node attachment plus a
+  `sessionId` topic query, which hardens the path against id leakage
+  topologically rather than by a wrapper.
 - A nonexistent id names no app (`ownerApp` → null → 404 today).
   Speculative subscription resolves the app by the SAME rule as
   send-create-on-miss (§7): single-app default, explicit appId for

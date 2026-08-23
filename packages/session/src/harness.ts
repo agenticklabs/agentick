@@ -21,6 +21,7 @@ import {
   spanAttributes,
   generateId,
   withCallMiddleware,
+  withEmissionBus,
   SESSION_ESCALATION_MESSAGE_TYPE,
   ESCALATION_TIMEOUT_MS,
   SESSION_TASK_WAKE_MESSAGE_TYPE,
@@ -3467,7 +3468,13 @@ export class SessionHarness<P = unknown>
               },
               loopSink,
             ),
-          ),
+            // ADR 102 — the app-shared spine (loop, compiler, model executor)
+            // is constructed on the APP's bus, so without this its frames —
+            // model deltas above all — fan in at the root and never reach a
+            // subscriber attached to this session's scope node. The one-fiber
+            // spine carries the target to every nested emission. Topology-free
+            // apps are unaffected: `this.bus` IS the app bus.
+          ).pipe((execution) => withEmissionBus(this.bus, execution)),
           this.telemetryRuntime,
         ),
     );

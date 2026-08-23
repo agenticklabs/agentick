@@ -75,6 +75,7 @@ import type {
   Operation,
   OperationJournal,
   ProtocolEvent,
+  ScopeNodeLease,
   RunOnceInput,
   RunOnceResult,
   ServerTransport,
@@ -129,8 +130,9 @@ import {
   normalizeTelemetry,
   type AppHarnessOptions,
   type NormalizedTelemetry,
+  type SessionNodeContext,
 } from "@agentick/app";
-import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import { LocalEventBus, LocalInbox, MemoryJournal, ScopeNodeRegistry } from "@agentick/runtime";
 
 // ADR 80/83/84 — light up the gateway lifecycle verbs. Both `gateway:start`
 // (see `listen`) and `gateway:close` (see `close`) route through
@@ -392,6 +394,13 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
   private readonly attachableNodesResolver?: (
     auth: IngressIdentity,
   ) => readonly (readonly string[])[];
+  /**
+   * The ONE tree every hosted app's sessions land in and every subscriber
+   * attaches to. Two independently-configurable resolvers would let sessions
+   * and subscribers disagree about where a principal lives, which reads as
+   * silent starvation.
+   */
+  private readonly scopeNodes: ScopeNodeRegistry;
   private gatewayClosed = false;
   /** Idempotency latch for {@link listen} — a second `listen()` is a no-op. */
   private gatewayStarted = false;
@@ -551,6 +560,8 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     this.sessionIndex = options.sessionIndex;
     this.sessionNodeResolver = options.sessionNode;
     this.attachableNodesResolver = options.attachableNodes;
+    this.scopeNodes = new ScopeNodeRegistry({ root: this.bus });
+    this.onClose(() => this.scopeNodes.close());
 
     // Pre-tag gateway-level tools once at construction. Every
     // `createApp` call threads this same array through to the new
@@ -1038,6 +1049,11 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     return [this.sessionNodeFor(identity)];
   }
 
+  /** ADR 102 — hold a node of the shared tree open for one attachment. */
+  attachScopeNode(path: readonly string[]): ScopeNodeLease {
+    return this.scopeNodes.node(path);
+  }
+
   as(identity: IngressIdentity): IdentityScopedGateway {
     return {
       identity,
@@ -1354,6 +1370,18 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
       inbox: inbox as AppHarnessOptions<P>["inbox"],
       journal: journal as AppHarnessOptions<P>["journal"],
       ...(inheritedTools.length > 0 ? { inheritedTools } : {}),
+      // ADR 102 — the app inherits the gateway's tree, resolver AND registry
+      // together, so a session lands on exactly the node a subscriber of the
+      // same principal attaches to. An app that names its own `sessionNode`
+      // keeps it (capability, not opinion); an app on its OWN bus is left
+      // topology-free, since the gateway's tree is rooted at the gateway's.
+      ...(input.options.sessionNode === undefined && bus === this.bus
+        ? {
+            sessionNode: (ctx: SessionNodeContext) =>
+              this.sessionNodeFor(omitUndefined({ principal: ctx.principal })),
+            scopeNodes: this.scopeNodes,
+          }
+        : {}),
     };
 
     const app = new AppHarness<P>(appOptions);

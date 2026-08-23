@@ -25,7 +25,7 @@
  */
 
 import type { EventQuery, ProtocolEvent } from "../data/events.js";
-import type { EventBus, EventBusFactory, SubscribeOptions } from "./bus.js";
+import type { EventBus, EventBusFactory, ScopeNodeLease, SubscribeOptions } from "./bus.js";
 import type { OperationJournal, OperationJournalFactory } from "./journal.js";
 import type { MessageInbox, MessageInboxFactory } from "./inbox.js";
 import type {
@@ -250,6 +250,31 @@ export interface GatewayHarnessProtocol {
 
   /** Enumerate all registered Apps. */
   apps(): readonly AppHarnessProtocol[];
+
+  // ─── Scope nodes (ADR 102) ──────────────────────────────────────
+  //
+  // The gateway is the single source of the tree: it derives every hosted
+  // app's session placement from `sessionNodeFor` and hands out attachments
+  // against the same registry, so a subscriber attaches where sessions land.
+
+  /**
+   * The scope-node path this identity's sessions live on. `[]` is the root —
+   * an unauthenticated caller at the local pole sees everything.
+   */
+  sessionNodeFor(identity: IngressIdentity | undefined): readonly string[];
+
+  /**
+   * Every node this identity may attach to. Widening it beyond
+   * {@link sessionNodeFor} — a tenant node for an operator, a room node for a
+   * member — is one decision made once at attachment.
+   */
+  attachableNodesFor(identity: IngressIdentity | undefined): readonly (readonly string[])[];
+
+  /**
+   * Hold the node at `path` open and read its subtree. The caller releases the
+   * lease when its attachment ends; the last release out closes the node.
+   */
+  attachScopeNode(path: readonly string[]): ScopeNodeLease;
 
   /**
    * Which mounted app owns this session — gateway-level ADDRESS RESOLUTION, so a

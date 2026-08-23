@@ -22,7 +22,6 @@ export { LocalInbox, type LocalInboxOptions } from "./substrate/local-inbox.js";
 export {
   ScopeNodeRegistry,
   type ScopeNodeBusInput,
-  type ScopeNodeLease,
   type ScopeNodeRegistryOptions,
 } from "./substrate/scope-node-registry.js";
 export {
@@ -114,6 +113,7 @@ export {
   type RuntimeContext,
   type RuntimeContextUser,
 } from "./substrate/runtime-context.js";
+export { getEmissionBus, withEmissionBus } from "./substrate/emission-target.js";
 export {
   deriveObservability,
   NOOP_SPAN,
@@ -137,7 +137,12 @@ export {
   type NamespaceSlotAppScope,
   type NamespaceSlotToExtension,
 } from "./substrate/namespace-slots.js";
-export { matchesQuery, compileQuery, type CompiledMatcher } from "./substrate/query.js";
+export {
+  matchesQuery,
+  nameMatches,
+  compileQuery,
+  type CompiledMatcher,
+} from "./substrate/query.js";
 export { resolveSyncSubstrateSlot } from "./substrate/resolve-slot.js";
 // Convenience re-export for harness authors, who mint opIds constantly. The
 // SEAM (`setIdGenerator`) is deliberately not re-exported — installing a

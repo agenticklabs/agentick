@@ -1305,13 +1305,18 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   protected emit(
     args: Omit<ProtocolEvent, "id" | "timestamp" | "surface"> & { readonly id?: string },
   ): Effect.Effect<void, JournalError, never> {
-    const envelope: ProtocolEvent = {
+    return this.operationRunner.publish(this.envelopeOf(args));
+  }
+
+  private envelopeOf(
+    args: Omit<ProtocolEvent, "id" | "timestamp" | "surface"> & { readonly id?: string },
+  ): ProtocolEvent {
+    return {
       ...args,
       id: args.id ?? generateId(),
       timestamp: Date.now(),
       surface: this.surface,
     };
-    return this.operationRunner.publish(envelope);
   }
 
   /**
@@ -1338,11 +1343,12 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
       // Journal needs the envelope regardless of subscribers.
       return this.emit(build());
     }
-    // bus-only — probe the subscriber index first.
-    if (!this.bus.hasSubscriberFor({ surface: this.surface, name: key.name, phase: key.phase })) {
-      return Effect.void;
-    }
-    return this.emit(build());
+    // bus-only — probe the subscriber index of the bus this will land on.
+    return Effect.flatMap(this.operationRunner.emissionBus, (bus) =>
+      bus.hasSubscriberFor({ surface: this.surface, name: key.name, phase: key.phase })
+        ? this.operationRunner.publishTo(bus, this.envelopeOf(build()))
+        : Effect.void,
+    );
   }
 
   /**
@@ -1368,20 +1374,23 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
   ): Effect.Effect<void, JournalError, never> {
     const decision = this.operationRunner.decideFromShape(op.name, "delta");
     if (decision === "drop") return Effect.void;
-    if (
-      decision !== "always" &&
-      decision !== "journal" &&
-      !this.bus.hasSubscriberFor({
-        surface: op.surface ?? this.surface,
-        name: op.name,
-        phase: "delta",
-      })
-    ) {
-      return Effect.void;
-    }
-    return this.operationRunner.publish(
-      this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload }),
-    );
+    const journaled = decision === "always" || decision === "journal";
+    return Effect.flatMap(this.operationRunner.emissionBus, (bus) => {
+      if (
+        !journaled &&
+        !bus.hasSubscriberFor({
+          surface: op.surface ?? this.surface,
+          name: op.name,
+          phase: "delta",
+        })
+      ) {
+        return Effect.void;
+      }
+      return this.operationRunner.publishTo(
+        bus,
+        this.operationRunner.makeEvent(op, "delta", op.scope ?? {}, { payload }),
+      );
+    });
   }
 
   // ──────── ⑤b Signals (log + progress) — ADR 64 ────────

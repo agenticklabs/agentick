@@ -10,11 +10,11 @@ import { GatewayHarness } from "../harness.js";
  * permanent bus subscriber (the 2026-08-18 outage's growth term).
  */
 
-function ctxCapturingCleanup(gateway: GatewayHarnessProtocol) {
+function ctxCapturingCleanup(gateway: GatewayHarnessProtocol, principal?: string) {
   let cleanup: (() => Promise<void>) | undefined;
   const ctx = {
     gateway,
-    principal: undefined,
+    principal,
     bridges: () => ({}),
     publish: () => {},
     wire: {
@@ -73,6 +73,37 @@ describe("sub/subscribe teardown", () => {
     await settle();
     expect(bus.subscriberCount()).toBe(baseline);
 
+    await gw.close();
+  });
+
+  it("an ATTACHMENT SET releases every one of its iterators, plus the node lease", async () => {
+    // An authenticated caller resolves to two attachments — their own node with
+    // the full query, and the root restricted to the control plane — so
+    // teardown has more than one iterator to unpark. Releasing only the first
+    // is the same permanent-subscriber growth in a new shape.
+    const gw = new GatewayHarness();
+    await gw.ready;
+    const handler = gw.wireExtensions().resolve("sub/subscribe")!.extension.methods[
+      "sub/subscribe"
+    ]!;
+    const root = (gw as unknown as { bus: { subscriberCount(): number } }).bus;
+    const rootBaseline = root.subscriberCount();
+    // Held for observation only; the subscription takes its own lease.
+    const node = gw.attachScopeNode(gw.sessionNodeFor({ principal: "alice" }));
+    const nodeBus = node.bus as unknown as { subscriberCount(): number };
+
+    const { ctx, runCleanup } = ctxCapturingCleanup(gw, "alice");
+    await handler({ subscriptionId: "sub-set", scope: { kind: "gateway" } }, ctx);
+    await settle();
+    expect(nodeBus.subscriberCount()).toBe(1);
+    expect(root.subscriberCount()).toBe(rootBaseline + 1);
+
+    await runCleanup();
+    await settle();
+    expect(nodeBus.subscriberCount()).toBe(0);
+    expect(root.subscriberCount()).toBe(rootBaseline);
+
+    node.release();
     await gw.close();
   });
 });

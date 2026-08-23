@@ -30,7 +30,8 @@ function asArray<T>(v: T | readonly T[] | undefined): readonly T[] | undefined {
   return Array.isArray(v) ? (v as readonly T[]) : ([v] as readonly T[]);
 }
 
-function nameMatches(name: string, query: NameQuery): boolean {
+/** Does `name` satisfy a {@link NameQuery}? The name axis of {@link matchesQuery}, alone. */
+export function nameMatches(name: string, query: NameQuery): boolean {
   if ("exact" in query) return name === query.exact;
   if ("prefix" in query) return name.startsWith(query.prefix);
   if ("segments" in query) {

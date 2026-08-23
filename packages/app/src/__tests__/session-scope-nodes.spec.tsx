@@ -1,6 +1,8 @@
 /**
- * ADR 102 stage 1 — sessions resolve their bus through the scope-node
- * tree when (and only when) the adopter names a topology.
+ * ADR 102 — sessions resolve their bus through the scope-node tree when (and
+ * only when) the adopter names a topology (stage 1), and an execution's
+ * emissions land on that node even though the spine driving them is shared by
+ * the whole app (stage 2).
  */
 
 import React from "react";
@@ -8,8 +10,20 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
-import { forkBusSubscription, LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
-import type { EventBus, ExecutionTarget, ProtocolEvent } from "@agentick/spec";
+import {
+  forkBusSubscription,
+  LocalEventBus,
+  LocalInbox,
+  MemoryJournal,
+  ScopeNodeRegistry,
+} from "@agentick/runtime";
+import type {
+  EventBus,
+  ExecutionTarget,
+  ExecutorFactory,
+  ExecutorFactoryDeps,
+  ProtocolEvent,
+} from "@agentick/spec";
 
 import { createApp } from "../react.js";
 
@@ -137,6 +151,63 @@ describe("scope nodes — configured topology", () => {
 
     const second = await app.createSession({ principal: "ryan" });
     expect(busOf(second)).not.toBe(firstBus);
+    await app.closeApp();
+  });
+});
+
+/**
+ * A factory so the app builds the executor on the APP's substrate — the shared
+ * spine whose emissions this suite is about. A pre-constructed instance would
+ * carry a private bus and prove nothing.
+ */
+function streamingExecutorFactory(): ExecutorFactory {
+  return Object.assign(
+    (deps?: ExecutorFactoryDeps) =>
+      new FakeLanguageModelExecutor(
+        deps?.scopeId ?? "scope-node-stream-exec",
+        deps?.journal ?? new MemoryJournal(),
+        deps?.bus ?? new LocalEventBus(),
+        deps?.inbox ?? new LocalInbox(),
+        {},
+      ),
+    { executorFactory: true as const },
+  );
+}
+
+describe("scope nodes — per-execution emission", () => {
+  it("model deltas from the app-shared executor reach the session's node, the root, and no sibling", async () => {
+    const root = new LocalEventBus();
+    const scopeNodes = new ScopeNodeRegistry({ root });
+    const app = await createApp(React.createElement(MinimalAgent), {
+      bus: root,
+      modelExecutor: streamingExecutorFactory(),
+      sessionNode: (ctx) => [ctx.principal ?? "anon"],
+      scopeNodes,
+    });
+
+    const alice = await app.createSession({ principal: "alice" });
+    const bobNode = scopeNodes.node(["bob"]);
+
+    const deltas = { surface: "model", phase: "delta" } as const;
+    const atAlice: ProtocolEvent[] = [];
+    const atBob: ProtocolEvent[] = [];
+    const atRoot: ProtocolEvent[] = [];
+    const unsubs = [
+      forkBusSubscription(busOf(alice), deltas, (e) => void atAlice.push(e)),
+      forkBusSubscription(bobNode.bus, deltas, (e) => void atBob.push(e)),
+      forkBusSubscription(root, deltas, (e) => void atRoot.push(e)),
+    ];
+    await settle();
+
+    await alice.send({ messages: [{ role: "user", content: "go" }] });
+    await settle();
+
+    expect(atAlice.length).toBeGreaterThan(0);
+    expect(atRoot.length).toBe(atAlice.length);
+    expect(atBob).toEqual([]);
+
+    for (const u of unsubs) u();
+    bobNode.release();
     await app.closeApp();
   });
 });

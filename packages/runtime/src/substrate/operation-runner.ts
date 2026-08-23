@@ -94,6 +94,7 @@ import {
   parseTraceparent,
   registerAgentickError,
 } from "@agentick/spec";
+import { getEmissionBus } from "./emission-target.js";
 import { getContext, type RuntimeContext, withContext } from "./runtime-context.js";
 import { generateId } from "@agentick/utils";
 import {
@@ -162,6 +163,17 @@ export interface OperationRunner {
   ): ProtocolEvent;
   /** Publish to bus + (conditionally) journal per {@link JournalingPolicy}. */
   publish(envelope: ProtocolEvent): Effect.Effect<void, JournalError, never>;
+  /**
+   * The bus this fiber's emissions land on (ADR 102): the ambient per-call
+   * target when one is scoped, else the harness's own.
+   */
+  readonly emissionBus: Effect.Effect<EventBus, never, never>;
+  /**
+   * {@link publish} against an already-resolved bus — for the light-path
+   * emitters, which probe that bus's subscriber index before building an
+   * envelope and must not resolve it twice.
+   */
+  publishTo(bus: EventBus, envelope: ProtocolEvent): Effect.Effect<void, JournalError, never>;
   /**
    * Policy routing keyed by the cheapest-to-compute envelope subset
    * (name + phase) — lets the harness's lazy emitters decide whether to build
@@ -483,13 +495,22 @@ class OperationRunnerImpl implements OperationRunner {
     } as ProtocolEvent;
   }
 
+  readonly emissionBus: Effect.Effect<EventBus, never, never> = Effect.map(
+    getEmissionBus,
+    (target) => target ?? this.bus,
+  );
+
   publish(envelope: ProtocolEvent): Effect.Effect<void, JournalError, never> {
+    return Effect.flatMap(this.emissionBus, (bus) => this.publishTo(bus, envelope));
+  }
+
+  publishTo(bus: EventBus, envelope: ProtocolEvent): Effect.Effect<void, JournalError, never> {
     const decision = this.decideFromShape(envelope.name, envelope.phase);
     if (decision === "drop") return Effect.void;
     if (decision === "always" || decision === "journal") {
-      return Effect.zipRight(this.bus.append(envelope), this.journal.append(envelope));
+      return Effect.zipRight(bus.append(envelope), this.journal.append(envelope));
     }
-    return this.bus.append(envelope);
+    return bus.append(envelope);
   }
 
   /**

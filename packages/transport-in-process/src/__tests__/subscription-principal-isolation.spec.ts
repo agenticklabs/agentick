@@ -1,5 +1,6 @@
 /**
- * A gateway-scope subscription is ONE TENANT's slice, not the gateway (#297).
+ * A gateway-scope subscription is ONE TENANT's slice, and it is one BY
+ * TOPOLOGY (ADR 102 stage 2).
  *
  * The leak this closes was live, not theoretical: a thread list subscribes at
  * `{ kind: "gateway" }` by design — that is how a row for a session you hold no
@@ -7,10 +8,16 @@
  * unfiltered. Holding the `sub:subscribe` verb was therefore enough to receive
  * every other principal's session traffic, because scope-target resolution keys
  * on `params.sessionId` and a subscription's target rides `params.scope.id`.
- *
  * `{ kind: "app" }` is the same hole wearing a narrower name: apps inherit the
- * gateway's bus by default and `app.events()` injects no `appId`, so an app
- * subscription is gateway-wide in practice.
+ * gateway's bus by default, so an app subscription is gateway-wide underneath.
+ *
+ * #299 closed it with an arrival filter, which was only ever as good as every
+ * emitter's stamping discipline (#304 found four that had forgotten). What
+ * closes it now is that the frames never meet: each principal's sessions live
+ * on that principal's scope node, a subscriber attaches to the nodes they are
+ * entitled to, and no edge of the bus tree carries a sibling's traffic. The
+ * grants below are identical and TOTAL on both sides, so a grant can never be
+ * what separates these principals — only the topology can.
  */
 
 import { describe, expect, it } from "vitest";
@@ -22,6 +29,7 @@ import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import {
   channelEventQuery,
   sessionStatusEventQuery,
+  type EventBus,
   type EventEnvelope,
   type EventFrame,
   type EventQuery,
@@ -81,6 +89,8 @@ async function watch(
   };
 }
 
+const busOf = (harness: unknown): EventBus => (harness as { bus: EventBus }).bus;
+
 /** {@link watch} over the session-status channel, read as its frame payloads. */
 async function watchStatus(
   gateway: DispatchHost,
@@ -95,10 +105,9 @@ async function watchStatus(
 }
 
 /**
- * Grants are identical and TOTAL on both sides, so a grant can never be what
- * separates these principals — the only thing that can is the arrival filter.
- * `authorized: false` builds the local pole instead: no authenticator, so no
- * identity and nothing to carve by.
+ * `authorized: false` builds the local pole: no authenticator, so no identity,
+ * so both `sessionNodeFor` and `attachableNodesFor` resolve to `[]` — the root
+ * — and everything is visible, as the in-process default must be.
  */
 async function makeGateway(authorized = true, withModel = false) {
   // The gateway's bus is created here rather than inside `createGateway` so a
@@ -143,6 +152,27 @@ async function scriptedExecutor(bus: LocalEventBus) {
   return executor;
 }
 
+describe("the two principals are on disjoint buses", () => {
+  it("each principal's sessions run on that principal's node, and the nodes are distinct", async () => {
+    const { gateway, app } = await makeGateway();
+    const alices = await app.createSession({ sessionId: "alice-bus", principal: "alice" });
+    const bobs = await app.createSession({ sessionId: "bob-bus", principal: "bob" });
+
+    // The gateway derives the app's session placement from its OWN resolver
+    // against its OWN registry, so this is the same node the wire attaches to.
+    const aliceNode = gateway.attachScopeNode(gateway.sessionNodeFor({ principal: "alice" }));
+    const bobNode = gateway.attachScopeNode(gateway.sessionNodeFor({ principal: "bob" }));
+
+    expect(busOf(alices)).toBe(aliceNode.bus);
+    expect(busOf(bobs)).toBe(bobNode.bus);
+    expect(aliceNode.bus).not.toBe(bobNode.bus);
+
+    aliceNode.release();
+    bobNode.release();
+    await gateway.close();
+  });
+});
+
 describe("gateway-scope subscriptions are carved by principal", () => {
   it("alice never receives bob's session frames", async () => {
     const { gateway, app } = await makeGateway();
@@ -176,7 +206,8 @@ describe("gateway-scope subscriptions are carved by principal", () => {
 
     expect(alice.ids()).toEqual(["alice-session"]);
     expect(bob.ids()).toEqual(["bob-session"]);
-    // The leak, stated as the assertion it is.
+    // The leak, stated as the assertion it is. Bob's frame does not reach
+    // alice because no edge of the tree runs from bob's node to hers.
     expect(alice.ids()).not.toContain("bob-session");
 
     await alice.close();
@@ -209,7 +240,7 @@ describe("gateway-scope subscriptions are carved by principal", () => {
   });
 });
 
-describe("the unstamped envelope fails closed", () => {
+describe("what a node attachment does and does not reach", () => {
   it("an authenticated caller does NOT receive an unowned session's frames", async () => {
     const { gateway, app } = await makeGateway();
     const unowned = await app.createSession({ sessionId: "unowned" });
@@ -229,8 +260,10 @@ describe("the unstamped envelope fails closed", () => {
     // The owned frame is the barrier: it is published second, so once it has
     // arrived the unowned one has had its chance.
     await waitFor(() => alice.ids().includes("owned"), { description: "alice's own frame" });
-    // Fail CLOSED. A SESSION envelope that forgot to stamp itself must not
-    // become the way around the filter — the fix for one belongs at its emitter.
+    // A principal-less session resolves to the ROOT node; alice is attached to
+    // hers, and fan-in runs upward only, so the frame has no edge to travel.
+    // Under the arrival filter this depended on the emitter having stamped;
+    // now the stamp is provenance and the placement is the guarantee.
     expect(alice.ids()).not.toContain("unowned");
 
     await alice.close();
@@ -238,11 +271,10 @@ describe("the unstamped envelope fails closed", () => {
   });
 
   it("control-plane events still reach an authenticated caller", async () => {
-    // The carve-out, pinned as a claim rather than left as a side effect: an
-    // envelope that names no session is not tenant data, and filtering it would
-    // break capability reactivity for every authenticated deployment while
-    // protecting nothing. `gateway:capabilities:changed` carries `gatewayId`
-    // and an empty payload.
+    // Fan-in runs upward, so a root-level fact would never reach a node
+    // attachment on its own. The carve-out is the SECOND attachment in the set
+    // — the root, restricted to the host-owned control-plane allowlist — and
+    // it is topic selection, never a look at whose frame arrived.
     const { gateway } = await makeGateway();
     const transport = identifiedTransport(gateway, { principal: "alice", scopes: ["*"] });
     await transport.connect();
@@ -285,11 +317,13 @@ describe("the unstamped envelope fails closed", () => {
 });
 
 /**
- * The filter fails closed, so an emitter that hand-builds its own envelope has
- * to stamp its own owner — the status channel was the only one that did, which
- * made every other session-named frame invisible to the two unbounded scopes.
+ * Every frame a session produces rides that session's bus, whoever built the
+ * envelope — a userland channel publish, a snapshot the wire splices in, or a
+ * model delta from the executor the whole app shares. The #304 stamps stay on
+ * those envelopes as provenance (journal reads, cluster relays, debugging);
+ * nothing about DELIVERY depends on them any more.
  */
-describe("a session stamps what it publishes outside the operation runner", () => {
+describe("everything a session emits rides its own bus", () => {
   it("a userland channel publish reaches its owner and nobody else", async () => {
     const { gateway, app } = await makeGateway();
     const alices = await app.createSession({ sessionId: "alice-chan", principal: "alice" });
@@ -349,8 +383,9 @@ describe("a session stamps what it publishes outside the operation runner", () =
     await waitFor(() => alice.seen.some((e) => e.phase === "delta"), {
       description: "alice's model deltas",
     });
-    // The model executor is app-level and stamps no principal of its own — the
-    // scope the loop hands it is the only thing carrying the session's owner.
+    // The model executor is ONE instance on the app's bus, driving every
+    // session — so the deltas reach alice's node only because the execution
+    // scopes its emission target to her session's bus (ADR 102 stage 2).
     expect(new Set(alice.sessionIds())).toEqual(new Set(["alice-run"]));
     expect(bob.seen).toEqual([]);
 
@@ -380,6 +415,36 @@ describe("a session stamps what it publishes outside the operation runner", () =
   });
 });
 
+describe("the attachment set is one stream", () => {
+  it("one subscription carries both the caller's node frames and the control plane", async () => {
+    const { gateway, app } = await makeGateway();
+    const alices = await app.createSession({ sessionId: "merged", principal: "alice" });
+
+    // No `name` constraint, so the control-plane attachment is admitted
+    // alongside the node one and both drain onto the same stream.
+    const alice = await watch(
+      gateway,
+      { principal: "alice", scopes: ["*"] },
+      { kind: "gateway" },
+      {},
+    );
+
+    // `watch`'s trailing RPC already settled the subscription, so both of these
+    // land after it is registered — no emit-until-seen loop to spin on.
+    await alices.channel("board").publish({ from: "alice" });
+    gateway.emitCapabilitiesChanged();
+    await waitFor(
+      () =>
+        alice.seen.some((e) => e.name === "session:channel:board") &&
+        alice.seen.some((e) => e.name === "gateway:capabilities:changed"),
+      { description: "one frame from each attachment" },
+    );
+
+    await alice.close();
+    await gateway.close();
+  });
+});
+
 describe("the bounded scopes are untouched", () => {
   it("a session-scope subscription still opens on its snapshot", async () => {
     const { gateway, app } = await makeGateway();
@@ -397,6 +462,28 @@ describe("the bounded scopes are untouched", () => {
 
     await stream.close();
     await transport.close();
+    await gateway.close();
+  });
+
+  it("a session-scope subscription still receives LIVE frames from a node-resident session", async () => {
+    // Stage 2 leaves `session` scope as a root-ring query. That keeps working
+    // only because fan-in carries a node's frames up to the root — the claim
+    // stage 3 will retire, pinned here rather than asserted in prose.
+    const { gateway, app } = await makeGateway();
+    const alices = await app.createSession({ sessionId: "live-node", principal: "alice" });
+
+    const alice = await watch(
+      gateway,
+      { principal: "alice", scopes: ["*"] },
+      { kind: "session", id: "live-node" },
+      channelEventQuery("board"),
+    );
+
+    await alices.channel("board").publish({ from: "alice" });
+    await waitFor(() => alice.seen.length > 0, { description: "the live frame" });
+    expect(alice.sessionIds()).toEqual(["live-node"]);
+
+    await alice.close();
     await gateway.close();
   });
 });

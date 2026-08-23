@@ -135,3 +135,24 @@ import type { Factory } from "./factory.js";
  * @see docs/proposals/v2/blueprint/31-harness-hierarchy.md
  */
 export type EventBusFactory<P = unknown> = Factory<EventBus, P>;
+
+// ============================================================================
+// ScopeNodeLease — the bus tree's addressing unit (ADR 102)
+// ============================================================================
+
+/**
+ * A held reference to the bus at one path of the scope-node tree. The node
+ * stays open while at least one lease is unreleased; the last release closes
+ * it and discards its ring.
+ *
+ * The shape lives here, with {@link EventBus}, because it is what a host
+ * hands a subscriber that wants to ATTACH to a node rather than read the
+ * root. `@agentick/runtime`'s `ScopeNodeRegistry` is its implementation.
+ *
+ * @see docs/proposals/v2/blueprint/102-subscription-bus-topology.md
+ */
+export interface ScopeNodeLease {
+  readonly path: readonly string[];
+  readonly bus: EventBus;
+  release(): void;
+}

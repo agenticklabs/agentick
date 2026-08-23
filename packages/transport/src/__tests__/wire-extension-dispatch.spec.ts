@@ -28,6 +28,7 @@ import {
   ErrorCode,
   WIRE_PROTOCOL_VERSION,
   type AppHarnessProtocol,
+  type EventBus,
   type GatewayHarnessProtocol,
   type InitializeResult,
   type JsonRpcRequest,
@@ -132,6 +133,15 @@ function fakeGateway(
     authorize: () => Promise.resolve({ allowed: true }),
     accept: () => Promise.resolve(),
     events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
+    // ADR 102 scope-node seams: this fake has one bus, so every path is the
+    // root and no node is ever created.
+    sessionNodeFor: () => [],
+    attachableNodesFor: () => [],
+    attachScopeNode: (path) => ({
+      path,
+      bus: undefined as unknown as EventBus,
+      release: () => {},
+    }),
     runWireDispatch: (_m, _p, _ctx, run) => run(_p),
     wireExtensions: () => registry,
     _wireExtensions: registry,
@@ -295,6 +305,13 @@ describe("dispatchRequest — wire extension registry integration", () => {
       authorize: () => Promise.resolve({ allowed: true }),
       accept: () => Promise.resolve(),
       events: () => ({ [Symbol.asyncIterator]: async function* () {} }),
+      sessionNodeFor: () => [],
+      attachableNodesFor: () => [],
+      attachScopeNode: (path) => ({
+        path,
+        bus: undefined as unknown as EventBus,
+        release: () => {},
+      }),
       runWireDispatch: (_m, _p, _ctx, run) => run(_p),
     };
     const resp = await dispatchRequest(bareGw, req("_extensions/list", {}), stubSink());

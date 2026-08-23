@@ -11,20 +11,8 @@
  */
 
 import { Effect } from "effect";
-import type { EventBus, ProtocolEvent } from "@agentick/spec";
+import type { EventBus, ProtocolEvent, ScopeNodeLease } from "@agentick/spec";
 import { LocalEventBus } from "./local-event-bus.js";
-
-/**
- * A held reference to a node's bus. The node stays open while at least
- * one lease is unreleased; the last release closes it and discards its
- * ring — re-resolving the same path builds a fresh node (ADR 102
- * §Resolved questions: no linger TTL).
- */
-export interface ScopeNodeLease {
-  readonly path: readonly string[];
-  readonly bus: EventBus;
-  release(): void;
-}
 
 export interface ScopeNodeBusInput {
   readonly path: readonly string[];

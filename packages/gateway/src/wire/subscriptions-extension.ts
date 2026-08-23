@@ -39,25 +39,33 @@
  * `@agentick/transport`'s `authorizeDispatch`, which is where subscribe scopes
  * must route to be seen.
  *
- * Until they do, the two UNBOUNDED scopes carry their own admission: `gateway`
- * and `app` are narrowed to the caller's principal by {@link onlyOwnedBy}.
- * Without it, holding `sub:subscribe` was enough to receive every tenant's
- * traffic — a live leak (#297), not a theoretical one, since a thread list
- * subscribes at gateway scope by design.
+ * The two UNBOUNDED scopes (`gateway`, `app`) are nonetheless bounded, and
+ * TOPOLOGICALLY (ADR 102): they resolve to an ATTACHMENT SET — the caller's own
+ * scope nodes carrying the full query, plus a root attachment restricted to
+ * {@link CONTROL_PLANE_NAMES}. A frame from outside that subtree never transits
+ * the buses the caller is attached to, so there is nothing to filter and no
+ * emitter's stamping discipline to depend on. The arrival filter this replaces
+ * (`onlyOwnedBy`, #299) closed the same leak by inspecting every envelope, and
+ * failed closed on any emitter that forgot to stamp (#304).
  *
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
+ * @see docs/proposals/v2/blueprint/102-subscription-bus-topology.md
  */
 
 import {
   AppNotFoundError,
+  GATEWAY_CAPABILITIES_CHANGED,
   SessionNotFoundError,
   defineWireExtension,
   type AppHarnessProtocol,
   type EventEnvelope,
+  type EventQuery,
   type GatewayHarnessProtocol,
+  type IngressIdentity,
   type SubscribeParams,
   type WireExtension,
 } from "@agentick/spec";
+import { busAsyncIterator, nameMatches } from "@agentick/runtime";
 
 /** The app whose LIVE registry holds `sessionId`, or `undefined`. */
 function ownerApp(
@@ -94,110 +102,128 @@ async function* onlyInTree(
 }
 
 /**
- * Admit only what the CALLER owns — the identity axis of {@link onlyInTree}'s
- * lineage one, and the thing that makes the two unbounded scopes tenant-safe.
+ * The control-plane frames a node attachment ALSO hears, via a second
+ * attachment at the ROOT. Fan-in goes up, so a root-level fact never reaches a
+ * leaf on its own; mirroring it into every node instead would cost write
+ * amplification proportional to the node count plus a second emitter discipline
+ * to get wrong (ADR 102 §4).
  *
- * TENANT DATA is what a session emits, so naming a session is what subjects an
- * envelope to the rule — and an envelope that names one had better be stamped,
- * because an UNSTAMPED session envelope fails CLOSED. That is the whole point:
- * a channel frame that forgot to stamp itself must not become the way around
- * the filter, and the fix for one belongs at its emitter. The three that had
- * forgotten — `session.channel().publish`, the channel snapshot, and the model
- * deltas the app-level executor emits under the scope the loop hands it — now
- * stamp at those emitters (#304).
- *
- * An envelope that names NO session is control plane — `gateway:capabilities:
- * changed` carries `gatewayId` and nothing else — and passes. Filtering it out
- * would break capability reactivity for every authenticated deployment while
- * protecting nothing: it is a signal that the extension set moved, with no
- * tenant content to leak. The soft edge, stated rather than discovered: an
- * app-level operation event carries no session either, so app lifecycle is
- * visible across tenants. That is a metadata surface, not a data one, and
- * closing it means stamping the emitter — not widening this predicate, which
- * would only move the hole.
- *
- * A principal-LESS deployment (the local pole, no authenticator) matches
- * `undefined === undefined` and is unaffected: nothing is stamped, nobody is
- * authenticated, everything is admitted exactly as before.
- *
- * INTERIM per #297. The structural end-state is bus topology — a subscriber
- * ATTACHES to the bus it is entitled to, so isolation is a property of what you
- * are connected to rather than of a predicate every new event kind has to
- * remember to satisfy. This filter is the stopgap that closes the live leak.
+ * Selection is by TOPIC — what you hear, never whose frame arrived — so the
+ * no-per-event-filter doctrine holds. HOST-OWNED per the ADR's resolved
+ * questions: extension registration of control-plane surfaces waits for a third
+ * consumer. The one entry is the one behavioral guarantee the arrival filter
+ * this replaces made explicitly (its no-sessionId branch also let app-level
+ * lifecycle across tenants through — a metadata leak it named as a soft edge,
+ * and this list closes).
  */
-async function* onlyOwnedBy(
-  live: AsyncIterable<EventEnvelope>,
-  principal: string | undefined,
-): AsyncGenerator<EventEnvelope> {
-  for await (const envelope of live) {
-    if (envelope.scope.sessionId === undefined) {
-      yield envelope;
-    } else if (envelope.scope.principal === principal) {
-      yield envelope;
-    }
-  }
-}
+const CONTROL_PLANE_NAMES: readonly string[] = [GATEWAY_CAPABILITIES_CHANGED];
 
 /**
- * Resolve the scope's event iterable — mirrors the pre-#303
- * `openScopeEvents` helper. `null` return means the scope's target
- * (app or session) wasn't found.
- *
- * The two UNBOUNDED scopes (`gateway`, and `app` — which the shared default bus
- * makes gateway-wide in practice) are narrowed to the caller's principal on
- * arrival by {@link onlyOwnedBy}. The two session scopes are already bounded by
- * an id the caller named.
+ * One bus the caller is attached to, with the query it reads through.
  *
  * TODO(gateway-scope-subscription): what remains of #297 is the OPERATOR view —
- * a caller entitled to the whole gateway rather than to one tenant's slice of
- * it. Deliberately not built here: there is no privileged-caller notion in this
- * layer to key it off, and inventing one inside a leak fix is how a privilege
- * escalation gets shipped. Its natural home is the authorizer's existing scope
- * label (`AuthorizeInput.scope`), asked once at subscribe time.
+ * a caller entitled to a node ABOVE their own. Under topology that is no longer
+ * a filter question but an attachment one: `attachableNodes` already returns a
+ * list, so an operator's entry is a broader path in it, authorized ONCE at
+ * subscribe time via the authorizer's scope label (`AuthorizeInput.scope`).
  */
+interface Attachment {
+  readonly events: AsyncIterable<EventEnvelope>;
+  /** Release the node lease this attachment holds, if any. */
+  readonly release?: () => void;
+}
+
 interface OpenedScope {
   readonly iterable: AsyncIterable<EventEnvelope>;
   /**
-   * Release the ROOT bus iterator NOW. `busAsyncIterator.return()` interrupts
-   * the producer fiber and resolves any pending pull immediately — which the
-   * generator wrappers (`onlyOwnedBy`/`onlyInTree`/`withSnapshots`) cannot do:
-   * an async generator's `return()` queues behind its suspended inner await,
-   * so tearing down from the OUTSIDE hangs until the next event arrives.
+   * Release every ROOT bus iterator NOW, then the node leases.
+   * `busAsyncIterator.return()` interrupts the producer fiber and resolves any
+   * pending pull immediately — which the generator wrappers (`onlyInTree` /
+   * `withSnapshots` / the merge) cannot do: an async generator's `return()`
+   * queues behind its suspended inner await, so tearing down from the OUTSIDE
+   * hangs until the next event arrives.
    */
   readonly closeRoot: () => Promise<void>;
 }
 
-function rooted(
-  events: AsyncIterable<EventEnvelope>,
+function opened(
+  attachments: readonly Attachment[],
   wrap?: (inner: AsyncIterable<EventEnvelope>) => AsyncIterable<EventEnvelope>,
 ): OpenedScope {
-  const root = events[Symbol.asyncIterator]();
-  const single: AsyncIterable<EventEnvelope> = { [Symbol.asyncIterator]: () => root };
+  const roots = attachments.map((a) => a.events[Symbol.asyncIterator]());
+  const merged: AsyncIterable<EventEnvelope> =
+    roots.length === 1
+      ? { [Symbol.asyncIterator]: () => roots[0]! }
+      : { [Symbol.asyncIterator]: () => mergeIterators(roots) };
   return {
-    iterable: wrap ? wrap(single) : single,
+    iterable: wrap ? wrap(merged) : merged,
     closeRoot: async () => {
-      await root.return?.();
+      await Promise.all(roots.map((root) => root.return?.()));
+      for (const attachment of attachments) attachment.release?.();
     },
   };
 }
 
+/**
+ * Interleave the attachment set, one outstanding pull per iterator. Each
+ * settled pull is re-issued for its own source only, so a quiet attachment
+ * never holds up a busy one and a `return()` on any source retires just that
+ * source — which is what lets {@link OpenedScope.closeRoot} unblock a merge
+ * parked on several pending pulls at once.
+ */
+async function* mergeIterators(
+  iterators: readonly AsyncIterator<EventEnvelope>[],
+): AsyncGenerator<EventEnvelope> {
+  const pending = new Map<
+    AsyncIterator<EventEnvelope>,
+    Promise<{
+      readonly from: AsyncIterator<EventEnvelope>;
+      readonly step: IteratorResult<EventEnvelope>;
+    }>
+  >();
+  const pull = (from: AsyncIterator<EventEnvelope>): void => {
+    pending.set(
+      from,
+      from.next().then((step) => ({ from, step })),
+    );
+  };
+  for (const iterator of iterators) pull(iterator);
+  try {
+    while (pending.size > 0) {
+      const { from, step } = await Promise.race(pending.values());
+      pending.delete(from);
+      if (step.done === true) continue;
+      pull(from);
+      yield step.value;
+    }
+  } finally {
+    for (const iterator of pending.keys()) void iterator.return?.();
+  }
+}
+
+/**
+ * Resolve the scope to its attachment set. `null` means the scope's target (app
+ * or session) wasn't found.
+ *
+ * `gateway` / `app` attach to the caller's own nodes; an unauthenticated caller
+ * resolves to `[]`, which IS the root, so the local/no-auth pole keeps seeing
+ * everything (ADR 102 §Resolved questions). The two session scopes stay a query
+ * over the owning app's bus — root-ring reads still see a node's frames through
+ * fan-in, and migrating them is stage 3.
+ */
 function openScopeEvents(
   gateway: GatewayHarnessProtocol,
   params: SubscribeParams,
-  principal: string | undefined,
+  identity: IngressIdentity | undefined,
 ): OpenedScope | null {
   const scope = params.scope;
   if (scope.kind === "gateway") {
-    return rooted(gateway.events(params.query) as AsyncIterable<EventEnvelope>, (inner) =>
-      onlyOwnedBy(inner, principal),
-    );
+    return opened(attachToOwnNodes(gateway, identity, params.query, gateway));
   }
   if (scope.kind === "app") {
     const app = gateway.app(scope.id);
     if (!app) return null;
-    return rooted(app.events(params.query) as AsyncIterable<EventEnvelope>, (inner) =>
-      onlyOwnedBy(inner, principal),
-    );
+    return opened(attachToOwnNodes(gateway, identity, params.query, app));
   }
   if (scope.kind === "session") {
     const app = ownerApp(gateway, scope.id);
@@ -206,16 +232,72 @@ function openScopeEvents(
       ...(params.query ?? {}),
       scope: { ...(params.query?.scope ?? {}), sessionId: scope.id },
     };
-    return rooted(app.events(query) as AsyncIterable<EventEnvelope>);
+    return opened([{ events: app.events(query) as AsyncIterable<EventEnvelope> }]);
   }
   if (scope.kind === "session-tree") {
     const app = ownerApp(gateway, scope.id);
     if (!app) return null;
-    return rooted(app.events(params.query) as AsyncIterable<EventEnvelope>, (inner) =>
+    return opened([{ events: app.events(params.query) as AsyncIterable<EventEnvelope> }], (inner) =>
       onlyInTree(inner, app, scope.id),
     );
   }
   return null;
+}
+
+/**
+ * The caller as the node resolvers see them. `identity` is the structured
+ * ingress stamp; `principal` alone is what the `as()` doors leave, and both
+ * resolvers key on the principal either way.
+ */
+function identityOf(ctx: {
+  readonly identity?: IngressIdentity;
+  readonly principal?: string;
+}): IngressIdentity | undefined {
+  if (ctx.identity !== undefined) return ctx.identity;
+  return ctx.principal !== undefined ? { principal: ctx.principal } : undefined;
+}
+
+/** The scope's own root — the gateway's bus, or one app's. */
+interface ScopeRoot {
+  events(query?: EventQuery): AsyncIterable<unknown>;
+}
+
+/**
+ * The caller's nodes with the full query, plus `root` restricted to the control
+ * plane. A caller whose only node IS the root gets one attachment with the full
+ * query — the control-plane entry would be a strictly narrower duplicate.
+ *
+ * The control-plane attachment carries the caller's own query too, minus its
+ * name: a subscriber that asked for model deltas did not ask to be told the
+ * capability set moved, and the attachment set must not widen what was
+ * requested.
+ */
+function attachToOwnNodes(
+  gateway: GatewayHarnessProtocol,
+  identity: IngressIdentity | undefined,
+  query: EventQuery | undefined,
+  root: ScopeRoot,
+): readonly Attachment[] {
+  const paths = gateway.attachableNodesFor(identity);
+  if (paths.every((path) => path.length === 0)) {
+    return [{ events: root.events(query) as AsyncIterable<EventEnvelope> }];
+  }
+  const attachments: Attachment[] = paths.map((path) => {
+    const lease = gateway.attachScopeNode(path);
+    return {
+      events: {
+        [Symbol.asyncIterator]: () => busAsyncIterator(lease.bus, query ?? {}),
+      } as AsyncIterable<EventEnvelope>,
+      release: () => lease.release(),
+    };
+  });
+  for (const name of CONTROL_PLANE_NAMES) {
+    if (query?.name !== undefined && !nameMatches(name, query.name)) continue;
+    attachments.push({
+      events: root.events({ ...query, name: { exact: name } }) as AsyncIterable<EventEnvelope>,
+    });
+  }
+  return attachments;
 }
 
 /** Fully-qualified prefix every channel event's `name` carries. */
@@ -308,7 +390,7 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // tiny overlap (a delta counted in both the snapshot version and the
       // live tail) is absorbed by the client's idempotent, version-gated
       // reducer.
-      const opened = openScopeEvents(ctx.gateway, params, ctx.principal);
+      const opened = openScopeEvents(ctx.gateway, params, identityOf(ctx));
       if (!opened) {
         // Name the thing that is missing. Not cosmetic: a client deciding
         // whether to re-ask needs to tell "this scope is not here (yet)" from

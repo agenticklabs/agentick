@@ -36,7 +36,6 @@ import {
   MemoryJournal,
   runHarnessProtocol,
   ScopeNodeRegistry,
-  type ScopeNodeLease,
   type TelemetryProvider,
   generateId,
 } from "@agentick/runtime";
@@ -71,6 +70,7 @@ import type {
   CursorPage,
   PageRequest,
   OnInterruptedExecution,
+  ScopeNodeLease,
   SessionRecord,
   SessionStore,
   SessionStoreQuery,

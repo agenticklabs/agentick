@@ -89,6 +89,8 @@ Nodes are created on first use and refcount-closed: a lease is a hold, a node ho
 
 An app takes a topology by naming one — `createApp({ sessionNode: (ctx) => [ctx.principal] })` puts every session on its principal's node. Without that option there is no tree at all and sessions run on the app's own bus.
 
+**Where a harness's emissions land** is a second question, because the model executor, the loop, and the compiler are one instance per app, shared by every session — placing them on any one node is impossible. `withEmissionBus(bus, effect)` scopes an emission target for a dynamic call tree instead, the same mechanism and the same ADR 77 one-fiber spine that carries tier-4 middleware: every nested `runOperation`, `emit`, and `emitDelta` the effect reaches publishes to `bus` rather than to the emitting harness's own. A session wraps its loop run in it, so one shared executor's deltas reach whichever session is running. Emissions made outside that fiber — the log/progress signal family emits from a detached `Effect.runFork` — fall back to the harness's own bus. The journal is never redirected.
+
 ## Declaring a harness
 
 _Harness authors._ `BaseHarness` gives a subclass five surfaces: **commands** (the heavy path — phase contract, journaling, idempotency, interceptors), the **inbox** (`handleMessage` plus `onMessage` overrides), **lifecycle** (`onClose`, `ready`, `close`), **interceptors** (`use` / `guard` / `hook`), and **events** (`emit` / `emitDelta` and the signal helpers).
@@ -644,6 +646,7 @@ A sink is just a bag of standard OTel objects, so a raw literal is a valid one: 
 | `deriveContext(...)` / `ContextFacets`                                         | The one branded boundary-ctx constructor                                              |
 | `getContext` · `withContext` · `readContext` · `EMPTY_CONTEXT`                 | Trunk propagation (`RuntimeContextRef` is the FiberRef behind them)                   |
 | `withCallMiddleware(mw, eff)`                                                  | Tier-4 call-scoped interceptors                                                       |
+| `withEmissionBus(bus, eff)` · `getEmissionBus`                                 | Scope where a call tree's emissions land (ADR 102)                                    |
 | `composeMiddleware` · `MiddlewareChain` · `liftMiddleware`                     | Composition primitives (`liftMiddleware` lifts async → Effect on the ambient runtime) |
 | `tagInterceptor` · `interceptorKind` · `orderInterceptors`                     | Interceptor kinds and the guard-outermost sort                                        |
 | `OperationVeto` · `OperationDefer` · `OperationReplace`                        | The control signals a guard raises                                                    |
@@ -659,7 +662,7 @@ A sink is just a bag of standard OTel objects, so a raw literal is a valid one: 
 | `NOOP_SPAN` · `OFF_TRACE` · `NOOP_METRICS`                                     | The off-path singletons                                                               |
 | `RequestResponseRegistry`                                                      | Correlated request/response bookkeeping behind `harness.request`                      |
 | `busAsyncIterator` · `forkBusSubscription`                                     | Bus → `AsyncIterator` / callback, with per-event error isolation                      |
-| `matchesQuery` · `compileQuery`                                                | The `EventQuery` predicate, interpreted or pre-compiled                               |
+| `matchesQuery` · `nameMatches` · `compileQuery`                                | The `EventQuery` predicate (or just its name axis), interpreted or pre-compiled       |
 | `resolveSyncSubstrateSlot` · `generateId`                                      | Slot resolution (instance \| factory) and the id generator                            |
 | `SESSION_ESCALATION_MESSAGE_TYPE` · `SESSION_TASK_WAKE_MESSAGE_TYPE`           | Substrate wire constants for escalation and task-wake                                 |
 
