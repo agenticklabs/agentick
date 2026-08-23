@@ -230,6 +230,9 @@ export class SessionRuntime {
    */
   private _currentTick = 0;
 
+  /** The record {@link hydrate} adopted, until {@link takeAdoptedRecord} claims it. */
+  private adopted: SessionRecord | undefined;
+
   constructor(init: SessionRuntimeInit) {
     this.id = init.id;
     this.store = init.store;
@@ -314,9 +317,23 @@ export class SessionRuntime {
     );
   }
 
+  /**
+   * The persisted record this session ADOPTED at genesis — `undefined` for a
+   * fresh one — read back exactly once. It is the only place a crashed
+   * `running` + `currentExecutionId` survives (the {@link hydrate} merge below
+   * overwrites both), and consuming it is what keeps the app's interruption
+   * reconcile firing once per interruption rather than once per open.
+   */
+  takeAdoptedRecord(): SessionRecord | undefined {
+    const adopted = this.adopted;
+    this.adopted = undefined;
+    return adopted;
+  }
+
   async hydrate(): Promise<void> {
     const persisted = await this.store?.get(this.id, this.storeCtx());
     if (persisted !== undefined) {
+      this.adopted = persisted;
       const fresh = this.record();
       this.view.seedSync(
         omitUndefined({

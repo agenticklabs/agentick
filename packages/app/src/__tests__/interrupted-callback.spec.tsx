@@ -236,3 +236,136 @@ describe("onInterruptedExecution — the resume-path callback (slice 2)", () => 
     await app.closeApp();
   });
 });
+
+/**
+ * `createSession` on a known id is open-or-rehydrate (ADR 49), so it adopts a
+ * crashed record exactly as `resumeSession` does — and must take the SAME
+ * recovery path (checkpointing §4: one path, whichever door). Detection reads
+ * the record the SESSION adopted at genesis, so a fresh create — which has no
+ * record — never pays for it.
+ */
+describe("onInterruptedExecution — the create door (open-or-rehydrate)", () => {
+  const observed = (ctx: InterruptedExecution) => ({
+    executionId: ctx.executionId,
+    attempt: ctx.attempt,
+    status: ctx.session.status,
+    interruptedExecutionId: ctx.session.interruptedExecutionId,
+    currentExecutionId: ctx.session.currentExecutionId,
+  });
+
+  it("reopening a crash via createSession fires ONCE — same sequence as resumeSession", async () => {
+    const store = new InMemorySessionStore();
+    await seed(store, "crashed-create", { status: "running", currentExecutionId: "exec:c1" });
+    await seed(store, "crashed-resume", { status: "running", currentExecutionId: "exec:c1" });
+    const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
+    const app = await mkApp(store, cb);
+
+    await app.createSession({ sessionId: "crashed-create" });
+    await app.resumeSession("crashed-resume");
+    expect(cb).toHaveBeenCalledTimes(2);
+    expect(observed(cb.mock.calls[0]![0])).toEqual(observed(cb.mock.calls[1]![0]));
+    expect(observed(cb.mock.calls[0]![0])).toEqual({
+      executionId: "exec:c1",
+      attempt: 1,
+      status: "idle",
+      interruptedExecutionId: "exec:c1",
+      currentExecutionId: undefined,
+    });
+    expect((await store.get("crashed-create", stubStoreCtx()))?.interruptedExecutionId).toBe(
+      "exec:c1",
+    );
+
+    // The idempotent reopen returns the LIVE session — one interruption stays
+    // one policy call, however many times the door is used.
+    await app.createSession({ sessionId: "crashed-create" });
+    expect(cb).toHaveBeenCalledTimes(2);
+
+    await app.closeApp();
+  });
+
+  it("boundary present via the create door = no mark, no callback (don't-run-twice)", async () => {
+    const store = new InMemorySessionStore();
+    const timelineStore = new MemoryTimelineStore();
+    const boundaryEntry: TimelineEntry = {
+      kind: "boundary",
+      ts: 0,
+      boundary: { executionId: "exec:cdone", outcome: "succeeded" },
+    };
+    await timelineStore.append("finished-create:timeline", [boundaryEntry], stubStoreCtx());
+    await seed(store, "finished-create", { status: "running", currentExecutionId: "exec:cdone" });
+    const cb = vi.fn((_: InterruptedExecution) => "resume" as const);
+    const app = await mkApp(store, cb, timelineStore);
+
+    await app.createSession({ sessionId: "finished-create" });
+    expect(cb).not.toHaveBeenCalled();
+
+    const record = await store.get("finished-create", stubStoreCtx());
+    expect(record?.status).toBe("idle");
+    expect(record?.interruptedExecutionId).toBeUndefined();
+    expect(record?.resumeAttempts).toBeUndefined();
+
+    await app.closeApp();
+  });
+
+  it("a genuinely fresh create pays NOTHING — one record read, the genesis one", async () => {
+    // Detection rides the record the session adopted at genesis, so it costs no
+    // read of its own. A create door that probed the store itself would make
+    // this two — every new session paying for a recovery that cannot apply.
+    class CountingStore extends InMemorySessionStore {
+      gets = 0;
+      override get(id: string, ctx: Parameters<InMemorySessionStore["get"]>[1]) {
+        this.gets += 1;
+        return super.get(id, ctx);
+      }
+    }
+    const store = new CountingStore();
+    const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
+    const app = await mkApp(store, cb);
+
+    await app.createSession({ sessionId: "brand-new" });
+    expect(store.gets).toBe(1);
+    expect(cb).not.toHaveBeenCalled();
+
+    await app.closeApp();
+  });
+
+  it("resumeAttempts increments across a re-crash reopened through the create door", async () => {
+    // The re-driven execution keeps its id, so a second crash of the SAME id is
+    // consecutive — the crash-loop budget the policy reads.
+    const store = new InMemorySessionStore();
+    await seed(store, "recrash", {
+      status: "running",
+      currentExecutionId: "exec:loop",
+      interruptedExecutionId: "exec:loop",
+      resumeAttempts: 1,
+    });
+    const cb = vi.fn((_: InterruptedExecution) => "drop" as const);
+    const app = await mkApp(store, cb);
+
+    await app.createSession({ sessionId: "recrash" });
+
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb.mock.calls[0]![0].attempt).toBe(2);
+    expect((await store.get("recrash", stubStoreCtx()))?.resumeAttempts).toBe(2);
+
+    await app.closeApp();
+  });
+
+  it("a throwing policy rejects the create, exactly as it rejects the resume", async () => {
+    const store = new InMemorySessionStore();
+    await seed(store, "boom-create", { status: "running", currentExecutionId: "exec:b1" });
+    const app = await mkApp(store, () => {
+      throw new Error("policy boom");
+    });
+
+    // Collapsed to a string before asserting: a `rejects` matcher that gets a
+    // RESOLVED open diffs a whole live session harness, which OOMs the worker.
+    const outcome = await app.createSession({ sessionId: "boom-create" }).then(
+      () => "opened",
+      (err: unknown) => String((err as Error).message),
+    );
+    expect(outcome).toContain("policy boom");
+
+    await app.closeApp();
+  });
+});

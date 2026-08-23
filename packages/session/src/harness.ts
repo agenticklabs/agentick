@@ -91,6 +91,7 @@ import type {
   SessionError,
   SessionExecutionHandle,
   SessionHarnessProtocol,
+  SessionRecord,
   SessionRunOutcome,
   SessionStatus,
   SessionStatusFrame,
@@ -1791,6 +1792,15 @@ export class SessionHarness<P = unknown>
    */
   flushRecordWrites(): Promise<void> {
     return this.runtime.flushRecord();
+  }
+
+  /**
+   * The durable record this session adopted at genesis, claimed once — the
+   * app's crash evidence, whichever door opened the session. Public on the
+   * concrete class for the same reason as {@link flushRecordWrites}.
+   */
+  takeAdoptedRecord(): SessionRecord | undefined {
+    return this.runtime.takeAdoptedRecord();
   }
 
   /**
