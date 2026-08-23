@@ -229,6 +229,25 @@ export interface GatewayHarnessOptions extends BaseHarnessOptions<unknown, "gate
   /** Stable gateway id; defaults to `gateway:${generateId()}`. */
   readonly gatewayId?: string;
   /**
+   * Where a caller's sessions live in the scope-node tree (ADR 102) —
+   * the path their own events land on and, by default, the only path
+   * they may attach to.
+   *
+   * Defaults to `[principal]`, or `[]` (the root, seeing everything)
+   * for an unauthenticated caller: the local/no-auth pole is the
+   * trusted interior, and failing closed there breaks every in-process
+   * test.
+   */
+  readonly sessionNode?: (auth: IngressIdentity) => readonly string[];
+  /**
+   * Which nodes this caller may subscribe to. Defaults to their
+   * {@link sessionNode} alone. Widening it — a tenant node for an
+   * operator, a room node for a member — is how the operator view and
+   * arena rooms are granted, and it is one decision made once at
+   * attachment rather than a check on every frame.
+   */
+  readonly attachableNodes?: (auth: IngressIdentity) => readonly (readonly string[])[];
+  /**
    * A single door onto every mounted app's sessions — the scale answer for
    * `gateway/list_sessions`, and where cross-app session ORDERING policy lives.
    *
@@ -364,6 +383,15 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
    * index, and {@link listSessions} falls back to merging the apps' stores.
    */
   private readonly sessionIndex?: import("@agentick/spec").SessionIndex;
+  /**
+   * ADR 102 node-resolution seams. Read through {@link sessionNodeFor} /
+   * {@link attachableNodesFor}, which apply the documented defaults —
+   * nothing else reads these directly.
+   */
+  private readonly sessionNodeResolver?: (auth: IngressIdentity) => readonly string[];
+  private readonly attachableNodesResolver?: (
+    auth: IngressIdentity,
+  ) => readonly (readonly string[])[];
   private gatewayClosed = false;
   /** Idempotency latch for {@link listen} — a second `listen()` is a no-op. */
   private gatewayStarted = false;
@@ -521,6 +549,8 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
     // The cross-app read door. Nothing to normalize — either an adopter handed
     // one over or the merge fallback stands in for it.
     this.sessionIndex = options.sessionIndex;
+    this.sessionNodeResolver = options.sessionNode;
+    this.attachableNodesResolver = options.attachableNodes;
 
     // Pre-tag gateway-level tools once at construction. Every
     // `createApp` call threads this same array through to the new
@@ -988,6 +1018,24 @@ export class GatewayHarness extends BaseHarness<typeof SURFACE> implements Gatew
 
   apps(): readonly AppHarnessProtocol[] {
     return Array.from(this._apps.values());
+  }
+
+  /**
+   * ADR 102 — the scope-node path this caller's sessions live on, and
+   * the default (often only) node they may attach to. `[]` is the root:
+   * an unauthenticated caller at the local pole sees everything.
+   */
+  sessionNodeFor(identity: IngressIdentity | undefined): readonly string[] {
+    if (this.sessionNodeResolver !== undefined) return this.sessionNodeResolver(identity ?? {});
+    return identity?.principal !== undefined ? [identity.principal] : [];
+  }
+
+  /** ADR 102 — every node this caller may subscribe to. */
+  attachableNodesFor(identity: IngressIdentity | undefined): readonly (readonly string[])[] {
+    if (this.attachableNodesResolver !== undefined) {
+      return this.attachableNodesResolver(identity ?? {});
+    }
+    return [this.sessionNodeFor(identity)];
   }
 
   as(identity: IngressIdentity): IdentityScopedGateway {

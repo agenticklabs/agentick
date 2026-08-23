@@ -8,7 +8,7 @@
  * @see docs/proposals/v2/blueprint/09-app-harness.md
  */
 
-export { AppHarness, type AppHarnessOptions } from "./harness.js";
+export { AppHarness, type AppHarnessOptions, type SessionNodeContext } from "./harness.js";
 export { createApp, type CreateAppOptions } from "./create-app.js";
 export {
   createTelemetry,

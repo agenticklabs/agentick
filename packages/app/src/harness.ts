@@ -35,6 +35,8 @@ import {
   LocalInbox,
   MemoryJournal,
   runHarnessProtocol,
+  ScopeNodeRegistry,
+  type ScopeNodeLease,
   type TelemetryProvider,
   generateId,
 } from "@agentick/runtime";
@@ -287,6 +289,18 @@ export type ToolExecutorDefaults = Omit<
   ToolExecutorHarnessOptions,
   "handlerResolver" | "elicitation"
 >;
+
+/**
+ * What a session's scope-node path is resolved from (ADR 102). The
+ * facts the app holds about a session at construction — the adopter
+ * maps them to a path of scope keys.
+ */
+export interface SessionNodeContext {
+  readonly sessionId: string;
+  /** The session's owning principal (ADR 48). Absent at the local/no-auth pole. */
+  readonly principal?: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+}
 
 export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
   /** Stable app id; defaults to `app:${generateId()}`. */
@@ -656,6 +670,25 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
   readonly inbox?: MessageInbox | MessageInboxFactory<HarnessShell>;
 
   /**
+   * Where a session's events land in the scope-node tree (ADR 102).
+   * Returning `["tenant:acme", "user:ryan"]` puts every session of that
+   * user on the user node, which fans in to the tenant node and on to
+   * the app's own bus — so an attachment at any of those paths sees
+   * exactly its subtree, with no per-event identity check anywhere.
+   *
+   * Omitted (the default) the app is topology-free: sessions share the
+   * app's bus, as they always have. An explicit per-session `bus`
+   * (`createSession({ bus })` / `session.bus` defaults) wins over this.
+   */
+  readonly sessionNode?: (ctx: SessionNodeContext) => readonly string[];
+  /**
+   * The node tree {@link sessionNode} paths resolve against. Supply one
+   * to share a tree across several apps (a gateway hosting many);
+   * omitted, the app builds a private registry rooted at its own bus.
+   */
+  readonly scopeNodes?: ScopeNodeRegistry;
+
+  /**
    * App-wide abort signal (PA1). A single `AbortSignal` fanned into every
    * session the app creates (as the session's construction signal). Firing
    * it:
@@ -906,6 +939,14 @@ export class AppHarness<P = unknown>
    * Captured verbatim — the app does NOT re-tag these.
    */
   private readonly inheritedTools: readonly ToolRegistration[];
+
+  /**
+   * ADR 102 — the scope-node seam. Both are set together or not at all:
+   * without a `sessionNode` resolver the app has no topology and every
+   * session runs on the app's own bus.
+   */
+  private readonly sessionNode: ((ctx: SessionNodeContext) => readonly string[]) | undefined;
+  private readonly scopeNodes: ScopeNodeRegistry | undefined;
 
   // Shared sub-harnesses (one per app, used by every session).
   private readonly compiler: CompilerProtocol;
@@ -1178,6 +1219,20 @@ export class AppHarness<P = unknown>
     const journal = this.journal;
     const bus = this.bus;
     const inbox = this.inbox;
+
+    // ADR 102 — a topology exists only when the adopter names one. An
+    // app-owned registry is rooted at the app's bus, so whatever a
+    // session publishes still fans in here.
+    this.sessionNode = options.sessionNode;
+    if (options.sessionNode === undefined) {
+      this.scopeNodes = undefined;
+    } else if (options.scopeNodes !== undefined) {
+      this.scopeNodes = options.scopeNodes;
+    } else {
+      const owned = new ScopeNodeRegistry({ root: bus });
+      this.scopeNodes = owned;
+      this.onClose(() => owned.close());
+    }
 
     this.rootElement = options.rootElement;
     // Model/executor slots (ADR 52): `model` takes an adapter — the
@@ -2470,6 +2525,14 @@ export class AppHarness<P = unknown>
     // continues into a live replacement.
     if (existing !== undefined) await this.disposeSession(sessionId, "close");
 
+    // ADR 102 — the session's node in the scope tree, held for as long as
+    // the session lives. Unconfigured (or when the adopter wired an
+    // explicit per-session bus), this is the app's own bus and every
+    // construction below is byte-for-byte what it was.
+    const nodeLease = this.resolveSessionNode(sessionId, input);
+    const sessionBus = nodeLease?.bus ?? this.bus;
+    if (nodeLease !== undefined) claimed.push({ close: () => nodeLease.release() });
+
     // ADR 76 tier 3 + ADR 83 amendment — ONE construction-fold value. Snapshot
     // the app's RESOLVED interceptors NOW (captures boot-time `app.use()` /
     // `app.guard()` AND the app's declarative hooks, registered in the app ctor)
@@ -2516,7 +2579,7 @@ export class AppHarness<P = unknown>
     const elicitation = new ElicitationHarness(
       `${sessionId}:elicitation`,
       this.journal,
-      this.bus,
+      sessionBus,
       this.inbox,
       { parentScope: { sessionId }, inheritedInterceptors, interceptorParent: this },
     );
@@ -2527,7 +2590,7 @@ export class AppHarness<P = unknown>
     // `bridges.tasks` for JSX, and routed through the ToolExecutor's
     // `tasks` slot so handlers returning a TaskHandle branch on the
     // tool's `taskSupport` annotation (#156).
-    const tasks = new TasksHarness(`${sessionId}:tasks`, this.journal, this.bus, this.inbox, {
+    const tasks = new TasksHarness(`${sessionId}:tasks`, this.journal, sessionBus, this.inbox, {
       parentScope: { sessionId },
       // ADR 68 — the shared app-scoped store + executor registry, so
       // detached tasks outlive the per-session harness and child-process
@@ -2562,7 +2625,7 @@ export class AppHarness<P = unknown>
     const resources = new ResourcesHarness(
       `${sessionId}:resources`,
       this.journal,
-      this.bus,
+      sessionBus,
       this.inbox,
       // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
       // command hooks as op-scoped middleware. Live via `interceptorParent`.
@@ -2701,12 +2764,12 @@ export class AppHarness<P = unknown>
       ? this.toolFactory({
           scopeId: sessionId,
           journal: this.journal,
-          bus: this.bus,
+          bus: sessionBus,
           inbox: this.inbox,
           // The same cascade the bundled `ToolExecutorHarness` gets below.
           interceptors: { inheritedInterceptors, interceptorParent: this },
         })
-      : new ToolExecutorHarness(sessionId, this.journal, this.bus, this.inbox, {
+      : new ToolExecutorHarness(sessionId, this.journal, sessionBus, this.inbox, {
           ...this.toolDefaults,
           ...omitUndefined({ initialTools: mergedInitialTools }),
           handlerResolver: this.handlerResolver,
@@ -2740,7 +2803,7 @@ export class AppHarness<P = unknown>
     // Cascade: per-call `createSession.*` > per-app `session.*` >
     // shorthand (`defaultMaxTicks`/`initialProps`/`initialKnobs`).
     // sessionDefaults already collapsed (longhand vs shorthand).
-    const session = new SessionHarness<P>(this.journal, this.bus, this.inbox, {
+    const session = new SessionHarness<P>(this.journal, sessionBus, this.inbox, {
       ...this.sessionDefaults,
       sessionId,
       // Agent cascade: spawn-supplied (overrides.agent) > per-call
@@ -2908,6 +2971,9 @@ export class AppHarness<P = unknown>
       }),
     });
     claimed.push(session);
+    // The node outlives the session only if something else still holds it —
+    // the last session on a principal's node takes the node down with it.
+    if (nodeLease !== undefined) session.onClose(() => nodeLease.release());
 
     // ── The namespace map's ORDERING CONTRACT (#257) ─────────────────────
     //
@@ -3663,6 +3729,27 @@ export class AppHarness<P = unknown>
       // Clear only if still ours — a fresh dispose of the same id must not wipe it.
       if (this.disposing.get(sessionId) === teardown) this.disposing.delete(sessionId);
     }
+  }
+
+  /**
+   * ADR 102 — resolve and hold this session's scope node, or `undefined`
+   * when the app has no topology. An adopter-supplied per-session bus
+   * (per-call or app default) owns the session's wiring outright, so the
+   * seam stands aside rather than competing with it.
+   */
+  private resolveSessionNode(
+    sessionId: string,
+    input: CreateSessionInput<P>,
+  ): ScopeNodeLease | undefined {
+    if (this.sessionNode === undefined || this.scopeNodes === undefined) return undefined;
+    if (input.bus !== undefined || this.sessionDefaults.bus !== undefined) return undefined;
+    return this.scopeNodes.node(
+      this.sessionNode({
+        sessionId,
+        metadata: input.metadata ?? {},
+        ...omitUndefined({ principal: input.principal }),
+      }),
+    );
   }
 
   private touchActivity(sessionId: string): void {

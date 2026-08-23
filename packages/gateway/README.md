@@ -784,18 +784,20 @@ Each is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`, 
 
 ### `createGateway(options)`
 
-| Option                  | Type                                  | Purpose                                              |
-| ----------------------- | ------------------------------------- | ---------------------------------------------------- |
-| `gatewayId`             | `string`                              | Stable id; defaults to a generated one.              |
-| `journal` `bus` `inbox` | instance or factory                   | Substrate the hosted apps inherit.                   |
-| `cluster`               | `ClusterFactory`                      | Wraps the substrate; every app inherits the wrap.    |
-| `transports`            | `ServerTransport[]`                   | Owned by `listen()` / `close()`.                     |
-| `authorizer`            | `Authorizer`                          | The authorization policy.                            |
-| `tools`                 | `ToolDeclaration[]`                   | Baseline tools for every session of every app.       |
-| `wireExtensions`        | `WireExtension[]`                     | Adopter JSON-RPC namespaces.                         |
-| `extensions`            | gateway/app/session ext or bundle     | Installs and cascades by scope.                      |
-| `truncateToolResults`   | `boolean \| { maxBytes?, truncate? }` | Bound client-facing tool output. Off by default.     |
-| `telemetry`             | `TelemetrySetting`                    | Gateway spans, and the default for every hosted app. |
+| Option                  | Type                                  | Purpose                                                                        |
+| ----------------------- | ------------------------------------- | ------------------------------------------------------------------------------ |
+| `gatewayId`             | `string`                              | Stable id; defaults to a generated one.                                        |
+| `journal` `bus` `inbox` | instance or factory                   | Substrate the hosted apps inherit.                                             |
+| `cluster`               | `ClusterFactory`                      | Wraps the substrate; every app inherits the wrap.                              |
+| `transports`            | `ServerTransport[]`                   | Owned by `listen()` / `close()`.                                               |
+| `authorizer`            | `Authorizer`                          | The authorization policy.                                                      |
+| `tools`                 | `ToolDeclaration[]`                   | Baseline tools for every session of every app.                                 |
+| `wireExtensions`        | `WireExtension[]`                     | Adopter JSON-RPC namespaces.                                                   |
+| `extensions`            | gateway/app/session ext or bundle     | Installs and cascades by scope.                                                |
+| `truncateToolResults`   | `boolean \| { maxBytes?, truncate? }` | Bound client-facing tool output. Off by default.                               |
+| `sessionNode`           | `(auth) => readonly string[]`         | The caller's scope-node path. Defaults to `[principal]`, `[]` unauthenticated. |
+| `attachableNodes`       | `(auth) => readonly string[][]`       | Which nodes the caller may subscribe to. Defaults to their `sessionNode`.      |
+| `telemetry`             | `TelemetrySetting`                    | Gateway spans, and the default for every hosted app.                           |
 
 ### `GatewayHarness`
 
@@ -815,6 +817,8 @@ Each is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`, 
 | `wireExtensions()`               | The sealed registry.                                             |
 | `emitCapabilitiesChanged()`      | Signal subscribers to refetch capabilities.                      |
 | `emitAdmissionFailure(failure)`  | Record a refused ingress crossing on the bus.                    |
+| `sessionNodeFor(identity)`       | The caller's own scope node, with the default applied.           |
+| `attachableNodesFor(identity)`   | Every scope node the caller may attach to.                       |
 | `hook(config)` / `hooks.onX(fn)` | Register interceptors; both fold live to every app beneath.      |
 | `guard(decide)`                  | Register a verdict-returning admission seam.                     |
 
@@ -866,10 +870,12 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - **`telemetryNamespace` does not cascade.** Each app whitelabels its own attribute prefix; set it per app if you need a non-default one.
 - **No cluster substrate of its own.** `GatewayHarness` accepts any `EventBus`, so a Redis- or Kafka-backed deployment is a substrate swap rather than a gateway rewrite — but this package ships no such bus.
 - **`fanIn` cannot tell two apps' identically-named sessions apart.** The lineage walk keys on a session id, which is unique within an app but not across apps on one gateway. The arrival filter checks `scope.appId` for exactly this, but no `appId` reaches a `tool:signal:progress` envelope today — the app stamps `{ sessionId }` on the per-session scope and nothing gap-fills the rest. Reaching the hole needs two apps, deliberate reuse of one explicit session id (spawn generates ULIDs), and concurrent `fanIn` turns; closing it belongs at the emitter, since every scope-filtered bus subscriber has the same blind spot.
+- **`sessionNode` / `attachableNodes` are threaded, not consumed.** The gateway resolves both (defaults included) and `sessionNodeFor` / `attachableNodesFor` answer, but the `sub/*` lane still reads the shared bus and narrows by arrival filter. Turning an attachment into the isolation mechanism is ADR 102 stage 2; the resolvers are also on the concrete class rather than `GatewayHarnessProtocol`, which is what the wire lane types against.
 - **There is no per-principal subscription scope.** The ladder tops out at `{ kind: "gateway" }`, which is the whole deployment — an operator's view, not a tenant's. The missing rung is a scope carved by principal rather than by spawn lineage; it would have `session-tree`'s shape (widen, then filter on arrival) with the identity axis, but the envelope scope carries no principal today, so the filter has nothing to read. `TODO(gateway-scope-subscription)` marks the spot.
 
 ## Verified by
 
+- `src/__tests__/scope-node-seams.spec.ts` — the node-resolution defaults (`[principal]`, `[]` for an unauthenticated caller, attachable set defaulting to the caller's own node) and both configured seams overriding them independently.
 - `src/__tests__/harness.spec.ts` — construction and default substrate, the `listen`/`close`/`create-app`/`accept` operations and their hooks, `createApp` before `listen()` throwing `GatewayNotStartedError` (and the pre-gate firing before the operation), duplicate `appId` rejection, the `gateway:app:created` emit, close cascading into apps, and rejection after close.
 - `src/__tests__/server-transports.spec.ts` — `listen()` fanning out with the gateway as host, `close()` closing every owned transport, idempotent `listen()` not re-firing, the zero-transport no-op, and best-effort teardown when a transport's `close()` rejects.
 - `src/__tests__/wire-registry.spec.ts` + `wire-framework-extensions.spec.ts` — register, resolve, enumerate in insertion order, duplicate namespace and name rejection, sealing, and adopter attempts on all four framework namespaces failing.

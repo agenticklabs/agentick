@@ -64,6 +64,31 @@ The `createFactory` form is the slot-shaped twin — `bus: LocalEventBus.createF
 > [!NOTE]
 > Substrate slots resolve **synchronously**: a harness passes them through `super(...)`, which cannot await. A factory that returns a Promise throws with a message pointing at instances instead.
 
+### Scope nodes — buses addressed by path
+
+`ScopeNodeRegistry` is that one-directional composition made addressable. A node is named by a path of scope keys and parents to the node one segment shorter, so the tree you describe is the isolation you get: what fans into a node, who may attach to it, and what is published at it are the same fact.
+
+```ts
+import { Effect } from "effect";
+import type { ProtocolEvent } from "@agentick/spec";
+import { LocalEventBus, ScopeNodeRegistry } from "@agentick/runtime";
+
+declare const frame: ProtocolEvent;
+
+const registry = new ScopeNodeRegistry({ root: new LocalEventBus() });
+const room = registry.node(["tenant:acme", "room:standup"]);
+
+// Published at the room, the frame reaches the room and the tenant above it —
+// and can never reach `tenant:other`, because no edge exists.
+await Effect.runPromise(registry.publish(room.path, frame));
+
+room.release(); // last lease out closes the node and discards its ring
+```
+
+Nodes are created on first use and refcount-closed: a lease is a hold, a node holds a lease on its parent, and re-resolving a closed path builds a fresh node rather than reviving the old one's history. `[]` resolves to the root bus you supplied, which the registry never closes.
+
+An app takes a topology by naming one — `createApp({ sessionNode: (ctx) => [ctx.principal] })` puts every session on its principal's node. Without that option there is no tree at all and sessions run on the app's own bus.
+
 ## Declaring a harness
 
 _Harness authors._ `BaseHarness` gives a subclass five surfaces: **commands** (the heavy path — phase contract, journaling, idempotency, interceptors), the **inbox** (`handleMessage` plus `onMessage` overrides), **lifecycle** (`onClose`, `ready`, `close`), **interceptors** (`use` / `guard` / `hook`), and **events** (`emit` / `emitDelta` and the signal helpers).
@@ -613,6 +638,7 @@ A sink is just a bag of standard OTel objects, so a raw literal is a valid one: 
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
 | `MemoryJournal` · `LocalEventBus` · `LocalInbox`                               | The substrate trio; each with a `createFactory()` slot form                           |
 | `LocalChannelPublisher`                                                        | Sequenced channel publication over a bus                                              |
+| `ScopeNodeRegistry`                                                            | Lazily-created, refcount-closed buses addressed by a path of scope keys               |
 | `BaseHarness`                                                                  | The inheritance point: commands, inbox, lifecycle, interceptors, events               |
 | `inheritedFrom(installer)`                                                     | Recover typed interceptor-inheritance options from an installer handle                |
 | `deriveContext(...)` / `ContextFacets`                                         | The one branded boundary-ctx constructor                                              |
@@ -697,6 +723,7 @@ The **fakes** are the production in-memory implementations themselves — import
 
 ## Verified by
 
+- `src/__tests__/scope-node-registry.spec.ts` — `[]` resolving to the host's bus, lazy parent-first creation, one bus per path, a node's events reaching its ancestors and never a sibling, `publish` at a held and at an unheld path, refcount close (last lease out closes and discards the ring, a re-request rebuilds), ancestors outliving descendants, and a repeated release being inert.
 - `src/__tests__/base-harness.spec.ts` — the phase contract (`requested` → `terminal`), idempotent replay on a repeated `opId`, the FiberRef trunk visible to body Effects, verdict outcomes, outer-wraps-inner middleware composition, the `onMessage` precedence chain (including that `request-response` auto-intercept always wins), and the `.fx` twins composing into one fiber tree.
 - `src/__tests__/base-harness.spec.ts` (fiber-propagation block) + `call-middleware.spec.ts` — the async-middleware caveat, pinned: a span opened in the body nests under the op span _through_ an async `use`, the continuation still reads the op's trunk after the fork, a tier-4 middleware still wraps a nested op reached through it, interruption tears down the wrapped call, short-circuit and multi-`next` retry both behave, and tier 4 crosses construction siblings then evaporates.
 - `src/__tests__/structural-middleware.spec.ts` — tier-3 live inheritance: pull-seed at construction, push to an already-built child and grandchild on late registration (including a late ancestor guard's veto), unsubscribe cascading to all descendants, and a closed child receiving no further pushes.

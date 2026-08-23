@@ -20,6 +20,12 @@ export {
 } from "./substrate/local-event-bus.js";
 export { LocalInbox, type LocalInboxOptions } from "./substrate/local-inbox.js";
 export {
+  ScopeNodeRegistry,
+  type ScopeNodeBusInput,
+  type ScopeNodeLease,
+  type ScopeNodeRegistryOptions,
+} from "./substrate/scope-node-registry.js";
+export {
   LocalChannelPublisher,
   type LocalChannelPublisherOptions,
 } from "./substrate/local-channel-publisher.js";

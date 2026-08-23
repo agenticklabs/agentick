@@ -105,6 +105,19 @@ const app = await createApp(<Agent />, { model, timeline: { store } }); // inlin
 
 Omit the store and a store-backed slot still gets one: the namespace builds an **app-scoped** default, once per app, keyed by session underneath. That lifetime is the point — a default that lived on the harness would leave with the evicted session, and the rebuild would hydrate from nothing. Your own store is merged over the default, so injecting one wins.
 
+### `sessionNode` — where a session's events land
+
+By default every session in an app publishes on the app's own bus, and anyone reading that bus reads all of them. `sessionNode` names a **scope-node path** instead: sessions of one principal, tenant, or room get their own bus, which fans in to its parent and on to the app's.
+
+```tsx
+const app = await createApp(<Agent />, {
+  model,
+  sessionNode: (ctx) => [`tenant:${ctx.metadata.tenantId}`, `user:${ctx.principal}`],
+});
+```
+
+The isolation is then structural rather than inspected: a reader attached to `tenant:acme` sees every session under it and nothing from `tenant:other`, because there is no edge to carry a frame across. Nodes are built on first use and closed when their last session leaves; returning `[]` means the root, which is the app's bus — the unauthenticated pole, unchanged. An explicit `createSession({ bus })` owns its own wiring and the resolver stands aside.
+
 ### `extensions` — the fully-dynamic escape hatch
 
 Slots are declarative and statically typed. `extensions: []` is the array you build at runtime — conditional composition, a slot-less third party, anything assembled in a loop:
@@ -591,30 +604,32 @@ await app.closeApp(); // closes the cluster too
 
 ### `createApp` options
 
-| Field                       | Type                                                   | Notes                                                                                    |
-| --------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `model`                     | `LanguageModelAdapter`                                 | What to call. At most one of `model` / `modelExecutor`; both omitted is a model-less app |
-| `modelExecutor`             | `LanguageModelExecutor` \| factory                     | How to execute. A bare adapter belongs on `model`                                        |
-| `compiler`                  | `CompilerProtocol` \| factory                          | Required; defaulted by the `/react` subpath                                              |
-| `loop`                      | `LoopExecutorProtocol` \| factory                      | Defaults to the bundled loop executor                                                    |
-| `tools`                     | `ToolDeclaration[]`                                    | App-scope registry; threads to every session                                             |
-| `hooks`                     | `CommandHooks`                                         | Declarative per-verb transforms; folded once at construction                             |
-| `guards`                    | `CommandGuards`                                        | Declarative per-verb admission verdicts                                                  |
-| `extensions`                | `Extension[]`                                          | The dynamic composition array; routed by `target`                                        |
-| `sessions`                  | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable resume index, live-registry bounds, spawn ceiling                                |
-| `onInterruptedExecution`    | `(i) => "resume" \| "drop"` (async ok)                 | Policy for a turn a crash left mid-flight; absent = `drop`. See above                    |
-| `signal`                    | `AbortSignal`                                          | App-wide cascading cancel                                                                |
-| `cluster`                   | `ClusterFactory`                                       | Substrate fusion across nodes                                                            |
-| `bus` / `inbox` / `journal` | instance \| factory                                    | Substrate overrides                                                                      |
-| `telemetry`                 | `boolean` \| `TelemetrySetting`                        | The one observability switch; off by default                                             |
-| `telemetryNamespace`        | `string`                                               | Prefix on framework attribute keys; defaults to `"agentick"`                             |
-| `name`                      | `string`                                               | Logical app name — the telemetry identity dimension and default `functionId`             |
-| `metadata`                  | `Record<string, unknown>`                              | Adopter bag carried on the instance                                                      |
-| `appId`                     | `string`                                               | Defaults to `app:${generateId()}`                                                        |
-| `title`                     | `string`                                               | Display label — what a person reads. Distinct from `name`; see below                     |
-| `description`               | `string`                                               | One line for a picker or catalog                                                         |
-| `costResolver`              | `(input) => RateCard \| Cost \| undefined`             | Pricing seam; wins over a model's declared `rates`. See below                            |
-| _namespace slots_           | e.g. `timeline`                                        | Contributed by namespace packages; not declared here                                     |
+| Field                       | Type                                                   | Notes                                                                                     |
+| --------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `model`                     | `LanguageModelAdapter`                                 | What to call. At most one of `model` / `modelExecutor`; both omitted is a model-less app  |
+| `modelExecutor`             | `LanguageModelExecutor` \| factory                     | How to execute. A bare adapter belongs on `model`                                         |
+| `compiler`                  | `CompilerProtocol` \| factory                          | Required; defaulted by the `/react` subpath                                               |
+| `loop`                      | `LoopExecutorProtocol` \| factory                      | Defaults to the bundled loop executor                                                     |
+| `tools`                     | `ToolDeclaration[]`                                    | App-scope registry; threads to every session                                              |
+| `hooks`                     | `CommandHooks`                                         | Declarative per-verb transforms; folded once at construction                              |
+| `guards`                    | `CommandGuards`                                        | Declarative per-verb admission verdicts                                                   |
+| `extensions`                | `Extension[]`                                          | The dynamic composition array; routed by `target`                                         |
+| `sessions`                  | `{ store?, maxActive?, idleTimeout?, maxSpawnDepth? }` | Durable resume index, live-registry bounds, spawn ceiling                                 |
+| `onInterruptedExecution`    | `(i) => "resume" \| "drop"` (async ok)                 | Policy for a turn a crash left mid-flight; absent = `drop`. See above                     |
+| `signal`                    | `AbortSignal`                                          | App-wide cascading cancel                                                                 |
+| `cluster`                   | `ClusterFactory`                                       | Substrate fusion across nodes                                                             |
+| `bus` / `inbox` / `journal` | instance \| factory                                    | Substrate overrides                                                                       |
+| `sessionNode`               | `(ctx) => readonly string[]`                           | Where a session's events land in the scope-node tree. Omitted: sessions share the app bus |
+| `scopeNodes`                | `ScopeNodeRegistry`                                    | The tree `sessionNode` resolves against; omitted, the app owns a private one              |
+| `telemetry`                 | `boolean` \| `TelemetrySetting`                        | The one observability switch; off by default                                              |
+| `telemetryNamespace`        | `string`                                               | Prefix on framework attribute keys; defaults to `"agentick"`                              |
+| `name`                      | `string`                                               | Logical app name — the telemetry identity dimension and default `functionId`              |
+| `metadata`                  | `Record<string, unknown>`                              | Adopter bag carried on the instance                                                       |
+| `appId`                     | `string`                                               | Defaults to `app:${generateId()}`                                                         |
+| `title`                     | `string`                                               | Display label — what a person reads. Distinct from `name`; see below                      |
+| `description`               | `string`                                               | One line for a picker or catalog                                                          |
+| `costResolver`              | `(input) => RateCard \| Cost \| undefined`             | Pricing seam; wins over a model's declared `rates`. See below                             |
+| _namespace slots_           | e.g. `timeline`                                        | Contributed by namespace packages; not declared here                                      |
 
 Also accepted: `models`, `session`, `toolExecutor`, `tasks`, `defaultMaxTicks`, `streaming`, `narrate`, `initialProps`, `initialKnobs`, `target`, `interceptorParent`, and the failed-tick recovery pair `tickFailurePolicy` / `maxConsecutiveFailedTicks` (ADR 99) — flat shortcuts that cascade like `defaultMaxTicks`, with `session.*` longhand winning; semantics in [@agentick/session](../session#retrying-a-failed-tick).
 
@@ -694,10 +709,12 @@ const app = await createApp(<Agent />, { model, tools: [calculator] });
 - **The interruption mark has a best-effort window.** A crash between construction's record write-back and the mark landing loses the evidence, and the turn is never detected as interrupted. The loss is silent-drop-shaped rather than run-twice-shaped, which is the tradeoff taken deliberately.
 - **`resumeAttempts` is not in the store conformance suite.** The two resume slots are documented obligations on an adapter; nothing yet fails an adapter that drops them on the round trip.
 - **`onSessionClose` does not fire on eviction.** Leaving memory is not a lifecycle end, so the app-level handler stays quiet; the session's own bridge and extension close handlers do run. Observe evictions on `onBeforeSessionClose` instead, where the reason is `"evicted"`.
+- **`sessionNode` moves the session, not the whole spine.** A configured topology puts the session and its per-session harnesses (elicitation, tasks, resources, tool executor) on the node bus. The app-shared spine — the model executor, the loop, the compiler — is constructed once per app on the app's bus, so its frames (model deltas above all) fan in at the root rather than at the session's node. A node subscriber therefore sees session-scoped frames, not tick-scoped ones. Closing that gap means per-session emission from a shared executor, which is ADR 102 stage 2 work.
 - **`onBeforeAppResumeSession` counts attempts, not resumes.** The wire's resolution walks every app asking "can you resume this id?", so the before-hook fires once per app asked — including apps that answer nothing, and ids that resume nowhere. The truthy signal is the around form: `onAppResumeSession` observing a session out of `next()` is a resume that actually happened. Telemetry and dashboards key on the around form; the before form is only right when attempts are the thing being measured.
 
 ## Verified by
 
+- `src/__tests__/session-scope-nodes.spec.tsx` — sessions on the app's own bus with no `sessionNode` configured and with one that resolves `[]`, two principals landing on disjoint node buses while the app bus sees both, two sessions of one principal sharing a node, an explicit per-session `bus` outranking the resolver, and a node closing with its last session so the next one gets a fresh bus.
 - `src/__tests__/app-harness.spec.tsx` — construction, session lifecycle, close cascade, and the durable store: `listSessions` / `getSessionRecord` read it, records mirror lifecycle and execution accounting (status, `executionCount`, `currentExecutionId`, aggregated usage, close → `closed`), `setSessionMeta` sets the app-owned slots, and ephemeral `runOnce` sessions stay out of the list.
 - `src/__tests__/genesis-lifecycle.spec.tsx` — the app-level namespace slot reaching the session's timeline (definition form and inline bag), the genesis and shaping seams riding it, the zero-config default with no slot, genesis completing before first render, `createSession` failing with the typed error on a throwing hydrator, and the genesis law as amended — a spawn runs none, a fork branches the parent's scope and genesises over the copy, a resume re-runs it.
 - `src/__tests__/lifecycle-operations.spec.tsx` — the spawn and close envelopes end to end: spawn emits both operations with the child-create carrying `{ sessionId, parentSessionId, spawnPath }` and naming the spawn as its parent op, a spawn adds no host-create record, a fork adds snapshot + restore records, a guard veto at either layer creates no child, a spawn-only guard leaves host `createSession` alone, and close stays out of the journal while a veto leaves the session usable.
