@@ -240,8 +240,9 @@ after, since this build decides which doors production uses.
 ## 10. Open questions (decide at build, not silently)
 
 1. Draft-id collision: client-minted id already existing (another device's
-   session) — first send RESUMES it. With ULIDs the accidental case is
-   negligible and the adversarial case is authz-denied (record principal
+   session) — first send RESUMES it. With UUIDv7 ids (knowify's choice —
+   time-ordered for pg index locality, 74 random bits) the accidental case
+   is negligible and the adversarial case is authz-denied (record principal
    gate). If a consumer ever needs create-intent, its canonical shape is
    `open(2)`'s `O_EXCL`: `openSession(..., { create: true, exclusive: true })`
    → typed conflict when the id exists. Not built until demonstrated.

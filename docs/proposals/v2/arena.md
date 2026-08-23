@@ -54,6 +54,22 @@ presence/typing, session meta + store queries, spawn/destroy lifecycle,
 elicitation with the escalation address seam, journaling dispositions
 for chatter, idle eviction for many-mostly-dormant sessions.
 
+**ADR 102 landed the isolation substrate (2026-08-23, stages 1–3 on
+`feat/v2`)** — and it removes an entire item from arena's build. A room
+is a **scope node**: a path in the bus tree several principals are
+authorized to attach to, with room broadcast being publication at the
+node (`registry.publish(path, frame)` exists). Membership-as-visibility
+therefore needs NO filtering subsystem — joining a room is being granted
+its path in `attachableNodes`, leaving is the grant's revocation, and
+tenancy is the room path being prefixed by the tenant segment
+(`["tenant:acme", "room:standup"]`), hard by construction. What remains
+for arena is exactly ADR 102's **stage 4**: the `node` wire scope kind
+(ratified — a path-shaped scope on `sub/subscribe`) and the
+lateral-grant decision at the authorizer's scope label, asked once at
+attachment. The per-envelope arrival filter arena would once have had to
+reckon with (`onlyOwnedBy`) is deleted; isolation is which bus you
+attach to. @see blueprint/102-subscription-bus-topology.md.
+
 ## 3. The core enablers (small, standalone, arena-blind)
 
 Each of these is worth landing on its own merits; none names arena.
