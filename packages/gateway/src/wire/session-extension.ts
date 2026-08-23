@@ -15,10 +15,9 @@
 import {
   defineWireExtension,
   findSession,
-  findSessionOrResume,
   findSessionOwner,
+  openSession,
   progressEventQuery,
-  resolveSessionDoor,
   toClientToolRegistration,
   type AppHarnessProtocol,
   type ProtocolEvent,
@@ -98,10 +97,10 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
   version: "1.0.0",
   methods: {
     // The ONE existence-creating verb (session-doors.md §3): a send names the
-    // conversation it is about, so it resolves through all three doors — live,
-    // resume (the reaper paged it out; a 404 would make eviction look like data
-    // loss), create (the client minted the id and this is the first message).
-    // Reads never create; sends never 404.
+    // conversation it is about, so it opens with `create` — live, remounted
+    // (the reaper paged it out; a 404 would make eviction look like data
+    // loss), or created (the client minted the id and this is the first
+    // message). Reads never create; sends never 404.
     //
     // TODO(resume-ctx-app): `ctx.app` is resolved by the dispatcher's LIVE walk,
     // so it is undefined for the send that did the remounting — `fanIn` loses
@@ -110,12 +109,12 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
       // Creation stamps the caller's principal from the authenticated identity,
       // exactly as `app/create_session` does — the params carry no `principal`
       // slot, so ownership is never the caller's to claim.
-      const { session: sess, door } = ctx.session
-        ? { session: ctx.session, door: "live" as const }
-        : await resolveSessionDoor(
+      const { session: sess, created } = ctx.session
+        ? { session: ctx.session, created: false }
+        : await openSession(
             ctx,
             params.sessionId,
-            omitUndefined({ appId: params.appId, principal: ctx.principal }),
+            omitUndefined({ create: true, appId: params.appId, principal: ctx.principal }),
           );
       const progressToken = params._meta?.progressToken;
 
@@ -248,7 +247,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
           executionId: handle.executionId,
           finalCursor: { value: 0 },
           result,
-          door,
+          created,
         };
       } finally {
         // Stop the signal drain regardless of success/failure so the
@@ -295,7 +294,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
     // Remounts like `session/send` does, and for the same reason: dispatching a
     // tool is work asked of the session, not an observation of it.
     "session/dispatch": async ({ sessionId, tool, input }, ctx) => {
-      const sess = ctx.session ?? (await findSessionOrResume(ctx, sessionId));
+      const sess = ctx.session ?? (await openSession(ctx, sessionId)).session;
       const content = await sess.tools.dispatch(tool, input as Record<string, unknown>);
       return { content };
     },

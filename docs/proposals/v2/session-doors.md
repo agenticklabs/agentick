@@ -85,8 +85,12 @@ remove nothing).
 - **`session/send`**: live → deliver. Record exists → **resume door**
   (`app:resume-session` — interruption detection, hooks, telemetry) →
   deliver. Nothing → **create door** (`app:create-session`, §7) → deliver.
-  The send ack carries `door: "live" | "resumed" | "created"` — one field,
-  the ack becomes self-describing.
+  The API is `openSession(ctx, sessionId, { create, appId, principal })` —
+  `open(2)` semantics, `create` being `O_CREAT`. The ack carries
+  `created: boolean` (cf. HTTP 201): the one existence fact a client may
+  act on. Live-vs-remounted is residency and deliberately NOT on the wire
+  — it lives on the `app:resume-session` span. ("Door" is this document's
+  metaphor; identifiers name the concepts: open, create, resume.)
 - **`timeline/history`**: live → serve. Record → resume door → serve.
   Nothing → 404. Reads never create; sends never 404.
 - **Evict** stays framework-owned (sweep/LRU/manual through
@@ -174,7 +178,7 @@ The first `send` to the nonexistent id takes the **create door** with that
 id. The record is then written by lazy-persist on the first real status
 transition — no blank-row window exists at all. The `session added`
 enumeration notification fans out to every device (including the sender;
-the ack's `door: "created"` confirms materialization without waiting on it).
+the ack's `created: true` confirms materialization without waiting on it).
 
 App resolution for the miss case (a nonexistent id names no app):
 (a) `SendParams.appId?` — the explicit form; the dock already knows its app
@@ -194,7 +198,7 @@ Authz: creation-by-send stamps the caller's principal exactly as
 **Framework (slices, each gated on the full root suite):**
 
 1. Door routing: `session/send` live/resume/create resolution (+ `appId` +
-   single-app default + typed ambiguity error + `door` on the ack);
+   single-app default + typed ambiguity error + `created` on the ack);
    `timeline/history` resume-on-record; `session/get` typed miss.
 2. Subscription admission by record.
 
@@ -213,8 +217,8 @@ after, since this build decides which doors production uses.
 
 - `get` on live / evicted / nonexistent: correct record or typed miss;
   registry unchanged in all three (never mounts, never creates).
-- Send door matrix: live → `door:"live"`, no door op; evicted-with-record →
-  resume door fires (hook observed, span child of send) + delivery;
+- Send door matrix: live → `created:false`, no lifecycle op; evicted-with-
+  record → resume fires (hook observed, span child of send) + `created:false`;
   nonexistent → create door fires + record written ONCE, no blank row
   before the turn; single-app default; multi-app ambiguity error.
 - `history` on evicted-with-record: resume door fires attributed to
@@ -233,7 +237,9 @@ after, since this build decides which doors production uses.
 1. Draft-id collision: client-minted id already existing (another device's
    session) — first send RESUMES it. With ULIDs the accidental case is
    negligible and the adversarial case is authz-denied (record principal
-   gate). Lean: no `expectNew` flag until a consumer demonstrates the need.
+   gate). If a consumer ever needs create-intent, its canonical shape is
+   `open(2)`'s `O_EXCL`: `openSession(..., { create: true, exclusive: true })`
+   → typed conflict when the id exists. Not built until demonstrated.
 2. Should `get`'s typed miss be `null` payload or a typed NOT_FOUND error?
    Decide with the wire dialect (client ergonomics: null composes better
    with "render draft on miss").

@@ -125,12 +125,12 @@ describe("session/send remounts a paged-out session", () => {
     await cleanup();
   });
 
-  it("takes the CREATE door for an id that was never a session — sends never 404", async () => {
+  it("creates a session for an id that never was one — sends never 404", async () => {
     const { app, client, cleanup } = await makeStack();
 
     const ack = await client.request("session/send", { sessionId: "ghost", ...say("hello") });
 
-    expect(ack.door).toBe("created");
+    expect(ack.created).toBe(true);
     expect(await app.getSessionRecord("ghost")).toMatchObject({ id: "ghost" });
 
     await cleanup();

@@ -94,7 +94,7 @@ describe("residency hooks through the gateway door + wire send", () => {
     expect(app.getSession("wired")).toBeUndefined();
 
     // The production flow: the wire send resolves the hibernated id through
-    // findSessionOrResume → app.resumeSession (the OP) → hooks.
+    // openSession → app.resumeSession (the OP) → hooks.
     const handler = sessionWireExtension.methods["session/send"]!;
     const result = (await handler(
       { sessionId: "wired", messages: [{ role: "user", content: "again" }] } as never,

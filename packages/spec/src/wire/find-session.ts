@@ -62,40 +62,8 @@ export function findSession(
 }
 
 /**
- * Resolve a session id, REMOUNTING it when the live walk misses and an app can
- * rehydrate it (a paged-out session, or a durable record from a previous
- * process). See {@link AppHarnessProtocol.resumeSession} for what an app is
- * willing to bring back.
- *
- * **Only the verbs that DO work on a session's behalf may use this** —
- * `session/send` and `session/dispatch`. Observation verbs (`sub/subscribe`,
- * `session/compile`, `session/list_tools`, `session/model_info`, …) stay on
- * {@link findSession} and 404 against a paged-out session, deliberately: a
- * remount mounts an agent tree and costs the memory the reaper just reclaimed,
- * so a reconnecting UI that subscribes to fifty thread ids must not be able to
- * page all fifty back in. `session/abort` is live-only for a second reason — a
- * hibernated session has nothing in flight to cancel, so remounting one to abort
- * it would be work in service of a no-op.
- *
- * @throws {SessionNotFoundError} when the id is neither live nor resumable.
- */
-export async function findSessionOrResume(
-  ctx: SessionResolutionContext,
-  sessionId: string,
-): Promise<SessionHarnessProtocol> {
-  for (const app of ctx.gateway.apps()) {
-    const live = app.getSession(sessionId);
-    if (live) return live;
-  }
-  const resumed = await resumeSession(ctx, sessionId);
-  if (resumed) return resumed;
-  throw new SessionNotFoundError({ sessionId });
-}
-
-/**
- * The RESUME door on its own — for a caller that has already missed the live
- * walk and wants the session brought back if any app can (`undefined` if none
- * can; resume never creates).
+ * Resume a session no app holds live — `undefined` when no app can (no durable
+ * record, or the id already ended). Resume never creates.
  */
 export async function resumeSession(
   ctx: SessionResolutionContext,
@@ -108,53 +76,66 @@ export async function resumeSession(
   return undefined;
 }
 
-/** Which door a verb had to walk through to reach its session. */
-export type SessionDoor = "live" | "resumed" | "created";
-
-export interface SessionDoorResult {
-  readonly session: SessionHarnessProtocol;
-  readonly door: SessionDoor;
-}
-
-/** What the CREATE door needs beyond the id — see {@link resolveSessionDoor}. */
-export interface SessionDoorInput {
-  /** The app a miss creates in. Required only on a gateway holding ≠ 1 app. */
+export interface OpenSessionOptions {
+  /** `open(2)` `O_CREAT`: a total miss creates the session instead of throwing. */
+  readonly create?: boolean;
+  /** The app a created session belongs to. Required only on a gateway holding ≠ 1 app. */
   readonly appId?: string;
   /** Owning principal stamped on a created session (ADR 48). */
   readonly principal?: string;
 }
 
+export interface OpenSessionResult {
+  readonly session: SessionHarnessProtocol;
+  /** True iff this open created the session (cf. HTTP 201). */
+  readonly created: boolean;
+}
+
 /**
- * All three doors — live, resume, CREATE — resolved atomically, reporting which
- * one was taken.
+ * Open a session by id — `open(2)` semantics: return it live, REMOUNT it when
+ * an app can rehydrate it (a paged-out session, or a durable record from a
+ * previous process; see {@link AppHarnessProtocol.resumeSession}), and with
+ * `create` CREATE it on a total miss.
  *
- * **`session/send` only** (docs/proposals/v2/session-doors.md §3): a send is
- * existence-creating because the id it names is the conversation it is about, so
- * a miss is a session that does not exist YET rather than an error. Every other
- * verb stays on {@link findSession} / {@link findSessionOrResume} — that is what
- * keeps reads from creating, and it is the invariant a client-side
- * `get → create` dance could not hold (the door must be resolved inside the verb
- * or the reaper interleaves).
+ * **Only the verbs that DO work on a session's behalf may open** —
+ * `session/send` (with `create`: a send names the conversation it is about, so
+ * a miss is a session that does not exist YET) and `session/dispatch` (without:
+ * work on a nonexistent session is an error). Observation verbs
+ * (`sub/subscribe`, `session/compile`, `session/list_tools`,
+ * `session/model_info`, …) stay on {@link findSession} and 404 against a
+ * paged-out session, deliberately: a remount mounts an agent tree and costs the
+ * memory the reaper just reclaimed, so a reconnecting UI that subscribes to
+ * fifty thread ids must not be able to page all fifty back in. `session/abort`
+ * is live-only for a second reason — a hibernated session has nothing in
+ * flight to cancel, so remounting one to abort it would be work in service of a
+ * no-op.
  *
+ * Whether an open was a registry hit or a remount is residency — the
+ * framework's business, observable on the `app:resume-session` span, and
+ * deliberately NOT in the result: `created` is the one existence fact a caller
+ * may act on.
+ *
+ * @throws {SessionNotFoundError} on a total miss without `create`.
  * @throws {AppNotFoundError} when `appId` names no app on this gateway.
  * @throws {AppAmbiguousError} when a miss must create and no app is implied.
  */
-export async function resolveSessionDoor(
+export async function openSession(
   ctx: SessionResolutionContext,
   sessionId: string,
-  input: SessionDoorInput = {},
-): Promise<SessionDoorResult> {
+  options: OpenSessionOptions = {},
+): Promise<OpenSessionResult> {
   for (const app of ctx.gateway.apps()) {
     const live = app.getSession(sessionId);
-    if (live) return { session: live, door: "live" };
+    if (live) return { session: live, created: false };
   }
   const resumed = await resumeSession(ctx, sessionId);
-  if (resumed) return { session: resumed, door: "resumed" };
-  const session = await creationApp(ctx, input.appId).createSession({
+  if (resumed) return { session: resumed, created: false };
+  if (!options.create) throw new SessionNotFoundError({ sessionId });
+  const session = await creationApp(ctx, options.appId).createSession({
     sessionId,
-    ...(input.principal !== undefined ? { principal: input.principal } : {}),
+    ...(options.principal !== undefined ? { principal: options.principal } : {}),
   });
-  return { session, door: "created" };
+  return { session, created: true };
 }
 
 function creationApp(ctx: SessionResolutionContext, appId?: string): AppHarnessProtocol {

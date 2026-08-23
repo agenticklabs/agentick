@@ -2,6 +2,16 @@
 
 **Branch:** `feat/v2`
 
+**2026-08-22 — ADR 102 stage 1: the scope-node registry, and sessions resolving their bus through it (uncommitted, `feat/v2`).**
+
+`ScopeNodeRegistry` in `packages/runtime/src/substrate/scope-node-registry.ts` maps a path of scope keys to a lazily-created, refcount-closed bus; each node parents to the node one segment shorter (wrapper composition over `LocalEventBus({ parent })` — its internals were not touched, per the 2026-08-18 outage), `[]` is the host's own bus, and the last lease out closes the node and discards its ring (no linger TTL, as ratified). `publish(path, event)` goes through `appendBatch` so a frame published at a node nobody holds still fans in before the transient lease closes it.
+
+`createApp({ sessionNode, scopeNodes? })` is the app-side seam: when a resolver is configured, the session AND its per-session harnesses (elicitation, tasks, resources, tool executor) are constructed on the node bus instead of the app bus; when it is not — or when the adopter passed an explicit per-session `bus` — every construction is literally what it was, and `session.bus === app.bus` still holds. The lease is released on session close, so a principal's node dies with its last session. `createGateway({ sessionNode, attachableNodes })` stores both and answers through `sessionNodeFor` / `attachableNodesFor` (defaults: `[principal]`, `[]` unauthenticated, attachable = own node); the `sub/*` lane does not consume them yet — that is stage 2.
+
+**Two couplings found, reported not forced.** (1) The app-shared spine (model executor, loop, compiler — `packages/app/src/harness.ts:1258`, `:1406`) is constructed ONCE per app on the app bus, so tick/model-delta frames fan in at the root rather than at the session's node even under a configured topology. Stage 2's principal-isolation claim needs per-session emission from a shared executor, or those frames stay invisible to a node subscriber. (2) The wire lane types against `GatewayHarnessProtocol` (`packages/spec/src/protocol/gateway-harness.ts:218`), which the two resolvers are NOT on — stage 2 must either add them there or carry them on the wire ctx.
+
+Gates: root `npx vitest run` 745 files / 7363 tests green, 0 failed; `pnpm typecheck` 111/111; oxfmt on every touched file; NUL byte-scan clean.
+
 **2026-08-22 — checkpointing P4: the sweep. The value-snapshot apparatus is deleted workspace-wide (branch `feat/checkpointing`).**
 
 Net −2082 LOC across 128 files. Gone: `SnapshotCapable` / `isSnapshotCapable` and every `exportSnapshot`/`importSnapshot` pair (timeline, knobs, state, skills, prompts, subscriptions, `LogView`, `InMemoryDataBridge`); `SessionSnapshot` / `RestoreSnapshotInput` / `CaptureSnapshotInput` — `session.snapshot()` is now `Promise<void>` (the flush barrier) and `session.restore()` takes no argument (the hydrate fan-out); the migration seam (`SnapshotMigration`, `migrateSnapshot`, `SnapshotVersionMismatch`); the wire verb `session/snapshot` (which the gateway never routed — declared in spec, called by a client-core handle, answered by nobody); and `CompilerSnapshot` with the compiler's whole second composition root (`captureBridgeSnapshots`, `MountInput.snapshot`, `MountResult.restoredFromSnapshot`, `CompilerProtocol.snapshot`/`restore`, the `define-compiler` slots, `SnapshotIncompatible`, `DataCacheEntry`, `MountState.elementVersion`). The command NAMES `session:snapshot`/`session:restore` and their minted hook quartet survive — only the payloads died.
@@ -2248,11 +2258,17 @@ is commanded, residency is taken — the client speaks `get`/`history`/
 `subscribe`/`send`; create/resume are doors the framework walks, hooked
 and traced, never wire-callable. Slice 1 landed:
 
-- `resolveSessionDoor` (spec/wire/find-session.ts): live → resume →
-  CREATE, atomic, `session/send` only — a miss creates with the
-  client-minted id (`SendParams.appId` / single-app default /
-  `AppAmbiguousError`), principal stamped from the wire identity. Sends
-  never 404; the ack carries `door: live|resumed|created`.
+- `openSession(ctx, sessionId, { create, appId, principal })`
+  (spec/wire/find-session.ts): `open(2)` semantics — live → resume →
+  create-on-miss (`create` is `O_CREAT`), atomic; only `session/send`
+  opens with `create`, with the client-minted id, principal stamped from
+  the wire identity, `AppAmbiguousError` on an implied-app miss. Sends
+  never 404; the ack carries `created: boolean` (HTTP-201 shape) —
+  live-vs-remounted is residency and stays OFF the wire, on the
+  `app:resume-session` span. (Naming ruling, Ryan 2026-08-23: metaphor
+  belongs to prose; identifiers name concepts — "door" was renamed out
+  of the API the same day it landed. Follow-up candidate: `host-door`
+  in tool-executor DispatchOptions.)
 - Dynamic-command lane: AddressNotFound + sessionId param → one-shot
   resume-door retry — every harness's wire reads survive eviction
   through the same hooked door, no surface special-cased. No record →

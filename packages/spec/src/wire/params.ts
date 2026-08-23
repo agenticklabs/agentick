@@ -30,7 +30,6 @@ import type {
   SendResult,
   SendTelemetry,
 } from "../protocol/session-harness.js";
-import type { SessionDoor } from "./find-session.js";
 import type { RequestMeta } from "./json-rpc.js";
 import type { SubscriptionScope } from "./scope.js";
 
@@ -393,12 +392,12 @@ export interface SessionSendResult {
   readonly finalCursor: Cursor;
   readonly result: SendResult;
   /**
-   * Which door the send walked through to reach the session — the ack is
-   * self-describing, so a client knows its draft materialized (`"created"`)
-   * without a second read. Residency stays the framework's business:
-   * `"resumed"` is reportable history, not a state a client may ask for.
+   * True iff this send created the session (cf. HTTP 201) — the ack is
+   * self-describing, so a client knows its draft materialized without a second
+   * read. Whether an existing session was live or remounted is residency — the
+   * framework's business, deliberately absent here.
    */
-  readonly door: SessionDoor;
+  readonly created: boolean;
 }
 
 /**
