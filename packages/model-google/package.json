@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model-google",
-  "version": "1.0.0-next.145",
+  "version": "1.0.0-next.146",
   "description": "Google (Gemini) LanguageModelAdapter for Agentick v2 (ADR 52). google(model?, options?) — Gemini Developer API + Vertex AI paths. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
