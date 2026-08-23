@@ -106,4 +106,32 @@ describe("sub/subscribe teardown", () => {
     node.release();
     await gw.close();
   });
+
+  it("a SESSION scope attaches to the same node, and releases it the same way", async () => {
+    // Since ADR 102 stage 3 a session scope is that attachment narrowed by
+    // topic, so it takes a node lease where it used to read the owning app's
+    // ring — and it is admitted for an id no session has ever had.
+    const gw = new GatewayHarness();
+    await gw.ready;
+    const handler = gw.wireExtensions().resolve("sub/subscribe")!.extension.methods[
+      "sub/subscribe"
+    ]!;
+    const node = gw.attachScopeNode(gw.sessionNodeFor({ principal: "alice" }));
+    const nodeBus = node.bus as unknown as { subscriberCount(): number };
+
+    const { ctx, runCleanup } = ctxCapturingCleanup(gw, "alice");
+    await handler(
+      { subscriptionId: "sub-draft", scope: { kind: "session", id: "never-created" } },
+      ctx,
+    );
+    await settle();
+    expect(nodeBus.subscriberCount()).toBe(1);
+
+    await runCleanup();
+    await settle();
+    expect(nodeBus.subscriberCount()).toBe(0);
+
+    node.release();
+    await gw.close();
+  });
 });

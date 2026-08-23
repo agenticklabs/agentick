@@ -101,11 +101,13 @@ export interface OpenSessionResult {
  * `session/send` (with `create`: a send names the conversation it is about, so
  * a miss is a session that does not exist YET) and `session/dispatch` (without:
  * work on a nonexistent session is an error). Observation verbs
- * (`sub/subscribe`, `session/compile`, `session/list_tools`,
- * `session/model_info`, …) stay on {@link findSession} and 404 against a
- * paged-out session, deliberately: a remount mounts an agent tree and costs the
- * memory the reaper just reclaimed, so a reconnecting UI that subscribes to
- * fifty thread ids must not be able to page all fifty back in. `session/abort`
+ * (`session/compile`, `session/list_tools`, `session/model_info`, …) stay on
+ * {@link findSession} and 404 against a paged-out session, deliberately: a
+ * remount mounts an agent tree and costs the memory the reaper just reclaimed,
+ * so a reconnecting UI that renders fifty thread ids must not be able to page
+ * all fifty back in. `sub/subscribe` reaches that outcome without coming here at
+ * all — since ADR 102 stage 3 it resolves a bus attachment rather than a
+ * session, so an evicted or never-created id is admitted and quiet. `session/abort`
  * is live-only for a second reason — a hibernated session has nothing in
  * flight to cancel, so remounting one to abort it would be work in service of a
  * no-op.

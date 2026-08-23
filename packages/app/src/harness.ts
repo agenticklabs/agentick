@@ -682,9 +682,12 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    */
   readonly sessionNode?: (ctx: SessionNodeContext) => readonly string[];
   /**
-   * The node tree {@link sessionNode} paths resolve against. Supply one
-   * to share a tree across several apps (a gateway hosting many);
-   * omitted, the app builds a private registry rooted at its own bus.
+   * FRAMEWORK-INTERNAL. The node tree {@link sessionNode} paths resolve
+   * against — the injection channel a gateway uses to put every app it
+   * hosts on ITS tree, so a session lands where a subscriber of the same
+   * principal attaches. Omitted, the app builds a private registry rooted
+   * at its own bus, which is what an adopter wants; constructing one by
+   * hand is not an adopter surface.
    */
   readonly scopeNodes?: ScopeNodeRegistry;
 

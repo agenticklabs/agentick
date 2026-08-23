@@ -109,7 +109,11 @@ async function watchStatus(
  * so both `sessionNodeFor` and `attachableNodesFor` resolve to `[]` — the root
  * — and everything is visible, as the in-process default must be.
  */
-async function makeGateway(authorized = true, withModel = false) {
+async function makeGateway(
+  authorized = true,
+  withModel = false,
+  sessions?: { readonly maxActive: number },
+) {
   // The gateway's bus is created here rather than inside `createGateway` so a
   // scripted executor can be built on the SAME bus — its deltas are only
   // observable to a subscriber if both sides share one.
@@ -125,9 +129,23 @@ async function makeGateway(authorized = true, withModel = false) {
   const app = await gateway.createApp({
     appId: "iso-app",
     rootElement: null,
-    options: { compiler: fakeCompiler(), ...omitUndefined({ modelExecutor }) },
+    options: { compiler: fakeCompiler(), ...omitUndefined({ modelExecutor, sessions }) },
   });
   return { gateway, app };
+}
+
+const ALICE: IngressIdentity = { principal: "alice", scopes: ["*"] };
+const BOB: IngressIdentity = { principal: "bob", scopes: ["*"] };
+
+/** Deliver one turn over the wire as `identity` — the door that creates or resumes. */
+async function send(gateway: DispatchHost, identity: IngressIdentity, sessionId: string) {
+  const transport = identifiedTransport(gateway, identity);
+  await transport.connect();
+  await transport.request("session/send", {
+    sessionId,
+    messages: [{ role: "user", content: "hi" }],
+  });
+  await transport.close();
 }
 
 async function scriptedExecutor(bus: LocalEventBus) {
@@ -466,9 +484,8 @@ describe("the bounded scopes are untouched", () => {
   });
 
   it("a session-scope subscription still receives LIVE frames from a node-resident session", async () => {
-    // Stage 2 leaves `session` scope as a root-ring query. That keeps working
-    // only because fan-in carries a node's frames up to the root — the claim
-    // stage 3 will retire, pinned here rather than asserted in prose.
+    // Since stage 3 this is the node attachment itself, narrowed to one id by
+    // topic — the session alice subscribes to is on the node she attaches to.
     const { gateway, app } = await makeGateway();
     const alices = await app.createSession({ sessionId: "live-node", principal: "alice" });
 
@@ -484,6 +501,94 @@ describe("the bounded scopes are untouched", () => {
     expect(alice.sessionIds()).toEqual(["live-node"]);
 
     await alice.close();
+    await gateway.close();
+  });
+});
+
+/**
+ * A `session` subscription is an own-node attachment narrowed to one id by
+ * topic (ADR 102 stage 3), so it resolves nothing: live, evicted, and
+ * never-created ids are ONE shape. That is what makes the doors arc's draft
+ * flow race-free — mint, subscribe, then send — and it is what retires
+ * id-as-capability, since an id that materializes under another principal's
+ * node never transits yours.
+ */
+describe("a session subscription filters your own subtree instead of naming a session", () => {
+  it("carries a client-minted id from silence through the send that creates it", async () => {
+    const { gateway, app } = await makeGateway(true, true);
+    const draft = "draft-01";
+
+    const alice = await watchStatus(gateway, ALICE, { kind: "session", id: draft });
+
+    // Nothing under that id, and subscribing neither created one nor 404'd.
+    expect(app.getSession(draft)).toBeUndefined();
+    expect(alice.ids()).toEqual([]);
+
+    await send(gateway, ALICE, draft);
+
+    // The pipe was open BEFORE the create door fired, so the session's first
+    // status transitions land on the subscription that was already waiting.
+    await waitFor(() => alice.ids().length > 0, { description: "the draft's frames" });
+    expect(new Set(alice.ids())).toEqual(new Set([draft]));
+
+    await alice.close();
+    await gateway.close();
+  });
+
+  it("stays silent on another principal's EXISTING session, which its owner hears", async () => {
+    const { gateway, app } = await makeGateway();
+    const bobs = await app.createSession({ sessionId: "bobs-thread", principal: "bob" });
+
+    const alice = await watchStatus(gateway, ALICE, { kind: "session", id: "bobs-thread" });
+    const bob = await watchStatus(gateway, BOB, { kind: "session", id: "bobs-thread" });
+
+    await bobs.close();
+
+    await waitFor(() => bob.ids().length > 1, { description: "bob's snapshot and close" });
+    expect(new Set(bob.ids())).toEqual(new Set(["bobs-thread"]));
+    // Alice named a real id she does not own. The arm this replaces read the
+    // root ring, so holding `sub:subscribe` and knowing the id was enough — and
+    // the opening snapshot handed over the channel's contents besides.
+    expect(alice.ids()).toEqual([]);
+    expect(alice.seen).toEqual([]);
+
+    await alice.close();
+    await bob.close();
+    await gateway.close();
+  });
+
+  it("is quiet on an EVICTED session and flows again when a send remounts it", async () => {
+    const { gateway, app } = await makeGateway(true, true, { maxActive: 1 });
+    await send(gateway, ALICE, "paged");
+    await app.createSession({ sessionId: "filler", principal: "alice" });
+    expect(app.getSession("paged")).toBeUndefined();
+
+    const alice = await watchStatus(gateway, ALICE, { kind: "session", id: "paged" });
+    // Observation does not remount, so there is nothing to hear yet.
+    expect(app.getSession("paged")).toBeUndefined();
+    expect(alice.ids()).toEqual([]);
+
+    await send(gateway, ALICE, "paged");
+
+    // The resume door puts it back on the SAME node — placement is a function
+    // of the principal, not of when the session was built.
+    await waitFor(() => alice.ids().includes("paged"), { description: "the remounted frames" });
+
+    await alice.close();
+    await gateway.close();
+  });
+
+  it("reads a session scope off the ROOT for an unauthenticated caller", async () => {
+    const { gateway, app } = await makeGateway(false);
+    const local = await app.createSession({ sessionId: "local-sess" });
+
+    const watcher = await watchStatus(gateway, {}, { kind: "session", id: "local-sess" });
+    await local.close();
+
+    await waitFor(() => watcher.ids().length > 1, { description: "the local frames" });
+    expect(new Set(watcher.ids())).toEqual(new Set(["local-sess"]));
+
+    await watcher.close();
     await gateway.close();
   });
 });

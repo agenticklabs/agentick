@@ -627,11 +627,29 @@ Membership is **lineage**: `app.sessionTreeContains(rootId, emitterId)` climbs t
 | `{ kind: "session-tree" }`      | that session **and its live subtree**             | the subscription |
 | `{ kind: "app" }` / `"gateway"` | the caller's slice of one app / of the deployment | the subscription |
 
-Authorization does not change: every scope kind passes the same `sub:subscribe` gate, and admitting a root admits its tree because principal descends the spawn tree. A tree subscription reaches nothing a session subscription on the same root could not.
+Authorization does not change: every scope kind passes the same `sub:subscribe` gate, and admitting a root admits its tree because principal descends the spawn tree. Since a `session` subscription became an attachment (below), a tree subscription is the one that reaches further — it is still named by an id rather than carved by topology.
 
-**The two unbounded scopes are bounded by the bus tree.** `{ kind: "gateway" }` is the scope a thread list opens — that is how a row for a session you hold no handle for goes busy — and it is not the whole deployment for an authenticated caller. Subscribing RESOLVES AN ATTACHMENT, once: `attachableNodesFor(identity)` names the scope nodes the caller may read, the subscription attaches to those buses, and a sibling principal's frames never transit them. There is no per-envelope identity check anywhere on the path, so an emitter that forgets to stamp its principal cannot leak across a boundary its bus does not reach.
+**Every scope but `session-tree` is bounded by the bus tree.** `{ kind: "gateway" }` is the scope a thread list opens — that is how a row for a session you hold no handle for goes busy — and it is not the whole deployment for an authenticated caller. Subscribing RESOLVES AN ATTACHMENT, once: `attachableNodesFor(identity)` names the scope nodes the caller may read, the subscription attaches to those buses, and a sibling principal's frames never transit them. There is no per-envelope identity check anywhere on the path, so an emitter that forgets to stamp its principal cannot leak across a boundary its bus does not reach.
+
+**`{ kind: "session" }` is that same attachment narrowed to one id**, which is why it resolves no session at all. A live id, an id the reaper paged out, and an id nothing has ever created are one shape: admitted, and quiet until frames for it appear on a bus you are already attached to. That is what makes the draft flow race-free — mint an id, subscribe, then send — with the pipe open before the session's first tick. It also means naming another principal's session id gets you silence rather than their traffic; sharing a session across principals is an `attachableNodes` grant, not a filter, and is not built yet.
 
 Fan-in runs upward, so a fact published at the ROOT — `gateway:capabilities:changed` — would never reach a node attachment on its own. A subscription is therefore an attachment **set**: the caller's nodes with the full query, plus the root restricted to a host-owned control-plane allowlist. That is topic selection, never a look at whose frame arrived. An unauthenticated caller resolves to `[]`, which IS the root, and reads it with the full query — the local pole sees everything, as an in-process deployment must.
+
+### Configuring the tree
+
+**The gateway is where topology is configured** — one function, keyed by whoever is calling, or nothing at all. The defaults already give a multi-tenant deployment per-principal isolation, so most adopters write neither:
+
+```ts
+const gateway = await createGateway({
+  sessionNode: (auth) => [`tenant:${auth.tenantId}`, `user:${auth.principal}`],
+  attachableNodes: (auth) => [
+    [`tenant:${auth.tenantId}`, `user:${auth.principal}`],
+    [`tenant:${auth.tenantId}`, `room:${auth.roomId}`],
+  ],
+});
+```
+
+`sessionNode` places a caller's sessions; `attachableNodes` says which nodes they may read, and widening it is how an operator view or a shared room is granted — one decision, made once, at attachment. The gateway hands every app it hosts the same resolver and the same tree, so a session cannot land somewhere a subscriber of that principal does not attach. `createApp`'s own `sessionNode` is the mechanism the gateway configures through; reach for it directly only when there is no gateway — an embedded host building an app on its own.
 
 ## Observing the whole deployment
 
@@ -788,20 +806,20 @@ Each is overridable — `allowedOrigins`, `allowedHosts`, `trustProxy`, `csrf`, 
 
 ### `createGateway(options)`
 
-| Option                  | Type                                  | Purpose                                                                        |
-| ----------------------- | ------------------------------------- | ------------------------------------------------------------------------------ |
-| `gatewayId`             | `string`                              | Stable id; defaults to a generated one.                                        |
-| `journal` `bus` `inbox` | instance or factory                   | Substrate the hosted apps inherit.                                             |
-| `cluster`               | `ClusterFactory`                      | Wraps the substrate; every app inherits the wrap.                              |
-| `transports`            | `ServerTransport[]`                   | Owned by `listen()` / `close()`.                                               |
-| `authorizer`            | `Authorizer`                          | The authorization policy.                                                      |
-| `tools`                 | `ToolDeclaration[]`                   | Baseline tools for every session of every app.                                 |
-| `wireExtensions`        | `WireExtension[]`                     | Adopter JSON-RPC namespaces.                                                   |
-| `extensions`            | gateway/app/session ext or bundle     | Installs and cascades by scope.                                                |
-| `truncateToolResults`   | `boolean \| { maxBytes?, truncate? }` | Bound client-facing tool output. Off by default.                               |
-| `sessionNode`           | `(auth) => readonly string[]`         | The caller's scope-node path. Defaults to `[principal]`, `[]` unauthenticated. |
-| `attachableNodes`       | `(auth) => readonly string[][]`       | Which nodes the caller may subscribe to. Defaults to their `sessionNode`.      |
-| `telemetry`             | `TelemetrySetting`                    | Gateway spans, and the default for every hosted app.                           |
+| Option                  | Type                                  | Purpose                                                                             |
+| ----------------------- | ------------------------------------- | ----------------------------------------------------------------------------------- |
+| `gatewayId`             | `string`                              | Stable id; defaults to a generated one.                                             |
+| `journal` `bus` `inbox` | instance or factory                   | Substrate the hosted apps inherit.                                                  |
+| `cluster`               | `ClusterFactory`                      | Wraps the substrate; every app inherits the wrap.                                   |
+| `transports`            | `ServerTransport[]`                   | Owned by `listen()` / `close()`.                                                    |
+| `authorizer`            | `Authorizer`                          | The authorization policy.                                                           |
+| `tools`                 | `ToolDeclaration[]`                   | Baseline tools for every session of every app.                                      |
+| `wireExtensions`        | `WireExtension[]`                     | Adopter JSON-RPC namespaces.                                                        |
+| `extensions`            | gateway/app/session ext or bundle     | Installs and cascades by scope.                                                     |
+| `truncateToolResults`   | `boolean \| { maxBytes?, truncate? }` | Bound client-facing tool output. Off by default.                                    |
+| `sessionNode`           | `(auth) => readonly string[]`         | Where this caller's sessions live. Defaults to `[principal]`, `[]` unauthenticated. |
+| `attachableNodes`       | `(auth) => readonly string[][]`       | Which nodes the caller may subscribe to. Defaults to their `sessionNode`.           |
+| `telemetry`             | `TelemetrySetting`                    | Gateway spans, and the default for every hosted app.                                |
 
 ### `GatewayHarness`
 
@@ -875,16 +893,17 @@ This is the multi-app pattern to reach for. Apps that pass `cluster` independent
 - **`telemetryNamespace` does not cascade.** Each app whitelabels its own attribute prefix; set it per app if you need a non-default one.
 - **No cluster substrate of its own.** `GatewayHarness` accepts any `EventBus`, so a Redis- or Kafka-backed deployment is a substrate swap rather than a gateway rewrite — but this package ships no such bus.
 - **`fanIn` cannot tell two apps' identically-named sessions apart.** The lineage walk keys on a session id, which is unique within an app but not across apps on one gateway. The arrival filter checks `scope.appId` for exactly this, but no `appId` reaches a `tool:signal:progress` envelope today — the app stamps `{ sessionId }` on the per-session scope and nothing gap-fills the rest. Reaching the hole needs two apps, deliberate reuse of one explicit session id (spawn generates ULIDs), and concurrent `fanIn` turns; closing it belongs at the emitter, since every scope-filtered bus subscriber has the same blind spot.
-- **`session` and `session-tree` still read the root ring.** Both resolve to a query over the owning app's bus rather than to an attachment, and they keep working only because fan-in carries a node's frames up to that bus. Migrating them (own-node attachment plus a `sessionId` topic query, per the ADR's stage-3 amendment) retires the last query-filter emulation.
-- **An app on its own bus is left topology-free.** The gateway derives a hosted app's `sessionNode` from its own resolver and shares its registry — but only when the app also shares its bus, since the tree is rooted there and relocating an own-bus app's sessions into it would make `app.events()` blind to them. The mirror-image cost is that a gateway-scope subscriber attached to a principal node does not see such an app's sessions. Closing it needs a tree per bus root, which no consumer has asked for. `TODO(scope-nodes-app-bus)`.
+- **A session is visible to its own principal and no one else.** `{ kind: "session" }` attaches to the caller's own nodes, so a session belonging to another principal is silent even when the caller holds its id and total grants. Handing one principal a view of another's session is a `node`-scope grant through `attachableNodes` (ADR 102 ship order 4) and is not built; there is deliberately no filter-shaped substitute.
+- **`session-tree` still reads the root ring, and is still reached by naming an id.** Subtree membership changes on every spawn, so it cannot be a bus-side query — it stays a root read narrowed on arrival by `sessionTreeContains`, which also means it is live-only (an unknown root answers `SessionNotFound`) and, unlike `session`, not carved by principal.
+- **An app on its own bus is left topology-free.** The gateway derives a hosted app's `sessionNode` from its own resolver and shares its registry — but only when the app also shares its bus, since the tree is rooted there and relocating an own-bus app's sessions into it would make `app.events()` blind to them. The mirror-image cost is that a subscriber does not see such an app's sessions: a node attachment has no edge to them, and a root-owning caller reads the GATEWAY's ring, which an own-bus app does not fan into. Closing it needs a tree per bus root, which no consumer has asked for. `TODO(scope-nodes-app-bus)`.
 - **The control-plane allowlist is host-owned and has one entry.** A node attachment additionally reads the root for `gateway:capabilities:changed` and nothing else; an extension cannot register a surface of its own onto it. Per ADR 102's resolved questions that waits for a third consumer.
 - **There is no scope kind for a LATERAL node.** `attachableNodes` can widen a caller's set to a tenant or room path, and the attachment machinery honors it — but the wire has no way to ASK for one: the four scope kinds name a gateway, an app, or a session. The ADR reserves a `node` scope carrying the path; until it ships, an operator or room view is reachable only by an adopter widening the default set, which applies to every subscription that caller opens. `TODO(gateway-scope-subscription)` marks the spot.
 
 ## Verified by
 
 - `src/__tests__/scope-node-seams.spec.ts` — the node-resolution defaults (`[principal]`, `[]` for an unauthenticated caller, attachable set defaulting to the caller's own node), both configured seams overriding them independently, and the single-source rule: a gateway-mounted app's sessions landing on the node the gateway names, an app-level `sessionNode` still winning, and an app on its own bus left topology-free.
-- `src/__tests__/subscription-teardown.spec.ts` — cleanup releasing the bus subscriber without another event arriving, repeated subscribe/cleanup cycles not accumulating, and an ATTACHMENT SET releasing every one of its iterators plus the node lease.
-- `@agentick/transport-in-process`'s `src/__tests__/subscription-principal-isolation.spec.ts` — the isolation guarantee as topology: two principals with identical total grants on disjoint node buses, neither seeing the other's status frames, channel publishes, or model deltas at `gateway` or `app` scope; a principal-less session on the root staying invisible to a node attachment; both principals still receiving the control plane, on one merged stream with their own node's frames; the unauthenticated pole seeing everything; and `session` scope still reading live frames off a node-resident session through fan-in.
+- `src/__tests__/subscription-teardown.spec.ts` — cleanup releasing the bus subscriber without another event arriving, repeated subscribe/cleanup cycles not accumulating, an ATTACHMENT SET releasing every one of its iterators plus the node lease, and a `session` scope taking and releasing that same node lease for an id no session has ever had.
+- `@agentick/transport-in-process`'s `src/__tests__/subscription-principal-isolation.spec.ts` — the isolation guarantee as topology: two principals with identical total grants on disjoint node buses, neither seeing the other's status frames, channel publishes, or model deltas at `gateway` or `app` scope; a principal-less session on the root staying invisible to a node attachment; both principals still receiving the control plane, on one merged stream with their own node's frames; the unauthenticated pole seeing everything; and — stage 3 — a `session` subscription carrying a client-minted id from silence through the send that creates it, staying silent on another principal's existing session that its owner hears, going quiet across an eviction and flowing again when a send remounts it, and still reading the root for an unauthenticated caller.
 - `src/__tests__/harness.spec.ts` — construction and default substrate, the `listen`/`close`/`create-app`/`accept` operations and their hooks, `createApp` before `listen()` throwing `GatewayNotStartedError` (and the pre-gate firing before the operation), duplicate `appId` rejection, the `gateway:app:created` emit, close cascading into apps, and rejection after close.
 - `src/__tests__/server-transports.spec.ts` — `listen()` fanning out with the gateway as host, `close()` closing every owned transport, idempotent `listen()` not re-firing, the zero-transport no-op, and best-effort teardown when a transport's `close()` rejects.
 - `src/__tests__/wire-registry.spec.ts` + `wire-framework-extensions.spec.ts` — register, resolve, enumerate in insertion order, duplicate namespace and name rejection, sealing, and adopter attempts on all four framework namespaces failing.

@@ -61,6 +61,11 @@ function stubGateway(session: SessionHarnessProtocol): GatewayHarnessProtocol {
     apps: () => [app],
     app: () => app,
     events: () => emptyLive(),
+    // No identity on this ctx, so the caller owns the root: it reads
+    // `gateway.events` directly and every session is inside its attachment.
+    // The snapshot splice is what is under test.
+    attachableNodesFor: () => [[]],
+    sessionNodeFor: () => [],
   } as unknown as GatewayHarnessProtocol;
 }
 

@@ -32,21 +32,37 @@
  * label. Scope-target resolution — the same-principal rule and the session's
  * scope ceiling — keys on `params.sessionId`, which these params do not carry
  * (the target rides `params.scope.id`), so it does not run for ANY subscription
- * scope. `session-tree` therefore adds no reachability a `session` subscription
- * did not already have, and it is the right shape when it does run: principal
- * descends the spawn tree (ADR 48), so admitting a root admits its tree. That
- * gap is already named — `TODO(trail-session-resolution-seam)` in
+ * scope. It is the right shape when it does run: principal descends the spawn
+ * tree (ADR 48), so admitting a root admits its tree. That gap is what leaves
+ * `session-tree` reaching further than a `session` subscription on the same
+ * root — the latter is now carved by topology and the former still is not. It is
+ * already named — `TODO(trail-session-resolution-seam)` in
  * `@agentick/transport`'s `authorizeDispatch`, which is where subscribe scopes
  * must route to be seen.
  *
- * The two UNBOUNDED scopes (`gateway`, `app`) are nonetheless bounded, and
- * TOPOLOGICALLY (ADR 102): they resolve to an ATTACHMENT SET — the caller's own
- * scope nodes carrying the full query, plus a root attachment restricted to
- * {@link CONTROL_PLANE_NAMES}. A frame from outside that subtree never transits
- * the buses the caller is attached to, so there is nothing to filter and no
- * emitter's stamping discipline to depend on. The arrival filter this replaces
- * (`onlyOwnedBy`, #299) closed the same leak by inspecting every envelope, and
- * failed closed on any emitter that forgot to stamp (#304).
+ * Three of the four scopes resolve the same way, and TOPOLOGICALLY (ADR 102):
+ * to an ATTACHMENT SET over the caller's own scope nodes. A frame from outside
+ * that subtree never transits the buses the caller is attached to, so there is
+ * nothing to filter and no emitter's stamping discipline to depend on. The
+ * arrival filter this replaces (`onlyOwnedBy`, #299) closed the same leak by
+ * inspecting every envelope, and failed closed on any emitter that forgot to
+ * stamp (#304).
+ *
+ * The two UNBOUNDED scopes (`gateway`, `app`) carry the full query on those
+ * nodes plus a second attachment at the root restricted to
+ * {@link CONTROL_PLANE_NAMES} — fan-in goes up, so a root-level fact reaches a
+ * leaf no other way.
+ *
+ * `session` is the same attachment narrowed to one sessionId by TOPIC, and it
+ * resolves NOTHING: live, evicted, and never-created ids are one shape, which is
+ * what lets a client mint an id, subscribe, and only then send
+ * (`session-doors.md` §4). Cross-principal visibility is what that costs —
+ * another principal's session never transits your subtree — and sharing one back
+ * is an `attachableNodes` grant (ADR 102 ship order 4), never a filter.
+ *
+ * `session-tree` is the exception. Subtree membership is a fact only a MOUNTED
+ * tree holds, so it stays a root-ring read narrowed on arrival, and it is the
+ * one scope that still answers `SessionNotFound`.
  *
  * @see docs/proposals/v2/blueprint/46-wire-extensions.md
  * @see docs/proposals/v2/blueprint/102-subscription-bus-topology.md
@@ -202,37 +218,28 @@ async function* mergeIterators(
 }
 
 /**
- * Resolve the scope to its attachment set. `null` means the scope's target (app
- * or session) wasn't found.
- *
- * `gateway` / `app` attach to the caller's own nodes; an unauthenticated caller
- * resolves to `[]`, which IS the root, so the local/no-auth pole keeps seeing
- * everything (ADR 102 §Resolved questions). The two session scopes stay a query
- * over the owning app's bus — root-ring reads still see a node's frames through
- * fan-in, and migrating them is stage 3.
+ * Resolve the scope to its attachment set. `null` means the scope's target
+ * wasn't found — which only `app` and `session-tree` can be, because they are
+ * the only kinds that still name something that has to exist.
  */
 function openScopeEvents(
   gateway: GatewayHarnessProtocol,
   params: SubscribeParams,
-  identity: IngressIdentity | undefined,
+  paths: readonly (readonly string[])[],
 ): OpenedScope | null {
   const scope = params.scope;
   if (scope.kind === "gateway") {
-    return opened(attachToOwnNodes(gateway, identity, params.query, gateway));
+    return opened(attachUnbounded(gateway, paths, params.query, gateway));
   }
   if (scope.kind === "app") {
     const app = gateway.app(scope.id);
     if (!app) return null;
-    return opened(attachToOwnNodes(gateway, identity, params.query, app));
+    return opened(attachUnbounded(gateway, paths, params.query, app));
   }
   if (scope.kind === "session") {
-    const app = ownerApp(gateway, scope.id);
-    if (!app) return null;
-    const query = {
-      ...(params.query ?? {}),
-      scope: { ...(params.query?.scope ?? {}), sessionId: scope.id },
-    };
-    return opened([{ events: app.events(query) as AsyncIterable<EventEnvelope> }]);
+    return opened(
+      attachToOwnNodes(gateway, paths, narrowToSession(params.query, scope.id), gateway),
+    );
   }
   if (scope.kind === "session-tree") {
     const app = ownerApp(gateway, scope.id);
@@ -262,27 +269,24 @@ interface ScopeRoot {
   events(query?: EventQuery): AsyncIterable<unknown>;
 }
 
+/** A caller whose every attachable path is `[]` reads the scope's root ring itself. */
+function ownsRoot(paths: readonly (readonly string[])[]): boolean {
+  return paths.every((path) => path.length === 0);
+}
+
 /**
- * The caller's nodes with the full query, plus `root` restricted to the control
- * plane. A caller whose only node IS the root gets one attachment with the full
- * query — the control-plane entry would be a strictly narrower duplicate.
- *
- * The control-plane attachment carries the caller's own query too, minus its
- * name: a subscriber that asked for model deltas did not ask to be told the
- * capability set moved, and the attachment set must not widen what was
- * requested.
+ * The caller's own nodes, read through `query`. An unauthenticated caller
+ * resolves to `[]`, which IS the root, so the local/no-auth pole keeps seeing
+ * everything (ADR 102 §Resolved questions).
  */
 function attachToOwnNodes(
   gateway: GatewayHarnessProtocol,
-  identity: IngressIdentity | undefined,
+  paths: readonly (readonly string[])[],
   query: EventQuery | undefined,
   root: ScopeRoot,
 ): readonly Attachment[] {
-  const paths = gateway.attachableNodesFor(identity);
-  if (paths.every((path) => path.length === 0)) {
-    return [{ events: root.events(query) as AsyncIterable<EventEnvelope> }];
-  }
-  const attachments: Attachment[] = paths.map((path) => {
+  if (ownsRoot(paths)) return [{ events: root.events(query) as AsyncIterable<EventEnvelope> }];
+  return paths.map((path) => {
     const lease = gateway.attachScopeNode(path);
     return {
       events: {
@@ -291,13 +295,66 @@ function attachToOwnNodes(
       release: () => lease.release(),
     };
   });
-  for (const name of CONTROL_PLANE_NAMES) {
-    if (query?.name !== undefined && !nameMatches(name, query.name)) continue;
-    attachments.push({
-      events: root.events({ ...query, name: { exact: name } }) as AsyncIterable<EventEnvelope>,
-    });
-  }
-  return attachments;
+}
+
+/**
+ * `root` restricted to the control plane. A caller whose only node IS the root
+ * hears these already through its full-query attachment, so the entry would be a
+ * strictly narrower duplicate.
+ *
+ * The attachment carries the caller's own query too, minus its name: a
+ * subscriber that asked for model deltas did not ask to be told the capability
+ * set moved, and the attachment set must not widen what was requested.
+ */
+function attachToControlPlane(
+  paths: readonly (readonly string[])[],
+  query: EventQuery | undefined,
+  root: ScopeRoot,
+): readonly Attachment[] {
+  if (ownsRoot(paths)) return [];
+  return CONTROL_PLANE_NAMES.filter(
+    (name) => query?.name === undefined || nameMatches(name, query.name),
+  ).map((name) => ({
+    events: root.events({ ...query, name: { exact: name } }) as AsyncIterable<EventEnvelope>,
+  }));
+}
+
+/** An unbounded scope (`gateway` / `app`): own nodes, plus the control plane. */
+function attachUnbounded(
+  gateway: GatewayHarnessProtocol,
+  paths: readonly (readonly string[])[],
+  query: EventQuery | undefined,
+  root: ScopeRoot,
+): readonly Attachment[] {
+  return [
+    ...attachToOwnNodes(gateway, paths, query, root),
+    ...attachToControlPlane(paths, query, root),
+  ];
+}
+
+/**
+ * The caller's query, narrowed to one session id. Topic selection inside a
+ * subtree the caller already owns — choosing WHAT they hear, never inspecting
+ * WHOSE frame arrived.
+ */
+function narrowToSession(query: EventQuery | undefined, sessionId: string): EventQuery {
+  return { ...(query ?? {}), scope: { ...(query?.scope ?? {}), sessionId } };
+}
+
+/**
+ * Whether a session owned by `principal` sits inside a node this caller may
+ * attach to. The live stream gets this from the bus tree and needs no such
+ * question asked; a channel SNAPSHOT is a read of session state rather than a
+ * delivery, so it asks the paths directly — once, at subscribe, which is where
+ * ADR 102 puts every authorization decision.
+ */
+function withinAttachment(
+  gateway: GatewayHarnessProtocol,
+  paths: readonly (readonly string[])[],
+  principal: string | undefined,
+): boolean {
+  const node = gateway.sessionNodeFor(principal === undefined ? {} : { principal });
+  return paths.some((path) => path.every((segment, depth) => node[depth] === segment));
 }
 
 /** Fully-qualified prefix every channel event's `name` carries. */
@@ -307,8 +364,10 @@ const CHANNEL_NAME_PREFIX = "session:channel:";
  * When a subscription targets exactly ONE session channel, render that
  * channel's current snapshot(s) as the opening frame(s). Empty unless: the
  * scope is a session or a session tree, the query is a single-channel
- * `{ exact }` name under `session:channel:`, the target session resolves, AND
- * a provider owns that channel.
+ * `{ exact }` name under `session:channel:`, the target session is LIVE and
+ * inside a node the caller may attach to, AND a provider owns that channel. An
+ * evicted or speculative id has no snapshot to open on and simply gets none —
+ * the subscription is still admitted.
  *
  * A `session` scope yields at most ONE frame. A `session-tree` scope yields one
  * per LIVE MEMBER that has the channel, in {@link AppHarnessProtocol.sessionTree}
@@ -325,6 +384,7 @@ const CHANNEL_NAME_PREFIX = "session:channel:";
 async function resolveChannelSnapshots(
   gateway: GatewayHarnessProtocol,
   params: SubscribeParams,
+  paths: readonly (readonly string[])[],
 ): Promise<readonly EventEnvelope[]> {
   const scope = params.scope;
   if (scope.kind !== "session" && scope.kind !== "session-tree") return [];
@@ -334,6 +394,14 @@ async function resolveChannelSnapshots(
   const channel = name.exact.slice(CHANNEL_NAME_PREFIX.length);
   const app = ownerApp(gateway, scope.id);
   if (!app) return [];
+  // `session-tree` is still reached by naming its root id (ADR 102 ship order
+  // 4), live stream included, so only the carved scope asks.
+  if (
+    scope.kind === "session" &&
+    !withinAttachment(gateway, paths, app.getSession(scope.id)?.principal)
+  ) {
+    return [];
+  }
   const members = scope.kind === "session" ? [scope.id] : app.sessionTree(scope.id);
   const snapshots: EventEnvelope[] = [];
   for (const id of members) {
@@ -390,7 +458,10 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // tiny overlap (a delta counted in both the snapshot version and the
       // live tail) is absorbed by the client's idempotent, version-gated
       // reducer.
-      const opened = openScopeEvents(ctx.gateway, params, identityOf(ctx));
+      // ONE node resolution per subscribe: the attachment set and the opening
+      // snapshot both answer to it.
+      const paths = ctx.gateway.attachableNodesFor(identityOf(ctx));
+      const opened = openScopeEvents(ctx.gateway, params, paths);
       if (!opened) {
         // Name the thing that is missing. Not cosmetic: a client deciding
         // whether to re-ask needs to tell "this scope is not here (yet)" from
@@ -399,10 +470,9 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
         // everything the adopter has not rebuilt yet. Naming a session scope
         // as an app whose id stringified to `[object Object]` told a caller
         // neither.
-        if (params.scope.kind === "session" || params.scope.kind === "session-tree") {
+        if (params.scope.kind === "session-tree") {
           // A tree is named by its ROOT, so an unknown root is an unknown
-          // session — the same answer, and the id in it is the one the caller
-          // asked about.
+          // session, and the id in the error is the one the caller asked about.
           throw new SessionNotFoundError({ sessionId: params.scope.id });
         }
         throw new AppNotFoundError({
@@ -415,7 +485,7 @@ export const subscriptionsWireExtension: WireExtension = defineWireExtension({
       // the channel's current snapshots — one for a session scope, one per live
       // tree member (root first) for a session-tree scope; live deltas follow on
       // the same stream.
-      const snapEnvelopes = await resolveChannelSnapshots(ctx.gateway, params);
+      const snapEnvelopes = await resolveChannelSnapshots(ctx.gateway, params, paths);
       const iterable =
         snapEnvelopes.length > 0 ? withSnapshots(snapEnvelopes, opened.iterable) : opened.iterable;
 

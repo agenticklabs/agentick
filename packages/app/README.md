@@ -107,6 +107,8 @@ Omit the store and a store-backed slot still gets one: the namespace builds an *
 
 ### `sessionNode` — where a session's events land
 
+**Topology is configured at the gateway**, which keys it by principal and hands every app it hosts the same tree — see [`@agentick/gateway`](../gateway/README.md#subscriptions). Reach for this option when there is no gateway to configure: an embedded host that builds an app directly and still wants its sessions carved.
+
 By default every session in an app publishes on the app's own bus, and anyone reading that bus reads all of them. `sessionNode` names a **scope-node path** instead: sessions of one principal, tenant, or room get their own bus, which fans in to its parent and on to the app's.
 
 ```tsx
@@ -116,7 +118,7 @@ const app = await createApp(<Agent />, {
 });
 ```
 
-The isolation is then structural rather than inspected: a reader attached to `tenant:acme` sees every session under it and nothing from `tenant:other`, because there is no edge to carry a frame across. Nodes are built on first use and closed when their last session leaves; returning `[]` means the root, which is the app's bus — the unauthenticated pole, unchanged. An explicit `createSession({ bus })` owns its own wiring and the resolver stands aside.
+The isolation is then structural rather than inspected: a reader attached to `tenant:acme` sees every session under it and nothing from `tenant:other`, because there is no edge to carry a frame across. Nodes are built on first use and closed when their last session leaves; returning `[]` means the root, which is the app's bus — the unauthenticated pole, unchanged. An explicit `createSession({ bus })` owns its own wiring and the resolver stands aside. A gateway-hosted app that names its own resolver keeps it, and leaves the gateway's tree.
 
 ### `extensions` — the fully-dynamic escape hatch
 
@@ -620,7 +622,6 @@ await app.closeApp(); // closes the cluster too
 | `cluster`                   | `ClusterFactory`                                       | Substrate fusion across nodes                                                             |
 | `bus` / `inbox` / `journal` | instance \| factory                                    | Substrate overrides                                                                       |
 | `sessionNode`               | `(ctx) => readonly string[]`                           | Where a session's events land in the scope-node tree. Omitted: sessions share the app bus |
-| `scopeNodes`                | `ScopeNodeRegistry`                                    | The tree `sessionNode` resolves against; omitted, the app owns a private one              |
 | `telemetry`                 | `boolean` \| `TelemetrySetting`                        | The one observability switch; off by default                                              |
 | `telemetryNamespace`        | `string`                                               | Prefix on framework attribute keys; defaults to `"agentick"`                              |
 | `name`                      | `string`                                               | Logical app name — the telemetry identity dimension and default `functionId`              |

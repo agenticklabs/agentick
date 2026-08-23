@@ -175,19 +175,22 @@ describe("the status channel narrates the page-out", () => {
 });
 
 describe("observation does NOT remount", () => {
-  it("refuses a subscription to a paged-out session and leaves it paged out", async () => {
+  it("admits a subscription to a paged-out session and leaves it paged out", async () => {
     const { app, gateway, cleanup } = await makeStack();
     await pageOut(app, "alpha", "beta");
 
     const transport = inProcessTransport({ gateway });
     await transport.connect();
 
+    // ADR 102 stage 3: the subscription is a filter on the caller's own
+    // subtree, so it resolves no session and cannot remount one. Quiet until a
+    // send puts the conversation back on the bus.
     await expect(
       transport.request("sub/subscribe", {
         subscriptionId: "sub-1",
         scope: { kind: "session", id: "alpha" },
       }),
-    ).rejects.toThrow(/session alpha not found/);
+    ).resolves.toEqual({ subscriptionId: "sub-1" });
     expect(app.getSession("alpha")).toBeUndefined();
 
     await transport.close();

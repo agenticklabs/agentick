@@ -313,8 +313,10 @@ describe("(B) a backend that restarted under a connected client", () => {
     });
     await client.whenReady();
 
-    // The transport has now resubscribed — against an empty registry — and
-    // failed. Give it a beat to have done so before the session exists.
+    // The transport has now resubscribed — against an empty registry. Since
+    // ADR 102 stage 3 that subscription is ADMITTED and quiet rather than
+    // refused, so the stream is already open across the gap. Give it a beat to
+    // have been re-established before the session exists.
     await new Promise((r) => setTimeout(r, 100));
 
     // NOW the adopter re-establishes the session, exactly as a create-or-resume
@@ -327,9 +329,18 @@ describe("(B) a backend that restarted under a connected client", () => {
     // The subscription must heal. A scope that is missing for a few hundred
     // milliseconds after a peer restart is a race with the client's own
     // re-establishment, not a verdict — killing the stream for it is how a UI
-    // reconnects to a live wire and never updates again.
+    // reconnects to a live wire and never updates again. Since the stream was
+    // open across the whole mount it carries the channel being BUILT — its
+    // opening snapshot, then the delta that sets the knob — where a
+    // subscription established afterwards would open on a snapshot already
+    // holding it.
+    const reopened = await nextFrame(stream, 5_000);
+    expect(reopened.envelope.payload).toMatchObject({ kind: "snapshot", values: {} });
     const healed = await nextFrame(stream, 5_000);
-    expect(healed.envelope.payload).toMatchObject({ values: { temperature: 0.2 } });
+    expect(healed.envelope.payload).toMatchObject({
+      kind: "delta",
+      ops: [{ op: "add", path: "/temperature", value: 0.2 }],
+    });
   });
 
   it("a resubscribe the fresh gateway REFUSES ends that stream, and only that stream", async () => {

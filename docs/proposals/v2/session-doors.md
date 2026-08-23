@@ -57,7 +57,7 @@ defeating this semantics is the client's ensure-create hack.
 | ------------------ | -------------------------------------------------- | ---------------------------------- |
 | `session/get`      | read the durable record                            | NONE — never mounts or creates     |
 | `timeline/history` | read a page of the log                             | resume door if cold; never creates |
-| `sub/subscribe`    | observe session events                             | NONE — admitted by record (§4)     |
+| `sub/subscribe`    | observe session events                             | NONE — resolves no session (§4)    |
 | `session/send`     | deliver input; **the one existence-creating verb** | live / resume door / create door   |
 
 There is **no client-callable `resume`**. A verb whose meaning is
@@ -106,45 +106,41 @@ deleting the path that bypasses them.
 
 ### 4. Subscriptions accept non-live AND nonexistent sessions
 
-`sub/subscribe` currently 404s on anything not in the registry. Admission is
-re-founded on the bus hierarchy — **authorize the attachment once (to the
-scope); addresses within your scope may be speculative**:
+**DELIVERED — ADR 102 stage 3.** `sub/subscribe` used to 404 on anything not in
+the registry, and the first draft of this section answered that with new
+admission machinery: authorize the attachment, then re-found the address rules
+on the bus hierarchy. None of it was needed. Under
+[ADR 102](./blueprint/102-subscription-bus-topology.md) a `session`
+subscription is an **own-node attachment narrowed to one sessionId by topic** —
+the identical resolution `gateway` and `app` scopes take, with one extra clause
+on the query. It resolves no session, so there is nothing to be missing:
 
-- **Own scope, any address** — including evicted sessions and ids that do
-  not exist yet (client-minted drafts): admitted. This is REQUIRED by the
-  draft flow, not a convenience: the race-free client ordering is mint →
-  subscribe (quiet) → send, with the pipe open before the create door emits
-  tick-one events. Safety is topological, not checked: a session's events
-  fan in through the bus of the principal it belongs to, so a speculative
-  subscription either becomes yours when YOU materialize the id, or hears
-  silence forever if someone else does. No admission re-check at
-  materialization, no per-event filters (the bus-hierarchy rule).
-- **Another principal's session** (shared visibility): the durable-record
-  gate (`findRecordPrincipal`), as before.
+- **Live, evicted, and never-created ids are one shape.** No registry lookup, no
+  app resolution, no 404. A draft subscription is a filter on a subtree the
+  caller already owns, and it costs a map entry on the wire connection.
+- **The draft flow is race-free by construction.** Mint → subscribe (quiet) →
+  send: the pipe is open before the create door emits tick-one events, and the
+  session materializes ON the node the subscription is attached to, because
+  placement is a function of the principal (`sessionNodeFor`) and nothing else.
+- **Speculation is safe topologically, not by a check.** An id someone ELSE
+  materializes lands under THEIR node; it never transits yours, so the
+  speculative subscription simply stays silent forever.
+- **Cross-principal visibility is gone, deliberately.** The arm this replaced was
+  id-as-capability — a root-ring read that any holder of `sub:subscribe` could
+  aim at any session id they knew, opening channel snapshot included. Handing one
+  principal a view of another's session is now a `node`-scope grant through
+  `attachableNodes` (ADR 102 ship order 4). There is no filter-shaped substitute,
+  and the `findRecordPrincipal` gate this section once proposed is not built.
 
-**The receipt mechanism exists** — and as of ADR 102 stage 2 it is the
-attachment itself (`gateway/src/wire/subscriptions-extension.ts`): a
-`gateway`/`app` subscription attaches to the caller's scope nodes, so a
-frame from outside that subtree never transits it. The `onlyOwnedBy`
-arrival filter this replaced is deleted, and with it the fail-closed
-dependency on emitter stamping (#304). Two gaps this slice closes:
+Two consequences worth naming. The channel-snapshot splice is a READ of session
+state rather than a bus delivery, so the bus tree cannot carve it; it asks the
+attachable paths the same reachability question once, at subscribe. And
+`session-tree` is unchanged: subtree membership changes on every spawn and so
+cannot be a bus-side query, which leaves it a root-ring read narrowed on arrival
+— live-only, and still the one scope that answers `SessionNotFound`.
 
-- The `session`/`session-tree` scope paths are still a query over the
-  owning app's bus ("bounded by an id the caller named" —
-  id-as-capability), which client-minted speculative ids invalidate. The
-  fix is the stage-3 amendment below: own-node attachment plus a
-  `sessionId` topic query, which hardens the path against id leakage
-  topologically rather than by a wrapper.
-- A nonexistent id names no app (`ownerApp` → null → 404 today).
-  Speculative subscription resolves the app by the SAME rule as
-  send-create-on-miss (§7): single-app default, explicit appId for
-  multi-app, loud typed ambiguity error.
-
-A subscription to a quiet or nonexistent session costs a map entry on the
-wire connection — nothing session-side, nothing durable — and dies with the
-connection or an explicit unsubscribe. Guard: a per-connection subscription
-quota (speculative addresses are free to hold, not free in unbounded
-number).
+Guard, unchanged from the original design: a per-connection subscription quota.
+Speculative addresses are free to hold, not free in unbounded number.
 
 ### 5. What dies
 
@@ -202,7 +198,11 @@ Authz: creation-by-send stamps the caller's principal exactly as
 1. Door routing: `session/send` live/resume/create resolution (+ `appId` +
    single-app default + typed ambiguity error + `created` on the ack);
    `timeline/history` resume-on-record; `session/get` typed miss.
-2. Subscription admission by record.
+2. Subscription admission — **DELIVERED by ADR 102 stage 3**, as topology
+   rather than admission: `session` scope became an own-node attachment plus a
+   `sessionId` topic query, so evicted and never-created ids are admitted and
+   quiet with no new machinery. Cross-principal session visibility left for
+   ADR 102 ship order 4.
 
 **knowify (after the framework publish):**
 
@@ -226,11 +226,14 @@ after, since this build decides which doors production uses.
 - `history` on evicted-with-record: resume door fires attributed to
   history; on nonexistent: 404, registry unchanged. Reads never create;
   sends never 404.
-- Subscribe on evicted: admitted, quiet, flows after a send mounts.
+- Subscribe on evicted: admitted, quiet, flows after a send mounts. **LANDED**
 - Draft-flow race pin (end-to-end): subscribe to a minted nonexistent id →
   silence → send → create door → events arrive on the PRE-EXISTING
-  subscription with no gap. Cross-principal pin: a speculative subscription
-  in scope A receives nothing when the id materializes under scope B.
+  subscription with no gap. Cross-principal pin: naming another principal's
+  existing session id receives nothing while its owner receives frames.
+  **LANDED** — `@agentick/transport-in-process`'s
+  `src/__tests__/subscription-principal-isolation.spec.ts`, all four
+  discriminated against stage-2 behavior.
 - Regression: a never-sent draft leaves NOTHING server-side (no record, no
   registry entry, no store scopes).
 
