@@ -26,6 +26,7 @@ import { createApp } from "../react.js";
 import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { KnobsHarness } from "@agentick/knobs";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
+import type { CommandHooks } from "@agentick/runtime";
 import type { ContentBlock, ToolDeclaration, ToolHandler } from "@agentick/spec";
 import { jsonSchema } from "@agentick/spec";
 
@@ -188,6 +189,128 @@ describe("ADR 82 — hook cascade wired end-to-end (tool:dispatch)", () => {
 
     expect(seen.value).toBe("verbatim");
     expect((result[0] as { text: string }).text).toBe("verbatim");
+
+    await app.closeApp();
+  });
+});
+
+/**
+ * A `hooks:` / `guards:` field accepts a LIST of bags — one layer per element,
+ * in list order. Contributor modules stop pre-merging with a spread, which
+ * dropped one of two same-key entries before the framework ever saw the loser.
+ */
+describe("declarative bags accept a LIST — collisions compose instead of clobbering", () => {
+  /** Suffixes the dispatched `value`, so ordering is legible in the result. */
+  const appendBefore = (suffix: string): CommandHooks => ({
+    onBeforeToolDispatch: (input) => ({
+      ...input,
+      input: {
+        ...(input.input as Record<string, unknown>),
+        value: `${(input.input as { value: string }).value}|${suffix}`,
+      },
+    }),
+  });
+
+  it("two app bags naming the SAME hook key both fire, in list order", async () => {
+    const seen: { value?: unknown } = {};
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      tools: [echoTool()],
+      toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
+      hooks: [appendBefore("audit"), appendBefore("redaction")],
+    });
+
+    const session = await app.createSession();
+    await session.tools.dispatch("echo", { value: "x" });
+
+    expect(seen.value).toBe("x|audit|redaction");
+
+    await app.closeApp();
+  });
+
+  it("two around-form hooks on the same key NEST — earlier element outer", async () => {
+    const order: string[] = [];
+    const around = (name: string): CommandHooks => ({
+      onToolDispatch: async (input, next) => {
+        order.push(`${name}:in`);
+        const out = await next(input);
+        order.push(`${name}:out`);
+        return out;
+      },
+    });
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      tools: [echoTool()],
+      toolHandlers: new Map([[ECHO_REF, makeEchoHandler({})]]),
+      hooks: [around("outer"), around("inner")],
+    });
+
+    const session = await app.createSession();
+    await session.tools.dispatch("echo", { value: "x" });
+
+    expect(order).toEqual(["outer:in", "inner:in", "inner:out", "outer:out"]);
+
+    await app.closeApp();
+  });
+
+  it("two guard bags on the same command both run, and EITHER can veto", async () => {
+    const consulted: string[] = [];
+    const seen: { value?: unknown } = {};
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      tools: [echoTool()],
+      toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
+      guards: [
+        {
+          toolDispatch: (input) => {
+            consulted.push("policy");
+            return (input.input as { value: string }).value === "banned-by-policy"
+              ? { kind: "veto" as const, reason: "policy" }
+              : undefined;
+          },
+        },
+        {
+          toolDispatch: (input) => {
+            consulted.push("quota");
+            return (input.input as { value: string }).value === "banned-by-quota"
+              ? { kind: "veto" as const, reason: "quota" }
+              : undefined;
+          },
+        },
+      ],
+    });
+
+    const session = await app.createSession();
+    await session.tools.dispatch("echo", { value: "fine" });
+    expect(consulted).toEqual(["policy", "quota"]);
+    expect(seen.value).toBe("fine");
+
+    await expect(session.tools.dispatch("echo", { value: "banned-by-quota" })).rejects.toThrow(
+      /veto/,
+    );
+    await expect(session.tools.dispatch("echo", { value: "banned-by-policy" })).rejects.toThrow(
+      /veto/,
+    );
+    expect(seen.value).toBe("fine");
+
+    await app.closeApp();
+  });
+
+  it("createSession({ hooks: [...] }) composes app-outer, exactly as one bag does", async () => {
+    const seen: { value?: unknown } = {};
+    const app = await createApp(React.createElement(Agent), {
+      modelExecutor: await mkExecutor(),
+      tools: [echoTool()],
+      toolHandlers: new Map([[ECHO_REF, makeEchoHandler(seen)]]),
+      hooks: appendBefore("app"),
+    });
+
+    const session = await app.createSession({
+      hooks: [appendBefore("s1"), appendBefore("s2")],
+    });
+    await session.tools.dispatch("echo", { value: "x" });
+
+    expect(seen.value).toBe("x|app|s1|s2");
 
     await app.closeApp();
   });

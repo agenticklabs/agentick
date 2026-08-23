@@ -31,6 +31,8 @@ import {
   forkBusSubscription,
   type HarnessShell,
   hooksToMiddlewares,
+  interceptorLayers,
+  type InterceptorLayers,
   LocalEventBus,
   LocalInbox,
   MemoryJournal,
@@ -171,11 +173,12 @@ declare module "@agentick/spec" {
   interface CreateSessionInput<P> {
     /**
      * Per-session command lifecycle hooks (ADR 82). Declarative
-     * {@link CommandHooks}; folded over the app's resolved layer at
-     * `createSession` and threaded into every per-session sub-harness. App
-     * hooks compose OUTER (both fire), never override.
+     * {@link CommandHooks}, or a LIST of them ({@link InterceptorLayers}) —
+     * each element is its own layer, in list order. Folded over the app's
+     * resolved layer at `createSession` and threaded into every per-session
+     * sub-harness. App hooks compose OUTER (both fire), never override.
      */
-    readonly hooks?: CommandHooks;
+    readonly hooks?: InterceptorLayers<CommandHooks>;
   }
 }
 
@@ -768,9 +771,14 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    * bare `on<Command>` key is the whole middleware.
    * `createApp({ hooks: { onBeforeToolDispatch: (i) => reshaped } })`.
    *
+   * A LIST of bags is equally accepted ({@link InterceptorLayers}): each
+   * element registers as its own layer in list order, so contributor modules
+   * pass `hooks: [audit, redaction]` instead of pre-merging bags with a spread
+   * that would silently drop one of two same-key entries.
+   *
    * @see docs/proposals/v2/blueprint/83-one-interceptor-primitive.md
    */
-  readonly hooks?: CommandHooks;
+  readonly hooks?: InterceptorLayers<CommandHooks>;
 
   /**
    * App-level GUARDS (ADR 93) — the sibling bag of {@link hooks}, keyed by the
@@ -784,8 +792,10 @@ export interface AppHarnessOptions<P = unknown> extends NamespaceSlots {
    * Registered on the app's own chain at construction and inherited by every
    * session and per-session sub-harness through the same ONE
    * `inheritedInterceptors` value that carries hooks and `.use` transforms.
+   * A LIST of bags is equally accepted ({@link InterceptorLayers}) — each
+   * element is its own layer, and a veto from ANY of them vetoes.
    */
-  readonly guards?: CommandGuards;
+  readonly guards?: InterceptorLayers<CommandGuards>;
 
   /**
    * LIVE interceptor parent (ADR 83 §4 / ADR 84 §3) — the GatewayHarness that
@@ -1212,12 +1222,12 @@ export class AppHarness<P = unknown>
     // `inheritedInterceptors: this.resolvedInterceptors()` snapshot (below)
     // picks them up. `createSessionBody` folds the app's resolved layer per
     // session. This is the app's cascade base (was `this.hookLayer`).
-    this.hook(options.hooks ?? {});
+    for (const bag of interceptorLayers(options.hooks)) this.hook(bag);
     // ADR 93 — the app's declarative GUARD bag, on the same own-chain as the
     // hooks above. Guard-kind, so `orderInterceptors` floats these ahead of
     // every transform (and ahead of any narrower guard, since the sort is stable
     // and the app layer seeds a child's inherited layer first).
-    if (options.guards !== undefined) this.guard(options.guards);
+    for (const bag of interceptorLayers(options.guards)) this.guard(bag);
     // Local aliases for convenience in the rest of the constructor.
     const journal = this.journal;
     const bus = this.bus;
@@ -2560,7 +2570,7 @@ export class AppHarness<P = unknown>
     // session teardown, which detaches it from this app's children set.
     const inheritedInterceptors = [
       ...this.resolvedInterceptors(),
-      ...hooksToMiddlewares(input.hooks ?? {}),
+      ...interceptorLayers(input.hooks).flatMap((bag) => hooksToMiddlewares(bag)),
     ];
     // TODO(adr-84): the ONLY remaining live-inheritance gap is the gateway→app
     // edge — the gateway does not link to apps at all yet (no `interceptorParent`

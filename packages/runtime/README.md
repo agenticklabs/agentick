@@ -444,7 +444,7 @@ app2.guards.ledgerCredit((input) => (input.amount < 0 ? { kind: "veto" } : undef
 off();
 ```
 
-Hooks **compose, they never override**: two registered layers both fire, outer bracketing inner.
+Hooks **compose, they never override**: two registered layers both fire, outer bracketing inner. Both fields also accept a LIST of bags (`hooks: [audit, redaction]`) — one layer per element, in list order — so N contributor modules compose without pre-merging into one bag, where a shared key would lose an entry to the spread. `BaseHarnessOptions` and every `defineX` definition carry the same widened fields.
 
 ### Where each tier wraps
 

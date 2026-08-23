@@ -154,6 +154,55 @@ describe("ADR 96 — options.guards (drop-layer)", () => {
   });
 });
 
+describe("ADR 96 — a LIST of bags is N layers, not a merge", () => {
+  it("two hook bags naming the SAME key both fire — earlier element outer", async () => {
+    const h = new StampHarness("l1", {
+      hooks: [
+        {
+          onBeforeStamp: (input) => ({ note: `${input.note}/first` }),
+          onAfterStamp: (out) => `${out}/first`,
+        },
+        {
+          onBeforeStamp: (input) => ({ note: `${input.note}/second` }),
+          onAfterStamp: (out) => `${out}/second`,
+        },
+      ],
+    });
+    await h.ready;
+    // Both bags survived (a spread-merge would have kept one), and they ride the
+    // ordinary fold: before in list order, after unwinding in reverse.
+    await expect(h.stamp({ note: "x" })).resolves.toBe("stamped:x/first/second/second/first");
+  });
+
+  it("two guard bags on the SAME command both run, and a veto from EITHER vetoes", async () => {
+    const consulted: string[] = [];
+    const h = new StampHarness("l2", {
+      guards: [
+        {
+          stamp: (input) => {
+            consulted.push("first");
+            return input.note === "a" ? { kind: "veto" } : undefined;
+          },
+        },
+        {
+          stamp: (input) => {
+            consulted.push("second");
+            return input.note === "b" ? { kind: "veto" } : undefined;
+          },
+        },
+      ],
+    });
+    await h.ready;
+
+    await expect(h.stamp({ note: "ok" })).resolves.toBe("stamped:ok");
+    expect(consulted).toEqual(["first", "second"]);
+
+    await expect(h.stamp({ note: "b" })).rejects.toThrow("operation outcome: vetoed");
+    await expect(h.stamp({ note: "a" })).rejects.toThrow("operation outcome: vetoed");
+    expect(h.bodyRuns).toBe(1);
+  });
+});
+
 describe("ADR 96 — harness.guards (the per-verb registrar)", () => {
   it("vetoes before the body runs, and unsubscribes", async () => {
     const h = new StampHarness("gp1");

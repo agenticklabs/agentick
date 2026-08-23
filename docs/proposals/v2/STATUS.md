@@ -2280,6 +2280,30 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-23 — declarative `hooks:` / `guards:` accept a LIST of bags
+
+Every declarative interceptor field now takes one bag OR a readonly list
+of bags (`InterceptorLayers<B>` in `@agentick/runtime`). Each element
+registers as its own layer in the existing ADR 83 fold, in list order —
+no merge logic anywhere. The motivation: an adopter with N contributor
+modules had to pre-merge with `{...a, ...b}`, which silently clobbered on
+key collision before the framework ever saw the loser, while the
+framework's own registrations (`installer.hook()`, `app.hook()`) have
+always composed. Lists make the collision impossible by construction.
+
+Three choke points, all widened at the option type + normalized with
+`interceptorLayers()` at the registration site:
+`HarnessInterceptors<S>` (covers `BaseHarnessOptions` and every
+`defineX` definition bag), `AppHarnessOptions.hooks/guards`, and
+`CreateSessionInput.hooks`. Cross-scope ordering (guards outermost,
+app-outer, `onAfter*` unwinding in reverse) is unchanged — a list only
+expands one scope's contribution into ordered sub-layers.
+
+Sparse elements are NOT accepted (`readonly B[]`, not
+`(B | false | undefined)[]`): the house convention is the strict
+`extensions` array, and conditional composition is
+`...(flag ? [bag] : [])`.
+
 ### 2026-08-22 — session doors: send creates, reads resume, get is pure; ADR 102 accepted
 
 The cold-reads proposal was redesigned as `session-doors.md` (renamed;

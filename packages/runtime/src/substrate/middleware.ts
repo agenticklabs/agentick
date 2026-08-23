@@ -297,6 +297,22 @@ export type NamespaceHooks<NS extends string> = NamespaceHooksOf<
 >;
 
 /**
+ * One declarative interceptor bag, or an ORDERED LIST of them — what every
+ * `hooks:` / `guards:` config field accepts. Each element registers as its own
+ * layer in list order, so N contributor modules each keep their own bag: two
+ * elements naming the same key BOTH fire (earlier = outer), where a pre-merge
+ * spread would have dropped one. Sparse elements are not accepted; compose
+ * conditionally with `...(flag ? [bag] : [])`, as `extensions` does.
+ */
+export type InterceptorLayers<B> = B | readonly B[];
+
+/** Normalize an {@link InterceptorLayers} field to the layers to register. */
+export function interceptorLayers<B>(config: InterceptorLayers<B> | undefined): readonly B[] {
+  if (config === undefined) return [];
+  return (Array.isArray(config) ? config : [config]) as readonly B[];
+}
+
+/**
  * The interceptor half of every harness's construction options (ADR 96) — the
  * two drop-layer bags, derived from the surface. {@link BaseHarnessOptions}
  * extends this, so a harness accepts and registers both by naming its surface;
@@ -307,8 +323,8 @@ export type NamespaceHooks<NS extends string> = NamespaceHooksOf<
  * generics ({@link NamespaceHooksOf}) it is built from.
  */
 export interface HarnessInterceptors<S extends string> {
-  readonly hooks?: NamespaceHooks<S>;
-  readonly guards?: NamespaceGuards<S>;
+  readonly hooks?: InterceptorLayers<NamespaceHooks<S>>;
+  readonly guards?: InterceptorLayers<NamespaceGuards<S>>;
 }
 
 /**

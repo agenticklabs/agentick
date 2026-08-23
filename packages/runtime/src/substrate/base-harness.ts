@@ -175,6 +175,7 @@ import {
   liftMiddleware,
   commandHookMiddleware,
   guardsToMiddlewares,
+  interceptorLayers,
   qualifyNamespaceGuards,
   qualifyNamespaceHooks,
   readChunkCarrier,
@@ -194,6 +195,7 @@ export {
   hooksToMiddlewares,
   guardsToMiddlewares,
   commandGuardMiddleware,
+  interceptorLayers,
   withCallMiddleware,
   annotateOperationSpan,
   spanAttributes,
@@ -211,6 +213,7 @@ export {
   type HarnessInterceptors,
   type HookRegistrars,
   type InterceptorCtx,
+  type InterceptorLayers,
   type NamespaceGuards,
   type NamespaceHooks,
 } from "./middleware.js";
@@ -1136,11 +1139,11 @@ export abstract class BaseHarness<Surface extends EventSurface = EventSurface, I
     // so an app guard vetoes before a definition guard is consulted). Placed
     // after the command runner for the same reason the carrier drain is: a
     // drop-layer `on<Verb>Chunk` key registers ON it.
-    if (options.hooks !== undefined) {
-      this.hook(qualifyNamespaceHooks(surface, options.hooks as Record<string, unknown>));
+    for (const bag of interceptorLayers(options.hooks)) {
+      this.hook(qualifyNamespaceHooks(surface, bag as Record<string, unknown>));
     }
-    if (options.guards !== undefined) {
-      this.guard(qualifyNamespaceGuards(surface, options.guards as Record<string, unknown>));
+    for (const bag of interceptorLayers(options.guards)) {
+      this.guard(qualifyNamespaceGuards(surface, bag as Record<string, unknown>));
     }
 
     if (options.autoRegisterInbox !== false) {

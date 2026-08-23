@@ -46,6 +46,7 @@ export {
   guardsToMiddlewares,
   commandGuardMiddleware,
   interceptorKind,
+  interceptorLayers,
   isOperationSignal,
   liftMiddleware,
   orderInterceptors,
@@ -95,6 +96,7 @@ export {
   // inline in the bag, where it is inferred) is impossible without it.
   type InterceptorCtx,
   type InterceptorKind,
+  type InterceptorLayers,
   type Middleware,
   type OperationSignal,
   type PendingRequestSnapshot,
