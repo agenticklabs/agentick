@@ -1,6 +1,6 @@
 {
   "name": "@agentick/model-anthropic",
-  "version": "1.0.0-next.144",
+  "version": "1.0.0-next.145",
   "description": "Anthropic LanguageModelAdapter for Agentick v2 (ADR 52). anthropic(model?, options?) — Messages API with native thinking blocks + cache_control. Zero Effect, zero substrate.",
   "keywords": [
     "agent",
