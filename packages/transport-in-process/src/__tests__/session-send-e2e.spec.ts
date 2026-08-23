@@ -189,14 +189,17 @@ describe("session/send — full client → gateway → executor roundtrip", () =
   it("a server-thrown AgentickError rehydrates typed on the client (G2-wire-errors)", async () => {
     const { client, cleanup } = await makeStack("unused");
 
-    // The gateway throws SessionNotFoundError for an unknown session; the
-    // server dispatch stamps its toJSON() into JSON-RPC error.data, and the
-    // client rehydrates it via spec's codec — SAME class, instanceof holds
-    // across the wire, fields intact.
+    // `session/dispatch` throws SessionNotFoundError for an unknown session —
+    // work asked of a session that does not exist, which (unlike `send`, the
+    // one existence-creating verb) is still an error. The server dispatch
+    // stamps its toJSON() into JSON-RPC error.data, and the client rehydrates
+    // it via spec's codec — SAME class, instanceof holds across the wire,
+    // fields intact.
     const caught = await client
-      .request("session/send", {
+      .request("session/dispatch", {
         sessionId: "no-such-session",
-        messages: [{ role: "user", content: "ping" }],
+        tool: "anything",
+        input: {},
       })
       .then(() => undefined)
       .catch((e: unknown) => e);

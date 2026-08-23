@@ -18,6 +18,7 @@ import {
   findSessionOrResume,
   findSessionOwner,
   progressEventQuery,
+  resolveSessionDoor,
   toClientToolRegistration,
   type AppHarnessProtocol,
   type ProtocolEvent,
@@ -28,6 +29,7 @@ import {
 import { omitUndefined, paginate } from "@agentick/utils";
 
 import { fanOutProgressSignals } from "./progress-fanout.js";
+import { toSessionEntry, visibleTo } from "./session-list.js";
 
 /**
  * Structural view of the session's tool executor seam. The gateway is
@@ -95,16 +97,26 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
   namespace: "session",
   version: "1.0.0",
   methods: {
-    // One of the two verbs that may REMOUNT a paged-out session (see
-    // `findSessionOrResume`): a client sending into a conversation the reaper
-    // paged out is asking for work on it, and answering 404 would make eviction
-    // visible as data loss.
+    // The ONE existence-creating verb (session-doors.md §3): a send names the
+    // conversation it is about, so it resolves through all three doors — live,
+    // resume (the reaper paged it out; a 404 would make eviction look like data
+    // loss), create (the client minted the id and this is the first message).
+    // Reads never create; sends never 404.
     //
     // TODO(resume-ctx-app): `ctx.app` is resolved by the dispatcher's LIVE walk,
     // so it is undefined for the send that did the remounting — `fanIn` loses
     // descendant progress frames for that one turn, then behaves normally.
     "session/send": async (params, ctx) => {
-      const sess = ctx.session ?? (await findSessionOrResume(ctx, params.sessionId));
+      // Creation stamps the caller's principal from the authenticated identity,
+      // exactly as `app/create_session` does — the params carry no `principal`
+      // slot, so ownership is never the caller's to claim.
+      const { session: sess, door } = ctx.session
+        ? { session: ctx.session, door: "live" as const }
+        : await resolveSessionDoor(
+            ctx,
+            params.sessionId,
+            omitUndefined({ appId: params.appId, principal: ctx.principal }),
+          );
       const progressToken = params._meta?.progressToken;
 
       const handle = await sess.send({
@@ -236,6 +248,7 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
           executionId: handle.executionId,
           finalCursor: { value: 0 },
           result,
+          door,
         };
       } finally {
         // Stop the signal drain regardless of success/failure so the
@@ -243,6 +256,19 @@ export const sessionWireExtension: WireExtension = defineWireExtension({
         stopSignalDrain?.();
         completeProgress?.();
       }
+    },
+    // The PURE read (session-doors.md §2) — the durable record and nothing
+    // else: no live walk, no resume, no create, so a client can render a thread
+    // header for a session the reaper collected without paying to rebuild it.
+    // `null`, not a throw: "no such record" is the answer a client renders a
+    // local draft on. An invisible record answers the same way a list hides one
+    // — a 403 here would confirm the id exists.
+    "session/get": async ({ sessionId }, ctx) => {
+      for (const app of ctx.gateway.apps()) {
+        const record = await app.getSessionRecord(sessionId);
+        if (record !== undefined && visibleTo(record, ctx.principal)) return toSessionEntry(record);
+      }
+      return null;
     },
     // Compile what a tick WOULD send, without sending it. The whole prompt is
     // in the response, which is why it is same-principal only — `findSession`

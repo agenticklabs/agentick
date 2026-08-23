@@ -22,7 +22,6 @@ import { FakeLanguageModelExecutor } from "@agentick/model-executor";
 import { LocalEventBus, LocalInbox, MemoryJournal } from "@agentick/runtime";
 import {
   SESSION_STATUS_CHANNEL,
-  SessionNotFoundError,
   channelEventQuery,
   type ContentBlock,
   type SessionStatusFrame,
@@ -126,12 +125,13 @@ describe("session/send remounts a paged-out session", () => {
     await cleanup();
   });
 
-  it("still refuses an id that was never a session", async () => {
-    const { client, cleanup } = await makeStack();
+  it("takes the CREATE door for an id that was never a session — sends never 404", async () => {
+    const { app, client, cleanup } = await makeStack();
 
-    await expect(
-      client.request("session/send", { sessionId: "ghost", ...say("hello") }),
-    ).rejects.toBeInstanceOf(SessionNotFoundError);
+    const ack = await client.request("session/send", { sessionId: "ghost", ...say("hello") });
+
+    expect(ack.door).toBe("created");
+    expect(await app.getSessionRecord("ghost")).toMatchObject({ id: "ghost" });
 
     await cleanup();
   });

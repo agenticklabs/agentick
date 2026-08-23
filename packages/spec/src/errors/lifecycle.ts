@@ -109,6 +109,26 @@ export class AppNotFoundError extends GatewayError {
 }
 registerAgentickError("AppNotFoundError", AppNotFoundError);
 
+/**
+ * A verb that had to CREATE a session (the send-on-miss door, session-doors.md
+ * §7) could not tell which app should host it: no `appId` was named and the
+ * gateway holds anything other than exactly one app. Loud, never a guess — the
+ * app decides the recipe, the stores, and the principal rules the session gets.
+ */
+export class AppAmbiguousError extends GatewayError {
+  readonly _tag = "AppAmbiguousError" as const;
+  readonly appIds: readonly string[];
+  constructor(args: { readonly appIds: readonly string[]; readonly cause?: unknown }) {
+    super(
+      `cannot resolve an app implicitly — the gateway holds ${args.appIds.length} ` +
+        `(${args.appIds.join(", ") || "none"}); name one with \`appId\`.`,
+      { cause: args.cause },
+    );
+    this.appIds = args.appIds;
+  }
+}
+registerAgentickError("AppAmbiguousError", AppAmbiguousError);
+
 export class GatewayLifecycleError extends GatewayError {
   readonly _tag = "GatewayLifecycleError" as const;
   override readonly cause: unknown;
@@ -144,6 +164,7 @@ export type GatewayErrorChannel =
   | GatewayNotStartedError
   | AppAlreadyExistsError
   | AppNotFoundError
+  | AppAmbiguousError
   | GatewayLifecycleError
   | GatewayBridgeSlotOccupied;
 

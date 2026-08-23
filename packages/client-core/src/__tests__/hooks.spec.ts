@@ -95,6 +95,7 @@ function sendResult(overrides?: Partial<SessionSendResult>): SessionSendResult {
       ticks: 1,
       executionId: "exec-1",
     },
+    door: "live",
     ...overrides,
   };
 }

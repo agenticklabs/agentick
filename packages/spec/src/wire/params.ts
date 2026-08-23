@@ -30,6 +30,7 @@ import type {
   SendResult,
   SendTelemetry,
 } from "../protocol/session-harness.js";
+import type { SessionDoor } from "./find-session.js";
 import type { RequestMeta } from "./json-rpc.js";
 import type { SubscriptionScope } from "./scope.js";
 
@@ -328,6 +329,8 @@ export type AppCloseResult = null;
  */
 export interface SessionSendParams extends WireRequestParams {
   readonly sessionId: string;
+  /** Which app hosts a session this send has to CREATE; unused when it exists. */
+  readonly appId?: string;
   readonly messages?: ReadonlyArray<SendMessageInput>;
   readonly props?: unknown;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -389,7 +392,26 @@ export interface SessionSendResult {
   readonly executionId: string;
   readonly finalCursor: Cursor;
   readonly result: SendResult;
+  /**
+   * Which door the send walked through to reach the session — the ack is
+   * self-describing, so a client knows its draft materialized (`"created"`)
+   * without a second read. Residency stays the framework's business:
+   * `"resumed"` is reportable history, not a state a client may ask for.
+   */
+  readonly door: SessionDoor;
 }
+
+/**
+ * `session/get` — the durable record for one id. PURE (session-doors.md §2):
+ * it never mounts, resumes, or creates, so a client may read a thread header
+ * without paying for a session tree.
+ */
+export interface SessionGetParams extends WireRequestParams {
+  readonly sessionId: string;
+}
+
+/** The row a session list serves, for one id — `null` when no record exists. */
+export type SessionGetResult = SessionEntry | null;
 
 /**
  * Params for the preview verbs — `session/dry_run`, `session/compile`,
@@ -880,6 +902,7 @@ export interface WireMethods {
   "app/close": { params: AppCloseParams; result: AppCloseResult };
 
   "session/send": { params: SessionSendParams; result: SessionSendResult };
+  "session/get": { params: SessionGetParams; result: SessionGetResult };
   "session/dry_run": { params: SessionPreviewParams; result: SessionDryRunWireResult };
   "session/compile": { params: SessionPreviewParams; result: SessionCompileResult };
   "session/project": { params: SessionPreviewParams; result: SessionProjectResult };

@@ -2240,6 +2240,42 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 
+### 2026-08-22 — session doors: send creates, reads resume, get is pure; ADR 102 accepted
+
+The cold-reads proposal was redesigned as `session-doors.md` (renamed;
+Ryan judged the parallel cold-read plane tacked-on). Doctrine: existence
+is commanded, residency is taken — the client speaks `get`/`history`/
+`subscribe`/`send`; create/resume are doors the framework walks, hooked
+and traced, never wire-callable. Slice 1 landed:
+
+- `resolveSessionDoor` (spec/wire/find-session.ts): live → resume →
+  CREATE, atomic, `session/send` only — a miss creates with the
+  client-minted id (`SendParams.appId` / single-app default /
+  `AppAmbiguousError`), principal stamped from the wire identity. Sends
+  never 404; the ack carries `door: live|resumed|created`.
+- Dynamic-command lane: AddressNotFound + sessionId param → one-shot
+  resume-door retry — every harness's wire reads survive eviction
+  through the same hooked door, no surface special-cased. No record →
+  MethodNotFound; reads never create.
+- `session/get` — new PURE record read, `null` on miss (and on
+  invisible records — no existence oracle), never mounts.
+- Cross-principal safety verified pre-existing: `authorizeDispatch`'s
+  ownership-outlives-liveness block resolves the target principal from
+  the durable record before any handler (and thus before the resume
+  fallback) runs.
+- **ADR 102 ACCEPTED** (blueprint/102-subscription-bus-topology.md):
+  attachment is authorization; four open questions resolved; stage-3
+  amendment (session scope = own-node + sessionId topic query, one
+  shape for live/evicted/nonexistent — admits the draft flow's
+  mint → subscribe → send). Slice 2 = stages 1–3, deletes
+  `onlyOwnedBy`; stage 4 deferred to arena. Stage 1 (node registry +
+  seams, inert by default) in flight.
+- Telemetry footnote from the build: `onBeforeAppResumeSession` fires
+  per app ASKED — it counts resume attempts, not resumes; knowify
+  residency dashboards should key on the around-form success.
+- Next: knowify client slices (drop ensure-create, local drafts,
+  first-send appId) after the next publish.
+
 ### 2026-08-18 — sessions hibernate and resume; both reapers proven in prod (next.128, v1 0.15.4)
 
 Driven by a production FD-exhaustion incident (external MCP connectors:

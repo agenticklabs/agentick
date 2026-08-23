@@ -24,7 +24,7 @@
  * @throws {SessionNotFoundError} when no app owns the id.
  */
 
-import { SessionNotFoundError } from "../errors/lifecycle.js";
+import { AppAmbiguousError, AppNotFoundError, SessionNotFoundError } from "../errors/lifecycle.js";
 import type { AppHarnessProtocol } from "../protocol/app-harness.js";
 import type { SessionHarnessProtocol } from "../protocol/session-harness.js";
 
@@ -87,9 +87,83 @@ export async function findSessionOrResume(
     const live = app.getSession(sessionId);
     if (live) return live;
   }
+  const resumed = await resumeSession(ctx, sessionId);
+  if (resumed) return resumed;
+  throw new SessionNotFoundError({ sessionId });
+}
+
+/**
+ * The RESUME door on its own — for a caller that has already missed the live
+ * walk and wants the session brought back if any app can (`undefined` if none
+ * can; resume never creates).
+ */
+export async function resumeSession(
+  ctx: SessionResolutionContext,
+  sessionId: string,
+): Promise<SessionHarnessProtocol | undefined> {
   for (const app of ctx.gateway.apps()) {
     const resumed = await app.resumeSession(sessionId);
     if (resumed) return resumed;
   }
-  throw new SessionNotFoundError({ sessionId });
+  return undefined;
+}
+
+/** Which door a verb had to walk through to reach its session. */
+export type SessionDoor = "live" | "resumed" | "created";
+
+export interface SessionDoorResult {
+  readonly session: SessionHarnessProtocol;
+  readonly door: SessionDoor;
+}
+
+/** What the CREATE door needs beyond the id — see {@link resolveSessionDoor}. */
+export interface SessionDoorInput {
+  /** The app a miss creates in. Required only on a gateway holding ≠ 1 app. */
+  readonly appId?: string;
+  /** Owning principal stamped on a created session (ADR 48). */
+  readonly principal?: string;
+}
+
+/**
+ * All three doors — live, resume, CREATE — resolved atomically, reporting which
+ * one was taken.
+ *
+ * **`session/send` only** (docs/proposals/v2/session-doors.md §3): a send is
+ * existence-creating because the id it names is the conversation it is about, so
+ * a miss is a session that does not exist YET rather than an error. Every other
+ * verb stays on {@link findSession} / {@link findSessionOrResume} — that is what
+ * keeps reads from creating, and it is the invariant a client-side
+ * `get → create` dance could not hold (the door must be resolved inside the verb
+ * or the reaper interleaves).
+ *
+ * @throws {AppNotFoundError} when `appId` names no app on this gateway.
+ * @throws {AppAmbiguousError} when a miss must create and no app is implied.
+ */
+export async function resolveSessionDoor(
+  ctx: SessionResolutionContext,
+  sessionId: string,
+  input: SessionDoorInput = {},
+): Promise<SessionDoorResult> {
+  for (const app of ctx.gateway.apps()) {
+    const live = app.getSession(sessionId);
+    if (live) return { session: live, door: "live" };
+  }
+  const resumed = await resumeSession(ctx, sessionId);
+  if (resumed) return { session: resumed, door: "resumed" };
+  const session = await creationApp(ctx, input.appId).createSession({
+    sessionId,
+    ...(input.principal !== undefined ? { principal: input.principal } : {}),
+  });
+  return { session, door: "created" };
+}
+
+function creationApp(ctx: SessionResolutionContext, appId?: string): AppHarnessProtocol {
+  const apps = ctx.gateway.apps();
+  if (appId !== undefined) {
+    const named = apps.find((app) => app.id === appId);
+    if (!named) throw new AppNotFoundError({ appId });
+    return named;
+  }
+  if (apps.length !== 1) throw new AppAmbiguousError({ appIds: apps.map((app) => app.id) });
+  return apps[0]!;
 }

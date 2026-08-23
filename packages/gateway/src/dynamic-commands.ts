@@ -26,6 +26,7 @@ import { Cause, Effect, Exit } from "effect";
 
 import {
   progressEventQuery,
+  resumeSession,
   WireRpcError,
   type Authorizer,
   type CommandInfo,
@@ -165,15 +166,34 @@ export function createDynamicCommandResolver(
 
     const handler = async (params: unknown, rawCtx: unknown): Promise<unknown> => {
       const p = (params ?? {}) as DynamicParams;
+      const ctx = rawCtx as WireExtensionContext | undefined;
 
       const address = resolveAddress(surface, p);
       if (address === undefined) throw WireRpcError.methodNotFound(method);
+
+      /**
+       * An unmounted surface on a session-addressed verb is ambiguous — the
+       * harness may be absent, or the whole session may have been paged out.
+       * Take the RESUME door once and ask again (session-doors.md §3), which is
+       * what makes any harness read survive eviction through the same hooked,
+       * traced door. Generic by construction: no surface is special-cased. A
+       * session with no record resumes to nothing and stays MethodNotFound —
+       * reads never create.
+       */
+      const askCommandsOrResume = async (): Promise<readonly CommandInfo[] | undefined> => {
+        const mounted = await askCommandsOrAbsent(address);
+        if (mounted !== undefined) return mounted;
+        const sessionId = p.sessionId;
+        if (ctx?.gateway === undefined || sessionId === undefined) return undefined;
+        if ((await resumeSession(ctx, sessionId)) === undefined) return undefined;
+        return askCommandsOrAbsent(address);
+      };
 
       // `<surface>/commands` is itself the ratified discovery meta-verb —
       // the dispatch choke point already authorized it; serve directly.
       // An unmounted surface answers nothing, so it reads as absent.
       if (rest === "commands") {
-        const commands = await askCommandsOrAbsent(address);
+        const commands = await askCommandsOrResume();
         if (commands === undefined) throw WireRpcError.methodNotFound(method);
         return { commands };
       }
@@ -181,7 +201,7 @@ export function createDynamicCommandResolver(
       // Exposure check: deny-by-default — a verb that isn't declared
       // `wire` (or a surface that isn't mounted) does not exist as far as
       // the wire is concerned.
-      const commands = await askCommandsOrAbsent(address);
+      const commands = await askCommandsOrResume();
       if (commands === undefined) throw WireRpcError.methodNotFound(method);
       const declared = commands.find((c) => c.name === verb);
       if (!declared || declared.exposure !== "wire") {
@@ -198,7 +218,6 @@ export function createDynamicCommandResolver(
       // becomes observable by emitting, not by earning wire plumbing.
       const progressToken = (p._meta as { readonly progressToken?: string | number } | undefined)
         ?.progressToken;
-      const ctx = rawCtx as WireExtensionContext | undefined;
       if (progressToken === undefined || ctx?.gateway === undefined) return ask();
 
       const reporter = ctx.wire.progress(progressToken);
