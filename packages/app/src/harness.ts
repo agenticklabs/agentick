@@ -2581,7 +2581,14 @@ export class AppHarness<P = unknown>
       this.journal,
       sessionBus,
       this.inbox,
-      { parentScope: { sessionId }, inheritedInterceptors, interceptorParent: this },
+      // `principal` on every per-session harness: what its emitters stamp on
+      // frame scopes (#304's last mile — the mechanism landed with stampScope).
+      {
+        parentScope: { sessionId },
+        inheritedInterceptors,
+        interceptorParent: this,
+        ...omitUndefined({ principal: input.principal }),
+      },
     );
     claimed.push(elicitation);
 
@@ -2592,6 +2599,7 @@ export class AppHarness<P = unknown>
     // tool's `taskSupport` annotation (#156).
     const tasks = new TasksHarness(`${sessionId}:tasks`, this.journal, sessionBus, this.inbox, {
       parentScope: { sessionId },
+      ...omitUndefined({ principal: input.principal }),
       // ADR 68 — the shared app-scoped store + executor registry, so
       // detached tasks outlive the per-session harness and child-process
       // reattach finds its still-live children. Scope-filtered by
@@ -2629,7 +2637,11 @@ export class AppHarness<P = unknown>
       this.inbox,
       // ADR 76/83 — the app's resolved interceptor snapshot incl. the app+session
       // command hooks as op-scoped middleware. Live via `interceptorParent`.
-      { inheritedInterceptors, interceptorParent: this },
+      {
+        inheritedInterceptors,
+        interceptorParent: this,
+        ...omitUndefined({ principal: input.principal }),
+      },
     );
     claimed.push(resources);
 
@@ -2771,6 +2783,7 @@ export class AppHarness<P = unknown>
         })
       : new ToolExecutorHarness(sessionId, this.journal, sessionBus, this.inbox, {
           ...this.toolDefaults,
+          ...omitUndefined({ principal: input.principal }),
           ...omitUndefined({ initialTools: mergedInitialTools }),
           handlerResolver: this.handlerResolver,
           elicitation,
