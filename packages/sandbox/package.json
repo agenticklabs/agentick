@@ -1,6 +1,6 @@
 {
   "name": "@agentick/sandbox",
-  "version": "1.0.0-next.143",
+  "version": "1.0.0-next.144",
   "description": "Base sandbox package (ADR 59) — the SandboxHarness + bridge + ACL, the SandboxProvider construction contract + SandboxHandle interface, the applyEdits transform, and the pure network matcher. Providers dep this base (mirroring model-openai-next → model-next). React bindings ship from /react; the conformance suite + fake from /testing.",
   "files": [
     "dist"
