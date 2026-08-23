@@ -1,6 +1,6 @@
 {
   "name": "@agentick/code-secure-exec",
-  "version": "1.0.0-next.146",
+  "version": "1.0.0-next.147",
   "description": "In-process V8 isolate Runtime for @agentick/code — runs model-authored code in an isolated-vm isolate that contains by construction (no fs, no network, no require, no ambient authority), so it needs no OS jail. timeMs and memoryMb enforced by the isolate; bindings marshaled across the isolate boundary as JSON. Construction, not confinement.",
   "keywords": [
     "agent",

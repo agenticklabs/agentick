@@ -1,6 +1,6 @@
 {
   "name": "@agentick/compiler-react",
-  "version": "1.0.0-next.146",
+  "version": "1.0.0-next.147",
   "description": "Reference compiler harness for Agentick v2. Uses react-reconciler to drive JSX agent definitions and produces RenderedTree IR. Reference implementation of CompilerProtocol from @agentick/spec.",
   "keywords": [
     "agent",
