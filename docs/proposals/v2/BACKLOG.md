@@ -196,6 +196,9 @@ carry usage rollups.
 
 ## Parked decisions (Ryan's, not work)
 
+- Dock send default: flip onBusy 'queue' -> 'steer' (steer = same behavior
+  plus barging in). Ryan leans steer; AFTER the create-on-open cleanup.
+
 - In-prompt self-name: "You are Ernesto" (`identity.tsx:132`) vs the
   "Knowify AI" display title — behavior-changing; full rename / internal
   persona / hybrid.
@@ -207,7 +210,20 @@ carry usage rollups.
 
 ## Standing context
 
-2026-08-24 late: draft-palette interim LANDED (knowify f4a81f8f3c) —
+2026-08-24 latest — DESIGN CORRECTION: create early, persist late.
+Ryan rejected the client-draft model AND its catalog-cache workaround.
+Framework next.151: SessionRuntime.durable — the record is EARNED
+(first running transition / eager / adoption); teardown of a
+never-persisted session writes nothing (evict/shutdown/close). New chat
+= create_session on open: live, fully capable, per-principal, no row
+until first send; declarations run at open so the first-turn race is
+DEAD without a framework door. Knowify rip-out in flight (delete
+catalogs/conversationPalette/openDraft machinery; contract respec'd).
+#312 SHRINKS to the per-thread re-declaration optimization only.
+session-doors Part II rewritten as this design with the detour
+footnoted as superseded.
+
+2026-08-24 late (SUPERSEDED by the above): draft-palette interim LANDED (knowify f4a81f8f3c) —
 per-app CatalogCache + conversationPalette in ernesto-client (drafts:
 zero wire traffic, cache-fed palette, local completion decline,
 CREATE-ON-RUN ratified: a palette run takes app/create_session once,
