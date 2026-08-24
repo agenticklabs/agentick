@@ -11,7 +11,7 @@ arc 1)**, then by opportunity. Sequencing rationale inline per stream.
 
 ---
 
-## A. Context architecture — "the lay of the land" ✅ ARC 1 FRAMEWORK LANDED (2026-08-24, pending publish)
+## A. Context architecture — "the lay of the land" ✅ ARC 1 LANDED BOTH SIDES (2026-08-24 — framework next.150; knowify b656dfa6e5)
 
 The model knows what it can do WITHOUT searching; it searches only for
 specifics. "Rules and conventions drive success."
@@ -41,12 +41,27 @@ specifics. "Rules and conventions drive success."
 Split: ONE small framework PR (fields + sugar) / knowify-led everything
 else.
 
+KNOWIFY LANDED (b656dfa6e5, pins on next.150): the toolbox tree —
+~949 cached tokens in <System>, group prose + tool names only,
+requires-pruned so the prompt never names an undeclared tool; bloat
+killed with stated causes of death; 45 per-tool summaries AUTHORED,
+unrendered — TODO(canonical-summary) moves them onto declarations
+(one line per tool). REMAINING in A: that move; the
+resources/prompts/skills half; naming decisions for Ryan (debug*info ->
+notify_team; project_plan_create/\_update read singular but are bulk;
+get_node_map/get_node_content/dom_act are implementation vocabulary;
+list_items*\* heading-rescued). Framework issue #314: ctx.emit publishes
+nothing (channelPublisher never supplied; wiring is per-session) —
+notify_user shipped via the AppExtension workaround, TODO(ctx-emit).
+
 LANDED: `ToolDeclaration.summary` + `.group` as FIRST-CLASS fields (not
 annotations — the declaration is what the tool IS; `annotations.summary` would
 have collided with `displaySummary`/`ToolPresentation.summary`), carried on
 `ToolInfo` so `list()` and the wire see them. `createToolGroup({name, tools})`
 in `@agentick/tool` — a group IS a flat array, nesting is nested arrays,
-nothing group-shaped survives. Group-level `summary` deliberately omitted: the
+nothing group-shaped survives. Group-level `summary` RESTORED at the judge pass (Ryan's refinement made
+group prose primary; one authored literal serves registration AND the
+section), flatten-ignored. [superseded note: it was first omitted because the
 `groups` enumeration that would consume it is still deferred, so the field
 would be dead surface (`TODO(tool-groups)` marks it).
 
@@ -95,7 +110,7 @@ NEXT: the app builds `done` + `<OutputContract/>` on these seams. Sugar rungs
 (`terminal: true` / `stopOn`) only after app-side proof — three-consumers
 rule.
 
-## C. Session tools — the model holds its own handles ✅ ARC 1 FRAMEWORK LANDED (2026-08-24, pending publish)
+## C. Session tools — the model holds its own handles ✅ ARC 1 LANDED BOTH SIDES (2026-08-24 — framework next.150; knowify b656dfa6e5)
 
 - `ask_user`: DONE (app-side, already shipped).
 - Toast: it IS just a notification channel — a channel name + dock renderer
