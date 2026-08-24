@@ -40,21 +40,25 @@
  * count 0, zero usage). `hydrate()` — the session's genesis step (ADR 93), run
  * before first render — first reads the persisted record and ADOPTS it. A
  * RESUME (a record already exists) re-writes it; a genuinely NEW session
- * persists at genesis only when `eager`, and otherwise LAZILY: the cache is
- * seeded and the first status transition / `setMeta` performs the first durable
- * `put`. Lazy-by-default is what keeps a "new chat" that never sends off the
- * durable "list my sessions" registry (no blank "Untitled" rows). Deferring the
- * write to `hydrate` is also what makes resume correct: an eager construction
- * write would overwrite a live session's durable record with a blank one before
+ * persists nothing at genesis — the harness's `session:persist` COMMAND is
+ * what performs the first durable `put` ({@link persistRecord} is its body).
+ * Lazy-by-default is what keeps a "new chat" that never sends off the durable
+ * "list my sessions" registry (no blank "Untitled" rows). Deferring the write
+ * to `hydrate` is also what makes resume correct: an eager construction write
+ * would overwrite a live session's durable record with a blank one before
  * anything read it back.
  *
- * **Create early, persist late.** A session EXISTS the moment it is
- * constructed — palette, prompts, completions, subscriptions all real — but it
- * becomes DURABLE only when something earns the record: adopting one at
- * hydrate, `eager: true`, or the first `running` transition (execution is the
- * intent moment). Until then every "persisting" write below stays cache-only
- * (`durable` gates `commit`), and teardown — evict, shutdown, close — writes
- * nothing: a session nobody ever spoke to leaves no trace.
+ * **Create early, persist late — and persist is a COMMAND.** A session EXISTS
+ * the moment it is constructed — palette, prompts, completions, subscriptions
+ * all real — but it becomes DURABLE only when something earns the record:
+ * adopting one at hydrate, or the harness dispatching `session:persist` (at
+ * the first `running` transition — execution is the intent moment — or at
+ * genesis for an `eager` create). Until then every "persisting" write below
+ * stays cache-only (`durable` gates `commit`), and teardown — evict,
+ * shutdown, close — writes nothing: a session nobody ever spoke to leaves no
+ * trace. Because the earn moment is an operation, it is journaled, hookable
+ * (`onBeforeSessionPersist` is the ephemeral-by-policy veto), and its
+ * terminal event is the wire-visible "this conversation now exists".
  *
  * **Persist/notify parity (the View migration was parity-only):**
  *   - `setStatus` / `setMeta` PERSIST (`view.write` → cache + store.put +
@@ -173,13 +177,6 @@ export interface SessionRuntimeInit {
   readonly title?: string;
   readonly description?: string;
   readonly metadata?: Record<string, unknown>;
-  /**
-   * Persist the durable record at genesis (E11). Default `false` — genesis
-   * seeds the cache only, and the first status transition / `setMeta` performs
-   * the first durable `put`. `true` writes the record immediately, for the
-   * "show the empty session in the list now" case.
-   */
-  readonly eager?: boolean;
 }
 
 /**
@@ -213,9 +210,6 @@ export class SessionRuntime {
   private readonly store: SessionStore | undefined;
   private readonly storeCtx: () => StoreCtx;
 
-  /** Persist the record at genesis rather than on first mutation (E11). */
-  private readonly eager: boolean;
-
   private readonly onStatusTransition:
     | ((status: SessionStatus, outcome?: SessionRunOutcome) => void)
     | undefined;
@@ -246,7 +240,6 @@ export class SessionRuntime {
     this.id = init.id;
     this.store = init.store;
     this.storeCtx = init.storeCtx;
-    this.eager = init.eager ?? false;
     this.onStatusTransition = init.onStatusTransition;
 
     const store: Store<
@@ -279,8 +272,8 @@ export class SessionRuntime {
   }
 
   /**
-   * GENESIS (ADR 93) — adopt a persisted record on RESUME; otherwise persist
-   * a new record only when `eager`, else lazily on first mutation.
+   * GENESIS (ADR 93) — adopt a persisted record on RESUME; otherwise seed the
+   * cache only (the `session:persist` command performs the first write).
    *
    * A `createSession` with an id the durable registry already holds is a
    * RESUME, and the record it holds is the session's real history: when it was
@@ -293,8 +286,8 @@ export class SessionRuntime {
    * died mid-way through is not running here.
    *
    * The read lands here rather than in the constructor so that a resume reads
-   * before it writes. A NEW session (nothing persisted) defers its first write
-   * to the first status transition / `setMeta` unless `eager` forces it now.
+   * before it writes. A NEW session (nothing persisted) writes nothing until
+   * the harness dispatches `session:persist`.
    */
   /**
    * Durability barrier over the record's write-behind — awaits every in-flight
@@ -341,15 +334,35 @@ export class SessionRuntime {
 
   /**
    * Whether this session has EARNED a durable record — by adopting one at
-   * hydrate, by `eager`, or by starting an execution. Until then every
-   * `persist: true` commit stays cache-only: persistence is triggered by
-   * EXECUTION, not by creation — and not by teardown either. A session that
-   * never ran a turn dies recordless on evict, shutdown, and close alike,
-   * which is what lets a host create a live session for a brand-new chat
-   * (palette, prompts, completions all real) and leave no row behind if the
-   * user never says anything.
+   * hydrate, or by the harness's `session:persist` command (dispatched at the
+   * first `running` transition, or at genesis for an `eager` create). Until
+   * then every `persist: true` commit stays cache-only: persistence is a
+   * COMMAND, not a side-effect of creation — and not of teardown either. A
+   * session that never ran a turn dies recordless on evict, shutdown, and
+   * close alike, which is what lets a host create a live session for a
+   * brand-new chat (palette, prompts, completions all real) and leave no row
+   * behind if the user never says anything.
    */
   private durable = false;
+
+  /** Adoption/persistence state a dispatch site guards on before minting an op. */
+  isDurable(): boolean {
+    return this.durable;
+  }
+
+  /**
+   * The body of the `session:persist` command: flip the latch and perform the
+   * durable write of the record as it stands. Returns what was written — the
+   * op's terminal event carries it, which is what lets a connected list insert
+   * the row from the payload instead of racing the store with a read-back.
+   * Idempotent in effect (a second write upserts the same record); ONCE-ness
+   * is the dispatch sites' guard, not this body's.
+   */
+  persistRecord(): SessionRecord {
+    this.durable = true;
+    this.commit({}, { persist: true });
+    return this.record();
+  }
 
   async hydrate(): Promise<void> {
     const persisted = await this.store?.get(this.id, this.storeCtx());
@@ -370,8 +383,7 @@ export class SessionRuntime {
       this.commit({}, { persist: true });
       return;
     }
-    if (this.eager) this.durable = true;
-    this.commit({}, { persist: this.eager });
+    this.commit({}, { persist: false });
   }
 
   // ────────── record read-modify-write ──────────
@@ -418,9 +430,6 @@ export class SessionRuntime {
   /** PERSIST + NOTIFY — the metadata-change trigger (the old `notify()`). */
   setStatus(next: SessionStatus, outcome?: SessionRunOutcome): void {
     const prev = this.record().status;
-    // Starting a turn is the intent moment: the first `running` is what earns
-    // the durable record (the upsert-on-transition contract's trigger).
-    if (next === "running") this.durable = true;
     this.commit({ status: next }, { persist: true });
     if (next !== prev) this.onStatusTransition?.(next, outcome);
   }

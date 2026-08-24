@@ -204,6 +204,12 @@ declare module "@agentick/runtime" {
     // `onBeforeSessionRestore` + `onAfterSessionRestore`. Both journal, and
     // both carry NO payload: the data never leaves its harness's own store.
     "session:snapshot": { input: void; output: void };
+    // Create early, persist late — and persist is a COMMAND. The earn moment
+    // (first `running`, or `eager` genesis) dispatches this op, so it is
+    // journaled, mints `onBeforeSessionPersist` (the ephemeral-by-policy veto)
+    // + `onAfterSessionPersist`, and its terminal event carries the record —
+    // the wire-visible "this conversation now exists" a thread list folds in.
+    "session:persist": { input: void; output: SessionRecord };
     "session:restore": { input: void; output: void };
     // ADR 92 Family 2 §5 — teardown is an op, symmetric with `app:close-app` /
     // `gateway:close`. Mints `onBeforeSessionClose` (the hold-for-drain seam)
@@ -520,10 +526,11 @@ export interface SessionHarnessOptions<P = unknown> {
    */
   readonly sessionStore?: SessionStore;
   /**
-   * Persist the durable `SessionRecord` at genesis rather than on first
-   * mutation (E11). Default `false` — a created-but-never-used session stays
-   * out of the durable registry until its first status transition / `setMeta`.
-   * `true` writes the record immediately (the "show it in the list now" case).
+   * Dispatch `session:persist` at genesis rather than at the first `running`
+   * transition. Default `false` — a created-but-never-used session stays out
+   * of the durable registry. `true` earns the row immediately (the "show it
+   * in the list now" case: imports, seeds, spawned children) — through the
+   * same command, hooks, and terminal event as the run-earned path.
    */
   readonly eager?: boolean;
   /** Owning app id — stamped on the session's `SessionRecord.appId`. */
@@ -1025,7 +1032,6 @@ export class SessionHarness<P = unknown>
       onStatusTransition: (status, outcome) => this.publishStatusTransition(status, outcome),
       ...omitUndefined({
         appId: options.appId,
-        eager: options.eager,
         parentSessionId: options.parentSessionId,
         // ADR 48 — persist ownership on the durable record (resume index).
         principal: options.principal,
@@ -1243,7 +1249,12 @@ export class SessionHarness<P = unknown>
         : this.hydrateCheckpointBridges(this.checkpointCtxFrom(this.storeCtx())),
     ])
       .then(seedCreateInputValues)
-      .then(() => {});
+      .then(() => {
+        // `eager` — the caller wants the row at genesis: same command, same
+        // hooks, same event as the run-earned path. Adoption (resume) is
+        // already durable, so the guard makes this a no-op there.
+        if (options.eager === true) this.earnRecord();
+      });
 
     // Eagerly mount — the compiler exposes `.ready` for its own
     // inbox registration; our mount is awaited via `_mountReady`. The
@@ -1700,6 +1711,35 @@ export class SessionHarness<P = unknown>
     if (!model) throw new NoModelForExecutionError();
     const executor = model.modelExecutor;
     return executor.prepareRequest?.({ targetInput: input, target: model.target });
+  }
+
+  /**
+   * `session:persist` — commit this session to the durable registry NOW.
+   *
+   * `createSession` creates the LIVE session; this command creates the ROW.
+   * Dispatched by the framework at the earn moments — the first `running`
+   * transition, and genesis when `eager` — and callable by a host that wants
+   * a row on its own schedule. The op's terminal event carries the returned
+   * record, which is what a connected list inserts from. A guard veto
+   * (`onBeforeSessionPersist`) keeps the session ephemeral: live, recordless.
+   * A second dispatch re-upserts the same record — harmless; the framework's
+   * own dispatch sites guard on durability, so it fires once per lifetime.
+   */
+  persist(): Promise<SessionRecord> {
+    return runHarnessProtocol(
+      this.sessionOp("persist", undefined, () => Effect.sync(() => this.runtime.persistRecord())),
+    );
+  }
+
+  /**
+   * Framework-side earn dispatch: fire `session:persist` if the record has not
+   * been earned yet. Un-awaited by callers — persistence is off the critical
+   * path — and a guard veto is a policy answer, not an error, so it logs at
+   * debug and the session simply stays recordless.
+   */
+  private earnRecord(): void {
+    if (this.runtime.isDurable()) return;
+    void this.persist().catch(() => {});
   }
 
   snapshot(): Promise<void> {
@@ -3283,6 +3323,11 @@ export class SessionHarness<P = unknown>
       // running) — the upsert-on-transition contract.
       if (resume === undefined) this.runtime.bumpExecutionCount(); // same execution, not a new turn
       this.runtime.setCurrentExecutionId(executionId);
+      // Execution is the intent moment — the first turn earns the durable
+      // record via the `session:persist` command (un-awaited: the write is
+      // off the critical path, and the status write below rides into the
+      // record the command's handler commits).
+      this.earnRecord();
       this.runtime.setStatus("running");
 
       // Per-call overrides — model-executor + target — fall through from
