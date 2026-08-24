@@ -1,6 +1,6 @@
 {
   "name": "@agentick/client",
-  "version": "1.0.0-next.148",
+  "version": "1.0.0-next.149",
   "description": "Batteries-included agentick client: re-exports `@agentick/client-core` and side-effect-imports every built-in `/client` subpath (tasks, knobs, elicitation, tool-executor/tools, timeline, gates, skills, prompts, resources, state) so their session sub-handles self-assemble with no per-harness imports. Interim stand-in for the public `agentick/client` metapackage entry until the v2 cut.",
   "keywords": [
     "agent",

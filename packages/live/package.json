@@ -1,6 +1,6 @@
 {
   "name": "@agentick/live",
-  "version": "1.0.0-next.148",
+  "version": "1.0.0-next.149",
   "description": "LiveHarness — the real-time media plane (ADR 88). Streams mic audio / video frames up and media down over a session-scoped MediaSession keyed by (sessionId, streamId), with a MediaTransport capability, stream routing, and the session.live client handle (sendFrame/onFrame spec + uplink/downlink WritableStream/ReadableStream projections). v0 minimal core: transport contract + handle + routing + wire; the STT/TTS engine, TurnArbiter, and realtime-provider integration are deferred (composed by the adopter from existing primitives). OPTIONAL extension — installed separately, not bundled.",
   "keywords": [
     "agent",
