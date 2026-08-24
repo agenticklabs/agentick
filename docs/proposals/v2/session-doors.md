@@ -163,31 +163,44 @@ the full projection; the reaper collects it in the idle window. Two flags:
 
 ---
 
-## Part II — Deferred materialization (no row until first send)
+## Part II — Create early, persist late (no row until first send)
 
-### 7. Drafts are client-side; send creates
+### 7. New sessions are created on open and persisted on first send
 
-A "new chat" is a client-local draft: the client mints the sessionId
-(already legal — ids are client-suppliable) and renders an empty timeline
-with NO server call. `list_sessions` elsewhere does not show it — correct:
-it does not exist yet.
+Existence and durability are DIFFERENT events. `createSession` makes a
+session EXIST — live in the registry, per-principal tools composed,
+prompts, completions and subscriptions all real — and writes NOTHING
+durable. The record is EARNED: by the first turn (the `running`
+transition — execution is the intent moment), by `eager: true` when a
+host wants the row at creation (imports, migrations), or by resuming an
+existing record. Teardown honors the same law: a session nobody ever
+spoke to dies recordless on evict, shutdown, and close alike
+(`unpersisted-session-teardown.spec.tsx`).
 
-The first `send` to the nonexistent id takes the **create door** with that
-id. The record is then written by lazy-persist on the first real status
-transition — no blank-row window exists at all. The `session added`
-enumeration notification fans out to every device (including the sender;
-the ack's `created: true` confirms materialization without waiting on it).
+So a "new chat" is a REAL session: the client mints the id (v7,
+client-suppliable), calls `create_session` on open, and everything a
+conversation offers works immediately — the palette is real because the
+session is. `list_sessions` elsewhere does not show it and
+`session/get` answers null — correct: nothing durable exists yet. The
+row appears the moment the user actually says something, and the
+`session added` enumeration notification fans out to every device then.
+Declarations (client tools, the sitemap) run at open, before any send —
+so the first turn is whole, with no race and no deferred materialization
+machinery.
 
-App resolution for the miss case (a nonexistent id names no app):
-(a) `SendParams.appId?` — the explicit form; the dock already knows its app
-id (it names it in `app/create_session` today).
-(b) Single-app-gateway default (ernesto's topology) — miss resolves to the
-only app.
-**Decision: both** — (b) zero-config, (a) explicit; ambiguous miss on a
-multi-app gateway is a loud typed error, never a guess.
+`send` to a NONEXISTENT id remains the wire's safety net — the create
+door with the client's id — for every path that skipped an open:
+reconnects, cross-device, bare API callers. App resolution for that
+miss: `SendParams.appId?` explicit, single-app-gateway default,
+ambiguous miss a loud typed error. Creation-by-send stamps the caller's
+principal exactly as `app/create_session` does.
 
-Authz: creation-by-send stamps the caller's principal exactly as
-`app/create_session` does (same door-side identity plumbing).
+> Superseded on 2026-08-24: an earlier revision made new chats
+> CLIENT-LOCAL drafts (zero server calls until first send), which forced
+> a client-side catalog cache for the palette and a deferred-declaration
+> race on the first turn. Rejected — the framework's persistence law
+> makes the live-but-unpersisted session strictly better, and the
+> workaround is deleted.
 
 ---
 
@@ -207,7 +220,8 @@ Authz: creation-by-send stamps the caller's principal exactly as
 **knowify (after the framework publish):**
 
 3. ernesto-client: thread-open drops ensure-create (get + history +
-   subscribe); new-chat becomes a local draft; first send carries appId.
+   subscribe); new-chat = create_session on open (live, unpersisted);
+   first send earns the record.
 4. Delete the ensure-create hack + verify: `create` telemetry only on real
    creations, `resume` events appear with verb attribution, blank rows stop.
 
