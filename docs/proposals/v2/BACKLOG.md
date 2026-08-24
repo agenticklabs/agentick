@@ -207,6 +207,16 @@ carry usage rollups.
 
 ## Standing context
 
+2026-08-24 late: draft-palette interim LANDED (knowify f4a81f8f3c) —
+per-app CatalogCache + conversationPalette in ernesto-client (drafts:
+zero wire traffic, cache-fed palette, local completion decline,
+CREATE-ON-RUN ratified: a palette run takes app/create_session once,
+memoized — running is intent). Cold start/hard reload = honestly empty
+until #312 lands app-scoped catalog verbs + connection declarations —
+#312 is the RECOMMENDED next framework arc (Ryan's promotion call
+pending). draft-lifecycle-e2e.spec.ts is the contract file and the
+migration harness for #312.
+
 Everything through agentick 1.0.0-next.149 + knowify `e40a59705f` is landed:
 session doors, ADR 102 stages 1–3, shutdown-hibernates + heal migrations,
 single-flight resumes, refused-send unwind (#313), InterceptorLayers,
