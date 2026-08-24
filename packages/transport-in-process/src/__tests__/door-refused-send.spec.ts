@@ -75,7 +75,12 @@ describe("a door-refused send unwinds the turn it opened", () => {
       client.request("session/send", { sessionId: "s1", messages: [REFUSED_MEDIA] } as never),
     ).rejects.toThrow(/media|source/i);
 
-    const session = app.getSession("s1")!;
+    // Concrete-class surface (flushRecordWrites precedent) — the protocol
+    // deliberately does not carry residency internals.
+    const session = app.getSession("s1")! as unknown as {
+      hasInFlightExecution: boolean;
+      whenQuiescent(): Promise<void>;
+    };
     expect(session.hasInFlightExecution).toBe(false);
     expect(await orHung(session.whenQuiescent().then(() => "quiescent"))).toBe("quiescent");
 
