@@ -3076,7 +3076,18 @@ export class SessionHarness<P = unknown>
       while (this._handleReservation !== null) {
         if (!this._loopDone) {
           const reservation = this._handleReservation;
-          const handle = await reservation.promise;
+          let handle: SessionExecutionHandle;
+          try {
+            handle = await reservation.promise;
+          } catch {
+            // The turn died before producing a handle (#313 — a refused
+            // append unwinds through the reservation). Its failure belongs to
+            // ITS caller, not this one: wait out the unwind (`_settled`
+            // resolves in the same finally that clears the reservation), then
+            // re-check — the fresh-send path takes over.
+            await this._settled.catch(() => undefined);
+            continue;
+          }
           // Re-check: the loop may have settled while we awaited the
           // reservation — a dead handle must not be joined.
           if (!this._loopDone) {
@@ -3166,58 +3177,12 @@ export class SessionHarness<P = unknown>
     // (see the settle handlers).
     let redispatchSteers: SendMessageInput[] | null = null;
 
-    await this._mountReady;
-
     // A resume ADOPTS the crashed execution's id — the durable identity — and
     // appends nothing: the interrupted attempt's input is already on the
     // timeline (re-appending would duplicate entries AND corrupt
     // executionCursor's lastTickIndex). The handle below is per-INVOCATION
     // either way; only the id persists across attempts.
     const executionId = resume?.executionId ?? `exec:${generateId()}`;
-
-    // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
-    // drain. The first tick's render sees it via <Timeline/>.
-    if (resume === undefined) {
-      for (const m of input.messages ?? []) await this.appendInputMessage(m, executionId);
-    }
-
-    // ADR 53: the first render will include everything appended so far.
-    this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
-    // A new turn is new material — a fold that could not help last turn may be
-    // able to now (ADR 97).
-    this._compactRefusedThisExecution = false;
-    this._executionRollup = undefined;
-
-    // E11 accounting: bump the execution count + set the in-flight id BEFORE
-    // `setStatus("running")`. The count / id updates are cache-only on the
-    // runtime's view; the `setStatus` write-through then persists ONE record
-    // capturing the full execution-start delta (count + currentExecutionId +
-    // running) — the upsert-on-transition contract.
-    if (resume === undefined) this.runtime.bumpExecutionCount(); // same execution, not a new turn
-    this.runtime.setCurrentExecutionId(executionId);
-    this.runtime.setStatus("running");
-
-    // Per-call overrides — model-executor + target — fall through from
-    // SendInput. The app-level model-executor/target is the default;
-    // this send swaps in caller-supplied alternatives without changing
-    // session state.
-    const modelExecutorForCall = input.modelExecutor ?? this.modelExecutor;
-    const targetForCall = input.target ?? this.target;
-
-    // Resolve streaming preference. Cascade:
-    //   SendInput.stream  >  session-level streaming default
-    //                     >  executor capability default
-    // The capability default is true when both:
-    //   - the executor exposes `executeStream`
-    //   - target.capabilities.supportsStreaming is not explicitly false
-    // Both slots may be undefined on a model-less session — the loop enforces
-    // the presence of a model at the per-tick resolution point (respecting the
-    // per-tick `<Model>` cascade), so here we only compute a capability default
-    // when a model-executor + target are actually present.
-    const capabilityStreamDefault =
-      typeof modelExecutorForCall?.executeStream === "function" &&
-      (targetForCall?.capabilities?.supportsStreaming ?? true);
-    const streamForCall = input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
 
     // Set up the handle + emit chain BEFORE running the loop so the
     // loop can pump events into it from the first tick.
@@ -3283,427 +3248,490 @@ export class SessionHarness<P = unknown>
       // Prevent unhandled rejections — handle has its own .result.
     });
 
-    const { handle, emit, close } = createSessionExecutionHandle({
-      sessionId: this.runtime.id,
-      executionId,
-      // SP5 — the caller's handle stream carries the lineage too.
-      ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
-      resultPromise,
-      abort: async (reason) => {
-        // EX1 — tear down what this execution spawned FIRST: a child must stop
-        // before the parent waiting on it unwinds (the same deepest-first rule
-        // destroy's walk follows). Synchronous — firing the signal only
-        // schedules the children's teardown; it does not wait on it.
-        executionAbort.abort(new Error(reason ?? "origin execution aborted"));
-        await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
-      },
-    });
+    // ── SINGLE-EXIT (#313): everything a turn IS — id, reservation,
+    // quiescence, abort signal, and the ONE settle that releases them — was
+    // constructed above, synchronously. From here down, this body may only
+    // leave through `resultDeferred`: a pre-loop throw (a refused append, a
+    // failed mount) is a turn that FAILED, and it settles like one. Without
+    // this, the throw escaped holding the reservation — `whenQuiescent`
+    // never resolved, shutdown hung, and a queued send joined a dead turn.
+    try {
+      await this._mountReady;
 
-    // The run-execution event sink (streaming-up, ADR 51 §2): the session
-    // consumes the `loop:run-execution` command's `.fx` sink-fold face. Each
-    // `LoopExecutionEvent` chunk maps through `buildOnEvent` (the SAME
-    // partial-StreamEvent → handle-queue projection as before) wrapped in an
-    // `Effect.sync` so it drains IN the loop's fiber (in-order, no queue). This
-    // is the ONE event channel — the retired `RunExecutionInput.onEvent`
-    // push-callback is gone.
-    const onEvent = this.buildOnEvent(emit);
-    const loopSink = (event: LoopExecutionEvent): Effect.Effect<void> =>
-      Effect.sync(() => onEvent(event));
+      // Input appends the moment it arrives (ADR 53 §2.1) — no queue, no
+      // drain. The first tick's render sees it via <Timeline/>.
+      if (resume === undefined) {
+        for (const m of input.messages ?? []) await this.appendInputMessage(m, executionId);
+      }
 
-    // Execution-scoped tools (#139) are bound for the duration of the
-    // loop run via `withScope`: register each tool, run the loop,
-    // remove the scope's binding in `finally`. Atomic — cleanup runs
-    // on success, failure, or throw.
-    const runPromise = withScope(
-      this.toolExecutor,
-      { scope: "execution", executionId },
-      input.tools ?? [],
-      // ADR 77 Stage 4 — run the COMPOSED loop (`loop.fx.runExecution`, one
-      // fiber) on the telemetry runtime. `loop.runExecution` (the facade) is
-      // exactly `runHarnessProtocol(loop.fx.runExecution(...))` on the DEFAULT
-      // runtime; swapping in `this.telemetryRuntime` routes the whole
-      // execution's `Effect.withSpan` tree to the adopter's tracer, and
-      // because the loop is one fiber every downstream span nests under the
-      // execution via FiberRef `parentOpId` auto-threading. `undefined`
-      // runtime → default → behavior-preserving (no-op tracer).
-      //
-      // ADR 89 §4 — the `model:generate[_stream]` lifecycle forwarders
-      // ride THIS call as tier-4 call-scoped middleware (`withCall
-      // Middleware`): the one-fiber spine threads them into every nested
-      // `runOperation` the send touches, so the projection reaches
-      // WHICHEVER model-executor instance runs a tick — including a
-      // per-tick `<Model>`-swapped executor (ADR 56) the session's
-      // interceptor tree can't reach structurally. Empty list (no
-      // projection target) is a pass-through.
-      () =>
-        runHarnessProtocol(
-          withCallMiddleware(
-            // ADR 89 §2 + §4 — two tier-4 seams ride each send: the §4
-            // `model:generate[_stream]` lifecycle forwarders (observe) AND
-            // the §2 `session.model` interceptors (use/guard). Both reach
-            // WHICHEVER executor runs a tick (per-tick `<Model>` swap OR a
-            // `setModel` swap) via the one-fiber spine — the §2 interceptors
-            // live on the facade, so they persist across `setModel`.
-            [
-              ...(this.lifecycleProjection?.callMiddleware ?? []),
-              ...this.modelFacade.callMiddleware(),
-              // ADR 89 §4 (tree-side) — the in-path interceptor forwarder:
-              // ONE tier-4 middleware that pulls this mount's tree
-              // guards/transforms per op (`ctx.op`) and composes them around
-              // the body, so a `<ToolGate>` veto / `useTransformModelInput`
-              // injection runs on the model's real tool + generate calls.
-              ...(this.treeInterceptorForwarder ? [this.treeInterceptorForwarder] : []),
-              // Telemetry rung 1 — the app-level enrichment (span attrs +
-              // usage/cost), empty when telemetry is off. Composed over the
-              // same one-fiber seam so it reaches every op the send touches.
-              ...this.telemetryMiddleware,
-              // Telemetry rung 2 — per-call `SendInput.telemetry` (functionId +
-              // metadata), stamped INNERMOST so it overrides rung 1's app-name
-              // functionId default. Only when enrichment is on (else a stray
-              // `telemetry` field registers nothing — zero overhead).
-              ...this.buildSendTelemetryMiddleware(input.telemetry),
-            ],
-            this.loop.fx.runExecution(
-              {
-                executionId,
-                sessionId: this.runtime.id,
-                // SP5 — stamp the spawn lineage on the execution scope so every
-                // tick / model / tool envelope is attributable to this sub-agent.
-                ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
-                // The tab that asked, carried for the run's life — a tool call
-                // relayed on tick 6 still knows where the request came from.
-                ...omitUndefined({ connectionId: input.connectionId, clientId: input.clientId }),
-                // ADR 48 — the app-level model executor has no principal of its
-                // own, so this execution's owner rides the scope it is handed.
-                ...omitUndefined({ principal: this.principal }),
-                compiler: this.compiler,
-                mountId: this.mountId,
-                modelExecutor: modelExecutorForCall,
-                target: targetForCall,
-                // The app-level pricing seam, forwarded verbatim. The loop
-                // consults it per tick at settlement, where it beats the
-                // resolved target's declared `rates`.
-                ...omitUndefined({ costResolver: this.costResolver }),
-                toolExecutor: this.toolExecutor,
-                stateApplicator: {
-                  // The `.fx` twins compose in the loop's fiber (Stage 3); the
-                  // Promise facades below stay the derived edge. `Effect.asVoid`
-                  // drops the session's `ApplyResult` to the loop-facing `void`.
-                  fx: {
-                    applyExecutorResult: (i) => this.applyExecutorResultFx(i).pipe(Effect.asVoid),
-                    applyToolResults: (i) => this.applyToolResultsFx(i).pipe(Effect.asVoid),
-                  },
-                  applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
-                  applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
-                  appendEntry: (i) => this.appendEntry(i).then(() => undefined),
-                },
-                notifyTickEnd: (i) => this.notifyLifecycleFx(i),
-                // ADR 55 — the session is the per-render fact producer. It folds
-                // every RenderContext slot it can supply: the active model's
-                // window (via effectiveModelInfo) into `contextInfo`, and the
-                // active model itself (a projection of the target) into
-                // `activeModel`. Future slots (budget, caller) add a field here.
-                // Today the model is construction-bound (this.target); TODO(trail-
-                // per-tick-model): under #169 it's IR-derived per tick and this
-                // re-resolves per render.
-                resolveRenderContext: () => {
-                  // Model-less send: no fallback target to project. The tree may
-                  // still declare a per-tick `<Model>`, but that resolves
-                  // POST-render (chicken-and-egg, see the loop's ADR-56 notes),
-                  // so `activeModel`/`contextInfo` are simply absent this render.
-                  if (targetForCall === undefined) return {};
-                  const contextWindow = effectiveModelInfo(
-                    targetForCall,
-                    this.models,
-                  )?.contextWindow;
-                  const rc: RenderContext = {
-                    ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
-                    activeModel: {
-                      provider: targetForCall.provider,
-                      modelId: targetForCall.modelId,
-                      capabilities: targetForCall.capabilities,
+      // ADR 53: the first render will include everything appended so far.
+      this._inputEntriesSeen = this.bridges.timeline.inputEntryCount();
+      // A new turn is new material — a fold that could not help last turn may be
+      // able to now (ADR 97).
+      this._compactRefusedThisExecution = false;
+      this._executionRollup = undefined;
+
+      // E11 accounting: bump the execution count + set the in-flight id BEFORE
+      // `setStatus("running")`. The count / id updates are cache-only on the
+      // runtime's view; the `setStatus` write-through then persists ONE record
+      // capturing the full execution-start delta (count + currentExecutionId +
+      // running) — the upsert-on-transition contract.
+      if (resume === undefined) this.runtime.bumpExecutionCount(); // same execution, not a new turn
+      this.runtime.setCurrentExecutionId(executionId);
+      this.runtime.setStatus("running");
+
+      // Per-call overrides — model-executor + target — fall through from
+      // SendInput. The app-level model-executor/target is the default;
+      // this send swaps in caller-supplied alternatives without changing
+      // session state.
+      const modelExecutorForCall = input.modelExecutor ?? this.modelExecutor;
+      const targetForCall = input.target ?? this.target;
+
+      // Resolve streaming preference. Cascade:
+      //   SendInput.stream  >  session-level streaming default
+      //                     >  executor capability default
+      // The capability default is true when both:
+      //   - the executor exposes `executeStream`
+      //   - target.capabilities.supportsStreaming is not explicitly false
+      // Both slots may be undefined on a model-less session — the loop enforces
+      // the presence of a model at the per-tick resolution point (respecting the
+      // per-tick `<Model>` cascade), so here we only compute a capability default
+      // when a model-executor + target are actually present.
+      const capabilityStreamDefault =
+        typeof modelExecutorForCall?.executeStream === "function" &&
+        (targetForCall?.capabilities?.supportsStreaming ?? true);
+      const streamForCall = input.stream ?? this.defaultStreaming ?? capabilityStreamDefault;
+
+      const { handle, emit, close } = createSessionExecutionHandle({
+        sessionId: this.runtime.id,
+        executionId,
+        // SP5 — the caller's handle stream carries the lineage too.
+        ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
+        resultPromise,
+        abort: async (reason) => {
+          // EX1 — tear down what this execution spawned FIRST: a child must stop
+          // before the parent waiting on it unwinds (the same deepest-first rule
+          // destroy's walk follows). Synchronous — firing the signal only
+          // schedules the children's teardown; it does not wait on it.
+          executionAbort.abort(new Error(reason ?? "origin execution aborted"));
+          await this.loop.abort({ executionId, ...(reason !== undefined ? { reason } : {}) });
+        },
+      });
+
+      // The run-execution event sink (streaming-up, ADR 51 §2): the session
+      // consumes the `loop:run-execution` command's `.fx` sink-fold face. Each
+      // `LoopExecutionEvent` chunk maps through `buildOnEvent` (the SAME
+      // partial-StreamEvent → handle-queue projection as before) wrapped in an
+      // `Effect.sync` so it drains IN the loop's fiber (in-order, no queue). This
+      // is the ONE event channel — the retired `RunExecutionInput.onEvent`
+      // push-callback is gone.
+      const onEvent = this.buildOnEvent(emit);
+      const loopSink = (event: LoopExecutionEvent): Effect.Effect<void> =>
+        Effect.sync(() => onEvent(event));
+
+      // Execution-scoped tools (#139) are bound for the duration of the
+      // loop run via `withScope`: register each tool, run the loop,
+      // remove the scope's binding in `finally`. Atomic — cleanup runs
+      // on success, failure, or throw.
+      const runPromise = withScope(
+        this.toolExecutor,
+        { scope: "execution", executionId },
+        input.tools ?? [],
+        // ADR 77 Stage 4 — run the COMPOSED loop (`loop.fx.runExecution`, one
+        // fiber) on the telemetry runtime. `loop.runExecution` (the facade) is
+        // exactly `runHarnessProtocol(loop.fx.runExecution(...))` on the DEFAULT
+        // runtime; swapping in `this.telemetryRuntime` routes the whole
+        // execution's `Effect.withSpan` tree to the adopter's tracer, and
+        // because the loop is one fiber every downstream span nests under the
+        // execution via FiberRef `parentOpId` auto-threading. `undefined`
+        // runtime → default → behavior-preserving (no-op tracer).
+        //
+        // ADR 89 §4 — the `model:generate[_stream]` lifecycle forwarders
+        // ride THIS call as tier-4 call-scoped middleware (`withCall
+        // Middleware`): the one-fiber spine threads them into every nested
+        // `runOperation` the send touches, so the projection reaches
+        // WHICHEVER model-executor instance runs a tick — including a
+        // per-tick `<Model>`-swapped executor (ADR 56) the session's
+        // interceptor tree can't reach structurally. Empty list (no
+        // projection target) is a pass-through.
+        () =>
+          runHarnessProtocol(
+            withCallMiddleware(
+              // ADR 89 §2 + §4 — two tier-4 seams ride each send: the §4
+              // `model:generate[_stream]` lifecycle forwarders (observe) AND
+              // the §2 `session.model` interceptors (use/guard). Both reach
+              // WHICHEVER executor runs a tick (per-tick `<Model>` swap OR a
+              // `setModel` swap) via the one-fiber spine — the §2 interceptors
+              // live on the facade, so they persist across `setModel`.
+              [
+                ...(this.lifecycleProjection?.callMiddleware ?? []),
+                ...this.modelFacade.callMiddleware(),
+                // ADR 89 §4 (tree-side) — the in-path interceptor forwarder:
+                // ONE tier-4 middleware that pulls this mount's tree
+                // guards/transforms per op (`ctx.op`) and composes them around
+                // the body, so a `<ToolGate>` veto / `useTransformModelInput`
+                // injection runs on the model's real tool + generate calls.
+                ...(this.treeInterceptorForwarder ? [this.treeInterceptorForwarder] : []),
+                // Telemetry rung 1 — the app-level enrichment (span attrs +
+                // usage/cost), empty when telemetry is off. Composed over the
+                // same one-fiber seam so it reaches every op the send touches.
+                ...this.telemetryMiddleware,
+                // Telemetry rung 2 — per-call `SendInput.telemetry` (functionId +
+                // metadata), stamped INNERMOST so it overrides rung 1's app-name
+                // functionId default. Only when enrichment is on (else a stray
+                // `telemetry` field registers nothing — zero overhead).
+                ...this.buildSendTelemetryMiddleware(input.telemetry),
+              ],
+              this.loop.fx.runExecution(
+                {
+                  executionId,
+                  sessionId: this.runtime.id,
+                  // SP5 — stamp the spawn lineage on the execution scope so every
+                  // tick / model / tool envelope is attributable to this sub-agent.
+                  ...(this.spawnPath.length > 0 ? { spawnPath: this.spawnPath } : {}),
+                  // The tab that asked, carried for the run's life — a tool call
+                  // relayed on tick 6 still knows where the request came from.
+                  ...omitUndefined({ connectionId: input.connectionId, clientId: input.clientId }),
+                  // ADR 48 — the app-level model executor has no principal of its
+                  // own, so this execution's owner rides the scope it is handed.
+                  ...omitUndefined({ principal: this.principal }),
+                  compiler: this.compiler,
+                  mountId: this.mountId,
+                  modelExecutor: modelExecutorForCall,
+                  target: targetForCall,
+                  // The app-level pricing seam, forwarded verbatim. The loop
+                  // consults it per tick at settlement, where it beats the
+                  // resolved target's declared `rates`.
+                  ...omitUndefined({ costResolver: this.costResolver }),
+                  toolExecutor: this.toolExecutor,
+                  stateApplicator: {
+                    // The `.fx` twins compose in the loop's fiber (Stage 3); the
+                    // Promise facades below stay the derived edge. `Effect.asVoid`
+                    // drops the session's `ApplyResult` to the loop-facing `void`.
+                    fx: {
+                      applyExecutorResult: (i) => this.applyExecutorResultFx(i).pipe(Effect.asVoid),
+                      applyToolResults: (i) => this.applyToolResultsFx(i).pipe(Effect.asVoid),
                     },
-                  };
-                  return rc;
+                    applyExecutorResult: (i) => this.applyExecutorResult(i).then(() => undefined),
+                    applyToolResults: (i) => this.applyToolResults(i).then(() => undefined),
+                    appendEntry: (i) => this.appendEntry(i).then(() => undefined),
+                  },
+                  notifyTickEnd: (i) => this.notifyLifecycleFx(i),
+                  // ADR 55 — the session is the per-render fact producer. It folds
+                  // every RenderContext slot it can supply: the active model's
+                  // window (via effectiveModelInfo) into `contextInfo`, and the
+                  // active model itself (a projection of the target) into
+                  // `activeModel`. Future slots (budget, caller) add a field here.
+                  // Today the model is construction-bound (this.target); TODO(trail-
+                  // per-tick-model): under #169 it's IR-derived per tick and this
+                  // re-resolves per render.
+                  resolveRenderContext: () => {
+                    // Model-less send: no fallback target to project. The tree may
+                    // still declare a per-tick `<Model>`, but that resolves
+                    // POST-render (chicken-and-egg, see the loop's ADR-56 notes),
+                    // so `activeModel`/`contextInfo` are simply absent this render.
+                    if (targetForCall === undefined) return {};
+                    const contextWindow = effectiveModelInfo(
+                      targetForCall,
+                      this.models,
+                    )?.contextWindow;
+                    const rc: RenderContext = {
+                      ...(contextWindow !== undefined ? { contextInfo: { contextWindow } } : {}),
+                      activeModel: {
+                        provider: targetForCall.provider,
+                        modelId: targetForCall.modelId,
+                        capabilities: targetForCall.capabilities,
+                      },
+                    };
+                    return rc;
+                  },
+                  // ADR 56 — resolve tree-declared per-tick model refs against the
+                  // mount's ModelBridge. `useModelRegistration` registers models
+                  // here at render time; the loop looks up `declarations.model
+                  // .modelRef` per tick. No default registration — the loop's
+                  // fallback (this.modelExecutor/target via modelExecutorForCall/
+                  // targetForCall) covers the undeclared case.
+                  resolveModel: (ref) => this.bridges.models.resolve(ref),
+                  maxTicks: input.maxTicks ?? this.defaultMaxTicks,
+                  // Resume seed — ticks continue past the last committed tick;
+                  // maxTicks above stays the execution's TOTAL budget.
+                  ...(resume !== undefined ? { startTickIndex: resume.seedTickIndex } : {}),
+                  // ADR 99 slice 2 — the hard backstop under `tickFailurePolicy`.
+                  // Absent, the loop's own default (3) applies.
+                  ...omitUndefined({ maxConsecutiveFailedTicks: this.maxConsecutiveFailedTicks }),
+                  // Pass B — the model-narration switch gates `_summary` schema
+                  // injection at the projection site. Session default (from the
+                  // app-level cascade); the projector defaults ON if unset.
+                  narrate: this.narrate,
+                  stream: streamForCall,
+                  // trail-response-format-send — the send-level structured
+                  // directive (explicit `responseFormat`, or the normalized live
+                  // `output` schema). The loop overlays it onto each tick's
+                  // compiled config, spread LAST (explicit-beats-ambient).
+                  ...(effectiveResponseFormat !== undefined
+                    ? { responseFormat: effectiveResponseFormat }
+                    : {}),
+                  // §B2 — the live-schema `output` sugar. The loop resolves the
+                  // strategy + injects the terminal tool / responseFormat
+                  // overlay; the raw capture rides `ExecutionRunResult
+                  // .terminalCapture`, validated to `data` at result assembly.
+                  ...(outputSpec !== undefined ? { outputSpec } : {}),
+                  // C2 — per-execution tool RESTRICTION. The loop filters the
+                  // merged model-visible list to these canonical names BEFORE
+                  // terminal-tool injection; dispatch-door tools are unaffected.
+                  ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
+                  // Stage 5 — per-send tool concurrency (default "unbounded" in
+                  // the loop) + optional execution timeout, both opt-in.
+                  ...omitUndefined({
+                    // PA1 — the app-signal cascade. Merge the construction
+                    // signal (app / per-session) with this call's signal into
+                    // the ONE live execution signal the loop honors. An
+                    // already-aborted merge means the loop stops at its tick-top
+                    // abort check (no model call); a mid-run abort tears down
+                    // the in-flight execution.
+                    signal: mergeAbortSignals(this.constructionSignal, input.signal),
+                    toolConcurrency: input.toolConcurrency,
+                    timeoutMs: input.timeoutMs,
+                  }),
+                  // The event sink — the SECOND `fx.runExecution` arg (the
+                  // `commandStream` `.fx` sink-fold face). Events drain in-fiber,
+                  // in emission order, on the loop's own fiber.
                 },
-                // ADR 56 — resolve tree-declared per-tick model refs against the
-                // mount's ModelBridge. `useModelRegistration` registers models
-                // here at render time; the loop looks up `declarations.model
-                // .modelRef` per tick. No default registration — the loop's
-                // fallback (this.modelExecutor/target via modelExecutorForCall/
-                // targetForCall) covers the undeclared case.
-                resolveModel: (ref) => this.bridges.models.resolve(ref),
-                maxTicks: input.maxTicks ?? this.defaultMaxTicks,
-                // Resume seed — ticks continue past the last committed tick;
-                // maxTicks above stays the execution's TOTAL budget.
-                ...(resume !== undefined ? { startTickIndex: resume.seedTickIndex } : {}),
-                // ADR 99 slice 2 — the hard backstop under `tickFailurePolicy`.
-                // Absent, the loop's own default (3) applies.
-                ...omitUndefined({ maxConsecutiveFailedTicks: this.maxConsecutiveFailedTicks }),
-                // Pass B — the model-narration switch gates `_summary` schema
-                // injection at the projection site. Session default (from the
-                // app-level cascade); the projector defaults ON if unset.
-                narrate: this.narrate,
-                stream: streamForCall,
-                // trail-response-format-send — the send-level structured
-                // directive (explicit `responseFormat`, or the normalized live
-                // `output` schema). The loop overlays it onto each tick's
-                // compiled config, spread LAST (explicit-beats-ambient).
-                ...(effectiveResponseFormat !== undefined
-                  ? { responseFormat: effectiveResponseFormat }
-                  : {}),
-                // §B2 — the live-schema `output` sugar. The loop resolves the
-                // strategy + injects the terminal tool / responseFormat
-                // overlay; the raw capture rides `ExecutionRunResult
-                // .terminalCapture`, validated to `data` at result assembly.
-                ...(outputSpec !== undefined ? { outputSpec } : {}),
-                // C2 — per-execution tool RESTRICTION. The loop filters the
-                // merged model-visible list to these canonical names BEFORE
-                // terminal-tool injection; dispatch-door tools are unaffected.
-                ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
-                // Stage 5 — per-send tool concurrency (default "unbounded" in
-                // the loop) + optional execution timeout, both opt-in.
-                ...omitUndefined({
-                  // PA1 — the app-signal cascade. Merge the construction
-                  // signal (app / per-session) with this call's signal into
-                  // the ONE live execution signal the loop honors. An
-                  // already-aborted merge means the loop stops at its tick-top
-                  // abort check (no model call); a mid-run abort tears down
-                  // the in-flight execution.
-                  signal: mergeAbortSignals(this.constructionSignal, input.signal),
-                  toolConcurrency: input.toolConcurrency,
-                  timeoutMs: input.timeoutMs,
-                }),
-                // The event sink — the SECOND `fx.runExecution` arg (the
-                // `commandStream` `.fx` sink-fold face). Events drain in-fiber,
-                // in emission order, on the loop's own fiber.
-              },
-              loopSink,
-            ),
-            // ADR 102 — the app-shared spine (loop, compiler, model executor)
-            // is constructed on the APP's bus, so without this its frames —
-            // model deltas above all — fan in at the root and never reach a
-            // subscriber attached to this session's scope node. The one-fiber
-            // spine carries the target to every nested emission. Topology-free
-            // apps are unaffected: `this.bus` IS the app bus.
-          ).pipe((execution) => withEmissionBus(this.bus, execution)),
-          this.telemetryRuntime,
-        ),
-    );
+                loopSink,
+              ),
+              // ADR 102 — the app-shared spine (loop, compiler, model executor)
+              // is constructed on the APP's bus, so without this its frames —
+              // model deltas above all — fan in at the root and never reach a
+              // subscriber attached to this session's scope node. The one-fiber
+              // spine carries the target to every nested emission. Topology-free
+              // apps are unaffected: `this.bus` IS the app bus.
+            ).pipe((execution) => withEmissionBus(this.bus, execution)),
+            this.telemetryRuntime,
+          ),
+      );
 
-    this._currentExecution = runPromise;
-    this._currentHandle = handle;
-    this._currentEmit = emit;
-    this._handleReservation?.resolve(handle);
-    // Latch loop completion SYNCHRONOUSLY on settle — joins during the
-    // terminal window (endTurn/flush/resolve) must be refused. Safe to leave
-    // un-`catch`ed: both branches are supplied (so `runPromise`'s rejection is
-    // consumed) and neither can throw — the derived promise cannot reject.
-    runPromise.then(
-      () => {
-        this._loopDone = true;
-      },
-      () => {
-        this._loopDone = true;
-      },
-    );
+      this._currentExecution = runPromise;
+      this._currentHandle = handle;
+      this._currentEmit = emit;
+      this._handleReservation?.resolve(handle);
+      // Latch loop completion SYNCHRONOUSLY on settle — joins during the
+      // terminal window (endTurn/flush/resolve) must be refused. Safe to leave
+      // un-`catch`ed: both branches are supplied (so `runPromise`'s rejection is
+      // consumed) and neither can throw — the derived promise cannot reject.
+      runPromise.then(
+        () => {
+          this._loopDone = true;
+        },
+        () => {
+          this._loopDone = true;
+        },
+      );
 
-    // Resolve the result promise + emit the final `result` StreamEvent
-    // when the loop terminates. Iterator closes after the result event.
-    const settled = runPromise.then(
-      async (terminal) => {
-        // 4b — the loop has terminated, so no more tick-boundary drains will
-        // run: whatever remains in the steer queue is UNDRAINED. On a normal
-        // end (`succeeded` — also covers executor_failed / max_ticks, which
-        // still complete a real turn) re-dispatch it as a fresh follow-up
-        // (lossless; the joining caller was told delivery succeeded). On
-        // cancel / abort / timeout (`outcome !== "succeeded"`) DROP it — an
-        // explicit stop voids the steer's premise; resurrecting it as a new
-        // turn would contradict the abort.
-        if (this._steerQueue.length > 0) {
-          const undrained = this._steerQueue;
+      // Resolve the result promise + emit the final `result` StreamEvent
+      // when the loop terminates. Iterator closes after the result event.
+      const settled = runPromise.then(
+        async (terminal) => {
+          // 4b — the loop has terminated, so no more tick-boundary drains will
+          // run: whatever remains in the steer queue is UNDRAINED. On a normal
+          // end (`succeeded` — also covers executor_failed / max_ticks, which
+          // still complete a real turn) re-dispatch it as a fresh follow-up
+          // (lossless; the joining caller was told delivery succeeded). On
+          // cancel / abort / timeout (`outcome !== "succeeded"`) DROP it — an
+          // explicit stop voids the steer's premise; resurrecting it as a new
+          // turn would contradict the abort.
+          if (this._steerQueue.length > 0) {
+            const undrained = this._steerQueue;
+            this._steerQueue = [];
+            if (terminal.outcome === "succeeded") redispatchSteers = undrained;
+          }
+          // EX1 — the same rule the steer queue just applied, applied to the
+          // execution's SPAWNED work: an execution that did not complete
+          // (`canceled`, `timeout` — `executor_failed` / `max_ticks` / a veto all
+          // report `succeeded`, having completed a real turn) cancels the
+          // sub-agents it started. This is the path a TIMEOUT takes, which
+          // `handle.abort` never sees. On success the children survive
+          // deliberately: that is the case `app.abortExecutionTree` exists for.
+          if (terminal.outcome !== "succeeded") {
+            executionAbort.abort(
+              new Error(`origin execution ${terminal.outcome}: ${terminal.reason ?? ""}`),
+            );
+          }
+          // ADR 49 flush barrier — execution end. Invariant: any process
+          // that subsequently loads the store sees every completed
+          // execution. A buffered store-write failure is a durability
+          // divergence: fail the send with the typed TimelineWriteFailed
+          // (catchTag-able) and land the session on "failed" status —
+          // it must not keep running against a log its store doesn't have.
+          // ADR 53: emit the turn-boundary RECORD (segmentation +
+          // turn-aggregate usage; load-bearing nowhere) before the flush
+          // barrier so it rides the same durability guarantee.
+          await this.bridges.timeline
+            .endTurn({
+              executionId,
+              // The loop RESOLVES provider failures (outcome "succeeded"
+              // with stopReason "executor_failed") — the boundary record
+              // must not launder them (review finding).
+              // The loop RESOLVES both kinds of refusal — a provider failure and a
+              // guard veto arrive as `outcome: "succeeded"` with the stop reason
+              // naming what happened. The record must launder NEITHER: this site
+              // already caught the provider case, and read a vetoed turn as
+              // `succeeded`, which made a refused turn indistinguishable on the
+              // timeline from one that answered.
+              outcome:
+                terminal.outcome === "succeeded"
+                  ? terminal.result?.stopReason === "executor_failed"
+                    ? "failed"
+                    : terminal.result?.stopReason === "vetoed"
+                      ? "vetoed"
+                      : "succeeded"
+                  : "aborted",
+              // The CAUSE rides the record too — the only account a reloaded client
+              // can read, since a turn that died before its first tick appended no
+              // assistant entry at all.
+              ...omitUndefined({
+                usage: this._executionRollup?.usage,
+                // The turn's per-model breakdown + cost, folded from the same
+                // per-tick stream the flat `usage` above comes from — so the
+                // three never disagree. `cost` is `partial` when any tick of
+                // this turn was unpriced.
+                byModel: this._executionRollup?.byModel,
+                cost: this._executionRollup?.cost,
+                stopCause: terminal.result?.stopCause,
+                // The target that ran the turn. A SUCCEEDED boundary is a proof that every
+                // entry it carried was projectable — but only for this target, so a reader
+                // narrowing suspects to "entries since the last success" can tell a
+                // comparable success from one across a failover or a model swap.
+                target: boundaryTarget(targetForCall),
+              }),
+            })
+            .catch(() => {});
+          try {
+            await this.bridges.timeline.flush();
+          } catch (err) {
+            durabilityFailed = true;
+            // 4b — the session diverged from its durable log and lands "failed".
+            // Do NOT re-dispatch undrained steers into a failed session.
+            redispatchSteers = null;
+            resultDeferred.reject(err);
+            close();
+            return;
+          }
+          const result = terminal.result;
+          // A CANCELED terminal that carries a result is a real, settled turn —
+          // the loop ran it to its abort point and reports what happened
+          // (`ticks`, partial `output`, `usage`, and a `stopReason` that already
+          // NAMES the cancellation: "aborted" / "timeout"). Resolve it, exactly
+          // as a natural end resolves; `SendResult.stopReason` is where a caller
+          // reads the cancellation. Only a terminal with NO result (nothing to
+          // report) rejects.
+          //
+          // This is the session-side half of the loop's ratified abort semantics
+          // (2026-07-27): the loop reports `canceled` for BOTH entry points (a
+          // caller `signal` abort AND `abort()`), so the session must not make the
+          // caller's `.result` settle differently depending on which one fired.
+          // Before the ruling, a signal abort reached here as `succeeded` (and
+          // resolved) while `abort()` reached here as `canceled` (and rejected) —
+          // the same divergence, one layer up. Note the ADR 49 boundary record
+          // above ALREADY treats this terminal as a settled turn (`outcome:
+          // "aborted"`, not a failure); resolving keeps the two in agreement.
+          if (result && (terminal.outcome === "succeeded" || terminal.outcome === "canceled")) {
+            const response = result.output
+              .filter((b): b is { type: "text"; text: string } => b.type === "text")
+              .map((b) => b.text)
+              .join("");
+            // §B3 — structured-output `data`. The LOOP is the validation
+            // authority (it holds the resolved schema — send-level `input.output`
+            // OR a tree-level `<Output>` the session never sees), so it validates
+            // the capture / final text and surfaces the VALIDATED value on
+            // `result.data`; a schema that isn't met fails the execution with the
+            // typed `ResponseValidationError` loop-side (the onRejected branch
+            // below rejects `handle.result`). The session lifts `result.data`
+            // verbatim — present for BOTH the send-level `output` sugar AND a
+            // tree-only `<Output>` (the dedicated-extraction-agent story).
+            const sendResult: SendResult = {
+              response,
+              output: result.output,
+              toolResults: result.toolResults,
+              usage: result.usage,
+              // Lifted from the loop's run result, exactly as the flat `usage`
+              // beside them is: the loop is the accounting authority for the
+              // run (it sees every tick, including ones that appended no
+              // entry). Absent when the run recorded no usage; `cost` is
+              // `partial` when any tick was unpriced — never a zero `complete`.
+              ...omitUndefined({ byModel: result.byModel, cost: result.cost }),
+              stopReason: result.stopReason,
+              ticks: result.ticks,
+              executionId,
+              ...(result.data !== undefined ? { data: result.data } : {}),
+              // `executor_failed` and `vetoed` both RESOLVE — so a caller's `.catch`
+              // never runs and this is the ONLY place they can read what happened.
+              ...(result.stopCause !== undefined ? { stopCause: result.stopCause } : {}),
+            };
+            emit({ type: "result", tick: 0, result: sendResult });
+            resultDeferred.resolve(sendResult);
+          } else {
+            resultDeferred.reject(
+              new Error(
+                `execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`,
+              ),
+            );
+          }
+          close();
+        },
+        async (err) => {
+          // 4b — the execution errored: drop any undrained steers (there is no
+          // successful turn they could have steered, and the caller's `.result`
+          // rejects). No re-dispatch.
           this._steerQueue = [];
-          if (terminal.outcome === "succeeded") redispatchSteers = undrained;
-        }
-        // EX1 — the same rule the steer queue just applied, applied to the
-        // execution's SPAWNED work: an execution that did not complete
-        // (`canceled`, `timeout` — `executor_failed` / `max_ticks` / a veto all
-        // report `succeeded`, having completed a real turn) cancels the
-        // sub-agents it started. This is the path a TIMEOUT takes, which
-        // `handle.abort` never sees. On success the children survive
-        // deliberately: that is the case `app.abortExecutionTree` exists for.
-        if (terminal.outcome !== "succeeded") {
-          executionAbort.abort(
-            new Error(`origin execution ${terminal.outcome}: ${terminal.reason ?? ""}`),
-          );
-        }
-        // ADR 49 flush barrier — execution end. Invariant: any process
-        // that subsequently loads the store sees every completed
-        // execution. A buffered store-write failure is a durability
-        // divergence: fail the send with the typed TimelineWriteFailed
-        // (catchTag-able) and land the session on "failed" status —
-        // it must not keep running against a log its store doesn't have.
-        // ADR 53: emit the turn-boundary RECORD (segmentation +
-        // turn-aggregate usage; load-bearing nowhere) before the flush
-        // barrier so it rides the same durability guarantee.
-        await this.bridges.timeline
-          .endTurn({
-            executionId,
-            // The loop RESOLVES provider failures (outcome "succeeded"
-            // with stopReason "executor_failed") — the boundary record
-            // must not launder them (review finding).
-            // The loop RESOLVES both kinds of refusal — a provider failure and a
-            // guard veto arrive as `outcome: "succeeded"` with the stop reason
-            // naming what happened. The record must launder NEITHER: this site
-            // already caught the provider case, and read a vetoed turn as
-            // `succeeded`, which made a refused turn indistinguishable on the
-            // timeline from one that answered.
-            outcome:
-              terminal.outcome === "succeeded"
-                ? terminal.result?.stopReason === "executor_failed"
-                  ? "failed"
-                  : terminal.result?.stopReason === "vetoed"
-                    ? "vetoed"
-                    : "succeeded"
-                : "aborted",
-            // The CAUSE rides the record too — the only account a reloaded client
-            // can read, since a turn that died before its first tick appended no
-            // assistant entry at all.
-            ...omitUndefined({
-              usage: this._executionRollup?.usage,
-              // The turn's per-model breakdown + cost, folded from the same
-              // per-tick stream the flat `usage` above comes from — so the
-              // three never disagree. `cost` is `partial` when any tick of
-              // this turn was unpriced.
-              byModel: this._executionRollup?.byModel,
-              cost: this._executionRollup?.cost,
-              stopCause: terminal.result?.stopCause,
-              // The target that ran the turn. A SUCCEEDED boundary is a proof that every
-              // entry it carried was projectable — but only for this target, so a reader
-              // narrowing suspects to "entries since the last success" can tell a
-              // comparable success from one across a failover or a model swap.
-              target: boundaryTarget(targetForCall),
-            }),
-          })
-          .catch(() => {});
-        try {
-          await this.bridges.timeline.flush();
-        } catch (err) {
-          durabilityFailed = true;
-          // 4b — the session diverged from its durable log and lands "failed".
-          // Do NOT re-dispatch undrained steers into a failed session.
-          redispatchSteers = null;
+          // EX1 — and cancel what it spawned, for the same reason: there was no
+          // turn for those sub-agents to be doing work for.
+          executionAbort.abort(err instanceof Error ? err : new Error("origin execution failed"));
+          // The execution error wins as the rejection reason; the barrier
+          // still runs so a completed-but-unflushed prefix lands in the
+          // store (best-effort — a flush failure here latches "failed"
+          // status but does not mask the execution error).
+          await this.bridges.timeline
+            .endTurn({
+              executionId,
+              outcome: "failed",
+              ...omitUndefined({
+                usage: this._executionRollup?.usage,
+                byModel: this._executionRollup?.byModel,
+                cost: this._executionRollup?.cost,
+                target: boundaryTarget(targetForCall),
+              }),
+            })
+            .catch(() => {});
+          try {
+            await this.bridges.timeline.flush();
+          } catch {
+            durabilityFailed = true;
+          }
           resultDeferred.reject(err);
           close();
-          return;
-        }
-        const result = terminal.result;
-        // A CANCELED terminal that carries a result is a real, settled turn —
-        // the loop ran it to its abort point and reports what happened
-        // (`ticks`, partial `output`, `usage`, and a `stopReason` that already
-        // NAMES the cancellation: "aborted" / "timeout"). Resolve it, exactly
-        // as a natural end resolves; `SendResult.stopReason` is where a caller
-        // reads the cancellation. Only a terminal with NO result (nothing to
-        // report) rejects.
-        //
-        // This is the session-side half of the loop's ratified abort semantics
-        // (2026-07-27): the loop reports `canceled` for BOTH entry points (a
-        // caller `signal` abort AND `abort()`), so the session must not make the
-        // caller's `.result` settle differently depending on which one fired.
-        // Before the ruling, a signal abort reached here as `succeeded` (and
-        // resolved) while `abort()` reached here as `canceled` (and rejected) —
-        // the same divergence, one layer up. Note the ADR 49 boundary record
-        // above ALREADY treats this terminal as a settled turn (`outcome:
-        // "aborted"`, not a failure); resolving keeps the two in agreement.
-        if (result && (terminal.outcome === "succeeded" || terminal.outcome === "canceled")) {
-          const response = result.output
-            .filter((b): b is { type: "text"; text: string } => b.type === "text")
-            .map((b) => b.text)
-            .join("");
-          // §B3 — structured-output `data`. The LOOP is the validation
-          // authority (it holds the resolved schema — send-level `input.output`
-          // OR a tree-level `<Output>` the session never sees), so it validates
-          // the capture / final text and surfaces the VALIDATED value on
-          // `result.data`; a schema that isn't met fails the execution with the
-          // typed `ResponseValidationError` loop-side (the onRejected branch
-          // below rejects `handle.result`). The session lifts `result.data`
-          // verbatim — present for BOTH the send-level `output` sugar AND a
-          // tree-only `<Output>` (the dedicated-extraction-agent story).
-          const sendResult: SendResult = {
-            response,
-            output: result.output,
-            toolResults: result.toolResults,
-            usage: result.usage,
-            // Lifted from the loop's run result, exactly as the flat `usage`
-            // beside them is: the loop is the accounting authority for the
-            // run (it sees every tick, including ones that appended no
-            // entry). Absent when the run recorded no usage; `cost` is
-            // `partial` when any tick was unpriced — never a zero `complete`.
-            ...omitUndefined({ byModel: result.byModel, cost: result.cost }),
-            stopReason: result.stopReason,
-            ticks: result.ticks,
-            executionId,
-            ...(result.data !== undefined ? { data: result.data } : {}),
-            // `executor_failed` and `vetoed` both RESOLVE — so a caller's `.catch`
-            // never runs and this is the ONLY place they can read what happened.
-            ...(result.stopCause !== undefined ? { stopCause: result.stopCause } : {}),
-          };
-          emit({ type: "result", tick: 0, result: sendResult });
-          resultDeferred.resolve(sendResult);
-        } else {
-          resultDeferred.reject(
-            new Error(`execution ended with outcome=${terminal.outcome}: ${terminal.reason ?? ""}`),
-          );
-        }
-        close();
-      },
-      async (err) => {
-        // 4b — the execution errored: drop any undrained steers (there is no
-        // successful turn they could have steered, and the caller's `.result`
-        // rejects). No re-dispatch.
-        this._steerQueue = [];
-        // EX1 — and cancel what it spawned, for the same reason: there was no
-        // turn for those sub-agents to be doing work for.
-        executionAbort.abort(err instanceof Error ? err : new Error("origin execution failed"));
-        // The execution error wins as the rejection reason; the barrier
-        // still runs so a completed-but-unflushed prefix lands in the
-        // store (best-effort — a flush failure here latches "failed"
-        // status but does not mask the execution error).
-        await this.bridges.timeline
-          .endTurn({
-            executionId,
-            outcome: "failed",
-            ...omitUndefined({
-              usage: this._executionRollup?.usage,
-              byModel: this._executionRollup?.byModel,
-              cost: this._executionRollup?.cost,
-              target: boundaryTarget(targetForCall),
-            }),
-          })
-          .catch(() => {});
-        try {
-          await this.bridges.timeline.flush();
-        } catch {
-          durabilityFailed = true;
-        }
+        },
+      );
+      // Settle-path safety net. The `.then(onSettled, onFailed)` above consumes
+      // the loop's own rejection, but the DERIVED promise has no consumer: a
+      // throw from INSIDE either handler, before it settles `resultDeferred`,
+      // would leave the caller's `.result` pending forever while the throw
+      // escaped as an unhandled rejection. Route it to the one place that can
+      // still report it. Both calls are idempotent (a settled promise ignores a
+      // second settle; `close()` guards on `done`), so a handler that already
+      // finished its work is undisturbed.
+      void settled.catch((err: unknown) => {
         resultDeferred.reject(err);
         close();
-      },
-    );
-    // Settle-path safety net. The `.then(onSettled, onFailed)` above consumes
-    // the loop's own rejection, but the DERIVED promise has no consumer: a
-    // throw from INSIDE either handler, before it settles `resultDeferred`,
-    // would leave the caller's `.result` pending forever while the throw
-    // escaped as an unhandled rejection. Route it to the one place that can
-    // still report it. Both calls are idempotent (a settled promise ignores a
-    // second settle; `close()` guards on `done`), so a handler that already
-    // finished its work is undisturbed.
-    void settled.catch((err: unknown) => {
-      resultDeferred.reject(err);
-      close();
-    });
+      });
 
-    return handle;
+      return handle;
+    } catch (cause) {
+      // Once-only promise semantics make both rejects no-ops after the loop
+      // took ownership — no flags, no double-unwind.
+      resultDeferred.reject(cause);
+      this._handleReservation?.reject(cause);
+      throw cause;
+    }
   }
 
   /**
