@@ -180,6 +180,7 @@ describe("resumeSession brings an evicted session back", () => {
 
     await app.createSession({
       sessionId: "owned",
+      eager: true, // identity is read back off the RECORD — earn one
       principal: "user-1",
       requiredScopes: ["tenant:acme"],
       metadata: { thread: "t-9" },
@@ -224,7 +225,7 @@ describe("resumeSession brings an evicted session back", () => {
       },
     });
 
-    await app.createSession({ sessionId: "A" });
+    await app.createSession({ sessionId: "A", eager: true }); // resume needs a record
     expect(constructions).toBe(1);
     await app.createSession({ sessionId: "B" }); // evicts A
 

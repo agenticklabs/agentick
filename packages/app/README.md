@@ -221,7 +221,9 @@ The app keeps **two** structures for sessions, deliberately not merged:
 | **Live registry** | `sessionId → live session`, in-memory         | Routing and interaction — `app.getSession(id)`     |
 | **Session store** | `sessionId → SessionRecord`, durable superset | "List / resume my sessions" — `app.listSessions()` |
 
-The store is the queryable superset: every non-ephemeral session ever, including closed ones the live registry dropped.
+The store is the queryable superset: every session that EARNED a record, including closed ones the live registry dropped.
+
+**Create early, persist late.** `createSession` makes a session exist — live, in the registry, fully capable (tools, prompts, completions, subscriptions) — but writes NOTHING durable. The record is earned by the first turn (`send`), by `createSession({ eager: true })` when a host wants the row at creation (imports, migrations), or by resuming an existing record. A session nobody ever speaks to leaves no trace: not on eviction, not on shutdown, not on close. This is what makes a brand-new chat cheap and honest — the client creates it on open, the palette is real because the session is, and the row appears the moment the user actually says something.
 
 ```ts
 const live = app.getSession("chat-1"); // undefined once closed or evicted

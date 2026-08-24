@@ -48,10 +48,19 @@
  * write would overwrite a live session's durable record with a blank one before
  * anything read it back.
  *
+ * **Create early, persist late.** A session EXISTS the moment it is
+ * constructed — palette, prompts, completions, subscriptions all real — but it
+ * becomes DURABLE only when something earns the record: adopting one at
+ * hydrate, `eager: true`, or the first `running` transition (execution is the
+ * intent moment). Until then every "persisting" write below stays cache-only
+ * (`durable` gates `commit`), and teardown — evict, shutdown, close — writes
+ * nothing: a session nobody ever spoke to leaves no trace.
+ *
  * **Persist/notify parity (the View migration was parity-only):**
  *   - `setStatus` / `setMeta` PERSIST (`view.write` → cache + store.put +
- *     notify). `setStatus` is the metadata-change notify trigger, exactly as
- *     the old `notify()` was; `setMeta` persists directly (as it did).
+ *     notify) — once the record is EARNED (see above). `setStatus` is the
+ *     metadata-change notify trigger, exactly as the old `notify()` was;
+ *     `setMeta` persists directly (as it did).
  *   - `setCurrentExecutionId` / `bumpExecutionCount` / `addTickAccounting` are
  *     CACHE-ONLY (`view.seedSync` — no store write, no notify). They ride the
  *     next `setStatus` into the store, preserving the old behavior where only a
@@ -330,9 +339,22 @@ export class SessionRuntime {
     return adopted;
   }
 
+  /**
+   * Whether this session has EARNED a durable record — by adopting one at
+   * hydrate, by `eager`, or by starting an execution. Until then every
+   * `persist: true` commit stays cache-only: persistence is triggered by
+   * EXECUTION, not by creation — and not by teardown either. A session that
+   * never ran a turn dies recordless on evict, shutdown, and close alike,
+   * which is what lets a host create a live session for a brand-new chat
+   * (palette, prompts, completions all real) and leave no row behind if the
+   * user never says anything.
+   */
+  private durable = false;
+
   async hydrate(): Promise<void> {
     const persisted = await this.store?.get(this.id, this.storeCtx());
     if (persisted !== undefined) {
+      this.durable = true;
       this.adopted = persisted;
       const fresh = this.record();
       this.view.seedSync(
@@ -348,6 +370,7 @@ export class SessionRuntime {
       this.commit({}, { persist: true });
       return;
     }
+    if (this.eager) this.durable = true;
     this.commit({}, { persist: this.eager });
   }
 
@@ -374,12 +397,13 @@ export class SessionRuntime {
    */
   private commit(patch: SessionRecordPatch, opts: { persist: boolean }): void {
     const cur = this.record();
+    const persist = opts.persist && this.durable;
     const record = omitUndefined({
       ...cur,
       ...patch,
-      updatedAt: opts.persist ? Date.now() : cur.updatedAt,
+      updatedAt: persist ? Date.now() : cur.updatedAt,
     }) as SessionRecord;
-    if (opts.persist) {
+    if (persist) {
       this.view.write(record, this.storeCtx());
     } else {
       this.view.seedSync(record);
@@ -394,6 +418,9 @@ export class SessionRuntime {
   /** PERSIST + NOTIFY — the metadata-change trigger (the old `notify()`). */
   setStatus(next: SessionStatus, outcome?: SessionRunOutcome): void {
     const prev = this.record().status;
+    // Starting a turn is the intent moment: the first `running` is what earns
+    // the durable record (the upsert-on-transition contract's trigger).
+    if (next === "running") this.durable = true;
     this.commit({ status: next }, { persist: true });
     if (next !== prev) this.onStatusTransition?.(next, outcome);
   }

@@ -219,7 +219,11 @@ describe("app/destroy_session — ownership", () => {
     await gateway.listen();
     const app = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions(1) });
 
-    const owned = await app.createSession({ sessionId: "paged-out", principal: "userB" });
+    const owned = await app.createSession({
+      sessionId: "paged-out",
+      principal: "userB",
+      eager: true,
+    });
     expect(owned.id).toBe("paged-out");
     // Creating a second session evicts the first (soft LRU cap of 1).
     await app.createSession({ sessionId: "keeper" });
@@ -270,7 +274,7 @@ describe("gateway/destroy_session — app-less addressing", () => {
     const first = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const second = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     await first.createSession({ sessionId: "decoy" });
-    await second.createSession({ sessionId: "target" });
+    await second.createSession({ sessionId: "target", eager: true });
 
     const destroyed = await dispatchRequest(
       gateway,
@@ -310,7 +314,7 @@ describe("gateway/destroy_session — app-less addressing", () => {
     await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions() });
     const owner = await gateway.createApp({ rootElement: NULL_ROOT, options: mkAppOptions(1) });
 
-    await owner.createSession({ sessionId: "paged-out", principal: "userB" });
+    await owner.createSession({ sessionId: "paged-out", principal: "userB", eager: true });
     await owner.createSession({ sessionId: "keeper" });
     expect(owner.getSession("paged-out")).toBeUndefined();
 

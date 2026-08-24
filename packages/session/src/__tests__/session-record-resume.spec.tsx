@@ -77,6 +77,9 @@ async function mkSession(
     toolExecutor: tools,
     target,
     sessionStore: store,
+    // Persistence is execution's to trigger; these rigs are ABOUT the record,
+    // so they earn one at creation.
+    eager: true,
     ...(title !== undefined ? { title } : {}),
   });
   await session.ready;

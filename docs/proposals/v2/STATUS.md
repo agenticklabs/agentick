@@ -2305,6 +2305,31 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 
 ## Decision log
 
+### 2026-08-24 — create early, persist late: the record is EARNED, teardown writes nothing
+
+Production review (Ryan) rejected the client-draft model and its palette
+workaround: a brand-new chat should be a REAL live session — per-principal
+tools, prompts, completions, subscriptions — that simply is not durable
+yet. The framework already had the creation half (lazy-persist); the
+teardown half was broken: evict and shutdown stamped `hibernated` onto
+sessions that never earned a record, creating rows for chats nobody spoke
+to (empirically probed: create alone ✓ recordless, evict ✗, shutdown ✗).
+
+Fix: `SessionRuntime.durable` — true on adopting a record at hydrate, on
+`eager: true`, or at the first `running` transition (execution is the
+intent moment). `commit({persist: true})` writes to the store only when
+durable. Consequences: teardown of a never-persisted session writes
+nothing on evict/shutdown/close; meta writes on an unpersisted session
+ride until execution earns the row (closing the old title-write blank-row
+vector at the framework level); `eager: true` is the one door for hosts
+that want the row at creation. Five rigs updated to earn their records
+explicitly; pinned in unpersisted-session-teardown.spec.tsx.
+
+Supersedes: the knowify client-draft machinery (catalog cache,
+conversationPalette, openDraft specialization) rips out — new chat calls
+create_session on open; #312 shrinks to the per-thread re-declaration
+optimization. session-doors.md Part II to be rewritten as this design.
+
 Running record of decisions made during execution (separate from the
 blueprint's design decisions; this is execution-level).
 

@@ -264,7 +264,9 @@ describe("app.destroySession — the live plane", () => {
 
   it("is idempotent — a second destroy reports found:false / existed:false", async () => {
     const app = await mkApp();
-    await app.createSession({ sessionId: "solo" });
+    // `eager` earns the record at creation — persistence is otherwise
+    // execution's to trigger, and this test is about the record plane.
+    await app.createSession({ sessionId: "solo", eager: true });
 
     const first = await app.destroySession("solo");
     expect(first.live.found).toBe(true);
@@ -319,7 +321,7 @@ describe("app.destroySession — the durable record", () => {
 
   it("close() leaves the record behind — destroy is the verb that deletes it", async () => {
     const app = await mkApp();
-    const session = await app.createSession({ sessionId: "closed-not-gone" });
+    const session = await app.createSession({ sessionId: "closed-not-gone", eager: true });
     await session.close();
 
     // The gentle verb: history survives on a terminal status.
