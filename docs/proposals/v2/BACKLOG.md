@@ -16,17 +16,25 @@ arc 1)**, then by opportunity. Sequencing rationale inline per stream.
 The model knows what it can do WITHOUT searching; it searches only for
 specifics. "Rules and conventions drive success."
 
-- Tool `summary` (one sentence) as first-class declaration metadata.
-- **Toolboxes** — the grouping concept over tools.
-- Projection split: capabilities + summaries + categories ALWAYS in context;
-  **schemas on demand** (generalize knowify's `tool-search`/`tool_docs` into
-  the principled mechanism).
+- Tool `summary` (one sentence) + `group` as canonical typed fields (the
+  channel EXISTS: ToolAnnotations -> ToolInfo already crosses the wire; this
+  is naming, not machinery). `createToolGroup({name, summary, tools})` sugar
+  that tags members and flattens into `tools: []`.
+- The capabilities SECTION (grouped summaries, categories, NO schemas,
+  always in context) is APP-SIDE JSX; a framework `<Toolboxes/>` reference
+  component only post-absorption.
+- Per-principal visibility: NO framework — sessions are per-principal and
+  the app recipe composes the tool set at session build; guards enforce at
+  dispatch. Provider per-request subsets = adapter capability, later.
+  LAW (cache): within a session the tools block may only APPEND.
+  A projection-predicate seam only if within-session dynamism shows a
+  third consumer.
 - Same treatment for resources, prompts, skills — kill enumeration bloat.
 - Knowify-side: curation, keywords, embeddings of description/summary/
   few-shot questions per tool.
 
-Split: framework (declaration metadata + projection tiers) / knowify
-(curation + embeddings). NEXT: arc-1 brief.
+Split: ONE small framework PR (fields + sugar) / knowify-led everything
+else. NEXT: arc-1 brief.
 
 ## B. Explicit completion — the done tool ✅ DESIGN RATIFIED, BUILD PENDING
 
@@ -58,9 +66,10 @@ after app-side proof.
 
 ## C. Session tools — the model holds its own handles 🔜 ARC 1
 
-- `ask_user`: framework-provided tool EXPOSED by the elicitation package,
-  explicitly included by apps (bundled-not-privileged).
-- Agent callout / toast: knowify channel + dock rendering.
+- `ask_user`: DONE (app-side, already shipped).
+- Toast: it IS just a notification channel — a channel name + dock renderer
+  - a model-facing `notify_user` tool publishing to it. Zero framework.
+    Also the delivery surface stream G's scheduler/heartbeats will need.
 - **`_summary` on tool_dispatch**: required, injected into every tool schema
   by the tool-executor (stripped before the handler), tool-defined inner
   field wins over the injected outer. PARALLEL-BATCH UX (leaning, not
@@ -69,7 +78,9 @@ after app-side proof.
   `announce`-style tool only if narration proves unreliable (absorption
   rule). Ryan still kicking the parallel story around.
 
-NEXT: arc-1 brief (with A).
+NEXT: arc-1 brief (with A) — knowify-led + the one framework PR (summary/
+group fields, createToolGroup, \_summary injection, stopOnTools gate
+factory, bound-schema exposure).
 
 ## D. Memory / search plane ⏸ DESIGN SKETCHED
 
