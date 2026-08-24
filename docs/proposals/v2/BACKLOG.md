@@ -11,12 +11,17 @@ arc 1)**, then by opportunity. Sequencing rationale inline per stream.
 
 ---
 
-## A. Context architecture — "the lay of the land" 🔜 ARC 1
+## A. Context architecture — "the lay of the land" 🔒 ARC 1 LOCKED (2026-08-24)
 
 The model knows what it can do WITHOUT searching; it searches only for
 specifics. "Rules and conventions drive success."
 
-- Tool `summary` (one sentence) + `group` as canonical typed fields (the
+- Tool `summary` (one sentence) + `group: readonly string[]` (a PATH — the
+  tree is a set of paths, ScopeNodeRegistry-style; recursion exists only at
+  authoring: `createToolGroup.tools` accepts groups, flatten prefixes
+  segments, the runtime stays flat; client tree view derives from paths;
+  a `groups` sibling enumeration on list_tools deferred until the dock
+  builds that panel) as canonical typed fields (the
   channel EXISTS: ToolAnnotations -> ToolInfo already crosses the wire; this
   is naming, not machinery). `createToolGroup({name, summary, tools})` sugar
   that tags members and flattens into `tools: []`.
@@ -64,7 +69,7 @@ stop-at-tools).
 NEXT: the two seams (gate factory + exposure) fold into arc 1; sugar rungs
 after app-side proof.
 
-## C. Session tools — the model holds its own handles 🔜 ARC 1
+## C. Session tools — the model holds its own handles 🔒 ARC 1 LOCKED (2026-08-24)
 
 - `ask_user`: DONE (app-side, already shipped).
 - Toast: it IS just a notification channel — a channel name + dock renderer
