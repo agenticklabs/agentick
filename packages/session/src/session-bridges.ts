@@ -207,6 +207,14 @@ export interface BuildSessionBridgesOptions {
    * construction-time snapshot ({@link inheritedInterceptors}).
    */
   readonly interceptorParent?: BaseHarness;
+  /**
+   * The session's OWNING principal (ADR 48) — threaded into every bridge
+   * harness so their `storeCtx()` carries attribution. A durable store
+   * adapter attributing a write (tenant-scoped timeline append, etc.) reads
+   * `ctx.principal` instead of joining against a session row that — under
+   * create-early-persist-late — may not exist yet.
+   */
+  readonly principal?: string;
 }
 
 export function buildSessionBridges(
@@ -221,8 +229,8 @@ export function buildSessionBridges(
   /**
    * The options EVERY session-owned bridge takes — assembled ONCE.
    *
-   * Two facts have to reach all of them, and both were previously hand-threaded per
-   * site. Both were then forgotten at some of the sites, in the same way, twice:
+   * Three facts have to reach all of them, and each was previously hand-threaded per
+   * site — and then forgotten at some of the sites, in the same way, every time:
    *
    *   - The interceptor cascade (ADR 93 landmine 11). Timeline was the one bridge that
    *     took no threading, so `app.guard()` / `createApp({ hooks })` silently skipped
@@ -232,6 +240,10 @@ export function buildSessionBridges(
    *     someone remembered to thread". The five that missed out emitted events no
    *     session-scoped subscription could match, so every client-side live projection
    *     over them was silently dead.
+   *   - `principal`, the owning identity (ADR 48). Absent from every bridge, so
+   *     `storeCtx()` carried no attribution and a tenant-scoped store adapter had to
+   *     join against the session row — which, under create-early-persist-late, does
+   *     not exist until the first turn earns it.
    *
    * A comment cannot enforce an invariant; a function can. Adding an eighth bridge now
    * means calling this, and forgetting a fact is no longer expressible.
@@ -245,6 +257,7 @@ export function buildSessionBridges(
     parentScope: { sessionId: store.id },
     inheritedInterceptors: options.inheritedInterceptors,
     interceptorParent: options.interceptorParent,
+    ...(options.principal !== undefined ? { principal: options.principal } : {}),
   });
 
   const timeline = new TimelineHarness(

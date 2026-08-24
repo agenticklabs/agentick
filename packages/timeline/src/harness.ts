@@ -152,12 +152,11 @@ const TIMELINE_JOURNALING: Readonly<Record<string, "always" | "bus-only" | "drop
 // noise. The fix is a per-op result projection at the terminal (publish a size
 // summary for reads), which belongs in the operation runner, not here.
 //
-// TODO(D-phase): `ctx.principal` is undefined inside this namespace's guards —
-// `buildSessionBridges` (@agentick/session) does not thread the session's
-// principal into any bridge harness, so `deriveOperationCtx`/`makeEvent` have
-// nothing to stamp (see `hydrateCtx`, which already reads `this.principal` for
-// the genesis seam). Cross-principal admission is the wire choke point's and is
-// unaffected; this only bounds how narrow a namespace-local guard can be.
+// `buildSessionBridges` (@agentick/session) threads the session's OWNING
+// principal into every bridge harness, so `this.principal` — and therefore
+// `storeCtx().principal` (store-write attribution) and what
+// `deriveOperationCtx`/`makeEvent` stamp — is the session's identity here.
+// Verified by @agentick/session's bridge-principal-attribution.spec.ts.
 
 /** A declared command's public invoker (ADR 51). */
 type Cmd<I, R> = (input: I, opts?: { readonly origin?: OperationOrigin }) => Promise<R>;

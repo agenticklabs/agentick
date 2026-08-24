@@ -1081,6 +1081,10 @@ export class SessionHarness<P = unknown>
         // per-session bridges too, not just the construction snapshot.
         inheritedInterceptors: this.resolvedInterceptors(),
         interceptorParent: this,
+        // ADR 48 — the owning principal, so every bridge's `storeCtx()` carries
+        // attribution (a tenant-scoped store adapter must not have to join a
+        // session row that create-early-persist-late has not written yet).
+        ...omitUndefined({ principal: options.principal }),
       },
     );
     // Create-call seeds, applied AFTER genesis (see `_genesisReady` below): the
