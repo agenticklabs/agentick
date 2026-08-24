@@ -210,7 +210,25 @@ carry usage rollups.
 
 ## Standing context
 
-2026-08-24 latest — DESIGN CORRECTION: create early, persist late.
+2026-08-24 LANDED — knowify rip-out COMPLETE (knowify `3416927a25`,
+pushed): draft model deleted wholesale (catalogs/conversationPalette/
+openDraft/materialize + specs + DI token), sessionPalette folds the LIVE
+session's catalogs, README rewritten to the new contract,
+new-session-lifecycle-e2e.spec.ts pins it over the REAL gateway. The
+contract spec caught a FOURTH eager layer: `toCreateSessionInput`
+(ernesto-v2 app.ts) forced `eager: true` on every host+wire create —
+deleted; CreateErnestoSessionArgs gained an explicit `eager?`
+passthrough (imports/seeds). Suites: ernesto-v2 522/522,
+ernesto-client 225/225, knowify-app 433/433. Traps hit: stale
+`libs/*/dist` (nx resolves dist, rebuild before trusting a spec run);
+pathspec `git stash push` on already-committed paths NO-OPS and the
+later `pop` grabs someone else's stash. Pre-existing, not mine:
+`developers-sdk` TS4114s; ernesto-client:lint OOMs because
+eslint.config.js sets `parserOptions.project: ['./tsconfig.json']`
+(whole monorepo as one program) while ZERO enabled rules are
+type-aware — 3-line deletion or oxlint, Ryan's call.
+
+2026-08-24 earlier — DESIGN CORRECTION: create early, persist late.
 Ryan rejected the client-draft model AND its catalog-cache workaround.
 Framework next.151: SessionRuntime.durable — the record is EARNED
 (first running transition / eager / adoption); teardown of a

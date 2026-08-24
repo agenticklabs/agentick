@@ -2305,6 +2305,26 @@ explicit `typescript` + `vitest` devDeps. Both removed:
 
 ## Decision log
 
+### 2026-08-24 — knowify rip-out of the draft model landed (adopter side of create early, persist late)
+
+Knowify `3416927a25` (pushed): the draft/catalog-cache machinery is gone —
+`sessionPalette` folds the live session's own catalogs, a new chat takes
+`app/create_session` at open, and `new-session-lifecycle-e2e.spec.ts` pins
+the contract over the real `createErnestoGateway`. Writing that spec at the
+adopter's entry point caught a FOURTH layer carrying the record-on-create
+premise: `toCreateSessionInput` in ernesto-v2 forced `eager: true` on every
+create (host and wire doors alike). Deleted; `CreateErnestoSessionArgs`
+gained an explicit `eager?` passthrough for hosts that genuinely want a row
+at genesis. Tests asserting on the durable record now seed `eager: true`
+deliberately. ernesto-v2 522/522, ernesto-client 225/225, knowify-app
+433/433.
+
+Operational lesson: nx workspace libs resolve `default: ./dist` — a spec
+run after editing lib source but before `nx run <lib>:build` exercises the
+STALE build. The phantom eager was found by trapping
+`InMemorySessionStore.prototype.mutate` (the Store seam the View writes
+through — `put` is not the write path) and logging the writer's stack.
+
 ### 2026-08-24 — create early, persist late: the record is EARNED, teardown writes nothing
 
 Production review (Ryan) rejected the client-draft model and its palette
